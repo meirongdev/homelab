@@ -1,4 +1,28 @@
-vm_user     = "ubuntu"
-vm_password = "ubuntu1234!"
-vm_cores    = 4
-vm_memory   = 4096
+vms = {
+  "k8s-master-1" = {
+    cores    = 4
+    memory   = 4096
+    user     = "ubuntu"
+    password = "pwd123!"
+    ip       = "10.10.10.10/24"
+    gateway  = "10.10.10.1"
+  },
+  "k8s-worker-1" = {
+    cores    = 4
+    memory   = 4096
+    user     = "ubuntu"
+    password = "pwd123!"
+    ip       = "10.10.10.20/24"
+    gateway  = "10.10.10.1"
+  }
+  "k8s-worker-2" = {
+    cores    = 4
+    memory   = 4096
+    user     = "ubuntu"
+    password = "pwd123!"
+    ip       = "10.10.10.30/24"
+    gateway  = "10.10.10.1"
+  }
+}
+
+proxmox_node = "pve"

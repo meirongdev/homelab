@@ -1,23 +1,28 @@
 # Init
 init: create-tfvars
 	terraform init
-# Plan: image download
+
+# Create tfvars from example if it doesn't exist
 create-tfvars:
-	cp terraform.tfvars.example terraform.tfvars
-plan-image:
-	terraform plan -out=image.plan -target=proxmox_virtual_environment_download_file.ubuntu_cloud_image
-# Apply: image download
-apply-image: plan-image
-	terraform apply "image.plan"
-# Plan: VM creation
-plan-vm:
-	terraform plan -out=vm.plan -target=proxmox_virtual_environment_vm.ubuntu_vm
-# Apply: VM creation
-apply-vm: plan-vm
-	terraform apply "vm.plan"
-# Destroy - destroy all resources
+	@if [ ! -f terraform.tfvars ]; then \
+		echo "Creating terraform.tfvars from example..."; \
+		cp terraform.tfvars.example terraform.tfvars; \
+	else \
+		echo "terraform.tfvars already exists."; \
+	fi
+
+# Plan all changes
+plan:
+	terraform plan -out=terraform.plan
+
+# Apply all changes
+apply: plan
+	terraform apply "terraform.plan"
+
+# Destroy all resources
 destroy:
-	terraform destroy
+	terraform destroy -auto-approve
+
 # Clean - remove local terraform files
 clean:
 	rm -rf .terraform/
@@ -25,9 +30,15 @@ clean:
 	rm -f *.tfstate*
 	rm -f *.plan
 
+# --- Granular Commands ---
+
+# Plan: VM creation
+plan-vm:
+	terraform plan -out=vm.plan -target=proxmox_virtual_environment_vm.ubuntu_vm
+# Apply: VM creation
+apply-vm: plan-vm
+	terraform apply "vm.plan"
+
 # destry vm only
 destroy-vm:
 	terraform destroy -target=proxmox_virtual_environment_vm.ubuntu_vm
-# destroy image only
-destroy-image:
-	terraform destroy -target=proxmox_virtual_environment_download_file.ubuntu_cloud_image

@@ -2,6 +2,7 @@
 
 - [ ] download img
 - [ ] init vm
+- [ ] init multiple vms
 
 ## Reference
 
@@ -19,7 +20,7 @@ git clone https://github.com/hashicorp/terraform
 cd terraform
 go install
 # move terraform binary to where is included in $PATH
-mv $GOPATH/bin/terraform /usr/local/bin/
+mv ~/go/bin/terraform /usr/local/bin/
 #  install the autocomplete package.
 terraform -install-autocomplete
 ```
@@ -32,6 +33,15 @@ PROXMOX_VE_PASSWORD=your password
 PROXMOX_VE_ENDPOINT=https://youripordomain:8006
 ```
 
+## Prerequisite
+
+- download img on proxmox server
+  - We can create and destroy the vms multiple times, but the download of the image should be done only once, or else it could be limited by the network speed from the cloud image server.
+
+```bash
+wget -O /mnt/pve/iso-templates/template/iso/ubuntu-24.04-noble-cloudimg.img https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+```
+
 ## Init terraform project
 
 ```bash
@@ -40,18 +50,15 @@ make init
 
 Modify the `terraform.tfvars` if in need
 
-## Image
-
-```bash
-make plan-image
-make apply-image
-make destry-image
-```
-
 ## Create VM
 
 ```bash
-make plan-vm
-make apply-vm
-make destroy-vm
+make apply
+```
+
+## Clean 
+
+```bash
+make destroy
+make clean
 ```

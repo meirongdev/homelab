@@ -1,8 +1,17 @@
+data "proxmox_virtual_environment_file" "ubuntu_cloud_image" {
+  datastore_id = "iso-templates"
+  content_type = "iso"
+  node_name    = var.proxmox_node
+  file_name    = "ubuntu-24.04-noble-cloudimg.img"
+}
+
 #  Create Ubuntu VM
 resource "proxmox_virtual_environment_vm" "ubuntu_vm" {
-  name      = "ubuntu"
-  node_name = "pve"
-  machine     = "q35"
+for_each = var.vms
+
+  name      = each.key
+  node_name = var.proxmox_node
+  machine   = "q35"
   bios      = "ovmf"
 
   # should be true if qemu agent is not installed / enabled on the VM
@@ -11,23 +20,24 @@ resource "proxmox_virtual_environment_vm" "ubuntu_vm" {
   initialization {
     ip_config {
       ipv4 {
-        address = "dhcp"
+        address = each.value.ip
+        gateway = each.value.gateway
       }
     }
     user_account {
-      username = var.vm_user
-      password = var.vm_password
+      username = each.value.user
+      password = each.value.password
     }
   }
   network_device {
-    bridge       = "vmbr0"
+    bridge = "vmbr0"
   }
   cpu {
-    cores = var.vm_cores
+    cores = each.value.cores
   }
 
   memory {
-    dedicated = var.vm_memory
+    dedicated = each.value.memory
   }
 
   serial_device {}
@@ -38,7 +48,7 @@ resource "proxmox_virtual_environment_vm" "ubuntu_vm" {
 
   disk {
     datastore_id = "local-lvm"
-    file_id      = proxmox_virtual_environment_download_file.ubuntu_cloud_image.id
+    file_id      = data.proxmox_virtual_environment_file.ubuntu_cloud_image.id
     interface    = "virtio0"
     iothread     = true
     discard      = "on"
