@@ -1,0 +1,4 @@
+vm_user     = "ubuntu"
+vm_password = "ubuntu1234!"
+vm_cores    = 4
+vm_memory   = 4096
