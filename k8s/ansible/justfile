@@ -1,0 +1,22 @@
+# Reset all k8s nodes to a clean state
+cleanup-k8s:
+    ansible-playbook playbooks/cleanup-k8s.yaml
+
+# Setup MicroK8s cluster on the k8s nodes
+setup-k8s:
+    ansible-playbook playbooks/setup-microk8s.yaml
+
+# Fetch kubeconfig from master node to local machine
+fetch-kubeconfig:
+    ansible-playbook playbooks/fetch-kubeconfig.yaml
+
+# Update firewall rules
+update-firewall:
+    ansible-playbook playbooks/update-firewall.yaml
+
+# Remove microk8s-homelab config from local kubeconfig
+remove-kubeconfig:
+    kubectl config delete-cluster microk8s-homelab || true
+    kubectl config delete-user microk8s-homelab-admin || true
+    kubectl config delete-context microk8s-homelab || true
+    @echo "✅ Removed microk8s-homelab configuration from ~/.kube/config"
