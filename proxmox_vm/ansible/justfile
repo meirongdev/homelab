@@ -1,0 +1,19 @@
+# Show help
+help:
+    @just --list --unsorted
+
+# Ping all hosts
+ping:
+    ansible-playbook playbooks/ping.yaml
+
+# Install updates
+install-updates:
+    ansible-playbook playbooks/install-updates.yaml
+
+# Download Ubuntu 24.04 cloud image to Proxmox hosts
+download-cloud-image:
+    ansible-playbook playbooks/download-cloud-image.yaml
+
+# Create a new VM template from the downloaded cloud image
+create-template:
+    ansible-playbook playbooks/create-vm-template.yaml

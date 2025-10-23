@@ -1,0 +1,22 @@
+- name: Download Ubuntu Cloud Image for Proxmox
+  hosts: proxmox # Target Proxmox hosts
+  become: true
+
+  vars:
+    image_url: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+    image_name: "ubuntu-24.04-noble-cloudimg.img"
+    # Proxmox 存储路径，根据实际情况修改
+    image_dest_path: "/mnt/pve/iso-templates/template/iso/"
+
+  tasks:
+    - name: Ensure destination directory exists
+      ansible.builtin.file:
+        path: "{{ image_dest_path }}"
+        state: directory
+        mode: '0755'
+
+    - name: Download Ubuntu 24.04 cloud image
+      ansible.builtin.get_url:
+        url: "{{ image_url }}"
+        dest: "{{ image_dest_path }}{{ image_name }}"
+        mode: '0644'

@@ -2,27 +2,36 @@ vms = {
   "k8s-master-1" = {
     cores    = 4
     memory   = 4096
+    disk_size = 100 # inGB
     user     = "ubuntu"
-    password = "pwd123!"
     ip       = "10.10.10.10/24"
     gateway  = "10.10.10.1"
   },
   "k8s-worker-1" = {
     cores    = 4
     memory   = 4096
+    disk_size = 100 # inGB
     user     = "ubuntu"
-    password = "pwd123!"
     ip       = "10.10.10.20/24"
     gateway  = "10.10.10.1"
-  }
+  },
   "k8s-worker-2" = {
     cores    = 4
     memory   = 4096
+    disk_size = 100 # inGB
     user     = "ubuntu"
-    password = "pwd123!"
-    ip       = "10.10.10.30/24"
+    ip       = "10.10.10.21/24"
     gateway  = "10.10.10.1"
   }
 }
 
 proxmox_node = "pve"
+
+# Replace with your actual SSH public key
+ssh_public_key = "ssh-rsa AAAA..."
+
+# --- Proxmox Provider Configuration ---
+# 注意: 填写在这里的值会覆盖环境变量
+proxmox_endpoint = "https://192.168.1.100:8006"
+proxmox_username = "root@pam"
+proxmox_password = "YourProxmoxPassword!"

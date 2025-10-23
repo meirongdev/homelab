@@ -1,18 +1,15 @@
-data "proxmox_virtual_environment_file" "ubuntu_cloud_image" {
-  datastore_id = "iso-templates"
-  content_type = "iso"
-  node_name    = var.proxmox_node
-  file_name    = "ubuntu-24.04-noble-cloudimg.img"
-}
-
 #  Create Ubuntu VM
 resource "proxmox_virtual_environment_vm" "ubuntu_vm" {
-for_each = var.vms
+  for_each = var.vms
 
   name      = each.key
   node_name = var.proxmox_node
-  machine   = "q35"
-  bios      = "ovmf"
+
+  # Clone from the specified template
+  clone {
+    vm_id = var.template_vmid
+    full          = true
+  }
 
   # should be true if qemu agent is not installed / enabled on the VM
   stop_on_destroy = true
@@ -26,12 +23,14 @@ for_each = var.vms
     }
     user_account {
       username = each.value.user
-      password = each.value.password
+      keys     = [var.ssh_public_key]
     }
   }
+
   network_device {
     bridge = "vmbr0"
   }
+
   cpu {
     cores = each.value.cores
   }
@@ -42,16 +41,11 @@ for_each = var.vms
 
   serial_device {}
 
-  efi_disk {
-    datastore_id = "local-lvm"
-  }
-
   disk {
+    # The disk interface must match the template's disk (scsi0 in this case)
+    interface    = "scsi0"
     datastore_id = "local-lvm"
-    file_id      = data.proxmox_virtual_environment_file.ubuntu_cloud_image.id
-    interface    = "virtio0"
-    iothread     = true
+    size         = each.value.disk_size
     discard      = "on"
-    size         = 100
   }
 }
