@@ -44,7 +44,7 @@
         - name: Create a new temporary VM
           ansible.builtin.command: >
             qm create {{ template_vmid }} --name {{ template_name }}-builder --memory {{ template_memory }}
-            --cores {{ template_cores }} --net0 virtio,bridge=vmbr0 --scsihw virtio-scsi-pci
+            --cores {{ template_cores }} --cpu host --net0 virtio,bridge=vmbr0 --scsihw virtio-scsi-pci 
           changed_when: true
 
         - name: Import the disk from the existing image
