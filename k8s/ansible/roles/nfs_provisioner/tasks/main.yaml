@@ -1,0 +1,22 @@
+# roles/nfs_provisioner/tasks/main.yaml
+- name: Upload NFS provisioner manifest
+  ansible.builtin.copy:
+    src: nfs-provisioner.yaml
+    dest: /tmp/nfs-provisioner.yaml
+    mode: '0644'
+
+- name: Upload NFS StorageClass manifest
+  ansible.builtin.copy:
+    src: nfs-storageclass.yaml
+    dest: /tmp/nfs-storageclass.yaml
+    mode: '0644'
+
+- name: Apply NFS provisioner manifest
+  ansible.builtin.shell: microk8s kubectl apply -f /tmp/nfs-provisioner.yaml
+  args:
+    executable: /bin/bash
+
+- name: Apply NFS StorageClass manifest
+  ansible.builtin.shell: microk8s kubectl apply -f /tmp/nfs-storageclass.yaml
+  args:
+    executable: /bin/bash
