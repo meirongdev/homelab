@@ -1,0 +1,52 @@
+tempo:
+  image:
+    repository: grafana/tempo
+    tag: 2.8.2
+  replicas: 1
+  
+  # 追踪数据保留期
+  retention: 168h               # ✅ 7 天
+
+  storage:
+    trace:
+      backend: local
+      local:
+        path: /var/tempo/traces
+  
+  persistence:
+    enabled: true
+    storageClassName: nfs-client
+    size: 2Gi
+  
+  # 资源限制
+  resources:
+    requests:
+      cpu: 100m               
+      memory: 128Mi           
+    limits:
+      cpu: 500m              
+      memory: 512Mi
+
+# 启用查询前端
+tempoQuery:
+  enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# 配置追踪接收器
+traces:
+  otlp:
+    grpc:
+      enabled: true
+    http:
+      enabled: true
+  jaeger:
+    thriftHttp:
+      enabled: true
+  zipkin:
+    enabled: true

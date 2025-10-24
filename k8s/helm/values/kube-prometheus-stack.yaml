@@ -1,0 +1,116 @@
+# Prometheus + Grafana + Alertmanager
+grafana:
+  enabled: true
+  admin:
+    existingSecret: "grafana-admin-credentials" # ✅ 使用预先创建的 Secret
+    userKey: ""              # ✅ 显式设置为空，覆盖默认值
+    passwordKey: "admin-password" 
+
+  # 持久化存储
+  persistence:
+    enabled: true
+    storageClassName: nfs-client
+    size: 1Gi
+
+  # 资源限制
+  resources:
+    requests:
+      cpu: 100m                 # ✅ 从默认值降低
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  
+  # 配置数据源（Loki 和 Tempo 会自动配置）
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      url: http://loki-gateway.monitoring.svc.cluster.local
+      access: proxy
+      isDefault: false
+    - name: Tempo
+      type: tempo
+      url: http://tempo.monitoring.svc.cluster.local:3100
+      access: proxy
+      isDefault: false
+
+prometheus:
+  prometheusSpec:
+    retention: 7d
+    
+    # 持久化存储
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: nfs-client
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+    
+    # 资源限制
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 50m             
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: nfs-client
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 1Gi
+
+# 默认会安装很多 ServiceMonitors，如果资源有限可以禁用一些
+kubeStateMetrics:
+  enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+nodeExporter:
+  enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# 如果不需要监控 etcd、scheduler 等控制平面组件，可以禁用
+kubeEtcd:
+  enabled: false
+
+kubeScheduler:
+  enabled: false
+
+kubeControllerManager:
+  enabled: false

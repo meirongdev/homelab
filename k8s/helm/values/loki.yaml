@@ -1,0 +1,114 @@
+loki:
+  auth_enabled: false
+  
+  commonConfig:
+    replication_factor: 1
+  
+  storage:
+    type: filesystem
+  
+  limits_config:
+    retention_period: 168h
+  
+  schemaConfig:
+    configs:
+      - from: 2024-01-01
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: index_
+          period: 24h
+
+# ✅ 明确指定使用 SingleBinary 模式
+deploymentMode: SingleBinary
+
+singleBinary:
+  replicas: 1
+  
+  persistence:
+    enabled: true
+    storageClass: nfs-client
+    size: 5Gi
+  
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ✅ 禁用 chunks cache（节省 9.6GB 内存！）
+chunksCache:
+  enabled: false
+  # 或者如果你想保留但减少内存：
+  # allocatedMemory: 512  # MB，从 8192 降到 512
+  # replicas: 0
+
+# ✅ 禁用 results cache 或减少内存
+resultsCache:
+  enabled: false
+  # 或者：
+  # allocatedMemory: 256  # MB
+
+# ✅ 减少 canary 副本数
+monitoring:
+  selfMonitoring:
+    enabled: false
+    grafanaAgent:
+      installOperator: false
+  lokiCanary:
+    enabled: false # 禁用 canary, 节省资源
+
+# ✅ 确保禁用其他模式的组件
+read:
+  replicas: 0
+
+write:
+  replicas: 0
+
+backend:
+  replicas: 0
+
+# Gateway
+gateway:
+  enabled: true
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# 明确禁用分布式组件（重要！）
+ingester:
+  replicas: 0
+distributor:
+  replicas: 0
+querier:
+  replicas: 0
+queryFrontend:
+  replicas: 0
+compactor:
+  replicas: 0
+indexGateway:
+  replicas: 0
+ruler:
+  replicas: 0
+
+# Promtail（日志收集器）
+promtail:
+  enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  config:
+    clients:
+      - url: http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push

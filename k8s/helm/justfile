@@ -1,0 +1,127 @@
+namespace := "monitoring"
+set dotenv-load
+
+add-repos:
+    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+    helm repo add grafana https://grafana.github.io/helm-charts
+    helm repo update
+
+create-namespace:
+    kubectl create namespace {{namespace}} --dry-run=client -o yaml | kubectl apply -f -
+
+create-grafana-secret:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z "${GRAFANA_ADMIN_PASSWORD:-}" ]; then
+        echo "Error: GRAFANA_ADMIN_PASSWORD not set in .env file"
+        exit 1
+    fi
+    kubectl create secret generic grafana-admin-credentials \
+        --from-literal=admin-user="admin" \
+        --from-literal=admin-password="$GRAFANA_ADMIN_PASSWORD" \
+        --namespace {{namespace}} \
+        --dry-run=client -o yaml | kubectl apply -f -
+
+# 部署 Prometheus + Grafana
+deploy-prometheus: create-grafana-secret
+    @echo "⏳ Deploying Prometheus stack (this may take 5-10 minutes)..."
+    helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+        --namespace {{namespace}} \
+        --values values/kube-prometheus-stack.yaml \
+        --wait \
+        --timeout 15m \
+        --debug
+
+deploy-prometheus-nowait: create-grafana-secret
+    helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+        --namespace {{namespace}} \
+        --values values/kube-prometheus-stack.yaml \
+        --timeout 15m
+    @echo "✅ Helm release created. Check status with: just status"
+
+deploy-loki:
+    helm upgrade --install loki grafana/loki \
+        --namespace {{namespace}} \
+        --values values/loki.yaml \
+        --wait \
+        --timeout 10m
+
+deploy-tempo:
+    helm upgrade --install tempo grafana/tempo \
+        --namespace {{namespace}} \
+        --values values/tempo.yaml \
+        --wait \
+        --timeout 10m
+
+deploy-all: add-repos create-namespace deploy-prometheus deploy-loki deploy-tempo
+    @echo "✅ All monitoring components deployed successfully!"
+
+# 检查部署状态（详细版）
+status:
+    @echo "=== Helm Releases ==="
+    helm list -n {{namespace}}
+    @echo ""
+    @echo "=== Pods Status ==="
+    kubectl get pods -n {{namespace}} -o wide
+    @echo ""
+    @echo "=== Events (Recent) ==="
+    kubectl get events -n {{namespace}} --sort-by='.lastTimestamp' | tail -20
+    @echo ""
+    @echo "=== PVC Status ==="
+    kubectl get pvc -n {{namespace}}
+
+# 查看失败的 pod 详情
+debug-pods:
+    #!/usr/bin/env bash
+    echo "=== Checking for problematic pods ==="
+    kubectl get pods -n {{namespace}} | grep -v "Running\|Completed" || echo "All pods are running"
+    echo ""
+    echo "=== Describing non-running pods ==="
+    for pod in $(kubectl get pods -n {{namespace}} -o json | jq -r '.items[] | select(.status.phase!="Running" and .status.phase!="Succeeded") | .metadata.name'); do
+        echo "--- Pod: $pod ---"
+        kubectl describe pod $pod -n {{namespace}} | tail -30
+        echo ""
+    done
+
+# 查看特定 pod 的日志
+logs pod:
+    kubectl logs {{pod}} -n {{namespace}} --tail=100 --follow
+
+remove-all:
+    helm uninstall kube-prometheus-stack -n {{namespace}} || true
+    helm uninstall loki -n {{namespace}} || true
+    helm uninstall tempo -n {{namespace}} || true
+    kubectl delete secret grafana-admin-credentials -n {{namespace}} || true
+    kubectl delete namespace {{namespace}} || true
+
+get-grafana-password:
+    @kubectl get secret -n {{namespace}} grafana-admin-credentials -o jsonpath="{.data.admin-password}" | base64 -d
+    @echo ""
+
+grafana:
+    @echo "Grafana is available at http://localhost:3000"
+    @echo "Username: admin"
+    @echo "Password: (run 'just get-grafana-password' to retrieve)"
+    kubectl port-forward -n {{namespace}} svc/kube-prometheus-stack-grafana 3000:80
+
+prometheus:
+    @echo "Prometheus is available at http://localhost:9090"
+    kubectl port-forward -n {{namespace}} svc/kube-prometheus-stack-prometheus 9090:9090
+
+init:
+    #!/usr/bin/env bash
+    if [ ! -f .env ]; then
+        cp .env.example .env
+        echo "✅ Created .env file from .env.example"
+        echo "⚠️  Please edit .env and set your passwords before deploying!"
+    else
+        echo "✅ .env file already exists"
+    fi
+
+# 查看集群资源使用情况
+check-resources:
+    @echo "=== Node Resources ==="
+    kubectl top nodes
+    @echo ""
+    @echo "=== Pod Resources in {{namespace}} ==="
+    kubectl top pods -n {{namespace}}
