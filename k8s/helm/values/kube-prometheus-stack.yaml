@@ -21,16 +21,21 @@ grafana:
       cpu: 500m
       memory: 512Mi
   
-  # 配置数据源（Loki 和 Tempo 会自动配置）
+  # 配置数据源（Loki 和 Tempo 会自动配置）--TODO not work
   additionalDataSources:
+    - name: Prometheus
+      type: prometheus
+      url: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+      access: proxy
+      isDefault: true
     - name: Loki
       type: loki
-      url: http://loki-gateway.monitoring.svc.cluster.local
+      url: http://loki.monitoring.svc.cluster.local:3100
       access: proxy
       isDefault: false
     - name: Tempo
       type: tempo
-      url: http://tempo.monitoring.svc.cluster.local:3100
+      url: http://tempo.monitoring.svc.cluster.local:3200
       access: proxy
       isDefault: false
 
@@ -56,6 +61,19 @@ prometheus:
       limits:
         cpu: 1000m
         memory: 1Gi
+
+
+    # 添加额外的抓取配置
+    additionalScrapeConfigs:
+      - job_name: 'node-exporter-metal-nodes'
+        scrape_interval: 15s
+        static_configs:
+          - targets:
+              - 192.168.50.106:9100  # storage-node-1
+              - 192.168.50.3:9100  # another VM
+              # - 10.10.10.10:9100     # k8s-master-1
+              # - 10.10.10.20:9100     # k8s-worker-1
+              # - 10.10.10.21:9100     # k8s-worker-2
 
 alertmanager:
   enabled: true

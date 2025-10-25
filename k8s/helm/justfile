@@ -131,3 +131,9 @@ setup-nfs-provisioner: add-repos
     helm upgrade --install nfs-client nfs-subdir-external-provisioner/nfs-subdir-external-provisioner \
       --namespace default \
       --values values/nfs-values.yaml
+
+# Update Prometheus stack
+update-prometheus:
+    helm upgrade kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+      -n monitoring \
+      -f values/kube-prometheus-stack.yaml
