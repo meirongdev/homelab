@@ -4,6 +4,7 @@ set dotenv-load
 add-repos:
     helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
     helm repo add grafana https://grafana.github.io/helm-charts
+    helm repo add nfs-subdir-external-provisioner https://kubernetes-sigs.github.io/nfs-subdir-external-provisioner
     helm repo update
 
 create-namespace:
@@ -125,3 +126,8 @@ check-resources:
     @echo ""
     @echo "=== Pod Resources in {{namespace}} ==="
     kubectl top pods -n {{namespace}}
+
+setup-nfs-provisioner: add-repos
+    helm upgrade --install nfs-client nfs-subdir-external-provisioner/nfs-subdir-external-provisioner \
+      --namespace default \
+      --values values/nfs-values.yaml
