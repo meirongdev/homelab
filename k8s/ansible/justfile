@@ -20,3 +20,11 @@ remove-kubeconfig:
     kubectl config delete-user microk8s-homelab-admin || true
     kubectl config delete-context microk8s-homelab || true
     @echo "✅ Removed microk8s-homelab configuration from ~/.kube/config"
+
+# Install public key
+config-ssh-key:
+    ansible-playbook playbooks/config-ssh-key.yaml
+
+# Install Prometheus Node Exporter on all nodes
+install-node-exporter:
+    ansible-playbook playbooks/install-node-exporter.yaml

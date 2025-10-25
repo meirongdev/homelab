@@ -1,0 +1,41 @@
+- name: Install Prometheus Node Exporter on all nodes
+  hosts: all
+  become: true
+  vars:
+    node_exporter_version: "1.10.0"
+    node_exporter_user: nobody
+    node_exporter_install_dir: /usr/local/bin
+    node_exporter_service_file: /etc/systemd/system/node_exporter.service
+    node_exporter_tarball: "node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+    node_exporter_url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/{{ node_exporter_tarball }}"
+  tasks:
+    - name: Download Node Exporter binary
+      ansible.builtin.get_url:
+        url: "{{ node_exporter_url }}"
+        dest: /tmp/{{ node_exporter_tarball }}
+        mode: '0644'
+
+    - name: Extract Node Exporter binary
+      ansible.builtin.unarchive:
+        src: /tmp/{{ node_exporter_tarball }}
+        dest: "{{ node_exporter_install_dir }}"
+        remote_src: true
+        extra_opts:
+          - --strip-components=1
+        creates: "{{ node_exporter_install_dir }}/node_exporter"
+
+    - name: Create Node Exporter systemd service
+      ansible.builtin.template:
+        src: node_exporter.service.j2
+        dest: "{{ node_exporter_service_file }}"
+        mode: '0644'
+
+    - name: Reload systemd daemon
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Enable and start Node Exporter
+      ansible.builtin.systemd:
+        name: node_exporter
+        enabled: true
+        state: started

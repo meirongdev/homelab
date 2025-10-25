@@ -1,0 +1,50 @@
+# When these nodes are first created, we need to install our SSH public key
+# into the 'mr' user's authorized_keys file to allow passwordless SSH access.
+- name: Configure NOPASSWD for mr user
+  hosts: storage_nodes
+  become: true
+  tasks:
+    - name: Ensure sudoers file allows NOPASSWD for mr user
+      ansible.builtin.lineinfile:
+        path: /etc/sudoers
+        regexp: '^mr ALL=\(ALL\) NOPASSWD:ALL'
+        line: 'mr ALL=(ALL) NOPASSWD:ALL'
+        state: present
+        validate: 'visudo -cf %s'
+
+- name: Install SSH public key on Debian nodes
+  hosts: debian_nodes
+  become: true
+  tasks:
+    - name: Ensure user exists
+      ansible.builtin.user:
+        name: mr
+        state: present
+
+    - name: Install public key for youruser
+      ansible.posix.authorized_key:
+        user: mr
+        state: present
+        key: "{{ lookup('file', '~/.ssh/vgio.pub') }}"
+
+    - name: Enable public key authentication for SSH
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^PubkeyAuthentication'
+        line: 'PubkeyAuthentication yes'
+        state: present
+      notify: Restart SSH
+
+    - name: Ensure AuthorizedKeysFile is set correctly
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^AuthorizedKeysFile'
+        line: 'AuthorizedKeysFile .ssh/authorized_keys'
+        state: present
+      notify: Restart SSH
+  
+  handlers:
+    - name: Restart SSH
+      ansible.builtin.service:
+        name: ssh
+        state: restarted

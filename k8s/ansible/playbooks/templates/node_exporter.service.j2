@@ -1,0 +1,11 @@
+[Unit]
+Description=Prometheus Node Exporter
+After=network.target
+
+[Service]
+User={{ node_exporter_user }}
+ExecStart={{ node_exporter_install_dir }}/node_exporter
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
