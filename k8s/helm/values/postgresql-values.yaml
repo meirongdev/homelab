@@ -1,0 +1,27 @@
+global:
+  storageClass: nfs-client  # 设置全局存储类
+
+primary:
+  persistence:
+    enabled: true
+    storageClass: nfs-client  # 使用 nfs-client StorageClass
+    size: 8Gi                 # 设置存储大小
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 250m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+readReplicas:
+  replicaCount: 0  # 如果不需要读副本，可以设置为 0
+
+metrics:
+  enabled: true  # 启用 Prometheus 监控
+  serviceMonitor:
+    enabled: true
+    namespace: monitoring                       # ServiceMonitor 创建在哪个命名空间（Prometheus 能访问）
+    labels:                                     # 保证与 Prometheus CR 的 selector 匹配
+      release: kube-prometheus-stack
+    interval: 30s

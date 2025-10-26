@@ -5,6 +5,7 @@ add-repos:
     helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
     helm repo add grafana https://grafana.github.io/helm-charts
     helm repo add nfs-subdir-external-provisioner https://kubernetes-sigs.github.io/nfs-subdir-external-provisioner
+    helm repo add bitnami https://charts.bitnami.com/bitnami
     helm repo update
 
 create-namespace:
@@ -137,3 +138,14 @@ update-prometheus:
     helm upgrade kube-prometheus-stack prometheus-community/kube-prometheus-stack \
       -n monitoring \
       -f values/kube-prometheus-stack.yaml
+
+# setup postgres
+setup-postgres: add-repos
+    helm upgrade --install postgresql bitnami/postgresql -n database \
+    --create-namespace \
+    -f values/postgresql-values.yaml
+
+# get postgres auto-generated password
+get-postgres-password:
+    @kubectl get secret --namespace database postgresql -o jsonpath="{.data.postgres-password}" | base64 -d
+    @echo ""
