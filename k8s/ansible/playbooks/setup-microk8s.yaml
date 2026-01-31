@@ -99,10 +99,9 @@
   hosts: k8s_masters
   become: true
   tasks:
-    - name: Enable core addons (DNS, default storage, dashboard)
+    - name: Enable core addons
       ansible.builtin.command: "microk8s enable {{ item }}"
       loop:
         - dns
-        - hostpath-storage
-        - dashboard
+        # hostpath-storage 已移除，使用 NFS provisioner 替代
       changed_when: true
