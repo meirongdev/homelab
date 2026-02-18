@@ -7,4 +7,7 @@ ingress_rules = {
   "book"    = { service = "http://traefik.kube-system.svc:80" }
   "grafana" = { service = "http://traefik.kube-system.svc:80" }
   "vault"   = { service = "http://traefik.kube-system.svc:80" }
+  "tool"    = { service = "http://traefik.kube-system.svc:80" }
+  "pdf"     = { service = "http://traefik.kube-system.svc:80" }
+  "squoosh" = { service = "http://traefik.kube-system.svc:80" }
 }

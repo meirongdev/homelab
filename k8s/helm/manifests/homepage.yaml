@@ -107,6 +107,15 @@ data:
               container: stirling-pdf
               label_selector: app=stirling-pdf
 
+        - Squoosh:
+            icon: photopea.png
+            href: https://squoosh.meirong.dev
+            description: 图片压缩工具
+            kubernetes:
+              namespace: personal-services
+              container: squoosh
+              label_selector: app=squoosh
+
     - 监控:
         - Grafana:
             icon: grafana.png

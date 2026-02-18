@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: squoosh
+  namespace: personal-services
+  labels:
+    app: squoosh
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: squoosh
+  template:
+    metadata:
+      labels:
+        app: squoosh
+    spec:
+      containers:
+        - name: squoosh
+          image: dko0/squoosh:1.12.0
+          ports:
+            - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: squoosh
+  namespace: personal-services
+spec:
+  selector:
+    app: squoosh
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
