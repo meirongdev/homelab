@@ -2,8 +2,8 @@
   hosts: k8s_masters
   become: true
   tasks:
-    - name: Allow Kubernetes API Server access (port 16443)
+    - name: Allow Kubernetes API Server access (port 6443)
       community.general.ufw:
         rule: allow
-        port: '16443'
+        port: '6443'
         proto: tcp

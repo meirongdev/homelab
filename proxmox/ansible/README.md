@@ -27,9 +27,3 @@ Just is very similar to `Makefile`, but with better syntax highlighting and easi
 just download-cloud-image
 ```
 
-### Create VM Template on Proxmox
-
-```bash
-just create-vm-template
-```
-

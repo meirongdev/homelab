@@ -1,0 +1,19 @@
+vm_name      = "k8s-node"
+vm_cores     = 11       # 11 vCPUs
+vm_memory    = 15360    # 15GB
+vm_disk_size = 120      # GB
+
+vm_ip       = "10.10.10.10/24"
+vm_gateway  = "10.10.10.1"
+
+cloud_image_id = "local:iso/ubuntu-24.04-cloudimg-amd64.img"
+
+proxmox_node = "pve"
+
+# Replace with your actual SSH public key
+ssh_public_key = "ssh-rsa AAAA..."
+
+# --- Proxmox Provider Configuration ---
+proxmox_endpoint = "https://192.168.1.100:8006"
+proxmox_username = "root@pam"
+proxmox_password = "YourProxmoxPassword!"

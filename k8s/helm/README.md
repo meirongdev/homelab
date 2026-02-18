@@ -2,25 +2,30 @@
 
 ## Techstack
 
-- **Terraform** for infrastructure as code
-- **Ansible** for configuration management, setting up k8s cluster with MicroK8s
+- **Terraform** for infrastructure (Proxmox VMs) and external access (Cloudflare)
+- **Ansible** for configuration management and K3s cluster setup
 - **Helm** for managing Kubernetes applications
-- **Prometheus, Loki, Tempo, Grafana** for Observability
+- **HashiCorp Vault** for centralized secret management
+- **External Secrets Operator (ESO)** for syncing secrets to Kubernetes
+- **Prometheus, Loki, Tempo, Grafana** (LGTM Stack) for observability
+- **Cloudflare Tunnel** for secure, outbound-only external access
+- **K8s Gateway API (Traefik)** for unified ingress routing
 
 ## Project Structure
 
 ```
 homelab/
-├── proxmox_vm/          # Terraform configs for VM provisioning
-│   └── terraform/
+├── proxmox/          # Infrastructure provisioning on Proxmox
+│   ├── terraform/
+│   └── ansible/
 ├── k8s/
-│   ├── ansible/         # Kubernetes cluster setup with MicroK8s
-│   │   ├── playbooks/
-│   │   └── justfile
-│   └── helm/            # Application deployment with Helm
+│   ├── ansible/      # K3s cluster setup and node config
+│   └── helm/         # Application deployment
 │       ├── values/
-│       ├── .env.example # Template for secrets (copy to .env)
+│       ├── manifests/
 │       └── justfile
+├── cloudflare/       # External access management
+│   └── terraform/
 └── README.md
 ```
 
@@ -29,7 +34,7 @@ homelab/
 ### 1. Provision VMs with Terraform
 
 ```bash
-cd proxmox_vm/terraform
+cd proxmox/terraform
 just plan
 just apply
 ```
@@ -53,18 +58,53 @@ just deploy-all
 
 ## Security Best Practices
 
-### Current Implementation (Phase 1)
-- ✅ Secrets stored in local `.env` files (not committed to Git)
-- ✅ Kubernetes Secrets used for in-cluster secret management
-- ⚠️ `.env` files must be managed manually on each machine
+### Current Implementation (Phase 2)
+- ✅ **HashiCorp Vault** for centralized, encrypted secret management.
+- ✅ **External Secrets Operator (ESO)** to sync secrets from Vault to Kubernetes.
+- ✅ **Raft Integrated Storage** for persistent, single-node high availability.
+- ✅ Secrets are injected via standard Kubernetes Secrets, requiring no app code changes.
+- ⚠️ Vault must be **unsealed** manually after pod restarts (via `just vault-unseal`).
 
-### Future Enhancements (Phase 2 - Planned)
-- 🔄 **HashiCorp Vault integration** for centralized secret management
-- 🔄 **External Secrets Operator** to sync secrets from Vault to Kubernetes
-- 🔄 **Automatic secret rotation** and audit logging
-- 🔄 **Dynamic secrets** for database credentials
+## Vault & Secrets Management
 
-**Migration Path**: Current `.env` approach is designed to be easily replaceable with Vault without changing application configurations.
+We use HashiCorp Vault (KV v2) to manage credentials. Secrets are synced to Kubernetes using the External Secrets Operator.
+
+### Initial Access & Authentication
+Vault credentials and unseal keys are saved locally in `k8s/helm/vault-keys.json`.
+**⚠️ Never commit `vault-keys.json` to Git.**
+
+```bash
+# Display UI access info and Root Token
+just vault-ui
+```
+
+### Vault CLI Usage (Inside Pod)
+
+To manage secrets via the command line, you can exec into the Vault pod:
+
+```bash
+# 1. Enter the pod
+kubectl exec -ti vault-0 -n vault -- sh
+
+# 2. Login with Root Token (from vault-keys.json)
+export VAULT_TOKEN="hvs.xxxxxx"
+
+# 3. List secrets
+vault kv list secret/homelab
+
+# 4. View a secret
+vault kv get secret/homelab/cloudflare
+
+# 5. Add/Update a secret
+vault kv put secret/homelab/grafana admin-password="your-new-password"
+```
+
+### Unsealing Vault
+If the Vault pod restarts, it enters a "Sealed" state and ESO will fail to sync secrets.
+```bash
+# Unseal Vault using the keys in vault-keys.json
+just vault-unseal
+```
 
 ## Accessing Services
 
@@ -96,8 +136,28 @@ vim k8s/helm/.env
 - Use strong, unique passwords (min 16 characters)
 - Rotate passwords periodically
 
-### Future: Migrating to Vault
-See [`docs/vault-migration.md`](docs/vault-migration.md) for the planned migration guide.
+### Syncing to Kubernetes (ESO)
+To make a Vault secret available to an application, create an `ExternalSecret` manifest in `k8s/helm/manifests/`.
+
+Example `ExternalSecret` (`v1`):
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: my-app-secret
+  namespace: my-namespace
+spec:
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: k8s-secret-target-name
+  data:
+  - secretKey: my-key-name
+    remoteRef:
+      key: secret/homelab/my-secret-path
+      property: password
+```
 
 ## Persistent Storage
 

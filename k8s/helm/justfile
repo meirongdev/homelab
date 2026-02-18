@@ -6,23 +6,21 @@ add-repos:
     helm repo add grafana https://grafana.github.io/helm-charts
     helm repo add nfs-subdir-external-provisioner https://kubernetes-sigs.github.io/nfs-subdir-external-provisioner
     helm repo add bitnami https://charts.bitnami.com/bitnami
+    helm repo add hashicorp https://helm.releases.hashicorp.com
+    helm repo add external-secrets https://charts.external-secrets.io
     helm repo update
 
 create-namespace:
     kubectl create namespace {{namespace}} --dry-run=client -o yaml | kubectl apply -f -
 
 create-grafana-secret:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ -z "${GRAFANA_ADMIN_PASSWORD:-}" ]; then
-        echo "Error: GRAFANA_ADMIN_PASSWORD not set in .env file"
-        exit 1
-    fi
-    kubectl create secret generic grafana-admin-credentials \
-        --from-literal=admin-user="admin" \
-        --from-literal=admin-password="$GRAFANA_ADMIN_PASSWORD" \
-        --namespace {{namespace}} \
-        --dry-run=client -o yaml | kubectl apply -f -
+    @echo "🔒 Grafana secrets are managed by Vault and External Secrets Operator."
+    @kubectl get secret grafana-admin-credentials -n {{namespace}} > /dev/null 2>&1 || (echo "❌ Error: grafana-admin-credentials secret not found. Check Vault/ESO sync." && exit 1)
+
+create-cloudflare-secret:
+    @echo "🔒 Cloudflare secrets are managed by Vault and External Secrets Operator."
+    @kubectl create namespace cloudflare --dry-run=client -o yaml | kubectl apply -f -
+    @kubectl get secret cloudflare-tunnel-token -n cloudflare > /dev/null 2>&1 || (echo "❌ Error: cloudflare-tunnel-token secret not found. Check Vault/ESO sync." && exit 1)
 
 # 部署 Prometheus + Grafana
 deploy-prometheus: create-grafana-secret
@@ -54,6 +52,59 @@ deploy-tempo:
         --values values/tempo.yaml \
         --wait \
         --timeout 10m
+
+# ⬇️ 个人服务相关命令 ⬇️
+personal_ns := "personal-services"
+
+# 部署 Calibre-Web (使用原生 K8s 清单)
+deploy-calibre:
+    kubectl apply -f manifests/calibre-web.yaml
+
+# 删除 Calibre-Web
+delete-calibre:
+    kubectl delete -f manifests/calibre-web.yaml
+
+# 部署 Cloudflare Tunnel
+deploy-cloudflare-tunnel: create-cloudflare-secret
+    kubectl apply -f manifests/cloudflare-tunnel.yaml
+
+# 删除 Cloudflare Tunnel
+delete-cloudflare-tunnel:
+    kubectl delete -f manifests/cloudflare-tunnel.yaml
+
+# 部署 Gateway API 配置 (Traefik + Gateway + HTTPRoutes)
+deploy-gateway:
+    kubectl apply -f manifests/traefik-config.yaml
+    @echo "⏳ Waiting for Traefik to restart with Gateway API provider..."
+    sleep 10
+    kubectl apply -f manifests/gateway.yaml
+    @echo "✅ Gateway API deployed!"
+
+# 删除 Gateway API 配置
+delete-gateway:
+    kubectl delete -f manifests/gateway.yaml || true
+    kubectl delete -f manifests/traefik-config.yaml || true
+
+# 查看个人服务状态
+status-personal:
+    kubectl get all,pvc -n {{personal_ns}}
+
+# ⬇️ Homepage 仪表盘 ⬇️
+deploy-homepage:
+    kubectl apply -f manifests/homepage.yaml
+    @echo "✅ Homepage deployed! Access at http://<NodeIP>:30080"
+
+delete-homepage:
+    kubectl delete -f manifests/homepage.yaml
+
+update-homepage:
+    kubectl delete configmap homepage-config -n homepage || true
+    kubectl apply -f manifests/homepage.yaml
+    kubectl rollout restart deployment/homepage -n homepage
+
+homepage:
+    @echo "Homepage is available at http://localhost:8080"
+    kubectl port-forward -n homepage svc/homepage 8080:3000
 
 deploy-all: add-repos create-namespace deploy-prometheus deploy-loki deploy-tempo
     @echo "✅ All monitoring components deployed successfully!"
@@ -93,8 +144,10 @@ remove-all:
     helm uninstall kube-prometheus-stack -n {{namespace}} || true
     helm uninstall loki -n {{namespace}} || true
     helm uninstall tempo -n {{namespace}} || true
+    helm uninstall calibre-web -n {{personal_ns}} || true
     kubectl delete secret grafana-admin-credentials -n {{namespace}} || true
     kubectl delete namespace {{namespace}} || true
+    kubectl delete namespace {{personal_ns}} || true
 
 get-grafana-password:
     @kubectl get secret -n {{namespace}} grafana-admin-credentials -o jsonpath="{.data.admin-password}" | base64 -d
@@ -149,3 +202,51 @@ setup-postgres: add-repos
 get-postgres-password:
     @kubectl get secret --namespace database postgresql -o jsonpath="{.data.postgres-password}" | base64 -d
     @echo ""
+
+# ⬇️ Vault & Secret Management ⬇️
+vault_ns := "vault"
+
+deploy-vault:
+    kubectl create namespace {{vault_ns}} --dry-run=client -o yaml | kubectl apply -f -
+    helm upgrade --install vault hashicorp/vault \
+        --namespace {{vault_ns}} \
+        --values values/vault-values.yaml
+
+# 初始化 Vault (仅第一次运行)
+vault-init:
+    kubectl exec vault-0 -n {{vault_ns}} -- vault operator init -key-shares=1 -key-threshold=1 -format=json > vault-keys.json
+    @echo "✅ Vault initialized. Keys saved to vault-keys.json (DO NOT COMMIT THIS FILE)"
+
+# 解锁 Vault (基于 vault-keys.json)
+vault-unseal:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    key=$(jq -r ".unseal_keys_b64[0]" vault-keys.json)
+    kubectl exec vault-0 -n {{vault_ns}} -- vault operator unseal $key
+    echo "✅ Vault unsealed."
+
+# 部署 External Secrets Operator
+deploy-eso:
+    helm upgrade --install external-secrets external-secrets/external-secrets \
+        --namespace external-secrets \
+        --create-namespace \
+        --values values/external-secrets-values.yaml
+
+# 配置 Vault 与 ESO 的连接 (需要先 init)
+setup-vault-eso:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    token=$(jq -r ".root_token" vault-keys.json)
+    kubectl create secret generic vault-token \
+        --namespace external-secrets \
+        --from-literal=token=$token \
+        --dry-run=client -o yaml | kubectl apply -f -
+    kubectl apply -f manifests/vault-eso-config.yaml
+
+# Vault UI info
+vault-ui:
+    @echo "Vault UI is available at http://localhost:30820 (NodePort)"
+    @echo "Root Token for login:"
+    @jq -r ".root_token" vault-keys.json
+    @echo "Starting port-forward to http://localhost:8200 ... Press Ctrl+C to stop."
+    kubectl port-forward -n {{vault_ns}} svc/vault 8200:8200

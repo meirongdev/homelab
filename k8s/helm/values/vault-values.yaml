@@ -1,0 +1,38 @@
+server:
+  affinity: ""
+  ha:
+    enabled: true
+    replicas: 1
+    raft:
+      enabled: true
+      setNodeId: true
+      config: |
+        ui = true
+        cluster_name = "vault-integrated-storage"
+        storage "raft" {
+          path    = "/vault/data"
+        }
+
+        listener "tcp" {
+          address = "[::]:8200"
+          cluster_address = "[::]:8201"
+          tls_disable = 1
+        }
+
+        service_registration "kubernetes" {}
+
+  # 使用 NFS 存储 Raft 数据
+  dataStorage:
+    enabled: true
+    size: 10Gi
+    storageClass: nfs-client
+
+  auditStorage:
+    enabled: true
+    size: 10Gi
+    storageClass: nfs-client
+
+ui:
+  enabled: true
+  serviceType: "NodePort"
+  nodePort: 30820

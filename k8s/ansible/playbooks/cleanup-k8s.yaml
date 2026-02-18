@@ -1,19 +1,13 @@
-- name: Force reset MicroK8s on all nodes by reinstalling
-  hosts: k8s_cluster
+- name: Uninstall K3s
+  hosts: k8s_masters
   become: true
   tasks:
-    - name: Check if microk8s service exists
+    - name: Check if K3s server uninstall script exists
       ansible.builtin.stat:
-        path: /etc/systemd/system/snap.microk8s.daemon-cluster-agent.service
-      register: microk8s_service_status
+        path: /usr/local/bin/k3s-uninstall.sh
+      register: k3s_server_uninstall
 
-    - name: Stop microk8s service if it exists
-      ansible.builtin.systemd:
-        name: snap.microk8s.daemon-cluster-agent
-        state: stopped
-      when: microk8s_service_status.stat.exists
-
-    - name: Completely remove the microk8s snap
-      community.general.snap:
-        name: microk8s
-        state: absent
+    - name: Run K3s server uninstall script
+      ansible.builtin.command: /usr/local/bin/k3s-uninstall.sh
+      when: k3s_server_uninstall.stat.exists
+      changed_when: true

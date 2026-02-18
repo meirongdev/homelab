@@ -1,8 +1,11 @@
+# Proxmox Terraform
+
+Provisions an Ubuntu 24.04 VM on Proxmox VE using Terraform.
+
 ## Functionality
 
 - [ ] download img
 - [ ] init vm
-- [ ] init multiple vms
 
 ## Reference
 
@@ -36,10 +39,10 @@ PROXMOX_VE_ENDPOINT=https://youripordomain:8006
 ## Prerequisite
 
 - download img on proxmox server
-  - We can create and destroy the vms multiple times, but the download of the image should be done only once, or else it could be limited by the network speed from the cloud image server.
+  - We can create and destroy the VM multiple times, but the download of the image should be done only once, or else it could be limited by the network speed from the cloud image server.
 
 ```bash
-wget -O /mnt/pve/iso-templates/template/iso/ubuntu-24.04-noble-cloudimg.img https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+wget -O /var/lib/vz/template/iso/ubuntu-24.04-cloudimg-amd64.img https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
 ```
 
 ## Init terraform project

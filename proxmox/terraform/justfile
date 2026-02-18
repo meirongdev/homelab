@@ -1,0 +1,48 @@
+# Proxmox Terraform tasks
+
+# Show help
+help:
+    @just --list --unsorted
+
+# Initialize Terraform and create tfvars if it doesn't exist
+init:
+	@if [ ! -f terraform.tfvars ]; then \
+		echo "Creating terraform.tfvars from example..."; \
+		cp terraform.tfvars.example terraform.tfvars; \
+	else \
+		echo "terraform.tfvars already exists."; \
+	fi
+	terraform init
+
+# Plan all changes
+plan:
+    terraform plan -out=terraform.plan
+
+# Apply all changes
+apply: plan
+    terraform apply "terraform.plan"
+
+# Destroy all resources
+destroy:
+    terraform destroy -auto-approve
+
+# Clean - remove local terraform files
+clean:
+    rm -rf .terraform/
+    rm -f .terraform.lock.hcl
+    rm -f *.tfstate*
+    rm -f *.plan
+
+# --- Granular Commands ---
+
+# Plan: VM creation
+plan-vm:
+    terraform plan -out=vm.plan -target=proxmox_virtual_environment_vm.k8s
+
+# Apply: VM creation
+apply-vm: plan-vm
+    terraform apply "vm.plan"
+
+# Destroy VM only
+destroy-vm:
+    terraform destroy -target=proxmox_virtual_environment_vm.k8s

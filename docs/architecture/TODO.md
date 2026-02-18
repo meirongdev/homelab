@@ -3,7 +3,7 @@
 ## Phase 1: Foundation ✅ (Current)
 
 - [x] Terraform setup for VM provisioning
-- [x] Ansible playbooks for MicroK8s installation
+- [x] Ansible playbooks for K3s installation
 - [x] Helm-based application deployment
 - [x] Observability stack (Prometheus, Grafana, Loki, Tempo)
 - [x] Basic secret management with `.env` files

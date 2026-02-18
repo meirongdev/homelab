@@ -1,0 +1,10 @@
+cloudflare_api_token  = "your-cloudflare-api-token"
+cloudflare_account_id = "c49b6c6407adb48905eb6f932cd4e972"
+tunnel_id             = "ce9fd9fe-1dc4-430a-b797-b3b3fc931978"
+
+ingress_rules = {
+  "home"    = { service = "http://traefik.kube-system.svc:80" }
+  "book"    = { service = "http://traefik.kube-system.svc:80" }
+  "grafana" = { service = "http://traefik.kube-system.svc:80" }
+  "vault"   = { service = "http://traefik.kube-system.svc:80" }
+}

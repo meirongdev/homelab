@@ -74,10 +74,8 @@ prometheus:
         static_configs:
           - targets:
               - 192.168.50.106:9100  # storage-node-1
-              - 192.168.50.3:9100    # proxmox-node-1
-              # - 10.10.10.10:9100     # k8s-master-1
-              # - 10.10.10.20:9100     # k8s-worker-1
-              # - 10.10.10.21:9100     # k8s-worker-2
+              - 192.168.50.4:9100    # proxmox-node-1
+              # - 10.10.10.10:9100   # k8s-node
 
 alertmanager:
   enabled: true

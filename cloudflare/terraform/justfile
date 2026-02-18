@@ -1,0 +1,12 @@
+set dotenv-load
+
+export CLOUDFLARE_API_TOKEN := env_var_or_default("CLOUDFLARE_API_TOKEN", "")
+
+init:
+    terraform init
+
+plan:
+    terraform plan -var="cloudflare_api_token=${CLOUDFLARE_API_TOKEN}"
+
+apply:
+    terraform apply -auto-approve -var="cloudflare_api_token=${CLOUDFLARE_API_TOKEN}"

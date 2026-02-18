@@ -13,7 +13,3 @@ install-updates:
 # Download Ubuntu 24.04 cloud image to Proxmox hosts
 download-cloud-image:
     ansible-playbook playbooks/download-cloud-image.yaml
-
-# Create a new VM template from the downloaded cloud image
-create-template:
-    ansible-playbook playbooks/create-vm-template.yaml

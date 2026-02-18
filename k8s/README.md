@@ -1,15 +1,15 @@
-# Setup MicroK8s Cluster
+# Setup K3s Cluster
 
 ## Prerequisites
 
-- Based on [proxmox vm setup](../proxmox_vm/README.md)
+- Based on [Proxmox VM Setup](../proxmox/README.md) (infrastructure must be provisioned first)
 
 
 ## Functionality
 
-### Install MicroK8s on all nodes
+### Install K3s on the single node
 
-Run the Ansible playbook to install MicroK8s on all nodes:
+Run the Ansible playbook to install K3s on the provisioned VM:
 
 ```bash
 cd ansible

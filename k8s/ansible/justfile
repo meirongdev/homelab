@@ -2,9 +2,9 @@
 cleanup-k8s:
     ansible-playbook playbooks/cleanup-k8s.yaml
 
-# Setup MicroK8s cluster on the k8s nodes
+# Setup K3s cluster on the k8s nodes
 setup-k8s:
-    ansible-playbook playbooks/setup-microk8s.yaml
+    ansible-playbook playbooks/setup-k3s.yaml
 
 # Fetch kubeconfig from master node to local machine
 fetch-kubeconfig:
@@ -14,16 +14,16 @@ fetch-kubeconfig:
 update-firewall:
     ansible-playbook playbooks/update-firewall.yaml
 
-# Remove microk8s-homelab config from local kubeconfig
+# Remove k3s-homelab config from local kubeconfig
 remove-kubeconfig:
-    kubectl config delete-cluster microk8s-homelab || true
-    kubectl config delete-user microk8s-homelab-admin || true
-    kubectl config delete-context microk8s-homelab || true
-    @echo "✅ Removed microk8s-homelab configuration from ~/.kube/config"
+    kubectl config delete-cluster k3s-homelab || true
+    kubectl config delete-user k3s-homelab-admin || true
+    kubectl config delete-context k3s-homelab || true
+    @echo "✅ Removed k3s-homelab configuration from ~/.kube/config"
 
 # Install public key
 config-ssh-key:
-    ansible-playbook playbooks/config-ssh-key.yaml
+    ansible-playbook playbooks/config-ssh-access.yaml
 
 # Install Prometheus Node Exporter on all nodes
 install-node-exporter:

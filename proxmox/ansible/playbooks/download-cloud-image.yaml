@@ -1,0 +1,9 @@
+- name: Download Ubuntu cloud image
+  hosts: proxmox
+  become: true
+  tasks:
+    - name: Download Ubuntu 24.04 cloud image
+      ansible.builtin.get_url:
+        url: https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
+        dest: /var/lib/vz/template/iso/ubuntu-24.04-cloudimg-amd64.img
+        mode: "0644"

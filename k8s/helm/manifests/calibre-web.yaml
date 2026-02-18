@@ -1,0 +1,113 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: personal-services
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: calibre-web-config
+  namespace: personal-services
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: calibre-books-pv
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  nfs:
+    server: 192.168.50.106
+    path: /storage/calibre
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: calibre-books
+  namespace: personal-services
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ""
+  volumeName: calibre-books-pv
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: calibre-web
+  namespace: personal-services
+  labels:
+    app: calibre-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: calibre-web
+  template:
+    metadata:
+      labels:
+        app: calibre-web
+    spec:
+      containers:
+        - name: calibre-web
+          image: lscr.io/linuxserver/calibre-web:latest
+          ports:
+            - containerPort: 8083
+              name: http
+          env:
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+            - name: TZ
+              value: "Asia/Shanghai"
+            - name: DOCKER_MODS
+              value: "linuxserver/mods:universal-calibre"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1024Mi
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: books
+              mountPath: /books
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: calibre-web-config
+        - name: books
+          persistentVolumeClaim:
+            claimName: calibre-books
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: calibre-web
+  namespace: personal-services
+spec:
+  type: NodePort
+  selector:
+    app: calibre-web
+  ports:
+    - port: 8083
+      targetPort: 8083
+      nodePort: 30083
+      name: http
