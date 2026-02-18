@@ -110,7 +110,7 @@ data:
         - Squoosh:
             icon: photopea.png
             href: https://squoosh.meirong.dev
-            description: 图片压缩工具
+            description: 图片压缩工具 🔥
             kubernetes:
               namespace: personal-services
               container: squoosh
