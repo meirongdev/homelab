@@ -146,7 +146,7 @@ data:
               label_selector: app.kubernetes.io/name=vault
 
         - ArgoCD:
-            icon: argocd.png
+            icon: argo-cd.png
             href: https://argocd.meirong.dev
             description: GitOps 持续部署
             kubernetes:
