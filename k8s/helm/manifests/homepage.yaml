@@ -98,6 +98,15 @@ data:
               container: it-tools
               label_selector: app=it-tools
 
+        - Stirling-PDF:
+            icon: stirling-pdf.png
+            href: https://pdf.meirong.dev
+            description: 开源 PDF 处理工具箱
+            kubernetes:
+              namespace: personal-services
+              container: stirling-pdf
+              label_selector: app=stirling-pdf
+
     - 监控:
         - Grafana:
             icon: grafana.png

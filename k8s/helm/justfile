@@ -72,6 +72,14 @@ deploy-it-tools:
 delete-it-tools:
     kubectl delete -f manifests/it-tools.yaml
 
+# 部署 Stirling-PDF
+deploy-pdf:
+    kubectl apply -f manifests/stirling-pdf.yaml
+
+# 删除 Stirling-PDF
+delete-pdf:
+    kubectl delete -f manifests/stirling-pdf.yaml
+
 # 部署 Cloudflare Tunnel
 deploy-cloudflare-tunnel: create-cloudflare-secret
     kubectl apply -f manifests/cloudflare-tunnel.yaml
@@ -250,6 +258,16 @@ setup-vault-eso:
         --from-literal=token=$token \
         --dry-run=client -o yaml | kubectl apply -f -
     kubectl apply -f manifests/vault-eso-config.yaml
+
+# 备份 vault-keys.json 为 K8s Secret（防止丢失）
+vault-backup-keys:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    kubectl create secret generic vault-backup-keys \
+        --namespace {{vault_ns}} \
+        --from-literal=vault-keys.json="$(cat vault-keys.json)" \
+        --dry-run=client -o yaml | kubectl apply -f -
+    echo "✅ vault-keys.json backed up to K8s secret vault/vault-backup-keys"
 
 # Vault UI info
 vault-ui:
