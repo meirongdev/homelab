@@ -113,10 +113,11 @@ deploy-homepage:
 delete-homepage:
     kubectl delete -f manifests/homepage.yaml
 
+# 更新 Homepage 配置并重启（ArgoCD 管理下直接 apply + restart）
 update-homepage:
-    kubectl delete configmap homepage-config -n homepage || true
     kubectl apply -f manifests/homepage.yaml
     kubectl rollout restart deployment/homepage -n homepage
+    kubectl rollout status deployment/homepage -n homepage --timeout=60s
 
 homepage:
     @echo "Homepage is available at http://localhost:8080"
