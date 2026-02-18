@@ -214,23 +214,7 @@ spec:
               memory: 256Mi
           volumeMounts:
             - name: config
-              mountPath: /app/config/settings.yaml
-              subPath: settings.yaml
-            - name: config
-              mountPath: /app/config/bookmarks.yaml
-              subPath: bookmarks.yaml
-            - name: config
-              mountPath: /app/config/services.yaml
-              subPath: services.yaml
-            - name: config
-              mountPath: /app/config/widgets.yaml
-              subPath: widgets.yaml
-            - name: config
-              mountPath: /app/config/kubernetes.yaml
-              subPath: kubernetes.yaml
-            - name: config
-              mountPath: /app/config/docker.yaml
-              subPath: docker.yaml
+              mountPath: /app/config
           livenessProbe:
             httpGet:
               path: /
