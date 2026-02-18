@@ -17,10 +17,16 @@ metadata:
   name: homepage
 rules:
   - apiGroups: [""]
-    resources: ["pods", "services", "namespaces"]
+    resources: ["pods", "services", "namespaces", "nodes"]
     verbs: ["get", "list"]
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
     verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -78,9 +84,10 @@ data:
             icon: calibre-web.png
             href: https://book.meirong.dev
             description: 电子书管理
-            server: k8s-cluster
-            container: calibre-web
-            namespace: personal-services
+            kubernetes:
+              namespace: personal-services
+              container: calibre-web
+              label_selector: app=calibre-web
 
     - 监控:
         - Grafana:
@@ -90,7 +97,7 @@ data:
 
         - Prometheus:
             icon: prometheus.png
-            href: http://localhost:9090
+            # href: http://localhost:9090
             description: 指标采集
 
         - Loki:
@@ -106,29 +113,17 @@ data:
             icon: vault.png
             href: https://vault.meirong.dev
             description: 凭证与密钥管理
-            server: k8s-cluster
-            container: vault
-            namespace: vault
+            kubernetes:
+              namespace: vault
+              container: vault
+              label_selector: app.kubernetes.io/name=vault
 
         - NFS Storage:
             icon: synology.png
-            description: 192.168.50.106
+            description: NFS Storage from NAS
             ping: 192.168.50.106
 
   widgets.yaml: |
-    - kubernetes:
-        cluster:
-          show: true
-          cpu: true
-          memory: true
-          showLabel: true
-          label: "K3s"
-        nodes:
-          show: true
-          cpu: true
-          memory: true
-          showLabel: true
-
     - datetime:
         text_size: xl
         format:
