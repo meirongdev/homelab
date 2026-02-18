@@ -64,6 +64,14 @@ deploy-calibre:
 delete-calibre:
     kubectl delete -f manifests/calibre-web.yaml
 
+# 部署 IT-Tools
+deploy-it-tools:
+    kubectl apply -f manifests/it-tools.yaml
+
+# 删除 IT-Tools
+delete-it-tools:
+    kubectl delete -f manifests/it-tools.yaml
+
 # 部署 Cloudflare Tunnel
 deploy-cloudflare-tunnel: create-cloudflare-secret
     kubectl apply -f manifests/cloudflare-tunnel.yaml

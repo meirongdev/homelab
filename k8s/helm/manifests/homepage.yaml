@@ -89,6 +89,15 @@ data:
               container: calibre-web
               label_selector: app=calibre-web
 
+        - IT-Tools:
+            icon: it-tools.png
+            href: https://tool.meirong.dev
+            description: 开发者工具箱
+            kubernetes:
+              namespace: personal-services
+              container: it-tools
+              label_selector: app=it-tools
+
     - 监控:
         - Grafana:
             icon: grafana.png
