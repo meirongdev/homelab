@@ -276,8 +276,8 @@ argocd_ns := "argocd"
 deploy-argocd:
     # 1. 创建 namespace（idempotent）
     kubectl create namespace {{argocd_ns}} --dry-run=client -o yaml | kubectl apply -f -
-    # 2. 安装/更新 ArgoCD 核心组件
-    kubectl apply -n {{argocd_ns}} -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+    # 2. 安装/更新 ArgoCD 核心组件（--server-side 避免 CRD 注释超限问题）
+    kubectl apply -n {{argocd_ns}} -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml --server-side
     @echo "⏳ Waiting for ArgoCD server to be ready..."
     kubectl rollout status deployment/argocd-server -n {{argocd_ns}} --timeout=8m
     # 3. 禁用内置 TLS（由 Traefik 处理）
