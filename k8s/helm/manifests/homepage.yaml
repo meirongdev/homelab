@@ -176,6 +176,8 @@ data:
     mode: cluster
 
   docker.yaml: ""
+
+  proxmox.yaml: ""
 ---
 apiVersion: apps/v1
 kind: Deployment
