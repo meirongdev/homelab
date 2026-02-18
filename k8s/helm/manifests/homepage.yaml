@@ -215,6 +215,8 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /app/config
+            - name: logs
+              mountPath: /app/config/logs
           livenessProbe:
             httpGet:
               path: /
@@ -231,6 +233,8 @@ spec:
         - name: config
           configMap:
             name: homepage-config
+        - name: logs
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
