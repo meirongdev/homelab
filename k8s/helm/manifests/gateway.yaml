@@ -61,9 +61,16 @@ spec:
   hostnames:
     - "book.meirong.dev"
   rules:
-    - backendRefs:
-        - name: calibre-web
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: calibre-web
           port: 8083
+          weight: 1
 ---
 # HTTPRoute: tool.meirong.dev -> it-tools
 apiVersion: gateway.networking.k8s.io/v1
@@ -81,9 +88,16 @@ spec:
   hostnames:
     - "tool.meirong.dev"
   rules:
-    - backendRefs:
-        - name: it-tools
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: it-tools
           port: 80
+          weight: 1
 ---
 # HTTPRoute: pdf.meirong.dev -> stirling-pdf
 apiVersion: gateway.networking.k8s.io/v1
@@ -101,9 +115,16 @@ spec:
   hostnames:
     - "pdf.meirong.dev"
   rules:
-    - backendRefs:
-        - name: stirling-pdf
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: stirling-pdf
           port: 8080
+          weight: 1
 ---
 # HTTPRoute: home.meirong.dev -> homepage
 apiVersion: gateway.networking.k8s.io/v1
@@ -126,8 +147,11 @@ spec:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: homepage
+        - group: ""
+          kind: Service
+          name: homepage
           port: 3000
+          weight: 1
 ---
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: ReferenceGrant
@@ -164,8 +188,11 @@ spec:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: kube-prometheus-stack-grafana
+        - group: ""
+          kind: Service
+          name: kube-prometheus-stack-grafana
           port: 80
+          weight: 1
 ---
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: ReferenceGrant
@@ -202,8 +229,11 @@ spec:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: vault
+        - group: ""
+          kind: Service
+          name: vault
           port: 8200
+          weight: 1
 ---
 # HTTPRoute: squoosh.meirong.dev -> squoosh
 apiVersion: gateway.networking.k8s.io/v1
@@ -221,9 +251,16 @@ spec:
   hostnames:
     - "squoosh.meirong.dev"
   rules:
-    - backendRefs:
-        - name: squoosh
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: squoosh
           port: 80
+          weight: 1
 ---
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: ReferenceGrant
@@ -260,5 +297,8 @@ spec:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: argocd-server
+        - group: ""
+          kind: Service
+          name: argocd-server
           port: 80
+          weight: 1
