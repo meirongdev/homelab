@@ -2,12 +2,12 @@
 name: add-service
 description: Add a new service to the homelab. Creates the K8s manifest, gateway HTTPRoute, homepage entry, and Cloudflare tunnel DNS rule. Use when the user wants to deploy a new application or self-hosted service.
 argument-hint: [service-name]
-allowed-tools: Read, Edit, Write, Glob, Grep, Bash(kubectl *), Bash(cd /Users/matthew/projects/homelab/cloudflare/terraform && just *)
+allowed-tools: Read, Edit, Write, Glob, Grep, Bash(kubectl *), Bash(cd /Users/matthew/projects/homelab/cloudflare/terraform && just *), Bash(cd /Users/matthew/projects/homelab && git *)
 ---
 
 ## Add New Homelab Service: $ARGUMENTS
 
-Follow these steps to fully integrate a new service into the homelab.
+This homelab uses **ArgoCD GitOps**: once changes are pushed to `main`, ArgoCD auto-deploys within 3 minutes. No manual `kubectl apply` needed for service manifests.
 
 ### Step 1 — Gather information
 
@@ -69,11 +69,12 @@ spec:
       targetPort: <container-port>
 ```
 
-If persistent storage is needed, add a PVC using `storageClassName: nfs-client`.
+If persistent storage is needed, add a PVC with `storageClassName: nfs-client`.
+If the PVC holds important data (e.g. media libraries), add `argocd.argoproj.io/sync-options: Prune=false` annotation to protect it from accidental deletion.
 
 ### Step 3 — Add HTTPRoute to `manifests/gateway.yaml`
 
-Append at the end of the file. Always include `port: 8000` in parentRefs:
+Append at the end of the file. Always include all explicit fields to prevent ArgoCD OutOfSync drift:
 
 ```yaml
 ---
@@ -85,20 +86,57 @@ metadata:
   namespace: <namespace>
 spec:
   parentRefs:
-    - name: homelab-gateway
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: homelab-gateway
       namespace: kube-system
       port: 8000
   hostnames:
     - "<subdomain>.meirong.dev"
   rules:
-    - backendRefs:
-        - name: <service-name>
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: <service-name>
           port: <service-port>
+          weight: 1
 ```
 
-Note: if the namespace is new (not personal-services, monitoring, homepage, or vault), also add a ReferenceGrant for it.
+**Important**: if the namespace is new (not `personal-services`, `monitoring`, `homepage`, `vault`, or `argocd`), also prepend a ReferenceGrant:
 
-### Step 4 — Add service to homepage in `manifests/homepage.yaml`
+```yaml
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-gateway-to-<namespace>
+  namespace: <namespace>
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: <namespace>
+  to:
+    - group: ""
+      kind: Service
+```
+
+### Step 4 — Register with ArgoCD Application
+
+Open `argocd/applications/personal-services.yaml` and add the new filename to the `include` list:
+
+```yaml
+directory:
+  include: "{calibre-web.yaml,it-tools.yaml,...,<service-name>.yaml}"
+```
+
+If the service belongs to a different logical group (e.g. infrastructure), add it to the appropriate Application instead, or create a new one.
+
+### Step 5 — Add service to homepage in `manifests/homepage.yaml`
 
 Find the correct section under `services.yaml:` in the ConfigMap and add:
 
@@ -113,7 +151,7 @@ Find the correct section under `services.yaml:` in the ConfigMap and add:
               label_selector: app=<service-name>
 ```
 
-### Step 5 — Add Cloudflare tunnel rule in `cloudflare/terraform/terraform.tfvars`
+### Step 6 — Add Cloudflare tunnel rule in `cloudflare/terraform/terraform.tfvars`
 
 Add to the `ingress_rules` map:
 
@@ -121,18 +159,18 @@ Add to the `ingress_rules` map:
   "<subdomain>" = { service = "http://traefik.kube-system.svc:80" }
 ```
 
-### Step 6 — Apply everything
-
-Run in order:
+### Step 7 — Commit and push (triggers ArgoCD auto-deploy)
 
 ```bash
-kubectl apply -f manifests/<service-name>.yaml
-kubectl apply -f manifests/gateway.yaml
-kubectl apply -f manifests/homepage.yaml
-kubectl rollout restart deployment/homepage -n homepage
+cd /Users/matthew/projects/homelab
+git add manifests/<service-name>.yaml manifests/gateway.yaml manifests/homepage.yaml argocd/applications/personal-services.yaml
+git commit -m "feat: add <service-name> service"
+git push origin main
 ```
 
-Then apply Cloudflare changes:
+ArgoCD will automatically sync within ~3 minutes. The `personal-services` and `gateway` Applications handle deployment — no manual `kubectl apply` needed.
+
+### Step 8 — Apply Cloudflare DNS
 
 ```bash
 cd /Users/matthew/projects/homelab/cloudflare/terraform && just plan
@@ -140,11 +178,13 @@ cd /Users/matthew/projects/homelab/cloudflare/terraform && just plan
 
 Show the plan output and ask the user to confirm before running `just apply`.
 
-### Step 7 — Verify
+### Step 9 — Verify
 
 ```bash
 kubectl get pods -n <namespace> -l app=<service-name>
 kubectl rollout status deployment/<service-name> -n <namespace>
 ```
+
+Or check ArgoCD UI at `https://argocd.meirong.dev` — the Application should show `Synced + Healthy`.
 
 Confirm the pod is Running and report the final URL: `https://<subdomain>.meirong.dev`
