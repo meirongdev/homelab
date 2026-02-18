@@ -145,6 +145,15 @@ data:
               container: vault
               label_selector: app.kubernetes.io/name=vault
 
+        - ArgoCD:
+            icon: argocd.png
+            href: https://argocd.meirong.dev
+            description: GitOps 持续部署
+            kubernetes:
+              namespace: argocd
+              container: argocd-server
+              label_selector: app.kubernetes.io/name=argocd-server
+
         - NFS Storage:
             icon: synology.png
             description: NFS Storage from NAS
