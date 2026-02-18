@@ -269,6 +269,50 @@ vault-backup-keys:
         --dry-run=client -o yaml | kubectl apply -f -
     echo "✅ vault-keys.json backed up to K8s secret vault/vault-backup-keys"
 
+# ⬇️ ArgoCD GitOps ⬇️
+argocd_ns := "argocd"
+
+# 一键安装 ArgoCD + 应用配置（幂等，可重复执行）
+deploy-argocd:
+    # 1. 创建 namespace（idempotent）
+    kubectl create namespace {{argocd_ns}} --dry-run=client -o yaml | kubectl apply -f -
+    # 2. 安装/更新 ArgoCD 核心组件
+    kubectl apply -n {{argocd_ns}} -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+    @echo "⏳ Waiting for ArgoCD server to be ready..."
+    kubectl rollout status deployment/argocd-server -n {{argocd_ns}} --timeout=8m
+    # 3. 禁用内置 TLS（由 Traefik 处理）
+    kubectl apply -f ../../argocd/install/argocd-cm-patch.yaml
+    kubectl rollout restart deployment/argocd-server -n {{argocd_ns}}
+    kubectl rollout status deployment/argocd-server -n {{argocd_ns}} --timeout=3m
+    # 4. 注册 Gateway HTTPRoute（argocd namespace 已存在）
+    kubectl apply -f manifests/gateway.yaml
+    # 5. 注册 AppProject + Applications
+    kubectl apply -f ../../argocd/projects/homelab.yaml
+    kubectl apply -f ../../argocd/applications/
+    @echo "✅ ArgoCD deployed! Access at https://argocd.meirong.dev"
+    @echo "Initial password: run 'just argocd-password'"
+
+# 更新 Cloudflare DNS（添加 argocd.meirong.dev）
+deploy-argocd-dns:
+    cd ../../cloudflare/terraform && just apply
+
+# 获取 ArgoCD 初始管理员密码
+argocd-password:
+    @kubectl -n {{argocd_ns}} get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+    @echo ""
+
+# 触发全量同步
+argocd-sync:
+    argocd app sync --all
+
+# 查看所有 Application 状态
+argocd-status:
+    @echo "=== ArgoCD Applications ==="
+    kubectl get applications -n {{argocd_ns}}
+    @echo ""
+    @echo "=== ArgoCD Pods ==="
+    kubectl get pods -n {{argocd_ns}}
+
 # Vault UI info
 vault-ui:
     @echo "Vault UI is available at http://localhost:30820 (NodePort)"

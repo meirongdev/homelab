@@ -1,0 +1,28 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vault-eso
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: homelab
+
+  source:
+    repoURL: https://github.com/meirongdev/homelab
+    targetRevision: main
+    path: k8s/helm/manifests
+    directory:
+      include: "{vault-eso-config.yaml,cloudflare-external-secret.yaml,grafana-external-secret.yaml,postgres-external-secret.yaml,stirling-pdf-external-secret.yaml}"
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: external-secrets
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

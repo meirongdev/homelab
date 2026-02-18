@@ -1,0 +1,28 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: personal-services
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: homelab
+
+  source:
+    repoURL: https://github.com/meirongdev/homelab
+    targetRevision: main
+    path: k8s/helm/manifests
+    directory:
+      include: "{calibre-web.yaml,it-tools.yaml,stirling-pdf.yaml,squoosh.yaml,homepage.yaml}"
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: personal-services
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: homelab
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: Homelab GitOps project
+
+  sourceRepos:
+    - https://github.com/meirongdev/homelab
+
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "*"
+
+  # 允许管理集群级资源（Namespace、ClusterRole 等）
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"
+
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

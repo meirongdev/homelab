@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cmd-params-cm
+  namespace: argocd
+data:
+  # 禁用 ArgoCD 内置 TLS，由 Traefik 负责 TLS 终止
+  server.insecure: "true"

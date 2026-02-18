@@ -1,0 +1,28 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cloudflare
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: homelab
+
+  source:
+    repoURL: https://github.com/meirongdev/homelab
+    targetRevision: main
+    path: k8s/helm/manifests
+    directory:
+      include: "cloudflare-tunnel.yaml"
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cloudflare
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
