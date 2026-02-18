@@ -59,7 +59,8 @@ just init                  # Initialize .env from .env.example
 just deploy-all            # Deploy full observability stack (LGTM)
 just setup-nfs-provisioner # Install NFS storage provisioner
 just setup-postgres        # Deploy PostgreSQL
-just deploy-homepage       # Update/deploy Homepage dashboard
+just deploy-homepage       # First-time deploy Homepage dashboard
+just update-homepage       # Update Homepage config + restart pod (apply + rollout restart)
 just status                # Check monitoring namespace state
 ```
 
@@ -143,6 +144,7 @@ just apply   # Apply DNS/Tunnel changes
   4. Add subdomain to `cloudflare/terraform/terraform.tfvars`
   5. `git push` → ArgoCD auto-deploys within 3 minutes
   6. `cd cloudflare/terraform && just apply` for DNS
+- **Homepage config updates**: ArgoCD auto-syncs the ConfigMap on `git push`, but `subPath` volume mounts require a pod restart to reload — run `just update-homepage` (does `apply` + `rollout restart` in one step). Do NOT use `kubectl delete configmap` as ArgoCD will conflict.
 - **HTTPRoute template**: Always include explicit `group`/`kind` in `parentRefs` and `group`/`kind`/`weight` in `backendRefs` to prevent ArgoCD OutOfSync drift caused by Gateway controller defaults.
 - **Chinese Comments**: Permitted and used in `justfile` for clarity.
 - **SSH**: User `root`, Key `~/.ssh/vgio`.
