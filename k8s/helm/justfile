@@ -301,9 +301,13 @@ argocd-password:
     @kubectl -n {{argocd_ns}} get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
     @echo ""
 
-# 触发全量同步
+# 触发全量同步（通过 kubectl annotation，无需 argocd CLI）
 argocd-sync:
-    argocd app sync --all
+    @echo "⏳ Triggering sync for all applications..."
+    @kubectl get applications -n {{argocd_ns}} -o name | xargs -I{} kubectl annotate {} -n {{argocd_ns}} argocd.argoproj.io/refresh=normal --overwrite
+    @echo "✅ Sync triggered. Waiting for completion..."
+    @sleep 15
+    @kubectl get applications -n {{argocd_ns}}
 
 # 查看所有 Application 状态
 argocd-status:
