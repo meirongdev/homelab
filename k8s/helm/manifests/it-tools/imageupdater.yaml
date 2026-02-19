@@ -1,0 +1,12 @@
+apiVersion: argocd-image-updater.argoproj.io/v1alpha1
+kind: ImageUpdater
+metadata:
+  name: it-tools
+  namespace: argocd
+spec:
+  # namespace where the target ArgoCD Application lives
+  namespace: argocd
+  applicationRefs:
+    - namePattern: it-tools
+      # read image config from the Application's argocd-image-updater.argoproj.io/* annotations
+      useAnnotations: true

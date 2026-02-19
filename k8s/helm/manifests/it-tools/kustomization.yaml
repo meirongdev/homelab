@@ -6,3 +6,15 @@ namespace: personal-services
 resources:
   - deployment.yaml
   - service.yaml
+  - imageupdater.yaml
+
+# ImageUpdater CR must live in argocd namespace, override the default above
+patches:
+  - target:
+      group: argocd-image-updater.argoproj.io
+      kind: ImageUpdater
+      name: it-tools
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: argocd
