@@ -31,7 +31,9 @@ homelab/
 ├── cloudflare/
 │   └── terraform/      # Cloudflare Tunnel ingress rules + DNS records
 └── docs/
-    └── CONVENTIONS.md  # This file (symlinked as CLAUDE.md and GEMINI.md)
+    ├── CONVENTIONS.md  # This file (symlinked as CLAUDE.md and GEMINI.md)
+    ├── architecture/   # Architecture notes and TODO
+    └── plans/          # Implementation plan records
 ```
 
 ## Key Commands (Context-Dependent)
@@ -94,7 +96,9 @@ just apply   # Apply DNS/Tunnel changes
 - ArgoCD runs in the `argocd` namespace, UI at `argocd.meirong.dev`
 - **Sync poll interval**: 3 minutes (auto-syncs after every `git push`)
 - **Managed by ArgoCD** (auto-sync + selfHeal):
-  - `personal-services` App → `manifests/{calibre-web,it-tools,stirling-pdf,squoosh,homepage}.yaml`
+  - `personal-services` App → `manifests/{calibre-web,stirling-pdf,squoosh,homepage}.yaml`
+  - `it-tools` App → `manifests/it-tools/` (Kustomize; managed separately to support Image Updater write-back)
+  - `argocd-image-updater` App → Helm chart `argo/argocd-image-updater` v1.1.0, values from `values/argocd-image-updater.yaml`
   - `gateway` App → `manifests/{gateway.yaml,traefik-config.yaml}`
   - `cloudflare` App → `manifests/cloudflare-tunnel.yaml`
   - `vault-eso` App → `manifests/{vault-eso-config,*-external-secret}.yaml`
@@ -144,7 +148,10 @@ just apply   # Apply DNS/Tunnel changes
   4. Add subdomain to `cloudflare/terraform/terraform.tfvars`
   5. `git push` → ArgoCD auto-deploys within 3 minutes
   6. `cd cloudflare/terraform && just apply` for DNS
+  - **Exception**: services needing ArgoCD Image Updater (e.g. `it-tools`) get their own Kustomize Application (`manifests/<service>/`) and `argocd/applications/<service>.yaml` instead of joining `personal-services`
 - **Homepage config updates**: ArgoCD auto-syncs the ConfigMap on `git push`, but `subPath` volume mounts require a pod restart to reload — run `just update-homepage` (does `apply` + `rollout restart` in one step). Do NOT use `kubectl delete configmap` as ArgoCD will conflict.
 - **HTTPRoute template**: Always include explicit `group`/`kind` in `parentRefs` and `group`/`kind`/`weight` in `backendRefs` to prevent ArgoCD OutOfSync drift caused by Gateway controller defaults.
+- **ArgoCD Image Updater** (v1.1.0): Uses CRD model — create an `ImageUpdater` CR (not just annotations). Set `useAnnotations: true` in the CR to read image config from Application annotations. Use strategy `newest-build` (not `latest`, deprecated). After changing Application annotations in Git, re-run `kubectl apply -f argocd/applications/<app>.yaml` — ArgoCD does not manage Application objects themselves.
+- **Kustomize namespace caveat**: The global `namespace:` field in `kustomization.yaml` runs as a transformer after JSON patches, overriding them. Declare namespace explicitly in each manifest instead when resources span multiple namespaces.
 - **Chinese Comments**: Permitted and used in `justfile` for clarity.
 - **SSH**: User `root`, Key `~/.ssh/vgio`.
