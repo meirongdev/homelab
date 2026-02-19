@@ -13,7 +13,7 @@ spec:
     targetRevision: main
     path: k8s/helm/manifests
     directory:
-      include: "{vault-eso-config.yaml,cloudflare-external-secret.yaml,grafana-external-secret.yaml,postgres-external-secret.yaml,stirling-pdf-external-secret.yaml}"
+      include: "{vault-eso-config.yaml,cloudflare-external-secret.yaml,grafana-external-secret.yaml,postgres-external-secret.yaml,stirling-pdf-external-secret.yaml,github-external-secret.yaml}"
 
   destination:
     server: https://kubernetes.default.svc

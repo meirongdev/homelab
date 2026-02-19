@@ -1,0 +1,34 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: it-tools
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    # 监控的镜像
+    argocd-image-updater.argoproj.io/image-list: it-tools=ghcr.io/meirongdev/it-tools
+    # latest 策略：按推送时间选最新的匹配 tag
+    argocd-image-updater.argoproj.io/it-tools.update-strategy: latest
+    # 只匹配 sha-xxxxxxx 格式的 tag
+    argocd-image-updater.argoproj.io/it-tools.tag-match-expr: ^sha-[0-9a-f]+$
+    # 用 GHCR auth secret 拉取镜像信息
+    argocd-image-updater.argoproj.io/it-tools.pull-secret: pullsecret:argocd/argocd-image-updater-secret
+    # Git write-back：用 git-creds secret 提交到 GitHub
+    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/git-creds
+    argocd-image-updater.argoproj.io/git-repository: https://github.com/meirongdev/homelab
+spec:
+  project: homelab
+  source:
+    repoURL: https://github.com/meirongdev/homelab
+    targetRevision: main
+    path: k8s/helm/manifests/it-tools
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: personal-services
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

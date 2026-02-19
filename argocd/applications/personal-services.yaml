@@ -13,7 +13,7 @@ spec:
     targetRevision: main
     path: k8s/helm/manifests
     directory:
-      include: "{calibre-web.yaml,it-tools.yaml,stirling-pdf.yaml,squoosh.yaml,homepage.yaml}"
+      include: "{calibre-web.yaml,stirling-pdf.yaml,squoosh.yaml,homepage.yaml}"
 
   destination:
     server: https://kubernetes.default.svc

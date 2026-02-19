@@ -1,0 +1,19 @@
+# ArgoCD Image Updater Helm values
+# 参考: https://argocd-image-updater.readthedocs.io/
+
+config:
+  registries:
+    - name: GitHub Container Registry
+      api_url: https://ghcr.io
+      prefix: ghcr.io
+      insecure: false
+      credentials: pullsecret:argocd/argocd-image-updater-secret
+
+logLevel: debug   # 初次验证后改为 info
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    memory: 128Mi

@@ -10,6 +10,7 @@ spec:
 
   sourceRepos:
     - https://github.com/meirongdev/homelab
+    - https://argoproj.github.io/argo-helm
 
   destinations:
     - server: https://kubernetes.default.svc
