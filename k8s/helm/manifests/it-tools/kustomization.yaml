@@ -1,20 +1,12 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: personal-services
+# namespaces are declared explicitly in each resource manifest:
+#   deployment.yaml  → personal-services
+#   service.yaml     → personal-services
+#   imageupdater.yaml → argocd
 
 resources:
   - deployment.yaml
   - service.yaml
   - imageupdater.yaml
-
-# ImageUpdater CR must live in argocd namespace, override the default above
-patches:
-  - target:
-      group: argocd-image-updater.argoproj.io
-      kind: ImageUpdater
-      name: it-tools
-    patch: |-
-      - op: replace
-        path: /metadata/namespace
-        value: argocd
