@@ -8,6 +8,7 @@ Clients connect via gRPC over HTTPS to back up and restore data.
 ## Architecture
 
 ```
+Browser (Web UI)   --HTTPS--> backup.meirong.dev --> Cloudflare Tunnel --> Traefik --> kopia pod:51515
 Client (kopia CLI) --gRPC/HTTPS--> K8s Node:31515 (NodePort) --> kopia pod:51515
 ```
 
@@ -21,7 +22,18 @@ Client (kopia CLI) --gRPC/HTTPS--> K8s Node:31515 (NodePort) --> kopia pod:51515
 
 ## Access
 
-Kopia is exposed via **NodePort 31515** on the K8s node (`10.10.10.10`).
+### Web UI
+
+Kopia 的管理界面可通过 Cloudflare Tunnel 正常访问：
+
+```
+https://backup.meirong.dev
+```
+
+### CLI (NodePort)
+
+Kopia CLI 使用 HTTP/2 双向流式 gRPC (`Session()` RPC)，无法通过 Cloudflare Tunnel（524 超时）。
+CLI 客户端须直连 NodePort：
 
 ```bash
 kopia repository connect server \
@@ -32,16 +44,7 @@ kopia repository connect server \
 
 The password at the prompt is the **server password** (Vault key: `password`).
 
-### Why not Cloudflare Tunnel?
-
-Kopia's gRPC-Go client uses HTTP/2 bidirectional streaming for the `Session()` RPC.
-This fails through Cloudflare Tunnel with a 524 timeout, even though:
-- Regular HTTP/2 requests work fine (verified with curl)
-- Cloudflare gRPC zone setting is enabled
-- `http2_origin: true` and `noTLSVerify: true` are configured
-
-The Cloudflare tunnel config and DNS record for `backup.meirong.dev` are kept in
-Terraform for future investigation, but the route is non-functional for the kopia CLI.
+> **原因**：常规 HTTP/2 请求（Web UI）可正常通过 Cloudflare；但 kopia CLI 的 gRPC-Go 双向流式 RPC 会触发 524 超时，即使开启了 Cloudflare gRPC zone 设置。CLI 只能走 NodePort 直连。
 
 ## User Management
 
@@ -55,6 +58,16 @@ just kopia-list-users
 ```
 
 After adding a user, the client can connect using the server password.
+
+## Future Improvements
+
+### Envoy gRPC Sidecar
+
+一个潜在的优化方案是在 kopia pod 旁边部署 Envoy 作为 sidecar 代理，用于处理 gRPC 流量：
+
+- **目标**：通过 Envoy 的 `grpc_web` 过滤器将 kopia 的 HTTP/2 双向流式 gRPC (`Session()` RPC) 转换为 gRPC-Web（单向流），从而绕过 Cloudflare Tunnel 对 HTTP/2 双向流的限制。
+- **方案**：Envoy sidecar 监听一个新端口（如 51514），将 gRPC-Web 请求转码后转发给 kopia 的原生 gRPC 端口（51515）。Cloudflare Tunnel 指向 Envoy 端口。
+- **注意**：kopia CLI 目前不支持 gRPC-Web，需等待上游支持或使用 grpc-web-proxy 方案。此方案仍需验证。
 
 ## TLS Certificate
 

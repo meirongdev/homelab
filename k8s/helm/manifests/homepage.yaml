@@ -154,6 +154,15 @@ data:
               container: argocd-server
               label_selector: app.kubernetes.io/name=argocd-server
 
+        - Kopia:
+            icon: kopia.png
+            href: https://backup.meirong.dev
+            description: 备份服务器
+            kubernetes:
+              namespace: kopia
+              container: kopia
+              label_selector: app=kopia
+
         - NFS Storage:
             icon: synology.png
             description: NFS Storage from NAS
