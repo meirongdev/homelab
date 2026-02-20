@@ -1,0 +1,16 @@
+# Terraform state (contains sensitive data — never commit)
+terraform.tfstate
+terraform.tfstate.backup
+terraform.plan
+
+# Terraform working directory
+.terraform/
+.terraform.lock.hcl
+
+# Actual tfvars (contains OCIDs, API keys, SSH keys)
+terraform.tfvars
+
+# OCI API private key (if stored locally)
+*.pem
+*.key
+oci_api_key*
