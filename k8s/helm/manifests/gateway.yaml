@@ -302,3 +302,44 @@ spec:
           name: argocd-server
           port: 80
           weight: 1
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-gateway-to-kopia
+  namespace: kopia
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: kopia
+  to:
+    - group: ""
+      kind: Service
+---
+# HTTPRoute: backup.meirong.dev -> kopia
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: kopia
+  namespace: kopia
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: homelab-gateway
+      namespace: kube-system
+      port: 8000
+  hostnames:
+    - "backup.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: kopia
+          port: 51515
+          weight: 1

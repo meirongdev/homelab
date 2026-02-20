@@ -1,0 +1,177 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kopia
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: kopia-secret
+  namespace: kopia
+spec:
+  refreshInterval: 1m
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: kopia-secret
+    creationPolicy: Owner
+  data:
+    - secretKey: password
+      remoteRef:
+        key: secret/homelab/kopia
+        property: password
+    - secretKey: repo-password
+      remoteRef:
+        key: secret/homelab/kopia
+        property: repo-password
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kopia-repository
+  namespace: kopia
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 500Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kopia-config
+  namespace: kopia
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kopia
+  namespace: kopia
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kopia
+  template:
+    metadata:
+      labels:
+        app: kopia
+    spec:
+      initContainers:
+        - name: kopia-init
+          image: kopia/kopia:latest
+          command:
+            - sh
+            - -c
+            - |
+              if [ ! -f /app/config/repository.config ]; then
+                echo "Initializing Kopia repository..."
+                KOPIA_PASSWORD="$(KOPIA_REPO_PASSWORD)" kopia repository create filesystem \
+                  --path=/repository \
+                  --config-file=/app/config/repository.config \
+                  --cache-directory=/app/cache
+                echo "Repository initialized."
+              else
+                echo "Repository already initialized, skipping."
+              fi
+          env:
+            - name: KOPIA_REPO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kopia-secret
+                  key: repo-password
+          volumeMounts:
+            - name: repository
+              mountPath: /repository
+            - name: config
+              mountPath: /app/config
+            - name: cache
+              mountPath: /app/cache
+      containers:
+        - name: kopia
+          image: kopia/kopia:latest
+          command:
+            - kopia
+            - server
+            - start
+            - --insecure
+            - --address=0.0.0.0:51515
+            - --config-file=/app/config/repository.config
+            - --cache-directory=/app/cache
+            - --server-username=admin
+            - --server-password=$(KOPIA_SERVER_PASSWORD)
+            - --server-control-username=admin
+            - --server-control-password=$(KOPIA_SERVER_PASSWORD)
+          env:
+            - name: KOPIA_SERVER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kopia-secret
+                  key: password
+            - name: KOPIA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kopia-secret
+                  key: repo-password
+          ports:
+            - containerPort: 51515
+          livenessProbe:
+            tcpSocket:
+              port: 51515
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            tcpSocket:
+              port: 51515
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            - name: repository
+              mountPath: /repository
+            - name: config
+              mountPath: /app/config
+            - name: cache
+              mountPath: /app/cache
+      volumes:
+        - name: repository
+          persistentVolumeClaim:
+            claimName: kopia-repository
+        - name: config
+          persistentVolumeClaim:
+            claimName: kopia-config
+        - name: cache
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kopia
+  namespace: kopia
+spec:
+  type: ClusterIP
+  selector:
+    app: kopia
+  ports:
+    - port: 51515
+      targetPort: 51515
