@@ -21,6 +21,22 @@ server:
 
         service_registration "kubernetes" {}
 
+  # 断电重启后自动解锁（密钥存储于 K8s Secret: vault/vault-auto-unseal）
+  # 注意：vault-auto-unseal secret 需手动创建（见 justfile: just vault-setup-auto-unseal）
+  postStart:
+    - /bin/sh
+    - -c
+    - |
+      export VAULT_ADDR=http://127.0.0.1:8200
+      until vault status 2>/dev/null | grep -q "Initialized"; do sleep 2; done
+      if vault status 2>/dev/null | grep -q "Sealed.*true"; then
+        vault operator unseal "$(cat /vault/userconfig/vault-auto-unseal/key)"
+      fi
+
+  extraVolumes:
+    - type: secret
+      name: vault-auto-unseal
+
   # 使用 NFS 存储 Raft 数据
   dataStorage:
     enabled: true

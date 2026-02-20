@@ -11,7 +11,7 @@ primary:
       memory: 256Mi
       cpu: 250m
     limits:
-      memory: 512Mi
+      memory: 768Mi  # 从 512Mi 提升，防止启动期 OOM（重启后多服务同时竞争内存）
       cpu: 500m
 
 readReplicas:

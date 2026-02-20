@@ -282,7 +282,8 @@ deploy-argocd:
     @echo "⏳ Waiting for ArgoCD server to be ready..."
     kubectl rollout status deployment/argocd-server -n {{argocd_ns}} --timeout=8m
     # 3. 禁用内置 TLS（由 Traefik 处理）
-    kubectl apply -f ../../argocd/install/argocd-cm-patch.yaml
+    # 注意：使用 --server-side 确保字段所有权，防止 install.yaml 重新 apply 后被覆盖
+    kubectl apply --server-side -f ../../argocd/install/argocd-cm-patch.yaml
     kubectl rollout restart deployment/argocd-server -n {{argocd_ns}}
     kubectl rollout status deployment/argocd-server -n {{argocd_ns}} --timeout=3m
     # 4. 注册 Gateway HTTPRoute（argocd namespace 已存在）
@@ -356,6 +357,43 @@ kopia-status:
     @echo ""
     @echo "=== Registered Users ==="
     @just kopia-list-users
+
+# 配置 Vault 自动解锁（仅需运行一次）
+# 从 vault-backup-keys 提取解锁密钥，创建 vault-auto-unseal secret
+# 然后升级 Vault Helm Chart 以启用 postStart 自动解锁
+vault-setup-auto-unseal:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "⏳ Extracting unseal key from vault-backup-keys secret..."
+    UNSEAL_KEY=$(kubectl get secret vault-backup-keys -n {{vault_ns}} \
+        -o jsonpath='{.data.vault-keys\.json}' | base64 -d | \
+        python3 -c "import json,sys; print(json.load(sys.stdin)['unseal_keys_b64'][0])")
+    kubectl create secret generic vault-auto-unseal -n {{vault_ns}} \
+        --from-literal=key="$UNSEAL_KEY" --dry-run=client -o yaml | kubectl apply -f -
+    echo "⏳ Upgrading Vault Helm chart with auto-unseal postStart hook..."
+    helm upgrade vault hashicorp/vault -n {{vault_ns}} -f values/vault-values.yaml
+    echo "✅ Vault auto-unseal configured. Next restart will unseal automatically."
+
+# 重启后健康检查（快速诊断断电恢复状态）
+post-restart-check:
+    @echo "=== Vault Status ==="
+    @kubectl exec -n {{vault_ns}} vault-0 -- vault status 2>/dev/null | grep -E "Sealed|HA Mode|Active Since" || echo "❌ Vault unreachable"
+    @echo ""
+    @echo "=== ExternalSecrets Sync Status ==="
+    @kubectl get externalsecret -A 2>/dev/null | grep -v "SecretSynced" | grep -v "^NAMESPACE" || echo "✅ All secrets synced"
+    @echo ""
+    @echo "=== Non-Running Pods ==="
+    @kubectl get pods -A --field-selector='status.phase!=Running,status.phase!=Succeeded' 2>/dev/null | grep -v "^NAMESPACE" || echo "✅ All pods running"
+    @echo ""
+    @echo "=== ArgoCD Insecure Mode (防止 redirect loop) ==="
+    @kubectl get configmap argocd-cmd-params-cm -n {{argocd_ns}} -o jsonpath='{.data.server\.insecure}' 2>/dev/null | grep -q "true" \
+        && echo "✅ server.insecure=true (正常)" \
+        || (echo "❌ server.insecure 未设置！正在修复..." && \
+            kubectl apply --server-side -f ../../argocd/install/argocd-cm-patch.yaml && \
+            kubectl rollout restart deployment/argocd-server -n {{argocd_ns}})
+    @echo ""
+    @echo "=== ArgoCD Apps ==="
+    @kubectl get applications -n {{argocd_ns}} 2>/dev/null
 
 # Vault UI info
 vault-ui:
