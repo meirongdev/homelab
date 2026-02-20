@@ -91,6 +91,7 @@ just apply   # Apply DNS/Tunnel changes
 - **Cloudflare Tunnel**: `cloudflared` pod in `cloudflare` namespace forwards to `traefik.kube-system.svc:80`
 - **Traefik**: Configured via K8s Gateway API (`HTTPRoute` resources in `manifests/gateway.yaml`)
 - **K8s Node**: `10.10.10.10` | **Proxmox**: `192.168.50.3`
+- **Exception — Kopia**: Exposed via NodePort (31515) instead of Cloudflare Tunnel. Kopia's gRPC-Go client uses bidirectional streaming that fails through Cloudflare Tunnel (524 timeout), even though regular HTTP/2 works. Connect directly: `kopia repository connect server --url=https://10.10.10.10:31515 --server-cert-fingerprint=<sha256> --override-username=admin`
 
 ### GitOps (ArgoCD)
 - ArgoCD runs in the `argocd` namespace, UI at `argocd.meirong.dev`
@@ -102,6 +103,7 @@ just apply   # Apply DNS/Tunnel changes
   - `gateway` App → `manifests/{gateway.yaml,traefik-config.yaml}`
   - `cloudflare` App → `manifests/cloudflare-tunnel.yaml`
   - `vault-eso` App → `manifests/{vault-eso-config,*-external-secret}.yaml`
+  - `kopia` App → `manifests/kopia.yaml`
 - **NOT managed by ArgoCD** (manual `just` commands):
   - HashiCorp Vault — requires manual init/unseal
   - External Secrets Operator — depends on Vault
@@ -134,6 +136,7 @@ just apply   # Apply DNS/Tunnel changes
 | Grafana | `monitoring` | `grafana.meirong.dev` |
 | HashiCorp Vault | `vault` | `vault.meirong.dev` |
 | ArgoCD | `argocd` | `argocd.meirong.dev` |
+| Kopia Backup | `kopia` | `https://10.10.10.10:31515` (NodePort, LAN only) |
 | PostgreSQL | `database` | Internal only |
 
 ## Conventions

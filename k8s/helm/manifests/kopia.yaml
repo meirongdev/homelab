@@ -109,7 +109,8 @@ spec:
             - kopia
             - server
             - start
-            - --insecure
+            - --tls-cert-file=/app/config/tls.cert
+            - --tls-key-file=/app/config/tls.key
             - --address=0.0.0.0:51515
             - --config-file=/app/config/repository.config
             - --cache-directory=/app/cache
@@ -168,10 +169,13 @@ kind: Service
 metadata:
   name: kopia
   namespace: kopia
+  annotations:
+    traefik.ingress.kubernetes.io/service.serversscheme: h2c
 spec:
-  type: ClusterIP
+  type: NodePort
   selector:
     app: kopia
   ports:
     - port: 51515
       targetPort: 51515
+      nodePort: 31515

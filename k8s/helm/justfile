@@ -318,6 +318,45 @@ argocd-status:
     @echo "=== ArgoCD Pods ==="
     kubectl get pods -n {{argocd_ns}}
 
+# ⬇️ Kopia Backup Server ⬇️
+kopia_ns := "kopia"
+
+# 添加 Kopia 服务器用户（格式: username@hostname）
+kopia-add-user user:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    pod=$(kubectl get pod -n {{kopia_ns}} -l app=kopia -o jsonpath='{.items[0].metadata.name}')
+    password=$(kubectl get secret -n {{kopia_ns}} kopia-secret -o jsonpath='{.data.password}' | base64 -d)
+    kubectl exec -n {{kopia_ns}} "$pod" -c kopia -- kopia server user add "{{user}}" --user-password="$password"
+    kubectl rollout restart deployment/kopia -n {{kopia_ns}}
+    kubectl rollout status deployment/kopia -n {{kopia_ns}} --timeout=90s
+    echo "✅ User '{{user}}' added. Connect with:"
+    echo "   kopia repository connect server \\"
+    echo "     --url=https://10.10.10.10:31515 \\"
+    echo "     --server-cert-fingerprint=$(just kopia-fingerprint) \\"
+    echo "     --override-username=$(echo '{{user}}' | cut -d@ -f1)"
+
+# 列出 Kopia 服务器用户
+kopia-list-users:
+    #!/usr/bin/env bash
+    pod=$(kubectl get pod -n {{kopia_ns}} -l app=kopia -o jsonpath='{.items[0].metadata.name}')
+    kubectl exec -n {{kopia_ns}} "$pod" -c kopia -- kopia server user list
+
+# 获取 Kopia TLS 证书指纹
+kopia-fingerprint:
+    @openssl s_client -connect 10.10.10.10:31515 </dev/null 2>/dev/null | openssl x509 -fingerprint -sha256 -noout | sed 's/://g' | cut -d= -f2 | tr '[:upper:]' '[:lower:]'
+
+# 查看 Kopia 服务器状态
+kopia-status:
+    @echo "=== Kopia Pods ==="
+    @kubectl get pods -n {{kopia_ns}}
+    @echo ""
+    @echo "=== Kopia PVCs ==="
+    @kubectl get pvc -n {{kopia_ns}}
+    @echo ""
+    @echo "=== Registered Users ==="
+    @just kopia-list-users
+
 # Vault UI info
 vault-ui:
     @echo "Vault UI is available at http://localhost:30820 (NodePort)"
