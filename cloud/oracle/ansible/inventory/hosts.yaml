@@ -1,0 +1,11 @@
+all:
+  children:
+    oracle_cluster:
+      children:
+        oracle_masters:
+          hosts:
+            oracle-k3s:
+              ansible_host: 152.69.195.151
+          vars:
+            ansible_user: ubuntu
+            ansible_ssh_private_key_file: ~/.ssh/vgio

@@ -1,0 +1,14 @@
+# 安装 K3s 单节点集群
+setup-k3s:
+    ansible-playbook playbooks/setup-k3s.yaml
+
+# 获取 kubeconfig 并合并到本地 ~/.kube/config
+fetch-kubeconfig:
+    ansible-playbook playbooks/fetch-kubeconfig.yaml
+
+# 从本地 kubeconfig 移除 oracle-k3s 配置
+remove-kubeconfig:
+    kubectl config delete-cluster oracle-k3s || true
+    kubectl config delete-user oracle-k3s-admin || true
+    kubectl config delete-context oracle-k3s || true
+    @echo "Removed oracle-k3s configuration from ~/.kube/config"

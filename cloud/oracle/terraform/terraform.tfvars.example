@@ -1,0 +1,33 @@
+# Copy this file to terraform.tfvars and fill in your values.
+# terraform.tfvars is gitignored — never commit it (public repo).
+
+# --- OCI API Credentials ---
+# Generate at: OCI Console > Profile (top-right) > API Keys > Add API Key
+tenancy_ocid     = "ocid1.tenancy.oc1..aaaaaaaaxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+user_ocid        = "ocid1.user.oc1..aaaaaaaaxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+fingerprint      = "xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx"
+private_key_path = "~/.oci/oci_api_key.pem"
+region           = "ap-osaka-1"  # Change to your actual region
+
+# --- Compartment & AZ ---
+# compartment_ocid: OCI Console > Identity > Compartments
+# For root compartment, use the same value as tenancy_ocid
+compartment_ocid    = "ocid1.tenancy.oc1..aaaaaaaaxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+# availability_domain: OCI Console > Compute > Instances > Instance details
+availability_domain = "lFTz:AP-OSAKA-1-AD-1"
+
+# --- Network (adjust to match your existing VCN CIDRs) ---
+vcn_cidr    = "10.0.0.0/16"
+subnet_cidr = "10.0.1.0/24"
+
+# --- Instance ---
+# instance_image_ocid: OCI Console > Compute > Images > Platform Images
+#   Filter: Publisher=Canonical, OS=Ubuntu, Version=24.04, Shape=VM.Standard.A1.Flex
+instance_image_ocid = "ocid1.image.oc1.ap-osaka-1.aaaaaaaaxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+ocpus               = 4
+memory_gb           = 24
+boot_volume_size_gb = 200
+
+# --- SSH Access ---
+# Paste the contents of your public key (e.g., cat ~/.ssh/vgio.pub)
+ssh_public_key = "ssh-ed25519 AAAA... user@host"
