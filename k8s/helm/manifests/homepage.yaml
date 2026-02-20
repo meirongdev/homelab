@@ -80,6 +80,11 @@ data:
 
   services.yaml: |
     - 个人服务:
+        - Blog:
+            icon: https://meirong.dev/favicon.ico
+            href: https://meirong.dev
+            description: 个人博客
+
         - Calibre-Web:
             icon: calibre-web.png
             href: https://book.meirong.dev
