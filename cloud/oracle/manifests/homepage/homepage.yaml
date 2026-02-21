@@ -111,15 +111,6 @@ data:
               namespace: rss-system
               container: miniflux
               label_selector: app=miniflux
-
-        - RSSHub:
-            icon: rsshub.png
-            description: RSS 订阅源生成 (内部服务，供 Miniflux 使用)
-            kubernetes:
-              namespace: rss-system
-              container: rsshub
-              label_selector: app=rsshub
-
         - n8n:
             icon: n8n.png
             href: https://n8n.meirong.dev
