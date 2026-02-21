@@ -64,6 +64,28 @@
         state: restarted
       when: tailscale_force_reregister | default(false) | bool
 
+    - name: Add tailscale0 interface to trusted firewalld zone
+      ansible.posix.firewalld:
+        zone: trusted
+        interface: tailscale0
+        permanent: true
+        state: enabled
+
+    - name: Allow homelab pod CIDR in trusted zone (enables cross-cluster forwarding)
+      ansible.posix.firewalld:
+        zone: trusted
+        source: "{{ item }}"
+        permanent: true
+        state: enabled
+      loop:
+        - 10.42.0.0/16
+        - 10.43.0.0/16
+
+    - name: Reload firewalld
+      ansible.builtin.service:
+        name: firewalld
+        state: reloaded
+
     - name: Join tailnet with subnet routes
       ansible.builtin.command: >
         tailscale up
