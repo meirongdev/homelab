@@ -6,6 +6,9 @@
 - [x] Ansible playbooks for K3s installation
 - [x] Helm-based application deployment
 - [x] Observability stack (Prometheus, Grafana, Loki, Tempo)
+- [x] OTel Collector DaemonSet — 替换 Promtail，OTLP HTTP → Loki 3.x
+- [x] Grafana Loki Dashboards — Overview / Pod Browser / Errors / Cluster Search（GitOps via ArgoCD）
+- [x] log-exporter sidecar pattern — 支持文件日志应用（Calibre-Web 已实施）
 
 ## Phase 2: Security & GitOps ✅
 
@@ -38,4 +41,4 @@
 - [x] CI/CD — ArgoCD Image Updater for automated image deployments
 - [ ] Service mesh (Istio or Linkerd)
 - [ ] Monitoring alerts and notifications (Alertmanager)
-- [ ] Custom Grafana dashboards
+- [x] Custom Grafana dashboards (Loki / Logs — 4 dashboards)
