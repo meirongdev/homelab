@@ -122,6 +122,15 @@ data:
               label_selector: app=squoosh
 
     - 监控:
+        - Uptime Kuma:
+            icon: uptime-kuma.png
+            href: https://status.meirong.dev
+            description: 服务可用性监控
+            kubernetes:
+              namespace: personal-services
+              container: uptime-kuma
+              label_selector: app=uptime-kuma
+
         - Grafana:
             icon: grafana.png
             href: https://grafana.meirong.dev
