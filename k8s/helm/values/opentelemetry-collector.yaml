@@ -1,0 +1,56 @@
+# OTel Collector — DaemonSet 模式，替换 Promtail
+# Chart: open-telemetry/opentelemetry-collector
+# Image: otel/opentelemetry-collector-contrib (含 filelog, k8sattributes, loki exporter)
+
+mode: daemonset
+
+image:
+  repository: otel/opentelemetry-collector-contrib
+
+# Presets 处理：挂载 /var/log/pods、filelog receiver、k8sattributes processor 所需 RBAC 和环境变量
+presets:
+  logsCollection:
+    enabled: true
+    includeCollectorLogs: false   # 不采集 collector 自身日志，避免循环
+  kubernetesAttributes:
+    enabled: true
+    extractAllPodLabels: false    # 只提取 app label，避免高基数
+    extractAllPodAnnotations: false
+
+# 仅覆盖 pipeline 和 exporter 配置
+# presets 已自动注入 filelog receiver 和 k8sattributes processor
+config:
+  processors:
+    # 将 OTel resource attributes 映射为 Loki labels（控制基数）
+    resource:
+      attributes:
+        - action: insert
+          key: loki.resource.labels
+          value: k8s.namespace.name, k8s.pod.name, k8s.container.name, k8s.deployment.name, app
+
+    batch:
+      send_batch_size: 10000
+      timeout: 5s
+
+  exporters:
+    loki:
+      endpoint: http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push
+
+  service:
+    pipelines:
+      logs:
+        receivers: [filelog]
+        processors: [k8sattributes, resource, batch]
+        exporters: [loki]
+
+# 资源限制（单节点 homelab）
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+# 部署到 monitoring namespace（与 Loki 同 namespace，避免跨 namespace 网络问题）
+namespaceOverride: monitoring
