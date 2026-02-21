@@ -64,3 +64,6 @@ cloudflare_credential.md
 credentials.pkr.hcl
 variables.json
 variables.auto.pkrvars.hcl
+
+# Git worktrees
+.worktrees/
