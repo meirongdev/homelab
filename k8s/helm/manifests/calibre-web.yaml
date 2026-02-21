@@ -97,7 +97,7 @@ spec:
               mountPath: /books
         - name: log-exporter
           image: busybox
-          command: ["sh", "-c", "tail -F /config/logs/calibre-web.log 2>/dev/null"]
+          command: ["sh", "-c", "tail -F /config/calibre-web.log 2>/dev/null"]
           resources:
             requests:
               cpu: 1m
