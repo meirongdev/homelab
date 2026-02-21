@@ -5,7 +5,7 @@ resource "tailscale_acl" "main" {
       "tag:oracle"  = []
     }
     acls = [
-      { action = "accept", src = ["tag:homelab", "tag:oracle"], dst = ["*:*"] }
+      { action = "accept", src = ["autogroup:member", "tag:homelab", "tag:oracle"], dst = ["*:*"] }
     ]
     autoApprovers = {
       routes = {
