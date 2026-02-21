@@ -64,8 +64,102 @@ Bring the existing Oracle Cloud ARM VM under Terraform management and transform 
 
 ### Phase 3 — GitOps Integration
 
-- **ArgoCD:** Register oracle cluster as a destination in the existing homelab ArgoCD.
-- **Cloudflare:** Add `oracle.meirong.dev` subdomain to `cloudflare/terraform/terraform.tfvars` and run `just apply`.
+#### 3a. Register Oracle Cluster in Homelab ArgoCD (Method: Manual Cluster Secret)
+
+**Step 1 — Create ArgoCD ServiceAccount on oracle cluster**
+
+```bash
+kubectl config use-context oracle-k3s
+
+kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: argocd-manager
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: argocd-manager
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: argocd-manager
+  namespace: kube-system
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: argocd-manager-token
+  namespace: kube-system
+  annotations:
+    kubernetes.io/service-account.name: argocd-manager
+type: kubernetes.io/service-account-token
+EOF
+```
+
+**Step 2 — Extract token and CA cert**
+
+```bash
+TOKEN=$(kubectl get secret argocd-manager-token -n kube-system \
+  -o jsonpath='{.data.token}' | base64 -d)
+
+CA_CERT=$(kubectl get secret argocd-manager-token -n kube-system \
+  -o jsonpath='{.data.ca\.crt}')
+```
+
+**Step 3 — Create cluster Secret on homelab ArgoCD**
+
+```bash
+kubectl config use-context k3s-homelab
+
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: oracle-k3s-cluster
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: cluster
+type: Opaque
+stringData:
+  name: oracle-k3s
+  server: https://152.69.195.151:6443
+  config: |
+    {
+      "bearerToken": "${TOKEN}",
+      "tlsClientConfig": {
+        "insecure": false,
+        "caData": "${CA_CERT}"
+      }
+    }
+EOF
+```
+
+**Step 4 — Update homelab AppProject to allow oracle cluster as destination**
+
+Add to `argocd/projects/homelab.yaml` destinations:
+```yaml
+- server: https://152.69.195.151:6443
+  namespace: "*"
+```
+
+Then apply: `kubectl apply -f argocd/projects/homelab.yaml`
+
+**Token 丢失恢复：**
+- 从 homelab 取回：`kubectl get secret oracle-k3s-cluster -n argocd -o jsonpath='{.data.config}' | base64 -d`
+- 或在 oracle 上重建 token Secret：删除 `argocd-manager-token` 再重建，更新 homelab cluster Secret
+
+#### 3b. Cloudflare DNS
+
+- Add `oracle.meirong.dev` to `cloudflare/terraform/terraform.tfvars`
+- Run `just apply` from `cloudflare/terraform/`
 
 ---
 
