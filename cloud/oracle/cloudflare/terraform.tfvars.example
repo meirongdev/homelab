@@ -3,5 +3,11 @@ cloudflare_account_id = "c49b6c6407adb48905eb6f932cd4e972"
 tunnel_id             = "bc630e77-867f-4716-a1d0-8721bf9880da"
 
 ingress_rules = {
-  "rss" = { service = "http://traefik.kube-system.svc:80" }
+  "rss"     = { service = "http://traefik.kube-system.svc:80" }
+  "n8n"     = { service = "http://traefik.kube-system.svc:80" }
+  "home"    = { service = "http://traefik.kube-system.svc:80" }
+  "status"  = { service = "http://traefik.kube-system.svc:80" }
+  "tool"    = { service = "http://traefik.kube-system.svc:80" }
+  "pdf"     = { service = "http://traefik.kube-system.svc:80" }
+  "squoosh" = { service = "http://traefik.kube-system.svc:80" }
 }
