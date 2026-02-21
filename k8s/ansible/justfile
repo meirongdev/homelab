@@ -35,3 +35,8 @@ setup-tailscale authkey:
     ansible-playbook playbooks/setup-tailscale.yaml \
       -e "tailscale_authkey={{ authkey }}" \
       --private-key ~/.ssh/vgio
+
+# Fix DNS fallback on K3s nodes (add 8.8.8.8/1.1.1.1 to systemd-resolved)
+# Run after network interruption if image pulls fail (CoreDNS can't resolve external names)
+fix-dns:
+    ansible-playbook playbooks/fix-dns-fallback.yaml

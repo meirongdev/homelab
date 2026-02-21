@@ -1,0 +1,35 @@
+---
+# Ensure systemd-resolved has 8.8.8.8/1.1.1.1 as fallback DNS
+# Prevents DNS failure when Tailscale MagicDNS is unavailable after network interruption
+# Run: just fix-dns  (or: ansible-playbook -i inventory playbooks/fix-dns-fallback.yaml)
+- name: Configure DNS fallback on K3s nodes
+  hosts: all
+  become: true
+  tasks:
+    - name: Create systemd-resolved drop-in directory
+      file:
+        path: /etc/systemd/resolved.conf.d
+        state: directory
+        mode: "0755"
+
+    - name: Write DNS fallback config
+      copy:
+        dest: /etc/systemd/resolved.conf.d/fallback.conf
+        content: |
+          [Resolve]
+          DNS=8.8.8.8 1.1.1.1
+          FallbackDNS=8.8.4.4
+        mode: "0644"
+      notify: restart systemd-resolved
+
+    - name: Ensure systemd-resolved is running
+      systemd:
+        name: systemd-resolved
+        state: started
+        enabled: true
+
+  handlers:
+    - name: restart systemd-resolved
+      systemd:
+        name: systemd-resolved
+        state: restarted

@@ -49,6 +49,41 @@
   hosts: k8s_masters
   become: true
   tasks:
+    - name: Create K3s config directory
+      ansible.builtin.file:
+        path: /etc/rancher/k3s
+        state: directory
+        mode: "0755"
+
+    - name: Write K3s config (TLS SANs for local + Tailscale access)
+      ansible.builtin.copy:
+        dest: /etc/rancher/k3s/config.yaml
+        content: |
+          tls-san:
+            - {{ ansible_host }}
+            - {{ hostvars[inventory_hostname]['tailscale_ip'] | default('') }}
+        mode: "0644"
+
+    - name: Configure DNS fallback (prevent CoreDNS failure after network interruption)
+      ansible.builtin.file:
+        path: /etc/systemd/resolved.conf.d
+        state: directory
+        mode: "0755"
+
+    - name: Write DNS fallback config
+      ansible.builtin.copy:
+        dest: /etc/systemd/resolved.conf.d/fallback.conf
+        content: |
+          [Resolve]
+          DNS=8.8.8.8 1.1.1.1
+          FallbackDNS=8.8.4.4
+        mode: "0644"
+
+    - name: Restart systemd-resolved
+      ansible.builtin.systemd:
+        name: systemd-resolved
+        state: restarted
+
     - name: Check if K3s is already installed
       ansible.builtin.stat:
         path: /usr/local/bin/k3s
