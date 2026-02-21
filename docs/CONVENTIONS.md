@@ -97,7 +97,7 @@ just apply   # Apply DNS/Tunnel changes
 - ArgoCD runs in the `argocd` namespace, UI at `argocd.meirong.dev`
 - **Sync poll interval**: 3 minutes (auto-syncs after every `git push`)
 - **Managed by ArgoCD** (auto-sync + selfHeal):
-  - `personal-services` App → `manifests/{calibre-web,stirling-pdf,squoosh,homepage}.yaml`
+  - `personal-services` App → `manifests/{calibre-web,stirling-pdf,squoosh,homepage,uptime-kuma}.yaml`
   - `it-tools` App → `manifests/it-tools/` (Kustomize; managed separately to support Image Updater write-back)
   - `argocd-image-updater` App → Helm chart `argo/argocd-image-updater` v1.1.0, values from `values/argocd-image-updater.yaml`
   - `gateway` App → `manifests/{gateway.yaml,traefik-config.yaml}`
@@ -137,6 +137,7 @@ just apply   # Apply DNS/Tunnel changes
 | HashiCorp Vault | `vault` | `vault.meirong.dev` |
 | ArgoCD | `argocd` | `argocd.meirong.dev` |
 | Kopia Backup | `kopia` | `https://10.10.10.10:31515` (NodePort, LAN only) |
+| Uptime Kuma | `personal-services` | `status.meirong.dev` |
 | PostgreSQL | `database` | Internal only |
 
 ## Conventions
@@ -151,7 +152,16 @@ just apply   # Apply DNS/Tunnel changes
   4. Add subdomain to `cloudflare/terraform/terraform.tfvars`
   5. `git push` → ArgoCD auto-deploys within 3 minutes
   6. `cd cloudflare/terraform && just apply` for DNS
+  7. Add the new URL to the Uptime Kuma provisioner (see below)
   - **Exception**: services needing ArgoCD Image Updater (e.g. `it-tools`) get their own Kustomize Application (`manifests/<service>/`) and `argocd/applications/<service>.yaml` instead of joining `personal-services`
+- **Uptime Kuma monitors**: All monitors are defined as code in `manifests/uptime-kuma.yaml` under the `MONITORS` list in the `uptime-kuma-provisioner` ConfigMap. To add a monitor for a new service:
+  1. Append an entry to `MONITORS` in the ConfigMap:
+     ```python
+     {"name": "My Service", "url": "https://<subdomain>.meirong.dev"},
+     ```
+  2. `git push` → ArgoCD PostSync hook re-runs the provisioner Job automatically
+  3. The script is idempotent: existing monitors are skipped, only new ones are created
+  - Admin credentials live in Vault at `secret/homelab/uptime-kuma` (keys: `admin_username`, `admin_password`), synced via ESO ExternalSecret `uptime-kuma-admin` in `personal-services` namespace
 - **Homepage config updates**: ArgoCD auto-syncs the ConfigMap on `git push`, but `subPath` volume mounts require a pod restart to reload — run `just update-homepage` (does `apply` + `rollout restart` in one step). Do NOT use `kubectl delete configmap` as ArgoCD will conflict.
 - **HTTPRoute template**: Always include explicit `group`/`kind` in `parentRefs` and `group`/`kind`/`weight` in `backendRefs` to prevent ArgoCD OutOfSync drift caused by Gateway controller defaults.
 - **ArgoCD Image Updater** (v1.1.0): Uses CRD model — create an `ImageUpdater` CR (not just annotations). Set `useAnnotations: true` in the CR to read image config from Application annotations. Use strategy `newest-build` (not `latest`, deprecated). After changing Application annotations in Git, re-run `kubectl apply -f argocd/applications/<app>.yaml` — ArgoCD does not manage Application objects themselves.
