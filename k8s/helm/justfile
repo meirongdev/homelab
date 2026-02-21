@@ -8,6 +8,7 @@ add-repos:
     helm repo add bitnami https://charts.bitnami.com/bitnami
     helm repo add hashicorp https://helm.releases.hashicorp.com
     helm repo add external-secrets https://charts.external-secrets.io
+    helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
     helm repo update
 
 create-namespace:
@@ -52,6 +53,18 @@ deploy-tempo:
         --values values/tempo.yaml \
         --wait \
         --timeout 10m
+
+# 部署 OpenTelemetry Collector (DaemonSet 模式，替换 Promtail)
+deploy-otel-collector: add-repos
+	helm upgrade --install opentelemetry-collector open-telemetry/opentelemetry-collector \
+	    --namespace {{namespace}} \
+	    --values values/opentelemetry-collector.yaml \
+	    --wait \
+	    --timeout 5m
+
+# 删除 OTel Collector
+remove-otel-collector:
+	helm uninstall opentelemetry-collector -n {{namespace}} || true
 
 # ⬇️ 个人服务相关命令 ⬇️
 personal_ns := "personal-services"
