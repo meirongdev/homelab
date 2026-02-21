@@ -7,7 +7,7 @@ metadata:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: calibre-web-config
+  name: calibre-web-automated-config
   namespace: personal-services
   annotations:
     argocd.argoproj.io/sync-options: Prune=false
@@ -71,7 +71,7 @@ spec:
     spec:
       containers:
         - name: calibre-web
-          image: lscr.io/linuxserver/calibre-web:latest
+          image: crocodilestick/calibre-web-automated:latest
           ports:
             - containerPort: 8083
               name: http
@@ -82,8 +82,12 @@ spec:
               value: "1000"
             - name: TZ
               value: "Asia/Shanghai"
-            - name: DOCKER_MODS
-              value: "linuxserver/mods:universal-calibre"
+            - name: NETWORK_SHARE_MODE
+              value: "true"
+            - name: TRUSTED_PROXY_COUNT
+              value: "1"
+            - name: CWA_WATCH_MODE
+              value: "poll"
           resources:
             requests:
               cpu: 100m
@@ -94,7 +98,10 @@ spec:
             - name: config
               mountPath: /config
             - name: books
-              mountPath: /books
+              mountPath: /calibre-library
+            - name: books
+              mountPath: /cwa-book-ingest
+              subPath: ingest
         - name: log-exporter
           image: busybox
           command: ["sh", "-c", "tail -F /config/calibre-web.log 2>/dev/null"]
@@ -111,7 +118,7 @@ spec:
       volumes:
         - name: config
           persistentVolumeClaim:
-            claimName: calibre-web-config
+            claimName: calibre-web-automated-config
         - name: books
           persistentVolumeClaim:
             claimName: calibre-books
