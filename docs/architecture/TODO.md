@@ -28,7 +28,7 @@
 - [ ] **Cert-Manager**: Automatic certificate management (cert-manager + Vault PKI or Cloudflare DNS)
 - [ ] **Vault Dynamic Secrets**: Dynamic database credentials for PostgreSQL
 - [ ] **Secret Rotation**: Automate rotation for sensitive keys (Cloudflare, etc.)
-- [ ] **VPC Peering/VPN**: Securely connect On-prem K3s with Oracle OCI K3s (Tailscale/Wireguard)
+- [ ] **VPC Peering/VPN**: Securely connect On-prem K3s with Oracle OCI K3s (Tailscale/Wireguard) — IaC complete, pending node installation (see `docs/architecture/tailscale-network.md`)
 
 ## Phase 4: Reliability & Maintenance 📋 (Planned)
 
@@ -56,7 +56,7 @@
 
 ### 🔴 High Difficulty (Complex Systems)
 - [ ] **Vault Dynamic Postgres**: Implement Vault's Database secret engine for dynamic SQL users.
-- [ ] **Hybrid Cloud Networking**: Establish a secure tunnel (e.g., Tailscale Subnet Router) between local and OCI networks.
+- [ ] **Hybrid Cloud Networking**: Establish a secure tunnel (e.g., Tailscale Subnet Router) between local and OCI networks. — IaC complete (`tailscale/terraform/`), pending node daemon installation
 - [ ] **Multi-Cluster ArgoCD**: Add Oracle Cluster as a managed destination in local ArgoCD.
 
 ## Phase 5: Production Readiness 🎯 (Future)

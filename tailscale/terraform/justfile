@@ -1,0 +1,22 @@
+set dotenv-load := true
+
+init:
+    terraform init
+
+plan:
+    terraform plan \
+        -var="tailscale_oauth_client_id=$TAILSCALE_OAUTH_CLIENT_ID" \
+        -var="tailscale_oauth_client_secret=$TAILSCALE_OAUTH_CLIENT_SECRET"
+
+apply:
+    terraform apply -auto-approve \
+        -var="tailscale_oauth_client_id=$TAILSCALE_OAUTH_CLIENT_ID" \
+        -var="tailscale_oauth_client_secret=$TAILSCALE_OAUTH_CLIENT_SECRET"
+
+# 获取 homelab 节点的 pre-auth key（用于 Ansible setup-tailscale）
+homelab-authkey:
+    terraform output -raw homelab_authkey
+
+# 获取 Oracle 节点的 pre-auth key（用于 Ansible setup-tailscale）
+oracle-authkey:
+    terraform output -raw oracle_authkey

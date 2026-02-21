@@ -54,13 +54,13 @@
     - name: Allow K3s pod CIDR (flannel overlay) in FORWARD
       ansible.builtin.iptables:
         chain: FORWARD
-        source: 10.42.0.0/16
+        source: 10.52.0.0/16
         jump: ACCEPT
 
     - name: Allow K3s service CIDR in FORWARD
       ansible.builtin.iptables:
         chain: FORWARD
-        destination: 10.43.0.0/16
+        destination: 10.53.0.0/16
         jump: ACCEPT
 
     - name: Persist iptables rules across reboots
@@ -90,6 +90,8 @@
           node-name: oracle-k3s
           tls-san:
             - {{ ansible_host }}
+          cluster-cidr: "10.52.0.0/16"
+          service-cidr: "10.53.0.0/16"
 
 - name: Install K3s single node
   hosts: oracle_masters
