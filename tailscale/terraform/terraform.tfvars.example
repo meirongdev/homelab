@@ -1,0 +1,4 @@
+# Copy to terraform.tfvars (gitignored) and fill in your values.
+# Alternatively, set environment variables and use justfile targets.
+tailscale_oauth_client_id     = "your-oauth-client-id"
+tailscale_oauth_client_secret = "your-oauth-client-secret"

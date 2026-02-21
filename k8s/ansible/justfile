@@ -28,3 +28,10 @@ config-ssh-key:
 # Install Prometheus Node Exporter on all nodes
 install-node-exporter:
     ansible-playbook playbooks/install-node-exporter.yaml
+
+# Install Tailscale daemon and join tailnet as subnet router (advertises 10.42/10.43)
+# Usage: just setup-tailscale <authkey>
+setup-tailscale authkey:
+    ansible-playbook playbooks/setup-tailscale.yaml \
+      -e "tailscale_authkey={{ authkey }}" \
+      --private-key ~/.ssh/vgio
