@@ -56,15 +56,15 @@ deploy-tempo:
 
 # 部署 OpenTelemetry Collector (DaemonSet 模式，替换 Promtail)
 deploy-otel-collector: add-repos
-	helm upgrade --install opentelemetry-collector open-telemetry/opentelemetry-collector \
-	    --namespace {{namespace}} \
-	    --values values/opentelemetry-collector.yaml \
-	    --wait \
-	    --timeout 5m
+    helm upgrade --install opentelemetry-collector open-telemetry/opentelemetry-collector \
+        --namespace {{namespace}} \
+        --values values/opentelemetry-collector.yaml \
+        --wait \
+        --timeout 5m
 
 # 删除 OTel Collector
 remove-otel-collector:
-	helm uninstall opentelemetry-collector -n {{namespace}} || true
+    helm uninstall opentelemetry-collector -n {{namespace}} || true
 
 # ⬇️ 个人服务相关命令 ⬇️
 personal_ns := "personal-services"
