@@ -1,3 +1,25 @@
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: stirling-pdf-auth
+  namespace: personal-services
+spec:
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: stirling-pdf-auth
+    creationPolicy: Owner
+  data:
+    - secretKey: username
+      remoteRef:
+        key: oracle-k3s/stirling-pdf
+        property: username
+    - secretKey: password
+      remoteRef:
+        key: oracle-k3s/stirling-pdf
+        property: password
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -7,7 +29,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: nfs-client
+  storageClassName: local-path
   resources:
     requests:
       storage: 1Gi
@@ -17,8 +39,6 @@ kind: Deployment
 metadata:
   name: stirling-pdf
   namespace: personal-services
-  labels:
-    app: stirling-pdf
 spec:
   replicas: 1
   selector:
@@ -34,12 +54,13 @@ spec:
           image: stirlingtools/stirling-pdf:latest
           ports:
             - containerPort: 8080
-              name: http
           env:
             - name: DOCKER_ENABLE_SECURITY
               value: "true"
             - name: SECURITY_ENABLE_LOGIN
               value: "true"
+            - name: INSTALL_BOOK_AND_ADVANCED_HTML_OPS
+              value: "false"
             - name: SECURITY_INITIALLOGIN_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -50,17 +71,16 @@ spec:
                 secretKeyRef:
                   name: stirling-pdf-auth
                   key: password
-            - name: INSTALL_BOOK_AND_ADVANCED_HTML_OPS
-              value: "false"
-          resources:
-            requests:
-              cpu: 100m
-              memory: 512Mi
-            limits:
-              memory: 1024Mi
           volumeMounts:
             - name: configs
               mountPath: /configs
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
       volumes:
         - name: configs
           persistentVolumeClaim:
@@ -72,10 +92,35 @@ metadata:
   name: stirling-pdf
   namespace: personal-services
 spec:
-  type: ClusterIP
   selector:
     app: stirling-pdf
   ports:
     - port: 8080
       targetPort: 8080
-      name: http
+---
+# HTTPRoute: pdf.meirong.dev -> stirling-pdf
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: stirling-pdf
+  namespace: personal-services
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: oracle-gateway
+      namespace: kube-system
+      port: 8000
+  hostnames:
+    - "pdf.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: stirling-pdf
+          port: 8080
+          weight: 1

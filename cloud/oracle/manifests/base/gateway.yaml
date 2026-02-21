@@ -140,33 +140,6 @@ spec:
           port: 3001
           weight: 1
 ---
-# HTTPRoute: rsshub.meirong.dev -> rsshub
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: rsshub
-  namespace: rss-system
-spec:
-  parentRefs:
-    - group: gateway.networking.k8s.io
-      kind: Gateway
-      name: oracle-gateway
-      namespace: kube-system
-      port: 8000
-  hostnames:
-    - "rsshub.meirong.dev"
-  rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /
-      backendRefs:
-        - group: ""
-          kind: Service
-          name: rsshub
-          port: 1200
-          weight: 1
----
 # HTTPRoute: n8n.meirong.dev -> n8n
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute

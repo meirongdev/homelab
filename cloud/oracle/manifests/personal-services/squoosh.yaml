@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: squoosh
+  namespace: personal-services
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: squoosh
+  template:
+    metadata:
+      labels:
+        app: squoosh
+    spec:
+      containers:
+        - name: squoosh
+          image: dko0/squoosh:1.12.0
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: squoosh
+  namespace: personal-services
+spec:
+  selector:
+    app: squoosh
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+# HTTPRoute: squoosh.meirong.dev -> squoosh
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: squoosh
+  namespace: personal-services
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: oracle-gateway
+      namespace: kube-system
+      port: 8000
+  hostnames:
+    - "squoosh.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: squoosh
+          port: 8080
+          weight: 1

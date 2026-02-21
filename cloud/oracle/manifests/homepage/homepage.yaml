@@ -114,8 +114,7 @@ data:
 
         - RSSHub:
             icon: rsshub.png
-            href: https://rsshub.meirong.dev
-            description: RSS 订阅源生成
+            description: RSS 订阅源生成 (内部服务，供 Miniflux 使用)
             kubernetes:
               namespace: rss-system
               container: rsshub

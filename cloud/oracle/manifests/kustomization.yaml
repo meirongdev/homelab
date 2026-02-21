@@ -24,3 +24,7 @@ resources:
   - monitoring/namespace.yaml
   - monitoring/otel-collector.yaml
   - monitoring/exporters.yaml
+  # Personal services (IT-Tools, Stirling-PDF, Squoosh)
+  - personal-services/it-tools.yaml
+  - personal-services/stirling-pdf.yaml
+  - personal-services/squoosh.yaml

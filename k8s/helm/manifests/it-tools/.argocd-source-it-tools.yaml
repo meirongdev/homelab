@@ -1,3 +1,0 @@
-kustomize:
-  images:
-  - ghcr.io/meirongdev/it-tools:sha-749c71f
