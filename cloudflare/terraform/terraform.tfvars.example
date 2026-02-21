@@ -10,4 +10,5 @@ ingress_rules = {
   "tool"    = { service = "http://traefik.kube-system.svc:80" }
   "pdf"     = { service = "http://traefik.kube-system.svc:80" }
   "squoosh" = { service = "http://traefik.kube-system.svc:80" }
+  "rss"     = { service = "http://traefik.kube-system.svc:80" }
 }

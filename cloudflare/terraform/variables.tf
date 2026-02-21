@@ -38,5 +38,8 @@ variable "ingress_rules" {
     "vault" = {
       service = "http://traefik.kube-system.svc:80"
     }
+    "rss" = {
+      service = "http://traefik.kube-system.svc:80"
+    }
   }
 }
