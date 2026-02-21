@@ -52,5 +52,5 @@ resources:
     cpu: 250m
     memory: 256Mi
 
-# 部署到 monitoring namespace（与 Loki 同 namespace，避免跨 namespace 网络问题）
+# chart 内部资源命名使用的 namespace（实际部署 namespace 由 justfile 的 --namespace 参数控制）
 namespaceOverride: monitoring
