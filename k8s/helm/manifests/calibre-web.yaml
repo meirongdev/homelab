@@ -95,6 +95,19 @@ spec:
               mountPath: /config
             - name: books
               mountPath: /books
+        - name: log-exporter
+          image: busybox
+          command: ["sh", "-c", "tail -F /config/logs/calibre-web.log 2>/dev/null"]
+          resources:
+            requests:
+              cpu: 1m
+              memory: 8Mi
+            limits:
+              memory: 16Mi
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
       volumes:
         - name: config
           persistentVolumeClaim:
