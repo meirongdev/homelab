@@ -1,0 +1,281 @@
+---
+# ServiceAccount for K8s API access (service discovery widgets)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: homepage
+  namespace: homepage
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: homepage
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "namespaces", "nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: homepage
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: homepage
+subjects:
+  - kind: ServiceAccount
+    name: homepage
+    namespace: homepage
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: homepage-config
+  namespace: homepage
+data:
+  settings.yaml: |
+    title: Matthew's Homelab
+    favicon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/kubernetes.png
+    theme: dark
+    color: slate
+    headerStyle: boxed
+    disableCollapse: true
+    hideVersion: true
+    useEqualHeights: true
+    layout:
+      个人服务:
+        style: row
+        columns: 3
+      RSS & 自动化:
+        style: row
+        columns: 3
+      监控:
+        style: row
+        columns: 3
+      基础设施:
+        style: row
+        columns: 3
+
+  bookmarks.yaml: |
+    - 开发工具:
+        - GitHub:
+            - abbr: GH
+              href: https://github.com
+        - Claude:
+            - abbr: AI
+              href: https://claude.ai
+
+  services.yaml: |
+    - 个人服务:
+        - Blog:
+            icon: https://meirong.dev/favicon.ico
+            href: https://meirong.dev
+            description: 个人博客
+
+        - Calibre-Web:
+            icon: calibre-web.png
+            href: https://book.meirong.dev
+            description: 电子书管理
+
+        - IT-Tools:
+            icon: it-tools.png
+            href: https://tool.meirong.dev
+            description: 开发者工具箱
+
+        - Stirling-PDF:
+            icon: stirling-pdf.png
+            href: https://pdf.meirong.dev
+            description: 开源 PDF 处理工具箱
+
+        - Squoosh:
+            icon: photopea.png
+            href: https://squoosh.meirong.dev
+            description: 图片压缩工具
+
+    - RSS & 自动化:
+        - Miniflux:
+            icon: miniflux.png
+            href: https://rss.meirong.dev
+            description: RSS 阅读器
+            kubernetes:
+              namespace: rss-system
+              container: miniflux
+              label_selector: app=miniflux
+
+        - RSSHub:
+            icon: rsshub.png
+            href: https://rsshub.meirong.dev
+            description: RSS 订阅源生成
+            kubernetes:
+              namespace: rss-system
+              container: rsshub
+              label_selector: app=rsshub
+
+        - n8n:
+            icon: n8n.png
+            href: https://n8n.meirong.dev
+            description: 工作流自动化
+            kubernetes:
+              namespace: rss-system
+              container: n8n
+              label_selector: app=n8n
+
+    - 监控:
+        - Uptime Kuma:
+            icon: uptime-kuma.png
+            href: https://status.meirong.dev
+            description: 服务可用性监控
+            kubernetes:
+              namespace: personal-services
+              container: uptime-kuma
+              label_selector: app=uptime-kuma
+
+        - Grafana:
+            icon: grafana.png
+            href: https://grafana.meirong.dev
+            description: 可视化监控面板
+
+        - Prometheus:
+            icon: prometheus.png
+            description: 指标采集 (Agent → Homelab)
+
+        - Loki:
+            icon: loki.png
+            description: 日志聚合 (→ Homelab)
+
+    - 基础设施:
+        - PostgreSQL:
+            icon: postgres.png
+            description: 关系型数据库 (Miniflux)
+            kubernetes:
+              namespace: rss-system
+              container: postgres
+              label_selector: app=miniflux
+
+        - HashiCorp Vault:
+            icon: vault.png
+            href: https://vault.meirong.dev
+            description: 凭证与密钥管理 (Homelab)
+
+        - ArgoCD:
+            icon: argo-cd.png
+            href: https://argocd.meirong.dev
+            description: GitOps 持续部署 (Homelab)
+
+        - Kopia:
+            icon: kopia.png
+            href: https://backup.meirong.dev
+            description: 备份服务器 (Homelab)
+
+  widgets.yaml: |
+    - datetime:
+        text_size: xl
+        format:
+          dateStyle: long
+          timeStyle: short
+          hourCycle: h23
+        locale: zh-CN
+
+    - search:
+        provider: google
+        target: _blank
+
+  kubernetes.yaml: |
+    mode: cluster
+
+  docker.yaml: ""
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: homepage
+  namespace: homepage
+  labels:
+    app: homepage
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: homepage
+  template:
+    metadata:
+      labels:
+        app: homepage
+    spec:
+      serviceAccountName: homepage
+      containers:
+        - name: homepage
+          image: ghcr.io/gethomepage/homepage:latest
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: TZ
+              value: "Asia/Shanghai"
+            - name: HOMEPAGE_ALLOWED_HOSTS
+              value: "localhost:8080,localhost:3000,127.0.0.1:8080,127.0.0.1:3000,home.meirong.dev"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: config
+              mountPath: /app/config/settings.yaml
+              subPath: settings.yaml
+            - name: config
+              mountPath: /app/config/bookmarks.yaml
+              subPath: bookmarks.yaml
+            - name: config
+              mountPath: /app/config/services.yaml
+              subPath: services.yaml
+            - name: config
+              mountPath: /app/config/widgets.yaml
+              subPath: widgets.yaml
+            - name: config
+              mountPath: /app/config/kubernetes.yaml
+              subPath: kubernetes.yaml
+            - name: config
+              mountPath: /app/config/docker.yaml
+              subPath: docker.yaml
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: config
+          configMap:
+            name: homepage-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: homepage
+  namespace: homepage
+spec:
+  type: ClusterIP
+  selector:
+    app: homepage
+  ports:
+    - port: 3000
+      targetPort: 3000
+      name: http

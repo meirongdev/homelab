@@ -1,0 +1,22 @@
+---
+# Vault token secret - must be created manually:
+# kubectl --context oracle-k3s create secret generic vault-token -n rss-system \
+#   --from-literal=token=<VAULT_TOKEN>
+---
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  name: vault-backend
+spec:
+  provider:
+    vault:
+      # Access Vault in k3s-homelab via Tailscale (NodePort 31144)
+      # k8s-node Tailscale IP: 100.107.254.112
+      server: "http://100.107.254.112:31144"
+      path: "secret"
+      version: "v2"
+      auth:
+        tokenSecretRef:
+          name: "vault-token"
+          namespace: "rss-system"
+          key: "token"

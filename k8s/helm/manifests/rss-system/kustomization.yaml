@@ -3,7 +3,10 @@ kind: Kustomization
 
 resources:
   - namespace.yaml
+  - vault-store.yaml
   - secrets.yaml
   - miniflux.yaml
   - rsshub.yaml
   - n8n.yaml
+  - gateway.yaml
+  - cloudflare-tunnel.yaml

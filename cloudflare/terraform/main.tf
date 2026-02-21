@@ -4,7 +4,7 @@ data "cloudflare_zone" "meirong" {
   }
 }
 
-# Cloudflare Tunnel Configuration
+# Cloudflare Tunnel Configuration (homelab)
 resource "cloudflare_zero_trust_tunnel_cloudflared_config" "homelab" {
   account_id = var.cloudflare_account_id
   tunnel_id  = var.tunnel_id
@@ -38,7 +38,7 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "homelab" {
   }
 }
 
-# DNS Records for subdomains
+# DNS Records for subdomains (homelab tunnel)
 resource "cloudflare_dns_record" "subdomains" {
   for_each = var.ingress_rules
 

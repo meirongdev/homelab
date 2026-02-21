@@ -22,6 +22,11 @@ presets:
 # presets 已自动注入 filelog receiver 和 k8sattributes processor
 config:
   processors:
+    resource:
+      attributes:
+        - key: cluster
+          value: homelab
+          action: upsert
     batch:
       send_batch_size: 10000
       timeout: 5s
@@ -38,7 +43,7 @@ config:
     pipelines:
       logs:
         receivers: [filelog]
-        processors: [k8sattributes, batch]
+        processors: [k8sattributes, resource, batch]
         exporters: [otlp_http]
 
 # 资源限制（单节点 homelab）

@@ -1,0 +1,148 @@
+---
+# Provisioner script — creates admin account + all monitors on first deploy
+# Run manually: just provision-uptime-kuma
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: uptime-kuma-provisioner
+  namespace: personal-services
+data:
+  provision.py: |
+    #!/usr/bin/env python3
+    import os, sys, time, urllib.request
+
+    UPTIME_KUMA_URL = os.environ.get("UPTIME_KUMA_URL", "http://uptime-kuma:3001")
+    USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
+    PASSWORD = os.environ["ADMIN_PASSWORD"]
+
+    MONITORS = [
+        {"name": "Homepage",       "url": "https://home.meirong.dev"},
+        {"name": "Miniflux",       "url": "https://rss.meirong.dev"},
+        {"name": "Calibre-Web",    "url": "https://book.meirong.dev"},
+        {"name": "Grafana",        "url": "https://grafana.meirong.dev"},
+        {"name": "HashiCorp Vault","url": "https://vault.meirong.dev"},
+        {"name": "IT-Tools",       "url": "https://tool.meirong.dev"},
+        {"name": "Stirling-PDF",   "url": "https://pdf.meirong.dev"},
+        {"name": "Squoosh",        "url": "https://squoosh.meirong.dev"},
+        {"name": "ArgoCD",         "url": "https://argocd.meirong.dev"},
+        {"name": "Kopia Backup",   "url": "https://backup.meirong.dev", "accepted_statuscodes": ["401"]},
+        {"name": "Uptime Kuma",    "url": "https://status.meirong.dev"},
+    ]
+
+    def wait_ready(timeout=120):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                urllib.request.urlopen(UPTIME_KUMA_URL, timeout=5)
+                print("Uptime Kuma is ready.")
+                return
+            except Exception:
+                print("Waiting for Uptime Kuma...")
+                time.sleep(5)
+        print("ERROR: Uptime Kuma not ready after timeout", file=sys.stderr)
+        sys.exit(1)
+
+    wait_ready()
+
+    from uptime_kuma_api import UptimeKumaApi, MonitorType
+    api = UptimeKumaApi(UPTIME_KUMA_URL)
+
+    try:
+        api.setup(username=USERNAME, password=PASSWORD)
+        print("Admin account created.")
+    except Exception as e:
+        print(f"Setup failed (likely already exists), logging in: {e}")
+        api.login(username=USERNAME, password=PASSWORD)
+        print("Logged in.")
+
+    STATUS_PAGE_SLUG   = "homelab"
+    STATUS_PAGE_TITLE  = "Homelab Status"
+    STATUS_PAGE_DOMAIN = "status.meirong.dev"
+
+    # --- Monitors ---
+    existing = {m["name"]: m for m in api.get_monitors()}
+    print(f"Existing monitors: {set(existing.keys()) or '(none)'}")
+
+    for m in MONITORS:
+        extra = {}
+        if "accepted_statuscodes" in m:
+            extra["accepted_statuscodes"] = m["accepted_statuscodes"]
+        if m["name"] in existing:
+            if extra:
+                api.edit_monitor(existing[m["name"]]["id"], **extra)
+                print(f"  updated {m['name']} (accepted_statuscodes={extra['accepted_statuscodes']})")
+            else:
+                print(f"  skip  {m['name']}")
+            continue
+        api.add_monitor(type=MonitorType.HTTP, name=m["name"], url=m["url"], interval=60, **extra)
+        print(f"  added {m['name']} -> {m['url']}")
+
+    # --- Public status page ---
+    monitor_entries  = [{"id": m["id"], "sendUrl": False} for m in api.get_monitors()]
+    existing_pages   = {p["slug"] for p in api.get_status_pages()}
+
+    if STATUS_PAGE_SLUG not in existing_pages:
+        api.add_status_page(slug=STATUS_PAGE_SLUG, title=STATUS_PAGE_TITLE)
+        print(f"Status page '{STATUS_PAGE_SLUG}' created.")
+
+    api.save_status_page(
+        slug=STATUS_PAGE_SLUG,
+        title=STATUS_PAGE_TITLE,
+        description="Real-time status of Homelab services",
+        theme="auto",
+        published=True,
+        showTags=False,
+        domainNameList=[STATUS_PAGE_DOMAIN],
+        customCSS="",
+        footerText="",
+        showPoweredBy=False,
+        publicGroupList=[{
+            "name": "Services",
+            "weight": 1,
+            "monitorList": monitor_entries,
+        }],
+    )
+    print(f"Status page updated: https://{STATUS_PAGE_DOMAIN}")
+
+    api.disconnect()
+    print("Provisioning complete.")
+---
+# Standalone Job (not ArgoCD hook — oracle-k3s has no ArgoCD)
+# Run manually: just provision-uptime-kuma
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: uptime-kuma-provisioner
+  namespace: personal-services
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: provisioner
+          image: python:3.12-slim
+          command: ["/bin/sh", "-c"]
+          args:
+            - pip install --quiet uptime-kuma-api==1.2.1 && python /scripts/provision.py
+          env:
+            - name: UPTIME_KUMA_URL
+              value: "http://uptime-kuma.personal-services.svc:3001"
+            - name: ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: uptime-kuma-admin
+                  key: username
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: uptime-kuma-admin
+                  key: password
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+      volumes:
+        - name: scripts
+          configMap:
+            name: uptime-kuma-provisioner

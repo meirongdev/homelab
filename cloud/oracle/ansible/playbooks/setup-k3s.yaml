@@ -44,6 +44,42 @@
         name: firewalld
         state: reloaded
 
+    # K3s flannel overlay needs pod/service CIDRs and interfaces trusted
+    # in firewalld, otherwise the nftables filter_FORWARD chain will reject
+    # pod egress traffic with "admin-prohibited".
+    - name: Trust K3s pod CIDR (10.52.0.0/16) in firewalld
+      ansible.posix.firewalld:
+        source: 10.52.0.0/16
+        zone: trusted
+        permanent: true
+        state: enabled
+
+    - name: Trust K3s service CIDR (10.53.0.0/16) in firewalld
+      ansible.posix.firewalld:
+        source: 10.53.0.0/16
+        zone: trusted
+        permanent: true
+        state: enabled
+
+    - name: Trust cni0 interface in firewalld
+      ansible.posix.firewalld:
+        interface: cni0
+        zone: trusted
+        permanent: true
+        state: enabled
+
+    - name: Trust flannel.1 interface in firewalld
+      ansible.posix.firewalld:
+        interface: flannel.1
+        zone: trusted
+        permanent: true
+        state: enabled
+
+    - name: Reload firewalld after adding trusted sources/interfaces
+      ansible.builtin.service:
+        name: firewalld
+        state: reloaded
+
     # K3s flannel overlay needs FORWARD chain open for pod/service CIDRs.
     # OCI instances use iptables-legacy alongside nftables; set FORWARD ACCEPT.
     - name: Set FORWARD policy to ACCEPT (required for pod-to-pod routing)

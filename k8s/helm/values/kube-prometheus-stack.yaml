@@ -46,6 +46,8 @@ grafana:
 prometheus:
   prometheusSpec:
     retention: 7d
+    externalLabels:
+      cluster: homelab
     
     # 持久化存储
     storageSpec:
@@ -76,6 +78,31 @@ prometheus:
               - 192.168.50.106:9100  # storage-node-1
               - 192.168.50.4:9100    # proxmox-node-1
               # - 10.10.10.10:9100   # k8s-node
+
+      # oracle-k3s cluster metrics via Tailscale
+      - job_name: 'oracle-k3s-node-exporter'
+        scrape_interval: 15s
+        static_configs:
+          - targets:
+              - 100.107.166.37:9100
+            labels:
+              cluster: oracle-k3s
+
+      - job_name: 'oracle-k3s-kube-state-metrics'
+        scrape_interval: 15s
+        static_configs:
+          - targets:
+              - 100.107.166.37:31082
+            labels:
+              cluster: oracle-k3s
+
+      - job_name: 'oracle-k3s-postgres-exporter'
+        scrape_interval: 30s
+        static_configs:
+          - targets:
+              - 100.107.166.37:31087
+            labels:
+              cluster: oracle-k3s
 
 alertmanager:
   enabled: true

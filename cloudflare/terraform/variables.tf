@@ -10,7 +10,7 @@ variable "cloudflare_account_id" {
 }
 
 variable "tunnel_id" {
-  description = "Existing Cloudflare Tunnel ID"
+  description = "Existing Cloudflare Tunnel ID (homelab)"
   type        = string
 }
 
@@ -21,7 +21,7 @@ variable "tunnel_name" {
 }
 
 variable "ingress_rules" {
-  description = "Map of subdomains to their internal services"
+  description = "Map of subdomains to their internal services (homelab tunnel)"
   type = map(object({
     service = string
   }))
@@ -36,9 +36,6 @@ variable "ingress_rules" {
       service = "http://traefik.kube-system.svc:80"
     }
     "vault" = {
-      service = "http://traefik.kube-system.svc:80"
-    }
-    "rss" = {
       service = "http://traefik.kube-system.svc:80"
     }
   }
