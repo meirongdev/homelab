@@ -1,6 +1,7 @@
 # OTel Collector — DaemonSet 模式，替换 Promtail
 # Chart: open-telemetry/opentelemetry-collector
-# Image: otel/opentelemetry-collector-contrib (含 filelog, k8sattributes, loki exporter)
+# Image: otel/opentelemetry-collector-contrib (含 filelog, k8sattributes processor)
+# Exporter: otlp_http 向 Loki OTLP 端点推送日志（loki exporter 在 contrib 0.145+ 已移除）
 
 mode: daemonset
 
@@ -21,27 +22,24 @@ presets:
 # presets 已自动注入 filelog receiver 和 k8sattributes processor
 config:
   processors:
-    # 将 OTel resource attributes 映射为 Loki labels（控制基数）
-    resource:
-      attributes:
-        - action: insert
-          key: loki.resource.labels
-          value: k8s.namespace.name, k8s.pod.name, k8s.container.name, k8s.deployment.name, app
-
     batch:
       send_batch_size: 10000
       timeout: 5s
 
   exporters:
-    loki:
-      endpoint: http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push
+    # 使用 otlp_http exporter 向 Loki OTLP 端点推送日志
+    # Loki 从 v2.9+ 支持 OTLP HTTP 协议，端点为 /otlp
+    otlp_http:
+      endpoint: http://loki-gateway.monitoring.svc.cluster.local/otlp
+      tls:
+        insecure: true
 
   service:
     pipelines:
       logs:
         receivers: [filelog]
-        processors: [k8sattributes, resource, batch]
-        exporters: [loki]
+        processors: [k8sattributes, batch]
+        exporters: [otlp_http]
 
 # 资源限制（单节点 homelab）
 resources:
