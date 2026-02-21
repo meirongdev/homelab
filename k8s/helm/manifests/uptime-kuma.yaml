@@ -130,6 +130,11 @@ data:
         api.login(username=USERNAME, password=PASSWORD)
         print("Logged in.")
 
+    STATUS_PAGE_SLUG   = "homelab"
+    STATUS_PAGE_TITLE  = "Homelab Status"
+    STATUS_PAGE_DOMAIN = "status.meirong.dev"
+
+    # --- Monitors ---
     existing = {m["name"] for m in api.get_monitors()}
     print(f"Existing monitors: {existing or '(none)'}")
 
@@ -139,6 +144,33 @@ data:
             continue
         api.add_monitor(type=MonitorType.HTTP, name=m["name"], url=m["url"], interval=60)
         print(f"  added {m['name']} -> {m['url']}")
+
+    # --- Public status page ---
+    monitor_entries  = [{"id": m["id"], "sendUrl": False} for m in api.get_monitors()]
+    existing_pages   = {p["slug"] for p in api.get_status_pages()}
+
+    if STATUS_PAGE_SLUG not in existing_pages:
+        api.add_status_page(slug=STATUS_PAGE_SLUG, title=STATUS_PAGE_TITLE)
+        print(f"Status page '{STATUS_PAGE_SLUG}' created.")
+
+    api.save_status_page(
+        slug=STATUS_PAGE_SLUG,
+        title=STATUS_PAGE_TITLE,
+        description="Real-time status of Homelab services",
+        theme="auto",
+        published=True,
+        showTags=False,
+        domainNameList=[STATUS_PAGE_DOMAIN],
+        customCSS="",
+        footerText="",
+        showPoweredBy=False,
+        publicGroupList=[{
+            "name": "Services",
+            "weight": 1,
+            "monitorList": monitor_entries,
+        }],
+    )
+    print(f"Status page updated: https://{STATUS_PAGE_DOMAIN}")
 
     api.disconnect()
     print("Provisioning complete.")
