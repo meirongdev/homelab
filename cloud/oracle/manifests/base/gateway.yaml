@@ -1,0 +1,195 @@
+# Gateway for oracle-k3s services
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: oracle-gateway
+  namespace: kube-system
+spec:
+  gatewayClassName: traefik
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 8000
+      allowedRoutes:
+        namespaces:
+          from: All
+---
+# ReferenceGrant: allow HTTPRoute in rss-system to reference services
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-gateway-to-rss
+  namespace: rss-system
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: rss-system
+  to:
+    - group: ""
+      kind: Service
+---
+# ReferenceGrant: allow HTTPRoute in homepage to reference services
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-gateway-to-homepage
+  namespace: homepage
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: homepage
+  to:
+    - group: ""
+      kind: Service
+---
+# ReferenceGrant: allow HTTPRoute in personal-services to reference services
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-gateway-to-personal-services
+  namespace: personal-services
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: personal-services
+  to:
+    - group: ""
+      kind: Service
+---
+# HTTPRoute: rss.meirong.dev -> miniflux
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: miniflux
+  namespace: rss-system
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: oracle-gateway
+      namespace: kube-system
+      port: 8000
+  hostnames:
+    - "rss.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: miniflux
+          port: 8080
+          weight: 1
+---
+# HTTPRoute: home.meirong.dev -> homepage
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: homepage
+  namespace: homepage
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: oracle-gateway
+      namespace: kube-system
+      port: 8000
+  hostnames:
+    - "home.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: homepage
+          port: 3000
+          weight: 1
+---
+# HTTPRoute: status.meirong.dev -> uptime-kuma
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: uptime-kuma
+  namespace: personal-services
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: oracle-gateway
+      namespace: kube-system
+      port: 8000
+  hostnames:
+    - "status.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: uptime-kuma
+          port: 3001
+          weight: 1
+---
+# HTTPRoute: rsshub.meirong.dev -> rsshub
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: rsshub
+  namespace: rss-system
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: oracle-gateway
+      namespace: kube-system
+      port: 8000
+  hostnames:
+    - "rsshub.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: rsshub
+          port: 1200
+          weight: 1
+---
+# HTTPRoute: n8n.meirong.dev -> n8n
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: n8n
+  namespace: rss-system
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: oracle-gateway
+      namespace: kube-system
+      port: 8000
+  hostnames:
+    - "n8n.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: n8n
+          port: 5678
+          weight: 1

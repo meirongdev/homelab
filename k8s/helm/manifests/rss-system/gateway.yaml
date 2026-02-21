@@ -1,0 +1,69 @@
+# Traefik HelmChartConfig to enable Gateway API provider on oracle-k3s
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    providers:
+      kubernetesGateway:
+        enabled: true
+---
+# Gateway for oracle-k3s services
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: oracle-gateway
+  namespace: kube-system
+spec:
+  gatewayClassName: traefik
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 8000
+      allowedRoutes:
+        namespaces:
+          from: All
+---
+# ReferenceGrant: allow HTTPRoute in rss-system to reference services
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-gateway-to-rss
+  namespace: rss-system
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: rss-system
+  to:
+    - group: ""
+      kind: Service
+---
+# HTTPRoute: rss.meirong.dev -> miniflux
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: miniflux
+  namespace: rss-system
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: oracle-gateway
+      namespace: kube-system
+      port: 8000
+  hostnames:
+    - "rss.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: miniflux
+          port: 8080
+          weight: 1

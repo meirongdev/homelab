@@ -31,20 +31,6 @@ spec:
     - group: ""
       kind: Service
 ---
-apiVersion: gateway.networking.k8s.io/v1beta1
-kind: ReferenceGrant
-metadata:
-  name: allow-gateway-to-homepage
-  namespace: homepage
-spec:
-  from:
-    - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-      namespace: homepage
-  to:
-    - group: ""
-      kind: Service
----
 # HTTPRoute: book.meirong.dev -> calibre-web
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -99,33 +85,6 @@ spec:
           port: 80
           weight: 1
 ---
-# HTTPRoute: rss.meirong.dev -> miniflux
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: miniflux
-  namespace: rss-system
-spec:
-  parentRefs:
-    - group: gateway.networking.k8s.io
-      kind: Gateway
-      name: homelab-gateway
-      namespace: kube-system
-      port: 8000
-  hostnames:
-    - "rss.meirong.dev"
-  rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /
-      backendRefs:
-        - group: ""
-          kind: Service
-          name: miniflux
-          port: 8080
-          weight: 1
----
 # HTTPRoute: pdf.meirong.dev -> stirling-pdf
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -151,33 +110,6 @@ spec:
           kind: Service
           name: stirling-pdf
           port: 8080
-          weight: 1
----
-# HTTPRoute: home.meirong.dev -> homepage
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: homepage
-  namespace: homepage
-spec:
-  parentRefs:
-    - group: gateway.networking.k8s.io
-      kind: Gateway
-      name: homelab-gateway
-      namespace: kube-system
-      port: 8000
-  hostnames:
-    - "home.meirong.dev"
-  rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /
-      backendRefs:
-        - group: ""
-          kind: Service
-          name: homepage
-          port: 3000
           weight: 1
 ---
 apiVersion: gateway.networking.k8s.io/v1beta1
@@ -343,33 +275,6 @@ spec:
   to:
     - group: ""
       kind: Service
----
-# HTTPRoute: status.meirong.dev -> uptime-kuma
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: uptime-kuma
-  namespace: personal-services
-spec:
-  parentRefs:
-    - group: gateway.networking.k8s.io
-      kind: Gateway
-      name: homelab-gateway
-      namespace: kube-system
-      port: 8000
-  hostnames:
-    - "status.meirong.dev"
-  rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /
-      backendRefs:
-        - group: ""
-          kind: Service
-          name: uptime-kuma
-          port: 3001
-          weight: 1
 ---
 # HTTPRoute: backup.meirong.dev -> kopia
 apiVersion: gateway.networking.k8s.io/v1

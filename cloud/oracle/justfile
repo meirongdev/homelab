@@ -1,0 +1,176 @@
+# Oracle K3s Cluster Management
+# All commands target the oracle-k3s kubectl context
+
+set dotenv-load
+
+ctx := "oracle-k3s"
+vault_token := env_var_or_default("VAULT_TOKEN", "")
+
+# ─── Node Setup ────────────────────────────────────────────────
+
+# Provision K3s on the Oracle Cloud node
+setup-node:
+    cd ansible && just setup-k3s
+
+# Fetch kubeconfig and merge into local ~/.kube/config
+fetch-kubeconfig:
+    cd ansible && just fetch-kubeconfig
+
+# Install Tailscale on the node (requires authkey)
+setup-tailscale authkey:
+    cd ansible && just setup-tailscale {{authkey}}
+
+# ─── Cluster Bootstrap ─────────────────────────────────────────
+
+# Full cluster bootstrap (run after fresh K3s install)
+bootstrap: install-eso configure-traefik create-vault-token deploy-manifests deploy-cloudflare-tunnel
+    @echo "✅ Oracle K3s cluster fully bootstrapped"
+
+# Install External Secrets Operator via Helm
+install-eso:
+    helm repo add external-secrets https://charts.external-secrets.io || true
+    helm repo update
+    helm upgrade --install external-secrets external-secrets/external-secrets \
+        --namespace external-secrets \
+        --create-namespace \
+        --kube-context {{ctx}} \
+        --wait --timeout 5m
+
+# Enable Gateway API provider in Traefik
+configure-traefik:
+    @echo "Enabling Gateway API provider in Traefik..."
+    kubectl --context {{ctx}} apply -f - <<EOF
+    apiVersion: helm.cattle.io/v1
+    kind: HelmChartConfig
+    metadata:
+      name: traefik
+      namespace: kube-system
+    spec:
+      valuesContent: |-
+        providers:
+          kubernetesGateway:
+            enabled: true
+    EOF
+    @echo "⏳ Waiting for Traefik to restart..."
+    sleep 15
+    @kubectl --context {{ctx}} rollout status deployment traefik -n kube-system --timeout=60s
+
+# Create Vault token secret (needed by ClusterSecretStore)
+create-vault-token:
+    kubectl --context {{ctx}} create namespace rss-system --dry-run=client -o yaml | kubectl --context {{ctx}} apply -f -
+    kubectl --context {{ctx}} create secret generic vault-token \
+        -n rss-system \
+        --from-literal=token={{vault_token}} \
+        --dry-run=client -o yaml | kubectl --context {{ctx}} apply -f -
+
+# ─── Application Deployment ────────────────────────────────────
+
+# Deploy all K8s manifests (base infra + all apps)
+deploy-manifests:
+    kubectl --context {{ctx}} apply -k manifests/
+
+# Deploy only rss-system app manifests
+deploy-rss:
+    kubectl --context {{ctx}} apply -f manifests/rss-system/
+
+# Deploy only homepage manifests
+deploy-homepage:
+    kubectl --context {{ctx}} apply -f manifests/homepage/
+
+# Deploy only uptime-kuma manifests (without provisioner job)
+deploy-uptime-kuma:
+    kubectl --context {{ctx}} apply -f manifests/uptime-kuma/namespace.yaml
+    kubectl --context {{ctx}} apply -f manifests/uptime-kuma/uptime-kuma.yaml
+    kubectl --context {{ctx}} apply -f manifests/uptime-kuma/secrets.yaml
+
+# Run uptime-kuma provisioner job (creates admin + monitors)
+provision-uptime-kuma:
+    kubectl --context {{ctx}} delete job uptime-kuma-provisioner -n personal-services --ignore-not-found
+    kubectl --context {{ctx}} apply -f manifests/uptime-kuma/provisioner.yaml
+    @echo "⏳ Waiting for provisioner job to complete..."
+    kubectl --context {{ctx}} wait --for=condition=complete job/uptime-kuma-provisioner -n personal-services --timeout=120s
+    kubectl --context {{ctx}} logs job/uptime-kuma-provisioner -n personal-services
+
+# Deploy only observability manifests (OTel collector + exporters)
+deploy-monitoring:
+    kubectl --context {{ctx}} apply -f manifests/monitoring/
+
+# Restart rss-system deployments
+restart-rss:
+    kubectl --context {{ctx}} rollout restart deployment -n rss-system
+
+# Restart homepage (e.g. after ConfigMap update)
+restart-homepage:
+    kubectl --context {{ctx}} rollout restart deployment homepage -n homepage
+
+# ─── Cloudflare Tunnel ─────────────────────────────────────────
+
+# Deploy Cloudflare tunnel (DNS + K8s connector)
+deploy-cloudflare-tunnel: deploy-cloudflare-dns deploy-cloudflare-connector
+
+# Apply Cloudflare Terraform (DNS records + tunnel config)
+deploy-cloudflare-dns:
+    cd cloudflare && just apply
+
+# Deploy cloudflared connector in the cluster
+deploy-cloudflare-connector:
+    kubectl --context {{ctx}} apply -f manifests/base/cloudflare-tunnel.yaml
+
+# ─── Status & Debug ────────────────────────────────────────────
+
+# Show cluster status
+status:
+    @echo "=== Pods ==="
+    kubectl --context {{ctx}} get pods -A
+    @echo ""
+    @echo "=== Services ==="
+    kubectl --context {{ctx}} get svc -A
+    @echo ""
+    @echo "=== ExternalSecrets ==="
+    kubectl --context {{ctx}} get externalsecret -A
+    @echo ""
+    @echo "=== ClusterSecretStore ==="
+    kubectl --context {{ctx}} get clustersecretstore
+    @echo ""
+    @echo "=== HTTPRoutes ==="
+    kubectl --context {{ctx}} get httproute -A
+    @echo ""
+    @echo "=== Gateway ==="
+    kubectl --context {{ctx}} get gateway -A
+
+# Show rss-system status
+status-rss:
+    @echo "=== Pods ==="
+    kubectl --context {{ctx}} get pods -n rss-system -o wide
+    @echo ""
+    @echo "=== ExternalSecrets ==="
+    kubectl --context {{ctx}} get externalsecret -n rss-system
+    @echo ""
+    @echo "=== Services ==="
+    kubectl --context {{ctx}} get svc -n rss-system
+
+# Show monitoring status
+status-monitoring:
+    @echo "=== Monitoring Pods ==="
+    kubectl --context {{ctx}} get pods -n monitoring -o wide
+    @echo ""
+    @echo "=== OTel Collector Logs ==="
+    kubectl --context {{ctx}} logs -n monitoring -l app=otel-collector --tail=20
+
+# Show logs for a pod
+logs app ns="rss-system":
+    kubectl --context {{ctx}} logs -n {{ns}} deployment/{{app}} --tail=50
+
+# ─── Teardown ──────────────────────────────────────────────────
+
+# Delete all kustomize-managed resources
+teardown-apps:
+    kubectl --context {{ctx}} delete -k manifests/ --ignore-not-found
+
+# Destroy Cloudflare tunnel DNS records
+teardown-cloudflare-dns:
+    cd cloudflare && just destroy
+
+# Full teardown
+teardown: teardown-apps teardown-cloudflare-dns
+    @echo "✅ All oracle-k3s resources removed"

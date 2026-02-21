@@ -9,6 +9,12 @@ loki:
   
   limits_config:
     retention_period: 168h
+    otlp_config:
+      resource_attributes:
+        attributes_config:
+          - action: index_label
+            attributes:
+              - cluster
   
   schemaConfig:
     configs:

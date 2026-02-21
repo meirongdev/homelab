@@ -19,20 +19,54 @@ The system uses a layered, decoupled design, communicating via standard protocol
     *   **Discord Server**: Sends Rich Embed formatted messages via Webhooks.
 
 ## 3. Kubernetes Infrastructure Specification
-The system is deployed in the Oracle Cloud K3s cluster with the following specifications:
+
+### 3.1 Multi-Cluster Architecture
+The system leverages a **dual-cluster** topology for resilience and separation of concerns:
+
+| Cluster | Role | Location |
+|---------|------|----------|
+| `oracle-k3s` | **Workload cluster** — runs all rss-system pods | Oracle Cloud ARM VM (Ampere A1) |
+| `k3s-homelab` | **Shared services** — provides HashiCorp Vault | Local Proxmox |
+
+**Cross-cluster communication** is handled exclusively via **Tailscale** (WireGuard mesh VPN):
+*   `oracle-k3s` node Tailscale IP: `100.107.166.37`
+*   `k3s-homelab` node (k8s-node) Tailscale IP: `100.107.254.112`
+*   Vault is accessed from `oracle-k3s` pods via `http://100.107.254.112:31144` (NodePort)
+
+This ensures the rss-system remains operational even if the homelab has network issues (the only dependency is Vault token refresh, which is cached).
+
+### 3.2 Workload Specification
+The system is deployed in the `oracle-k3s` cluster:
 
 *   **Namespace**: `rss-system`
 *   **Workloads**:
-    *   `rsshub`: Deployment (Port 1200) + Service + Redis (Cache)
+    *   `rsshub`: Deployment (Port 1200) + Service + Redis (Cache) + Browserless (headless Chrome)
     *   `miniflux`: Deployment (Port 8080) + Service + PostgreSQL
     *   `n8n`: Deployment (Port 5678) + Service (Persistent volume at `/home/node/.n8n`)
 *   **Persistence**:
     *   `PersistentVolumeClaim` (PVC) using the `local-path` storage class for PostgreSQL and n8n.
 *   **Ingress**:
     *   Gateway API `HTTPRoute` routing `rss.meirong.dev` to the Miniflux service.
-    *   Cloudflare Tunnel configured to route `rss.meirong.dev` to the cluster's Traefik ingress.
-*   **Security**:
-    *   All sensitive tokens (Telegram Bot Token, Discord Webhook, DB Passwords) are managed via External Secrets Operator (ESO) fetching from HashiCorp Vault.
+    *   Independent Cloudflare Tunnel (`cloudflared`) for `oracle-k3s` to route `rss.meirong.dev`.
+*   **Secret Management**:
+    *   External Secrets Operator (ESO) installed in `oracle-k3s`.
+    *   `ClusterSecretStore` pointing to Vault in `k3s-homelab` via Tailscale.
+    *   Vault token stored as `vault-token` Secret in `rss-system` namespace.
+    *   All sensitive tokens (DB passwords, admin credentials) fetched from Vault path `secret/homelab/miniflux`.
+
+### 3.3 Oracle Cloud K3s Network Notes
+The Oracle Cloud VM uses `firewalld` (nftables-based) which requires explicit trust for k3s pod/service CIDRs. Without this, pod egress to external IPs is blocked by the default `reject with icmpx admin-prohibited` rule in the `filter_FORWARD` chain.
+
+**Required firewalld configuration:**
+```bash
+sudo firewall-cmd --permanent --zone=trusted --add-source=10.52.0.0/16  # Pod CIDR
+sudo firewall-cmd --permanent --zone=trusted --add-source=10.53.0.0/16  # Service CIDR
+sudo firewall-cmd --permanent --zone=trusted --add-interface=cni0        # CNI bridge
+sudo firewall-cmd --permanent --zone=trusted --add-interface=flannel.1   # Flannel VXLAN
+sudo firewall-cmd --reload
+```
+
+**CoreDNS** must be configured to forward to `8.8.8.8` instead of `/etc/resolv.conf`, because the default Oracle DNS (`169.254.169.254`) is a link-local metadata service unreachable from inside pods.
 
 ## 4. Automation Logic Specification (n8n)
 
@@ -85,26 +119,45 @@ After a successful push task, n8n must initiate a reverse callback to the Minifl
 
 ## 5. Execution Plan
 
-1.  **Infrastructure as Code (Terraform)**:
-    *   Update `cloudflare/terraform/variables.tf` to include `rss` in `ingress_rules`.
-2.  **Kubernetes Manifests (Helm/Kustomize)**:
-    *   Create `k8s/helm/manifests/rss-system/` directory.
-    *   Define `namespace.yaml`.
-    *   Define `miniflux.yaml` (Deployment, Service, PVC, Postgres).
-    *   Define `rsshub.yaml` (Deployment, Service, Redis).
-    *   Define `n8n.yaml` (Deployment, Service, PVC).
-    *   Define `secrets.yaml` (ExternalSecret definitions).
-3.  **Ingress Configuration**:
-    *   Add `HTTPRoute` for `rss.meirong.dev` in `k8s/helm/manifests/gateway.yaml`.
-4.  **GitOps Deployment**:
-    *   Create `argocd/applications/rss-system.yaml` to deploy the namespace.
-5.  **Vault Secrets**:
-    *   Inject the required database credentials and Miniflux admin credentials into HashiCorp Vault so that ExternalSecrets could sync them.
-    *   `vault kv put secret/homelab/miniflux db_password="supersecretpassword" database_url="postgres://miniflux:supersecretpassword@miniflux-db.rss-system.svc.cluster.local:5432/miniflux?sslmode=disable" admin_username="admin" admin_password="adminpassword"`
-6.  **n8n Workflow Setup**:
-    *   Import the workflow JSON (provided below) into the deployed n8n instance.
-    *   Configure Miniflux API credentials in n8n.
-    *   Configure Telegram/Discord credentials in n8n.
+### Phase 1: Oracle K3s Node Preparation
+1.  **Firewalld Configuration**: Add k3s pod/service CIDRs (`10.52.0.0/16`, `10.53.0.0/16`) and interfaces (`cni0`, `flannel.1`) to firewalld trusted zone.
+2.  **CoreDNS Fix**: Patch CoreDNS ConfigMap to forward to `8.8.8.8 8.8.4.4` instead of `/etc/resolv.conf`.
+
+### Phase 2: Secret Management
+1.  **Install ESO**: Deploy External Secrets Operator via Helm in `oracle-k3s`.
+2.  **Vault Token**: Create `vault-token` Secret in `rss-system` namespace.
+3.  **ClusterSecretStore**: Deploy `vault-store.yaml` pointing to Vault via Tailscale IP (`http://100.107.254.112:31144`).
+4.  **Vault Secrets**: Inject credentials into Vault:
+    ```bash
+    vault kv put secret/homelab/miniflux \
+      db_password="<password>" \
+      database_url="postgres://miniflux:<password>@miniflux-db.rss-system.svc.cluster.local:5432/miniflux?sslmode=disable" \
+      admin_username="admin" \
+      admin_password="<password>"
+    ```
+
+### Phase 3: Kubernetes Manifests
+1.  **Create manifests** in `k8s/helm/manifests/rss-system/`:
+    *   `namespace.yaml` — Namespace definition
+    *   `vault-store.yaml` — ClusterSecretStore for Vault via Tailscale
+    *   `secrets.yaml` — ExternalSecret definitions
+    *   `miniflux.yaml` — Miniflux + PostgreSQL (Deployment, Service, PVC)
+    *   `rsshub.yaml` — RSSHub + Redis + Browserless (Deployment, Service)
+    *   `n8n.yaml` — n8n automation engine (Deployment, Service, PVC)
+    *   `kustomization.yaml` — Kustomize entrypoint
+2.  **Apply**: `kubectl apply -k k8s/helm/manifests/rss-system/`
+
+### Phase 4: Ingress & Networking
+1.  **Cloudflare Tunnel**: Deploy an independent `cloudflared` tunnel in `oracle-k3s` (separate from the homelab tunnel).
+2.  **Terraform**: Update `cloudflare/terraform/` to configure `rss.meirong.dev` DNS pointing to the Oracle tunnel.
+3.  **Gateway API**: Add `HTTPRoute` for `rss.meirong.dev` → `miniflux:8080`.
+
+### Phase 5: Automation Setup
+1.  **n8n Workflow**: Import the workflow JSON into the deployed n8n instance.
+2.  **Credentials**: Configure Miniflux API, Telegram Bot, and Discord Webhook credentials in n8n.
+
+### Phase 6: GitOps (Optional)
+1.  **ArgoCD Application**: Create `argocd/applications/rss-system.yaml` for continuous deployment.
 
 ## 6. n8n Workflow JSON Definition
 *(Save this as a `.json` file and import into n8n)*

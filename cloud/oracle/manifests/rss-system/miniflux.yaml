@@ -1,0 +1,174 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: miniflux
+  namespace: rss-system
+  labels:
+    app: miniflux
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: miniflux
+  template:
+    metadata:
+      labels:
+        app: miniflux
+    spec:
+      containers:
+        - name: miniflux
+          image: miniflux/miniflux:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: miniflux-db-secret
+                  key: database-url
+            - name: RUN_MIGRATIONS
+              value: "1"
+            - name: CREATE_ADMIN
+              value: "1"
+            - name: ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: miniflux-admin-secret
+                  key: username
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: miniflux-admin-secret
+                  key: password
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: miniflux
+  namespace: rss-system
+spec:
+  type: ClusterIP
+  selector:
+    app: miniflux
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: miniflux-db
+  namespace: rss-system
+  labels:
+    app: miniflux-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: miniflux-db
+  template:
+    metadata:
+      labels:
+        app: miniflux-db
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15-alpine
+          env:
+            - name: POSTGRES_USER
+              value: miniflux
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: miniflux-db-secret
+                  key: password
+            - name: POSTGRES_DB
+              value: miniflux
+          ports:
+            - containerPort: 5432
+              name: postgres
+          volumeMounts:
+            - name: miniflux-db-data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+        - name: postgres-exporter
+          image: prometheuscommunity/postgres-exporter:v0.16.0
+          ports:
+            - containerPort: 9187
+              name: metrics
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: miniflux-db-secret
+                  key: password
+            - name: DATA_SOURCE_NAME
+              value: "postgresql://miniflux:$(POSTGRES_PASSWORD)@localhost:5432/miniflux?sslmode=disable"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+      volumes:
+        - name: miniflux-db-data
+          persistentVolumeClaim:
+            claimName: miniflux-db-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: miniflux-db
+  namespace: rss-system
+spec:
+  type: ClusterIP
+  selector:
+    app: miniflux-db
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres
+---
+# Separate service for postgres-exporter metrics endpoint
+# Exposed as NodePort so homelab Prometheus can scrape via Tailscale
+apiVersion: v1
+kind: Service
+metadata:
+  name: miniflux-db-metrics
+  namespace: rss-system
+  labels:
+    app: miniflux-db
+spec:
+  type: NodePort
+  selector:
+    app: miniflux-db
+  ports:
+    - port: 9187
+      targetPort: 9187
+      nodePort: 31087
+      name: metrics
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: miniflux-db-pvc
+  namespace: rss-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
