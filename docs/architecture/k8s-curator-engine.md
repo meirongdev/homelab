@@ -98,7 +98,10 @@ After a successful push task, n8n must initiate a reverse callback to the Minifl
     *   Add `HTTPRoute` for `rss.meirong.dev` in `k8s/helm/manifests/gateway.yaml`.
 4.  **GitOps Deployment**:
     *   Create `argocd/applications/rss-system.yaml` to deploy the namespace.
-5.  **n8n Workflow Setup**:
+5.  **Vault Secrets**:
+    *   Inject the required database credentials and Miniflux admin credentials into HashiCorp Vault so that ExternalSecrets could sync them.
+    *   `vault kv put secret/homelab/miniflux db_password="supersecretpassword" database_url="postgres://miniflux:supersecretpassword@miniflux-db.rss-system.svc.cluster.local:5432/miniflux?sslmode=disable" admin_username="admin" admin_password="adminpassword"`
+6.  **n8n Workflow Setup**:
     *   Import the workflow JSON (provided below) into the deployed n8n instance.
     *   Configure Miniflux API credentials in n8n.
     *   Configure Telegram/Discord credentials in n8n.
