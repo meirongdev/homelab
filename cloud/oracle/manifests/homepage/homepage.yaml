@@ -181,7 +181,7 @@ data:
         target: _blank
 
   kubernetes.yaml: |
-    mode: cluster
+    mode: default
 
   docker.yaml: ""
 ---

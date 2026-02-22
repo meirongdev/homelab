@@ -13,7 +13,7 @@ spec:
     targetRevision: main
     path: k8s/helm/manifests
     directory:
-      include: "{calibre-web.yaml,uptime-kuma.yaml}"
+      include: "{calibre-web.yaml}"
 
   destination:
     server: https://kubernetes.default.svc
