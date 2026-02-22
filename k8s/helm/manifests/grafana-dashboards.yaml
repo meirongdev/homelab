@@ -13,7 +13,7 @@ data:
   loki-logs-overview.json: |-
     {
       "annotations": {"list": []},
-      "description": "各 namespace 日志量趋势与 error 率统计",
+      "description": "各 namespace 日志量趋势与 error 率统计（支持多集群）",
       "editable": true,
       "graphTooltip": 1,
       "links": [],
@@ -30,13 +30,13 @@ data:
           "targets": [
             {
               "datasource": {"type": "loki", "uid": "${datasource}"},
-              "expr": "sum by (service_namespace) (count_over_time({service_namespace=~\".+\"}[$__interval]))",
-              "legendFormat": "{{service_namespace}}",
+              "expr": "sum by (cluster, service_namespace) (count_over_time({cluster=~\"${cluster}\", service_namespace=~\".+\"}[$__interval]))",
+              "legendFormat": "{{cluster}}/{{service_namespace}}",
               "queryType": "range",
               "refId": "A"
             }
           ],
-          "title": "日志量 by Namespace",
+          "title": "日志量 by Cluster / Namespace",
           "type": "timeseries"
         },
         {
@@ -51,13 +51,13 @@ data:
           "targets": [
             {
               "datasource": {"type": "loki", "uid": "${datasource}"},
-              "expr": "sum by (service_namespace) (count_over_time({service_namespace=~\".+\"} |~ \"(?i)(error|exception|fatal|panic)\" [$__interval]))",
-              "legendFormat": "{{service_namespace}}",
+              "expr": "sum by (cluster, service_namespace) (count_over_time({cluster=~\"${cluster}\", service_namespace=~\".+\"} |~ \"(?i)(error|exception|fatal|panic)\" [$__interval]))",
+              "legendFormat": "{{cluster}}/{{service_namespace}} errors",
               "queryType": "range",
               "refId": "A"
             }
           ],
-          "title": "Error 日志量 by Namespace",
+          "title": "Error 日志量 by Cluster / Namespace",
           "type": "timeseries"
         },
         {
@@ -78,7 +78,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "loki", "uid": "${datasource}"},
-              "expr": "{service_namespace=~\".+\"} |~ \"(?i)(error|exception|fatal|panic)\"",
+              "expr": "{cluster=~\"${cluster}\", service_namespace=~\".+\"} |~ \"(?i)(error|exception|fatal|panic)\"",
               "queryType": "range",
               "refId": "A"
             }
@@ -89,7 +89,7 @@ data:
       ],
       "refresh": "30s",
       "schemaVersion": 40,
-      "tags": ["kubernetes", "logs", "loki", "otel"],
+      "tags": ["kubernetes", "logs", "loki", "otel", "multi-cluster"],
       "templating": {
         "list": [
           {
@@ -102,6 +102,21 @@ data:
             "query": "loki",
             "refresh": 1,
             "type": "datasource"
+          },
+          {
+            "current": {},
+            "datasource": {"type": "loki", "uid": "${datasource}"},
+            "definition": "label_values(cluster)",
+            "hide": 0,
+            "includeAll": true,
+            "allValue": ".+",
+            "label": "Cluster",
+            "multi": true,
+            "name": "cluster",
+            "query": {"label": "cluster", "stream": "", "type": 1},
+            "refresh": 2,
+            "sort": 1,
+            "type": "query"
           }
         ]
       },
@@ -110,7 +125,7 @@ data:
       "timezone": "browser",
       "title": "Kubernetes / Logs / Overview",
       "uid": "k8s-logs-overview",
-      "version": 1
+      "version": 2
     }
 ---
 apiVersion: v1
@@ -124,7 +139,7 @@ data:
   loki-logs-pod-browser.json: |-
     {
       "annotations": {"list": []},
-      "description": "按 namespace / pod / container 过滤的日志浏览器",
+      "description": "按 cluster / namespace / pod / container 过滤的日志浏览器",
       "editable": true,
       "graphTooltip": 0,
       "links": [],
@@ -147,7 +162,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "loki", "uid": "${datasource}"},
-              "expr": "{service_namespace=~\"${namespace:pipe}\", k8s_pod_name=~\"${pod:pipe}\"} |~ \"${search}\"",
+              "expr": "{cluster=~\"${cluster}\", service_namespace=~\"${namespace:pipe}\", k8s_pod_name=~\"${pod:pipe}\"} |~ \"${search}\"",
               "queryType": "range",
               "refId": "A"
             }
@@ -158,7 +173,7 @@ data:
       ],
       "refresh": "30s",
       "schemaVersion": 40,
-      "tags": ["kubernetes", "logs", "loki", "otel"],
+      "tags": ["kubernetes", "logs", "loki", "otel", "multi-cluster"],
       "templating": {
         "list": [
           {
@@ -175,14 +190,14 @@ data:
           {
             "current": {},
             "datasource": {"type": "loki", "uid": "${datasource}"},
-            "definition": "label_values(service_namespace)",
+            "definition": "label_values(cluster)",
             "hide": 0,
             "includeAll": true,
             "allValue": ".+",
-            "label": "Namespace",
+            "label": "Cluster",
             "multi": true,
-            "name": "namespace",
-            "query": {"label": "service_namespace", "stream": "", "type": 1},
+            "name": "cluster",
+            "query": {"label": "cluster", "stream": "", "type": 1},
             "refresh": 2,
             "sort": 1,
             "type": "query"
@@ -190,14 +205,29 @@ data:
           {
             "current": {},
             "datasource": {"type": "loki", "uid": "${datasource}"},
-            "definition": "label_values({service_namespace=~\"${namespace:pipe}\"}, k8s_pod_name)",
+            "definition": "label_values({cluster=~\"${cluster}\"}, service_namespace)",
+            "hide": 0,
+            "includeAll": true,
+            "allValue": ".+",
+            "label": "Namespace",
+            "multi": true,
+            "name": "namespace",
+            "query": {"label": "service_namespace", "stream": "{cluster=~\"${cluster}\"}", "type": 1},
+            "refresh": 2,
+            "sort": 1,
+            "type": "query"
+          },
+          {
+            "current": {},
+            "datasource": {"type": "loki", "uid": "${datasource}"},
+            "definition": "label_values({cluster=~\"${cluster}\", service_namespace=~\"${namespace:pipe}\"}, k8s_pod_name)",
             "hide": 0,
             "includeAll": true,
             "allValue": ".+",
             "label": "Pod",
             "multi": true,
             "name": "pod",
-            "query": {"label": "k8s_pod_name", "stream": "{service_namespace=~\"${namespace:pipe}\"}", "type": 1},
+            "query": {"label": "k8s_pod_name", "stream": "{cluster=~\"${cluster}\", service_namespace=~\"${namespace:pipe}\"}", "type": 1},
             "refresh": 2,
             "sort": 1,
             "type": "query"
@@ -218,7 +248,7 @@ data:
       "timezone": "browser",
       "title": "Kubernetes / Logs / Pod Browser",
       "uid": "k8s-logs-pod",
-      "version": 1
+      "version": 2
     }
 ---
 apiVersion: v1
@@ -232,7 +262,7 @@ data:
   loki-logs-error-aggregation.json: |-
     {
       "annotations": {"list": []},
-      "description": "聚合展示 ERROR / WARN / FATAL 日志，按 namespace 过滤",
+      "description": "聚合展示 ERROR / WARN / FATAL 日志，按 cluster / namespace 过滤",
       "editable": true,
       "graphTooltip": 0,
       "links": [],
@@ -249,15 +279,15 @@ data:
           "targets": [
             {
               "datasource": {"type": "loki", "uid": "${datasource}"},
-              "expr": "sum by (service_namespace) (count_over_time({service_namespace=~\"${namespace:pipe}\"} |~ \"(?i)(error|exception|fatal|panic)\" [$__interval]))",
-              "legendFormat": "{{service_namespace}} errors",
+              "expr": "sum by (cluster, service_namespace) (count_over_time({cluster=~\"${cluster}\", service_namespace=~\"${namespace:pipe}\"} |~ \"(?i)(error|exception|fatal|panic)\" [$__interval]))",
+              "legendFormat": "{{cluster}}/{{service_namespace}} errors",
               "queryType": "range",
               "refId": "A"
             },
             {
               "datasource": {"type": "loki", "uid": "${datasource}"},
-              "expr": "sum by (service_namespace) (count_over_time({service_namespace=~\"${namespace:pipe}\"} |~ \"(?i)(warn|warning)\" [$__interval]))",
-              "legendFormat": "{{service_namespace}} warnings",
+              "expr": "sum by (cluster, service_namespace) (count_over_time({cluster=~\"${cluster}\", service_namespace=~\"${namespace:pipe}\"} |~ \"(?i)(warn|warning)\" [$__interval]))",
+              "legendFormat": "{{cluster}}/{{service_namespace}} warnings",
               "queryType": "range",
               "refId": "B"
             }
@@ -283,7 +313,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "loki", "uid": "${datasource}"},
-              "expr": "{service_namespace=~\"${namespace:pipe}\"} |~ \"(?i)(error|exception|fatal|panic|warn)\"",
+              "expr": "{cluster=~\"${cluster}\", service_namespace=~\"${namespace:pipe}\"} |~ \"(?i)(error|exception|fatal|panic|warn)\"",
               "queryType": "range",
               "refId": "A"
             }
@@ -294,7 +324,7 @@ data:
       ],
       "refresh": "1m",
       "schemaVersion": 40,
-      "tags": ["kubernetes", "logs", "loki", "otel", "errors"],
+      "tags": ["kubernetes", "logs", "loki", "otel", "errors", "multi-cluster"],
       "templating": {
         "list": [
           {
@@ -311,14 +341,29 @@ data:
           {
             "current": {},
             "datasource": {"type": "loki", "uid": "${datasource}"},
-            "definition": "label_values(service_namespace)",
+            "definition": "label_values(cluster)",
+            "hide": 0,
+            "includeAll": true,
+            "allValue": ".+",
+            "label": "Cluster",
+            "multi": true,
+            "name": "cluster",
+            "query": {"label": "cluster", "stream": "", "type": 1},
+            "refresh": 2,
+            "sort": 1,
+            "type": "query"
+          },
+          {
+            "current": {},
+            "datasource": {"type": "loki", "uid": "${datasource}"},
+            "definition": "label_values({cluster=~\"${cluster}\"}, service_namespace)",
             "hide": 0,
             "includeAll": true,
             "allValue": ".+",
             "label": "Namespace",
             "multi": true,
             "name": "namespace",
-            "query": {"label": "service_namespace", "stream": "", "type": 1},
+            "query": {"label": "service_namespace", "stream": "{cluster=~\"${cluster}\"}", "type": 1},
             "refresh": 2,
             "sort": 1,
             "type": "query"
@@ -330,7 +375,7 @@ data:
       "timezone": "browser",
       "title": "Kubernetes / Logs / Errors",
       "uid": "k8s-logs-errors",
-      "version": 1
+      "version": 2
     }
 ---
 apiVersion: v1
@@ -344,7 +389,7 @@ data:
   loki-logs-cluster-search.json: |-
     {
       "annotations": {"list": []},
-      "description": "跨 namespace 全文搜索，适合排查跨服务问题",
+      "description": "跨 cluster / namespace 全文搜索，适合排查跨服务问题",
       "editable": true,
       "graphTooltip": 0,
       "links": [],
@@ -361,13 +406,13 @@ data:
           "targets": [
             {
               "datasource": {"type": "loki", "uid": "${datasource}"},
-              "expr": "sum by (service_namespace) (count_over_time({service_namespace=~\"${namespace:pipe}\"} |~ \"${search}\" [$__interval]))",
-              "legendFormat": "{{service_namespace}}",
+              "expr": "sum by (cluster, service_namespace) (count_over_time({cluster=~\"${cluster}\", service_namespace=~\"${namespace:pipe}\"} |~ \"${search}\" [$__interval]))",
+              "legendFormat": "{{cluster}}/{{service_namespace}}",
               "queryType": "range",
               "refId": "A"
             }
           ],
-          "title": "匹配日志量",
+          "title": "匹配日志量 by Cluster / Namespace",
           "type": "timeseries"
         },
         {
@@ -388,7 +433,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "loki", "uid": "${datasource}"},
-              "expr": "{service_namespace=~\"${namespace:pipe}\"} |~ \"${search}\"",
+              "expr": "{cluster=~\"${cluster}\", service_namespace=~\"${namespace:pipe}\"} |~ \"${search}\"",
               "queryType": "range",
               "refId": "A"
             }
@@ -399,7 +444,7 @@ data:
       ],
       "refresh": "30s",
       "schemaVersion": 40,
-      "tags": ["kubernetes", "logs", "loki", "otel", "search"],
+      "tags": ["kubernetes", "logs", "loki", "otel", "search", "multi-cluster"],
       "templating": {
         "list": [
           {
@@ -416,14 +461,29 @@ data:
           {
             "current": {},
             "datasource": {"type": "loki", "uid": "${datasource}"},
-            "definition": "label_values(service_namespace)",
+            "definition": "label_values(cluster)",
+            "hide": 0,
+            "includeAll": true,
+            "allValue": ".+",
+            "label": "Cluster",
+            "multi": true,
+            "name": "cluster",
+            "query": {"label": "cluster", "stream": "", "type": 1},
+            "refresh": 2,
+            "sort": 1,
+            "type": "query"
+          },
+          {
+            "current": {},
+            "datasource": {"type": "loki", "uid": "${datasource}"},
+            "definition": "label_values({cluster=~\"${cluster}\"}, service_namespace)",
             "hide": 0,
             "includeAll": true,
             "allValue": ".+",
             "label": "Namespace",
             "multi": true,
             "name": "namespace",
-            "query": {"label": "service_namespace", "stream": "", "type": 1},
+            "query": {"label": "service_namespace", "stream": "{cluster=~\"${cluster}\"}", "type": 1},
             "refresh": 2,
             "sort": 1,
             "type": "query"
@@ -444,5 +504,5 @@ data:
       "timezone": "browser",
       "title": "Kubernetes / Logs / Cluster Search",
       "uid": "k8s-logs-search",
-      "version": 1
+      "version": 2
     }

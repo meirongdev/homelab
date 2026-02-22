@@ -94,6 +94,19 @@ spec:
               memory: 256Mi
             limits:
               memory: 1024Mi
+          livenessProbe:
+            httpGet:
+              path: /login
+              port: 8083
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /login
+              port: 8083
+            initialDelaySeconds: 30
+            periodSeconds: 10
           volumeMounts:
             - name: config
               mountPath: /config
