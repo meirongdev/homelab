@@ -1,10 +1,10 @@
 ---
 # OTel Collector DaemonSet for oracle-k3s
 # Collects:
-#   - container logs → homelab Loki via Tailscale (otlphttp)
-#   - cloudflared metrics → homelab Prometheus via Tailscale (otlphttp OTLP receiver)
-#   - Traefik metrics (per-hostname) → homelab Prometheus via Tailscale (otlphttp OTLP receiver)
-# Architecture: filelog/prometheus → k8sattributes/resource → batch → otlphttp
+#   - container logs        → homelab Loki via Tailscale (otlphttp)
+#   - cloudflared metrics   → homelab Prometheus via Tailscale (prometheusremotewrite)
+#   - Traefik metrics       → homelab Prometheus via Tailscale (prometheusremotewrite)
+# Architecture: filelog/prometheus → k8sattributes/resource/batch → otlphttp / prometheusremotewrite
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -232,15 +232,19 @@ data:
         timeout: 5s
 
     exporters:
+      # Logs → homelab Loki via Tailscale (OTLP HTTP)
       otlphttp:
         endpoint: "http://100.107.254.112:31080/otlp"
         tls:
           insecure: true
-      # Prometheus OTLP receiver on homelab (enableFeatures: otlp-write-receiver)
-      otlphttp/prometheus:
-        endpoint: "http://100.107.254.112:31090/api/v1/otlp"
+      # Metrics → homelab Prometheus via Tailscale (Prometheus Remote Write)
+      # Uses same NodePort 31090 as prometheus-agent remote_write
+      prometheusremotewrite:
+        endpoint: "http://100.107.254.112:31090/api/v1/write"
         tls:
           insecure: true
+        external_labels:
+          cluster: oracle-k3s
       debug:
         verbosity: basic
 
@@ -256,8 +260,8 @@ data:
         metrics/cloudflared:
           receivers: [prometheus/cloudflared]
           processors: [resource, batch]
-          exporters: [otlphttp/prometheus]
+          exporters: [prometheusremotewrite]
         metrics/traefik:
           receivers: [prometheus/traefik]
           processors: [resource, batch]
-          exporters: [otlphttp/prometheus]
+          exporters: [prometheusremotewrite]
