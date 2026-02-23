@@ -1,9 +1,9 @@
 ---
 # External NodePort services for cross-cluster observability
 # Allows oracle-k3s OTel Collector to push logs to homelab Loki via Tailscale
-# Allows oracle-k3s Prometheus Agent to remote_write metrics to homelab Prometheus
+# Allows oracle-k3s OTel Collector to push metrics to homelab Prometheus via Tailscale
 ---
-# Loki Gateway — exposed for oracle-k3s OTel Collector
+# Loki Gateway — exposed for oracle-k3s OTel Collector (logs)
 apiVersion: v1
 kind: Service
 metadata:
@@ -20,11 +20,12 @@ spec:
       nodePort: 31080
       name: http
 ---
-# Prometheus — exposed for oracle-k3s Prometheus Agent remote_write
+# Prometheus OTLP receiver — exposed for oracle-k3s OTel Collector (metrics push)
+# Prometheus must have enableFeatures: [otlp-write-receiver] set
 apiVersion: v1
 kind: Service
 metadata:
-  name: prometheus-external
+  name: prometheus-otlp-external
   namespace: monitoring
 spec:
   type: NodePort

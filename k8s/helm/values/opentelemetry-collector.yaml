@@ -2,6 +2,7 @@
 # Chart: open-telemetry/opentelemetry-collector
 # Image: otel/opentelemetry-collector-contrib (含 filelog, k8sattributes processor)
 # Exporter: otlp_http 向 Loki OTLP 端点推送日志（loki exporter 在 contrib 0.145+ 已移除）
+# Metrics: prometheus receiver 抓取 cloudflared + Traefik，通过 otlphttp 推送到 Prometheus
 
 mode: daemonset
 
@@ -21,6 +22,30 @@ presets:
 # 仅覆盖 pipeline 和 exporter 配置
 # presets 已自动注入 filelog receiver 和 k8sattributes processor
 config:
+  receivers:
+    # cloudflared metrics — ClusterIP within cloudflare namespace
+    prometheus/cloudflared:
+      config:
+        scrape_configs:
+          - job_name: 'cloudflared'
+            scrape_interval: 30s
+            static_configs:
+              - targets: ['cloudflared-metrics.cloudflare.svc.cluster.local:2000']
+                labels:
+                  cluster: homelab
+                  tunnel: cloudflared
+
+    # Traefik metrics — per-hostname router labels (addRoutersLabels: true in HelmChartConfig)
+    prometheus/traefik:
+      config:
+        scrape_configs:
+          - job_name: 'traefik'
+            scrape_interval: 15s
+            static_configs:
+              - targets: ['traefik-metrics.kube-system.svc.cluster.local:9100']
+                labels:
+                  cluster: homelab
+
   processors:
     resource:
       attributes:
@@ -32,10 +57,14 @@ config:
       timeout: 5s
 
   exporters:
-    # 使用 otlp_http exporter 向 Loki OTLP 端点推送日志
-    # Loki 从 v2.9+ 支持 OTLP HTTP 协议，端点为 /otlp
-    otlp_http:
+    # Logs → Loki via OTLP HTTP
+    otlp_http/loki:
       endpoint: http://loki-gateway.monitoring.svc.cluster.local/otlp
+      tls:
+        insecure: true
+    # Metrics → Prometheus OTLP receiver (enableFeatures: otlp-write-receiver)
+    otlp_http/prometheus:
+      endpoint: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090/api/v1/otlp
       tls:
         insecure: true
 
@@ -44,15 +73,23 @@ config:
       logs:
         receivers: [filelog]
         processors: [k8sattributes, resource, batch]
-        exporters: [otlp_http]
+        exporters: [otlp_http/loki]
+      metrics/cloudflared:
+        receivers: [prometheus/cloudflared]
+        processors: [resource, batch]
+        exporters: [otlp_http/prometheus]
+      metrics/traefik:
+        receivers: [prometheus/traefik]
+        processors: [resource, batch]
+        exporters: [otlp_http/prometheus]
 
 # 资源限制（单节点 homelab）
 resources:
   requests:
     cpu: 50m
-    memory: 64Mi
+    memory: 128Mi
   limits:
-    cpu: 250m
+    cpu: 300m
     memory: 256Mi
 
 # chart 内部资源命名使用的 namespace（实际部署 namespace 由 justfile 的 --namespace 参数控制）

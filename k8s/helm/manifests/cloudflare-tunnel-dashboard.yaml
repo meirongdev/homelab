@@ -1,0 +1,868 @@
+# Grafana Dashboard: Cloudflare Tunnel + Per-Domain Traffic
+# Auto-loaded via kube-prometheus-stack grafana-sc-dashboard sidecar
+# Data sources:
+#   - cloudflared metrics: tunnel health, HA connections, active streams
+#   - Traefik metrics: per-hostname router request rate, latency, status codes
+# NOTE: cloudflared does NOT expose per-hostname metrics natively.
+#       Per-domain traffic visibility comes from Traefik router labels.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudflare-tunnel-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  cloudflare-tunnel-dashboard.json: |-
+    {
+      "annotations": {"list": []},
+      "description": "Cloudflare Tunnel health + per-domain traffic via Traefik (homelab & oracle-k3s)",
+      "editable": true,
+      "graphTooltip": 1,
+      "links": [],
+      "panels": [
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+          "id": 100,
+          "title": "🔒 Cloudflare Tunnel Health",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]
+              },
+              "mappings": [
+                {"options": {"0": {"text": "Down"}}, "type": "value"},
+                {"options": {"1": {"text": "Up"}}, "type": "value"}
+              ],
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 1},
+          "id": 1,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "count by (cluster) (cloudflared_tunnel_ha_connections{cluster=~\"$cluster\"} > 0)",
+              "legendFormat": "{{cluster}} tunnel up",
+              "refId": "A"
+            }
+          ],
+          "title": "Tunnel Status",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "palette-classic"}, "unit": "none"},
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 1},
+          "id": 2,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster) (cloudflared_tunnel_ha_connections{cluster=~\"$cluster\"})",
+              "legendFormat": "{{cluster}}",
+              "refId": "A"
+            }
+          ],
+          "title": "HA Connections per Cluster",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "palette-classic"}, "unit": "none"},
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 1},
+          "id": 3,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster) (cloudflared_tunnel_active_streams{cluster=~\"$cluster\"})",
+              "legendFormat": "{{cluster}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Active Streams",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "palette-classic"}, "unit": "reqps"},
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 18, "y": 1},
+          "id": 4,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster) (rate(cloudflared_tunnel_total_requests{cluster=~\"$cluster\"}[$__rate_interval]))",
+              "legendFormat": "{{cluster}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Total Tunnel Req/s",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 1, "fillOpacity": 10},
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 6, "w": 12, "x": 0, "y": 5},
+          "id": 5,
+          "options": {
+            "legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "right"},
+            "tooltip": {"mode": "multi"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster, connection_id, edge_location) (cloudflared_tunnel_server_locations{cluster=~\"$cluster\", location=\"1\"})",
+              "legendFormat": "{{cluster}} conn={{connection_id}} → {{edge_location}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Tunnel PoP Connections (Cloudflare Edge Location)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 1, "fillOpacity": 10},
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 6, "w": 12, "x": 12, "y": 5},
+          "id": 6,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "right"},
+            "tooltip": {"mode": "multi"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster) (rate(cloudflared_tunnel_request_errors{cluster=~\"$cluster\"}[$__rate_interval]))",
+              "legendFormat": "{{cluster}} errors/s",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster) (cloudflared_tunnel_timer_retries{cluster=~\"$cluster\"})",
+              "legendFormat": "{{cluster}} heartbeat retries",
+              "refId": "B"
+            }
+          ],
+          "title": "Tunnel Errors & Heartbeat Retries",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 11},
+          "id": 101,
+          "title": "🌐 Per-Domain Traffic (Traefik Router Metrics)",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 1, "fillOpacity": 10},
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+          "id": 10,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster, router) (rate(traefik_router_requests_total{cluster=~\"$cluster\", router=~\"$router\"}[$__rate_interval]))",
+              "legendFormat": "{{cluster}} / {{router}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Request Rate by Domain (Traefik router label)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 1, "fillOpacity": 5},
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+          "id": 11,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "histogram_quantile(0.50, sum by (cluster, router, le) (rate(traefik_router_request_duration_seconds_bucket{cluster=~\"$cluster\", router=~\"$router\"}[$__rate_interval])))",
+              "legendFormat": "{{cluster}} / {{router}} p50",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "histogram_quantile(0.95, sum by (cluster, router, le) (rate(traefik_router_request_duration_seconds_bucket{cluster=~\"$cluster\", router=~\"$router\"}[$__rate_interval])))",
+              "legendFormat": "{{cluster}} / {{router}} p95",
+              "refId": "B"
+            }
+          ],
+          "title": "Response Latency by Domain (p50 / p95)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 1, "fillOpacity": 10},
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+          "id": 12,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster, router, code) (rate(traefik_router_requests_total{cluster=~\"$cluster\", router=~\"$router\", code=~\"[45]..\"}[$__rate_interval]))",
+              "legendFormat": "{{cluster}} / {{router}} HTTP {{code}}",
+              "refId": "A"
+            }
+          ],
+          "title": "4xx / 5xx Errors by Domain",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"align": "auto", "displayMode": "auto"},
+              "unit": "short"
+            },
+            "overrides": [
+              {"matcher": {"id": "byName", "options": "Req/s"}, "properties": [{"id": "unit", "value": "reqps"}, {"id": "custom.displayMode", "value": "color-background"}]},
+              {"matcher": {"id": "byName", "options": "Error %"}, "properties": [{"id": "unit", "value": "percentunit"}, {"id": "custom.displayMode", "value": "color-background"}, {"id": "thresholds", "value": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 0.01}, {"color": "red", "value": 0.05}]}}]}
+            ]
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
+          "id": 13,
+          "options": {
+            "footer": {"show": false},
+            "showHeader": true,
+            "sortBy": [{"desc": true, "displayName": "Req/s"}]
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster, router) (rate(traefik_router_requests_total{cluster=~\"$cluster\", router=~\"$router\"}[$__rate_interval]))",
+              "format": "table",
+              "instant": true,
+              "legendFormat": "",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster, router) (rate(traefik_router_requests_total{cluster=~\"$cluster\", router=~\"$router\", code=~\"[45]..\"}[$__rate_interval])) / sum by (cluster, router) (rate(traefik_router_requests_total{cluster=~\"$cluster\", router=~\"$router\"}[$__rate_interval]))",
+              "format": "table",
+              "instant": true,
+              "legendFormat": "",
+              "refId": "B"
+            }
+          ],
+          "title": "Domain Summary Table",
+          "transformations": [
+            {"id": "merge", "options": {}},
+            {"id": "organize", "options": {"excludeByName": {"Time": true, "__name__": true, "job": true}, "renameByName": {"Value #A": "Req/s", "Value #B": "Error %", "cluster": "Cluster", "router": "Router/Domain"}}}
+          ],
+          "type": "table"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 28},
+          "id": 102,
+          "title": "🚦 HTTP Status Code Distribution",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 1, "fillOpacity": 10},
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 29},
+          "id": 20,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "right"},
+            "tooltip": {"mode": "multi"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster, router, code) (rate(traefik_router_requests_total{cluster=~\"$cluster\", router=~\"$router\"}[$__rate_interval]))",
+              "legendFormat": "{{cluster}} / {{router}} [{{code}}]",
+              "refId": "A"
+            }
+          ],
+          "title": "All Status Codes by Domain",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 37},
+          "id": 103,
+          "title": "⚡ Traefik Entrypoint Overview",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 1, "fillOpacity": 10},
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 7, "w": 12, "x": 0, "y": 38},
+          "id": 30,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster, entrypoint) (rate(traefik_entrypoint_requests_total{cluster=~\"$cluster\"}[$__rate_interval]))",
+              "legendFormat": "{{cluster}} / {{entrypoint}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Entrypoint Request Rate",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 1, "fillOpacity": 10},
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 7, "w": 12, "x": 12, "y": 38},
+          "id": 31,
+          "options": {
+            "legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster, entrypoint) (traefik_entrypoint_open_connections{cluster=~\"$cluster\"})",
+              "legendFormat": "{{cluster}} / {{entrypoint}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Entrypoint Open Connections",
+          "type": "timeseries"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 40,
+      "tags": ["cloudflare", "tunnel", "traefik", "traffic", "per-domain", "multi-cluster"],
+      "templating": {
+        "list": [
+          {
+            "current": {},
+            "hide": 0,
+            "includeAll": false,
+            "label": "Data Source",
+            "name": "datasource",
+            "options": [],
+            "query": "prometheus",
+            "refresh": 1,
+            "type": "datasource"
+          },
+          {
+            "current": {},
+            "datasource": {"type": "prometheus", "uid": "${datasource}"},
+            "definition": "label_values(traefik_router_requests_total, cluster)",
+            "hide": 0,
+            "includeAll": true,
+            "allValue": ".*",
+            "label": "Cluster",
+            "multi": true,
+            "name": "cluster",
+            "options": [],
+            "query": {
+              "query": "label_values(traefik_router_requests_total, cluster)",
+              "refId": "StandardVariableQuery"
+            },
+            "refresh": 2,
+            "sort": 1,
+            "type": "query"
+          },
+          {
+            "current": {},
+            "datasource": {"type": "prometheus", "uid": "${datasource}"},
+            "definition": "label_values(traefik_router_requests_total{cluster=~\"$cluster\"}, router)",
+            "hide": 0,
+            "includeAll": true,
+            "allValue": ".*",
+            "label": "Router / Domain",
+            "multi": true,
+            "name": "router",
+            "options": [],
+            "query": {
+              "query": "label_values(traefik_router_requests_total{cluster=~\"$cluster\"}, router)",
+              "refId": "StandardVariableQuery"
+            },
+            "refresh": 2,
+            "sort": 1,
+            "type": "query"
+          }
+        ]
+      },
+      "time": {"from": "now-3h", "to": "now"},
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "Cloudflare Tunnel & Per-Domain Traffic",
+      "uid": "cloudflare-tunnel-traffic",
+      "version": 2
+    }
+      "editable": true,
+      "graphTooltip": 1,
+      "links": [],
+      "panels": [
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+          "id": 100,
+          "title": "Tunnel Health",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "green", "value": 1}
+                ]
+              },
+              "mappings": [
+                {"options": {"0": {"text": "Down"}}, "type": "value"},
+                {"options": {"1": {"text": "Up"}}, "type": "value"}
+              ]
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 12, "x": 0, "y": 1},
+          "id": 1,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "max by (cluster) (cloudflared_tunnel_active_streams{cluster=~\"$cluster\"} >= 0) * 0 + 1",
+              "legendFormat": "{{cluster}} tunnel",
+              "refId": "A"
+            }
+          ],
+          "title": "Tunnel Status",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 12, "x": 12, "y": 1},
+          "id": 2,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster) (cloudflared_tunnel_active_streams{cluster=~\"$cluster\"})",
+              "legendFormat": "{{cluster}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Active Streams",
+          "type": "stat"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5},
+          "id": 101,
+          "title": "Request Traffic",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 1, "fillOpacity": 10},
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+          "id": 3,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster) (rate(cloudflared_tunnel_total_requests{cluster=~\"$cluster\"}[$__rate_interval]))",
+              "legendFormat": "{{cluster}} requests/s",
+              "refId": "A"
+            }
+          ],
+          "title": "Request Rate by Cluster",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 1, "fillOpacity": 10},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+          "id": 4,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster, status_code) (rate(cloudflared_tunnel_response_by_code_total{cluster=~\"$cluster\"}[$__rate_interval]))",
+              "legendFormat": "{{cluster}} {{status_code}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Response Codes by Cluster",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 14},
+          "id": 102,
+          "title": "Bytes Throughput",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 1, "fillOpacity": 10},
+              "unit": "Bps"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 15},
+          "id": 5,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster) (rate(cloudflared_tunnel_request_http_body_length{cluster=~\"$cluster\"}[$__rate_interval]))",
+              "legendFormat": "{{cluster}} inbound",
+              "refId": "A"
+            }
+          ],
+          "title": "Inbound Bytes/s (Origin → Cloudflare)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 1, "fillOpacity": 10},
+              "unit": "Bps"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 15},
+          "id": 6,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster) (rate(cloudflared_tunnel_response_http_body_length{cluster=~\"$cluster\"}[$__rate_interval]))",
+              "legendFormat": "{{cluster}} outbound",
+              "refId": "A"
+            }
+          ],
+          "title": "Outbound Bytes/s (Cloudflare → Client)",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 23},
+          "id": 103,
+          "title": "Latency & Retries",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 1, "fillOpacity": 5},
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+          "id": 7,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "histogram_quantile(0.50, sum by (cluster, le) (rate(cloudflared_tunnel_request_duration_seconds_bucket{cluster=~\"$cluster\"}[$__rate_interval])))",
+              "legendFormat": "{{cluster}} p50",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "histogram_quantile(0.95, sum by (cluster, le) (rate(cloudflared_tunnel_request_duration_seconds_bucket{cluster=~\"$cluster\"}[$__rate_interval])))",
+              "legendFormat": "{{cluster}} p95",
+              "refId": "B"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "histogram_quantile(0.99, sum by (cluster, le) (rate(cloudflared_tunnel_request_duration_seconds_bucket{cluster=~\"$cluster\"}[$__rate_interval])))",
+              "legendFormat": "{{cluster}} p99",
+              "refId": "C"
+            }
+          ],
+          "title": "Request Latency (p50 / p95 / p99)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 1, "fillOpacity": 10},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+          "id": 8,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster) (rate(cloudflared_tunnel_errors_total{cluster=~\"$cluster\"}[$__rate_interval]))",
+              "legendFormat": "{{cluster}} errors/s",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster) (rate(cloudflared_tunnel_retries_total{cluster=~\"$cluster\"}[$__rate_interval]))",
+              "legendFormat": "{{cluster}} retries/s",
+              "refId": "B"
+            }
+          ],
+          "title": "Errors & Retries Rate",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 32},
+          "id": 104,
+          "title": "Tunnel Connections",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 1, "fillOpacity": 10},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 33},
+          "id": 9,
+          "options": {
+            "legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "right"},
+            "tooltip": {"mode": "multi"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster, connection_id, location) (cloudflared_tunnel_active_streams{cluster=~\"$cluster\"})",
+              "legendFormat": "{{cluster}} conn={{connection_id}} loc={{location}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Active Streams by Connection & PoP",
+          "type": "timeseries"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 40,
+      "tags": ["cloudflare", "tunnel", "traffic", "multi-cluster"],
+      "templating": {
+        "list": [
+          {
+            "current": {},
+            "hide": 0,
+            "includeAll": false,
+            "label": "Data Source",
+            "name": "datasource",
+            "options": [],
+            "query": "prometheus",
+            "refresh": 1,
+            "type": "datasource"
+          },
+          {
+            "current": {},
+            "datasource": {"type": "prometheus", "uid": "${datasource}"},
+            "definition": "label_values(cloudflared_tunnel_active_streams, cluster)",
+            "hide": 0,
+            "includeAll": true,
+            "label": "Cluster",
+            "multi": true,
+            "name": "cluster",
+            "options": [],
+            "query": {
+              "query": "label_values(cloudflared_tunnel_active_streams, cluster)",
+              "refId": "StandardVariableQuery"
+            },
+            "refresh": 2,
+            "sort": 1,
+            "type": "query"
+          }
+        ]
+      },
+      "time": {"from": "now-3h", "to": "now"},
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "Cloudflare Tunnel Traffic",
+      "uid": "cloudflare-tunnel-traffic",
+      "version": 1
+    }

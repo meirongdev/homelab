@@ -1,5 +1,5 @@
 # HelmChartConfig to enable Gateway API provider in Traefik (managed by K3s)
-# This overrides the default K3s Traefik Helm chart values.
+# Also enables Prometheus metrics with per-hostname router labels for traffic visibility
 apiVersion: helm.cattle.io/v1
 kind: HelmChartConfig
 metadata:

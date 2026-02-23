@@ -79,7 +79,7 @@ prometheus:
               - 192.168.50.4:9100    # proxmox-node-1
               # - 10.10.10.10:9100   # k8s-node
 
-      # oracle-k3s cluster metrics via Tailscale
+      # oracle-k3s cluster metrics via Tailscale (scraped by prometheus-agent, remote_write here)
       - job_name: 'oracle-k3s-node-exporter'
         scrape_interval: 15s
         static_configs:
@@ -103,6 +103,18 @@ prometheus:
               - 100.107.166.37:31087
             labels:
               cluster: oracle-k3s
+
+      # NOTE: cloudflared + Traefik metrics are collected via OTel Collector (OTLP push)
+      # See: k8s/helm/values/opentelemetry-collector.yaml (homelab)
+      #      cloud/oracle/manifests/monitoring/otel-collector.yaml (oracle-k3s)
+
+    # Enable OTLP receiver so OTel Collectors can push metrics directly
+    enableFeatures:
+      - otlp-write-receiver
+
+    # Expose OTLP HTTP endpoint (/api/v1/otlp) — required for OTel push
+    additionalArgs:
+      - name: web.enable-otlp-receiver
 
 alertmanager:
   enabled: true
