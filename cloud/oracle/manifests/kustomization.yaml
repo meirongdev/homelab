@@ -6,6 +6,7 @@ resources:
   - base/vault-store.yaml
   - base/cloudflare-tunnel.yaml
   - base/gateway.yaml
+  - base/traefik-config.yaml
   # RSS system
   - rss-system/namespace.yaml
   - rss-system/secrets.yaml

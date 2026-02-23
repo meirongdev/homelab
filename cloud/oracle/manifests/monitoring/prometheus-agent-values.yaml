@@ -44,6 +44,7 @@ prometheus:
         memory: 512Mi
 
     # Scrape postgres-exporter
+    # NOTE: cloudflared + Traefik metrics are now collected via OTel Collector (OTLP push to homelab Prometheus)
     additionalScrapeConfigs:
       - job_name: 'postgres-exporter'
         scrape_interval: 30s

@@ -1,7 +1,10 @@
 ---
 # OTel Collector DaemonSet for oracle-k3s
-# Collects container logs and ships to homelab Loki via Tailscale
-# Architecture: filelog → k8sattributes → resource(cluster=oracle-k3s) → batch → otlphttp
+# Collects:
+#   - container logs → homelab Loki via Tailscale (otlphttp)
+#   - cloudflared metrics → homelab Prometheus via Tailscale (otlphttp OTLP receiver)
+#   - Traefik metrics (per-hostname) → homelab Prometheus via Tailscale (otlphttp OTLP receiver)
+# Architecture: filelog/prometheus → k8sattributes/resource → batch → otlphttp
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -175,6 +178,29 @@ data:
             from: attributes.stream
             to: attributes["log.iostream"]
 
+      # cloudflared metrics — ClusterIP within cloudflare namespace
+      prometheus/cloudflared:
+        config:
+          scrape_configs:
+            - job_name: 'cloudflared'
+              scrape_interval: 30s
+              static_configs:
+                - targets: ['cloudflared-metrics.cloudflare.svc.cluster.local:2000']
+                  labels:
+                    cluster: oracle-k3s
+                    tunnel: cloudflared
+
+      # Traefik metrics — per-hostname router labels (addRoutersLabels: true)
+      prometheus/traefik:
+        config:
+          scrape_configs:
+            - job_name: 'traefik'
+              scrape_interval: 15s
+              static_configs:
+                - targets: ['traefik-metrics.kube-system.svc.cluster.local:9100']
+                  labels:
+                    cluster: oracle-k3s
+
     processors:
       k8sattributes:
         auth_type: "serviceAccount"
@@ -210,15 +236,28 @@ data:
         endpoint: "http://100.107.254.112:31080/otlp"
         tls:
           insecure: true
+      # Prometheus OTLP receiver on homelab (enableFeatures: otlp-write-receiver)
+      otlphttp/prometheus:
+        endpoint: "http://100.107.254.112:31090/api/v1/otlp"
+        tls:
+          insecure: true
       debug:
         verbosity: basic
 
     service:
       telemetry:
         logs:
-          level: debug
+          level: warn
       pipelines:
         logs:
           receivers: [filelog]
           processors: [k8sattributes, resource, batch]
-          exporters: [otlphttp, debug]
+          exporters: [otlphttp]
+        metrics/cloudflared:
+          receivers: [prometheus/cloudflared]
+          processors: [resource, batch]
+          exporters: [otlphttp/prometheus]
+        metrics/traefik:
+          receivers: [prometheus/traefik]
+          processors: [resource, batch]
+          exporters: [otlphttp/prometheus]

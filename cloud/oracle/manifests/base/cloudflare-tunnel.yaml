@@ -78,3 +78,21 @@ spec:
               memory: 64Mi
             limits:
               memory: 256Mi
+---
+# ClusterIP service for cloudflared metrics
+# Scraped by OTel Collector running in-cluster (no NodePort needed)
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloudflared-metrics
+  namespace: cloudflare
+  labels:
+    app: cloudflared
+spec:
+  type: ClusterIP
+  selector:
+    app: cloudflared
+  ports:
+    - port: 2000
+      targetPort: 2000
+      name: metrics
