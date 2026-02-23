@@ -111,14 +111,6 @@ data:
               namespace: rss-system
               container: miniflux
               label_selector: app=miniflux
-        - n8n:
-            icon: n8n.png
-            href: https://n8n.meirong.dev
-            description: 工作流自动化
-            kubernetes:
-              namespace: rss-system
-              container: n8n
-              label_selector: app=n8n
 
     - 监控:
         - Uptime Kuma:
