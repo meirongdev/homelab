@@ -79,32 +79,9 @@ prometheus:
               - 192.168.50.4:9100    # proxmox-node-1
               # - 10.10.10.10:9100   # k8s-node
 
-      # oracle-k3s cluster metrics via Tailscale (scraped by prometheus-agent, remote_write here)
-      - job_name: 'oracle-k3s-node-exporter'
-        scrape_interval: 15s
-        static_configs:
-          - targets:
-              - 100.107.166.37:9100
-            labels:
-              cluster: oracle-k3s
-
-      - job_name: 'oracle-k3s-kube-state-metrics'
-        scrape_interval: 15s
-        static_configs:
-          - targets:
-              - 100.107.166.37:31082
-            labels:
-              cluster: oracle-k3s
-
-      - job_name: 'oracle-k3s-postgres-exporter'
-        scrape_interval: 30s
-        static_configs:
-          - targets:
-              - 100.107.166.37:31087
-            labels:
-              cluster: oracle-k3s
-
-      # NOTE: cloudflared + Traefik metrics are collected via OTel Collector (OTLP push)
+      # NOTE: oracle-k3s node-exporter, kube-state-metrics, postgres-exporter are pushed
+      # via prometheus-agent remote_write (100.107.166.37 → homelab Prometheus:31090/api/v1/write)
+      # cloudflared + Traefik metrics are collected via OTel Collector (OTLP push)
       # See: k8s/helm/values/opentelemetry-collector.yaml (homelab)
       #      cloud/oracle/manifests/monitoring/otel-collector.yaml (oracle-k3s)
 
@@ -112,9 +89,12 @@ prometheus:
     enableFeatures:
       - otlp-write-receiver
 
-    # Expose OTLP HTTP endpoint (/api/v1/otlp) — required for OTel push
+    # Web endpoints:
+    #   /api/v1/otlp  — homelab OTel Collector pushes metrics (OTLP)
+    #   /api/v1/write — oracle prometheus-agent + oracle OTel prometheusremotewrite
     additionalArgs:
       - name: web.enable-otlp-receiver
+      - name: web.enable-remote-write-receiver
 
 alertmanager:
   enabled: true
