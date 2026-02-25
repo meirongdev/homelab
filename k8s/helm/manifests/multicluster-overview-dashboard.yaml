@@ -1,0 +1,874 @@
+# Grafana Dashboard: Multi-Cluster Resource Overview
+# 展示 homelab 和 oracle-k3s 两个集群的资源使用情况与服务状态
+# 数据源: Prometheus (node-exporter + kube-state-metrics, cluster label 区分)
+# Auto-loaded via kube-prometheus-stack grafana-sc-dashboard sidecar
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: multicluster-overview-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  multicluster-overview.json: |-
+    {
+      "annotations": {"list": []},
+      "description": "双集群资源概览：homelab k3s + oracle k3s 的 CPU/内存/Pod/节点状态",
+      "editable": true,
+      "graphTooltip": 1,
+      "links": [],
+      "panels": [
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+          "id": 100,
+          "title": "🖥️ 节点概览",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "green", "value": 1}
+                ]
+              },
+              "unit": "none",
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 1},
+          "id": 1,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "count by (cluster) (up{job=~\"node-exporter.*\", cluster=~\"$cluster\"})",
+              "legendFormat": "{{cluster}} nodes up",
+              "refId": "A"
+            }
+          ],
+          "title": "节点在线数 by Cluster",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 0.7},
+                  {"color": "red", "value": 0.9}
+                ]
+              },
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 1},
+          "id": 2,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "avg by (cluster) (1 - rate(node_cpu_seconds_total{mode=\"idle\", cluster=~\"$cluster\"}[$__rate_interval]))",
+              "legendFormat": "{{cluster}} CPU",
+              "refId": "A"
+            }
+          ],
+          "title": "平均 CPU 使用率 by Cluster",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 0.7},
+                  {"color": "red", "value": 0.9}
+                ]
+              },
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 1},
+          "id": 3,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "avg by (cluster) (1 - (node_memory_MemAvailable_bytes{cluster=~\"$cluster\"} / node_memory_MemTotal_bytes{cluster=~\"$cluster\"}))",
+              "legendFormat": "{{cluster}} Memory",
+              "refId": "A"
+            }
+          ],
+          "title": "平均内存使用率 by Cluster",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 0.8},
+                  {"color": "red", "value": 0.95}
+                ]
+              },
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 18, "y": 1},
+          "id": 4,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "avg by (cluster) (1 - (node_filesystem_avail_bytes{cluster=~\"$cluster\", mountpoint=\"/\", fstype!=\"tmpfs\"} / node_filesystem_size_bytes{cluster=~\"$cluster\", mountpoint=\"/\", fstype!=\"tmpfs\"}))",
+              "legendFormat": "{{cluster}} Disk /",
+              "refId": "A"
+            }
+          ],
+          "title": "根分区磁盘使用率 by Cluster",
+          "type": "stat"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5},
+          "id": 101,
+          "title": "📈 CPU / 内存趋势",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 2},
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+          "id": 10,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "1 - avg by (cluster, instance) (rate(node_cpu_seconds_total{mode=\"idle\", cluster=~\"$cluster\"}[$__rate_interval]))",
+              "legendFormat": "{{cluster}} / {{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "CPU 使用率（每节点）",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 2},
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+          "id": 11,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "1 - (node_memory_MemAvailable_bytes{cluster=~\"$cluster\"} / node_memory_MemTotal_bytes{cluster=~\"$cluster\"})",
+              "legendFormat": "{{cluster}} / {{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "内存使用率（每节点）",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 1},
+              "unit": "Bps"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+          "id": 12,
+          "options": {
+            "legend": {"calcs": ["mean"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster, instance) (rate(node_network_receive_bytes_total{cluster=~\"$cluster\", device!~\"lo|veth.*|br.*|docker.*|cilium.*\"}[$__rate_interval]))",
+              "legendFormat": "{{cluster}} / {{instance}} rx",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "- sum by (cluster, instance) (rate(node_network_transmit_bytes_total{cluster=~\"$cluster\", device!~\"lo|veth.*|br.*|docker.*|cilium.*\"}[$__rate_interval]))",
+              "legendFormat": "{{cluster}} / {{instance}} tx",
+              "refId": "B"
+            }
+          ],
+          "title": "网络 IO（每节点）",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 1},
+              "unit": "Bps"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
+          "id": 13,
+          "options": {
+            "legend": {"calcs": ["mean"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster, instance) (rate(node_disk_read_bytes_total{cluster=~\"$cluster\"}[$__rate_interval]))",
+              "legendFormat": "{{cluster}} / {{instance}} read",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "- sum by (cluster, instance) (rate(node_disk_written_bytes_total{cluster=~\"$cluster\"}[$__rate_interval]))",
+              "legendFormat": "{{cluster}} / {{instance}} write",
+              "refId": "B"
+            }
+          ],
+          "title": "磁盘 IO（每节点）",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 22},
+          "id": 102,
+          "title": "☸️ Kubernetes 工作负载状态",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [{"color": "blue", "value": null}]
+              },
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 23},
+          "id": 20,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster) (kube_pod_info{cluster=~\"$cluster\", namespace=~\"$namespace\"})",
+              "legendFormat": "{{cluster}} pods",
+              "refId": "A"
+            }
+          ],
+          "title": "Pod 总数 by Cluster",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 1},
+                  {"color": "red", "value": 5}
+                ]
+              },
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 23},
+          "id": 21,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster) (kube_pod_status_phase{cluster=~\"$cluster\", namespace=~\"$namespace\", phase=~\"Pending|Failed|Unknown\"})",
+              "legendFormat": "{{cluster}} not running",
+              "refId": "A"
+            }
+          ],
+          "title": "异常 Pod 数 by Cluster",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 1},
+                  {"color": "red", "value": 3}
+                ]
+              },
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 23},
+          "id": 22,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster) (kube_pod_container_status_restarts_total{cluster=~\"$cluster\", namespace=~\"$namespace\"} > 0)",
+              "legendFormat": "{{cluster}} containers restarted",
+              "refId": "A"
+            }
+          ],
+          "title": "有重启记录的容器数 by Cluster",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [{"color": "blue", "value": null}]
+              },
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 18, "y": 23},
+          "id": 23,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster) (kube_deployment_status_replicas_available{cluster=~\"$cluster\", namespace=~\"$namespace\"}) / sum by (cluster) (kube_deployment_status_replicas{cluster=~\"$cluster\", namespace=~\"$namespace\"})",
+              "legendFormat": "{{cluster}} deployment健康率",
+              "refId": "A"
+            }
+          ],
+          "title": "Deployment 可用率 by Cluster",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "align": "auto",
+                "displayMode": "auto",
+                "inspect": false
+              },
+              "unit": "none"
+            },
+            "overrides": [
+              {
+                "matcher": {"id": "byName", "options": "Phase"},
+                "properties": [
+                  {
+                    "id": "custom.displayMode",
+                    "value": "color-background"
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {"options": {"Running": {"color": "green", "index": 0}}, "type": "value"},
+                      {"options": {"Pending": {"color": "yellow", "index": 1}}, "type": "value"},
+                      {"options": {"Failed": {"color": "red", "index": 2}}, "type": "value"},
+                      {"options": {"Unknown": {"color": "orange", "index": 3}}, "type": "value"}
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": {"id": "byName", "options": "Restarts"},
+                "properties": [
+                  {
+                    "id": "thresholds",
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {"color": "green", "value": null},
+                        {"color": "yellow", "value": 3},
+                        {"color": "red", "value": 10}
+                      ]
+                    }
+                  },
+                  {
+                    "id": "custom.displayMode",
+                    "value": "color-background"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {"h": 14, "w": 24, "x": 0, "y": 27},
+          "id": 30,
+          "options": {
+            "footer": {"show": false},
+            "showHeader": true,
+            "sortBy": [{"desc": true, "displayName": "Restarts"}]
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster, namespace, pod, phase) (kube_pod_status_phase{cluster=~\"$cluster\", namespace=~\"$namespace\", phase=~\"$phase\"})",
+              "format": "table",
+              "instant": true,
+              "legendFormat": "",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster, namespace, pod) (kube_pod_container_status_restarts_total{cluster=~\"$cluster\", namespace=~\"$namespace\"})",
+              "format": "table",
+              "instant": true,
+              "legendFormat": "",
+              "refId": "B"
+            }
+          ],
+          "title": "Pod 状态详情",
+          "transformations": [
+            {"id": "merge", "options": {}},
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {"Time": true, "Time 1": true, "Time 2": true, "__name__": true},
+                "renameByName": {
+                  "cluster": "Cluster",
+                  "namespace": "Namespace",
+                  "pod": "Pod",
+                  "phase": "Phase",
+                  "Value #A": "Count",
+                  "Value #B": "Restarts"
+                }
+              }
+            }
+          ],
+          "type": "table"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 41},
+          "id": 103,
+          "title": "🗄️ Deployment / StatefulSet 健康状态",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "align": "auto",
+                "displayMode": "auto"
+              },
+              "unit": "none"
+            },
+            "overrides": [
+              {
+                "matcher": {"id": "byName", "options": "Available"},
+                "properties": [
+                  {
+                    "id": "thresholds",
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {"color": "red", "value": null},
+                        {"color": "yellow", "value": 1},
+                        {"color": "green", "value": 1}
+                      ]
+                    }
+                  },
+                  {"id": "custom.displayMode", "value": "color-background"}
+                ]
+              }
+            ]
+          },
+          "gridPos": {"h": 12, "w": 12, "x": 0, "y": 42},
+          "id": 40,
+          "options": {
+            "footer": {"show": false},
+            "showHeader": true,
+            "sortBy": [{"desc": false, "displayName": "Available"}]
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "kube_deployment_status_replicas_available{cluster=~\"$cluster\", namespace=~\"$namespace\"} / kube_deployment_status_replicas{cluster=~\"$cluster\", namespace=~\"$namespace\"}",
+              "format": "table",
+              "instant": true,
+              "legendFormat": "",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "kube_deployment_status_replicas{cluster=~\"$cluster\", namespace=~\"$namespace\"}",
+              "format": "table",
+              "instant": true,
+              "legendFormat": "",
+              "refId": "B"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "kube_deployment_status_replicas_available{cluster=~\"$cluster\", namespace=~\"$namespace\"}",
+              "format": "table",
+              "instant": true,
+              "legendFormat": "",
+              "refId": "C"
+            }
+          ],
+          "title": "Deployment 状态",
+          "transformations": [
+            {"id": "merge", "options": {}},
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {"Time": true, "Time 1": true, "Time 2": true, "Time 3": true, "__name__": true},
+                "renameByName": {
+                  "cluster": "Cluster",
+                  "namespace": "Namespace",
+                  "deployment": "Deployment",
+                  "Value #A": "Available率",
+                  "Value #B": "期望",
+                  "Value #C": "Available"
+                }
+              }
+            }
+          ],
+          "type": "table"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "align": "auto",
+                "displayMode": "auto"
+              },
+              "unit": "none"
+            },
+            "overrides": [
+              {
+                "matcher": {"id": "byName", "options": "Ready"},
+                "properties": [
+                  {
+                    "id": "thresholds",
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {"color": "red", "value": null},
+                        {"color": "green", "value": 1}
+                      ]
+                    }
+                  },
+                  {"id": "custom.displayMode", "value": "color-background"}
+                ]
+              }
+            ]
+          },
+          "gridPos": {"h": 12, "w": 12, "x": 12, "y": 42},
+          "id": 41,
+          "options": {
+            "footer": {"show": false},
+            "showHeader": true,
+            "sortBy": [{"desc": false, "displayName": "Ready"}]
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "kube_statefulset_status_replicas_ready{cluster=~\"$cluster\", namespace=~\"$namespace\"}",
+              "format": "table",
+              "instant": true,
+              "legendFormat": "",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "kube_statefulset_replicas{cluster=~\"$cluster\", namespace=~\"$namespace\"}",
+              "format": "table",
+              "instant": true,
+              "legendFormat": "",
+              "refId": "B"
+            }
+          ],
+          "title": "StatefulSet 状态",
+          "transformations": [
+            {"id": "merge", "options": {}},
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {"Time": true, "Time 1": true, "Time 2": true, "__name__": true},
+                "renameByName": {
+                  "cluster": "Cluster",
+                  "namespace": "Namespace",
+                  "statefulset": "StatefulSet",
+                  "Value #A": "Ready",
+                  "Value #B": "期望"
+                }
+              }
+            }
+          ],
+          "type": "table"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 54},
+          "id": 104,
+          "title": "📦 容器资源使用",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 1},
+              "unit": "percentunit",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 55},
+          "id": 50,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster, namespace) (rate(container_cpu_usage_seconds_total{cluster=~\"$cluster\", namespace=~\"$namespace\", container!=\"\", container!=\"POD\"}[$__rate_interval])) / sum by (cluster, namespace) (kube_pod_container_resource_limits{cluster=~\"$cluster\", namespace=~\"$namespace\", resource=\"cpu\", container!=\"\"})",
+              "legendFormat": "{{cluster}} / {{namespace}}",
+              "refId": "A"
+            }
+          ],
+          "title": "容器 CPU 使用率（vs Limit）by Namespace",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"lineWidth": 1},
+              "unit": "percentunit",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 55},
+          "id": 51,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (cluster, namespace) (container_memory_working_set_bytes{cluster=~\"$cluster\", namespace=~\"$namespace\", container!=\"\", container!=\"POD\"}) / sum by (cluster, namespace) (kube_pod_container_resource_limits{cluster=~\"$cluster\", namespace=~\"$namespace\", resource=\"memory\", container!=\"\"})",
+              "legendFormat": "{{cluster}} / {{namespace}}",
+              "refId": "A"
+            }
+          ],
+          "title": "容器内存使用率（vs Limit）by Namespace",
+          "type": "timeseries"
+        }
+      ],
+      "refresh": "1m",
+      "schemaVersion": 40,
+      "tags": ["kubernetes", "multi-cluster", "prometheus", "node-exporter", "kube-state-metrics", "resources"],
+      "templating": {
+        "list": [
+          {
+            "current": {},
+            "hide": 0,
+            "includeAll": false,
+            "label": "Data Source",
+            "name": "datasource",
+            "options": [],
+            "query": "prometheus",
+            "refresh": 1,
+            "type": "datasource"
+          },
+          {
+            "current": {},
+            "datasource": {"type": "prometheus", "uid": "${datasource}"},
+            "definition": "label_values(kube_node_info{}, cluster)",
+            "hide": 0,
+            "includeAll": true,
+            "allValue": ".*",
+            "label": "Cluster",
+            "multi": true,
+            "name": "cluster",
+            "query": {
+              "query": "label_values(kube_node_info{}, cluster)",
+              "refId": "StandardVariableQuery"
+            },
+            "refresh": 2,
+            "sort": 1,
+            "type": "query"
+          },
+          {
+            "current": {},
+            "datasource": {"type": "prometheus", "uid": "${datasource}"},
+            "definition": "label_values(kube_pod_info{cluster=~\"$cluster\"}, namespace)",
+            "hide": 0,
+            "includeAll": true,
+            "allValue": ".*",
+            "label": "Namespace",
+            "multi": true,
+            "name": "namespace",
+            "query": {
+              "query": "label_values(kube_pod_info{cluster=~\"$cluster\"}, namespace)",
+              "refId": "StandardVariableQuery"
+            },
+            "refresh": 2,
+            "sort": 1,
+            "type": "query"
+          },
+          {
+            "current": {},
+            "hide": 0,
+            "includeAll": true,
+            "allValue": "Running|Pending|Failed|Unknown",
+            "label": "Phase",
+            "multi": true,
+            "name": "phase",
+            "options": [
+              {"selected": true, "text": "All", "value": "$__all"},
+              {"selected": false, "text": "Running", "value": "Running"},
+              {"selected": false, "text": "Pending", "value": "Pending"},
+              {"selected": false, "text": "Failed", "value": "Failed"},
+              {"selected": false, "text": "Unknown", "value": "Unknown"}
+            ],
+            "query": "Running,Pending,Failed,Unknown",
+            "type": "custom"
+          }
+        ]
+      },
+      "time": {"from": "now-1h", "to": "now"},
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "Kubernetes / Multi-Cluster / Resource Overview",
+      "uid": "k8s-multicluster-overview",
+      "version": 1
+    }

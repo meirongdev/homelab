@@ -12,7 +12,7 @@ spec:
     targetRevision: main
     path: k8s/helm/manifests
     directory:
-      include: "{grafana-dashboards.yaml,cloudflare-tunnel-dashboard.yaml}"
+      include: "{grafana-dashboards.yaml,cloudflare-tunnel-dashboard.yaml,multicluster-overview-dashboard.yaml}"
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring

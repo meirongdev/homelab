@@ -79,11 +79,13 @@ prometheus:
               - 192.168.50.4:9100    # proxmox-node-1
               # - 10.10.10.10:9100   # k8s-node
 
-      # NOTE: oracle-k3s node-exporter, kube-state-metrics, postgres-exporter are pushed
-      # via prometheus-agent remote_write (100.107.166.37 → homelab Prometheus:31090/api/v1/write)
-      # cloudflared + Traefik metrics are collected via OTel Collector (OTLP push)
-      # See: k8s/helm/values/opentelemetry-collector.yaml (homelab)
-      #      cloud/oracle/manifests/monitoring/otel-collector.yaml (oracle-k3s)
+      # oracle-k3s 指标均为 push 模式，不需要在此 scrape：
+      #   node-exporter / kube-state-metrics / postgres-exporter
+      #     → prometheus-agent (oracle-k3s) remote_write → :31090/api/v1/write
+      #   cloudflared / traefik
+      #     → OTel Collector (oracle-k3s) prometheusremotewrite → :31090/api/v1/write
+      # See: cloud/oracle/manifests/monitoring/prometheus-agent-values.yaml
+      #      cloud/oracle/manifests/monitoring/otel-collector.yaml
 
     # Enable OTLP receiver so OTel Collectors can push metrics directly
     enableFeatures:

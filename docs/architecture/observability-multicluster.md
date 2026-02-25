@@ -105,6 +105,14 @@ All 4 Loki dashboards (`k8s/helm/manifests/grafana-dashboards.yaml`) have a `clu
 - **k8s-logs-errors** — error rate aggregation, per cluster
 - **k8s-logs-search** — full-text search across selected cluster(s)
 
+Cloudflare Tunnel dashboard (`k8s/helm/manifests/cloudflare-tunnel-dashboard.yaml`):
+
+- **Cloudflare Tunnel + Per-Domain Traffic** — tunnel health, Traefik router metrics by cluster
+
+Multi-cluster resource overview (`k8s/helm/manifests/multicluster-overview-dashboard.yaml`):
+
+- **Kubernetes / Multi-Cluster / Resource Overview** (`uid: k8s-multicluster-overview`) — node CPU/memory/disk/network, Pod status table, Deployment/StatefulSet health, container resource usage vs Limit; supports `cluster`, `namespace`, `phase` variables
+
 **Dashboard variable configuration:**
 ```json
 {
