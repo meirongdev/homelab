@@ -201,6 +201,29 @@ data:
                   labels:
                     cluster: oracle-k3s
 
+      # Node Exporter — host-level CPU/memory/disk/network metrics
+      # node-exporter runs with hostNetwork:true, accessible via node IP
+      prometheus/node-exporter:
+        config:
+          scrape_configs:
+            - job_name: 'node-exporter'
+              scrape_interval: 15s
+              static_configs:
+                - targets: ['10.0.0.26:9100']
+                  labels:
+                    cluster: oracle-k3s
+
+      # Kube State Metrics — K8s object state (pods, deployments, etc.)
+      prometheus/kube-state-metrics:
+        config:
+          scrape_configs:
+            - job_name: 'kube-state-metrics'
+              scrape_interval: 30s
+              static_configs:
+                - targets: ['kube-state-metrics.monitoring.svc.cluster.local:8080']
+                  labels:
+                    cluster: oracle-k3s
+
     processors:
       k8sattributes:
         auth_type: "serviceAccount"
@@ -263,5 +286,13 @@ data:
           exporters: [prometheusremotewrite]
         metrics/traefik:
           receivers: [prometheus/traefik]
+          processors: [resource, batch]
+          exporters: [prometheusremotewrite]
+        metrics/node-exporter:
+          receivers: [prometheus/node-exporter]
+          processors: [resource, batch]
+          exporters: [prometheusremotewrite]
+        metrics/kube-state-metrics:
+          receivers: [prometheus/kube-state-metrics]
           processors: [resource, batch]
           exporters: [prometheusremotewrite]

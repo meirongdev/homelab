@@ -1,23 +1,37 @@
 # Multi-Cluster Observability Architecture
 
-> Date: 2026-02-22  
+> Date: 2026-02-25
 > Status: Production
 
 ## Overview
 
-Two k3s clusters are monitored from a single Grafana/Loki/Prometheus stack on the homelab cluster. Cross-cluster connectivity is provided by Tailscale.
+Two k3s clusters are monitored from a single Grafana/Loki/Prometheus stack on the homelab cluster. Cross-cluster connectivity is provided by Tailscale. All oracle-k3s telemetry (logs + metrics) is pushed via a single OTel Collector DaemonSet.
 
 ```
 ┌─────────────────────────────────────┐     Tailscale     ┌─────────────────────────────────────┐
-│          k3s-homelab                │◄──────────────────►│          oracle-k3s                 │
+│          k3s-homelab                │                    │          oracle-k3s                 │
 │  (100.107.254.112)                  │                    │  (100.107.166.37)                   │
 │                                     │                    │                                     │
-│  Grafana  ◄── Loki  ◄── NodePort    │◄── OTLP logs ──── │  OTel DaemonSet                     │
-│  Grafana  ◄── Prometheus            │◄── scrape ──────── │  node-exporter :9100                │
-│                          :31080     │                    │  kube-state-metrics :31082          │
-│                          :31090     │                    │  postgres-exporter :31087            │
+│  Grafana ◄── Loki      :31080/otlp │◄── logs (OTLP) ─── │  OTel Collector DaemonSet           │
+│  Grafana ◄── Prometheus :31090     │◄── metrics (PRW) ── │    ├ filelog → logs pipeline         │
+│                                     │                    │    ├ prometheus/node-exporter        │
+│  scrapeClasses:                     │                    │    ├ prometheus/kube-state-metrics   │
+│    cluster=homelab (all local jobs) │                    │    ├ prometheus/cloudflared          │
+│                                     │                    │    └ prometheus/traefik              │
+│  OTel Collector (homelab logs)      │                    │  node-exporter (hostNetwork:9100)    │
+│  node-exporter, kube-state-metrics  │                    │  kube-state-metrics (:8080)          │
 └─────────────────────────────────────┘                    └─────────────────────────────────────┘
 ```
+
+## Cluster Label Strategy
+
+All metrics carry a `cluster` label for multi-cluster dashboard queries:
+
+| Cluster | Mechanism | Label |
+|---------|-----------|-------|
+| homelab (local scrape) | Prometheus `scrapeClasses` with default relabeling | `cluster=homelab` |
+| homelab (metal nodes: proxmox, storage) | `additionalScrapeConfigs` with explicit label | `cluster=homelab` |
+| oracle-k3s (all metrics) | OTel `resource` processor + `prometheusremotewrite` `external_labels` | `cluster=oracle-k3s` |
 
 ## Log Pipeline
 
@@ -63,29 +77,31 @@ OTel resource attributes are converted to Loki stream labels (dots replaced with
 
 ## Metrics Pipeline
 
-### Oracle k3s → Homelab Prometheus
+### Oracle k3s → Homelab Prometheus (push via OTel)
 
-**Mechanism:** Homelab Prometheus pulls (scrape) oracle metrics over Tailscale — no push required.
+**Component:** `cloud/oracle/manifests/monitoring/otel-collector.yaml`
 
-**Configuration:** `k8s/helm/values/kube-prometheus-stack.yaml` → `additionalScrapeConfigs`
+**Mechanism:** OTel Collector scrapes local exporters and pushes via `prometheusremotewrite` to homelab Prometheus over Tailscale. No prometheus-agent needed.
+
+| OTel Receiver | Target | Interval |
+|---------------|--------|----------|
+| `prometheus/node-exporter` | `10.0.0.26:9100` (hostNetwork) | 15s |
+| `prometheus/kube-state-metrics` | `kube-state-metrics.monitoring.svc:8080` | 30s |
+| `prometheus/cloudflared` | `cloudflared-metrics.cloudflare.svc:2000` | 30s |
+| `prometheus/traefik` | `traefik-metrics.kube-system.svc:9100` | 15s |
+
+All metrics pass through `resource` processor (adds `cluster: oracle-k3s`) → `batch` → `prometheusremotewrite` exporter → `http://100.107.254.112:31090/api/v1/write`
+
+### Homelab Prometheus (local scrape)
+
+Standard kube-prometheus-stack in-cluster scraping with `scrapeClasses` default relabeling (`cluster: homelab`).
+
+**Additional scrape targets** (`additionalScrapeConfigs`):
 
 | Job | Target | Labels |
 |-----|--------|--------|
-| `oracle-k3s-node-exporter` | `100.107.166.37:9100` | `cluster=oracle-k3s` |
-| `oracle-k3s-kube-state-metrics` | `100.107.166.37:31082` | `cluster=oracle-k3s` |
-| `oracle-k3s-postgres-exporter` | `100.107.166.37:31087` | `cluster=oracle-k3s` |
-
-**Exposed NodePorts on oracle-k3s:** (`cloud/oracle/manifests/monitoring/exporters.yaml`)
-
-| Service | NodePort | Target |
-|---------|----------|--------|
-| `node-exporter` | 9100 | node-exporter pod |
-| `kube-state-metrics` | 31082 | kube-state-metrics pod |
-| `postgres-exporter` | 31087 | postgres-exporter pod |
-
-### Homelab Prometheus → itself
-
-Standard kube-prometheus-stack in-cluster scraping.
+| `node-exporter-metal-nodes` | `192.168.50.106:9100` (storage-node) | `cluster=homelab` |
+| `node-exporter-metal-nodes` | `192.168.50.4:9100` (proxmox-node) | `cluster=homelab` |
 
 ## NodePort Services on Homelab
 
@@ -94,7 +110,9 @@ Standard kube-prometheus-stack in-cluster scraping.
 | Service | NodePort | Purpose |
 |---------|----------|---------|
 | `loki-gateway-external` | 31080 | Receives OTLP logs from oracle OTel |
-| `prometheus-external` | 31090 | Exposes Prometheus for future remote_write |
+| `prometheus-otlp-external` | 31090 | Receives Prometheus remote_write from oracle OTel |
+
+> **Note:** kube-state-metrics NodePort (31082) on oracle-k3s is no longer used for cross-cluster scrape. OTel Collector scrapes it locally via ClusterIP and pushes via remote_write.
 
 ## Grafana Dashboards
 
@@ -166,5 +184,15 @@ All services have liveness and readiness probes configured:
 
 ### Prometheus not scraping oracle metrics
 
-1. Check Prometheus targets: Grafana → Explore → Prometheus → `up{cluster="oracle-k3s"}`
-2. Verify NodePorts accessible: `curl http://100.107.166.37:9100/metrics | head -5`
+Oracle-k3s metrics are pushed (not scraped). Check the OTel Collector:
+
+1. Check OTel logs: `kubectl --context oracle-k3s logs -n monitoring daemonset/otel-collector --tail=30`
+2. Look for `Failed to scrape Prometheus endpoint` — means target is unreachable from within the pod
+3. Verify Prometheus receives data: Grafana → Explore → Prometheus → `count by (cluster, job) ({cluster="oracle-k3s"})`
+4. Check Tailscale connectivity: `kubectl --context oracle-k3s exec -n monitoring daemonset/otel-collector -- wget -qO- http://100.107.254.112:31090/api/v1/status/runtimeinfo 2>/dev/null | head`
+
+### homelab metrics missing `cluster` label
+
+**Cause:** Prometheus `externalLabels` only applies to remote_write/federation, not local queries.
+
+**Fix:** Ensure `prometheusSpec.scrapeClasses` has a default class with `relabelings` that sets `cluster: homelab`. See `k8s/helm/values/kube-prometheus-stack.yaml`.

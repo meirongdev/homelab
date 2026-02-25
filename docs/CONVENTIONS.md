@@ -124,6 +124,14 @@ just apply   # Apply DNS/Tunnel changes
 ### Observability
 - LGTM stack (Loki, Grafana, Tempo, Prometheus/Mimir) in `monitoring` namespace
 - Grafana accessible at `grafana.meirong.dev`
+- **Multi-cluster monitoring**: All metrics carry a `cluster` label (`homelab` or `oracle-k3s`)
+  - homelab: Prometheus `scrapeClasses` default relabeling adds `cluster=homelab` to all local scrape targets
+  - oracle-k3s: OTel Collector pushes all metrics (node-exporter, kube-state-metrics, cloudflared, traefik) via `prometheusremotewrite` with `cluster=oracle-k3s`
+  - **No prometheus-agent on oracle-k3s** — the single OTel Collector handles both logs and metrics
+- **Deployment summary**: Only two components to deploy for observability changes:
+  1. `just deploy-prometheus` (homelab kube-prometheus-stack Helm release)
+  2. `kubectl --context oracle-k3s apply -f cloud/oracle/manifests/monitoring/otel-collector.yaml` + `kubectl --context oracle-k3s rollout restart daemonset/otel-collector -n monitoring` (oracle-k3s OTel Collector)
+  - Dashboard ConfigMaps: auto-synced by ArgoCD after `git push` (via `monitoring-dashboards` Application)
 
 ### Services
 | Service | Namespace | URL |
