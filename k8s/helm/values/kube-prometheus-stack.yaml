@@ -48,6 +48,17 @@ prometheus:
     retention: 7d
     externalLabels:
       cluster: homelab
+
+    # 给所有本地 scrape 的指标打上 cluster=homelab 标签
+    # externalLabels 仅在 remote_write/federation 时附加，本地查询不生效
+    # scrapeClasses 是 Prometheus Operator v0.70+ 支持的全局 relabel 方式
+    scrapeClasses:
+      - name: default
+        default: true
+        relabelings:
+          - targetLabel: cluster
+            replacement: homelab
+            action: replace
     
     # 持久化存储
     storageSpec:
@@ -77,15 +88,12 @@ prometheus:
           - targets:
               - 192.168.50.106:9100  # storage-node-1
               - 192.168.50.4:9100    # proxmox-node-1
-              # - 10.10.10.10:9100   # k8s-node
+            labels:
+              cluster: homelab
 
-      # oracle-k3s 指标均为 push 模式，不需要在此 scrape：
-      #   node-exporter / kube-state-metrics / postgres-exporter
-      #     → prometheus-agent (oracle-k3s) remote_write → :31090/api/v1/write
-      #   cloudflared / traefik
-      #     → OTel Collector (oracle-k3s) prometheusremotewrite → :31090/api/v1/write
-      # See: cloud/oracle/manifests/monitoring/prometheus-agent-values.yaml
-      #      cloud/oracle/manifests/monitoring/otel-collector.yaml
+      # oracle-k3s 指标均为 push 模式（OTel Collector → prometheusremotewrite）
+      # 包含: node-exporter, kube-state-metrics, cloudflared, traefik
+      # See: cloud/oracle/manifests/monitoring/otel-collector.yaml
 
     # Enable OTLP receiver so OTel Collectors can push metrics directly
     enableFeatures:
