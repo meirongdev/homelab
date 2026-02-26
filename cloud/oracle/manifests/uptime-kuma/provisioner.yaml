@@ -15,18 +15,22 @@ data:
     USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
     PASSWORD = os.environ["ADMIN_PASSWORD"]
 
+    # Internal URLs bypass SSO entirely (direct ClusterIP access).
+    # External URLs (k3s-homelab services) go via Cloudflare → SSO → 302.
     MONITORS = [
-        {"name": "Homepage",       "url": "https://home.meirong.dev",    "accepted_statuscodes": ["302"]},
-        {"name": "Miniflux",       "url": "https://rss.meirong.dev"},
+        # --- Local services (oracle-k3s) — bypass SSO via internal ClusterIP ---
+        {"name": "Homepage",       "url": "http://homepage.homepage.svc:3000"},
+        {"name": "Miniflux",       "url": "http://miniflux.rss-system.svc:8080"},
+        {"name": "IT-Tools",       "url": "http://it-tools.personal-services.svc:80"},
+        {"name": "Squoosh",        "url": "http://squoosh.personal-services.svc:8080"},
+        {"name": "Stirling-PDF",   "url": "http://stirling-pdf.personal-services.svc:8080/login"},
+        {"name": "Uptime Kuma",    "url": "http://uptime-kuma.personal-services.svc:3001"},
+        # --- Remote services (k3s-homelab) — via Cloudflare Tunnel, SSO returns 302 ---
         {"name": "Calibre-Web",    "url": "https://book.meirong.dev",    "accepted_statuscodes": ["302"]},
         {"name": "Grafana",        "url": "https://grafana.meirong.dev", "accepted_statuscodes": ["302"]},
         {"name": "HashiCorp Vault","url": "https://vault.meirong.dev",   "accepted_statuscodes": ["302"]},
-        {"name": "IT-Tools",       "url": "https://tool.meirong.dev",    "accepted_statuscodes": ["302"]},
-        {"name": "Stirling-PDF",   "url": "https://pdf.meirong.dev",     "accepted_statuscodes": ["302"]},
-        {"name": "Squoosh",        "url": "https://squoosh.meirong.dev", "accepted_statuscodes": ["302"]},
         {"name": "ArgoCD",         "url": "https://argocd.meirong.dev",  "accepted_statuscodes": ["302"]},
         {"name": "Kopia Backup",   "url": "https://backup.meirong.dev",  "accepted_statuscodes": ["302"]},
-        {"name": "Uptime Kuma",    "url": "https://status.meirong.dev"},
     ]
 
     def wait_ready(timeout=120):
@@ -67,12 +71,12 @@ data:
         extra = {}
         if "accepted_statuscodes" in m:
             extra["accepted_statuscodes"] = m["accepted_statuscodes"]
+        else:
+            extra["accepted_statuscodes"] = ["200-299"]
         if m["name"] in existing:
-            if extra:
-                api.edit_monitor(existing[m["name"]]["id"], **extra)
-                print(f"  updated {m['name']} (accepted_statuscodes={extra['accepted_statuscodes']})")
-            else:
-                print(f"  skip  {m['name']}")
+            # Always update URL and accepted_statuscodes to ensure they stay in sync
+            api.edit_monitor(existing[m["name"]]["id"], url=m["url"], **extra)
+            print(f"  updated {m['name']} -> {m['url']} (accepted={extra['accepted_statuscodes']})")
             continue
         api.add_monitor(type=MonitorType.HTTP, name=m["name"], url=m["url"], interval=60, **extra)
         print(f"  added {m['name']} -> {m['url']}")
