@@ -1,3 +1,63 @@
+# Traefik SSO Middlewares for oracle-k3s services
+# Must be created in each namespace where SSO-protected HTTPRoutes live,
+# because Traefik Gateway API resolves middlewares relative to the HTTPRoute namespace.
+#
+# Namespaces with protected routes: personal-services, homepage
+# (uptime-kuma is intentionally excluded — public status page)
+#
+# ForwardAuth points to the root (/) of oauth2-proxy (NOT /oauth2/auth).
+# When unauthenticated, oauth2-proxy at / returns 302 → GitHub OAuth login page.
+# Traefik forwardAuth propagates the 302 + Location header to the browser.
+# When authenticated, oauth2-proxy at / returns 202 (static upstream) → request passes through.
+#
+# HTTPRoutes reference "sso-forwardauth" as a single ExtensionRef.
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: sso-forwardauth
+  namespace: personal-services
+spec:
+  forwardAuth:
+    address: http://oauth2-proxy.auth-system.svc.cluster.local:4180/
+    trustForwardHeader: true
+    authRequestHeaders:
+      - Cookie
+      - X-Forwarded-Host
+      - X-Forwarded-Uri
+      - X-Forwarded-Proto
+      - X-Real-Ip
+    authResponseHeaders:
+      - X-Auth-Request-User
+      - X-Auth-Request-Email
+      - X-Auth-Request-Groups
+      - Authorization
+      - Set-Cookie
+      - Location
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: sso-forwardauth
+  namespace: homepage
+spec:
+  forwardAuth:
+    address: http://oauth2-proxy.auth-system.svc.cluster.local:4180/
+    trustForwardHeader: true
+    authRequestHeaders:
+      - Cookie
+      - X-Forwarded-Host
+      - X-Forwarded-Uri
+      - X-Forwarded-Proto
+      - X-Real-Ip
+    authResponseHeaders:
+      - X-Auth-Request-User
+      - X-Auth-Request-Email
+      - X-Auth-Request-Groups
+      - Authorization
+      - Set-Cookie
+      - Location
+---
 # HelmChartConfig to enable Gateway API provider in Traefik (managed by K3s)
 # Also enables Prometheus metrics with per-hostname router labels for traffic visibility
 apiVersion: helm.cattle.io/v1

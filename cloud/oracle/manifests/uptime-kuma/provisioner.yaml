@@ -16,16 +16,16 @@ data:
     PASSWORD = os.environ["ADMIN_PASSWORD"]
 
     MONITORS = [
-        {"name": "Homepage",       "url": "https://home.meirong.dev"},
+        {"name": "Homepage",       "url": "https://home.meirong.dev",    "accepted_statuscodes": ["302"]},
         {"name": "Miniflux",       "url": "https://rss.meirong.dev"},
         {"name": "Calibre-Web",    "url": "https://book.meirong.dev"},
         {"name": "Grafana",        "url": "https://grafana.meirong.dev"},
         {"name": "HashiCorp Vault","url": "https://vault.meirong.dev"},
-        {"name": "IT-Tools",       "url": "https://tool.meirong.dev"},
-        {"name": "Stirling-PDF",   "url": "https://pdf.meirong.dev"},
-        {"name": "Squoosh",        "url": "https://squoosh.meirong.dev"},
+        {"name": "IT-Tools",       "url": "https://tool.meirong.dev",    "accepted_statuscodes": ["302"]},
+        {"name": "Stirling-PDF",   "url": "https://pdf.meirong.dev",     "accepted_statuscodes": ["302"]},
+        {"name": "Squoosh",        "url": "https://squoosh.meirong.dev", "accepted_statuscodes": ["302"]},
         {"name": "ArgoCD",         "url": "https://argocd.meirong.dev"},
-        {"name": "Kopia Backup",   "url": "https://backup.meirong.dev", "accepted_statuscodes": ["401"]},
+        {"name": "Kopia Backup",   "url": "https://backup.meirong.dev",  "accepted_statuscodes": ["401"]},
         {"name": "Uptime Kuma",    "url": "https://status.meirong.dev"},
     ]
 
