@@ -1,12 +1,75 @@
-# SSO Integration Plan — ZITADEL + oauth2-proxy + Traefik ForwardAuth
+# SSO Integration Plan — oauth2-proxy + Traefik ForwardAuth (+ ZITADEL 待定)
 
 **Date:** 2026-02-25  
-**Status:** In Progress  
+**Updated:** 2026-02-27  
+**Status:** ✅ Phase 1 已完成 | 🔲 Phase 2 (ZITADEL) 待实施  
 **Author:** Matthew  
 
 ---
 
-## 1. Background & Goal
+## 当前实际状态（2026-02-27）
+
+> **ZITADEL 目前未部署，不在当前 SSO 链路中。**
+
+### 实际流量链路
+
+```
+Internet → Cloudflare Tunnel → Traefik (oracle-k3s)
+                                      │
+                          ExtensionRef Filter (per HTTPRoute)
+                                      │
+                              Traefik Middleware
+                           sso-forwardauth (kube-system)
+                                      │  ForwardAuth
+                              oauth2-proxy (auth-system)
+                                      │
+                             GitHub OAuth2 App
+                           (provider=github, user=meirongdev)
+```
+
+### 组件说明
+
+| 组件 | 状态 | 位置 | 说明 |
+|------|------|------|------|
+| **oauth2-proxy** | ✅ 运行中 | oracle-k3s `auth-system` | `--provider=github --github-user=meirongdev` |
+| **Traefik Middleware** `sso-forwardauth` | ✅ 运行中 | oracle-k3s `kube-system` | ForwardAuth → `http://oauth2-proxy.auth-system.svc:4180/oauth2/auth` |
+| **ZITADEL** | ❌ 未部署 | — | Phase 2 计划，homelab 集群，尚未实施 |
+
+### 受 SSO 保护的服务（当前）
+
+所有服务均在 oracle-k3s 上，通过 Traefik ForwardAuth 保护。访问任意服务时若无有效 cookie，均跳转至 GitHub OAuth 登录。
+
+| 服务 | URL | SSO 方式 |
+|------|-----|---------|
+| Homepage | `home.meirong.dev` | ForwardAuth (302 → GitHub) |
+| IT-Tools | `tool.meirong.dev` | ForwardAuth (302 → GitHub) |
+| Stirling-PDF | `pdf.meirong.dev` | ForwardAuth (302 → GitHub) |
+| Squoosh | `squoosh.meirong.dev` | ForwardAuth (302 → GitHub) |
+| Calibre-Web | `book.meirong.dev` | ForwardAuth (302 → GitHub) |
+| Grafana | `grafana.meirong.dev` | ForwardAuth (302 → GitHub) |
+| HashiCorp Vault | `vault.meirong.dev` | ForwardAuth (302 → GitHub) |
+| ArgoCD | `argocd.meirong.dev` | ForwardAuth (302 → GitHub) |
+| Kopia Backup | `backup.meirong.dev` | ForwardAuth (302 → GitHub) |
+
+**不受 SSO 保护（公开）：**
+- `status.meirong.dev` — Uptime Kuma 状态页，公开查看
+- `rss.meirong.dev` — Miniflux，保留自带 username/password 登录
+
+### oauth2-proxy 关键配置
+
+```
+--provider=github
+--github-user=meirongdev        # 只允许该 GitHub 用户
+--email-domain=*
+--upstream=static://202         # 纯 ForwardAuth 模式（不反代）
+--cookie-domain=.meirong.dev    # 单次登录覆盖所有子域名
+--cookie-expire=168h            # 7 天 session
+--redirect-url=https://oauth.meirong.dev/oauth2/callback
+```
+
+**Vault 密钥路径：** `secret/oracle-k3s/oauth2-proxy`（`client-id`, `client-secret`, `cookie-secret`）
+
+---
 
 All user-facing services are now split across two clusters:
 
@@ -20,6 +83,8 @@ Currently none of these services share authentication — each has its own login
 ---
 
 ## 2. Architecture
+
+> ⚠️ 下方架构图是**计划中**的最终状态（含 ZITADEL）。**当前实际运行的是 Phase 1**，ZITADEL 替换为 GitHub OAuth2。
 
 ```
 Internet → Cloudflare Tunnel → Traefik (oracle-k3s)
@@ -215,17 +280,20 @@ oauth2-proxy needs its own HTTPRoute for the OAuth2 callback:
 
 Add `oauth` subdomain to `cloud/oracle/cloudflare/terraform.tfvars`.
 
-#### 5.5 Verification checklist
+#### 5.5 Verification checklist（Phase 1 — ✅ 已全部完成）
 
-- [ ] oauth2-proxy pod is `Running` in `auth-system` namespace
-- [ ] Middleware resource created successfully
-- [ ] Visit `tool.meirong.dev` → redirected to GitHub OAuth login
-- [ ] After GitHub login → IT-Tools accessible
-- [ ] Session cookie persists across `tool.meirong.dev`, `squoosh.meirong.dev`, `pdf.meirong.dev`, `home.meirong.dev`
-- [ ] `status.meirong.dev` remains accessible without login
-- [ ] `rss.meirong.dev` still uses built-in login (unchanged)
+- [x] oauth2-proxy pod is `Running` in `auth-system` namespace
+- [x] Middleware resource created successfully
+- [x] Visit `tool.meirong.dev` → redirected to GitHub OAuth login
+- [x] After GitHub login → IT-Tools accessible
+- [x] Session cookie persists across `tool.meirong.dev`, `squoosh.meirong.dev`, `pdf.meirong.dev`, `home.meirong.dev`
+- [x] `status.meirong.dev` remains accessible without login
+- [x] `rss.meirong.dev` still uses built-in login (unchanged)
+- [x] `backup.meirong.dev` (Kopia) protected via Cloudflare Tunnel → Traefik → ForwardAuth
 
-### Phase 2: ZITADEL + Homelab SSO (Future)
+### Phase 2: ZITADEL + Homelab SSO（未实施）
+
+> ZITADEL 目前**未部署**。以下为待实施计划。
 
 1. Deploy ZITADEL on homelab (`zitadel` namespace)
 2. Add `auth.meirong.dev` DNS record
