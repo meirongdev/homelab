@@ -18,14 +18,14 @@ data:
     MONITORS = [
         {"name": "Homepage",       "url": "https://home.meirong.dev",    "accepted_statuscodes": ["302"]},
         {"name": "Miniflux",       "url": "https://rss.meirong.dev"},
-        {"name": "Calibre-Web",    "url": "https://book.meirong.dev"},
-        {"name": "Grafana",        "url": "https://grafana.meirong.dev"},
-        {"name": "HashiCorp Vault","url": "https://vault.meirong.dev"},
+        {"name": "Calibre-Web",    "url": "https://book.meirong.dev",    "accepted_statuscodes": ["302"]},
+        {"name": "Grafana",        "url": "https://grafana.meirong.dev", "accepted_statuscodes": ["302"]},
+        {"name": "HashiCorp Vault","url": "https://vault.meirong.dev",   "accepted_statuscodes": ["302"]},
         {"name": "IT-Tools",       "url": "https://tool.meirong.dev",    "accepted_statuscodes": ["302"]},
         {"name": "Stirling-PDF",   "url": "https://pdf.meirong.dev",     "accepted_statuscodes": ["302"]},
         {"name": "Squoosh",        "url": "https://squoosh.meirong.dev", "accepted_statuscodes": ["302"]},
-        {"name": "ArgoCD",         "url": "https://argocd.meirong.dev"},
-        {"name": "Kopia Backup",   "url": "https://backup.meirong.dev",  "accepted_statuscodes": ["401"]},
+        {"name": "ArgoCD",         "url": "https://argocd.meirong.dev",  "accepted_statuscodes": ["302"]},
+        {"name": "Kopia Backup",   "url": "https://backup.meirong.dev",  "accepted_statuscodes": ["302"]},
         {"name": "Uptime Kuma",    "url": "https://status.meirong.dev"},
     ]
 
