@@ -1,4 +1,5 @@
 namespace := "monitoring"
+ctx := "k3s-homelab"
 set dotenv-load
 
 add-repos:
@@ -12,22 +13,23 @@ add-repos:
     helm repo update
 
 create-namespace:
-    kubectl create namespace {{namespace}} --dry-run=client -o yaml | kubectl apply -f -
+    kubectl --context {{ctx}} create namespace {{namespace}} --dry-run=client -o yaml | kubectl --context {{ctx}} apply -f -
 
 create-grafana-secret:
     @echo "🔒 Grafana secrets are managed by Vault and External Secrets Operator."
-    @kubectl get secret grafana-admin-credentials -n {{namespace}} > /dev/null 2>&1 || (echo "❌ Error: grafana-admin-credentials secret not found. Check Vault/ESO sync." && exit 1)
+    @kubectl --context {{ctx}} get secret grafana-admin-credentials -n {{namespace}} > /dev/null 2>&1 || (echo "❌ Error: grafana-admin-credentials secret not found. Check Vault/ESO sync." && exit 1)
 
 create-cloudflare-secret:
     @echo "🔒 Cloudflare secrets are managed by Vault and External Secrets Operator."
-    @kubectl create namespace cloudflare --dry-run=client -o yaml | kubectl apply -f -
-    @kubectl get secret cloudflare-tunnel-token -n cloudflare > /dev/null 2>&1 || (echo "❌ Error: cloudflare-tunnel-token secret not found. Check Vault/ESO sync." && exit 1)
+    @kubectl --context {{ctx}} create namespace cloudflare --dry-run=client -o yaml | kubectl --context {{ctx}} apply -f -
+    @kubectl --context {{ctx}} get secret cloudflare-tunnel-token -n cloudflare > /dev/null 2>&1 || (echo "❌ Error: cloudflare-tunnel-token secret not found. Check Vault/ESO sync." && exit 1)
 
 # 部署 Prometheus + Grafana
 deploy-prometheus: create-grafana-secret
     @echo "⏳ Deploying Prometheus stack (this may take 5-10 minutes)..."
     helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
         --namespace {{namespace}} \
+        --kube-context {{ctx}} \
         --values values/kube-prometheus-stack.yaml \
         --wait \
         --timeout 15m \
@@ -36,6 +38,7 @@ deploy-prometheus: create-grafana-secret
 deploy-prometheus-nowait: create-grafana-secret
     helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
         --namespace {{namespace}} \
+        --kube-context {{ctx}} \
         --values values/kube-prometheus-stack.yaml \
         --timeout 15m
     @echo "✅ Helm release created. Check status with: just status"
@@ -43,6 +46,7 @@ deploy-prometheus-nowait: create-grafana-secret
 deploy-loki:
     helm upgrade --install loki grafana/loki \
         --namespace {{namespace}} \
+        --kube-context {{ctx}} \
         --values values/loki.yaml \
         --wait \
         --timeout 10m
@@ -50,6 +54,7 @@ deploy-loki:
 deploy-tempo:
     helm upgrade --install tempo grafana/tempo \
         --namespace {{namespace}} \
+        --kube-context {{ctx}} \
         --values values/tempo.yaml \
         --wait \
         --timeout 10m
@@ -58,83 +63,84 @@ deploy-tempo:
 deploy-otel-collector: add-repos
     helm upgrade --install opentelemetry-collector open-telemetry/opentelemetry-collector \
         --namespace {{namespace}} \
+        --kube-context {{ctx}} \
         --values values/opentelemetry-collector.yaml \
         --wait \
         --timeout 5m
 
 # 删除 OTel Collector
 remove-otel-collector:
-    helm uninstall opentelemetry-collector -n {{namespace}} || true
+    helm uninstall opentelemetry-collector -n {{namespace}} --kube-context {{ctx}} || true
 
 # ⬇️ 个人服务相关命令 ⬇️
 personal_ns := "personal-services"
 
 # 部署 Calibre-Web (使用原生 K8s 清单)
 deploy-calibre:
-    kubectl apply -f manifests/calibre-web.yaml
+    kubectl --context {{ctx}} apply -f manifests/calibre-web.yaml
 
 # 删除 Calibre-Web
 delete-calibre:
-    kubectl delete -f manifests/calibre-web.yaml
+    kubectl --context {{ctx}} delete -f manifests/calibre-web.yaml
 
 # 部署 IT-Tools
 deploy-it-tools:
-    kubectl apply -f manifests/it-tools.yaml
+    kubectl --context {{ctx}} apply -f manifests/it-tools.yaml
 
 # 删除 IT-Tools
 delete-it-tools:
-    kubectl delete -f manifests/it-tools.yaml
+    kubectl --context {{ctx}} delete -f manifests/it-tools.yaml
 
 # 部署 Stirling-PDF
 deploy-pdf:
-    kubectl apply -f manifests/stirling-pdf.yaml
+    kubectl --context {{ctx}} apply -f manifests/stirling-pdf.yaml
 
 # 删除 Stirling-PDF
 delete-pdf:
-    kubectl delete -f manifests/stirling-pdf.yaml
+    kubectl --context {{ctx}} delete -f manifests/stirling-pdf.yaml
 
 # 部署 Cloudflare Tunnel
 deploy-cloudflare-tunnel: create-cloudflare-secret
-    kubectl apply -f manifests/cloudflare-tunnel.yaml
+    kubectl --context {{ctx}} apply -f manifests/cloudflare-tunnel.yaml
 
 # 删除 Cloudflare Tunnel
 delete-cloudflare-tunnel:
-    kubectl delete -f manifests/cloudflare-tunnel.yaml
+    kubectl --context {{ctx}} delete -f manifests/cloudflare-tunnel.yaml
 
 # 部署 Gateway API 配置 (Traefik + Gateway + HTTPRoutes)
 deploy-gateway:
-    kubectl apply -f manifests/traefik-config.yaml
+    kubectl --context {{ctx}} apply -f manifests/traefik-config.yaml
     @echo "⏳ Waiting for Traefik to restart with Gateway API provider..."
     sleep 10
-    kubectl apply -f manifests/gateway.yaml
+    kubectl --context {{ctx}} apply -f manifests/gateway.yaml
     @echo "✅ Gateway API deployed!"
 
 # 删除 Gateway API 配置
 delete-gateway:
-    kubectl delete -f manifests/gateway.yaml || true
-    kubectl delete -f manifests/traefik-config.yaml || true
+    kubectl --context {{ctx}} delete -f manifests/gateway.yaml || true
+    kubectl --context {{ctx}} delete -f manifests/traefik-config.yaml || true
 
 # 查看个人服务状态
 status-personal:
-    kubectl get all,pvc -n {{personal_ns}}
+    kubectl --context {{ctx}} get all,pvc -n {{personal_ns}}
 
 # ⬇️ Homepage 仪表盘 ⬇️
 deploy-homepage:
-    kubectl apply -f manifests/homepage.yaml
+    kubectl --context {{ctx}} apply -f manifests/homepage.yaml
     @echo "✅ Homepage deployed! Access at http://<NodeIP>:30080"
 
 delete-homepage:
-    kubectl delete -f manifests/homepage.yaml
+    kubectl --context {{ctx}} delete -f manifests/homepage.yaml
 
 # 更新 Homepage 配置并重启（ArgoCD 管理下直接 apply + restart）
 update-homepage:
-    kubectl apply -f manifests/homepage.yaml
-    kubectl rollout restart deployment/homepage -n homepage
-    kubectl rollout status deployment/homepage -n homepage --timeout=60s
+    kubectl --context {{ctx}} apply -f manifests/homepage.yaml
+    kubectl --context {{ctx}} rollout restart deployment/homepage -n homepage
+    kubectl --context {{ctx}} rollout status deployment/homepage -n homepage --timeout=60s
 
 homepage:
     @echo "Homepage is available at http://localhost:8080"
-    kubectl port-forward -n homepage svc/homepage 8080:3000
+    kubectl --context {{ctx}} port-forward -n homepage svc/homepage 8080:3000
 
 deploy-all: add-repos create-namespace deploy-prometheus deploy-loki deploy-tempo
     @echo "✅ All monitoring components deployed successfully!"
@@ -142,56 +148,56 @@ deploy-all: add-repos create-namespace deploy-prometheus deploy-loki deploy-temp
 # 检查部署状态（详细版）
 status:
     @echo "=== Helm Releases ==="
-    helm list -n {{namespace}}
+    helm list -n {{namespace}} --kube-context {{ctx}}
     @echo ""
     @echo "=== Pods Status ==="
-    kubectl get pods -n {{namespace}} -o wide
+    kubectl --context {{ctx}} get pods -n {{namespace}} -o wide
     @echo ""
     @echo "=== Events (Recent) ==="
-    kubectl get events -n {{namespace}} --sort-by='.lastTimestamp' | tail -20
+    kubectl --context {{ctx}} get events -n {{namespace}} --sort-by='.lastTimestamp' | tail -20
     @echo ""
     @echo "=== PVC Status ==="
-    kubectl get pvc -n {{namespace}}
+    kubectl --context {{ctx}} get pvc -n {{namespace}}
 
 # 查看失败的 pod 详情
 debug-pods:
     #!/usr/bin/env bash
     echo "=== Checking for problematic pods ==="
-    kubectl get pods -n {{namespace}} | grep -v "Running\|Completed" || echo "All pods are running"
+    kubectl --context {{ctx}} get pods -n {{namespace}} | grep -v "Running\|Completed" || echo "All pods are running"
     echo ""
     echo "=== Describing non-running pods ==="
-    for pod in $(kubectl get pods -n {{namespace}} -o json | jq -r '.items[] | select(.status.phase!="Running" and .status.phase!="Succeeded") | .metadata.name'); do
+    for pod in $(kubectl --context {{ctx}} get pods -n {{namespace}} -o json | jq -r '.items[] | select(.status.phase!="Running" and .status.phase!="Succeeded") | .metadata.name'); do
         echo "--- Pod: $pod ---"
-        kubectl describe pod $pod -n {{namespace}} | tail -30
+        kubectl --context {{ctx}} describe pod $pod -n {{namespace}} | tail -30
         echo ""
     done
 
 # 查看特定 pod 的日志
 logs pod:
-    kubectl logs {{pod}} -n {{namespace}} --tail=100 --follow
+    kubectl --context {{ctx}} logs {{pod}} -n {{namespace}} --tail=100 --follow
 
 remove-all:
-    helm uninstall kube-prometheus-stack -n {{namespace}} || true
-    helm uninstall loki -n {{namespace}} || true
-    helm uninstall tempo -n {{namespace}} || true
-    helm uninstall calibre-web -n {{personal_ns}} || true
-    kubectl delete secret grafana-admin-credentials -n {{namespace}} || true
-    kubectl delete namespace {{namespace}} || true
-    kubectl delete namespace {{personal_ns}} || true
+    helm uninstall kube-prometheus-stack -n {{namespace}} --kube-context {{ctx}} || true
+    helm uninstall loki -n {{namespace}} --kube-context {{ctx}} || true
+    helm uninstall tempo -n {{namespace}} --kube-context {{ctx}} || true
+    helm uninstall calibre-web -n {{personal_ns}} --kube-context {{ctx}} || true
+    kubectl --context {{ctx}} delete secret grafana-admin-credentials -n {{namespace}} || true
+    kubectl --context {{ctx}} delete namespace {{namespace}} || true
+    kubectl --context {{ctx}} delete namespace {{personal_ns}} || true
 
 get-grafana-password:
-    @kubectl get secret -n {{namespace}} grafana-admin-credentials -o jsonpath="{.data.admin-password}" | base64 -d
+    @kubectl --context {{ctx}} get secret -n {{namespace}} grafana-admin-credentials -o jsonpath="{.data.admin-password}" | base64 -d
     @echo ""
 
 grafana:
     @echo "Grafana is available at http://localhost:3000"
     @echo "Username: admin"
     @echo "Password: (run 'just get-grafana-password' to retrieve)"
-    kubectl port-forward -n {{namespace}} svc/kube-prometheus-stack-grafana 3000:80
+    kubectl --context {{ctx}} port-forward -n {{namespace}} svc/kube-prometheus-stack-grafana 3000:80
 
 prometheus:
     @echo "Prometheus is available at http://localhost:9090"
-    kubectl port-forward -n {{namespace}} svc/kube-prometheus-stack-prometheus 9090:9090
+    kubectl --context {{ctx}} port-forward -n {{namespace}} svc/kube-prometheus-stack-prometheus 9090:9090
 
 init:
     #!/usr/bin/env bash
@@ -206,45 +212,49 @@ init:
 # 查看集群资源使用情况
 check-resources:
     @echo "=== Node Resources ==="
-    kubectl top nodes
+    kubectl --context {{ctx}} top nodes
     @echo ""
     @echo "=== Pod Resources in {{namespace}} ==="
-    kubectl top pods -n {{namespace}}
+    kubectl --context {{ctx}} top pods -n {{namespace}}
 
 setup-nfs-provisioner: add-repos
     helm upgrade --install nfs-client nfs-subdir-external-provisioner/nfs-subdir-external-provisioner \
       --namespace default \
+      --kube-context {{ctx}} \
       --values values/nfs-values.yaml
 
 # Update Prometheus stack
 update-prometheus:
     helm upgrade kube-prometheus-stack prometheus-community/kube-prometheus-stack \
       -n monitoring \
+      --kube-context {{ctx}} \
       -f values/kube-prometheus-stack.yaml
 
 # setup postgres
 setup-postgres: add-repos
     helm upgrade --install postgresql bitnami/postgresql -n database \
     --create-namespace \
+    --kube-context {{ctx}} \
     -f values/postgresql-values.yaml
 
 # get postgres auto-generated password
 get-postgres-password:
-    @kubectl get secret --namespace database postgresql -o jsonpath="{.data.postgres-password}" | base64 -d
+    @kubectl --context {{ctx}} get secret --namespace database postgresql -o jsonpath="{.data.postgres-password}" | base64 -d
     @echo ""
 
 # ⬇️ Vault & Secret Management ⬇️
 vault_ns := "vault"
 
 deploy-vault:
-    kubectl create namespace {{vault_ns}} --dry-run=client -o yaml | kubectl apply -f -
+    kubectl --context {{ctx}} create namespace {{vault_ns}} --dry-run=client -o yaml | kubectl --context {{ctx}} apply -f -
     helm upgrade --install vault hashicorp/vault \
         --namespace {{vault_ns}} \
+        --kube-context {{ctx}} \
         --values values/vault-values.yaml
 
 # 初始化 Vault (仅第一次运行)
 vault-init:
-    kubectl exec vault-0 -n {{vault_ns}} -- vault operator init -key-shares=1 -key-threshold=1 -format=json > vault-keys.json
+    kubectl --context {{ctx}} exec vault-0 -n {{vault_ns}} -- vault operator init -key-shares=1 -key-threshold=1 -format=json > vault-keys.json
     @echo "✅ Vault initialized. Keys saved to vault-keys.json (DO NOT COMMIT THIS FILE)"
 
 # 解锁 Vault (基于 vault-keys.json)
@@ -252,7 +262,7 @@ vault-unseal:
     #!/usr/bin/env bash
     set -euo pipefail
     key=$(jq -r ".unseal_keys_b64[0]" vault-keys.json)
-    kubectl exec vault-0 -n {{vault_ns}} -- vault operator unseal $key
+    kubectl --context {{ctx}} exec vault-0 -n {{vault_ns}} -- vault operator unseal $key
     echo "✅ Vault unsealed."
 
 # 部署 External Secrets Operator
@@ -260,6 +270,7 @@ deploy-eso:
     helm upgrade --install external-secrets external-secrets/external-secrets \
         --namespace external-secrets \
         --create-namespace \
+        --kube-context {{ctx}} \
         --values values/external-secrets-values.yaml
 
 # 配置 Vault 与 ESO 的连接 (需要先 init)
@@ -267,20 +278,20 @@ setup-vault-eso:
     #!/usr/bin/env bash
     set -euo pipefail
     token=$(jq -r ".root_token" vault-keys.json)
-    kubectl create secret generic vault-token \
+    kubectl --context {{ctx}} create secret generic vault-token \
         --namespace external-secrets \
         --from-literal=token=$token \
-        --dry-run=client -o yaml | kubectl apply -f -
-    kubectl apply -f manifests/vault-eso-config.yaml
+        --dry-run=client -o yaml | kubectl --context {{ctx}} apply -f -
+    kubectl --context {{ctx}} apply -f manifests/vault-eso-config.yaml
 
 # 备份 vault-keys.json 为 K8s Secret（防止丢失）
 vault-backup-keys:
     #!/usr/bin/env bash
     set -euo pipefail
-    kubectl create secret generic vault-backup-keys \
+    kubectl --context {{ctx}} create secret generic vault-backup-keys \
         --namespace {{vault_ns}} \
         --from-literal=vault-keys.json="$(cat vault-keys.json)" \
-        --dry-run=client -o yaml | kubectl apply -f -
+        --dry-run=client -o yaml | kubectl --context {{ctx}} apply -f -
     echo "✅ vault-keys.json backed up to K8s secret vault/vault-backup-keys"
 
 # ⬇️ ArgoCD GitOps ⬇️
@@ -289,21 +300,21 @@ argocd_ns := "argocd"
 # 一键安装 ArgoCD + 应用配置（幂等，可重复执行）
 deploy-argocd:
     # 1. 创建 namespace（idempotent）
-    kubectl create namespace {{argocd_ns}} --dry-run=client -o yaml | kubectl apply -f -
+    kubectl --context {{ctx}} create namespace {{argocd_ns}} --dry-run=client -o yaml | kubectl --context {{ctx}} apply -f -
     # 2. 安装/更新 ArgoCD 核心组件（--server-side 避免 CRD 注释超限问题）
-    kubectl apply -n {{argocd_ns}} -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml --server-side
+    kubectl --context {{ctx}} apply -n {{argocd_ns}} -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml --server-side
     @echo "⏳ Waiting for ArgoCD server to be ready..."
-    kubectl rollout status deployment/argocd-server -n {{argocd_ns}} --timeout=8m
+    kubectl --context {{ctx}} rollout status deployment/argocd-server -n {{argocd_ns}} --timeout=8m
     # 3. 禁用内置 TLS（由 Traefik 处理）
     # 注意：使用 --server-side 确保字段所有权，防止 install.yaml 重新 apply 后被覆盖
-    kubectl apply --server-side -f ../../argocd/install/argocd-cm-patch.yaml
-    kubectl rollout restart deployment/argocd-server -n {{argocd_ns}}
-    kubectl rollout status deployment/argocd-server -n {{argocd_ns}} --timeout=3m
+    kubectl --context {{ctx}} apply --server-side -f ../../argocd/install/argocd-cm-patch.yaml
+    kubectl --context {{ctx}} rollout restart deployment/argocd-server -n {{argocd_ns}}
+    kubectl --context {{ctx}} rollout status deployment/argocd-server -n {{argocd_ns}} --timeout=3m
     # 4. 注册 Gateway HTTPRoute（argocd namespace 已存在）
-    kubectl apply -f manifests/gateway.yaml
+    kubectl --context {{ctx}} apply -f manifests/gateway.yaml
     # 5. 注册 AppProject + Applications
-    kubectl apply -f ../../argocd/projects/homelab.yaml
-    kubectl apply -f ../../argocd/applications/
+    kubectl --context {{ctx}} apply -f ../../argocd/projects/homelab.yaml
+    kubectl --context {{ctx}} apply -f ../../argocd/applications/
     @echo "✅ ArgoCD deployed! Access at https://argocd.meirong.dev"
     @echo "Initial password: run 'just argocd-password'"
 
@@ -313,24 +324,24 @@ deploy-argocd-dns:
 
 # 获取 ArgoCD 初始管理员密码
 argocd-password:
-    @kubectl -n {{argocd_ns}} get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+    @kubectl --context {{ctx}} -n {{argocd_ns}} get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
     @echo ""
 
 # 触发全量同步（通过 kubectl annotation，无需 argocd CLI）
 argocd-sync:
     @echo "⏳ Triggering sync for all applications..."
-    @kubectl get applications -n {{argocd_ns}} -o name | xargs -I{} kubectl annotate {} -n {{argocd_ns}} argocd.argoproj.io/refresh=normal --overwrite
+    @kubectl --context {{ctx}} get applications -n {{argocd_ns}} -o name | xargs -I{} kubectl --context {{ctx}} annotate {} -n {{argocd_ns}} argocd.argoproj.io/refresh=normal --overwrite
     @echo "✅ Sync triggered. Waiting for completion..."
     @sleep 15
-    @kubectl get applications -n {{argocd_ns}}
+    @kubectl --context {{ctx}} get applications -n {{argocd_ns}}
 
 # 查看所有 Application 状态
 argocd-status:
     @echo "=== ArgoCD Applications ==="
-    kubectl get applications -n {{argocd_ns}}
+    kubectl --context {{ctx}} get applications -n {{argocd_ns}}
     @echo ""
     @echo "=== ArgoCD Pods ==="
-    kubectl get pods -n {{argocd_ns}}
+    kubectl --context {{ctx}} get pods -n {{argocd_ns}}
 
 # ⬇️ Kopia Backup Server ⬇️
 kopia_ns := "kopia"
@@ -339,11 +350,11 @@ kopia_ns := "kopia"
 kopia-add-user user:
     #!/usr/bin/env bash
     set -euo pipefail
-    pod=$(kubectl get pod -n {{kopia_ns}} -l app=kopia -o jsonpath='{.items[0].metadata.name}')
-    password=$(kubectl get secret -n {{kopia_ns}} kopia-secret -o jsonpath='{.data.password}' | base64 -d)
-    kubectl exec -n {{kopia_ns}} "$pod" -c kopia -- kopia server user add "{{user}}" --user-password="$password"
-    kubectl rollout restart deployment/kopia -n {{kopia_ns}}
-    kubectl rollout status deployment/kopia -n {{kopia_ns}} --timeout=90s
+    pod=$(kubectl --context {{ctx}} get pod -n {{kopia_ns}} -l app=kopia -o jsonpath='{.items[0].metadata.name}')
+    password=$(kubectl --context {{ctx}} get secret -n {{kopia_ns}} kopia-secret -o jsonpath='{.data.password}' | base64 -d)
+    kubectl --context {{ctx}} exec -n {{kopia_ns}} "$pod" -c kopia -- kopia server user add "{{user}}" --user-password="$password"
+    kubectl --context {{ctx}} rollout restart deployment/kopia -n {{kopia_ns}}
+    kubectl --context {{ctx}} rollout status deployment/kopia -n {{kopia_ns}} --timeout=90s
     echo "✅ User '{{user}}' added. Connect with:"
     echo "   kopia repository connect server \\"
     echo "     --url=https://10.10.10.10:31515 \\"
@@ -353,8 +364,8 @@ kopia-add-user user:
 # 列出 Kopia 服务器用户
 kopia-list-users:
     #!/usr/bin/env bash
-    pod=$(kubectl get pod -n {{kopia_ns}} -l app=kopia -o jsonpath='{.items[0].metadata.name}')
-    kubectl exec -n {{kopia_ns}} "$pod" -c kopia -- kopia server user list
+    pod=$(kubectl --context {{ctx}} get pod -n {{kopia_ns}} -l app=kopia -o jsonpath='{.items[0].metadata.name}')
+    kubectl --context {{ctx}} exec -n {{kopia_ns}} "$pod" -c kopia -- kopia server user list
 
 # 获取 Kopia TLS 证书指纹
 kopia-fingerprint:
@@ -363,10 +374,10 @@ kopia-fingerprint:
 # 查看 Kopia 服务器状态
 kopia-status:
     @echo "=== Kopia Pods ==="
-    @kubectl get pods -n {{kopia_ns}}
+    @kubectl --context {{ctx}} get pods -n {{kopia_ns}}
     @echo ""
     @echo "=== Kopia PVCs ==="
-    @kubectl get pvc -n {{kopia_ns}}
+    @kubectl --context {{ctx}} get pvc -n {{kopia_ns}}
     @echo ""
     @echo "=== Registered Users ==="
     @just kopia-list-users
@@ -378,35 +389,35 @@ vault-setup-auto-unseal:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "⏳ Extracting unseal key from vault-backup-keys secret..."
-    UNSEAL_KEY=$(kubectl get secret vault-backup-keys -n {{vault_ns}} \
+    UNSEAL_KEY=$(kubectl --context {{ctx}} get secret vault-backup-keys -n {{vault_ns}} \
         -o jsonpath='{.data.vault-keys\.json}' | base64 -d | \
         python3 -c "import json,sys; print(json.load(sys.stdin)['unseal_keys_b64'][0])")
-    kubectl create secret generic vault-auto-unseal -n {{vault_ns}} \
-        --from-literal=key="$UNSEAL_KEY" --dry-run=client -o yaml | kubectl apply -f -
+    kubectl --context {{ctx}} create secret generic vault-auto-unseal -n {{vault_ns}} \
+        --from-literal=key="$UNSEAL_KEY" --dry-run=client -o yaml | kubectl --context {{ctx}} apply -f -
     echo "⏳ Upgrading Vault Helm chart with auto-unseal postStart hook..."
-    helm upgrade vault hashicorp/vault -n {{vault_ns}} -f values/vault-values.yaml
+    helm upgrade vault hashicorp/vault -n {{vault_ns}} --kube-context {{ctx}} -f values/vault-values.yaml
     echo "✅ Vault auto-unseal configured. Next restart will unseal automatically."
 
 # 重启后健康检查（快速诊断断电恢复状态）
 post-restart-check:
     @echo "=== Vault Status ==="
-    @kubectl exec -n {{vault_ns}} vault-0 -- vault status 2>/dev/null | grep -E "Sealed|HA Mode|Active Since" || echo "❌ Vault unreachable"
+    @kubectl --context {{ctx}} exec -n {{vault_ns}} vault-0 -- vault status 2>/dev/null | grep -E "Sealed|HA Mode|Active Since" || echo "❌ Vault unreachable"
     @echo ""
     @echo "=== ExternalSecrets Sync Status ==="
-    @kubectl get externalsecret -A 2>/dev/null | grep -v "SecretSynced" | grep -v "^NAMESPACE" || echo "✅ All secrets synced"
+    @kubectl --context {{ctx}} get externalsecret -A 2>/dev/null | grep -v "SecretSynced" | grep -v "^NAMESPACE" || echo "✅ All secrets synced"
     @echo ""
     @echo "=== Non-Running Pods ==="
-    @kubectl get pods -A --field-selector='status.phase!=Running,status.phase!=Succeeded' 2>/dev/null | grep -v "^NAMESPACE" || echo "✅ All pods running"
+    @kubectl --context {{ctx}} get pods -A --field-selector='status.phase!=Running,status.phase!=Succeeded' 2>/dev/null | grep -v "^NAMESPACE" || echo "✅ All pods running"
     @echo ""
     @echo "=== ArgoCD Insecure Mode (防止 redirect loop) ==="
-    @kubectl get configmap argocd-cmd-params-cm -n {{argocd_ns}} -o jsonpath='{.data.server\.insecure}' 2>/dev/null | grep -q "true" \
+    @kubectl --context {{ctx}} get configmap argocd-cmd-params-cm -n {{argocd_ns}} -o jsonpath='{.data.server\.insecure}' 2>/dev/null | grep -q "true" \
         && echo "✅ server.insecure=true (正常)" \
         || (echo "❌ server.insecure 未设置！正在修复..." && \
-            kubectl apply --server-side -f ../../argocd/install/argocd-cm-patch.yaml && \
-            kubectl rollout restart deployment/argocd-server -n {{argocd_ns}})
+            kubectl --context {{ctx}} apply --server-side -f ../../argocd/install/argocd-cm-patch.yaml && \
+            kubectl --context {{ctx}} rollout restart deployment/argocd-server -n {{argocd_ns}})
     @echo ""
     @echo "=== ArgoCD Apps ==="
-    @kubectl get applications -n {{argocd_ns}} 2>/dev/null
+    @kubectl --context {{ctx}} get applications -n {{argocd_ns}} 2>/dev/null
 
 # Vault UI info
 vault-ui:
@@ -414,4 +425,4 @@ vault-ui:
     @echo "Root Token for login:"
     @jq -r ".root_token" vault-keys.json
     @echo "Starting port-forward to http://localhost:8200 ... Press Ctrl+C to stop."
-    kubectl port-forward -n {{vault_ns}} svc/vault 8200:8200
+    kubectl --context {{ctx}} port-forward -n {{vault_ns}} svc/vault 8200:8200
