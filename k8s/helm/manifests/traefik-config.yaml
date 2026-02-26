@@ -38,3 +38,132 @@ spec:
     - port: 9100
       targetPort: 9100
       name: metrics
+---
+# SSO ForwardAuth Middlewares — homelab cluster
+# ForwardAuth delegates auth to oracle-k3s oauth2-proxy via Tailscale subnet routing.
+# oracle-k3s oauth2-proxy ClusterIP: 10.53.182.179:4180 (reachable via Tailscale)
+#
+# Middleware must be in the SAME namespace as the HTTPRoute (Traefik Gateway API constraint).
+# Namespaces: personal-services, monitoring, vault, argocd, kopia
+#
+# Services protected:
+#   - book.meirong.dev    (calibre-web,  personal-services) — no built-in SSO
+#   - grafana.meirong.dev (grafana,      monitoring)        — has own login; ForwardAuth = extra layer
+#   - vault.meirong.dev   (vault,        vault)             — has own login; ForwardAuth = extra layer
+#   - argocd.meirong.dev  (argocd-server,argocd)            — has own login; ForwardAuth = extra layer
+#   - backup.meirong.dev  (kopia,        kopia)             — has own login; ForwardAuth = extra layer
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: sso-forwardauth
+  namespace: personal-services
+spec:
+  forwardAuth:
+    address: http://10.53.182.179:4180/
+    trustForwardHeader: true
+    authRequestHeaders:
+      - Cookie
+      - X-Forwarded-Host
+      - X-Forwarded-Uri
+      - X-Forwarded-Proto
+      - X-Real-Ip
+    authResponseHeaders:
+      - X-Auth-Request-User
+      - X-Auth-Request-Email
+      - X-Auth-Request-Groups
+      - Authorization
+      - Set-Cookie
+      - Location
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: sso-forwardauth
+  namespace: monitoring
+spec:
+  forwardAuth:
+    address: http://10.53.182.179:4180/
+    trustForwardHeader: true
+    authRequestHeaders:
+      - Cookie
+      - X-Forwarded-Host
+      - X-Forwarded-Uri
+      - X-Forwarded-Proto
+      - X-Real-Ip
+    authResponseHeaders:
+      - X-Auth-Request-User
+      - X-Auth-Request-Email
+      - X-Auth-Request-Groups
+      - Authorization
+      - Set-Cookie
+      - Location
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: sso-forwardauth
+  namespace: vault
+spec:
+  forwardAuth:
+    address: http://10.53.182.179:4180/
+    trustForwardHeader: true
+    authRequestHeaders:
+      - Cookie
+      - X-Forwarded-Host
+      - X-Forwarded-Uri
+      - X-Forwarded-Proto
+      - X-Real-Ip
+    authResponseHeaders:
+      - X-Auth-Request-User
+      - X-Auth-Request-Email
+      - X-Auth-Request-Groups
+      - Authorization
+      - Set-Cookie
+      - Location
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: sso-forwardauth
+  namespace: argocd
+spec:
+  forwardAuth:
+    address: http://10.53.182.179:4180/
+    trustForwardHeader: true
+    authRequestHeaders:
+      - Cookie
+      - X-Forwarded-Host
+      - X-Forwarded-Uri
+      - X-Forwarded-Proto
+      - X-Real-Ip
+    authResponseHeaders:
+      - X-Auth-Request-User
+      - X-Auth-Request-Email
+      - X-Auth-Request-Groups
+      - Authorization
+      - Set-Cookie
+      - Location
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: sso-forwardauth
+  namespace: kopia
+spec:
+  forwardAuth:
+    address: http://10.53.182.179:4180/
+    trustForwardHeader: true
+    authRequestHeaders:
+      - Cookie
+      - X-Forwarded-Host
+      - X-Forwarded-Uri
+      - X-Forwarded-Proto
+      - X-Real-Ip
+    authResponseHeaders:
+      - X-Auth-Request-User
+      - X-Auth-Request-Email
+      - X-Auth-Request-Groups
+      - Authorization
+      - Set-Cookie
+      - Location
