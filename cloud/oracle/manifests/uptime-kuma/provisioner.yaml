@@ -15,22 +15,31 @@ data:
     USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
     PASSWORD = os.environ["ADMIN_PASSWORD"]
 
-    # Internal URLs bypass SSO entirely (direct ClusterIP access).
-    # External URLs (k3s-homelab services) go via Cloudflare → SSO → 302.
+    # All internal URLs bypass SSO entirely.
+    # oracle-k3s services: direct ClusterIP via local CNI.
+    # k3s-homelab services: direct ClusterIP via Tailscale subnet routing
+    #   (oracle node advertises 10.52/16+10.53/16; homelab node advertises 10.42/16+10.43/16).
+    #   Requires iptables MASQUERADE on oracle node for pod→10.43.0.0/16 traffic
+    #   and ip route for 10.42-43.0.0/16 added to pod network namespace.
     MONITORS = [
-        # --- Local services (oracle-k3s) — bypass SSO via internal ClusterIP ---
+        # --- oracle-k3s local services ---
         {"name": "Homepage",       "url": "http://homepage.homepage.svc:3000"},
         {"name": "Miniflux",       "url": "http://miniflux.rss-system.svc:8080"},
         {"name": "IT-Tools",       "url": "http://it-tools.personal-services.svc:80"},
         {"name": "Squoosh",        "url": "http://squoosh.personal-services.svc:8080"},
         {"name": "Stirling-PDF",   "url": "http://stirling-pdf.personal-services.svc:8080/login"},
         {"name": "Uptime Kuma",    "url": "http://uptime-kuma.personal-services.svc:3001"},
-        # --- Remote services (k3s-homelab) — via Cloudflare Tunnel, SSO returns 302 ---
-        {"name": "Calibre-Web",    "url": "https://book.meirong.dev",    "accepted_statuscodes": ["302"]},
-        {"name": "Grafana",        "url": "https://grafana.meirong.dev", "accepted_statuscodes": ["302"]},
-        {"name": "HashiCorp Vault","url": "https://vault.meirong.dev",   "accepted_statuscodes": ["302"]},
-        {"name": "ArgoCD",         "url": "https://argocd.meirong.dev",  "accepted_statuscodes": ["302"]},
-        {"name": "Kopia Backup",   "url": "https://backup.meirong.dev",  "accepted_statuscodes": ["302"]},
+        # --- k3s-homelab services via Tailscale (ClusterIP 10.43.x.x) ---
+        # Grafana: /api/health returns 200 without auth
+        {"name": "Grafana",        "url": "http://10.43.70.241:80/api/health"},
+        # Vault: /v1/sys/health returns 200 when initialized and unsealed
+        {"name": "HashiCorp Vault","url": "http://10.43.29.201:8200/v1/sys/health"},
+        # Calibre-Web: /login returns 200 without auth
+        {"name": "Calibre-Web",    "url": "http://10.43.206.163:8083/login"},
+        # ArgoCD: HTTP→307→HTTPS; use HTTPS directly (self-signed cert)
+        {"name": "ArgoCD",         "url": "https://10.43.158.192/",      "ignoreTls": True},
+        # Kopia: HTTPS with self-signed cert, returns 401 (basic auth) — service is up
+        {"name": "Kopia Backup",   "url": "https://10.43.114.55:51515",  "accepted_statuscodes": ["401"], "ignoreTls": True},
     ]
 
     def wait_ready(timeout=120):
@@ -73,6 +82,8 @@ data:
             extra["accepted_statuscodes"] = m["accepted_statuscodes"]
         else:
             extra["accepted_statuscodes"] = ["200-299"]
+        if "ignoreTls" in m:
+            extra["ignoreTls"] = m["ignoreTls"]
         if m["name"] in existing:
             # Always update URL and accepted_statuscodes to ensure they stay in sync
             api.edit_monitor(existing[m["name"]]["id"], url=m["url"], **extra)
