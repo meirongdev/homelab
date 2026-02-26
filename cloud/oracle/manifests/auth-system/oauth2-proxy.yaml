@@ -1,0 +1,98 @@
+# oauth2-proxy — ForwardAuth middleware for oracle-k3s services
+# Phase 1: GitHub OAuth2 provider (temporary; will be replaced by ZITADEL in Phase 2)
+# Phase 2: Switch OIDC_ISSUER_URL to https://auth.meirong.dev (ZITADEL via Tailscale)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oauth2-proxy
+  namespace: auth-system
+  labels:
+    app: oauth2-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oauth2-proxy
+  template:
+    metadata:
+      labels:
+        app: oauth2-proxy
+    spec:
+      containers:
+        - name: oauth2-proxy
+          image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1
+          ports:
+            - containerPort: 4180
+              name: http
+          args:
+            - --provider=github
+            - --github-user=meirongdev
+            - --email-domain=*
+            - --upstream=static://202
+            - --http-address=0.0.0.0:4180
+            - --cookie-domain=.meirong.dev
+            - --cookie-secure=true
+            - --cookie-samesite=lax
+            - --cookie-expire=168h
+            - --redirect-url=https://oauth.meirong.dev/oauth2/callback
+            - --skip-provider-button=true
+            - --pass-access-token=false
+            - --pass-authorization-header=true
+            - --set-xauthrequest=true
+            # Trust X-Forwarded-* headers from Traefik; allows proper redirect handling
+            - --reverse-proxy=true
+            # Allow redirect to any *.meirong.dev subdomain after login
+            - --whitelist-domain=.meirong.dev
+            # Silence health check logs
+            - --silence-ping-logging=true
+          env:
+            - name: OAUTH2_PROXY_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: oauth2-proxy-secret
+                  key: client-id
+            - name: OAUTH2_PROXY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: oauth2-proxy-secret
+                  key: client-secret
+            - name: OAUTH2_PROXY_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: oauth2-proxy-secret
+                  key: cookie-secret
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 4180
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 4180
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oauth2-proxy
+  namespace: auth-system
+  labels:
+    app: oauth2-proxy
+spec:
+  type: ClusterIP
+  selector:
+    app: oauth2-proxy
+  ports:
+    - port: 4180
+      targetPort: 4180
+      name: http

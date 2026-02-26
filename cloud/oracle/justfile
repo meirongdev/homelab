@@ -77,6 +77,19 @@ deploy-rss:
 deploy-homepage:
     kubectl --context {{ctx}} apply -f manifests/homepage/
 
+# Deploy auth-system (oauth2-proxy for ForwardAuth SSO)
+deploy-auth:
+    kubectl --context {{ctx}} apply -f manifests/auth-system/namespace.yaml
+    kubectl --context {{ctx}} apply -f manifests/auth-system/external-secret.yaml
+    kubectl --context {{ctx}} apply -f manifests/auth-system/oauth2-proxy.yaml
+    kubectl --context {{ctx}} apply -f manifests/auth-system/httproute.yaml
+    @echo "⏳ Waiting for oauth2-proxy to be ready..."
+    kubectl --context {{ctx}} rollout status deployment oauth2-proxy -n auth-system --timeout=120s
+
+# Deploy personal services (IT-Tools, Stirling-PDF, Squoosh) with SSO
+deploy-personal-services:
+    kubectl --context {{ctx}} apply -f manifests/personal-services/
+
 # Deploy only uptime-kuma manifests (without provisioner job)
 deploy-uptime-kuma:
     kubectl --context {{ctx}} apply -f manifests/uptime-kuma/namespace.yaml

@@ -1,0 +1,44 @@
+# HTTPRoute for oauth2-proxy callback and auth endpoints
+# All subdomains on .meirong.dev will redirect to oauth.meirong.dev for OAuth2 callback
+---
+# ReferenceGrant: allow HTTPRoute in auth-system to reference services
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-gateway-to-auth-system
+  namespace: auth-system
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: auth-system
+  to:
+    - group: ""
+      kind: Service
+---
+# HTTPRoute: oauth.meirong.dev -> oauth2-proxy (handles /oauth2/* callbacks)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: oauth2-proxy
+  namespace: auth-system
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: oracle-gateway
+      namespace: kube-system
+      port: 8000
+  hostnames:
+    - "oauth.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: oauth2-proxy
+          port: 4180
+          weight: 1

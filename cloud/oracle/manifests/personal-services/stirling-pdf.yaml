@@ -1,3 +1,6 @@
+# stirling-pdf-auth ExternalSecret: provides initial admin credentials for Stirling-PDF's
+# built-in H2 database login. ForwardAuth is the outer SSO gate; this is the inner app login.
+# Phase 2: when ZITADEL is deployed, configure OAUTH2_ISSUER_URL env var for native SSO.
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
@@ -51,7 +54,7 @@ spec:
     spec:
       containers:
         - name: stirling-pdf
-          image: stirlingtools/stirling-pdf:latest
+          image: stirlingtools/stirling-pdf@sha256:74c9ad9e280087f0652bfc98c9b5524b03ea5c138050406d2e3936f9cd60906f
           ports:
             - containerPort: 8080
           env:
@@ -82,17 +85,15 @@ spec:
               cpu: 1000m
               memory: 1Gi
           livenessProbe:
-            httpGet:
-              path: /api/v1/info
+            tcpSocket:
               port: 8080
-            initialDelaySeconds: 30
+            initialDelaySeconds: 60
             periodSeconds: 20
             failureThreshold: 5
           readinessProbe:
-            httpGet:
-              path: /api/v1/info
+            tcpSocket:
               port: 8080
-            initialDelaySeconds: 15
+            initialDelaySeconds: 60
             periodSeconds: 10
       volumes:
         - name: configs
@@ -131,6 +132,12 @@ spec:
         - path:
             type: PathPrefix
             value: /
+      filters:
+        - type: ExtensionRef
+          extensionRef:
+            group: traefik.io
+            kind: Middleware
+            name: sso-forwardauth
       backendRefs:
         - group: ""
           kind: Service
