@@ -1,6 +1,5 @@
 # oauth2-proxy — ForwardAuth middleware for oracle-k3s services
-# Phase 1: GitHub OAuth2 provider (temporary; will be replaced by ZITADEL in Phase 2)
-# Phase 2: Switch OIDC_ISSUER_URL to https://auth.meirong.dev (ZITADEL via Tailscale)
+# Provider: ZITADEL OIDC (auth.meirong.dev)
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -26,8 +25,9 @@ spec:
             - containerPort: 4180
               name: http
           args:
-            - --provider=github
-            - --github-user=meirongdev
+            - --provider=oidc
+            - --oidc-issuer-url=https://auth.meirong.dev
+            - --scope=openid profile email
             - --email-domain=*
             - --upstream=static://202
             - --http-address=0.0.0.0:4180
@@ -40,6 +40,8 @@ spec:
             - --pass-access-token=false
             - --pass-authorization-header=true
             - --set-xauthrequest=true
+            - --oidc-email-claim=email
+            - --oidc-groups-claim=groups
             # Trust X-Forwarded-* headers from Traefik; allows proper redirect handling
             - --reverse-proxy=true
             # Allow redirect to any *.meirong.dev subdomain after login
