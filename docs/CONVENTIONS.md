@@ -104,6 +104,7 @@ just apply   # Apply DNS/Tunnel changes
   - `cloudflare` App → `manifests/cloudflare-tunnel.yaml`
   - `vault-eso` App → `manifests/{vault-eso-config,*-external-secret}.yaml`
   - `kopia` App → `manifests/kopia.yaml`
+  - `zitadel` App → `manifests/zitadel.yaml`
 - **NOT managed by ArgoCD** (manual `just` commands):
   - HashiCorp Vault — requires manual init/unseal
   - External Secrets Operator — depends on Vault
@@ -144,6 +145,7 @@ just apply   # Apply DNS/Tunnel changes
 | Grafana | `monitoring` | `grafana.meirong.dev` |
 | HashiCorp Vault | `vault` | `vault.meirong.dev` |
 | ArgoCD | `argocd` | `argocd.meirong.dev` |
+| ZITADEL (SSO) | `zitadel` | `auth.meirong.dev` |
 | Kopia Backup | `kopia` | `https://10.10.10.10:31515` (NodePort, LAN only) |
 | Uptime Kuma | `personal-services` | `status.meirong.dev` |
 | PostgreSQL | `database` | Internal only |

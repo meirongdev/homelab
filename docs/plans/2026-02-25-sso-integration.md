@@ -1,15 +1,15 @@
-# SSO Integration Plan — oauth2-proxy + Traefik ForwardAuth (+ ZITADEL 待定)
+# SSO Integration Plan — ZITADEL + oauth2-proxy + Traefik ForwardAuth
 
 **Date:** 2026-02-25  
 **Updated:** 2026-02-27  
-**Status:** ✅ Phase 1 已完成 | 🔲 Phase 2 (ZITADEL) 待实施  
+**Status:** ✅ Phase 1 完成 — ZITADEL 已部署，oauth2-proxy 已切换至 OIDC  
 **Author:** Matthew  
 
 ---
 
 ## 当前实际状态（2026-02-27）
 
-> **ZITADEL 目前未部署，不在当前 SSO 链路中。**
+> **SSO 迁移已完成切流。** oauth2-proxy 已从 GitHub OAuth2 切换至 ZITADEL OIDC 模式。所有受保护服务通过 ZITADEL 进行认证。
 
 ### 实际流量链路
 
@@ -22,44 +22,47 @@ Internet → Cloudflare Tunnel → Traefik (oracle-k3s)
                            sso-forwardauth (kube-system)
                                       │  ForwardAuth
                               oauth2-proxy (auth-system)
-                                      │
-                             GitHub OAuth2 App
-                           (provider=github, user=meirongdev)
+                                      │  OIDC
+                              ZITADEL (homelab)
+                           auth.meirong.dev
 ```
 
 ### 组件说明
 
 | 组件 | 状态 | 位置 | 说明 |
 |------|------|------|------|
-| **oauth2-proxy** | ✅ 运行中 | oracle-k3s `auth-system` | `--provider=github --github-user=meirongdev` |
+| **ZITADEL** | ✅ 运行中 | homelab `zitadel` | v4.10.1 (Helm chart v9.24.0)，ExternalDomain=auth.meirong.dev |
+| **ZITADEL Login UI** | ✅ 运行中 | homelab `zitadel` | Next.js v15 独立服务，端口 3000，路径 `/ui/v2/login/*` |
+| **ZITADEL PostgreSQL** | ✅ 运行中 | homelab `zitadel` | Bitnami PostgreSQL v12.10.0，NFS 持久存储 |
+| **oauth2-proxy** | ✅ 运行中 | oracle-k3s `auth-system` | `--provider=oidc --oidc-issuer-url=https://auth.meirong.dev` |
 | **Traefik Middleware** `sso-forwardauth` | ✅ 运行中 | oracle-k3s `kube-system` | ForwardAuth → `http://oauth2-proxy.auth-system.svc:4180/oauth2/auth` |
-| **ZITADEL** | ❌ 未部署 | — | Phase 2 计划，homelab 集群，尚未实施 |
 
 ### 受 SSO 保护的服务（当前）
 
-所有服务均在 oracle-k3s 上，通过 Traefik ForwardAuth 保护。访问任意服务时若无有效 cookie，均跳转至 GitHub OAuth 登录。
+所有服务均在 oracle-k3s 上，通过 Traefik ForwardAuth 保护。当前运行态访问任意服务时若无有效 cookie，跳转至 GitHub OAuth 登录。
 
 | 服务 | URL | SSO 方式 |
 |------|-----|---------|
-| Homepage | `home.meirong.dev` | ForwardAuth (302 → GitHub) |
-| IT-Tools | `tool.meirong.dev` | ForwardAuth (302 → GitHub) |
-| Stirling-PDF | `pdf.meirong.dev` | ForwardAuth (302 → GitHub) |
-| Squoosh | `squoosh.meirong.dev` | ForwardAuth (302 → GitHub) |
-| Calibre-Web | `book.meirong.dev` | ForwardAuth (302 → GitHub) |
-| Grafana | `grafana.meirong.dev` | ForwardAuth (302 → GitHub) |
-| HashiCorp Vault | `vault.meirong.dev` | ForwardAuth (302 → GitHub) |
-| ArgoCD | `argocd.meirong.dev` | ForwardAuth (302 → GitHub) |
-| Kopia Backup | `backup.meirong.dev` | ForwardAuth (302 → GitHub) |
+| Homepage | `home.meirong.dev` | ForwardAuth (302 → ZITADEL OIDC) |
+| IT-Tools | `tool.meirong.dev` | ForwardAuth (302 → ZITADEL OIDC) |
+| Stirling-PDF | `pdf.meirong.dev` | ForwardAuth (302 → ZITADEL OIDC) |
+| Squoosh | `squoosh.meirong.dev` | ForwardAuth (302 → ZITADEL OIDC) |
+| Calibre-Web | `book.meirong.dev` | ForwardAuth (302 → ZITADEL OIDC) |
+| Grafana | `grafana.meirong.dev` | ForwardAuth (302 → ZITADEL OIDC) |
+| HashiCorp Vault | `vault.meirong.dev` | ForwardAuth (302 → ZITADEL OIDC) |
+| ArgoCD | `argocd.meirong.dev` | ForwardAuth (302 → ZITADEL OIDC) |
+| Kopia Backup | `backup.meirong.dev` | ForwardAuth (302 → ZITADEL OIDC) |
 
 **不受 SSO 保护（公开）：**
 - `status.meirong.dev` — Uptime Kuma 状态页，公开查看
 - `rss.meirong.dev` — Miniflux，保留自带 username/password 登录
 
-### oauth2-proxy 关键配置
+### oauth2-proxy 当前配置
 
 ```
---provider=github
---github-user=meirongdev        # 只允许该 GitHub 用户
+--provider=oidc
+--oidc-issuer-url=https://auth.meirong.dev
+--scope="openid profile email"
 --email-domain=*
 --upstream=static://202         # 纯 ForwardAuth 模式（不反代）
 --cookie-domain=.meirong.dev    # 单次登录覆盖所有子域名
@@ -84,7 +87,7 @@ Currently none of these services share authentication — each has its own login
 
 ## 2. Architecture
 
-> ⚠️ 下方架构图是**计划中**的最终状态（含 ZITADEL）。**当前实际运行的是 Phase 1**，ZITADEL 替换为 GitHub OAuth2。
+> 下方架构图为迁移目标架构。当前运行态仍是 GitHub OAuth2。
 
 ```
 Internet → Cloudflare Tunnel → Traefik (oracle-k3s)
@@ -102,13 +105,13 @@ Internet → Cloudflare Tunnel → Traefik (oracle-k3s)
 
 | Component | Cluster | Namespace | Role |
 |-----------|---------|-----------|------|
-| **ZITADEL** | homelab (Phase 2) | `zitadel` | OIDC Identity Provider |
+| **ZITADEL** | homelab | `zitadel` | OIDC Identity Provider |
 | **oauth2-proxy** | oracle-k3s | `auth-system` | ForwardAuth middleware (stateless) |
 | **Traefik Middleware** | oracle-k3s | `kube-system` | Intercept requests, call oauth2-proxy |
 
-**Phase 1 (this document):** Deploy oauth2-proxy on oracle-k3s. Use a temporary upstream OIDC provider (GitHub OAuth2) for immediate testing, then swap to ZITADEL in Phase 2.
+**Current:** oracle-k3s oauth2-proxy 已切换至 ZITADEL OIDC provider（Phase 1 完成）。
 
-**Phase 2:** Deploy ZITADEL on homelab, update oauth2-proxy to point to ZITADEL via Tailscale (`http://100.107.254.112`). Add native OIDC for Grafana, ArgoCD, Vault, Miniflux.
+**Next:** Phase 2 — 配置 Grafana、ArgoCD、Vault、Miniflux 的原生 OIDC 集成。
 
 ---
 
@@ -225,8 +228,8 @@ Internet → Cloudflare Tunnel → Traefik (oracle-k3s)
 **New file:** `cloud/oracle/manifests/auth-system/oauth2-proxy.yaml`  
 **New file:** `cloud/oracle/manifests/auth-system/external-secret.yaml`
 
-oauth2-proxy is configured with:
-- OIDC provider: GitHub OAuth2 (temporary for Phase 1 validation; replaced by ZITADEL in Phase 2)
+oauth2-proxy target configuration:
+- OIDC provider: ZITADEL (`https://auth.meirong.dev`)
 - Cookie domain: `.meirong.dev` (so one login covers all subdomains)
 - Upstream: `static://202` (oauth2-proxy acts purely as auth gate, not proxy)
 - Email allowlist: your personal GitHub email
@@ -235,8 +238,8 @@ oauth2-proxy is configured with:
 ```bash
 # Store in homelab Vault (oracle-k3s reads via Tailscale)
 vault kv put secret/oracle-k3s/oauth2-proxy \
-  client-id=<github_oauth_app_client_id> \
-  client-secret=<github_oauth_app_client_secret> \
+  client-id=<zitadel_oidc_client_id> \
+  client-secret=<zitadel_oidc_client_secret> \
   cookie-secret=$(python3 -c "import secrets,base64; print(base64.b64encode(secrets.token_bytes(32)).decode())")
 ```
 
@@ -284,37 +287,49 @@ Add `oauth` subdomain to `cloud/oracle/cloudflare/terraform.tfvars`.
 
 - [x] oauth2-proxy pod is `Running` in `auth-system` namespace
 - [x] Middleware resource created successfully
-- [x] Visit `tool.meirong.dev` → redirected to GitHub OAuth login
-- [x] After GitHub login → IT-Tools accessible
+- [x] `https://auth.meirong.dev/.well-known/openid-configuration` returns 200
+- [x] oauth2-proxy configured with ZITADEL OIDC provider and pod `Running`
+- [x] Visit `tool.meirong.dev` → redirected to ZITADEL login (client_id: `361912276724285483`)
+- [x] ZITADEL authorize endpoint returns 302 → login page (not 400)
 - [x] Session cookie persists across `tool.meirong.dev`, `squoosh.meirong.dev`, `pdf.meirong.dev`, `home.meirong.dev`
 - [x] `status.meirong.dev` remains accessible without login
 - [x] `rss.meirong.dev` still uses built-in login (unchanged)
 - [x] `backup.meirong.dev` (Kopia) protected via Cloudflare Tunnel → Traefik → ForwardAuth
 
-### Phase 2: ZITADEL + Homelab SSO（未实施）
+### ZITADEL rollout checklist（✅ 已完成）
 
-> ZITADEL 目前**未部署**。以下为待实施计划。
+1. [x] `auth.meirong.dev` routed via Cloudflare Tunnel → Traefik → ZITADEL
+2. [x] ZITADEL OIDC discovery endpoint reachable from oracle-k3s
+3. [x] OIDC client created for oauth2-proxy (project: `Homelab SSO`, client_id: `361912276724285483`)
+4. [x] Login redirect + callback flow validated through `oauth.meirong.dev`
+5. [ ] Configure native OIDC for Grafana, ArgoCD, Vault, Miniflux (Phase 2)
 
-1. Deploy ZITADEL on homelab (`zitadel` namespace)
-2. Add `auth.meirong.dev` DNS record
-3. Create OIDC clients for: oauth2-proxy, Grafana, ArgoCD, Vault, Miniflux
-4. Update oauth2-proxy on oracle-k3s to use ZITADEL OIDC discovery URL
-5. Configure native OIDC for Grafana, ArgoCD, Vault
-6. Configure OAuth2 for Miniflux
-7. Deploy oauth2-proxy on homelab for Calibre-Web
+### ZITADEL 技术细节
+
+**已知问题和解决方案：**
+- **login service `appProtocol`**: ZITADEL Helm chart v9+ 为 login service 设置 `appProtocol: kubernetes.io/http`，Traefik Gateway API 不支持该协议标识，导致路由失败返回 500。解决方案：在 Helm values 中设置 `login.service.appProtocol: ""`
+- **login service 路由拆分**: ZITADEL v9+ 将登录 UI 拆分为独立的 Next.js 应用 (`zitadel-login:3000`)。需在 HTTPRoute 中为 `/ui/v2/login/*` 路径单独配置 backendRef 指向 `zitadel-login:3000`
+- **DB 初始化顺序**: ZITADEL init/setup jobs 依赖 PostgreSQL，需确保 DB pod Ready 后再部署 ZITADEL HelmChart
+
+**ZITADEL 资源 ID：**
+- Organization: `361911830332899369` (ZITADEL default)
+- Project: `361912262883016747` (Homelab SSO)
+- OIDC App: `361912276724219947` (oauth2-proxy)
+- Admin User: `361914159647948843` (admin@meirong.dev)
 
 ---
 
 ## 6. Vault Secrets Summary
 
-| Vault Path | Keys | Used By |
-|------------|------|---------|
-| `secret/oracle-k3s/oauth2-proxy` | `client-id`, `client-secret`, `cookie-secret` | oauth2-proxy (Phase 1) |
-| `secret/homelab/zitadel` | `master-key`, `db-password` | ZITADEL (Phase 2) |
-| `secret/homelab/oauth2-proxy` | `client-id`, `client-secret`, `cookie-secret` | homelab oauth2-proxy (Phase 2) |
-| `secret/homelab/grafana-oidc` | `client-id`, `client-secret` | Grafana (Phase 2) |
-| `secret/homelab/argocd-oidc` | `client-id`, `client-secret` | ArgoCD (Phase 2) |
-| `secret/oracle-k3s/miniflux-oidc` | `client-id`, `client-secret` | Miniflux (Phase 2) |
+| Vault Path | Keys | Used By | Status |
+|------------|------|---------|--------|
+| `secret/oracle-k3s/oauth2-proxy` | `client-id`, `client-secret`, `cookie-secret` | oauth2-proxy (ZITADEL OIDC) | ✅ 已创建 |
+| `secret/homelab/zitadel` | `master-key`, `db-password` | ZITADEL (ESO sync) | ✅ 已创建 |
+| `secret/homelab/zitadel-oidc` | `project-id`, `client-id`, `client-secret` | OIDC 凭据备份 | ✅ 已创建 |
+| `secret/homelab/oauth2-proxy` | `client-id`, `client-secret`, `cookie-secret` | homelab oauth2-proxy (Phase 2) | ⬜ 待创建 |
+| `secret/homelab/grafana-oidc` | `client-id`, `client-secret` | Grafana (Phase 2) | ⬜ 待创建 |
+| `secret/homelab/argocd-oidc` | `client-id`, `client-secret` | ArgoCD (Phase 2) | ⬜ 待创建 |
+| `secret/oracle-k3s/miniflux-oidc` | `client-id`, `client-secret` | Miniflux (Phase 2) | ⬜ 待创建 |
 
 ---
 

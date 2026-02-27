@@ -1,0 +1,158 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: zitadel
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: zitadel-masterkey
+  namespace: zitadel
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: zitadel-masterkey
+    creationPolicy: Owner
+    template:
+      type: Opaque
+      data:
+        masterkey: "{{ .masterkey }}"
+  data:
+    - secretKey: masterkey
+      remoteRef:
+        key: secret/homelab/zitadel
+        property: master-key
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: zitadel-postgres-auth
+  namespace: zitadel
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: zitadel-postgres-auth
+    creationPolicy: Owner
+    template:
+      type: Opaque
+      data:
+        postgres-password: "{{ .db_password }}"
+        password: "{{ .db_password }}"
+  data:
+    - secretKey: db_password
+      remoteRef:
+        key: secret/homelab/zitadel
+        property: db-password
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: zitadel-config
+  namespace: zitadel
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: zitadel-config
+    creationPolicy: Owner
+    template:
+      type: Opaque
+      data:
+        config-yaml: |
+          Database:
+            Postgres:
+              User:
+                Password: "{{ .db_password }}"
+              Admin:
+                Password: "{{ .db_password }}"
+  data:
+    - secretKey: db_password
+      remoteRef:
+        key: secret/homelab/zitadel
+        property: db-password
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: zitadel-db
+  namespace: kube-system
+spec:
+  repo: https://charts.bitnami.com/bitnami
+  chart: postgresql
+  version: 12.10.0
+  targetNamespace: zitadel
+  createNamespace: true
+  valuesContent: |-
+    image:
+      repository: bitnamilegacy/postgresql
+    architecture: standalone
+    auth:
+      enablePostgresUser: true
+      username: zitadel
+      database: zitadel
+      existingSecret: zitadel-postgres-auth
+      secretKeys:
+        adminPasswordKey: postgres-password
+        userPasswordKey: password
+    primary:
+      persistence:
+        enabled: true
+        storageClass: nfs-client
+        size: 8Gi
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: zitadel
+  namespace: kube-system
+spec:
+  repo: https://charts.zitadel.com
+  chart: zitadel
+  version: 9.24.0
+  targetNamespace: zitadel
+  createNamespace: true
+  valuesContent: |-
+    zitadel:
+      masterkeySecretName: zitadel-masterkey
+      configSecretName: zitadel-config
+      configmapConfig:
+        ExternalSecure: true
+        ExternalDomain: auth.meirong.dev
+        ExternalPort: 443
+        TLS:
+          Enabled: false
+        Database:
+          Postgres:
+            Host: zitadel-db-postgresql
+            Port: 5432
+            Database: zitadel
+            MaxOpenConns: 20
+            MaxIdleConns: 10
+            MaxConnLifetime: 30m
+            MaxConnIdleTime: 5m
+            User:
+              Username: zitadel
+              SSL:
+                Mode: disable
+            Admin:
+              Username: postgres
+              SSL:
+                Mode: disable
+    ingress:
+      enabled: false
+    login:
+      ingress:
+        enabled: false
+      service:
+        # Remove appProtocol: kubernetes.io/http — Traefik Gateway API
+        # does not support it and returns 500 for login routes
+        appProtocol: ""
