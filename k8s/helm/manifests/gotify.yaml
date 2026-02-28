@@ -1,0 +1,109 @@
+---
+# Gotify — 消息推送服务
+# 接收 Redpanda Connect 推送，通过 Telegram 插件转发到频道
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: gotify-secret
+  namespace: personal-services
+spec:
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: gotify-secret
+    creationPolicy: Owner
+  data:
+    - secretKey: default-user-password
+      remoteRef:
+        key: homelab/gotify
+        property: default_user_password
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gotify-data
+  namespace: personal-services
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gotify
+  namespace: personal-services
+  labels:
+    app: gotify
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gotify
+  template:
+    metadata:
+      labels:
+        app: gotify
+    spec:
+      containers:
+        - name: gotify
+          image: gotify/server:latest
+          ports:
+            - containerPort: 80
+              name: http
+          env:
+            - name: TZ
+              value: "Asia/Shanghai"
+            - name: GOTIFY_DEFAULTUSER_NAME
+              value: "admin"
+            - name: GOTIFY_DEFAULTUSER_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: gotify-secret
+                  key: default-user-password
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: gotify-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gotify
+  namespace: personal-services
+spec:
+  type: ClusterIP
+  selector:
+    app: gotify
+  ports:
+    - port: 80
+      targetPort: 80
+      name: http

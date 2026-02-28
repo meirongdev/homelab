@@ -1,0 +1,162 @@
+---
+# KaraKeep — 书签管理器 (含 Chrome + Meilisearch sidecar)
+# 接收 Redpanda Connect 转发的 Miniflux 保存文章
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: karakeep-data
+  namespace: rss-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: meilisearch-data
+  namespace: rss-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: karakeep
+  namespace: rss-system
+  labels:
+    app: karakeep
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: karakeep
+  template:
+    metadata:
+      labels:
+        app: karakeep
+    spec:
+      containers:
+        # KaraKeep Web 应用
+        - name: karakeep
+          image: karakeep/karakeep:release
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: NEXTAUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: karakeep-secret
+                  key: nextauth-secret
+            - name: NEXTAUTH_URL
+              value: "https://keep.meirong.dev"
+            - name: MEILI_ADDR
+              value: "http://localhost:7700"
+            - name: MEILI_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: karakeep-secret
+                  key: meili-master-key
+            - name: BROWSER_WEB_URL
+              value: "http://localhost:9222"
+            - name: DATA_DIR
+              value: "/data"
+            - name: DISABLE_SIGNUPS
+              value: "true"
+            - name: CRON_PATTERNS_ENABLED
+              value: "true"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /api/v1/bookmarks
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /api/v1/bookmarks
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+        # Chrome (headless browser for KaraKeep)
+        - name: chrome
+          image: gcr.io/zenika-hub/alpine-chrome:124
+          command:
+            - chromium-browser
+            - --headless
+            - --no-sandbox
+            - --disable-gpu
+            - --disable-dev-shm-usage
+            - --remote-debugging-address=0.0.0.0
+            - --remote-debugging-port=9222
+          ports:
+            - containerPort: 9222
+              name: chrome
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+        # Meilisearch
+        - name: meilisearch
+          image: getmeili/meilisearch:v1.13
+          ports:
+            - containerPort: 7700
+              name: meili
+          env:
+            - name: MEILI_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: karakeep-secret
+                  key: meili-master-key
+            - name: MEILI_NO_ANALYTICS
+              value: "true"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: meili-data
+              mountPath: /meili_data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: karakeep-data
+        - name: meili-data
+          persistentVolumeClaim:
+            claimName: meilisearch-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: karakeep
+  namespace: rss-system
+spec:
+  type: ClusterIP
+  selector:
+    app: karakeep
+  ports:
+    - port: 3000
+      targetPort: 3000
+      name: http

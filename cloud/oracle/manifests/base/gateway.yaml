@@ -146,4 +146,35 @@ spec:
           port: 3001
           weight: 1
 ---
-# n8n route removed
+# HTTPRoute: keep.meirong.dev -> karakeep
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: karakeep
+  namespace: rss-system
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: oracle-gateway
+      namespace: kube-system
+      port: 8000
+  hostnames:
+    - "keep.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      filters:
+        - type: ExtensionRef
+          extensionRef:
+            group: traefik.io
+            kind: Middleware
+            name: sso-forwardauth
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: karakeep
+          port: 3000
+          weight: 1

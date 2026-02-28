@@ -58,7 +58,7 @@ data:
         columns: 3
       RSS & 自动化:
         style: row
-        columns: 3
+        columns: 4
       监控:
         style: row
         columns: 3
@@ -111,6 +111,28 @@ data:
               namespace: rss-system
               container: miniflux
               label_selector: app=miniflux
+
+        - KaraKeep:
+            icon: karakeep.png
+            href: https://keep.meirong.dev
+            description: 书签管理器
+            kubernetes:
+              namespace: rss-system
+              container: karakeep
+              label_selector: app=karakeep
+
+        - Redpanda Connect:
+            icon: redpanda.png
+            description: 信息管道 (Webhook → KaraKeep → Gotify)
+            kubernetes:
+              namespace: rss-system
+              container: webhook-to-karakeep
+              label_selector: app=redpanda-connect
+
+        - Gotify:
+            icon: gotify.png
+            href: https://notify.meirong.dev
+            description: 消息推送 → Telegram
 
     - 监控:
         - Uptime Kuma:
