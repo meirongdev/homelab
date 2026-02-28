@@ -1,0 +1,217 @@
+---
+# Redpanda Connect — 信息管道
+# 管道 1: 接收 Miniflux Webhook → 保存到 KaraKeep
+# 管道 2: 定时轮询 KaraKeep tag=telegram → 推送到 Gotify
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redpanda-connect-config
+  namespace: rss-system
+data:
+  connect.yaml: |
+    http:
+      enabled: true
+      address: "0.0.0.0:4195"
+
+    input:
+      http_server:
+        path: /save_entry
+        allowed_verbs:
+          - POST
+
+    pipeline:
+      processors:
+        - mapping: |
+            root.type = "link"
+            root.url = this.entry.url
+            root.title = this.entry.title
+
+    output:
+      http_client:
+        url: "http://karakeep.rss-system.svc:3000/api/v1/bookmarks"
+        verb: POST
+        headers:
+          Authorization: "Bearer ${KARAKEEP_API_KEY}"
+          Content-Type: "application/json"
+        retries: 3
+        retry_period: "5s"
+
+  poll-karakeep.yaml: |
+    http:
+      enabled: false
+
+    input:
+      generate:
+        interval: "5m"
+        mapping: 'root = {}'
+
+    pipeline:
+      processors:
+        # 获取所有书签列表
+        - http:
+            url: "http://karakeep.rss-system.svc:3000/api/v1/bookmarks?favourited=false&archived=false&limit=50"
+            verb: GET
+            headers:
+              Authorization: "Bearer ${KARAKEEP_API_KEY}"
+              Accept: "application/json"
+        # 筛选带有 telegram tag 的书签
+        - mapping: |
+            root = this.bookmarks.filter(b -> b.tags.any(t -> t.name == "telegram"))
+        # 空数组则跳过
+        - mapping: |
+            if this.length() == 0 {
+              root = deleted()
+            }
+        # 展开数组为单独消息
+        - unarchive:
+            format: json_array
+        # 内存去重：已推送的 ID 跳过
+        - cache:
+            operator: get
+            resource: dedup_cache
+            key: '${! this.id}'
+        - catch:
+          # cache miss = 新条目，继续处理
+          - mapping: 'root = this'
+        - switch:
+          - check: 'content() == "seen"'
+            processors:
+              - mapping: 'root = deleted()'
+        # 标记为已推送
+        - cache:
+            operator: set
+            resource: dedup_cache
+            key: '${! this.id}'
+            value: "seen"
+        # 构造 Gotify 消息
+        - mapping: |
+            let title = this.content.title.or(this.title).or("New Bookmark")
+            let url = this.content.url.or("")
+            root.title = "📌 " + $title
+            root.message = $url
+            root.priority = 5
+            root.extras = {
+              "client::display": {
+                "contentType": "text/plain"
+              }
+            }
+
+    output:
+      http_client:
+        url: "${GOTIFY_URL}/message"
+        verb: POST
+        headers:
+          X-Gotify-Key: "${GOTIFY_TOKEN}"
+          Content-Type: "application/json"
+        retries: 3
+        retry_period: "5s"
+
+    cache_resources:
+      - label: dedup_cache
+        memory:
+          default_ttl: "24h"
+          compaction_interval: "1h"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redpanda-connect
+  namespace: rss-system
+  labels:
+    app: redpanda-connect
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redpanda-connect
+  template:
+    metadata:
+      labels:
+        app: redpanda-connect
+    spec:
+      containers:
+        # 管道 1: Miniflux Webhook → KaraKeep
+        - name: webhook-to-karakeep
+          image: docker.redpanda.com/redpandadata/connect:latest
+          args:
+            - run
+            - /config/connect.yaml
+          ports:
+            - containerPort: 4195
+              name: http
+          env:
+            - name: KARAKEEP_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: redpanda-connect-secret
+                  key: karakeep-api-key
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: config
+              mountPath: /config
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 4195
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 4195
+            initialDelaySeconds: 5
+            periodSeconds: 10
+        # 管道 2: KaraKeep 轮询 → Gotify
+        - name: karakeep-to-gotify
+          image: docker.redpanda.com/redpandadata/connect:latest
+          args:
+            - run
+            - /config/poll-karakeep.yaml
+          env:
+            - name: KARAKEEP_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: redpanda-connect-secret
+                  key: karakeep-api-key
+            - name: GOTIFY_URL
+              valueFrom:
+                secretKeyRef:
+                  name: redpanda-connect-secret
+                  key: gotify-url
+            - name: GOTIFY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: redpanda-connect-secret
+                  key: gotify-token
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: config
+              mountPath: /config
+      volumes:
+        - name: config
+          configMap:
+            name: redpanda-connect-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redpanda-connect
+  namespace: rss-system
+spec:
+  type: ClusterIP
+  selector:
+    app: redpanda-connect
+  ports:
+    - port: 4195
+      targetPort: 4195
+      name: http

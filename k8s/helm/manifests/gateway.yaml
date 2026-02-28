@@ -272,6 +272,33 @@ spec:
           port: 8080
           weight: 1
 ---
+# HTTPRoute: notify.meirong.dev -> gotify
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gotify
+  namespace: personal-services
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: homelab-gateway
+      namespace: kube-system
+      port: 8000
+  hostnames:
+    - "notify.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: gotify
+          port: 80
+          weight: 1
+---
 # HTTPRoute: backup.meirong.dev -> kopia
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
