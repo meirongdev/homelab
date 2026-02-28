@@ -47,7 +47,7 @@ spec:
       containers:
         # KaraKeep Web 应用
         - name: karakeep
-          image: karakeep/karakeep:release
+          image: ghcr.io/karakeep-app/karakeep:release
           ports:
             - containerPort: 3000
               name: http
@@ -85,16 +85,16 @@ spec:
               mountPath: /data
           livenessProbe:
             httpGet:
-              path: /api/v1/bookmarks
+              path: /
               port: 3000
-            initialDelaySeconds: 30
+            initialDelaySeconds: 60
             periodSeconds: 15
             failureThreshold: 5
           readinessProbe:
             httpGet:
-              path: /api/v1/bookmarks
+              path: /
               port: 3000
-            initialDelaySeconds: 15
+            initialDelaySeconds: 30
             periodSeconds: 10
         # Chrome (headless browser for KaraKeep)
         - name: chrome
@@ -118,7 +118,7 @@ spec:
               memory: 1Gi
         # Meilisearch
         - name: meilisearch
-          image: getmeili/meilisearch:v1.13
+          image: getmeili/meilisearch:v1.13.3
           ports:
             - containerPort: 7700
               name: meili
