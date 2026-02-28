@@ -130,12 +130,14 @@ spec:
                   key: meili-master-key
             - name: MEILI_NO_ANALYTICS
               value: "true"
+            - name: MEILI_MAX_INDEXING_THREADS
+              value: "1"
           resources:
             requests:
               cpu: 100m
               memory: 256Mi
             limits:
-              memory: 512Mi
+              memory: 768Mi
           volumeMounts:
             - name: meili-data
               mountPath: /meili_data
