@@ -40,6 +40,9 @@ data:
         {"name": "ArgoCD",         "url": "https://10.43.158.192/",      "ignoreTls": True},
         # Kopia: HTTPS with self-signed cert, returns 401 (basic auth) — service is up
         {"name": "Kopia Backup",   "url": "https://10.43.114.55:51515",  "accepted_statuscodes": ["401"], "ignoreTls": True},
+        # --- new info pipeline services ---
+        {"name": "KaraKeep",       "url": "http://karakeep.rss-system.svc:3000", "accepted_statuscodes": ["307"]},
+        {"name": "Gotify",         "url": "http://10.43.223.13:80/health"},
     ]
 
     def wait_ready(timeout=120):
