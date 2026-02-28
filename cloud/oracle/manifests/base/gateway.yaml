@@ -106,12 +106,6 @@ spec:
         - path:
             type: PathPrefix
             value: /
-      filters:
-        - type: ExtensionRef
-          extensionRef:
-            group: traefik.io
-            kind: Middleware
-            name: sso-forwardauth
       backendRefs:
         - group: ""
           kind: Service

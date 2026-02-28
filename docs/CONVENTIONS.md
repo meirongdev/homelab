@@ -24,15 +24,24 @@ homelab/
 │   └── helm/
 │       ├── values/     # Helm release configurations (one file per chart)
 │       └── manifests/  # Raw K8s YAML (Calibre-Web, Homepage, Vault, Gateway, etc.)
+├── cloud/
+│   └── oracle/         # Oracle Cloud K3s cluster IaC + manifests
+│       ├── ansible/    # oracle-k3s node setup
+│       ├── terraform/  # OCI VM provisioning
+│       └── manifests/  # oracle-k3s workloads (rss-system, homepage, monitoring, etc.)
 ├── argocd/
 │   ├── install/        # ArgoCD install patches (TLS disable)
 │   ├── projects/       # AppProject definitions (RBAC)
 │   └── applications/   # ArgoCD Application manifests (one per logical group)
 ├── cloudflare/
 │   └── terraform/      # Cloudflare Tunnel ingress rules + DNS records
+├── tailscale/
+│   └── terraform/      # Tailscale ACL + node pre-auth keys
 └── docs/
+    ├── README.md       # 文档索引
     ├── CONVENTIONS.md  # This file (symlinked as CLAUDE.md and GEMINI.md)
     ├── architecture/   # Architecture notes and TODO
+    ├── runbooks/       # 运维操作手册 (Kopia, DNS recovery, etc.)
     └── plans/          # Implementation plan records
 ```
 
@@ -90,8 +99,19 @@ just apply   # Apply DNS/Tunnel changes
 - All external traffic flows: `Internet → Cloudflare DNS → Cloudflare Tunnel → Traefik (K8s) → Services`
 - **Cloudflare Tunnel**: `cloudflared` pod in `cloudflare` namespace forwards to `traefik.kube-system.svc:80`
 - **Traefik**: Configured via K8s Gateway API (`HTTPRoute` resources in `manifests/gateway.yaml`)
-- **K8s Node**: `10.10.10.10` | **Proxmox**: `192.168.50.3`
+- **homelab K8s Node**: `10.10.10.10` / Tailscale `100.107.254.112` | **Proxmox**: `192.168.50.3`
+- **oracle-k3s Node**: `10.0.0.26` / Tailscale `100.107.166.37`
+- **Cross-cluster network**: Tailscale subnet routing — homelab 广播 `10.42.0.0/16, 10.43.0.0/16`；oracle-k3s 广播 `10.52.0.0/16, 10.53.0.0/16`。双向 Pod/Service 直通，RTT ~80ms。见 `docs/architecture/tailscale-network.md`
 - **Exception — Kopia**: Exposed via NodePort (31515) instead of Cloudflare Tunnel. Kopia's gRPC-Go client uses bidirectional streaming that fails through Cloudflare Tunnel (524 timeout), even though regular HTTP/2 works. Connect directly: `kopia repository connect server --url=https://10.10.10.10:31515 --server-cert-fingerprint=<sha256> --override-username=admin`
+
+### SSO (Single Sign-On)
+- **Status**: ✅ 生产运行中（2026-02-27 上线）
+- **Identity Provider**: ZITADEL v4 运行于 homelab `zitadel` namespace，对外地址 `auth.meirong.dev`
+- **Auth Proxy**: oauth2-proxy 运行于 oracle-k3s `auth-system` namespace，`--provider=oidc --upstream=static://202`
+- **Middleware**: Traefik `sso-forwardauth` ExtensionRef Filter（同 HTTPRoute namespace），指向 oracle-k3s oauth2-proxy
+- **Session**: cookie domain `.meirong.dev`，有效期 7 天（单次登录覆盖所有子域名）
+- **受保护服务**: book / grafana / vault / argocd / backup / notify (homelab Traefik); home / tool / pdf / squoosh / keep (oracle-k3s Traefik)
+- **公开服务**: `status.meirong.dev`（Uptime Kuma 状态页）、`rss.meirong.dev`（Miniflux 自带登录）
 
 ### GitOps (ArgoCD)
 - ArgoCD runs in the `argocd` namespace, UI at `argocd.meirong.dev`
@@ -105,7 +125,8 @@ just apply   # Apply DNS/Tunnel changes
   - `vault-eso` App → `manifests/{vault-eso-config,*-external-secret}.yaml`
   - `kopia` App → `manifests/kopia.yaml`
   - `zitadel` App → `manifests/zitadel.yaml`
-  - `rss-system` App → `manifests/rss-system.yaml` (on oracle-k3s: Miniflux, KaraKeep, Redpanda Connect)
+  - `rss-system` App → `cloud/oracle/manifests/rss-system/` (on oracle-k3s: Miniflux, KaraKeep, Redpanda Connect)
+  - `monitoring-dashboards` App → `k8s/helm/manifests/grafana-dashboards.yaml` 等 ConfigMap
 - **NOT managed by ArgoCD** (manual `just` commands):
   - HashiCorp Vault — requires manual init/unseal
   - External Secrets Operator — depends on Vault
@@ -136,24 +157,24 @@ just apply   # Apply DNS/Tunnel changes
   - Dashboard ConfigMaps: auto-synced by ArgoCD after `git push` (via `monitoring-dashboards` Application)
 
 ### Services
-| Service | Namespace | URL |
-|---------|-----------|-----|
-| Homepage | `homepage` | `home.meirong.dev` |
-| Calibre-Web | `personal-services` | `book.meirong.dev` |
-| IT-Tools | `personal-services` | `tool.meirong.dev` |
-| Stirling-PDF | `personal-services` | `pdf.meirong.dev` |
-| Squoosh | `personal-services` | `squoosh.meirong.dev` |
-| Grafana | `monitoring` | `grafana.meirong.dev` |
-| HashiCorp Vault | `vault` | `vault.meirong.dev` |
-| ArgoCD | `argocd` | `argocd.meirong.dev` |
-| ZITADEL (SSO) | `zitadel` | `auth.meirong.dev` |
-| Kopia Backup | `kopia` | `https://10.10.10.10:31515` (NodePort, LAN only) |
-| Uptime Kuma | `personal-services` | `status.meirong.dev` |
-| Miniflux | `rss-system` | `rss.meirong.dev` |
-| KaraKeep | `rss-system` | `keep.meirong.dev` |
-| Gotify | `personal-services` | `notify.meirong.dev` |
-| Redpanda Connect | `rss-system` | Internal only |
-| PostgreSQL | `database` | Internal only |
+| Service | Cluster | Namespace | URL |
+|---------|---------|-----------|-----|
+| Homepage | oracle-k3s | `homepage` | `home.meirong.dev` |
+| IT-Tools | oracle-k3s | `personal-services` | `tool.meirong.dev` |
+| Stirling-PDF | oracle-k3s | `personal-services` | `pdf.meirong.dev` |
+| Squoosh | oracle-k3s | `personal-services` | `squoosh.meirong.dev` |
+| Uptime Kuma | oracle-k3s | `personal-services` | `status.meirong.dev` |
+| Miniflux | oracle-k3s | `rss-system` | `rss.meirong.dev` |
+| KaraKeep | oracle-k3s | `rss-system` | `keep.meirong.dev` |
+| Redpanda Connect | oracle-k3s | `rss-system` | Internal only |
+| Calibre-Web | homelab | `personal-services` | `book.meirong.dev` |
+| Gotify | homelab | `personal-services` | `notify.meirong.dev` |
+| Grafana | homelab | `monitoring` | `grafana.meirong.dev` |
+| HashiCorp Vault | homelab | `vault` | `vault.meirong.dev` |
+| ArgoCD | homelab | `argocd` | `argocd.meirong.dev` |
+| ZITADEL (SSO) | homelab | `zitadel` | `auth.meirong.dev` |
+| Kopia Backup | homelab | `kopia` | `backup.meirong.dev` (Web) / `https://10.10.10.10:31515` (CLI) |
+| PostgreSQL | oracle-k3s | `rss-system` | Internal only |
 
 ## Conventions
 
