@@ -22,20 +22,22 @@
 - [x] GitOps with ArgoCD (auto-sync + selfHeal for all managed apps)
 - [x] ArgoCD Image Updater — automated `it-tools` image tracking via GHCR
 
-## Phase 3: Multi-Cloud & Security 📋 (In Progress)
+## Phase 3: Multi-Cloud & Security ✅
 
 - [ ] **Multi-Cluster ArgoCD**: Manage Oracle Cloud resources from local ArgoCD
 - [ ] **Cert-Manager**: Automatic certificate management (cert-manager + Vault PKI or Cloudflare DNS)
 - [ ] **Vault Dynamic Secrets**: Dynamic database credentials for PostgreSQL
 - [ ] **Secret Rotation**: Automate rotation for sensitive keys (Cloudflare, etc.)
-- [ ] **VPC Peering/VPN**: Securely connect On-prem K3s with Oracle OCI K3s (Tailscale/Wireguard) — IaC complete, pending node installation (see `docs/architecture/tailscale-network.md`)
+- [x] **Cross-Cluster Networking**: Tailscale 双向 Pod/Service 路由 (homelab ↔ oracle-k3s)
+- [x] **SSO**: ZITADEL + oauth2-proxy (OIDC) ForwardAuth 保护所有服务（2026-02-27 上线）
+- [x] **信息管道**: Miniflux → Redpanda Connect → KaraKeep → Gotify → Telegram（2026-02-28 上线）
 
 ## Phase 4: Reliability & Maintenance 📋 (Planned)
 
-- [x] **Uptime Kuma**: Deploy external health monitoring (status.meirong.dev) — with PostSync provisioner and public status page
+- [x] **Uptime Kuma**: Deploy external health monitoring (status.meirong.dev) — 含 PostSync 自动配置 + 公开状态页
 - [ ] **Kopia Automation**: Scheduled backups via K8s CronJob to offsite storage
 - [ ] **Loki Retention**: Configure log retention and compaction policies
-- [ ] **Alerting**: Alertmanager integration with Discord/Slack
+- [ ] **Alerting**: Alertmanager integration with Gotify/Telegram
 - [ ] **Disaster Recovery**: Velero backup and recovery runbooks
 
 ---
@@ -44,19 +46,17 @@
 
 ### 🟢 Low Difficulty (Easy Wins)
 - [x] **Uptime Kuma**: Deploy for external service health monitoring.
-- [ ] **Homepage Integration**: Add health checks for `it-tools`, `stirling-pdf`, `squoosh`, `kopia` in `manifests/homepage.yaml`.
-- [ ] **Oracle Metrics**: Run `ansible/playbooks/install-node-exporter.yaml` on Oracle node.
-- [ ] **Grafana Housekeeping**: Remove any remaining Promtail/Old Dashboards.
+- [ ] **Grafana Housekeeping**: Remove any remaining old dashboards.
+- [ ] **Oracle Postgres 迁移**: Miniflux 数据库迁移到 oracle-k3s 本地（减少跨集群延迟）
 
 ### 🟡 Medium Difficulty (Configuration Focused)
-- [ ] **Alertmanager Config**: Set up basic alerting rules and notification webhooks.
+- [ ] **Alertmanager Config**: Set up basic alerting rules → Gotify → Telegram notification.
 - [ ] **Kopia Scheduled Jobs**: Refactor `kopia.yaml` to use CronJobs for automated backups.
 - [ ] **Cert-Manager Setup**: Install cert-manager and configure Let's Encrypt with Cloudflare DNS-01 challenge.
 - [ ] **ArgoCD App-of-Apps**: Refactor Application manifests into a cleaner hierarchy.
 
 ### 🔴 High Difficulty (Complex Systems)
 - [ ] **Vault Dynamic Postgres**: Implement Vault's Database secret engine for dynamic SQL users.
-- [ ] **Hybrid Cloud Networking**: Establish a secure tunnel (e.g., Tailscale Subnet Router) between local and OCI networks. — IaC complete (`tailscale/terraform/`), pending node daemon installation
 - [ ] **Multi-Cluster ArgoCD**: Add Oracle Cluster as a managed destination in local ArgoCD.
 
 ## Phase 5: Production Readiness 🎯 (Future)

@@ -58,7 +58,7 @@ data:
         columns: 3
       RSS & 自动化:
         style: row
-        columns: 4
+        columns: 3
       监控:
         style: row
         columns: 3
@@ -120,14 +120,6 @@ data:
               namespace: rss-system
               container: karakeep
               label_selector: app=karakeep
-
-        - Redpanda Connect:
-            icon: redpanda.png
-            description: 信息管道 (Webhook → KaraKeep → Gotify)
-            kubernetes:
-              namespace: rss-system
-              container: webhook-to-karakeep
-              label_selector: app=redpanda-connect
 
         - Gotify:
             icon: gotify.png
