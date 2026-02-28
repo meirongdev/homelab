@@ -73,6 +73,15 @@ deploy-manifests:
 deploy-rss:
     kubectl --context {{ctx}} apply -f manifests/rss-system/
 
+# Deploy only KaraKeep + Redpanda Connect
+deploy-info-pipeline:
+    kubectl --context {{ctx}} apply -f manifests/rss-system/karakeep.yaml
+    kubectl --context {{ctx}} apply -f manifests/rss-system/redpanda-connect.yaml
+    @echo "⏳ Waiting for karakeep to be ready..."
+    kubectl --context {{ctx}} rollout status deployment karakeep -n rss-system --timeout=120s
+    @echo "⏳ Waiting for redpanda-connect to be ready..."
+    kubectl --context {{ctx}} rollout status deployment redpanda-connect -n rss-system --timeout=120s
+
 # Deploy only homepage manifests
 deploy-homepage:
     kubectl --context {{ctx}} apply -f manifests/homepage/
