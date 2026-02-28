@@ -97,7 +97,7 @@ just apply   # Apply DNS/Tunnel changes
 - ArgoCD runs in the `argocd` namespace, UI at `argocd.meirong.dev`
 - **Sync poll interval**: 3 minutes (auto-syncs after every `git push`)
 - **Managed by ArgoCD** (auto-sync + selfHeal):
-  - `personal-services` App → `manifests/{calibre-web,stirling-pdf,squoosh,homepage,uptime-kuma}.yaml`
+  - `personal-services` App → `manifests/{calibre-web.yaml,gotify.yaml}`
   - `it-tools` App → `manifests/it-tools/` (Kustomize; managed separately to support Image Updater write-back)
   - `argocd-image-updater` App → Helm chart `argo/argocd-image-updater` v1.1.0, values from `values/argocd-image-updater.yaml`
   - `gateway` App → `manifests/{gateway.yaml,traefik-config.yaml}`
@@ -105,6 +105,7 @@ just apply   # Apply DNS/Tunnel changes
   - `vault-eso` App → `manifests/{vault-eso-config,*-external-secret}.yaml`
   - `kopia` App → `manifests/kopia.yaml`
   - `zitadel` App → `manifests/zitadel.yaml`
+  - `rss-system` App → `manifests/rss-system.yaml` (on oracle-k3s: Miniflux, KaraKeep, Redpanda Connect)
 - **NOT managed by ArgoCD** (manual `just` commands):
   - HashiCorp Vault — requires manual init/unseal
   - External Secrets Operator — depends on Vault
@@ -148,6 +149,10 @@ just apply   # Apply DNS/Tunnel changes
 | ZITADEL (SSO) | `zitadel` | `auth.meirong.dev` |
 | Kopia Backup | `kopia` | `https://10.10.10.10:31515` (NodePort, LAN only) |
 | Uptime Kuma | `personal-services` | `status.meirong.dev` |
+| Miniflux | `rss-system` | `rss.meirong.dev` |
+| KaraKeep | `rss-system` | `keep.meirong.dev` |
+| Gotify | `personal-services` | `notify.meirong.dev` |
+| Redpanda Connect | `rss-system` | Internal only |
 | PostgreSQL | `database` | Internal only |
 
 ## Conventions
