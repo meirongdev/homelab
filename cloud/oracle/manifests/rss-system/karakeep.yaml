@@ -1,6 +1,7 @@
 ---
 # KaraKeep — 书签管理器 (含 Chrome + Meilisearch sidecar)
 # 接收 Redpanda Connect 转发的 Miniflux 保存文章
+# 数据库使用 SQLite（内置，存储在 /data/db.db）
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
