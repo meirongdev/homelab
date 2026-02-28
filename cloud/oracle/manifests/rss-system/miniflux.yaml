@@ -74,22 +74,23 @@ spec:
       targetPort: 8080
       name: http
 ---
+# 共享 PostgreSQL 实例 — miniflux + karakeep 共用
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: miniflux-db
+  name: rss-postgres
   namespace: rss-system
   labels:
-    app: miniflux-db
+    app: rss-postgres
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: miniflux-db
+      app: rss-postgres
   template:
     metadata:
       labels:
-        app: miniflux-db
+        app: rss-postgres
     spec:
       containers:
         - name: postgres
@@ -108,7 +109,7 @@ spec:
             - containerPort: 5432
               name: postgres
           volumeMounts:
-            - name: miniflux-db-data
+            - name: postgres-data
               mountPath: /var/lib/postgresql/data
           resources:
             requests:
@@ -136,19 +137,19 @@ spec:
             limits:
               memory: 64Mi
       volumes:
-        - name: miniflux-db-data
+        - name: postgres-data
           persistentVolumeClaim:
             claimName: miniflux-db-pvc
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: miniflux-db
+  name: rss-postgres
   namespace: rss-system
 spec:
   type: ClusterIP
   selector:
-    app: miniflux-db
+    app: rss-postgres
   ports:
     - port: 5432
       targetPort: 5432
@@ -159,14 +160,14 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: miniflux-db-metrics
+  name: rss-postgres-metrics
   namespace: rss-system
   labels:
-    app: miniflux-db
+    app: rss-postgres
 spec:
   type: NodePort
   selector:
-    app: miniflux-db
+    app: rss-postgres
   ports:
     - port: 9187
       targetPort: 9187
