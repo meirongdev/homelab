@@ -36,12 +36,13 @@ data:
         {"name": "HashiCorp Vault","url": "http://10.43.29.201:8200/v1/sys/health"},
         # Calibre-Web: /login returns 200 without auth
         {"name": "Calibre-Web",    "url": "http://10.43.206.163:8083/login"},
-        # ArgoCD: HTTP→307→HTTPS; use HTTPS directly (self-signed cert)
-        {"name": "ArgoCD",         "url": "https://10.43.158.192/",      "ignoreTls": True},
+        # ArgoCD: TLS disabled via argocd-cmd-params-cm (server.insecure=true), serves HTTP on port 80
+        {"name": "ArgoCD",         "url": "http://10.43.158.192:80/"},
         # Kopia: HTTPS with self-signed cert, returns 401 (basic auth) — service is up
         {"name": "Kopia Backup",   "url": "https://10.43.114.55:51515",  "accepted_statuscodes": ["401"], "ignoreTls": True},
         # --- new info pipeline services ---
-        {"name": "KaraKeep",       "url": "http://karakeep.rss-system.svc:3000", "accepted_statuscodes": ["307"]},
+        # KaraKeep: root / redirects 307 to /signin; monitor /signin directly (returns 200)
+        {"name": "KaraKeep",       "url": "http://karakeep.rss-system.svc:3000/signin"},
         {"name": "Gotify",         "url": "http://10.43.223.13:80/health"},
     ]
 

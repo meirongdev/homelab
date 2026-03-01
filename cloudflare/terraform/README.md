@@ -16,6 +16,8 @@ All subdomains point to the same Cloudflare Tunnel, which forwards traffic to th
 - An existing Cloudflare Tunnel (created via Zero Trust dashboard)
 - A Cloudflare API Token with:
   - **Zone** → `DNS` → **Edit**
+  - **Zone** → `Zone WAF` → **Edit**
+  - **Zone** → `Zone Settings` → **Edit**
   - **Account** → `Cloudflare Tunnel` → **Edit**
 
 ## Setup
@@ -69,6 +71,54 @@ Then run `just apply`. Terraform will automatically:
 | `grafana.meirong.dev` | Grafana |
 | `vault.meirong.dev` | HashiCorp Vault UI |
 
+## WAF & Security Configuration
+
+Zone-level security settings and WAF rules are defined in `waf.tf`. These are zone-wide — they protect **all** subdomains across both tunnels (homelab + oracle-k3s).
+
+### Zone Security Settings
+
+| Setting | Value | Purpose |
+|---------|-------|---------|
+| SSL Mode | `full` | Encrypt origin ↔ Cloudflare (tunnels already do this) |
+| Min TLS Version | `1.2` | Block TLS 1.0/1.1 (BEAST, POODLE vulnerabilities) |
+| Always Use HTTPS | `on` | Auto-redirect HTTP → HTTPS |
+| Security Level | `medium` | Challenge suspicious IPs (Cloudflare reputation DB) |
+| Browser Integrity Check | `on` | Block requests with abnormal HTTP headers |
+| Email Obfuscation | `on` | Hide emails from scrapers |
+| Hotlink Protection | `on` | Prevent resource hotlinking |
+| Opportunistic Encryption | `on` | TLS for HTTP content when supported |
+
+### Custom WAF Rules (5/5 used)
+
+| # | Action | Description |
+|---|--------|-------------|
+| 1 | Block | WordPress/PHP/admin scanner paths (`/wp-*`, `/phpmyadmin`, `/cgi-bin`, etc.) |
+| 2 | Block | Sensitive files (`.env`, `.git`, `.htaccess`, `/server-status`, etc.) |
+| 3 | Block | Known scanner user agents (sqlmap, nikto, nmap, acunetix, etc.) |
+| 4 | Managed Challenge | High threat score visitors (score > 14) |
+| 5 | Block | Non-standard HTTP methods (TRACE, CONNECT, etc.) |
+
+### Rate Limiting (1 rule)
+
+| Endpoint Pattern | Threshold | Block Duration |
+|-----------------|-----------|---------------|
+| `/login`, `/oauth2`, `/signin`, `/v1/auth` | 10 req / 10s per IP | 10s |
+
+> **Pro Plan Upgrade Path**: With Cloudflare Pro ($20/mo), you can enable:
+> - **Cloudflare Managed Ruleset** — SQLi, XSS, RCE, LFI protection
+> - **OWASP Core Ruleset** — anomaly-based detection
+> - **Leaked Credentials Detection** — checks against breached databases
+> - Longer rate limit periods (60s) and mitigation timeouts (600s)
+> - See commented section in `waf.tf` for implementation.
+
+### API Token Permissions
+
+The API token needs these permissions:
+- **Zone** → `DNS` → **Edit**
+- **Zone** → `Zone WAF` → **Edit**
+- **Zone** → `Zone Settings` → **Edit**
+- **Account** → `Cloudflare Tunnel` → **Edit**
+
 ## State Management
 
 Terraform state is stored **locally** (`terraform.tfstate`). This file is gitignored.
@@ -82,6 +132,7 @@ cloudflare/terraform/
 ├── .env                    # API token (gitignored)
 ├── .env.example            # Template for .env
 ├── main.tf                 # Tunnel config + DNS records
+├── waf.tf                  # WAF rules + zone security settings
 ├── provider.tf             # Cloudflare provider + backend config
 ├── variables.tf            # Variable definitions
 ├── terraform.tfvars        # Actual values (gitignored)
