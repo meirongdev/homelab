@@ -31,6 +31,7 @@
 - [x] **Cross-Cluster Networking**: Tailscale 双向 Pod/Service 路由 (homelab ↔ oracle-k3s)
 - [x] **SSO**: ZITADEL + oauth2-proxy (OIDC) ForwardAuth 保护所有服务（2026-02-27 上线）
 - [x] **信息管道**: Miniflux → Redpanda Connect → KaraKeep → Gotify → Telegram（2026-02-28 上线）
+- [x] **Cloudflare WAF**: Zone 级 WAF 防护 — 自定义规则、速率限制、安全设置（2026-02-28 上线）
 
 ## Phase 4: Reliability & Maintenance 📋 (Planned)
 
@@ -39,6 +40,7 @@
 - [ ] **Loki Retention**: Configure log retention and compaction policies
 - [ ] **Alerting**: Alertmanager integration with Gotify/Telegram
 - [ ] **Disaster Recovery**: Velero backup and recovery runbooks
+- [ ] **Cloudflare Pro WAF**: 升级 Pro 计划后启用 Managed Ruleset + OWASP CRS + 泄露凭证检测
 
 ---
 

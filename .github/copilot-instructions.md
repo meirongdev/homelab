@@ -39,3 +39,4 @@ We use `just` for most tasks and `make` for Proxmox Terraform.
 - **Storage**: Persistent volumes use NFS (`nfs-client` StorageClass) at `192.168.50.106:/export`.
 - **ArgoCD Image Updater**: Uses CRD model (`ImageUpdater` CR). Set `useAnnotations: true` and use strategy `newest-build`.
 - **Kustomize**: Avoid using the global `namespace:` field in `kustomization.yaml` if resources span multiple namespaces, as it overrides JSON patches.
+- **Cloudflare WAF**: Zone-level WAF rules in `cloudflare/terraform/waf.tf` protect all subdomains. Custom rules (5/5 on free plan), rate limiting, and zone security settings. Pro-only features (Managed Ruleset, OWASP CRS) are commented out in `waf.tf`.

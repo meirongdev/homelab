@@ -104,6 +104,21 @@ just apply   # Apply DNS/Tunnel changes
 - **Cross-cluster network**: Tailscale subnet routing — homelab 广播 `10.42.0.0/16, 10.43.0.0/16`；oracle-k3s 广播 `10.52.0.0/16, 10.53.0.0/16`。双向 Pod/Service 直通，RTT ~80ms。见 `docs/architecture/tailscale-network.md`
 - **Exception — Kopia**: Exposed via NodePort (31515) instead of Cloudflare Tunnel. Kopia's gRPC-Go client uses bidirectional streaming that fails through Cloudflare Tunnel (524 timeout), even though regular HTTP/2 works. Connect directly: `kopia repository connect server --url=https://10.10.10.10:31515 --server-cert-fingerprint=<sha256> --override-username=admin`
 
+### Cloudflare WAF & Security
+- **Status**: ✅ 生产运行中（2026-02-28 上线）
+- **Scope**: Zone-level — protects ALL subdomains across both tunnels (homelab + oracle-k3s)
+- **Config**: `cloudflare/terraform/waf.tf`（Terraform 管理，`just apply` 部署）
+- **Zone settings**: SSL Full, TLS 1.2+, Always HTTPS, Security Level Medium, Browser Integrity Check, Email Obfuscation, Hotlink Protection, Opportunistic Encryption
+- **Custom WAF rules** (5/5 used):
+  1. Block WordPress/PHP/admin scanner paths
+  2. Block sensitive file access (`.env`, `.git`, `.htaccess`, etc.)
+  3. Block known vulnerability scanner user agents (sqlmap, nikto, nmap, etc.)
+  4. Managed Challenge for high threat score visitors (score > 14)
+  5. Block non-standard HTTP methods (TRACE, CONNECT, etc.)
+- **Rate limiting**: Auth endpoints (`/login`, `/oauth2`, `/signin`, `/v1/auth`) — 10 req/10s per IP
+- **Pro plan upgrade**: Managed Ruleset (SQLi/XSS/RCE) + OWASP CRS + Leaked Credentials Detection（见 `waf.tf` 注释段）
+- **API Token 权限**: Zone DNS Edit + Zone WAF Edit + Zone Settings Edit + Cloudflare Tunnel Edit
+
 ### SSO (Single Sign-On)
 - **Status**: ✅ 生产运行中（2026-02-27 上线）
 - **Identity Provider**: ZITADEL v4 运行于 homelab `zitadel` namespace，对外地址 `auth.meirong.dev`
