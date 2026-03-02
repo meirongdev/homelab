@@ -7,7 +7,6 @@ resources:
   - base/cloudflare-tunnel.yaml
   - base/gateway.yaml
   - base/traefik-config.yaml
-  - base/traefik-helm-config.yaml
   # SSO auth system (oauth2-proxy ForwardAuth)
   - auth-system/namespace.yaml
   - auth-system/external-secret.yaml

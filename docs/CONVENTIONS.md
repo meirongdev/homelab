@@ -126,7 +126,7 @@ just apply   # Apply DNS/Tunnel changes
 - **Middleware**: Traefik `sso-forwardauth` ExtensionRef Filter（同 HTTPRoute namespace），指向 oracle-k3s oauth2-proxy
 - **Session**: cookie domain `.meirong.dev`，有效期 7 天（单次登录覆盖所有子域名）
 - **受保护服务**: book / grafana / vault / argocd / backup / notify (homelab Traefik); home / tool / pdf / squoosh / keep (oracle-k3s Traefik)
-- **公开服务**: `status.meirong.dev`（Uptime Kuma 状态页）、`rss.meirong.dev`（Miniflux 自带登录）
+- **公开服务**: `status.meirong.dev`（Uptime Kuma 状态页）、`rss.meirong.dev`（Miniflux 自带登录）、`slot.meirong.dev`（Timeslot，自带 Basic Auth 保护 `/admin/`，`/api/*` 公开供博客嵌入）
 
 ### GitOps (ArgoCD)
 - ArgoCD runs in the `argocd` namespace, UI at `argocd.meirong.dev`
@@ -190,6 +190,7 @@ just apply   # Apply DNS/Tunnel changes
 | IT-Tools | oracle-k3s | `personal-services` | `tool.meirong.dev` |
 | Stirling-PDF | oracle-k3s | `personal-services` | `pdf.meirong.dev` |
 | Squoosh | oracle-k3s | `personal-services` | `squoosh.meirong.dev` |
+| Timeslot | oracle-k3s | `personal-services` | `slot.meirong.dev` |
 | Uptime Kuma | oracle-k3s | `personal-services` | `status.meirong.dev` |
 | Miniflux | oracle-k3s | `rss-system` | `rss.meirong.dev` |
 | KaraKeep | oracle-k3s | `rss-system` | `keep.meirong.dev` |

@@ -102,6 +102,14 @@ data:
             href: https://squoosh.meirong.dev
             description: 图片压缩工具
 
+        - Timeslot:
+            icon: mdi-calendar-clock
+            href: https://slot.meirong.dev
+            description: 日历预约系统
+            kubernetes:
+              namespace: personal-services
+              app: timeslot
+
     - RSS & 自动化:
         - Miniflux:
             icon: miniflux.png
