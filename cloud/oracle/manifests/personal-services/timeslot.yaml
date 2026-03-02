@@ -1,0 +1,37 @@
+---
+# Timeslot — supplementary resources (Kustomize-managed)
+# App resources (Deployment, Service, PVC, ConfigMap, Secret) are managed by Helm.
+# See: cloud/oracle/justfile deploy-timeslot
+#
+# HTTPRoute: slot.meirong.dev -> timeslot
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: timeslot
+  namespace: personal-services
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: oracle-gateway
+      namespace: kube-system
+      port: 8000
+  hostnames:
+    - "slot.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      filters:
+        - type: ExtensionRef
+          extensionRef:
+            group: traefik.io
+            kind: Middleware
+            name: sso-forwardauth
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: timeslot
+          port: 8080
+          weight: 1

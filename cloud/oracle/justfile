@@ -38,19 +38,7 @@ install-eso:
 
 # Enable Gateway API provider in Traefik
 configure-traefik:
-    @echo "Enabling Gateway API provider in Traefik..."
-    kubectl --context {{ctx}} apply -f - <<EOF
-    apiVersion: helm.cattle.io/v1
-    kind: HelmChartConfig
-    metadata:
-      name: traefik
-      namespace: kube-system
-    spec:
-      valuesContent: |-
-        providers:
-          kubernetesGateway:
-            enabled: true
-    EOF
+    kubectl --context {{ctx}} apply -f manifests/base/traefik-helm-config.yaml
     @echo "⏳ Waiting for Traefik to restart..."
     sleep 15
     @kubectl --context {{ctx}} rollout status deployment traefik -n kube-system --timeout=60s
@@ -98,6 +86,34 @@ deploy-auth:
 # Deploy personal services (IT-Tools, Stirling-PDF, Squoosh) with SSO
 deploy-personal-services:
     kubectl --context {{ctx}} apply -f manifests/personal-services/
+
+# Deploy Timeslot via Helm chart (sparse-clones upstream chart, injects secret from Vault)
+# Requires VAULT_TOKEN env var. Run after storing secret:
+#   kubectl --context k3s-homelab exec -n vault vault-0 -- \
+#     sh -c "VAULT_TOKEN=$VAULT_TOKEN vault kv put secret/oracle-k3s/timeslot admin_password=<pw>"
+deploy-timeslot:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📦 Fetching admin_password from Vault (secret/oracle-k3s/timeslot)..."
+    ADMIN_PASSWORD=$(kubectl --context k3s-homelab exec -n vault vault-0 -- \
+      sh -c "VAULT_TOKEN=${VAULT_TOKEN} vault kv get -field=admin_password secret/oracle-k3s/timeslot")
+    echo "🔀 Sparse-cloning timeslot Helm chart from GitHub..."
+    TMPDIR=$(mktemp -d)
+    trap "rm -rf $TMPDIR" EXIT
+    git clone --depth 1 --filter=blob:none --sparse \
+      https://github.com/meirongdev/timeslot.git "$TMPDIR"
+    git -C "$TMPDIR" sparse-checkout set deploy/helm
+    echo "🚀 Installing/upgrading timeslot Helm release..."
+    helm upgrade --install timeslot "$TMPDIR/deploy/helm" \
+      --kube-context {{ctx}} \
+      --namespace personal-services \
+      --create-namespace \
+      --set image=ghcr.io/meirongdev/timeslot/timeslot:latest \
+      --set persistence.size=100Mi \
+      --set persistence.storageClass=local-path \
+      --set config.adminPassword="$ADMIN_PASSWORD" \
+      --wait --timeout 3m
+    echo "✅ Timeslot deployed. Apply HTTPRoute with: just deploy-personal-services"
 
 # Deploy only uptime-kuma manifests (without provisioner job)
 deploy-uptime-kuma:
