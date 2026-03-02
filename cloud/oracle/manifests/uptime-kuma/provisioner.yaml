@@ -44,6 +44,8 @@ data:
         # KaraKeep: root / redirects 307 to /signin; monitor /signin directly (returns 200)
         {"name": "KaraKeep",       "url": "http://karakeep.rss-system.svc:3000/signin"},
         {"name": "Gotify",         "url": "http://10.43.223.13:80/health"},
+        # Timeslot: oracle-k3s local service, direct ClusterDNS bypasses SSO
+        {"name": "Timeslot",       "url": "http://timeslot.personal-services.svc:8080/api/slots"},
     ]
 
     def wait_ready(timeout=120):

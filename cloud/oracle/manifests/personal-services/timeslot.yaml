@@ -23,12 +23,9 @@ spec:
         - path:
             type: PathPrefix
             value: /
-      filters:
-        - type: ExtensionRef
-          extensionRef:
-            group: traefik.io
-            kind: Middleware
-            name: sso-forwardauth
+      # No SSO: timeslot has its own Basic Auth on /admin/ and the API (/api/slots)
+      # is intentionally public (for blog embedding). SSO's --pass-authorization-header=true
+      # would inject Authorization: Bearer, overwriting the browser's Basic Auth → 401.
       backendRefs:
         - group: ""
           kind: Service
