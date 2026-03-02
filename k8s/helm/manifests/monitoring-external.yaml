@@ -37,3 +37,20 @@ spec:
       targetPort: 9090
       nodePort: 31090
       name: http
+---
+# Tempo gRPC receiver — exposed for oracle-k3s OTel Collector (traces push)
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo-otlp-external
+  namespace: monitoring
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: tempo
+  ports:
+    - port: 4317
+      targetPort: 4317
+      nodePort: 31317
+      protocol: TCP
+      name: otlp-grpc

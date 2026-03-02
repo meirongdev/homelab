@@ -1,6 +1,6 @@
-# Observability — OTel 日志架构
+# Observability — OTel 日志与追踪架构
 
-**更新日期：** 2026-02-21
+**更新日期：** 2026-03-01
 **状态：** 生产运行中
 
 ---
@@ -17,13 +17,19 @@
 │  │                                                         │   │
 │  │  Receivers:                                             │   │
 │  │    filelog ──── /var/log/pods/**/*.log (hostPath)      │   │
+│  │    otlp ────── gRPC :4317 / HTTP :4318 (traces+logs)  │   │
 │  │                                                         │   │
 │  │  Processors:                                            │   │
+│  │    memory_limiter ── 200MiB limit, 50MiB spike          │   │
 │  │    k8sattributes ── 注入 k8s 元数据到 resource attrs   │   │
-│  │    batch ─────────── 10000 条 / 5s 批量发送            │   │
+│  │    batch ───────── 10000 条 / 5s 批量发送            │   │
 │  │                                                         │   │
 │  │  Exporters:                                             │   │
-│  │    otlp_http ──── loki-gateway:80/otlp                 │   │
+│  │    otlp_http ──── loki-gateway:80/otlp (logs)          │   │
+│  │    otlp/tempo ─── tempo:4317 (traces)                  │   │
+│  │                                                         │   │
+│  │  Extensions:                                            │   │
+│  │    health_check ── :13133 (liveness/readiness)         │   │
 │  └─────────────────────────────────────────────────────────┘   │
 │            │                        ▲                           │
 │            │ /var/log/pods/         │ stdout/stderr             │
@@ -38,30 +44,34 @@
 │  └──────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
           │
-          ▼ OTLP HTTP (port 80, path /otlp/v1/logs)
-┌─────────────────────────┐
-│  Loki Gateway           │
-│  (loki-gateway svc)     │
-│         │               │
-│         ▼               │
-│  Loki 3.x SingleBinary  │
-│  (loki-0 pod)           │
-│  OTLP 原生支持           │
-│  auto-promotes labels   │
-└─────────────────────────┘
+          │ OTLP HTTP (port 80, path /otlp/v1/logs)
           │
-          ▼ LogQL
-┌─────────────────────────┐
-│  Grafana 12.3.3         │
-│  grafana.meirong.dev    │
-│                         │
-│  Dashboards (via sidecar│
-│  ConfigMap auto-load):  │
-│  · Logs / Overview      │
-│  · Logs / Pod Browser   │
-│  · Logs / Errors        │
-│  · Logs / Cluster Search│
-└─────────────────────────┘
+          ├────────────────────────────────────────────────┘
+          │                                            │
+          ▼ OTLP HTTP (logs)                  OTLP gRPC (traces)
+┌─────────────────────────┐  ┌─────────────────────────┐
+│  Loki Gateway           │  │  Tempo 2.8.2           │
+│  (loki-gateway svc)     │  │  (tempo svc :4317)     │
+│         │               │  │  OTLP gRPC receiver    │
+│         ▼               │  │  5Gi NFS storage       │
+│  Loki 3.x SingleBinary  │  └─────────────────────────┘
+│  (loki-0 pod)           │            │
+│  OTLP 原生支持           │            ▼ TraceQL
+│  auto-promotes labels   │  ┌─────────────────────────┐
+└─────────────────────────┘  │  Grafana 12.3.3         │
+          │                  │  grafana.meirong.dev    │
+          ▼ LogQL            │                         │
+┌─────────────────────────┐  │  Datasources:          │
+│  Grafana 12.3.3         │  │  · Loki (LogQL)        │
+│  grafana.meirong.dev    │  │  · Tempo (TraceQL)     │
+│                         │  │  · Prometheus (PromQL) │
+│  Dashboards (via sidecar│  │                         │
+│  ConfigMap auto-load):  │  │  Correlations:         │
+│  · Logs / Overview      │  │  · tracesToLogs (Loki) │
+│  · Logs / Pod Browser   │  │  · tracesToMetrics     │
+│  · Logs / Errors        │  │  · nodeGraph           │
+│  · Logs / Cluster Search│  │  · serviceMap          │
+└─────────────────────────┘  └─────────────────────────┘
 ```
 
 ---
@@ -163,24 +173,62 @@ kubectl exec -n <ns> <pod> -c <app-container> -- find / -name "*.log" 2>/dev/nul
 
 ---
 
-### 模式 C：OTel SDK 直接推送（应用原生）
+### 模式 C：OTel SDK 直接推送（应用原生 / 追踪）
 
 **适用场景：** 自研服务，可在代码层集成 OTel SDK
 
-**原理：** 应用内嵌 OTel SDK，通过 OTLP gRPC/HTTP 直接向 OTel Collector 或 Loki 推送结构化日志，携带完整 trace context（traceID、spanID）。
+**原理：** 应用内嵌 OTel SDK，通过 OTLP gRPC/HTTP 直接向 OTel Collector 推送结构化日志和分布式追踪（traces），携带完整 trace context（traceID、spanID）。
 
-**接入方式（以 Python 为例）：**
-```python
-from opentelemetry.sdk._logs import LoggerProvider
-from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+**环境变量配置（所有语言通用）：**
+```yaml
+env:
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: "http://otel-collector.monitoring.svc:4317"   # gRPC
+  - name: OTEL_SERVICE_NAME
+    value: "<service-name>"
+  - name: OTEL_RESOURCE_ATTRIBUTES
+    value: "cluster=<homelab|oracle-k3s>,k8s.namespace.name=<ns>"
+```
 
-# 指向 OTel Collector ClusterIP service
-exporter = OTLPLogExporter(endpoint="http://opentelemetry-collector-agent.monitoring.svc:4317")
+**各语言接入指南：**
+
+| 语言 | SDK | 关键依赖 |
+|------|-----|----------|
+| Go | `go.opentelemetry.io/otel` | `otlptracegrpc`, `otelhttp` |
+| Java (Spring Boot) | `opentelemetry-javaagent.jar` | 零代码修改，`-javaagent` JVM 参数 |
+| Node.js | `@opentelemetry/sdk-node` | `@opentelemetry/auto-instrumentations-node` |
+| Rust | `opentelemetry-otlp` | `tracing-opentelemetry`, `tonic` |
+
+**Go 示例：**
+```go
+import (
+    "go.opentelemetry.io/otel"
+    "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+    sdktrace "go.opentelemetry.io/otel/sdk/trace"
+)
+
+func initTracer() (*sdktrace.TracerProvider, error) {
+    exp, _ := otlptracegrpc.New(ctx)  // 读取 OTEL_EXPORTER_OTLP_ENDPOINT 环境变量
+    tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exp))
+    otel.SetTracerProvider(tp)
+    return tp, nil
+}
+```
+
+**Java Spring Boot 示例（零代码）：**
+```dockerfile
+ENV JAVA_TOOL_OPTIONS="-javaagent:/otel/opentelemetry-javaagent.jar"
 ```
 
 **优势：** 可携带 traceID，实现 Grafana 中 Loki → Tempo 的日志-追踪联动。
 
-**接入成本：** 需修改应用代码，适合新服务。
+**接入成本：** 需修改应用代码或 Dockerfile，适合新服务。
+
+> **追踪架构**（2026-03-01 上线）：
+> - homelab: App → OTel Collector (ClusterIP :4317) → Tempo
+> - oracle-k3s: App → OTel Collector (ClusterIP :4317) → Tempo NodePort :31317 (via Tailscale)
+> - Grafana 已配置 tracesToLogs / tracesToMetrics / nodeGraph / serviceMap
+> - 详见 `docs/architecture/observability-multicluster.md` ⇢ Traces Pipeline 章节
 
 ---
 
@@ -222,11 +270,13 @@ cd k8s/helm && just remove-otel-collector
 
 | 决策 | 选择 | 原因 |
 |------|------|------|
-| 采集层 | OTel Collector DaemonSet | 替换 Promtail；统一 OTel 语义，未来可扩展 metrics/traces |
+| 采集层 | OTel Collector DaemonSet | 替换 Promtail；统一 OTel 语义，支持 logs/metrics/traces 三个信号 |
 | 传输协议 | OTLP HTTP → Loki `/otlp` | `loki` exporter 在 contrib v0.145.0 已移除；OTLP 是 Loki 3.x 原生协议 |
+| 追踪传输 | OTLP gRPC → Tempo :4317 | gRPC 双向流更适合 trace 数据；跨集群走 Tailscale NodePort :31317 |
 | 文件日志方案 | log-exporter sidecar (busybox) | linuxserver.io 镜像不输出 stdout；sidecar 比修改镜像更轻量 |
 | Dashboard 管理 | ConfigMap + ArgoCD GitOps | 持久化，不依赖 Grafana DB，重建集群无损 |
 | label 设计 | 使用 OTel 语义标签 | 与 Grafana Labs 官方 Dashboard 兼容，无需自定义映射 |
+| 内存保护 | memory_limiter 200MiB/50MiB | 防止 OTel Collector OOM，背压式流控 |
 
 ---
 
@@ -234,7 +284,11 @@ cd k8s/helm && just remove-otel-collector
 
 | 文件 | 说明 |
 |------|------|
-| `k8s/helm/values/opentelemetry-collector.yaml` | OTel Collector Helm values |
+| `k8s/helm/values/opentelemetry-collector.yaml` | OTel Collector Helm values（logs + traces） |
+| `k8s/helm/values/tempo.yaml` | Tempo Helm values（traces backend） |
+| `k8s/helm/values/kube-prometheus-stack.yaml` | Grafana datasources（Tempo tracesToLogs/Metrics） |
+| `k8s/helm/manifests/monitoring-external.yaml` | Tempo NodePort :31317（跨集群 traces） |
+| `cloud/oracle/manifests/monitoring/otel-collector.yaml` | Oracle-k3s OTel Collector（logs + metrics + traces） |
 | `k8s/helm/values/loki.yaml` | Loki config（promtail.enabled: false） |
 | `k8s/helm/manifests/grafana-dashboards.yaml` | 4 个 Loki Dashboard ConfigMap |
 | `k8s/helm/manifests/calibre-web.yaml` | log-exporter sidecar 示例 |

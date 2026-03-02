@@ -4,7 +4,8 @@
 #   - container logs        → homelab Loki via Tailscale (otlphttp)
 #   - cloudflared metrics   → homelab Prometheus via Tailscale (prometheusremotewrite)
 #   - Traefik metrics       → homelab Prometheus via Tailscale (prometheusremotewrite)
-# Architecture: filelog/prometheus → k8sattributes/resource/batch → otlphttp / prometheusremotewrite
+#   - application traces    → homelab Tempo via Tailscale (otlp grpc)
+# Architecture: apps/filelog/prometheus → memory_limiter/k8sattributes/resource/batch → otlphttp / prometheusremotewrite / otlp
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -37,6 +38,32 @@ subjects:
     name: otel-collector
     namespace: monitoring
 ---
+# ClusterIP Service — applications send OTLP traces/logs here
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: monitoring
+  labels:
+    app: otel-collector
+spec:
+  type: ClusterIP
+  selector:
+    app: otel-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+      protocol: TCP
+    - name: health
+      port: 13133
+      targetPort: 13133
+      protocol: TCP
+---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -59,6 +86,28 @@ spec:
           image: otel/opentelemetry-collector-contrib:0.120.0
           args:
             - --config=/etc/otel/config.yaml
+          ports:
+            - containerPort: 4317
+              name: otlp-grpc
+              protocol: TCP
+            - containerPort: 4318
+              name: otlp-http
+              protocol: TCP
+            - containerPort: 13133
+              name: health
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 5
+            periodSeconds: 10
           resources:
             requests:
               cpu: 50m
@@ -110,7 +159,19 @@ metadata:
   namespace: monitoring
 data:
   config.yaml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
     receivers:
+      # OTLP receiver — applications send traces/logs/metrics here
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
       filelog:
         include:
           - /var/log/pods/*/*/*.log
@@ -225,6 +286,10 @@ data:
                     cluster: oracle-k3s
 
     processors:
+      memory_limiter:
+        limit_mib: 200
+        spike_limit_mib: 50
+        check_interval: 5s
       k8sattributes:
         auth_type: "serviceAccount"
         passthrough: false
@@ -261,38 +326,47 @@ data:
         tls:
           insecure: true
       # Metrics → homelab Prometheus via Tailscale (Prometheus Remote Write)
-      # Uses same NodePort 31090 as prometheus-agent remote_write
       prometheusremotewrite:
         endpoint: "http://100.107.254.112:31090/api/v1/write"
         tls:
           insecure: true
         external_labels:
           cluster: oracle-k3s
+      # Traces → homelab Tempo via Tailscale (OTLP gRPC)
+      otlp/tempo:
+        endpoint: "100.107.254.112:31317"
+        tls:
+          insecure: true
       debug:
         verbosity: basic
 
     service:
+      extensions: [health_check]
       telemetry:
         logs:
           level: warn
       pipelines:
         logs:
-          receivers: [filelog]
-          processors: [k8sattributes, resource, batch]
+          receivers: [filelog, otlp]
+          processors: [memory_limiter, k8sattributes, resource, batch]
           exporters: [otlphttp]
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlp/tempo]
         metrics/cloudflared:
           receivers: [prometheus/cloudflared]
-          processors: [resource, batch]
+          processors: [memory_limiter, resource, batch]
           exporters: [prometheusremotewrite]
         metrics/traefik:
           receivers: [prometheus/traefik]
-          processors: [resource, batch]
+          processors: [memory_limiter, resource, batch]
           exporters: [prometheusremotewrite]
         metrics/node-exporter:
           receivers: [prometheus/node-exporter]
-          processors: [resource, batch]
+          processors: [memory_limiter, resource, batch]
           exporters: [prometheusremotewrite]
         metrics/kube-state-metrics:
           receivers: [prometheus/kube-state-metrics]
-          processors: [resource, batch]
+          processors: [memory_limiter, resource, batch]
           exporters: [prometheusremotewrite]
