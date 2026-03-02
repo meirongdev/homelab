@@ -35,13 +35,31 @@ grafana:
             datasourceUid: tempo
     - name: Tempo
       type: tempo
-      url: http://tempo.monitoring.svc.cluster.local:3100
+      url: http://tempo.monitoring.svc.cluster.local:3200
       access: proxy
       isDefault: false
       jsonData:
         tracesToLogs:
           datasourceUid: loki
           lokiSearch: true
+          filterByTraceID: true
+          filterBySpanID: true
+          tags:
+            - key: k8s.namespace.name
+              value: k8s_namespace_name
+            - key: k8s.pod.name
+              value: k8s_pod_name
+            - key: service.name
+              value: service_name
+        tracesToMetrics:
+          datasourceUid: prometheus
+          tags:
+            - key: service.name
+              value: service
+        nodeGraph:
+          enabled: true
+        serviceMap:
+          datasourceUid: prometheus
 
 prometheus:
   prometheusSpec:

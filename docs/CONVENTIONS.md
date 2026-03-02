@@ -162,10 +162,22 @@ just apply   # Apply DNS/Tunnel changes
 ### Observability
 - LGTM stack (Loki, Grafana, Tempo, Prometheus/Mimir) in `monitoring` namespace
 - Grafana accessible at `grafana.meirong.dev`
-- **Multi-cluster monitoring**: All metrics carry a `cluster` label (`homelab` or `oracle-k3s`)
+- **Three signals**: Logs (Loki), Metrics (Prometheus), Traces (Tempo) — all collected via OTel Collector
+- **Multi-cluster monitoring**: All telemetry carries a `cluster` label (`homelab` or `oracle-k3s`)
   - homelab: Prometheus `scrapeClasses` default relabeling adds `cluster=homelab` to all local scrape targets
   - oracle-k3s: OTel Collector pushes all metrics (node-exporter, kube-state-metrics, cloudflared, traefik) via `prometheusremotewrite` with `cluster=oracle-k3s`
-  - **No prometheus-agent on oracle-k3s** — the single OTel Collector handles both logs and metrics
+  - **No prometheus-agent on oracle-k3s** — the single OTel Collector handles both logs, metrics, and traces
+- **Traces pipeline** (2026-03-01):
+  - Apps send OTLP traces → OTel Collector (gRPC :4317 / HTTP :4318) → Tempo
+  - homelab OTel Collector exports to `tempo.monitoring.svc.cluster.local:4317`
+  - oracle-k3s OTel Collector exports to `100.107.254.112:31317` (Tempo NodePort via Tailscale)
+  - Grafana Tempo datasource: tracesToLogs (Loki), tracesToMetrics (Prometheus), nodeGraph, serviceMap
+- **App instrumentation** (env vars for any OTel SDK):
+  ```
+  OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.monitoring.svc:4317
+  OTEL_SERVICE_NAME=<service-name>
+  OTEL_RESOURCE_ATTRIBUTES=cluster=<homelab|oracle-k3s>,k8s.namespace.name=<ns>
+  ```
 - **Deployment summary**: Only two components to deploy for observability changes:
   1. `just deploy-prometheus` (homelab kube-prometheus-stack Helm release)
   2. `kubectl --context oracle-k3s apply -f cloud/oracle/manifests/monitoring/otel-collector.yaml` + `kubectl --context oracle-k3s rollout restart daemonset/otel-collector -n monitoring` (oracle-k3s OTel Collector)

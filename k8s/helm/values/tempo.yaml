@@ -16,7 +16,7 @@ tempo:
   persistence:
     enabled: true
     storageClassName: nfs-client
-    size: 2Gi
+    size: 5Gi
   
   # 资源限制
   resources:
@@ -50,3 +50,10 @@ traces:
       enabled: true
   zipkin:
     enabled: true
+
+# Overrides — expose gRPC receiver on NodePort for cross-cluster traces
+server:
+  grpc:
+    port: 4317
+  http:
+    port: 4318

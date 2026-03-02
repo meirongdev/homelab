@@ -10,6 +10,7 @@
 - [x] Grafana Loki Dashboards — Overview / Pod Browser / Errors / Cluster Search（GitOps via ArgoCD）
 - [x] log-exporter sidecar pattern — 支持文件日志应用（Calibre-Web 已实施）
 - [x] **Cloud Foundation**: Oracle Cloud Free Tier K3s Cluster (Terraform + Ansible)
+- [x] **OTel Tracing**: 双集群 OTLP traces → Tempo 全链路追踪（2026-03-01 上线）
 
 ## Phase 2: Security & GitOps ✅
 

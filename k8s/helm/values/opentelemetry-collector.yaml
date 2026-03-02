@@ -1,8 +1,8 @@
 # OTel Collector — DaemonSet 模式，替换 Promtail
 # Chart: open-telemetry/opentelemetry-collector
 # Image: otel/opentelemetry-collector-contrib (含 filelog, k8sattributes processor)
-# Exporter: otlp_http 向 Loki OTLP 端点推送日志（loki exporter 在 contrib 0.145+ 已移除）
-# Metrics: prometheus receiver 抓取 cloudflared + Traefik，通过 otlphttp 推送到 Prometheus
+# Signals: logs (filelog → Loki), metrics (prometheus → Prometheus), traces (otlp → Tempo)
+# Architecture: apps/filelog/prometheus → memory_limiter/k8sattributes/resource/batch → otlp_http
 
 mode: daemonset
 
@@ -22,7 +22,19 @@ presets:
 # 仅覆盖 pipeline 和 exporter 配置
 # presets 已自动注入 filelog receiver 和 k8sattributes processor
 config:
+  extensions:
+    health_check:
+      endpoint: 0.0.0.0:13133
+
   receivers:
+    # OTLP receiver — applications send traces/logs/metrics here
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
     # cloudflared metrics — ClusterIP within cloudflare namespace
     prometheus/cloudflared:
       config:
@@ -47,6 +59,10 @@ config:
                   cluster: homelab
 
   processors:
+    memory_limiter:
+      limit_mib: 200
+      spike_limit_mib: 50
+      check_interval: 5s
     resource:
       attributes:
         - key: cluster
@@ -67,21 +83,50 @@ config:
       endpoint: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090/api/v1/otlp
       tls:
         insecure: true
+    # Traces → Tempo via OTLP gRPC (in-cluster)
+    otlp/tempo:
+      endpoint: tempo.monitoring.svc.cluster.local:4317
+      tls:
+        insecure: true
 
   service:
+    extensions: [health_check]
     pipelines:
       logs:
-        receivers: [filelog]
-        processors: [k8sattributes, resource, batch]
+        receivers: [filelog, otlp]
+        processors: [memory_limiter, k8sattributes, resource, batch]
         exporters: [otlp_http/loki]
+      traces:
+        receivers: [otlp]
+        processors: [memory_limiter, resource, batch]
+        exporters: [otlp/tempo]
       metrics/cloudflared:
         receivers: [prometheus/cloudflared]
-        processors: [resource, batch]
+        processors: [memory_limiter, resource, batch]
         exporters: [otlp_http/prometheus]
       metrics/traefik:
         receivers: [prometheus/traefik]
-        processors: [resource, batch]
+        processors: [memory_limiter, resource, batch]
         exporters: [otlp_http/prometheus]
+
+# OTLP receiver ports — exposed as ClusterIP for in-cluster apps
+ports:
+  otlp:
+    enabled: true
+    containerPort: 4317
+    servicePort: 4317
+    protocol: TCP
+  otlp-http:
+    enabled: true
+    containerPort: 4318
+    servicePort: 4318
+    protocol: TCP
+
+# Create a ClusterIP Service so apps can send OTLP to the collector
+# (DaemonSet mode doesn't create a Service by default)
+service:
+  enabled: true
+  type: ClusterIP
 
 # 资源限制（单节点 homelab）
 resources:
@@ -91,6 +136,20 @@ resources:
   limits:
     cpu: 300m
     memory: 256Mi
+
+# Liveness/readiness probes via health_check extension
+livenessProbe:
+  httpGet:
+    path: /
+    port: 13133
+  initialDelaySeconds: 15
+  periodSeconds: 10
+readinessProbe:
+  httpGet:
+    path: /
+    port: 13133
+  initialDelaySeconds: 5
+  periodSeconds: 10
 
 # chart 内部资源命名使用的 namespace（实际部署 namespace 由 justfile 的 --namespace 参数控制）
 namespaceOverride: monitoring

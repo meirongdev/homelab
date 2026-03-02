@@ -1,11 +1,11 @@
 # Multi-Cluster Observability Architecture
 
-> Date: 2026-02-25
+> Date: 2026-03-01
 > Status: Production
 
 ## Overview
 
-Two k3s clusters are monitored from a single Grafana/Loki/Prometheus stack on the homelab cluster. Cross-cluster connectivity is provided by Tailscale. All oracle-k3s telemetry (logs + metrics) is pushed via a single OTel Collector DaemonSet.
+Two k3s clusters are monitored from a single Grafana/Loki/Prometheus/Tempo stack on the homelab cluster. Cross-cluster connectivity is provided by Tailscale. All oracle-k3s telemetry (logs + metrics + traces) is pushed via a single OTel Collector DaemonSet.
 
 ```
 ┌─────────────────────────────────────┐     Tailscale     ┌─────────────────────────────────────┐
@@ -14,11 +14,12 @@ Two k3s clusters are monitored from a single Grafana/Loki/Prometheus stack on th
 │                                     │                    │                                     │
 │  Grafana ◄── Loki      :31080/otlp │◄── logs (OTLP) ─── │  OTel Collector DaemonSet           │
 │  Grafana ◄── Prometheus :31090     │◄── metrics (PRW) ── │    ├ filelog → logs pipeline         │
+│  Grafana ◄── Tempo     :31317     │◄── traces (OTLP) ── │    ├ otlp → traces pipeline          │
 │                                     │                    │    ├ prometheus/node-exporter        │
 │  scrapeClasses:                     │                    │    ├ prometheus/kube-state-metrics   │
 │    cluster=homelab (all local jobs) │                    │    ├ prometheus/cloudflared          │
 │                                     │                    │    └ prometheus/traefik              │
-│  OTel Collector (homelab logs)      │                    │  node-exporter (hostNetwork:9100)    │
+│  OTel Collector (homelab logs+traces)│                    │  node-exporter (hostNetwork:9100)    │
 │  node-exporter, kube-state-metrics  │                    │  kube-state-metrics (:8080)          │
 └─────────────────────────────────────┘                    └─────────────────────────────────────┘
 ```
@@ -92,6 +93,67 @@ OTel resource attributes are converted to Loki stream labels (dots replaced with
 
 All metrics pass through `resource` processor (adds `cluster: oracle-k3s`) → `batch` → `prometheusremotewrite` exporter → `http://100.107.254.112:31090/api/v1/write`
 
+## Traces Pipeline
+
+> Added: 2026-03-01
+
+### Architecture
+
+Both clusters have OTLP receivers (gRPC :4317, HTTP :4318) on their local OTel Collectors. Applications send traces to the cluster-local Collector via ClusterIP Service. The Collector enriches spans with `cluster` label and forwards to homelab Tempo.
+
+```
+Application Pod                      OTel Collector              Tempo (homelab)
+  OTEL_EXPORTER_OTLP_ENDPOINT  →  otlp receiver (4317/4318)  →  otlp/tempo exporter
+     (ClusterIP in-cluster)        memory_limiter → resource     (direct or via Tailscale)
+                                   → batch
+```
+
+### homelab Traces
+
+**Pipeline:** `otlp → memory_limiter → resource(cluster=homelab) → batch → otlp/tempo`
+
+- Collector sends traces directly to `tempo.monitoring.svc.cluster.local:4317` (in-cluster gRPC)
+- ClusterIP Service: `opentelemetry-collector.monitoring.svc:4317/4318`
+
+### oracle-k3s Traces
+
+**Pipeline:** `otlp → memory_limiter → resource(cluster=oracle-k3s) → batch → otlp/tempo`
+
+- Collector forwards traces to `100.107.254.112:31317` (Tempo NodePort via Tailscale)
+- ClusterIP Service: `otel-collector.monitoring.svc:4317/4318`
+
+### Sampling Strategy
+
+Head sampling at application SDK level via environment variable:
+- `OTEL_TRACES_SAMPLER=parentbased_traceidratio`
+- `OTEL_TRACES_SAMPLER_ARG=0.1` (10% sampling)
+
+### Application Instrumentation (Env Var Template)
+
+```yaml
+env:
+  - name: OTEL_SERVICE_NAME
+    value: "<service-name>"
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: "http://otel-collector.monitoring.svc.cluster.local:4318"  # or opentelemetry-collector for homelab
+  - name: OTEL_EXPORTER_OTLP_PROTOCOL
+    value: "http/protobuf"
+  - name: OTEL_TRACES_SAMPLER
+    value: "parentbased_traceidratio"
+  - name: OTEL_TRACES_SAMPLER_ARG
+    value: "0.1"
+  - name: OTEL_RESOURCE_ATTRIBUTES
+    value: "deployment.environment=prod,service.namespace=<namespace>"
+```
+
+### Grafana Integration
+
+- **Tempo datasource** at `http://tempo.monitoring.svc.cluster.local:3200`
+- **tracesToLogs**: Links traces to Loki logs with `filterByTraceID` and `filterBySpanID`
+- **tracesToMetrics**: Links traces to Prometheus RED metrics
+- **nodeGraph**: Enabled for visual service dependency graph
+- **Explore → Tempo**: Search traces by service name, duration, or TraceQL
+
 ### Homelab Prometheus (local scrape)
 
 Standard kube-prometheus-stack in-cluster scraping with `scrapeClasses` default relabeling (`cluster: homelab`).
@@ -110,8 +172,7 @@ Standard kube-prometheus-stack in-cluster scraping with `scrapeClasses` default 
 | Service | NodePort | Purpose |
 |---------|----------|---------|
 | `loki-gateway-external` | 31080 | Receives OTLP logs from oracle OTel |
-| `prometheus-otlp-external` | 31090 | Receives Prometheus remote_write from oracle OTel |
-
+| `prometheus-otlp-external` | 31090 | Receives Prometheus remote_write from oracle OTel || `tempo-otlp-external` | 31317 | Receives OTLP gRPC traces from oracle OTel |
 > **Note:** kube-state-metrics NodePort (31082) on oracle-k3s is no longer used for cross-cluster scrape. OTel Collector scrapes it locally via ClusterIP and pushes via remote_write.
 
 ## Grafana Dashboards
