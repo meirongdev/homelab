@@ -1,0 +1,3 @@
+[submodule "cloudflare/workers/sink"]
+	path = cloudflare/workers/sink
+	url = https://github.com/miantiao-me/Sink

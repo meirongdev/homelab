@@ -1,0 +1,45 @@
+set dotenv-load
+
+# Cloudflare credentials (loaded from .env in cloudflare/terraform/)
+export CLOUDFLARE_API_TOKEN := env_var_or_default("CLOUDFLARE_API_TOKEN", "")
+export CLOUDFLARE_ACCOUNT_ID := "c49b6c6407adb48905eb6f932cd4e972"
+
+# ────────────────────────────────────────────────────────────────────
+# Sink URL Shortener — Cloudflare Workers deployment
+# 部署前需要一个具备以下权限的 API Token:
+#   Workers Scripts:Edit, Workers KV Storage:Edit,
+#   Workers R2 Storage:Edit, Zone DNS:Edit, Account Analytics:Edit
+# ────────────────────────────────────────────────────────────────────
+
+# 安装依赖
+install:
+    cd sink && pnpm install
+
+# 创建 KV namespace（只需运行一次，记录输出的 ID 并填入 wrangler.jsonc）
+create-kv:
+    cd sink && npx wrangler kv namespace create "SINK_KV" --account-id ${CLOUDFLARE_ACCOUNT_ID}
+
+# 创建 R2 bucket（只需运行一次）
+create-r2:
+    cd sink && npx wrangler r2 bucket create sink --account-id ${CLOUDFLARE_ACCOUNT_ID}
+
+# 构建 Sink（NUXT_HOME_URL 必须在 build 时注入，否则 UI 内链接不正确）
+build:
+    cd sink && NUXT_HOME_URL=https://s.meirong.dev pnpm build
+
+# 部署到 Cloudflare Workers
+# 注意：每次 deploy 会报 custom domain 绑定错误（可忽略，domain 已通过 API 持久绑定）
+deploy: build
+    cd sink && npx wrangler deploy
+
+# 完整首次部署流程（KV 已创建后）
+deploy-full: install build
+    cd sink && npx wrangler deploy
+
+# 查看 Worker 日志
+logs:
+    cd sink && npx wrangler tail sink --account-id ${CLOUDFLARE_ACCOUNT_ID}
+
+# 更新 Sink 版本
+update:
+    cd sink && git pull origin master && pnpm install && pnpm build && npx wrangler deploy --account-id ${CLOUDFLARE_ACCOUNT_ID}

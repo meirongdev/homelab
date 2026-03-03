@@ -110,6 +110,11 @@ data:
               namespace: personal-services
               app: timeslot
 
+        - Sink:
+            icon: mdi-link-variant
+            href: https://s.meirong.dev/dashboard/
+            description: 短链接服务
+
     - RSS & 自动化:
         - Miniflux:
             icon: miniflux.png
