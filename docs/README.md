@@ -34,7 +34,10 @@ docs/
     ├── 2026-02-21-uptime-kuma-deployment.md
     ├── 2026-02-22-oracle-migration-observability.md
     ├── 2026-02-25-sso-integration.md
-    └── 2026-02-28-info-pipeline-miniflux-karakeep-gotify.md
+    ├── 2026-02-28-info-pipeline-miniflux-karakeep-gotify.md
+    ├── 2026-03-01-otel-tracing-improvement.md
+    ├── 2026-03-02-timeslot-deployment.md
+    └── 2026-03-03-sink-cloudflare-worker.md
 ```
 
 ---
@@ -81,3 +84,4 @@ docs/
 | Miniflux | oracle-k3s | rss.meirong.dev | 自带登录 |
 | KaraKeep | oracle-k3s | keep.meirong.dev | ✅ ForwardAuth |
 | Gotify | homelab | notify.meirong.dev | ✅ ForwardAuth |
+| Sink (短链) | Cloudflare Workers | s.meirong.dev | Site Token |

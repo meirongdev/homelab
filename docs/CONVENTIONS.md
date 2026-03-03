@@ -203,6 +203,7 @@ just apply   # Apply DNS/Tunnel changes
 | ZITADEL (SSO) | homelab | `zitadel` | `auth.meirong.dev` |
 | Kopia Backup | homelab | `kopia` | `backup.meirong.dev` (Web) / `https://10.10.10.10:31515` (CLI) |
 | PostgreSQL | oracle-k3s | `rss-system` | Internal only |
+| Sink (短链) | Cloudflare Workers | N/A | `s.meirong.dev` |
 
 ## Conventions
 
