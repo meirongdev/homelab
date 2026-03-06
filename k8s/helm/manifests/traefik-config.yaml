@@ -40,8 +40,10 @@ spec:
       name: metrics
 ---
 # SSO ForwardAuth Middlewares — homelab cluster
-# ForwardAuth delegates auth to oracle-k3s oauth2-proxy via Tailscale subnet routing.
-# oracle-k3s oauth2-proxy ClusterIP: 10.53.182.179:4180 (reachable via Tailscale)
+# ForwardAuth delegates auth to oracle-k3s oauth2-proxy via the public oauth callback endpoint.
+# This avoids dependence on cross-cluster Service CIDR routing during homelab rebuilds.
+# Keep this in Git: the gateway Application is self-healed by ArgoCD, so live-only patches
+# to these Middleware objects will be reverted on the next sync.
 #
 # Middleware must be in the SAME namespace as the HTTPRoute (Traefik Gateway API constraint).
 # Namespaces: personal-services, monitoring, vault, argocd, kopia
@@ -60,7 +62,7 @@ metadata:
   namespace: personal-services
 spec:
   forwardAuth:
-    address: http://10.53.182.179:4180/
+    address: https://oauth.meirong.dev/
     trustForwardHeader: true
     authRequestHeaders:
       - Cookie
@@ -83,7 +85,7 @@ metadata:
   namespace: monitoring
 spec:
   forwardAuth:
-    address: http://10.53.182.179:4180/
+    address: https://oauth.meirong.dev/
     trustForwardHeader: true
     authRequestHeaders:
       - Cookie
@@ -106,7 +108,7 @@ metadata:
   namespace: vault
 spec:
   forwardAuth:
-    address: http://10.53.182.179:4180/
+    address: https://oauth.meirong.dev/
     trustForwardHeader: true
     authRequestHeaders:
       - Cookie
@@ -129,7 +131,7 @@ metadata:
   namespace: argocd
 spec:
   forwardAuth:
-    address: http://10.53.182.179:4180/
+    address: https://oauth.meirong.dev/
     trustForwardHeader: true
     authRequestHeaders:
       - Cookie
@@ -152,7 +154,7 @@ metadata:
   namespace: kopia
 spec:
   forwardAuth:
-    address: http://10.53.182.179:4180/
+    address: https://oauth.meirong.dev/
     trustForwardHeader: true
     authRequestHeaders:
       - Cookie

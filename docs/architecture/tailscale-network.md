@@ -4,13 +4,15 @@
 
 Two K3s clusters are connected via Tailscale subnet routing. Each cluster's K3s node acts as a subnet router, advertising its Pod and Service CIDRs into the shared tailnet. This lets pods in either cluster reach pods in the other cluster directly by IP, without any changes to applications.
 
+After the homelab Cilium migration, the auth path was simplified: homelab Traefik no longer depends on oracle-k3s Service CIDR reachability for ForwardAuth. Instead, homelab uses the public `https://oauth.meirong.dev/` endpoint, so cross-cluster Service routing is no longer on the critical path for SSO.
+
 **Status**: Active as of 2026-02-21. Both nodes connected, bidirectional pod routing verified.
 
 ## CIDR Allocation
 
 | Cluster | Pod CIDR | Service CIDR | Node (LAN) IP | Tailscale IP |
 |---------|----------|--------------|---------------|--------------|
-| Homelab K3s | 10.42.0.0/16 | 10.43.0.0/16 | 10.10.10.10 | 100.107.254.112 |
+| Homelab K3s | 10.42.0.0/16 | 10.43.0.0/16 | 10.10.10.10 | 100.96.84.32 |
 | Oracle K3s | 10.52.0.0/16 | 10.53.0.0/16 | 10.0.0.26 | 100.107.166.37 |
 
 Oracle K3s uses non-default CIDRs to avoid collision with homelab defaults.
@@ -47,6 +49,14 @@ The reverse path (Oracle → homelab) is symmetric.
 - **Route acceptance**: `tailscale up --accept-routes` installs peer routes into kernel routing table 52 (`ip route show table 52`). These are separate from the main table.
 - **Auto-approval**: The Tailscale ACL `autoApprovers` block in `tailscale/terraform/main.tf` automatically approves advertised routes from tagged nodes without manual admin approval.
 - **Tailscale tags**: Both nodes use pre-auth keys with tags (`tag:homelab`, `tag:oracle`), which the ACL uses to grant subnet routing permissions.
+
+## Simplified Critical Path
+
+- **Keep**: Tailscale as the inter-cluster underlay for Pod/Service reachability and operational access.
+- **Keep**: Cilium as the homelab in-cluster CNI and data plane.
+- **Simplify**: homelab SSO now calls `https://oauth.meirong.dev/` instead of oracle-k3s `oauth2-proxy` ClusterIP.
+- **Benefit**: homelab ingress no longer breaks when oracle Service CIDR routing, static routes, or temporary rebuild state regress.
+- **GitOps rule**: because `gateway` is ArgoCD-managed, this simplification must live in `k8s/helm/manifests/traefik-config.yaml`, not as a live patch.
 
 ## Tailscale Tags and ACL
 
@@ -120,7 +130,7 @@ ping 10.42.0.1   # from Oracle: homelab pod gateway
 
 # Cross-cluster K3s API access
 nc -z 100.107.166.37 6443   # homelab → Oracle K3s API
-nc -z 100.107.254.112 6443  # Oracle → homelab K3s API
+nc -z 100.96.84.32 6443  # Oracle → homelab K3s API
 
 # Cross-cluster DNS query (homelab node querying Oracle CoreDNS)
 nslookup kubernetes.default.svc.cluster.local 10.52.0.2
