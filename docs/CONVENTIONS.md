@@ -101,7 +101,7 @@ just apply   # Apply DNS/Tunnel changes
 - **Traefik**: Configured via K8s Gateway API (`HTTPRoute` resources in `manifests/gateway.yaml`)
 - **homelab K8s Node**: `10.10.10.10` / Tailscale `100.96.84.32` | **Proxmox**: `192.168.50.3`
 - **oracle-k3s Node**: `10.0.0.26` / Tailscale `100.107.166.37`
-- **Cross-cluster network**: Tailscale subnet routing remains the inter-cluster underlay: homelab 广播 `10.42.0.0/16, 10.43.0.0/16`；oracle-k3s 广播 `10.52.0.0/16, 10.53.0.0/16`。双向 Pod/Service 直通，RTT ~80ms。见 `docs/architecture/tailscale-network.md`
+- **Cross-cluster network**: Tailscale subnet routing remains the inter-cluster underlay: homelab 广播 `10.42.0.0/16`；oracle-k3s 广播 `10.52.0.0/16`。各集群 Service CIDR 保持本地化，跨集群关键路径尽量通过 Pod CIDR、NodePort 或公网入口完成。见 `docs/architecture/tailscale-network.md`
 - **Exception — Kopia**: Exposed via NodePort (31515) instead of Cloudflare Tunnel. Kopia's gRPC-Go client uses bidirectional streaming that fails through Cloudflare Tunnel (524 timeout), even though regular HTTP/2 works. Connect directly: `kopia repository connect server --url=https://10.10.10.10:31515 --server-cert-fingerprint=<sha256> --override-username=admin`
 
 ### Cloudflare WAF & Security

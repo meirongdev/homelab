@@ -49,7 +49,7 @@ Internet → Cloudflare DNS (rss.meirong.dev)
 
 ```
 oracle-k3s pods → Tailscale (100.107.166.37)
-                → k8s-node (100.107.254.112:31144)
+                → k8s-node (100.96.84.32:31144)
                 → Vault (k3s-homelab)
 ```
 
@@ -91,8 +91,10 @@ just logs n8n        # View n8n logs
 
 ## Network Notes
 
-- **firewalld**: Oracle Cloud Ubuntu uses firewalld with nftables. Pod/service CIDRs
+- **firewalld**: Oracle Cloud Ubuntu uses firewalld with nftables. Oracle local pod/service CIDRs
   (`10.52.0.0/16`, `10.53.0.0/16`) and interfaces (`cni0`, `flannel.1`) must be in
-  the trusted zone. This is handled by `ansible/playbooks/setup-k3s.yaml`.
+  the trusted zone. Cross-cluster Tailscale routing is intentionally narrower: only homelab pod CIDR
+  (`10.42.0.0/16`) is trusted/advertised, while homelab service reachability should prefer public URLs,
+  NodePort, or the node Tailscale IP.
 - **CoreDNS**: Patched to forward to `8.8.8.8` instead of `/etc/resolv.conf`
   (which points to Oracle's unreachable `169.254.169.254` metadata DNS).

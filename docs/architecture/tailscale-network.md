@@ -2,7 +2,7 @@
 
 ## Overview
 
-Two K3s clusters are connected via Tailscale subnet routing. Each cluster's K3s node acts as a subnet router, advertising its Pod and Service CIDRs into the shared tailnet. This lets pods in either cluster reach pods in the other cluster directly by IP, without any changes to applications.
+Two K3s clusters are connected via Tailscale subnet routing. Each cluster's K3s node acts as a subnet router, advertising its Pod CIDR into the shared tailnet. This lets pods in either cluster reach pods in the other cluster directly by IP, without dragging cross-cluster Service CIDRs into the critical path.
 
 After the homelab Cilium migration, the auth path was simplified: homelab Traefik no longer depends on oracle-k3s Service CIDR reachability for ForwardAuth. Instead, homelab uses the public `https://oauth.meirong.dev/` endpoint, so cross-cluster Service routing is no longer on the critical path for SSO.
 
@@ -10,8 +10,8 @@ After the homelab Cilium migration, the auth path was simplified: homelab Traefi
 
 ## CIDR Allocation
 
-| Cluster | Pod CIDR | Service CIDR | Node (LAN) IP | Tailscale IP |
-|---------|----------|--------------|---------------|--------------|
+| Cluster | Advertised Pod CIDR | Local Service CIDR | Node (LAN) IP | Tailscale IP |
+|---------|----------------------|--------------------|---------------|--------------|
 | Homelab K3s | 10.42.0.0/16 | 10.43.0.0/16 | 10.10.10.10 | 100.96.84.32 |
 | Oracle K3s | 10.52.0.0/16 | 10.53.0.0/16 | 10.0.0.26 | 100.107.166.37 |
 
@@ -62,8 +62,8 @@ The reverse path (Oracle → homelab) is symmetric.
 
 | Tag | Node | Auto-approved routes |
 |-----|------|---------------------|
-| `tag:homelab` | k8s-node (homelab) | 10.42.0.0/16, 10.43.0.0/16 |
-| `tag:oracle` | node0 (oracle) | 10.52.0.0/16, 10.53.0.0/16 |
+| `tag:homelab` | k8s-node (homelab) | 10.42.0.0/16 |
+| `tag:oracle` | node0 (oracle) | 10.52.0.0/16 |
 
 ACL policy (`tailscale/terraform/main.tf`): `tag:homelab` and `tag:oracle` can reach any destination (`*:*`).
 
@@ -84,8 +84,8 @@ ACL policy (`tailscale/terraform/main.tf`): `tag:homelab` and `tag:oracle` can r
 
 | File | Node | Advertised routes |
 |------|------|------------------|
-| `k8s/ansible/playbooks/setup-tailscale.yaml` | Homelab | 10.42/16, 10.43/16 |
-| `cloud/oracle/ansible/playbooks/setup-tailscale.yaml` | Oracle | 10.52/16, 10.53/16 |
+| `k8s/ansible/playbooks/setup-tailscale.yaml` | Homelab | 10.42/16 |
+| `cloud/oracle/ansible/playbooks/setup-tailscale.yaml` | Oracle | 10.52/16 |
 
 ## Initial Setup
 
@@ -122,7 +122,7 @@ just setup-tailscale $(cd ../../tailscale/terraform && just homelab-authkey)
 tailscale status
 
 # Routes installed in table 52 (not main table)
-ip route show table 52 | grep -E "10\.42|10\.43|10\.52|10\.53"
+ip route show table 52 | grep -E "10\.42|10\.52"
 
 # Cross-cluster pod ping
 ping 10.52.0.2   # from homelab: Oracle CoreDNS pod
@@ -232,7 +232,6 @@ The iptables FORWARD chain has `policy ACCEPT` and `ACCEPT` rules, but `firewall
 ```bash
 firewall-cmd --zone=trusted --add-interface=tailscale0 --permanent
 firewall-cmd --zone=trusted --add-source=10.42.0.0/16 --permanent
-firewall-cmd --zone=trusted --add-source=10.43.0.0/16 --permanent
 firewall-cmd --reload
 ```
 

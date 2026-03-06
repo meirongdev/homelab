@@ -15,12 +15,9 @@ data:
     USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
     PASSWORD = os.environ["ADMIN_PASSWORD"]
 
-    # All internal URLs bypass SSO entirely.
-    # oracle-k3s services: direct ClusterIP via local CNI.
-    # k3s-homelab services: direct ClusterIP via Tailscale subnet routing
-    #   (oracle node advertises 10.52/16+10.53/16; homelab node advertises 10.42/16+10.43/16).
-    #   Requires iptables MASQUERADE on oracle node for pod→10.43.0.0/16 traffic
-    #   and ip route for 10.42-43.0.0/16 added to pod network namespace.
+    # oracle-k3s local services: direct ClusterDNS via local CNI.
+    # homelab services: public URLs via Cloudflare/Traefik, so status reflects real external reachability.
+    # This keeps cross-cluster networking off the critical path for status monitoring.
     MONITORS = [
         # --- oracle-k3s local services ---
         {"name": "Homepage",       "url": "http://homepage.homepage.svc:3000"},
@@ -29,21 +26,17 @@ data:
         {"name": "Squoosh",        "url": "http://squoosh.personal-services.svc:8080"},
         {"name": "Stirling-PDF",   "url": "http://stirling-pdf.personal-services.svc:8080/login"},
         {"name": "Uptime Kuma",    "url": "http://uptime-kuma.personal-services.svc:3001"},
-        # --- k3s-homelab services via Tailscale (ClusterIP 10.43.x.x) ---
-        # Grafana: /api/health returns 200 without auth
-        {"name": "Grafana",        "url": "http://10.43.70.241:80/api/health"},
-        # Vault: /v1/sys/health returns 200 when initialized and unsealed
-        {"name": "HashiCorp Vault","url": "http://10.43.29.201:8200/v1/sys/health"},
-        # Calibre-Web: /login returns 200 without auth
-        {"name": "Calibre-Web",    "url": "http://10.43.206.163:8083/login"},
-        # ArgoCD: TLS disabled via argocd-cmd-params-cm (server.insecure=true), serves HTTP on port 80
-        {"name": "ArgoCD",         "url": "http://10.43.158.192:80/"},
-        # Kopia: HTTPS with self-signed cert, returns 401 (basic auth) — service is up
-        {"name": "Kopia Backup",   "url": "https://10.43.114.55:51515",  "accepted_statuscodes": ["401"], "ignoreTls": True},
+        # --- homelab public services ---
+        # Protected services may redirect to oauth.meirong.dev; treat 2xx-3xx as healthy external reachability.
+        {"name": "Grafana",        "url": "https://grafana.meirong.dev/",       "accepted_statuscodes": ["200-399"]},
+        {"name": "HashiCorp Vault","url": "https://vault.meirong.dev/",         "accepted_statuscodes": ["200-399"]},
+        {"name": "Calibre-Web",    "url": "https://book.meirong.dev/",          "accepted_statuscodes": ["200-399"]},
+        {"name": "ArgoCD",         "url": "https://argocd.meirong.dev/",        "accepted_statuscodes": ["200-399"]},
+        {"name": "Kopia Backup",   "url": "https://backup.meirong.dev/",        "accepted_statuscodes": ["200-399"]},
         # --- new info pipeline services ---
         # KaraKeep: root / redirects 307 to /signin; monitor /signin directly (returns 200)
         {"name": "KaraKeep",       "url": "http://karakeep.rss-system.svc:3000/signin"},
-        {"name": "Gotify",         "url": "http://10.43.223.13:80/health"},
+        {"name": "Gotify",         "url": "https://notify.meirong.dev/",        "accepted_statuscodes": ["200-399"]},
         # Timeslot: oracle-k3s local service, direct ClusterDNS bypasses SSO
         {"name": "Timeslot",       "url": "http://timeslot.personal-services.svc:8080/api/slots"},
     ]
