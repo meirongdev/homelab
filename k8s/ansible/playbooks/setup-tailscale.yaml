@@ -2,16 +2,23 @@
   hosts: k8s_masters
   become: true
   vars:
-    advertise_routes: "10.42.0.0/16,10.43.0.0/16"
+    advertise_routes: "10.42.0.0/16"
   tasks:
-    - name: Add Tailscale apt signing key
-      ansible.builtin.apt_key:
+    - name: Create keyrings directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Download Tailscale signing key
+      ansible.builtin.get_url:
         url: https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg
-        state: present
+        dest: /etc/apt/keyrings/tailscale-archive-keyring.gpg
+        mode: "0644"
 
     - name: Add Tailscale apt repository
       ansible.builtin.apt_repository:
-        repo: "deb https://pkgs.tailscale.com/stable/ubuntu noble main"
+        repo: "deb [signed-by=/etc/apt/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu noble main"
         state: present
 
     - name: Install tailscale
@@ -49,10 +56,38 @@
         state: restarted
       when: tailscale_force_reregister | default(false) | bool
 
+    - name: Allow Tailscale UDP port (direct connections)
+      community.general.ufw:
+        rule: allow
+        port: '41641'
+        proto: udp
+
+    - name: Allow traffic from local bridge subnet (Proxmox vmbr0)
+      community.general.ufw:
+        rule: allow
+        src: 10.10.10.0/24
+
     - name: Join tailnet with subnet routes
       ansible.builtin.command: >
         tailscale up
         --advertise-routes={{ advertise_routes }}
-        --accept-routes
+        --netfilter-mode=off
+        --snat-subnet-routes=false
         --authkey={{ tailscale_authkey }}
       changed_when: true
+
+    - name: Add static route for oracle-k3s pod CIDR via Tailscale
+      ansible.builtin.command: >
+        ip route replace {{ item }} dev tailscale0
+      loop:
+        - 10.52.0.0/16
+      changed_when: true
+
+    - name: Persist oracle-k3s pod CIDR route across reboots
+      ansible.builtin.copy:
+        dest: /etc/networkd-dispatcher/routable.d/50-tailscale-routes.sh
+        mode: "0755"
+        content: |
+          #!/bin/bash
+          # Add route to oracle-k3s pod CIDR via Tailscale
+          ip route replace 10.52.0.0/16 dev tailscale0 2>/dev/null || true

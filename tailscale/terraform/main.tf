@@ -10,9 +10,7 @@ resource "tailscale_acl" "main" {
     autoApprovers = {
       routes = {
         "10.42.0.0/16" = ["tag:homelab"]
-        "10.43.0.0/16" = ["tag:homelab"]
         "10.52.0.0/16" = ["tag:oracle"]
-        "10.53.0.0/16" = ["tag:oracle"]
       }
     }
   })

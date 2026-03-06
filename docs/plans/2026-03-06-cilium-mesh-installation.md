@@ -34,7 +34,7 @@
 | Hubble | **启用** (可观测性 UI + Relay) |
 | Pod CIDR | 10.42.0.0/16 (不变) |
 | Service CIDR | 10.43.0.0/16 (不变) |
-| 跨集群网络 | Tailscale 子网路由 (保留为 underlay；当前未启用 Cilium ClusterMesh) |
+| 跨集群网络 | Tailscale 子网路由 (保留为 underlay；仅广播 Pod CIDR，当前未启用 Cilium ClusterMesh) |
 
 ## 关键决策
 
@@ -53,6 +53,10 @@ K3s 启动参数不加 `--disable traefik`，继续让 K3s 管理 Traefik 生命
 ### 4. 不把跨集群认证链路绑定到 Service CIDR
 
 虽然 homelab 已切到 Cilium，但当前没有启用跨集群 Cilium ClusterMesh。为了降低复杂度，homelab 的 Traefik ForwardAuth 不再直连 oracle-k3s 的 `oauth2-proxy` ClusterIP，而是统一走公开 `https://oauth.meirong.dev/`。这样可以减少对 Tailscale 静态路由和 oracle Service CIDR 的运行时依赖，也更符合 ArgoCD 的 GitOps 模式。
+
+### 5. 只在 Tailscale 中广播 Pod CIDR
+
+在当前架构下，跨集群真正需要的只有 Pod 级可达性、NodePort 和少量基于节点 Tailscale IP 的出口。既然 homelab SSO 已改走公网入口、oracle 侧 Uptime Kuma 也可直接监控公网域名，就没有必要继续把两边的 Service CIDR 暴露进 tailnet。后续 Tailscale 仅广播 `10.42.0.0/16` 与 `10.52.0.0/16`。
 
 ## 实施步骤
 
@@ -226,6 +230,7 @@ just post-restart-check
 - `kubeProxyReplacement: true` 在这套单节点 homelab 环境里曾导致宿主 SSH/网络异常，因此当前生产配置保留 kube-proxy。
 - Cilium 已经简化了 homelab 集群内的数据面，但还没有替代跨集群 underlay；跨集群仍由 Tailscale 承担。
 - 真正值得优先简化的是控制面依赖链。把 homelab 的 ForwardAuth 改为 `https://oauth.meirong.dev/` 后，认证不再依赖 oracle-k3s Service CIDR、静态路由和临时 ClusterIP。
+- 在移除 oracle 侧对 homelab `10.43.x.x` ClusterIP 监控后，Tailscale 也可以进一步收敛到只广播 Pod CIDR，减少 ACL、静态路由和排障面。
 - `gateway` Application 由 ArgoCD 自愈管理，因此这类修复必须先进 Git，再让 ArgoCD 同步，不能只 patch live 资源。
 
 ## 涉及文件清单
