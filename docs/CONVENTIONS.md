@@ -99,9 +99,9 @@ just apply   # Apply DNS/Tunnel changes
 - All external traffic flows: `Internet → Cloudflare DNS → Cloudflare Tunnel → Traefik (K8s) → Services`
 - **Cloudflare Tunnel**: `cloudflared` pod in `cloudflare` namespace forwards to `traefik.kube-system.svc:80`
 - **Traefik**: Configured via K8s Gateway API (`HTTPRoute` resources in `manifests/gateway.yaml`)
-- **homelab K8s Node**: `10.10.10.10` / Tailscale `100.107.254.112` | **Proxmox**: `192.168.50.3`
+- **homelab K8s Node**: `10.10.10.10` / Tailscale `100.96.84.32` | **Proxmox**: `192.168.50.3`
 - **oracle-k3s Node**: `10.0.0.26` / Tailscale `100.107.166.37`
-- **Cross-cluster network**: Tailscale subnet routing — homelab 广播 `10.42.0.0/16, 10.43.0.0/16`；oracle-k3s 广播 `10.52.0.0/16, 10.53.0.0/16`。双向 Pod/Service 直通，RTT ~80ms。见 `docs/architecture/tailscale-network.md`
+- **Cross-cluster network**: Tailscale subnet routing remains the inter-cluster underlay: homelab 广播 `10.42.0.0/16, 10.43.0.0/16`；oracle-k3s 广播 `10.52.0.0/16, 10.53.0.0/16`。双向 Pod/Service 直通，RTT ~80ms。见 `docs/architecture/tailscale-network.md`
 - **Exception — Kopia**: Exposed via NodePort (31515) instead of Cloudflare Tunnel. Kopia's gRPC-Go client uses bidirectional streaming that fails through Cloudflare Tunnel (524 timeout), even though regular HTTP/2 works. Connect directly: `kopia repository connect server --url=https://10.10.10.10:31515 --server-cert-fingerprint=<sha256> --override-username=admin`
 
 ### Cloudflare WAF & Security
@@ -123,7 +123,8 @@ just apply   # Apply DNS/Tunnel changes
 - **Status**: ✅ 生产运行中（2026-02-27 上线）
 - **Identity Provider**: ZITADEL v4 运行于 homelab `zitadel` namespace，对外地址 `auth.meirong.dev`
 - **Auth Proxy**: oauth2-proxy 运行于 oracle-k3s `auth-system` namespace，`--provider=oidc --upstream=static://202`
-- **Middleware**: Traefik `sso-forwardauth` ExtensionRef Filter（同 HTTPRoute namespace），指向 oracle-k3s oauth2-proxy
+- **Middleware**: homelab Traefik `sso-forwardauth` ExtensionRef Filter（同 HTTPRoute namespace）调用公开 `https://oauth.meirong.dev/`；oracle-k3s 内部仍直接调用本集群 `oauth2-proxy` Service
+- **Simplification**: Cilium 已接管 homelab 数据面，但当前未启用跨集群 ClusterMesh，因此仍保留 Tailscale 作为跨集群 underlay。为降低耦合，homelab 的 SSO 不再依赖 oracle-k3s 的 Service CIDR/ClusterIP。
 - **Session**: cookie domain `.meirong.dev`，有效期 7 天（单次登录覆盖所有子域名）
 - **受保护服务**: book / grafana / vault / argocd / backup / notify (homelab Traefik); home / tool / pdf / squoosh / keep (oracle-k3s Traefik)
 - **公开服务**: `status.meirong.dev`（Uptime Kuma 状态页）、`rss.meirong.dev`（Miniflux 自带登录）、`slot.meirong.dev`（Timeslot，自带 Basic Auth 保护 `/admin/`，`/api/*` 公开供博客嵌入）
@@ -170,7 +171,7 @@ just apply   # Apply DNS/Tunnel changes
 - **Traces pipeline** (2026-03-01):
   - Apps send OTLP traces → OTel Collector (gRPC :4317 / HTTP :4318) → Tempo
   - homelab OTel Collector exports to `tempo.monitoring.svc.cluster.local:4317`
-  - oracle-k3s OTel Collector exports to `100.107.254.112:31317` (Tempo NodePort via Tailscale)
+  - oracle-k3s OTel Collector exports to `100.96.84.32:31317` (Tempo NodePort via Tailscale)
   - Grafana Tempo datasource: tracesToLogs (Loki), tracesToMetrics (Prometheus), nodeGraph, serviceMap
 - **App instrumentation** (env vars for any OTel SDK):
   ```
@@ -231,6 +232,7 @@ just apply   # Apply DNS/Tunnel changes
 - **HTTPRoute template**: Always include explicit `group`/`kind` in `parentRefs` and `group`/`kind`/`weight` in `backendRefs` to prevent ArgoCD OutOfSync drift caused by Gateway controller defaults.
 - **ArgoCD Image Updater** (v1.1.0): Uses CRD model — create an `ImageUpdater` CR (not just annotations). Set `useAnnotations: true` in the CR to read image config from Application annotations. Use strategy `newest-build` (not `latest`, deprecated). After changing Application annotations in Git, re-run `kubectl apply -f argocd/applications/<app>.yaml` — ArgoCD does not manage Application objects themselves.
 - **ArgoCD Application definitions** (`argocd/applications/*.yaml`): These files are **NOT** auto-synced by ArgoCD (no App-of-Apps). After editing any Application definition (e.g. changing `include` globs, adding new paths), manually apply: `kubectl apply -f argocd/applications/<app>.yaml`. Then run `just argocd-sync` to trigger immediate sync.
+- **ArgoCD self-heal caveat**: Resources already managed by an Application (for example `gateway` managing `manifests/traefik-config.yaml`) must be changed in Git first. Ad-hoc `kubectl patch/apply` fixes on live resources will be reconciled away on the next sync.
 - **Kustomize namespace caveat**: The global `namespace:` field in `kustomization.yaml` runs as a transformer after JSON patches, overriding them. Declare namespace explicitly in each manifest instead when resources span multiple namespaces.
 - **Chinese Comments**: Permitted and used in `justfile` for clarity.
 - **SSH**: User `root`, Key `~/.ssh/vgio`.
