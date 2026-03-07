@@ -64,6 +64,8 @@ metadata:
   namespace: kopia
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: kopia
@@ -166,13 +168,24 @@ spec:
         - name: cache
           emptyDir: {}
 ---
+# ServersTransport: allow Traefik to connect to kopia's self-signed HTTPS backend
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: kopia-transport
+  namespace: kopia
+spec:
+  insecureSkipVerify: true
+---
 apiVersion: v1
 kind: Service
 metadata:
   name: kopia
   namespace: kopia
   annotations:
-    traefik.ingress.kubernetes.io/service.serversscheme: h2c
+    # Tell Traefik the backend serves HTTPS (kopia always uses TLS)
+    traefik.io/service.serversscheme: https
+    traefik.io/service.serverstransport: kopia-kopia-transport@kubernetescrd
 spec:
   type: NodePort
   selector:

@@ -19,6 +19,7 @@ resources:
   - rss-system/rsshub.yaml
   - rss-system/karakeep.yaml
   - rss-system/redpanda-connect.yaml
+  - rss-system/backup-cronjob.yaml
   # n8n removed
   # Homepage
   - homepage/namespace.yaml
@@ -37,3 +38,4 @@ resources:
   - personal-services/stirling-pdf.yaml
   - personal-services/squoosh.yaml
   - personal-services/timeslot.yaml
+  - personal-services/backup-cronjob.yaml
