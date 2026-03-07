@@ -93,6 +93,7 @@ spec:
               cpu: 100m
               memory: 256Mi
             limits:
+              cpu: 500m
               memory: 1024Mi
           livenessProbe:
             httpGet:
@@ -123,6 +124,7 @@ spec:
               cpu: 1m
               memory: 8Mi
             limits:
+              cpu: 10m
               memory: 16Mi
           volumeMounts:
             - name: config

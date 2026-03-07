@@ -67,3 +67,4 @@ variables.auto.pkrvars.hcl
 
 # Git worktrees
 .worktrees/
+**/vault_values.md

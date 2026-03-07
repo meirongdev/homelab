@@ -65,7 +65,7 @@ docs/
 
 | 集群 | 节点 | 状态 |
 |------|------|------|
-| homelab (k3s-homelab) | 10.10.10.10 / Tailscale 100.107.254.112 | 运行中 |
+| homelab (k3s-homelab) | 10.10.10.10 / Tailscale 100.96.84.32 | 运行中 |
 | oracle-k3s | 10.0.0.26 / Tailscale 100.107.166.37 | 运行中 |
 
 | 服务 | 集群 | URL | SSO |

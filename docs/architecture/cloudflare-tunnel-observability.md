@@ -60,9 +60,9 @@
 
 ```yaml
 # kube-prometheus-stack.yaml additionalScrapeConfigs:
-- job_name: 'cloudflared-homelab'         # 100.107.254.112:31200
+- job_name: 'cloudflared-homelab'         # 100.96.84.32:31200
 - job_name: 'cloudflared-oracle-k3s'      # 100.107.166.37:31201
-- job_name: 'traefik-homelab'             # 100.107.254.112:31910
+- job_name: 'traefik-homelab'             # 100.96.84.32:31910
 - job_name: 'traefik-oracle-k3s'          # 100.107.166.37:31911
 ```
 

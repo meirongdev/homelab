@@ -10,6 +10,7 @@ add-repos:
     helm repo add hashicorp https://helm.releases.hashicorp.com
     helm repo add external-secrets https://charts.external-secrets.io
     helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+    helm repo add cilium https://helm.cilium.io/
     helm repo update
 
 create-namespace:
@@ -144,6 +145,26 @@ homepage:
 
 deploy-all: add-repos create-namespace deploy-prometheus deploy-loki deploy-tempo
     @echo "✅ All monitoring components deployed successfully!"
+
+# ⬇️ Cilium CNI ⬇️
+
+# 部署 Cilium (替换 Flannel + kube-proxy)
+deploy-cilium: add-repos
+    helm upgrade --install cilium cilium/cilium \
+        --namespace kube-system \
+        --kube-context {{ctx}} \
+        --values values/cilium-values.yaml \
+        --wait \
+        --timeout 10m
+
+# Cilium 状态检查
+cilium-status:
+    kubectl --context {{ctx}} exec -n kube-system ds/cilium -c cilium-agent -- cilium status --brief
+
+# Hubble UI 端口转发
+hubble-ui:
+    @echo "Hubble UI is available at http://localhost:12000"
+    kubectl --context {{ctx}} port-forward -n kube-system svc/hubble-ui 12000:80
 
 # 检查部署状态（详细版）
 status:
