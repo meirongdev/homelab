@@ -1,0 +1,197 @@
+---
+# Kopia backup ExternalSecret for rss-system
+# Pulls kopia server credentials from Vault (requires ESO to be healthy)
+# If ESO is broken, create the secret manually:
+#   kubectl --context oracle-k3s create secret generic kopia-backup-secret \
+#     -n rss-system \
+#     --from-literal=server-url=https://100.96.84.32:31515 \
+#     --from-literal=server-fingerprint=281d63a1f327c0e31791c4eaad48b8bd27675efd1dc73ceb374c8607ccb0be01 \
+#     --from-literal=password=<kopia-repo-password>
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: kopia-backup-secret
+  namespace: rss-system
+spec:
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: kopia-backup-secret
+    creationPolicy: Owner
+  data:
+    - secretKey: server-url
+      remoteRef:
+        key: homelab/kopia
+        property: server_url
+    - secretKey: server-fingerprint
+      remoteRef:
+        key: homelab/kopia
+        property: server_fingerprint
+    - secretKey: password
+      remoteRef:
+        key: homelab/kopia
+        property: repo-password
+---
+# CronJob: daily backup of rss-system data to homelab kopia server
+# - Miniflux PostgreSQL → pg_dump → kopia snapshot
+# - KaraKeep SQLite (db.db, queue.db) → sqlite3 backup → kopia snapshot
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: kopia-backup
+  namespace: rss-system
+  labels:
+    app: kopia-backup
+spec:
+  # 备份时间: 每天凌晨 3:00 (UTC) = 北京时间 11:00
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 3
+  successfulJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # 最长执行时间 1 小时
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app: kopia-backup
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: default
+          volumes:
+            # 临时暂存目录：用于放置 dump 文件，再由 kopia 打快照
+            - name: staging
+              emptyDir:
+                sizeLimit: 2Gi
+            # KaraKeep SQLite 数据 (RWO PVC, 同节点可共享挂载)
+            - name: karakeep-data
+              persistentVolumeClaim:
+                claimName: karakeep-data
+                readOnly: true
+          initContainers:
+            # Step 1: Miniflux PostgreSQL dump
+            - name: pg-dump
+              image: postgres:15-alpine
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: miniflux-db-secret
+                      key: password
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  mkdir -p /staging/postgres
+                  echo "Dumping Miniflux PostgreSQL..."
+                  pg_dump -h rss-postgres -U miniflux -d miniflux \
+                    --format=custom --compress=9 \
+                    -f /staging/postgres/miniflux.dump
+                  echo "PostgreSQL dump done: $(du -sh /staging/postgres/miniflux.dump | cut -f1)"
+              volumeMounts:
+                - name: staging
+                  mountPath: /staging
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+
+            # Step 2: KaraKeep SQLite hot backup
+            - name: sqlite-karakeep
+              image: alpine:3.21
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  apk add --no-cache sqlite --quiet
+                  mkdir -p /staging/karakeep
+                  echo "Backing up KaraKeep SQLite databases..."
+                  # sqlite3 .backup 命令可在应用运行时安全备份
+                  sqlite3 /karakeep/db.db ".backup /staging/karakeep/db.db"
+                  sqlite3 /karakeep/queue.db ".backup /staging/karakeep/queue.db"
+                  echo "KaraKeep backup done:"
+                  ls -lh /staging/karakeep/
+              volumeMounts:
+                - name: staging
+                  mountPath: /staging
+                - name: karakeep-data
+                  mountPath: /karakeep
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 32Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+
+          # Main container: kopia snapshot to homelab server
+          containers:
+            - name: kopia-snapshot
+              image: kopia/kopia:latest
+              env:
+                - name: KOPIA_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: kopia-backup-secret
+                      key: password
+                - name: KOPIA_SERVER_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: kopia-backup-secret
+                      key: server-url
+                - name: KOPIA_SERVER_FINGERPRINT
+                  valueFrom:
+                    secretKeyRef:
+                      name: kopia-backup-secret
+                      key: server-fingerprint
+                - name: KOPIA_CHECK_FOR_UPDATES
+                  value: "false"
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  echo "Connecting to kopia server at $KOPIA_SERVER_URL..."
+                  kopia repository connect server \
+                    --url="$KOPIA_SERVER_URL" \
+                    --server-cert-fingerprint="$KOPIA_SERVER_FINGERPRINT" \
+                    --override-username=backup \
+                    --override-hostname=oracle-k3s \
+                    --config-file=/tmp/kopia.config \
+                    --cache-directory=/tmp/kopia-cache
+
+                  echo "Creating snapshot of /staging (rss-system)..."
+                  kopia snapshot create /staging \
+                    --config-file=/tmp/kopia.config \
+                    --cache-directory=/tmp/kopia-cache \
+                    --tags="cluster:oracle-k3s" \
+                    --tags="namespace:rss-system"
+
+                  echo "Snapshot status:"
+                  kopia snapshot list /staging \
+                    --config-file=/tmp/kopia.config \
+                    --cache-directory=/tmp/kopia-cache \
+                    --all | tail -5
+
+                  kopia repository disconnect \
+                    --config-file=/tmp/kopia.config
+                  echo "Backup completed successfully."
+              volumeMounts:
+                - name: staging
+                  mountPath: /staging
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 1000m
+                  memory: 1Gi

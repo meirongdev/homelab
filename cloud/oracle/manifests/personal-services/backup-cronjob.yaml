@@ -1,0 +1,193 @@
+---
+# Kopia backup ExternalSecret for personal-services
+# Pulls kopia server credentials from Vault (requires ESO to be healthy)
+# If ESO is broken, create the secret manually:
+#   kubectl --context oracle-k3s create secret generic kopia-backup-secret \
+#     -n personal-services \
+#     --from-literal=server-url=https://100.96.84.32:31515 \
+#     --from-literal=server-fingerprint=281d63a1f327c0e31791c4eaad48b8bd27675efd1dc73ceb374c8607ccb0be01 \
+#     --from-literal=password=<kopia-repo-password>
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: kopia-backup-secret
+  namespace: personal-services
+spec:
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: kopia-backup-secret
+    creationPolicy: Owner
+  data:
+    - secretKey: server-url
+      remoteRef:
+        key: homelab/kopia
+        property: server_url
+    - secretKey: server-fingerprint
+      remoteRef:
+        key: homelab/kopia
+        property: server_fingerprint
+    - secretKey: password
+      remoteRef:
+        key: homelab/kopia
+        property: repo-password
+---
+# CronJob: daily backup of personal-services data to homelab kopia server
+# - Uptime Kuma SQLite (kuma.db) → sqlite3 backup → kopia snapshot
+# - Timeslot SQLite (timeslot.db) → sqlite3 backup → kopia snapshot
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: kopia-backup
+  namespace: personal-services
+  labels:
+    app: kopia-backup
+spec:
+  # 备份时间: 每天凌晨 3:30 (UTC) — 错开 rss-system 备份
+  schedule: "30 3 * * *"
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 3
+  successfulJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app: kopia-backup
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: default
+          volumes:
+            - name: staging
+              emptyDir:
+                sizeLimit: 500Mi
+            # Uptime Kuma SQLite 数据 (RWO PVC, 同节点可共享挂载)
+            - name: uptime-kuma-data
+              persistentVolumeClaim:
+                claimName: uptime-kuma-data
+                readOnly: true
+            # Timeslot SQLite 数据
+            - name: timeslot-pvc
+              persistentVolumeClaim:
+                claimName: timeslot-pvc
+                readOnly: true
+          initContainers:
+            # Step 1: Uptime Kuma SQLite hot backup
+            - name: sqlite-uptime-kuma
+              image: alpine:3.21
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  apk add --no-cache sqlite --quiet
+                  mkdir -p /staging/uptime-kuma
+                  echo "Backing up Uptime Kuma SQLite database..."
+                  sqlite3 /uptime-kuma/kuma.db ".backup /staging/uptime-kuma/kuma.db"
+                  echo "Uptime Kuma backup done: $(du -sh /staging/uptime-kuma/kuma.db | cut -f1)"
+              volumeMounts:
+                - name: staging
+                  mountPath: /staging
+                - name: uptime-kuma-data
+                  mountPath: /uptime-kuma
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 32Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+
+            # Step 2: Timeslot SQLite hot backup
+            - name: sqlite-timeslot
+              image: alpine:3.21
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  apk add --no-cache sqlite --quiet
+                  mkdir -p /staging/timeslot
+                  echo "Backing up Timeslot SQLite database..."
+                  sqlite3 /timeslot/timeslot.db ".backup /staging/timeslot/timeslot.db"
+                  echo "Timeslot backup done: $(du -sh /staging/timeslot/timeslot.db | cut -f1)"
+              volumeMounts:
+                - name: staging
+                  mountPath: /staging
+                - name: timeslot-pvc
+                  mountPath: /timeslot
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 32Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+
+          # Main container: kopia snapshot to homelab server
+          containers:
+            - name: kopia-snapshot
+              image: kopia/kopia:latest
+              env:
+                - name: KOPIA_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: kopia-backup-secret
+                      key: password
+                - name: KOPIA_SERVER_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: kopia-backup-secret
+                      key: server-url
+                - name: KOPIA_SERVER_FINGERPRINT
+                  valueFrom:
+                    secretKeyRef:
+                      name: kopia-backup-secret
+                      key: server-fingerprint
+                - name: KOPIA_CHECK_FOR_UPDATES
+                  value: "false"
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  echo "Connecting to kopia server at $KOPIA_SERVER_URL..."
+                  kopia repository connect server \
+                    --url="$KOPIA_SERVER_URL" \
+                    --server-cert-fingerprint="$KOPIA_SERVER_FINGERPRINT" \
+                    --override-username=backup \
+                    --override-hostname=oracle-k3s \
+                    --config-file=/tmp/kopia.config \
+                    --cache-directory=/tmp/kopia-cache
+
+                  echo "Creating snapshot of /staging (personal-services)..."
+                  kopia snapshot create /staging \
+                    --config-file=/tmp/kopia.config \
+                    --cache-directory=/tmp/kopia-cache \
+                    --tags="cluster:oracle-k3s" \
+                    --tags="namespace:personal-services"
+
+                  echo "Snapshot status:"
+                  kopia snapshot list /staging \
+                    --config-file=/tmp/kopia.config \
+                    --cache-directory=/tmp/kopia-cache \
+                    --all | tail -5
+
+                  kopia repository disconnect \
+                    --config-file=/tmp/kopia.config
+                  echo "Backup completed successfully."
+              volumeMounts:
+                - name: staging
+                  mountPath: /staging
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 1000m
+                  memory: 1Gi
