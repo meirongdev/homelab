@@ -29,7 +29,7 @@
 - [ ] **Cert-Manager**: Automatic certificate management (cert-manager + Vault PKI or Cloudflare DNS)
 - [ ] **Vault Dynamic Secrets**: Dynamic database credentials for PostgreSQL
 - [ ] **Secret Rotation**: Automate rotation for sensitive keys (Cloudflare, etc.)
-- [x] **Cross-Cluster Networking**: Tailscale 双向 Pod/Service 路由 (homelab ↔ oracle-k3s)
+- [x] **Cross-Cluster Networking**: Tailscale 双向 Pod CIDR 路由 (homelab ↔ oracle-k3s)
 - [x] **SSO**: ZITADEL + oauth2-proxy (OIDC) ForwardAuth 保护所有服务（2026-02-27 上线）
 - [x] **信息管道**: Miniflux → Redpanda Connect → KaraKeep → Gotify → Telegram（2026-02-28 上线）
 - [x] **Cloudflare WAF**: Zone 级 WAF 防护 — 自定义规则、速率限制、安全设置（2026-02-28 上线）
@@ -67,3 +67,10 @@
 - [ ] High availability for all components (Vault HA, Postgres HA)
 - [ ] Performance optimization & Resource Quotas
 - [ ] Audit logging for Vault and K8s API
+
+## Post-Cilium Architecture Next Steps (2026-03)
+
+- [ ] Oracle-k3s 从 Flannel 迁移到 Cilium，统一双集群数据面
+- [ ] 评估并落地 Cilium ClusterMesh（先控制面互联，再逐步引入跨集群 Service）
+- [ ] Uptime Kuma 监控策略切分：外部入口可达性 vs 后端服务可用性
+- [ ] Gateway API 控制器标准化：Traefik 与 Cilium 二选一，避免长期双栈

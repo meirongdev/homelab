@@ -126,8 +126,8 @@ just apply   # Apply DNS/Tunnel changes
 - **Middleware**: homelab Traefik `sso-forwardauth` ExtensionRef Filter（同 HTTPRoute namespace）调用公开 `https://oauth.meirong.dev/`；oracle-k3s 内部仍直接调用本集群 `oauth2-proxy` Service
 - **Simplification**: Cilium 已接管 homelab 数据面，但当前未启用跨集群 ClusterMesh，因此仍保留 Tailscale 作为跨集群 underlay。为降低耦合，homelab 的 SSO 不再依赖 oracle-k3s 的 Service CIDR/ClusterIP。
 - **Session**: cookie domain `.meirong.dev`，有效期 7 天（单次登录覆盖所有子域名）
-- **受保护服务**: book / grafana / vault / argocd / backup / notify (homelab Traefik); home / tool / pdf / squoosh / keep (oracle-k3s Traefik)
-- **公开服务**: `status.meirong.dev`（Uptime Kuma 状态页）、`rss.meirong.dev`（Miniflux 自带登录）、`slot.meirong.dev`（Timeslot，自带 Basic Auth 保护 `/admin/`，`/api/*` 公开供博客嵌入）
+- **受保护服务**: book / grafana / vault / backup / notify (homelab Traefik); keep（oracle-k3s Traefik）
+- **公开服务**: `argocd.meirong.dev`（自带登录）、`home.meirong.dev`、`tool.meirong.dev`、`pdf.meirong.dev`、`squoosh.meirong.dev`、`status.meirong.dev`（Uptime Kuma 状态页）、`rss.meirong.dev`（Miniflux 自带登录）、`slot.meirong.dev`（Timeslot，自带 Basic Auth 保护 `/admin/`，`/api/*` 公开供博客嵌入）
 
 ### GitOps (ArgoCD)
 - ArgoCD runs in the `argocd` namespace, UI at `argocd.meirong.dev`
