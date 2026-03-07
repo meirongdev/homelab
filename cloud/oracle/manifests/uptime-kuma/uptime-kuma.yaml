@@ -29,6 +29,20 @@ spec:
       labels:
         app: uptime-kuma
     spec:
+      # Override DNS to avoid Tailscale/OracleVCN search domain timeouts.
+      # dnsPolicy: None + explicit dnsConfig fully replaces the generated resolv.conf
+      # so taild*.ts.net and *.oraclevcn.com search domains are NOT inherited.
+      dnsPolicy: None
+      dnsConfig:
+        nameservers:
+          - 10.53.0.10   # oracle-k3s CoreDNS ClusterIP
+        searches:
+          - personal-services.svc.cluster.local
+          - svc.cluster.local
+          - cluster.local
+        options:
+          - name: ndots
+            value: "5"
       containers:
         - name: uptime-kuma
           image: louislam/uptime-kuma:1
@@ -40,7 +54,14 @@ spec:
               cpu: 50m
               memory: 128Mi
             limits:
+              cpu: 200m
               memory: 256Mi
+          env:
+            # Oracle Cloud VMs have no IPv6 internet. Cloudflare domains return AAAA
+            # records which Node.js/curl prefers by default, causing 48s timeouts.
+            # Force DNS to resolve to IPv4 so monitors reach homelab services reliably.
+            - name: NODE_OPTIONS
+              value: "--dns-result-order=ipv4first"
           volumeMounts:
             - name: data
               mountPath: /app/data
