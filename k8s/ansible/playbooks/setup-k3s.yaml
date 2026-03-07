@@ -59,6 +59,13 @@
         port: '4244'
         proto: tcp
 
+    - name: Allow ClusterMesh API server (port 32379) from Tailscale
+      community.general.ufw:
+        rule: allow
+        port: '32379'
+        proto: tcp
+        src: 100.64.0.0/10
+
     - name: Allow all traffic from Proxmox subnet
       community.general.ufw:
         rule: allow
@@ -87,6 +94,8 @@
             - {{ hostvars[inventory_hostname]['tailscale_ip'] | default('') }}
           flannel-backend: "none"
           disable-network-policy: true
+          disable:
+            - traefik
         mode: "0644"
 
     - name: Configure DNS fallback (prevent CoreDNS failure after network interruption)

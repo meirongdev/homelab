@@ -1,9 +1,13 @@
 # Cilium CNI values for homelab K3s (single-node)
-# Replaces Flannel as CNI, kube-proxy kept alongside
+# Cilium provides the data plane, Gateway API ingress, and ClusterMesh control plane.
 # Docs: https://docs.cilium.io/en/stable/installation/k8s-install-helm/
 
-# --- kube-proxy replacement: DISABLED to avoid eBPF host networking issues ---
-kubeProxyReplacement: false
+# --- kube-proxy replacement: required for Cilium Gateway API ---
+kubeProxyReplacement: true
+
+cluster:
+  name: homelab
+  id: 1
 
 # --- Routing: VXLAN tunnel for cross-cluster traffic via Tailscale ---
 routingMode: tunnel
@@ -27,9 +31,19 @@ hubble:
   ui:
     enabled: true
 
-# --- Gateway API: disabled (Traefik handles it) ---
+# --- Gateway API: Cilium-managed ingress ---
 gatewayAPI:
-  enabled: false
+  enabled: true
+
+# --- ClusterMesh: deploy the control-plane pieces, then connect clusters with cilium CLI ---
+clustermesh:
+  useAPIServer: true
+  config:
+    enabled: true
+  apiserver:
+    service:
+      type: NodePort
+      nodePort: 32379
 
 # --- cgroup: K3s mounts cgroup v2 at /sys/fs/cgroup ---
 cgroup:

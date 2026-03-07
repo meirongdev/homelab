@@ -16,7 +16,7 @@ data:
     PASSWORD = os.environ["ADMIN_PASSWORD"]
 
     # oracle-k3s local services: direct ClusterDNS via local CNI.
-    # homelab services: public URLs via Cloudflare/Traefik, so status reflects real external reachability.
+    # homelab services: public URLs via Cloudflare/Cilium Gateway, so status reflects real external reachability.
     # This keeps cross-cluster networking off the critical path for status monitoring.
     MONITORS = [
         # --- oracle-k3s local services ---
@@ -27,9 +27,8 @@ data:
         {"name": "Stirling-PDF",   "url": "http://stirling-pdf.personal-services.svc:8080/login"},
         {"name": "Uptime Kuma",    "url": "http://uptime-kuma.personal-services.svc:3001"},
         # --- homelab public services ---
-        # Protected services may redirect to oauth.meirong.dev; treat 2xx-3xx as healthy external reachability.
-        # SSO-protected endpoints: only verify external ingress/auth redirect health.
-        # Do not follow redirects into oauth2 login exchange, otherwise monitor may end on 400.
+        # Auth-protected services may redirect to their own login page; treat 2xx-3xx as healthy external reachability.
+        # Do not follow redirects into full login exchanges.
         {"name": "Grafana",        "url": "https://grafana.meirong.dev/",       "accepted_statuscodes": ["300-399"], "maxredirects": 0},
         {"name": "HashiCorp Vault","url": "https://vault.meirong.dev/",         "accepted_statuscodes": ["300-399"], "maxredirects": 0},
         {"name": "Calibre-Web",    "url": "https://book.meirong.dev/",          "accepted_statuscodes": ["300-399"], "maxredirects": 0},

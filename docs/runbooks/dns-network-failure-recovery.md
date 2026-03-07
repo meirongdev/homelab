@@ -150,5 +150,5 @@ networksetup -setdnsservers Wi-Fi "Empty"  # restore to DHCP/Tailscale
 | Homelab node (local) | `10.10.10.10` |
 | Homelab node (Tailscale) | `100.96.84.32` |
 | K3s API server | `:6443` |
-| Vault UI | `100.96.84.32:31144` |
+| Vault UI | `100.96.84.32:31333` |
 | Loki OTLP NodePort | `100.96.84.32:31080` |

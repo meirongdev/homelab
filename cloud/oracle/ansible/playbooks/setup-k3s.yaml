@@ -98,6 +98,13 @@
         permanent: true
         state: enabled
 
+    - name: Allow ClusterMesh API server (32379) in firewalld
+      ansible.posix.firewalld:
+        port: 32379/tcp
+        zone: public
+        permanent: true
+        state: enabled
+
     - name: Reload firewalld after adding trusted sources/interfaces
       ansible.builtin.service:
         name: firewalld
@@ -145,6 +152,7 @@
           write-kubeconfig-mode: "644"
           disable:
             - servicelb
+            - traefik
           node-name: oracle-k3s
           tls-san:
             - {{ ansible_host }}

@@ -10,12 +10,12 @@
 
 | 维度 | homelab | oracle-k3s |
 |------|---------|------------|
-| CNI | Cilium (eBPF + VXLAN) | Flannel (VXLAN) |
+| CNI | Cilium (eBPF + VXLAN) | Cilium (eBPF + VXLAN) |
 | Gateway | Traefik (Gateway API) | Traefik (Gateway API) |
 | 跨集群 | Tailscale 子网路由 (Pod CIDR only) | ← |
 | 可观测 | LGTM stack (中枢) | OTel Collector → homelab |
 | SSO | ZITADEL (auth.meirong.dev) | oauth2-proxy (OIDC client) |
-| 备份 | Kopia (NFS, 无自动调度, 无离站副本) | ❌ 无备份 |
+| 备份 | Kopia (NFS, 已自动调度, 无离站副本) | pg_dump + Kopia CronJob |
 
 ### 1.2 目标架构
 

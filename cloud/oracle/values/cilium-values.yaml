@@ -1,9 +1,13 @@
 # Cilium CNI values for oracle-k3s (single-node)
-# Based on homelab template, adapted for oracle-k3s Pod CIDR
+# Cilium provides the data plane, Gateway API ingress, and ClusterMesh control plane.
 # Docs: https://docs.cilium.io/en/stable/installation/k8s-install-helm/
 
-# --- kube-proxy replacement: DISABLED (retain K3s kube-proxy) ---
-kubeProxyReplacement: false
+# --- kube-proxy replacement: required for Cilium Gateway API ---
+kubeProxyReplacement: true
+
+cluster:
+  name: oracle-k3s
+  id: 2
 
 # --- Routing: VXLAN tunnel (consistent with homelab) ---
 routingMode: tunnel
@@ -27,9 +31,19 @@ hubble:
   ui:
     enabled: true
 
-# --- Gateway API: disabled (Traefik handles it) ---
+# --- Gateway API: Cilium-managed ingress ---
 gatewayAPI:
-  enabled: false
+  enabled: true
+
+# --- ClusterMesh: deploy the control-plane pieces, then connect clusters with cilium CLI ---
+clustermesh:
+  useAPIServer: true
+  config:
+    enabled: true
+  apiserver:
+    service:
+      type: NodePort
+      nodePort: 32379
 
 # --- cgroup: K3s mounts cgroup v2 at /sys/fs/cgroup ---
 cgroup:

@@ -2,7 +2,7 @@
 
 This project manages a home laboratory environment: infrastructure provisioning on Proxmox, Kubernetes cluster setup using K3s, application deployment via Helm, GitOps with ArgoCD, and secrets management with HashiCorp Vault + External Secrets Operator.
 
-Network note: homelab now uses Cilium as the local CNI/data plane, while inter-cluster connectivity still rides on Tailscale. To keep the architecture simpler and more GitOps-friendly, homelab SSO no longer depends on oracle-k3s Service CIDR reachability; it calls the public `oauth.meirong.dev` endpoint instead. Cross-cluster Tailscale routing is also narrowed to Pod CIDRs only.
+Network note: both clusters now use Cilium for the local data plane and Gateway API ingress, while inter-cluster connectivity still rides on Tailscale. ClusterMesh control-plane pieces are prepared in Cilium values, but the mesh still needs an explicit `cilium clustermesh enable/connect` step before cross-cluster service discovery is active.
 
 ## Documentation Index
 

@@ -13,7 +13,7 @@ spec:
     targetRevision: main
     path: k8s/helm/manifests
     directory:
-      include: "{gateway.yaml,traefik-config.yaml}"
+      include: "gateway.yaml"
 
   destination:
     server: https://kubernetes.default.svc

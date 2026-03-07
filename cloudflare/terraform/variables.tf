@@ -27,16 +27,16 @@ variable "ingress_rules" {
   }))
   default = {
     "home" = {
-      service = "http://traefik.kube-system.svc:80"
+      service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80"
     }
     "book" = {
-      service = "http://traefik.kube-system.svc:80"
+      service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80"
     }
     "grafana" = {
-      service = "http://traefik.kube-system.svc:80"
+      service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80"
     }
     "vault" = {
-      service = "http://traefik.kube-system.svc:80"
+      service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80"
     }
   }
 }

@@ -5,10 +5,10 @@ This module manages Cloudflare Tunnel configurations and DNS records for the hom
 ## Architecture
 
 ```
-Internet → Cloudflare DNS (CNAME) → Cloudflare Tunnel → Traefik (K8s) → Services
+Internet → Cloudflare DNS (CNAME) → Cloudflare Tunnel → Cilium Gateway API (K8s) → Services
 ```
 
-All subdomains point to the same Cloudflare Tunnel, which forwards traffic to the in-cluster Traefik ingress controller. Traefik then routes to the correct service based on the `Host` header (via Gateway API `HTTPRoute`).
+All subdomains point to the same Cloudflare Tunnel, which forwards traffic to the in-cluster Cilium-managed Gateway service. The Gateway then routes to the correct service based on the `Host` header (via Gateway API `HTTPRoute`).
 
 ## Prerequisites
 
@@ -48,19 +48,19 @@ Edit `terraform.tfvars` and add an entry to `ingress_rules`:
 
 ```hcl
 ingress_rules = {
-  "home"    = { service = "http://traefik.kube-system.svc:80" }
-  "book"    = { service = "http://traefik.kube-system.svc:80" }
-  "grafana" = { service = "http://traefik.kube-system.svc:80" }
-  "vault"   = { service = "http://traefik.kube-system.svc:80" }
-  "mynewapp" = { service = "http://traefik.kube-system.svc:80" }  # ← add here
+  "home"     = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
+  "book"     = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
+  "grafana"  = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
+  "vault"    = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
+  "mynewapp" = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }  # <- add here
 }
 ```
 
 Then run `just apply`. Terraform will automatically:
 1. Create a CNAME DNS record pointing to the Cloudflare Tunnel.
-2. Update the Tunnel ingress rules to route the hostname to Traefik.
+2. Update the Tunnel ingress rules to route the hostname to the Cilium Gateway service.
 
-> **Note**: After adding a subdomain here, you also need to add a corresponding `HTTPRoute` in `k8s/helm/manifests/gateway.yaml` so Traefik knows where to forward the traffic inside the cluster.
+> **Note**: After adding a subdomain here, you also need to add a corresponding `HTTPRoute` in `k8s/helm/manifests/gateway.yaml` so Cilium Gateway API knows where to forward the traffic inside the cluster.
 
 ## Managed Resources
 

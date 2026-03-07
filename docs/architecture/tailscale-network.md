@@ -4,7 +4,7 @@
 
 Two K3s clusters are connected via Tailscale subnet routing. Each cluster's K3s node acts as a subnet router, advertising its Pod CIDR into the shared tailnet. This lets pods in either cluster reach pods in the other cluster directly by IP, without dragging cross-cluster Service CIDRs into the critical path.
 
-After the homelab Cilium migration, the auth path was simplified: homelab Traefik no longer depends on oracle-k3s Service CIDR reachability for ForwardAuth. Instead, homelab uses the public `https://oauth.meirong.dev/` endpoint, so cross-cluster Service routing is no longer on the critical path for SSO.
+After the gateway cutover, ingress no longer depends on any cross-cluster auth hop. Cloudflare Tunnel now targets the local Cilium Gateway service in each cluster, while Tailscale remains the underlay for pod routing, Vault access, observability export, and future ClusterMesh control-plane connectivity.
 
 **Status**: Active as of 2026-02-21. Both nodes connected, bidirectional pod routing verified.
 
@@ -53,10 +53,10 @@ The reverse path (Oracle → homelab) is symmetric.
 ## Simplified Critical Path
 
 - **Keep**: Tailscale as the inter-cluster underlay for Pod/Service reachability and operational access.
-- **Keep**: Cilium as the homelab in-cluster CNI and data plane.
-- **Simplify**: homelab SSO now calls `https://oauth.meirong.dev/` instead of oracle-k3s `oauth2-proxy` ClusterIP.
-- **Benefit**: homelab ingress no longer breaks when oracle Service CIDR routing, static routes, or temporary rebuild state regress.
-- **GitOps rule**: because `gateway` is ArgoCD-managed, this simplification must live in `k8s/helm/manifests/traefik-config.yaml`, not as a live patch.
+- **Keep**: Cilium as the in-cluster CNI, Gateway API controller, and future ClusterMesh substrate on both clusters.
+- **Simplify**: Cloudflare Tunnel now terminates into the local Cilium Gateway service instead of a separate Traefik controller.
+- **Benefit**: ingress is fully local to each cluster, and Tailscale is no longer in the HTTP request path.
+- **GitOps rule**: because `gateway` is ArgoCD-managed, gateway changes must live in `k8s/helm/manifests/gateway.yaml`, not as a live patch.
 
 ## Tailscale Tags and ACL
 
