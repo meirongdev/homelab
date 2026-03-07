@@ -7,7 +7,7 @@ It is symlinked as `CLAUDE.md` and `GEMINI.md` in the project root for automatic
 
 A five-layer dual-cluster Homelab infrastructure-as-code setup:
 1. **Proxmox VM** (`proxmox/`) — VM provisioning on Proxmox VE.
-2. **Kubernetes Clusters** (`k8s/ansible/` + `cloud/oracle/`) — homelab K3s (Cilium CNI) + oracle-k3s (Flannel, pending Cilium migration).
+2. **Kubernetes Clusters** (`k8s/ansible/` + `cloud/oracle/`) — homelab K3s (Cilium CNI) + oracle-k3s (Cilium CNI).
 3. **Applications** (`k8s/helm/` + `cloud/oracle/manifests/`) — Helm charts and K8s manifests for observability, databases, and personal services.
 4. **External Access** (`cloudflare/`) — Cloudflare Tunnel and DNS management via Terraform.
 5. **GitOps** (`argocd/`) — ArgoCD continuously syncs manifests from Git to both clusters.
@@ -97,9 +97,9 @@ just apply   # Apply DNS/Tunnel changes
 
 ### Networking & Ingress
 - All external traffic flows: `Internet → Cloudflare DNS → Cloudflare Tunnel → Traefik (K8s) → Services`
-- **Cloudflare Tunnel**: `cloudflared` pod in `cloudflare` namespace forwards to `traefik.kube-system.svc:80` (HTTP/2 protocol, 2 replicas)
+- **Cloudflare Tunnel**: `cloudflared` pod in `cloudflare` namespace forwards to `traefik.kube-system.svc:80` (HTTP/2 protocol, 2 replicas). oracle-k3s uses `--protocol http2` (Oracle Cloud NSG blocks outbound UDP/QUIC).
 - **Traefik**: Configured via K8s Gateway API (`HTTPRoute` resources in `manifests/gateway.yaml`)
-- **CNI**: homelab uses **Cilium** (eBPF + VXLAN, deployed 2026-03-06); oracle-k3s uses **Flannel** (pending Cilium migration)
+- **CNI**: Both clusters use **Cilium** (eBPF + VXLAN); homelab deployed 2026-03-06, oracle-k3s migrated from Flannel 2026-03-07
 - **homelab K8s Node**: `10.10.10.10` / Tailscale `100.96.84.32` | **Proxmox**: `192.168.50.3`
 - **oracle-k3s Node**: `10.0.0.26` / Tailscale `100.107.166.37`
 - **Cross-cluster network**: Tailscale subnet routing (Pod CIDR only): homelab `10.42.0.0/16`; oracle-k3s `10.52.0.0/16`。Service CIDR 保持本地化，跨集群通过 Pod CIDR、NodePort 或公网入口。见 `docs/architecture/tailscale-network.md`

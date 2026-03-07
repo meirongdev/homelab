@@ -44,7 +44,7 @@
         name: firewalld
         state: reloaded
 
-    # K3s flannel overlay needs pod/service CIDRs and interfaces trusted
+    # K3s Cilium overlay needs pod/service CIDRs and interfaces trusted
     # in firewalld, otherwise the nftables filter_FORWARD chain will reject
     # pod egress traffic with "admin-prohibited".
     - name: Trust K3s pod CIDR (10.52.0.0/16) in firewalld
@@ -68,10 +68,33 @@
         permanent: true
         state: enabled
 
-    - name: Trust flannel.1 interface in firewalld
+    # Cilium VXLAN overlay interface (replaces flannel.1)
+    - name: Trust cilium_vxlan interface in firewalld
       ansible.posix.firewalld:
-        interface: flannel.1
+        interface: cilium_vxlan
         zone: trusted
+        permanent: true
+        state: enabled
+
+    # Cilium-specific ports
+    - name: Allow Cilium health check (4240) in firewalld
+      ansible.posix.firewalld:
+        port: 4240/tcp
+        zone: public
+        permanent: true
+        state: enabled
+
+    - name: Allow Cilium VXLAN overlay (8472) in firewalld
+      ansible.posix.firewalld:
+        port: 8472/udp
+        zone: public
+        permanent: true
+        state: enabled
+
+    - name: Allow Hubble Relay (4244) in firewalld
+      ansible.posix.firewalld:
+        port: 4244/tcp
+        zone: public
         permanent: true
         state: enabled
 
@@ -80,14 +103,13 @@
         name: firewalld
         state: reloaded
 
-    # K3s flannel overlay needs FORWARD chain open for pod/service CIDRs.
     # OCI instances use iptables-legacy alongside nftables; set FORWARD ACCEPT.
     - name: Set FORWARD policy to ACCEPT (required for pod-to-pod routing)
       ansible.builtin.iptables:
         chain: FORWARD
         policy: ACCEPT
 
-    - name: Allow K3s pod CIDR (flannel overlay) in FORWARD
+    - name: Allow K3s pod CIDR in FORWARD
       ansible.builtin.iptables:
         chain: FORWARD
         source: 10.52.0.0/16
@@ -128,6 +150,8 @@
             - {{ ansible_host }}
           cluster-cidr: "10.52.0.0/16"
           service-cidr: "10.53.0.0/16"
+          flannel-backend: "none"
+          disable-network-policy: true
 
 - name: Install K3s single node
   hosts: oracle_masters

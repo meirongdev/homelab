@@ -20,10 +20,32 @@ fetch-kubeconfig:
 setup-tailscale authkey:
     cd ansible && just setup-tailscale {{authkey}}
 
+# ─── Cilium CNI ─────────────────────────────────────────────────
+
+# Deploy Cilium (replaces Flannel as CNI)
+deploy-cilium:
+    helm repo add cilium https://helm.cilium.io/ || true
+    helm repo update cilium
+    helm upgrade --install cilium cilium/cilium \
+        --namespace kube-system \
+        --kube-context {{ctx}} \
+        --values values/cilium-values.yaml \
+        --wait \
+        --timeout 10m
+
+# Cilium 状态检查
+cilium-status:
+    kubectl --context {{ctx}} exec -n kube-system ds/cilium -c cilium-agent -- cilium status --brief
+
+# Hubble UI 端口转发
+hubble-ui:
+    @echo "Hubble UI is available at http://localhost:12000"
+    kubectl --context {{ctx}} port-forward -n kube-system svc/hubble-ui 12000:80
+
 # ─── Cluster Bootstrap ─────────────────────────────────────────
 
 # Full cluster bootstrap (run after fresh K3s install)
-bootstrap: install-eso configure-traefik create-vault-token deploy-manifests deploy-cloudflare-tunnel
+bootstrap: deploy-cilium install-eso configure-traefik create-vault-token deploy-manifests deploy-cloudflare-tunnel
     @echo "✅ Oracle K3s cluster fully bootstrapped"
 
 # Install External Secrets Operator via Helm
@@ -119,20 +141,7 @@ deploy-timeslot:
     #        to empty), so the placeholder is never replaced. Fixed with awk which treats the
     #        literal $(...) as a regex pattern rather than a shell expression.
     echo "🔧 Patching chart bugs (liveness probe + init container)..."
-    cat > /tmp/timeslot-chart-fix.json << 'PATCH'
-[
-  {
-    "op": "replace",
-    "path": "/spec/template/spec/containers/0/livenessProbe/httpGet/path",
-    "value": "/api/slots"
-  },
-  {
-    "op": "replace",
-    "path": "/spec/template/spec/initContainers/0/command",
-    "value": ["sh", "-c", "awk -v pw=\"$ADMIN_PASSWORD\" '{gsub(/\\$\\(ADMIN_PASSWORD\\)/, pw)}1' /config-template/config.json > /config/config.json"]
-  }
-]
-PATCH
+    printf '[{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/httpGet/path","value":"/api/slots"},{"op":"replace","path":"/spec/template/spec/initContainers/0/command","value":["sh","-c","awk -v pw=\\"$ADMIN_PASSWORD\\" '"'"'{gsub(/\\$\\(ADMIN_PASSWORD\\)/, pw)}1'"'"' /config-template/config.json > /config/config.json"]}]' > /tmp/timeslot-chart-fix.json
     kubectl --context {{ctx}} patch deployment timeslot -n personal-services \
       --type=json --patch-file=/tmp/timeslot-chart-fix.json
     kubectl --context {{ctx}} rollout status deployment timeslot \

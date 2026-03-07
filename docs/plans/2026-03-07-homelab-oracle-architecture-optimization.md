@@ -1,7 +1,7 @@
 # Homelab + Oracle K3s 最优架构方案
 
 > 日期: 2026-03-07
-> 状态: Approved
+> 状态: In Progress (Milestone 3 ✅ Completed)
 > 目标: 基于 Cilium 统一双集群架构，优化备份与灾难恢复，定义清晰的演进路径。
 
 ## 1. 执行摘要
@@ -244,9 +244,9 @@ Traefik 当前运行稳定，SSO ForwardAuth 依赖 `traefik.io/Middleware Exten
 
 ### Milestone 3: 统一 CNI (2-4 周)
 
-- [ ] oracle-k3s 从 Flannel 迁移到 Cilium
-- [ ] 验证双集群 Cilium 网络一致性
-- [ ] 文档更新: 双集群统一 Cilium
+- [x] oracle-k3s 从 Flannel 迁移到 Cilium
+- [x] 验证双集群 Cilium 网络一致性
+- [x] 文档更新: 双集群统一 Cilium
 
 ### Milestone 4: 增强 (4-8 周)
 

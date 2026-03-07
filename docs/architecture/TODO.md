@@ -41,7 +41,7 @@
 - [ ] **恢复演练**: 验证 Vault 恢复 SOP
 - [ ] **Loki 日志保留**: 配置 compaction 与 retention policies
 - [ ] **Alertmanager**: 告警规则 → Gotify → Telegram 通知链路
-- [ ] **oracle-k3s Cilium**: 从 Flannel 迁移到 Cilium，统一双集群数据面
+- [x] **oracle-k3s Cilium**: 从 Flannel 迁移到 Cilium，统一双集群数据面
 - [x] **Uptime Kuma SSO 修复**: maxredirects=0 + accepted_statuscodes 300-399
 
 ## Phase 5: Production Hardening 🎯 (Future)
