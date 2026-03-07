@@ -36,13 +36,13 @@
 
 ## Phase 4: Reliability & Backup 📋 (Current)
 
-- [ ] **Kopia 自动快照**: P0 数据 (Vault / ZITADEL PG) 每日快照 + P1 数据每周快照
-- [ ] **oracle-k3s 备份接入**: pg_dump CronJob + SQLite 文件级快照 (Miniflux / KaraKeep / Timeslot)
+- [x] **Kopia 自动快照**: P0 数据 (Vault / ZITADEL PG) 每日快照 + P1 数据每周快照
+- [x] **oracle-k3s 备份接入**: pg_dump CronJob + SQLite 文件级快照 (Miniflux / KaraKeep / Timeslot)
 - [ ] **恢复演练**: 验证 Vault 恢复 SOP
 - [ ] **Loki 日志保留**: 配置 compaction 与 retention policies
 - [ ] **Alertmanager**: 告警规则 → Gotify → Telegram 通知链路
 - [ ] **oracle-k3s Cilium**: 从 Flannel 迁移到 Cilium，统一双集群数据面
-- [ ] **Uptime Kuma SSO 修复**: maxredirects=0 + accepted_statuscodes 300-399
+- [x] **Uptime Kuma SSO 修复**: maxredirects=0 + accepted_statuscodes 300-399
 
 ## Phase 5: Production Hardening 🎯 (Future)
 
@@ -59,13 +59,13 @@
 
 ### 🟢 Quick Wins
 
-- [ ] Uptime Kuma SSO 监控修复 (maxredirects config)
+- [x] Uptime Kuma SSO 监控修复 (maxredirects config)
 - [ ] Loki retention 配置 (values.yaml update)
 - [ ] Grafana 旧 dashboard 清理
 
 ### 🟡 Medium Effort
 
-- [ ] Kopia 自动快照 CronJob (K8s manifest)
+- [x] Kopia 自动快照 CronJob (K8s manifest)
 - [ ] Alertmanager → Gotify 通知模板
 - [ ] Cert-Manager 安装 + Let's Encrypt ClusterIssuer
 - [ ] oracle-k3s Cilium 迁移

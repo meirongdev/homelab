@@ -12,7 +12,7 @@ spec:
     targetRevision: main
     path: k8s/helm/manifests
     directory:
-      include: "kopia.yaml"
+      include: "{kopia.yaml,kopia-backup.yaml}"
   destination:
     server: https://kubernetes.default.svc
     namespace: kopia

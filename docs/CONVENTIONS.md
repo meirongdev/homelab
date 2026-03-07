@@ -244,5 +244,9 @@ just apply   # Apply DNS/Tunnel changes
 - **CLI**: NodePort 31515 (gRPC direct, NOT via Tunnel due to bidirectional streaming 524 timeout)
 - **Secrets**: Vault `secret/homelab/kopia` (keys: `password`, `repo-password`)
 - **Data priority**: P0 (Vault, ZITADEL PG) → P1 (Calibre-Web, Miniflux PG, KaraKeep, Gotify) → P2 (monitoring data)
-- **Current gap**: 无自动调度, oracle-k3s 未备份, 无离站副本。详见 `docs/plans/2026-03-07-homelab-oracle-architecture-optimization.md`
-- **Runbook**: `docs/runbooks/kopia-backup.md`
+- **Automated backups**: 
+  - homelab: CronJob in `kopia` namespace, 每天 02:00 UTC — Vault, ZITADEL PG, Calibre-Web, Gotify
+  - oracle-k3s `rss-system`: CronJob 每天 03:00 UTC — Miniflux PG, KaraKeep
+  - oracle-k3s `personal-services`: CronJob 每天 03:30 UTC — Uptime Kuma, Timeslot
+- **Remaining gap**: 无离站副本 (所有备份在 NFS 后端同一主机)
+- **Runbook**: `docs/runbooks/backup-recovery.md`

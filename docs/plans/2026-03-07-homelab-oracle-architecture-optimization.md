@@ -230,15 +230,16 @@ Traefik 当前运行稳定，SSO ForwardAuth 依赖 `traefik.io/Middleware Exten
 
 ### Milestone 1: 即时修复 (本周)
 
-- [ ] 修复 Uptime Kuma SSO 域名监控误报
-- [ ] 确认所有服务 Cilium 迁移后运行正常
-- [ ] 更新项目文档 (清理过期内容)
+- [x] 修复 Uptime Kuma SSO 域名监控误报
+- [x] 确认所有服务 Cilium 迁移后运行正常
+- [x] 更新项目文档 (清理过期内容)
+- [x] 修复 backup.meirong.dev 无法访问 (TraefikService scheme https → 直连 HTTP Service)
 
 ### Milestone 2: 备份体系 (1-2 周)
 
-- [ ] P0 数据配置 Kopia 自动快照 (Vault / ZITADEL PostgreSQL)
-- [ ] P1 数据配置 Kopia 快照 (Calibre-Web / Gotify)
-- [ ] oracle-k3s PostgreSQL pg_dump CronJob
+- [x] P0 数据配置 Kopia 自动快照 (Vault / ZITADEL PostgreSQL)
+- [x] P1 数据配置 Kopia 快照 (Calibre-Web / Gotify)
+- [x] oracle-k3s PostgreSQL pg_dump CronJob
 - [ ] 恢复演练: 验证 Vault 恢复 SOP
 
 ### Milestone 3: 统一 CNI (2-4 周)

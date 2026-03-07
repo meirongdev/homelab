@@ -127,11 +127,58 @@ kubectl --context <context> -n <namespace> get pods
 9. ✅ 验证 SSO 链路 (auth.meirong.dev)
 10. ✅ 验证所有服务可达性
 
+## 自动备份调度
+
+### homelab 集群 (CronJob: `kopia` namespace)
+
+每天 02:00 UTC 自动执行，备份内容:
+
+| 服务 | 方式 | 标签 |
+|------|------|------|
+| Vault (data + audit) | 文件级 cp → Kopia snapshot | `service:vault`, `priority:P0` |
+| ZITADEL PostgreSQL | pg_dump → Kopia snapshot | `service:zitadel-postgresql`, `priority:P0` |
+| Calibre-Web config | 文件级 cp → Kopia snapshot | `service:calibre-web`, `priority:P1` |
+| Gotify | 文件级 cp → Kopia snapshot | `service:gotify`, `priority:P1` |
+
+清单文件: `k8s/helm/manifests/kopia-backup.yaml`
+
+```bash
+# 查看 CronJob 状态
+kubectl --context k3s-homelab -n kopia get cronjob kopia-backup
+
+# 手动触发
+kubectl --context k3s-homelab -n kopia create job --from=cronjob/kopia-backup kopia-backup-manual
+
+# 查看最近 Job 日志
+kubectl --context k3s-homelab -n kopia logs job/kopia-backup-manual -c kopia-snapshot
+```
+
+### oracle-k3s 集群 (CronJob: `rss-system` + `personal-services`)
+
+**rss-system** — 每天 03:00 UTC:
+
+| 服务 | 方式 |
+|------|------|
+| Miniflux PostgreSQL | pg_dump → Kopia snapshot |
+| KaraKeep (SQLite) | 文件级 cp → Kopia snapshot |
+
+**personal-services** — 每天 03:30 UTC:
+
+| 服务 | 方式 |
+|------|------|
+| Uptime Kuma (SQLite) | 文件级 cp → Kopia snapshot |
+| Timeslot (SQLite) | 文件级 cp → Kopia snapshot |
+
+```bash
+# 查看 CronJob 状态
+kubectl --context oracle-k3s -n rss-system get cronjob kopia-backup
+kubectl --context oracle-k3s -n personal-services get cronjob kopia-backup
+```
+
 ## 当前限制
 
-- ⚠️ 无自动快照调度 (需手动触发)
-- ⚠️ oracle-k3s 应用数据未纳入备份
 - ⚠️ 无离站副本 (所有备份在 NFS 后端同一主机)
 - ⚠️ 未做过完整恢复演练
+- ⚠️ ZITADEL pg_dump 需要 Vault 中有 `secret/homelab/zitadel` → `db-password`
 
 详见 [架构优化方案 - 备份策略](../plans/2026-03-07-homelab-oracle-architecture-optimization.md#2-应用数据分类与备份策略)
