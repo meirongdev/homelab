@@ -75,7 +75,7 @@ spec:
                 claimName: timeslot-pvc
                 readOnly: true
           initContainers:
-            # Step 1: Uptime Kuma SQLite hot backup
+            # Step 1: Uptime Kuma SQLite backup (cp WAL-trio: .db + .db-wal + .db-shm)
             - name: sqlite-uptime-kuma
               image: alpine:3.21
               command:
@@ -83,10 +83,11 @@ spec:
                 - -c
                 - |
                   set -e
-                  apk add --no-cache sqlite --quiet
                   mkdir -p /staging/uptime-kuma
                   echo "Backing up Uptime Kuma SQLite database..."
-                  sqlite3 /uptime-kuma/kuma.db ".backup /staging/uptime-kuma/kuma.db"
+                  cp /uptime-kuma/kuma.db /staging/uptime-kuma/kuma.db
+                  cp /uptime-kuma/kuma.db-wal /staging/uptime-kuma/kuma.db-wal 2>/dev/null || true
+                  cp /uptime-kuma/kuma.db-shm /staging/uptime-kuma/kuma.db-shm 2>/dev/null || true
                   echo "Uptime Kuma backup done: $(du -sh /staging/uptime-kuma/kuma.db | cut -f1)"
               volumeMounts:
                 - name: staging
@@ -102,7 +103,7 @@ spec:
                   cpu: 200m
                   memory: 128Mi
 
-            # Step 2: Timeslot SQLite hot backup
+            # Step 2: Timeslot SQLite backup (cp WAL-trio: .db + .db-wal + .db-shm)
             - name: sqlite-timeslot
               image: alpine:3.21
               command:
@@ -110,10 +111,11 @@ spec:
                 - -c
                 - |
                   set -e
-                  apk add --no-cache sqlite --quiet
                   mkdir -p /staging/timeslot
                   echo "Backing up Timeslot SQLite database..."
-                  sqlite3 /timeslot/timeslot.db ".backup /staging/timeslot/timeslot.db"
+                  cp /timeslot/timeslot.db /staging/timeslot/timeslot.db
+                  cp /timeslot/timeslot.db-wal /staging/timeslot/timeslot.db-wal 2>/dev/null || true
+                  cp /timeslot/timeslot.db-shm /staging/timeslot/timeslot.db-shm 2>/dev/null || true
                   echo "Timeslot backup done: $(du -sh /staging/timeslot/timeslot.db | cut -f1)"
               volumeMounts:
                 - name: staging
@@ -168,14 +170,12 @@ spec:
                   echo "Creating snapshot of /staging (personal-services)..."
                   kopia snapshot create /staging \
                     --config-file=/tmp/kopia.config \
-                    --cache-directory=/tmp/kopia-cache \
                     --tags="cluster:oracle-k3s" \
                     --tags="namespace:personal-services"
 
                   echo "Snapshot status:"
                   kopia snapshot list /staging \
                     --config-file=/tmp/kopia.config \
-                    --cache-directory=/tmp/kopia-cache \
                     --all | tail -5
 
                   kopia repository disconnect \
