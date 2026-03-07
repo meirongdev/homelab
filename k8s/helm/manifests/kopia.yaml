@@ -111,6 +111,7 @@ spec:
             - kopia
             - server
             - start
+            - --insecure
             - --address=0.0.0.0:51515
             - --config-file=/app/config/repository.config
             - --cache-directory=/app/cache
