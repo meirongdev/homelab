@@ -18,7 +18,7 @@ cleanup-k3s:
     ansible -i inventory/hosts.yaml oracle_masters -b -m shell \
       -a "k3s-uninstall.sh" --private-key ~/.ssh/vgio
 
-# 安装 Tailscale daemon，加入 tailnet 并广播子网路由（10.52/10.53）
+# 安装 Tailscale daemon，加入 tailnet 并广播子网路由（10.52 Pod CIDR）
 # 用法: just setup-tailscale <authkey>
 setup-tailscale authkey:
     ansible-playbook playbooks/setup-tailscale.yaml \
