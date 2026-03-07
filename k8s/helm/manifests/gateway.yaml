@@ -299,7 +299,22 @@ spec:
           port: 80
           weight: 1
 ---
-# HTTPRoute: backup.meirong.dev -> kopia
+# TraefikService for Kopia HTTPS backend
+apiVersion: traefik.io/v1alpha1
+kind: TraefikService
+metadata:
+  name: kopia-ts
+  namespace: kopia
+spec:
+  weighted:
+    services:
+      - name: kopia
+        port:
+          number: 51515
+        scheme: https
+        serversTransport: kopia-kopia-transport@kubernetescrd
+
+# HTTPRoute: backup.meirong.dev -> kopia (via TraefikService)
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -326,8 +341,8 @@ spec:
             kind: Middleware
             name: sso-forwardauth
       backendRefs:
-        - group: ""
-          kind: Service
-          name: kopia
+        - group: traefik.io
+          kind: TraefikService
+          name: kopia-ts
           port: 51515
           weight: 1
