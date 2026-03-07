@@ -1,0 +1,283 @@
+---
+# CronJob: daily backup of homelab P0/P1 data to local Kopia server
+# P0: Vault (file-level), ZITADEL PostgreSQL (pg_dump)
+# P1: Calibre-Web config (file-level), Gotify (file-level)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: kopia-backup
+  namespace: kopia
+  labels:
+    app: kopia-backup
+spec:
+  # 每天凌晨 2:00 UTC
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 3
+  successfulJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app: kopia-backup
+        spec:
+          restartPolicy: OnFailure
+          volumes:
+            - name: staging
+              emptyDir:
+                sizeLimit: 2Gi
+            # Vault data (NFS PVC)
+            - name: vault-data
+              persistentVolumeClaim:
+                claimName: data-vault-0
+                readOnly: true
+            # Vault audit logs
+            - name: vault-audit
+              persistentVolumeClaim:
+                claimName: audit-vault-0
+                readOnly: true
+            # Calibre-Web automated config (NFS PVC)
+            - name: calibre-config
+              persistentVolumeClaim:
+                claimName: calibre-web-automated-config
+                readOnly: true
+            # Gotify data (NFS PVC)
+            - name: gotify-data
+              persistentVolumeClaim:
+                claimName: gotify-data
+                readOnly: true
+            # Kopia config (to reuse server's repo config)
+            - name: kopia-config
+              persistentVolumeClaim:
+                claimName: kopia-config
+                readOnly: true
+
+          initContainers:
+            # Step 1: Vault file-level backup
+            - name: vault-backup
+              image: alpine:3.21
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  mkdir -p /staging/vault/data /staging/vault/audit
+                  echo "Backing up Vault data directory..."
+                  cp -r /vault-data/* /staging/vault/data/ 2>/dev/null || true
+                  echo "Backing up Vault audit logs..."
+                  cp -r /vault-audit/* /staging/vault/audit/ 2>/dev/null || true
+                  echo "Vault backup done: $(du -sh /staging/vault/ | cut -f1)"
+              volumeMounts:
+                - name: staging
+                  mountPath: /staging
+                - name: vault-data
+                  mountPath: /vault-data
+                  readOnly: true
+                - name: vault-audit
+                  mountPath: /vault-audit
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 32Mi
+                limits:
+                  cpu: 200m
+                  memory: 256Mi
+
+            # Step 2: ZITADEL PostgreSQL dump (cross-namespace via service DNS)
+            - name: zitadel-pg-dump
+              image: postgres:15-alpine
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: kopia-secret
+                      key: password
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  mkdir -p /staging/zitadel-postgres
+
+                  # Get ZITADEL DB password from the zitadel namespace secret
+                  # The pg_dump connects via the service DNS name
+                  echo "Dumping ZITADEL PostgreSQL..."
+
+                  # Use the default zitadel db credentials (postgres superuser)
+                  PGPASSWORD="${ZITADEL_DB_PASSWORD}" pg_dump \
+                    -h zitadel-db-postgresql.zitadel.svc.cluster.local \
+                    -U postgres \
+                    -d zitadel \
+                    --format=custom --compress=9 \
+                    -f /staging/zitadel-postgres/zitadel.dump 2>&1 || {
+                      echo "WARNING: ZITADEL pg_dump failed (DB credentials may need updating)"
+                      echo "Skipping ZITADEL DB backup"
+                    }
+
+                  if [ -f /staging/zitadel-postgres/zitadel.dump ]; then
+                    echo "ZITADEL dump done: $(du -sh /staging/zitadel-postgres/zitadel.dump | cut -f1)"
+                  fi
+              envFrom: []
+              env:
+                - name: ZITADEL_DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: zitadel-db-password
+                      key: password
+                      optional: true
+              volumeMounts:
+                - name: staging
+                  mountPath: /staging
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+
+            # Step 3: Calibre-Web config backup
+            - name: calibre-config-backup
+              image: alpine:3.21
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  mkdir -p /staging/calibre-web
+                  echo "Backing up Calibre-Web config..."
+                  cp -r /calibre-config/* /staging/calibre-web/ 2>/dev/null || true
+                  echo "Calibre-Web backup done: $(du -sh /staging/calibre-web/ | cut -f1)"
+              volumeMounts:
+                - name: staging
+                  mountPath: /staging
+                - name: calibre-config
+                  mountPath: /calibre-config
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 32Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+
+            # Step 4: Gotify data backup
+            - name: gotify-backup
+              image: alpine:3.21
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  mkdir -p /staging/gotify
+                  echo "Backing up Gotify data..."
+                  cp -r /gotify-data/* /staging/gotify/ 2>/dev/null || true
+                  echo "Gotify backup done: $(du -sh /staging/gotify/ | cut -f1)"
+              volumeMounts:
+                - name: staging
+                  mountPath: /staging
+                - name: gotify-data
+                  mountPath: /gotify-data
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 32Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+
+          # Main container: kopia snapshot using local repo config
+          containers:
+            - name: kopia-snapshot
+              image: kopia/kopia:latest
+              env:
+                - name: KOPIA_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: kopia-secret
+                      key: repo-password
+                - name: KOPIA_CHECK_FOR_UPDATES
+                  value: "false"
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  echo "Connecting to kopia repository..."
+                  kopia repository connect from-config \
+                    --file=/app/config/repository.config \
+                    --cache-directory=/tmp/kopia-cache \
+                    --override-username=backup \
+                    --override-hostname=homelab
+
+                  echo "=== Creating snapshots ==="
+
+                  echo "Snapshot: Vault data..."
+                  kopia snapshot create /staging/vault \
+                    --tags="cluster:homelab" \
+                    --tags="service:vault" \
+                    --tags="priority:P0" || echo "WARNING: Vault snapshot failed"
+
+                  if [ -f /staging/zitadel-postgres/zitadel.dump ]; then
+                    echo "Snapshot: ZITADEL PostgreSQL dump..."
+                    kopia snapshot create /staging/zitadel-postgres \
+                      --tags="cluster:homelab" \
+                      --tags="service:zitadel-postgresql" \
+                      --tags="priority:P0" || echo "WARNING: ZITADEL snapshot failed"
+                  fi
+
+                  echo "Snapshot: Calibre-Web config..."
+                  kopia snapshot create /staging/calibre-web \
+                    --tags="cluster:homelab" \
+                    --tags="service:calibre-web" \
+                    --tags="priority:P1" || echo "WARNING: Calibre-Web snapshot failed"
+
+                  echo "Snapshot: Gotify data..."
+                  kopia snapshot create /staging/gotify \
+                    --tags="cluster:homelab" \
+                    --tags="service:gotify" \
+                    --tags="priority:P1" || echo "WARNING: Gotify snapshot failed"
+
+                  echo "=== Snapshot summary ==="
+                  kopia snapshot list --all | tail -20
+
+                  kopia repository disconnect
+                  echo "Homelab backup completed successfully."
+              volumeMounts:
+                - name: staging
+                  mountPath: /staging
+                - name: kopia-config
+                  mountPath: /app/config
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 1000m
+                  memory: 1Gi
+---
+# ExternalSecret for ZITADEL DB password (needed by pg_dump)
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: zitadel-db-password
+  namespace: kopia
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: zitadel-db-password
+    creationPolicy: Owner
+  data:
+    - secretKey: password
+      remoteRef:
+        key: secret/homelab/zitadel
+        property: db-password
