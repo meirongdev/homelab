@@ -66,12 +66,14 @@
 - job_name: 'traefik-oracle-k3s'          # 100.107.166.37:31911
 ```
 
-### Oracle Prometheus Agent（本地 scrape + remote_write）
+### Oracle 采集路径（OTel Collector）
+
+oracle-k3s 不再使用 prometheus-agent。当前由单一 OTel Collector 统一完成本地 scrape + remote_write：
 
 ```yaml
-# prometheus-agent-values.yaml additionalScrapeConfigs:
-- job_name: 'cloudflared'   # cloudflared-metrics.cloudflare.svc:2000
-- job_name: 'traefik'       # traefik-metrics.kube-system.svc:9100
+# cloud/oracle/manifests/monitoring/otel-collector.yaml
+- prometheus/cloudflared  # cloudflared-metrics.cloudflare.svc:2000
+- prometheus/traefik      # traefik-metrics.kube-system.svc:9100
 ```
 
 ## Grafana Dashboard

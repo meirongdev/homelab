@@ -28,15 +28,17 @@ data:
         {"name": "Uptime Kuma",    "url": "http://uptime-kuma.personal-services.svc:3001"},
         # --- homelab public services ---
         # Protected services may redirect to oauth.meirong.dev; treat 2xx-3xx as healthy external reachability.
-        {"name": "Grafana",        "url": "https://grafana.meirong.dev/",       "accepted_statuscodes": ["200-299", "300-399"]},
-        {"name": "HashiCorp Vault","url": "https://vault.meirong.dev/",         "accepted_statuscodes": ["200-299", "300-399"]},
-        {"name": "Calibre-Web",    "url": "https://book.meirong.dev/",          "accepted_statuscodes": ["200-299", "300-399"]},
+        # SSO-protected endpoints: only verify external ingress/auth redirect health.
+        # Do not follow redirects into oauth2 login exchange, otherwise monitor may end on 400.
+        {"name": "Grafana",        "url": "https://grafana.meirong.dev/",       "accepted_statuscodes": ["300-399"], "maxredirects": 0},
+        {"name": "HashiCorp Vault","url": "https://vault.meirong.dev/",         "accepted_statuscodes": ["300-399"], "maxredirects": 0},
+        {"name": "Calibre-Web",    "url": "https://book.meirong.dev/",          "accepted_statuscodes": ["300-399"], "maxredirects": 0},
         {"name": "ArgoCD",         "url": "https://argocd.meirong.dev/",        "accepted_statuscodes": ["200-299", "300-399"]},
-        {"name": "Kopia Backup",   "url": "https://backup.meirong.dev/",        "accepted_statuscodes": ["200-299", "300-399"]},
+        {"name": "Kopia Backup",   "url": "https://backup.meirong.dev/",        "accepted_statuscodes": ["300-399"], "maxredirects": 0},
         # --- new info pipeline services ---
         # KaraKeep: root / redirects 307 to /signin; monitor /signin directly (returns 200)
         {"name": "KaraKeep",       "url": "http://karakeep.rss-system.svc:3000/signin"},
-        {"name": "Gotify",         "url": "https://notify.meirong.dev/",        "accepted_statuscodes": ["200-299", "300-399"]},
+        {"name": "Gotify",         "url": "https://notify.meirong.dev/",        "accepted_statuscodes": ["300-399"], "maxredirects": 0},
         # Timeslot: oracle-k3s local service, direct ClusterDNS bypasses SSO
         {"name": "Timeslot",       "url": "http://timeslot.personal-services.svc:8080/api/slots"},
     ]
@@ -78,11 +80,14 @@ data:
     for m in MONITORS:
         extra = {}
         if "accepted_statuscodes" in m:
-            extra["accepted_statuscodes"] = m["accepted_statuscodes"]
+          extra["accepted_statuscodes"] = m["accepted_statuscodes"]
         else:
-            extra["accepted_statuscodes"] = ["200-299"]
-        if "ignoreTls" in m:
-            extra["ignoreTls"] = m["ignoreTls"]
+          extra["accepted_statuscodes"] = ["200-299"]
+
+        # Pass through optional monitor parameters used by Uptime Kuma HTTP checks.
+        for field in ("ignoreTls", "maxredirects", "timeout", "method"):
+          if field in m:
+            extra[field] = m[field]
         if m["name"] in existing:
             # Always update URL and accepted_statuscodes to ensure they stay in sync
             api.edit_monitor(existing[m["name"]]["id"], url=m["url"], **extra)

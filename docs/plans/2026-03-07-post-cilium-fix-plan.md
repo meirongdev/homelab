@@ -84,38 +84,21 @@
 3. `just argocd-sync` 触发立即同步
 4. 2/2 新 pod Running，logs 显示 `protocol=http2` 连接到 sin06/sin07/sin08/sin22
 
-### 问题 3: Metrics Server 不可用 (Medium) — ✅ 已修复
+### 问题 3: Metrics Server 不可用 (Medium)
 
 **现象**: `metrics-server` 无法抓取 kubelet，报 `dial tcp 10.10.10.10:10250: connect: connection refused`
 
-**根因分析 (深度排查)**:
+**根因分析**:
+- kubelet 在节点上**确实监听** 10250 端口 (已通过 Tailscale IP 确认 `ss -tlnp | grep 10250`)
+- 但 Pod 通过 Cilium 网络路径访问宿主 IP 10.10.10.10 时被拒
+- 可能原因:
+  - Cilium routing mode `Host: Legacy` 下 Pod→Host 流量走 iptables，可能未正确 SNAT
+  - K3s 内置 metrics-server 参数使用 `--kubelet-preferred-address-types=InternalIP` 但在 Cilium 下该路径不通
 
-通过逐层诊断确认了是 Cilium BPF 数据平面的问题:
-
-1. **kubelet 正常监听**: `ss -tlnp` 确认 kubelet 绑定 `*:10250` (所有接口)
-2. **hostNetwork pod 可达**: `hostNetwork: true` 的测试 pod 能连接 10.10.10.10:10250 (HTTP 401)
-3. **普通 pod 不可达 ANY 端口**: 测试 pod 连接 10.10.10.10 的 10250/6443/9100 全部失败
-4. **Cilium 内部 IP 可达**: pod 连接 Cilium 内部 IP 10.42.0.219:10250 成功 (HTTP 401)
-5. **SYN 到达 veth 但被 BPF 消耗**: tcpdump 在 veth (lxc*) 上看到 SYN 包进入，但 cilium_host/lo/eth0 上**零流量**
-6. **Cilium monitor 无 drop 事件**: BPF 不是 drop 而是"静默消化"了 SYN
-7. **UFW/iptables 规则正确**: pod CIDR 10.42.0.0/16 允许，port 10250 允许
-8. **无 cgroup BPF hook**: `bpftool cgroup show` 仅有 `sysctl_monitor`
-
-**核心结论**: Cilium tunnel (VXLAN) 模式下，TC BPF 程序处理 pod 出站流量时，对目标为节点物理 IP (10.10.10.10) 的包无法正确转发到宿主网络栈。包在 veth 的 BPF 钩子中被静默处理，永远无法到达 kubelet 的 TCP socket。
-
-这是 Cilium `routing: tunnel` + `Host: Legacy` 模式的已知限制。Cilium CT 表中 pod→10.10.10.10:6443 的流量之所以成功，是因为它走的是 Service NAT 路径 (kubernetes.default.svc ClusterIP → 10.10.10.10:6443)，而不是直接 IP 路径。
-
-**修复方案**: 修改 K3s 内置 metrics-server manifest 添加 `hostNetwork: true` + 改端口避免与 kubelet 冲突
-
-```bash
-# 修改 /var/lib/rancher/k3s/server/manifests/metrics-server/metrics-server-deployment.yaml
-# 1. spec.template.spec.hostNetwork: true
-# 2. --secure-port=10251 (避免与 kubelet 10250 冲突)
-# 3. containerPort: 10251
-# 4. UFW: sudo ufw allow 10251/tcp comment 'metrics-server'
-```
-
-K3s 自动检测 manifest 变更并重新部署，新 pod IP 变为 10.10.10.10 (host network)，`kubectl top nodes/pods` 恢复正常。
+**修复方案**: 
+- 方案 A: 在 Cilium values 中启用 `hostPort.enabled: true` 或设置 `bpf.masquerade: true`
+- 方案 B (推荐): 确认 Cilium 宿主策略, 检查是否需要设置 `devices` 列表或调整 `hostServicesProbe`
+- 方案 C: 给 metrics-server 添加 `--kubelet-insecure-tls` + `hostNetwork: true`
 
 ### 问题 4: ArgoCD NetworkPolicies (Low / 潜在风险)
 
@@ -181,11 +164,8 @@ Hubble 已启用 (4095/4095 flows)。建议:
 
 ## 验证清单
 
-- [x] `auth.meirong.dev` 返回 302 (ZITADEL 登录页重定向)
-- [x] `book.meirong.dev` SSO 流程正常 (302 重定向)
-- [x] `kubectl --context k3s-homelab -n cloudflare get pods` 全部 Running (2/2)
-- [x] `kubectl --context k3s-homelab top nodes` 正常输出 (CPU 9%, Memory 42%)
-- [x] `kubectl --context k3s-homelab top pods` 正常输出
-- [x] 所有公开服务 (home/tool/status/rss/argocd) 返回 200
-- [ ] vault-eso 应用 Degraded (pre-existing: argocd-image-updater/postgresql secrets 缺失)
-- [ ] ZITADEL login v3 pod Init:0/1 (需要 login-client secret, 不影响现有 SSO)
+- [ ] `auth.meirong.dev` 返回 200 (ZITADEL 登录页)
+- [ ] `book.meirong.dev` SSO 流程正常
+- [ ] `kubectl --context k3s-homelab -n cloudflare get pods` 全部 Running
+- [ ] `kubectl --context k3s-homelab top nodes` 正常输出
+- [ ] `kubectl --context k3s-homelab -n argocd get app` 全部 Synced + Healthy
