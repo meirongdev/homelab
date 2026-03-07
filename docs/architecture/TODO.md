@@ -1,5 +1,7 @@
 # Homelab Project TODO
 
+> Last updated: 2026-03-07
+
 ## Phase 1: Foundation ✅
 
 - [x] Terraform setup for VM provisioning (Proxmox)
@@ -9,68 +11,67 @@
 - [x] OTel Collector DaemonSet — 替换 Promtail，OTLP HTTP → Loki 3.x
 - [x] Grafana Loki Dashboards — Overview / Pod Browser / Errors / Cluster Search（GitOps via ArgoCD）
 - [x] log-exporter sidecar pattern — 支持文件日志应用（Calibre-Web 已实施）
-- [x] **Cloud Foundation**: Oracle Cloud Free Tier K3s Cluster (Terraform + Ansible)
-- [x] **OTel Tracing**: 双集群 OTLP traces → Tempo 全链路追踪（2026-03-01 上线）
+- [x] Oracle Cloud Free Tier K3s Cluster (Terraform + Ansible)
+- [x] OTel Tracing — 双集群 OTLP traces → Tempo 全链路追踪
 
 ## Phase 2: Security & GitOps ✅
 
 - [x] Deploy HashiCorp Vault to Kubernetes (Helm, `vault` namespace)
-- [x] Initialize and unseal Vault (`just vault-init`, `just vault-unseal`)
+- [x] Initialize and unseal Vault
 - [x] Configure Kubernetes authentication for ESO
 - [x] Install External Secrets Operator (ESO)
 - [x] Create ClusterSecretStore (`vault-backend`)
-- [x] Migrate all app secrets to Vault (Grafana, Cloudflare, Postgres, Stirling-PDF, GitHub)
+- [x] Migrate all app secrets to Vault
 - [x] GitOps with ArgoCD (auto-sync + selfHeal for all managed apps)
 - [x] ArgoCD Image Updater — automated `it-tools` image tracking via GHCR
 
 ## Phase 3: Multi-Cloud & Security ✅
 
-- [ ] **Multi-Cluster ArgoCD**: Manage Oracle Cloud resources from local ArgoCD
-- [ ] **Cert-Manager**: Automatic certificate management (cert-manager + Vault PKI or Cloudflare DNS)
-- [ ] **Vault Dynamic Secrets**: Dynamic database credentials for PostgreSQL
-- [ ] **Secret Rotation**: Automate rotation for sensitive keys (Cloudflare, etc.)
-- [x] **Cross-Cluster Networking**: Tailscale 双向 Pod CIDR 路由 (homelab ↔ oracle-k3s)
-- [x] **SSO**: ZITADEL + oauth2-proxy (OIDC) ForwardAuth 保护所有服务（2026-02-27 上线）
-- [x] **信息管道**: Miniflux → Redpanda Connect → KaraKeep → Gotify → Telegram（2026-02-28 上线）
-- [x] **Cloudflare WAF**: Zone 级 WAF 防护 — 自定义规则、速率限制、安全设置（2026-02-28 上线）
+- [x] Cross-Cluster Networking — Tailscale 双向 Pod CIDR 路由 (homelab ↔ oracle-k3s)
+- [x] SSO — ZITADEL + oauth2-proxy (OIDC) ForwardAuth 保护所有服务
+- [x] 信息管道 — Miniflux → Redpanda Connect → KaraKeep → Gotify → Telegram
+- [x] Cloudflare WAF — Zone 级 WAF 防护 (自定义规则、速率限制、安全设置)
+- [x] Uptime Kuma — 外部健康监控 (status.meirong.dev)
+- [x] Cilium CNI — homelab K3s 集群从 Flannel 迁移到 Cilium
 
-## Phase 4: Reliability & Maintenance 📋 (Planned)
+## Phase 4: Reliability & Backup 📋 (Current)
 
-- [x] **Uptime Kuma**: Deploy external health monitoring (status.meirong.dev) — 含 PostSync 自动配置 + 公开状态页
-- [ ] **Kopia Automation**: Scheduled backups via K8s CronJob to offsite storage
-- [ ] **Loki Retention**: Configure log retention and compaction policies
-- [ ] **Alerting**: Alertmanager integration with Gotify/Telegram
-- [ ] **Disaster Recovery**: Velero backup and recovery runbooks
-- [ ] **Cloudflare Pro WAF**: 升级 Pro 计划后启用 Managed Ruleset + OWASP CRS + 泄露凭证检测
+- [ ] **Kopia 自动快照**: P0 数据 (Vault / ZITADEL PG) 每日快照 + P1 数据每周快照
+- [ ] **oracle-k3s 备份接入**: pg_dump CronJob + SQLite 文件级快照 (Miniflux / KaraKeep / Timeslot)
+- [ ] **恢复演练**: 验证 Vault 恢复 SOP
+- [ ] **Loki 日志保留**: 配置 compaction 与 retention policies
+- [ ] **Alertmanager**: 告警规则 → Gotify → Telegram 通知链路
+- [ ] **oracle-k3s Cilium**: 从 Flannel 迁移到 Cilium，统一双集群数据面
+- [ ] **Uptime Kuma SSO 修复**: maxredirects=0 + accepted_statuscodes 300-399
+
+## Phase 5: Production Hardening 🎯 (Future)
+
+- [ ] Cilium ClusterMesh 评估 (跨集群 Service 发现)
+- [ ] Gateway 标准化 (Traefik → Cilium Gateway 迁移评估)
+- [ ] Cert-Manager (Let's Encrypt + Cloudflare DNS-01)
+- [ ] Vault Dynamic Secrets (PostgreSQL 动态凭据)
+- [ ] 离站备份 (Backblaze B2 / S3)
+- [ ] Cloudflare Pro WAF (Managed Ruleset + OWASP CRS)
 
 ---
 
-## 🚀 Task Roadmap (Ordered by Difficulty)
+## Task Roadmap (By Effort)
 
-### 🟢 Low Difficulty (Easy Wins)
-- [x] **Uptime Kuma**: Deploy for external service health monitoring.
-- [ ] **Grafana Housekeeping**: Remove any remaining old dashboards.
-- [ ] **Oracle Postgres 迁移**: Miniflux 数据库迁移到 oracle-k3s 本地（减少跨集群延迟）
+### 🟢 Quick Wins
 
-### 🟡 Medium Difficulty (Configuration Focused)
-- [ ] **Alertmanager Config**: Set up basic alerting rules → Gotify → Telegram notification.
-- [ ] **Kopia Scheduled Jobs**: Refactor `kopia.yaml` to use CronJobs for automated backups.
-- [ ] **Cert-Manager Setup**: Install cert-manager and configure Let's Encrypt with Cloudflare DNS-01 challenge.
-- [ ] **ArgoCD App-of-Apps**: Refactor Application manifests into a cleaner hierarchy.
+- [ ] Uptime Kuma SSO 监控修复 (maxredirects config)
+- [ ] Loki retention 配置 (values.yaml update)
+- [ ] Grafana 旧 dashboard 清理
 
-### 🔴 High Difficulty (Complex Systems)
-- [ ] **Vault Dynamic Postgres**: Implement Vault's Database secret engine for dynamic SQL users.
-- [ ] **Multi-Cluster ArgoCD**: Add Oracle Cluster as a managed destination in local ArgoCD.
+### 🟡 Medium Effort
 
-## Phase 5: Production Readiness 🎯 (Future)
+- [ ] Kopia 自动快照 CronJob (K8s manifest)
+- [ ] Alertmanager → Gotify 通知模板
+- [ ] Cert-Manager 安装 + Let's Encrypt ClusterIssuer
+- [ ] oracle-k3s Cilium 迁移
 
-- [ ] High availability for all components (Vault HA, Postgres HA)
-- [ ] Performance optimization & Resource Quotas
-- [ ] Audit logging for Vault and K8s API
+### 🔴 High Effort
 
-## Post-Cilium Architecture Next Steps (2026-03)
-
-- [ ] Oracle-k3s 从 Flannel 迁移到 Cilium，统一双集群数据面
-- [ ] 评估并落地 Cilium ClusterMesh（先控制面互联，再逐步引入跨集群 Service）
-- [ ] Uptime Kuma 监控策略切分：外部入口可达性 vs 后端服务可用性
-- [ ] Gateway API 控制器标准化：Traefik 与 Cilium 二选一，避免长期双栈
+- [ ] Cilium ClusterMesh PoC
+- [ ] Traefik → Cilium Gateway 迁移 (需 ext_authz 设计)
+- [ ] Vault HA + auto-unseal

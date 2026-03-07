@@ -3,9 +3,7 @@
 > Last updated: 2026-03-07
 > Scope: 双集群 homelab（homelab + oracle-k3s）的架构、运维与实施记录。
 
-## 文档站点标准
-
-为避免信息漂移，`docs/` 采用固定分层：
+## 文档分层
 
 1. `architecture/`: 当前生效的架构事实（source of truth）
 2. `runbooks/`: 可直接执行的运维手册（SOP）
@@ -15,7 +13,7 @@
 
 1. 架构事实写进 `architecture/`，不要只写在 `plans/`
 2. 临时决策与排障过程写进 `plans/`
-3. 命令步骤必须可执行，避免“思路型描述”
+3. 命令步骤必须可执行，避免"思路型描述"
 4. 过期内容在原文标注 `Deprecated` 并链接替代文档
 
 ## 快速入口
@@ -29,19 +27,45 @@
 
 | 集群 | CNI | 跨集群 underlay | Ingress Gateway |
 |------|-----|------------------|-----------------|
-| homelab | Cilium | Tailscale (Pod CIDR only) | Traefik Gateway API |
-| oracle-k3s | Flannel | Tailscale (Pod CIDR only) | Traefik Gateway API |
+| homelab | Cilium (eBPF + VXLAN) | Tailscale (Pod CIDR only) | Traefik Gateway API |
+| oracle-k3s | Flannel (待迁移 Cilium) | Tailscale (Pod CIDR only) | Traefik Gateway API |
 
-| 关键外部入口 | 当前行为 |
-|-------------|----------|
-| `auth.meirong.dev` | ZITADEL 登录链路（302/200） |
-| `book/grafana/vault/notify/backup.meirong.dev` | SSO 保护（默认 3xx） |
-| `argocd.meirong.dev` | 自带登录（200） |
-| `status/home/tool/rss.meirong.dev` | 公开访问（200） |
+### 服务总览
+
+| 服务 | 集群 | URL | 认证 |
+|------|------|-----|------|
+| Calibre-Web | homelab | book.meirong.dev | SSO |
+| Gotify | homelab | notify.meirong.dev | SSO |
+| Grafana | homelab | grafana.meirong.dev | SSO |
+| Vault | homelab | vault.meirong.dev | SSO |
+| ArgoCD | homelab | argocd.meirong.dev | 内置 |
+| ZITADEL | homelab | auth.meirong.dev | OIDC |
+| Kopia | homelab | backup.meirong.dev | SSO + Basic Auth |
+| Homepage | oracle-k3s | home.meirong.dev | 公开 |
+| IT-Tools | oracle-k3s | tool.meirong.dev | 公开 |
+| Stirling-PDF | oracle-k3s | pdf.meirong.dev | 公开 |
+| Squoosh | oracle-k3s | squoosh.meirong.dev | 公开 |
+| Miniflux | oracle-k3s | rss.meirong.dev | 内置 |
+| KaraKeep | oracle-k3s | keep.meirong.dev | SSO |
+| Timeslot | oracle-k3s | slot.meirong.dev | Basic Auth |
+| Uptime Kuma | oracle-k3s | status.meirong.dev | 公开 |
+| Sink (短链) | Cloudflare Workers | s.meirong.dev | N/A |
+
+### 备份状态
+
+| 数据 | 备份方式 | 状态 |
+|------|---------|------|
+| Vault PVC | Kopia (手动) | ⚠️ 需自动化 |
+| ZITADEL PostgreSQL | Kopia (手动) | ⚠️ 需自动化 |
+| Calibre-Web | Kopia (手动) | ⚠️ 需自动化 |
+| oracle-k3s 应用数据 | 无 | ❌ 待接入 |
+
+详见 [备份与恢复方案](plans/2026-03-07-homelab-oracle-architecture-optimization.md#2-应用数据分类与备份策略)
 
 ## 推荐阅读顺序
 
-1. [architecture/tailscale-network.md](architecture/tailscale-network.md)
-2. [architecture/observability-multicluster.md](architecture/observability-multicluster.md)
-3. [plans/2026-03-07-post-cilium-fix-plan.md](plans/2026-03-07-post-cilium-fix-plan.md)
-4. [plans/2026-03-07-homelab-oracle-architecture-optimization.md](plans/2026-03-07-homelab-oracle-architecture-optimization.md)
+1. [architecture/tailscale-network.md](architecture/tailscale-network.md) — 跨集群网络
+2. [architecture/observability-multicluster.md](architecture/observability-multicluster.md) — 可观测方案
+3. [architecture/k8s-qos-resource-management.md](architecture/k8s-qos-resource-management.md) — 资源管理
+4. [runbooks/kopia-backup.md](runbooks/kopia-backup.md) — 备份操作
+5. [plans/2026-03-07-homelab-oracle-architecture-optimization.md](plans/2026-03-07-homelab-oracle-architecture-optimization.md) — 架构优化方案

@@ -1,178 +1,270 @@
-# Homelab + Oracle K3s 最优架构优化方案（Cilium Mesh + Tailscale）
+# Homelab + Oracle K3s 最优架构方案
 
 > 日期: 2026-03-07
-> 状态: Proposed
-> 目标: 给出不为现状妥协的目标架构、替换路径和执行计划。
+> 状态: Approved
+> 目标: 基于 Cilium 统一双集群架构，优化备份与灾难恢复，定义清晰的演进路径。
 
 ## 1. 执行摘要
 
-当前状态是“混合网络面”:
+### 1.1 当前状态
 
-1. homelab: Cilium
-2. oracle-k3s: Flannel
-3. 跨集群: Tailscale 子网路由（Pod CIDR only）
-4. Gateway API 控制器: Traefik
+| 维度 | homelab | oracle-k3s |
+|------|---------|------------|
+| CNI | Cilium (eBPF + VXLAN) | Flannel (VXLAN) |
+| Gateway | Traefik (Gateway API) | Traefik (Gateway API) |
+| 跨集群 | Tailscale 子网路由 (Pod CIDR only) | ← |
+| 可观测 | LGTM stack (中枢) | OTel Collector → homelab |
+| SSO | ZITADEL (auth.meirong.dev) | oauth2-proxy (OIDC client) |
+| 备份 | Kopia (NFS, 无自动调度, 无离站副本) | ❌ 无备份 |
 
-这套架构可用，但不是最优。
+### 1.2 目标架构
 
-最优目标态（建议）:
+1. **双集群统一 Cilium** — 消除 CNI 异构，为 ClusterMesh 做好准备
+2. **备份与恢复体系化** — Kopia 自动调度 + 应用数据分类 + 恢复 SOP
+3. **Uptime Kuma SSO 监控修复** — 消除误报
+4. **Gateway 标准化路线** — 短期保持 Traefik 稳定，中长期评估迁移
+5. **Tailscale 职责收窄** — 管理通道为主，业务面依赖逐步降低
 
-1. 双集群统一 Cilium
-2. 启用 Cilium ClusterMesh（跨集群服务发现与策略）
-3. Tailscale 从“业务数据通道”降级为“管理与应急通道”
-4. Gateway API 控制器收敛为单实现（优先 Cilium Gateway）
+## 2. 应用数据分类与备份策略
 
-## 2. 现状评估结论
+### 2.1 数据分类
 
-### 2.1 可简化点
+| 类别 | 服务 | 集群 | 存储 | 数据特征 | 备份优先级 |
+|------|------|------|------|----------|-----------|
+| **有状态-关键** | Vault | homelab | NFS PVC | 所有服务的 secrets 源头 | 🔴 P0 |
+| **有状态-关键** | ZITADEL PostgreSQL | homelab | NFS PVC | SSO 身份数据 | 🔴 P0 |
+| **有状态-重要** | Calibre-Web | homelab | NFS PVC (10Gi) | 电子书库 + 用户数据 | 🟡 P1 |
+| **有状态-重要** | Miniflux PostgreSQL | oracle-k3s | NFS PVC (10Gi) | RSS 订阅与阅读历史 | 🟡 P1 |
+| **有状态-重要** | KaraKeep | oracle-k3s | local-path (5Gi) | 书签与全文快照 | 🟡 P1 |
+| **有状态-重要** | Gotify | homelab | NFS PVC (1Gi) | 通知历史 | 🟡 P1 |
+| **有状态-一般** | Kopia repo | homelab | NFS PVC (1Ti) | 备份数据本身 | 🟢 P2 |
+| **有状态-一般** | Uptime Kuma | oracle-k3s | NFS PVC (1Gi) | 监控历史 (SQLite) | 🟢 P2 |
+| **有状态-一般** | Timeslot | oracle-k3s | local-path (100Mi) | 日历数据 (SQLite) | 🟢 P2 |
+| **有状态-一般** | Grafana | homelab | NFS PVC (1Gi) | Dashboard (已 GitOps 管理) | 🟢 P2 |
+| **有状态-一般** | Prometheus | homelab | NFS PVC (50Gi) | 指标数据 (可重建) | 🟢 P2 |
+| **有状态-一般** | Loki | homelab | NFS PVC (50Gi) | 日志数据 (可重建) | 🟢 P2 |
+| **无状态** | IT-Tools / PDF / Squoosh / Homepage 等 | both | 无 | 可随时重建 | ⚪ 无需备份 |
 
-1. **双 CNI 异构**（Cilium + Flannel）增加排障复杂度
-2. **跨集群业务流量依赖 Tailscale 子网路由**，策略可观测与策略一致性不足
-3. **Gateway API 绑定 Traefik ExtensionRef**（`traefik.io/Middleware`）形成控制器锁定
-4. **Uptime Kuma 对 SSO 服务直接跟随重定向**，导致 400 误报
+### 2.2 备份方案 — Kopia 体系
 
-### 2.2 运行态证据（2026-03-07）
+#### 当前能力
 
-- homelab 与 oracle-k3s 节点均 Ready
-- Uptime Kuma 失败项集中在受 SSO 保护的 homelab 域名:
-  - `book.meirong.dev`
-  - `grafana.meirong.dev`
-  - `vault.meirong.dev`
-  - `notify.meirong.dev`
-  - `backup.meirong.dev`
-- 最新失败信息均为 `Request failed with status code 400`
+- Kopia server 运行于 homelab kopia namespace
+- 仓库存储: NFS PVC 1Ti (192.168.50.106:/export)
+- 访问: Web UI (backup.meirong.dev) + CLI (NodePort 31515)
+- 加密: AES 仓库级加密
 
-## 3. 最优目标架构（Target State）
+#### 缺失环节 (待补)
 
-## 3.1 网络与服务通信
+1. **自动快照调度**: 无 CronJob，全靠手动触发
+2. **oracle-k3s 数据未纳入备份**: Miniflux DB / KaraKeep / Uptime Kuma / Timeslot 均未备份
+3. **无离站副本**: 所有备份在同一 NFS 后端 (Proxmox 主机单点)
+4. **无恢复演练**: 未验证过完整恢复流程
 
-1. 双集群 Cilium（统一 dataplane）
-2. Cilium ClusterMesh 建立跨集群服务发现与身份
-3. 服务间互访优先使用 ClusterMesh 能力，不再依赖 Tailscale 子网路由
-4. Tailscale 保留给:
-   - 运维入口（SSH / debug）
-   - 控制面应急旁路
+#### 目标状态
 
-## 3.2 Gateway 与入口
+```
+homelab NFS volumes ──→ Kopia server (定时快照) ──→ NFS repo (本地)
+oracle-k3s volumes ──→ Kopia client (Tailscale) ──→ Kopia server ──→ NFS repo (本地)
 
-1. 短期维持 Traefik（保障稳定）
-2. 中期将 HTTPRoute 从 `ExtensionRef: traefik.io/Middleware` 迁移到网关无关策略
-3. 长期切换到 Cilium Gateway（Envoy）并移除 Traefik 控制面
+(Phase 2) NFS repo ──→ Kopia 同步目标 ──→ 离站存储 (Backblaze B2 / S3)
+```
 
-## 3.3 可观测与健康检查
+#### 实施步骤
 
-1. 外部可达性监控与后端可用性监控分离
-2. SSO 保护域名以 3xx 作为“入口健康”
-3. 后端真实可用性由集群内探测/Prometheus 指标承担
+**Phase 1: 自动调度 + oracle-k3s 数据纳入**
 
-## 4. Uptime Kuma 修复计划（针对当前 Fail）
+1. 为 P0/P1 NFS volumes 配置 Kopia 快照策略:
+   - Vault: 每日快照，保留 30 天
+   - ZITADEL PostgreSQL: 每日快照，保留 30 天
+   - Calibre-Web: 每周快照，保留 12 周
+   - Gotify: 每周快照，保留 4 周
+2. 在 oracle-k3s 部署 Kopia sidecar/CronJob，通过 Tailscale 连接 homelab Kopia server
+3. oracle-k3s PostgreSQL (Miniflux): pg_dump CronJob → Kopia 快照
+4. KaraKeep / Uptime Kuma / Timeslot (SQLite): 文件级 Kopia 快照
 
-## 4.1 根因
+**Phase 2: 离站备份**
 
-当前受保护域名监控会跟随重定向进入 oauth2 流程，最终落在 400，导致误判 fail。
+1. 在 Kopia 中添加 Backblaze B2 或 S3 兼容存储目标
+2. 配置跨源同步策略 (每周完整同步)
+3. 在 Vault 中管理云存储 credentials
 
-## 4.2 修复策略
+### 2.3 恢复流程 (SOP)
 
-1. 对 SSO 受保护监控项设置:
-   - `maxredirects: 0`
-   - `accepted_statuscodes: ["300-399"]`
-2. 对公开域名保持 `200-299`（或按业务需要含 3xx）
-3. 保留 `argocd.meirong.dev` 为 200/3xx（不走 SSO）
-
-## 4.3 执行步骤
-
-1. 修改 `cloud/oracle/manifests/uptime-kuma/provisioner.yaml`
-2. 重新执行 provisioner Job（更新现有 monitor 配置）
-3. 验证 5 分钟窗口内失败项清零
-4. 若仍有失败，按域名抓包与链路回放（Cloudflare -> Tunnel -> Gateway）
-
-## 4.4 验证命令
+#### Vault 恢复
 
 ```bash
-# 查看失败项
+# 1. 确认 Kopia 最新快照
+kopia snapshot list --all | grep vault
+
+# 2. 恢复到临时目录
+kopia restore <snapshot-id> /tmp/vault-restore/
+
+# 3. 替换 PVC 数据
+kubectl -n vault scale deploy vault --replicas=0
+# 拷贝恢复数据到 NFS mount
+kubectl -n vault scale deploy vault --replicas=1
+
+# 4. 手动 unseal
+just vault-unseal
+```
+
+#### PostgreSQL (ZITADEL / Miniflux) 恢复
+
+```bash
+# 1. 获取最新 pg_dump 快照
+kopia snapshot list --all | grep postgres
+
+# 2. 恢复 dump 文件
+kopia restore <snapshot-id> /tmp/pg-restore/
+
+# 3. 恢复数据库
+kubectl -n <namespace> exec -i <postgres-pod> -- \
+  psql -U <user> -d <dbname> < /tmp/pg-restore/dump.sql
+```
+
+#### SQLite 应用恢复 (Calibre-Web / Uptime Kuma / Timeslot)
+
+```bash
+# 1. 停止应用
+kubectl -n <namespace> scale deploy <app> --replicas=0
+
+# 2. 恢复数据文件
+kopia restore <snapshot-id> <nfs-mount-path>/
+
+# 3. 重启
+kubectl -n <namespace> scale deploy <app> --replicas=1
+```
+
+## 3. 网络架构优化
+
+### 3.1 短期: oracle-k3s 统一到 Cilium
+
+**目标**: 消除 CNI 异构
+
+**步骤**:
+1. 在 oracle-k3s 节点安装 Cilium (复用 homelab 配置模板)
+2. 禁用 Flannel VXLAN backend
+3. 验证所有 Pod 网络正常 + OTel Collector 数据流畅通
+4. 验证 Traefik Gateway API 功能不受影响
+
+**回滚**: 恢复 Flannel 配置 (K3s 内置)
+
+### 3.2 中期: Tailscale 职责精简
+
+当前 Tailscale 承担:
+- 跨集群 Pod CIDR 路由 (10.42 ↔ 10.52)
+- SSH 管理入口
+- 可观测数据通道 (OTel → homelab Prometheus/Loki/Tempo)
+
+目标:
+- 保留 SSH 管理入口
+- 保留可观测数据传输 (OTel → homelab 各 NodePort)
+- 跨集群 Pod CIDR 路由在 ClusterMesh 上线后逐步迁移
+
+### 3.3 长期: Cilium ClusterMesh (评估)
+
+**前置条件**:
+1. 双集群 Cilium 版本一致
+2. 证书体系统一 (共享 Cilium CA)
+3. Pod CIDR 无重叠 (已满足: 10.42 vs 10.52)
+
+**收益**:
+- 跨集群 Service 发现 (不需要 NodePort 暴露)
+- 统一网络策略 (CiliumNetworkPolicy)
+- 减少 Tailscale 子网路由依赖
+
+**风险**: 增加控制面复杂度; homelab 单节点故障影响 ClusterMesh 可用性
+
+## 4. Uptime Kuma SSO 监控修复
+
+### 4.1 问题
+
+SSO 保护域名 (book/grafana/vault/notify/backup.meirong.dev) 返回 302 → oauth2-proxy → 400。
+
+### 4.2 修复
+
+对 SSO 保护的监控项:
+- `maxredirects: 0`
+- `accepted_statuscodes: ["300-399"]`
+
+公开域名保持 `200-299`。
+
+### 4.3 执行
+
+```bash
+# 1. 修改 provisioner ConfigMap
+vim cloud/oracle/manifests/uptime-kuma/provisioner.yaml
+
+# 2. git push → ArgoCD PostSync 自动重建 provisioner Job
+
+# 3. 验证
 kubectl --context oracle-k3s -n personal-services exec deploy/uptime-kuma -- \
   sh -lc "sqlite3 -csv /app/data/kuma.db \"SELECT m.name,m.url,h.status,h.msg,h.time FROM monitor m LEFT JOIN heartbeat h ON h.id=(SELECT id FROM heartbeat WHERE monitor_id=m.id ORDER BY time DESC LIMIT 1) WHERE h.status != 1 ORDER BY m.name;\""
 ```
 
-## 5. Cilium Gateway API 替换 Traefik 可行性分析
+## 5. Gateway 标准化路线
 
-## 5.1 结论
+### 5.1 决策: 短期保持 Traefik
 
-可以替换，但必须分阶段。
+Traefik 当前运行稳定，SSO ForwardAuth 依赖 `traefik.io/Middleware ExtensionRef`。
 
-阻塞点不在 HTTPRoute 本身，而在 `traefik.io/Middleware`（ForwardAuth）依赖。
+迁移到 Cilium Gateway 需要:
+1. Envoy ext_authz 对接 oauth2-proxy (替代 ForwardAuth)
+2. 逐域名灰度迁移
+3. 双网关并行验证期
 
-## 5.2 主要差异
+**当前不投入迁移，Traefik 满足所有已有需求。**
 
-1. Traefik 当前通过 `ExtensionRef` 直接引用 Middleware
-2. Cilium Gateway 基于 Envoy，需用 Envoy 外部鉴权（ext_authz）实现同等 ForwardAuth
-3. 迁移期间若直接切换控制器，SSO 链路风险高
+### 5.2 迁移前提 (供未来参考)
 
-## 5.3 替换计划
+| 步骤 | 内容 |
+|------|------|
+| Phase A | 去 Traefik ExtensionRef 依赖，设计 ext_authz PoC |
+| Phase B | 双网关并行，公开服务先行迁移 |
+| Phase C | 全量切换到 Cilium Gateway，删除 Traefik |
 
-### Phase A: 去 Traefik 依赖（先解耦）
+**回滚**: DNS 层切回 Traefik Gateway，保留 Traefik manifests 至观察窗口结束。
 
-1. 盘点所有 `ExtensionRef: traefik.io/Middleware`
-2. 设计统一鉴权模型:
-   - 方案 1: Cilium Envoy ext_authz 对接 oauth2-proxy
-   - 方案 2: 将认证前置到 Cloudflare Access（减少集群内 auth 复杂度）
-3. 在非关键域名做 canary
+## 6. 执行路线图
 
-### Phase B: 双网关并行
+### Milestone 1: 即时修复 (本周)
 
-1. 同时部署 Cilium GatewayClass 与 Traefik GatewayClass
-2. 逐域名灰度迁移（从公开服务开始）
-3. 监控指标对比:
-   - 5xx rate
-   - p95 latency
-   - auth redirect success ratio
+- [ ] 修复 Uptime Kuma SSO 域名监控误报
+- [ ] 确认所有服务 Cilium 迁移后运行正常
+- [ ] 更新项目文档 (清理过期内容)
 
-### Phase C: 切换与收敛
+### Milestone 2: 备份体系 (1-2 周)
 
-1. 全量切换到 Cilium Gateway
-2. 删除 Traefik Middleware CRD 与 Traefik GatewayClass
-3. 回写文档与 runbook
+- [ ] P0 数据配置 Kopia 自动快照 (Vault / ZITADEL PostgreSQL)
+- [ ] P1 数据配置 Kopia 快照 (Calibre-Web / Gotify)
+- [ ] oracle-k3s PostgreSQL pg_dump CronJob
+- [ ] 恢复演练: 验证 Vault 恢复 SOP
 
-## 5.4 回滚策略
+### Milestone 3: 统一 CNI (2-4 周)
 
-1. DNS/路由级回滚：切回 Traefik Gateway
-2. 保留 Traefik manifests 直至观察窗口结束
-3. 所有切换按服务分批，不做一次性大切
+- [ ] oracle-k3s 从 Flannel 迁移到 Cilium
+- [ ] 验证双集群 Cilium 网络一致性
+- [ ] 文档更新: 双集群统一 Cilium
 
-## 6. Cilium Mesh + Tailscale 优化路线图
+### Milestone 4: 增强 (4-8 周)
 
-## Milestone 1（1-2 周）
+- [ ] 评估 Cilium ClusterMesh (PoC 先行)
+- [ ] Loki 日志保留策略配置
+- [ ] Alertmanager → Gotify/Telegram 告警链路
 
-1. 修复 Uptime Kuma 误报（已进入实施）
-2. 完成 Gateway 解耦设计（去 Traefik ExtensionRef）
-3. 输出 ext_authz PoC
+## 7. 风险矩阵
 
-## Milestone 2（2-4 周）
-
-1. oracle-k3s 迁移到 Cilium
-2. 验证双集群 Cilium 网络一致性
-3. 建立统一 CiliumNetworkPolicy 基线
-
-## Milestone 3（4-6 周）
-
-1. ClusterMesh 控制面联通
-2. 逐步迁移跨集群业务通信到 ClusterMesh
-3. Tailscale 下沉为管理平面
-
-## Milestone 4（6-8 周）
-
-1. Cilium Gateway 接管生产流量
-2. Traefik 退出主路径
-3. 收敛文档并冻结 target architecture
-
-## 7. 风险与前置条件
-
-1. `oauth2-proxy` 与 Envoy ext_authz 语义一致性是最大风险
-2. ClusterMesh 引入前需统一 Cilium 版本与证书管理
-3. 需要保留至少一个可一键回滚的网关路径
+| 风险 | 概率 | 影响 | 缓解措施 |
+|------|------|------|----------|
+| NFS 后端故障 → 所有备份丢失 | 低 | 🔴 严重 | Milestone 2 离站备份 |
+| oracle-k3s Cilium 迁移导致服务中断 | 中 | 🟡 中等 | 提前备份, K3s 内置 Flannel 回退 |
+| ClusterMesh 控制面增加复杂度 | 中 | 🟡 中等 | PoC 验证, 不急于生产 |
+| Traefik → Cilium Gateway 迁移 SSO 链路断裂 | 中 | 🔴 严重 | 短期不迁移, 保持 Traefik |
 
 ## 8. 交付物
 
-1. 本文档: 最优架构改进计划
-2. `docs/architecture/*`: 持续更新目标架构事实
-3. `docs/runbooks/*`: 增补网关迁移与回滚 SOP
+1. ✅ 本文档: 最优架构方案
+2. 📋 `docs/runbooks/backup-recovery.md`: 备份与恢复操作手册
+3. 📋 `docs/architecture/TODO.md`: 更新路线图
+4. 📋 项目文档全量审查与过期清理
