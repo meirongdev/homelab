@@ -111,7 +111,6 @@ spec:
             - kopia
             - server
             - start
-            - --tls-generate-cert
             - --tls-cert-file=/app/config/tls.cert
             - --tls-key-file=/app/config/tls.key
             - --address=0.0.0.0:51515
