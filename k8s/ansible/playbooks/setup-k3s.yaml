@@ -19,7 +19,7 @@
         rule: allow
         name: OpenSSH
 
-    - name: Allow traffic on K3s pod CIDR (Flannel)
+    - name: Allow traffic on K3s pod CIDR
       community.general.ufw:
         rule: allow
         src: 10.42.0.0/16
@@ -41,6 +41,29 @@
         port: '10250'
         proto: tcp
 
+    - name: Allow Cilium health check (port 4240)
+      community.general.ufw:
+        rule: allow
+        port: '4240'
+        proto: tcp
+
+    - name: Allow Cilium VXLAN overlay (port 8472)
+      community.general.ufw:
+        rule: allow
+        port: '8472'
+        proto: udp
+
+    - name: Allow Hubble Relay (port 4244)
+      community.general.ufw:
+        rule: allow
+        port: '4244'
+        proto: tcp
+
+    - name: Allow all traffic from Proxmox subnet
+      community.general.ufw:
+        rule: allow
+        src: 192.168.50.0/24
+
     - name: Enable ufw
       community.general.ufw:
         state: enabled
@@ -55,13 +78,15 @@
         state: directory
         mode: "0755"
 
-    - name: Write K3s config (TLS SANs for local + Tailscale access)
+    - name: Write K3s config (TLS SANs + Cilium CNI mode)
       ansible.builtin.copy:
         dest: /etc/rancher/k3s/config.yaml
         content: |
           tls-san:
             - {{ ansible_host }}
             - {{ hostvars[inventory_hostname]['tailscale_ip'] | default('') }}
+          flannel-backend: "none"
+          disable-network-policy: true
         mode: "0644"
 
     - name: Configure DNS fallback (prevent CoreDNS failure after network interruption)
