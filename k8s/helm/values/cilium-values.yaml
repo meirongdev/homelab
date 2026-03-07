@@ -1,0 +1,38 @@
+# Cilium CNI values for homelab K3s (single-node)
+# Replaces Flannel as CNI, kube-proxy kept alongside
+# Docs: https://docs.cilium.io/en/stable/installation/k8s-install-helm/
+
+# --- kube-proxy replacement: DISABLED to avoid eBPF host networking issues ---
+kubeProxyReplacement: false
+
+# --- Routing: VXLAN tunnel for cross-cluster traffic via Tailscale ---
+routingMode: tunnel
+tunnelProtocol: vxlan
+
+# --- IPAM: match K3s default Pod CIDR ---
+ipam:
+  operator:
+    clusterPoolIPv4PodCIDRList:
+      - "10.42.0.0/16"
+
+# --- Operator: single node, no anti-affinity needed ---
+operator:
+  replicas: 1
+
+# --- Hubble: observability ---
+hubble:
+  enabled: true
+  relay:
+    enabled: true
+  ui:
+    enabled: true
+
+# --- Gateway API: disabled (Traefik handles it) ---
+gatewayAPI:
+  enabled: false
+
+# --- cgroup: K3s mounts cgroup v2 at /sys/fs/cgroup ---
+cgroup:
+  autoMount:
+    enabled: false
+  hostRoot: /sys/fs/cgroup
