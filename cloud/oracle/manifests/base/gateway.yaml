@@ -5,11 +5,11 @@ metadata:
   name: oracle-gateway
   namespace: kube-system
 spec:
-  gatewayClassName: traefik
+  gatewayClassName: cilium
   listeners:
     - name: http
       protocol: HTTP
-      port: 8000
+      port: 80
       allowedRoutes:
         namespaces:
           from: All
@@ -71,7 +71,7 @@ spec:
       kind: Gateway
       name: oracle-gateway
       namespace: kube-system
-      port: 8000
+      port: 80
   hostnames:
     - "rss.meirong.dev"
   rules:
@@ -98,7 +98,7 @@ spec:
       kind: Gateway
       name: oracle-gateway
       namespace: kube-system
-      port: 8000
+      port: 80
   hostnames:
     - "home.meirong.dev"
   rules:
@@ -125,7 +125,7 @@ spec:
       kind: Gateway
       name: oracle-gateway
       namespace: kube-system
-      port: 8000
+      port: 80
   hostnames:
     - "status.meirong.dev"
   rules:
@@ -152,7 +152,7 @@ spec:
       kind: Gateway
       name: oracle-gateway
       namespace: kube-system
-      port: 8000
+      port: 80
   hostnames:
     - "keep.meirong.dev"
   rules:
@@ -160,12 +160,6 @@ spec:
         - path:
             type: PathPrefix
             value: /
-      filters:
-        - type: ExtensionRef
-          extensionRef:
-            group: traefik.io
-            kind: Middleware
-            name: sso-forwardauth
       backendRefs:
         - group: ""
           kind: Service

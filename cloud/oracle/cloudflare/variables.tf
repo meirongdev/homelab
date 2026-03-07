@@ -21,7 +21,7 @@ variable "ingress_rules" {
   }))
   default = {
     "rss" = {
-      service = "http://traefik.kube-system.svc:80"
+      service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80"
     }
   }
 }

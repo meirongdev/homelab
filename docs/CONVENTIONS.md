@@ -96,13 +96,13 @@ just apply   # Apply DNS/Tunnel changes
 ## Architecture Details
 
 ### Networking & Ingress
-- All external traffic flows: `Internet → Cloudflare DNS → Cloudflare Tunnel → Traefik (K8s) → Services`
-- **Cloudflare Tunnel**: `cloudflared` pod in `cloudflare` namespace forwards to `traefik.kube-system.svc:80` (HTTP/2 protocol, 2 replicas). oracle-k3s uses `--protocol http2` (Oracle Cloud NSG blocks outbound UDP/QUIC).
-- **Traefik**: Configured via K8s Gateway API (`HTTPRoute` resources in `manifests/gateway.yaml`)
+- All external traffic flows: `Internet → Cloudflare DNS → Cloudflare Tunnel → Cilium Gateway API → Services`
+- **Cloudflare Tunnel**: `cloudflared` pod in `cloudflare` namespace forwards to the Cilium-managed Gateway service (`cilium-gateway-<gateway-name>.kube-system.svc:80`). oracle-k3s uses `--protocol http2` (Oracle Cloud NSG blocks outbound UDP/QUIC).
+- **Ingress**: Cilium Gateway API is the only in-cluster HTTP entrypoint (`HTTPRoute` resources in `manifests/gateway.yaml`)
 - **CNI**: Both clusters use **Cilium** (eBPF + VXLAN); homelab deployed 2026-03-06, oracle-k3s migrated from Flannel 2026-03-07
 - **homelab K8s Node**: `10.10.10.10` / Tailscale `100.96.84.32` | **Proxmox**: `192.168.50.3`
 - **oracle-k3s Node**: `10.0.0.26` / Tailscale `100.107.166.37`
-- **Cross-cluster network**: Tailscale subnet routing (Pod CIDR only): homelab `10.42.0.0/16`; oracle-k3s `10.52.0.0/16`。Service CIDR 保持本地化，跨集群通过 Pod CIDR、NodePort 或公网入口。见 `docs/architecture/tailscale-network.md`
+- **Cross-cluster network**: Tailscale subnet routing (Pod CIDR only): homelab `10.42.0.0/16`; oracle-k3s `10.52.0.0/16`。ClusterMesh prerequisites are encoded in Cilium values (`cluster.name`, `cluster.id`, `clustermesh.useAPIServer`), but the mesh is not active until the `cilium clustermesh enable/connect` workflow is run. 见 `docs/architecture/tailscale-network.md`
 - **Exception — Kopia**: Exposed via NodePort (31515) instead of Cloudflare Tunnel. Kopia's gRPC-Go client uses bidirectional streaming that fails through Cloudflare Tunnel (524 timeout), even though regular HTTP/2 works. Connect directly: `kopia repository connect server --url=https://10.10.10.10:31515 --server-cert-fingerprint=<sha256> --override-username=admin`
 
 ### Cloudflare WAF & Security
@@ -120,15 +120,10 @@ just apply   # Apply DNS/Tunnel changes
 - **Pro plan upgrade**: Managed Ruleset (SQLi/XSS/RCE) + OWASP CRS + Leaked Credentials Detection（见 `waf.tf` 注释段）
 - **API Token 权限**: Zone DNS Edit + Zone WAF Edit + Zone Settings Edit + Cloudflare Tunnel Edit
 
-### SSO (Single Sign-On)
-- **Status**: ✅ 生产运行中（2026-02-27 上线）
-- **Identity Provider**: ZITADEL v4 运行于 homelab `zitadel` namespace，对外地址 `auth.meirong.dev`
-- **Auth Proxy**: oauth2-proxy 运行于 oracle-k3s `auth-system` namespace，`--provider=oidc --upstream=static://202`
-- **Middleware**: homelab Traefik `sso-forwardauth` ExtensionRef Filter（同 HTTPRoute namespace）调用公开 `https://oauth.meirong.dev/`；oracle-k3s 内部仍直接调用本集群 `oauth2-proxy` Service
-- **Simplification**: Cilium 已接管 homelab 数据面，但当前未启用跨集群 ClusterMesh，因此仍保留 Tailscale 作为跨集群 underlay。为降低耦合，homelab 的 SSO 不再依赖 oracle-k3s 的 Service CIDR/ClusterIP。
-- **Session**: cookie domain `.meirong.dev`，有效期 7 天（单次登录覆盖所有子域名）
-- **受保护服务**: book / grafana / vault / backup / notify (homelab Traefik); keep（oracle-k3s Traefik）
-- **公开服务**: `argocd.meirong.dev`（自带登录）、`home.meirong.dev`、`tool.meirong.dev`、`pdf.meirong.dev`、`squoosh.meirong.dev`、`status.meirong.dev`（Uptime Kuma 状态页）、`rss.meirong.dev`（Miniflux 自带登录）、`slot.meirong.dev`（Timeslot，自带 Basic Auth 保护 `/admin/`，`/api/*` 公开供博客嵌入）
+### Identity
+- **Status**: ZITADEL remains available at `auth.meirong.dev`, but shared ingress-layer SSO has been removed.
+- **Current model**: services are now either public or rely on their own built-in auth (for example ArgoCD, Vault, Miniflux, and Timeslot admin Basic Auth).
+- **Reason**: removing the Traefik ForwardAuth / oauth2-proxy chain simplifies ingress and avoids a second auth hop on every request.
 
 ### GitOps (ArgoCD)
 - ArgoCD runs in the `argocd` namespace, UI at `argocd.meirong.dev`
@@ -137,7 +132,7 @@ just apply   # Apply DNS/Tunnel changes
   - `personal-services` App → `manifests/{calibre-web.yaml,gotify.yaml}`
   - `it-tools` App → `manifests/it-tools/` (Kustomize; managed separately to support Image Updater write-back)
   - `argocd-image-updater` App → Helm chart `argo/argocd-image-updater` v1.1.0, values from `values/argocd-image-updater.yaml`
-  - `gateway` App → `manifests/{gateway.yaml,traefik-config.yaml}`
+  - `gateway` App → `manifests/gateway.yaml`
   - `cloudflare` App → `manifests/cloudflare-tunnel.yaml`
   - `vault-eso` App → `manifests/{vault-eso-config,*-external-secret}.yaml`
   - `kopia` App → `manifests/kopia.yaml`
@@ -167,7 +162,7 @@ just apply   # Apply DNS/Tunnel changes
 - **Three signals**: Logs (Loki), Metrics (Prometheus), Traces (Tempo) — all collected via OTel Collector
 - **Multi-cluster monitoring**: All telemetry carries a `cluster` label (`homelab` or `oracle-k3s`)
   - homelab: Prometheus `scrapeClasses` default relabeling adds `cluster=homelab` to all local scrape targets
-  - oracle-k3s: OTel Collector pushes all metrics (node-exporter, kube-state-metrics, cloudflared, traefik) via `prometheusremotewrite` with `cluster=oracle-k3s`
+  - oracle-k3s: OTel Collector pushes all metrics (node-exporter, kube-state-metrics, cloudflared) via `prometheusremotewrite` with `cluster=oracle-k3s`
   - **No prometheus-agent on oracle-k3s** — the single OTel Collector handles both logs, metrics, and traces
 - **Traces pipeline** (2026-03-01):
   - Apps send OTLP traces → OTel Collector (gRPC :4317 / HTTP :4318) → Tempo
@@ -233,7 +228,7 @@ just apply   # Apply DNS/Tunnel changes
 - **HTTPRoute template**: Always include explicit `group`/`kind` in `parentRefs` and `group`/`kind`/`weight` in `backendRefs` to prevent ArgoCD OutOfSync drift caused by Gateway controller defaults.
 - **ArgoCD Image Updater** (v1.1.0): Uses CRD model — create an `ImageUpdater` CR (not just annotations). Set `useAnnotations: true` in the CR to read image config from Application annotations. Use strategy `newest-build` (not `latest`, deprecated). After changing Application annotations in Git, re-run `kubectl apply -f argocd/applications/<app>.yaml` — ArgoCD does not manage Application objects themselves.
 - **ArgoCD Application definitions** (`argocd/applications/*.yaml`): These files are **NOT** auto-synced by ArgoCD (no App-of-Apps). After editing any Application definition (e.g. changing `include` globs, adding new paths), manually apply: `kubectl apply -f argocd/applications/<app>.yaml`. Then run `just argocd-sync` to trigger immediate sync.
-- **ArgoCD self-heal caveat**: Resources already managed by an Application (for example `gateway` managing `manifests/traefik-config.yaml`) must be changed in Git first. Ad-hoc `kubectl patch/apply` fixes on live resources will be reconciled away on the next sync.
+- **ArgoCD self-heal caveat**: Resources already managed by an Application (for example `gateway` managing `manifests/gateway.yaml`) must be changed in Git first. Ad-hoc `kubectl patch/apply` fixes on live resources will be reconciled away on the next sync.
 - **Kustomize namespace caveat**: The global `namespace:` field in `kustomization.yaml` runs as a transformer after JSON patches, overriding them. Declare namespace explicitly in each manifest instead when resources span multiple namespaces.
 - **Chinese Comments**: Permitted and used in `justfile` for clarity.
 - **SSH**: User `root`, Key `~/.ssh/vgio`.

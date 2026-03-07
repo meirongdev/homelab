@@ -1,8 +1,8 @@
 # OTel Collector — DaemonSet 模式，替换 Promtail
 # Chart: open-telemetry/opentelemetry-collector
 # Image: otel/opentelemetry-collector-contrib (含 filelog, k8sattributes processor)
-# Signals: logs (filelog → Loki), metrics (prometheus → Prometheus), traces (otlp → Tempo)
-# Architecture: apps/filelog/prometheus → memory_limiter/k8sattributes/resource/batch → otlp_http
+# Signals: logs (filelog -> Loki), metrics (prometheus -> Prometheus), traces (otlp -> Tempo)
+# Architecture: apps/filelog/prometheus -> memory_limiter/k8sattributes/resource/batch -> otlp_http
 
 mode: daemonset
 
@@ -46,17 +46,6 @@ config:
                 labels:
                   cluster: homelab
                   tunnel: cloudflared
-
-    # Traefik metrics — per-hostname router labels (addRoutersLabels: true in HelmChartConfig)
-    prometheus/traefik:
-      config:
-        scrape_configs:
-          - job_name: 'traefik'
-            scrape_interval: 15s
-            static_configs:
-              - targets: ['traefik-metrics.kube-system.svc.cluster.local:9100']
-                labels:
-                  cluster: homelab
 
   processors:
     memory_limiter:
@@ -102,10 +91,6 @@ config:
         exporters: [otlp/tempo]
       metrics/cloudflared:
         receivers: [prometheus/cloudflared]
-        processors: [memory_limiter, resource, batch]
-        exporters: [otlp_http/prometheus]
-      metrics/traefik:
-        receivers: [prometheus/traefik]
         processors: [memory_limiter, resource, batch]
         exporters: [otlp_http/prometheus]
 

@@ -3,9 +3,8 @@
 # Collects:
 #   - container logs        → homelab Loki via Tailscale (otlphttp)
 #   - cloudflared metrics   → homelab Prometheus via Tailscale (prometheusremotewrite)
-#   - Traefik metrics       → homelab Prometheus via Tailscale (prometheusremotewrite)
 #   - application traces    → homelab Tempo via Tailscale (otlp grpc)
-# Architecture: apps/filelog/prometheus → memory_limiter/k8sattributes/resource/batch → otlphttp / prometheusremotewrite / otlp
+# Architecture: apps/filelog/prometheus -> memory_limiter/k8sattributes/resource/batch -> otlphttp / prometheusremotewrite / otlp
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -251,17 +250,6 @@ data:
                     cluster: oracle-k3s
                     tunnel: cloudflared
 
-      # Traefik metrics — per-hostname router labels (addRoutersLabels: true)
-      prometheus/traefik:
-        config:
-          scrape_configs:
-            - job_name: 'traefik'
-              scrape_interval: 15s
-              static_configs:
-                - targets: ['traefik-metrics.kube-system.svc.cluster.local:9100']
-                  labels:
-                    cluster: oracle-k3s
-
       # Node Exporter — host-level CPU/memory/disk/network metrics
       # node-exporter runs with hostNetwork:true, accessible via node IP
       prometheus/node-exporter:
@@ -356,10 +344,6 @@ data:
           exporters: [otlp/tempo]
         metrics/cloudflared:
           receivers: [prometheus/cloudflared]
-          processors: [memory_limiter, resource, batch]
-          exporters: [prometheusremotewrite]
-        metrics/traefik:
-          receivers: [prometheus/traefik]
           processors: [memory_limiter, resource, batch]
           exporters: [prometheusremotewrite]
         metrics/node-exporter:

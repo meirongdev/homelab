@@ -13,8 +13,9 @@
 
 ## Design Notes
 
-- [gateway-controller-evaluation.md](gateway-controller-evaluation.md) — Traefik vs Cilium Gateway 评估（决策: 短期保持 Traefik）
+- [gateway-controller-evaluation.md](gateway-controller-evaluation.md) — Traefik vs Cilium Gateway 评估（结论: 现网已切换到 Cilium Gateway）
 - [argocd-image-updater.md](argocd-image-updater.md) — Image Updater CRD 模型与约束
+- [simplification-recommendations-2026-03.md](simplification-recommendations-2026-03.md) — Oracle Cilium 迁移后的下一步简化建议
 
 ## Roadmap
 

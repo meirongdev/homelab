@@ -8,6 +8,7 @@
 1. [dns-network-failure-recovery.md](dns-network-failure-recovery.md): DNS/网络故障恢复
 2. [kopia-backup.md](kopia-backup.md): Kopia 备份服务操作
 3. [backup-recovery.md](backup-recovery.md): 备份与灾难恢复 SOP（数据分级、恢复流程、检查清单）
+4. [cilium-gateway-cutover.md](cilium-gateway-cutover.md): Cilium Gateway / Cloudflare Tunnel 切换执行手册
 
 ## Runbook Standard
 

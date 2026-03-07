@@ -18,7 +18,7 @@ Two k3s clusters are monitored from a single Grafana/Loki/Prometheus/Tempo stack
 │                                     │                    │    ├ prometheus/node-exporter        │
 │  scrapeClasses:                     │                    │    ├ prometheus/kube-state-metrics   │
 │    cluster=homelab (all local jobs) │                    │    ├ prometheus/cloudflared          │
-│                                     │                    │    └ prometheus/traefik              │
+│                                     │                    │                                          │
 │  OTel Collector (homelab logs+traces)│                    │  node-exporter (hostNetwork:9100)    │
 │  node-exporter, kube-state-metrics  │                    │  kube-state-metrics (:8080)          │
 └─────────────────────────────────────┘                    └─────────────────────────────────────┘
@@ -89,7 +89,6 @@ OTel resource attributes are converted to Loki stream labels (dots replaced with
 | `prometheus/node-exporter` | `10.0.0.26:9100` (hostNetwork) | 15s |
 | `prometheus/kube-state-metrics` | `kube-state-metrics.monitoring.svc:8080` | 30s |
 | `prometheus/cloudflared` | `cloudflared-metrics.cloudflare.svc:2000` | 30s |
-| `prometheus/traefik` | `traefik-metrics.kube-system.svc:9100` | 15s |
 
 All metrics pass through `resource` processor (adds `cluster: oracle-k3s`) → `batch` → `prometheusremotewrite` exporter → `http://100.96.84.32:31090/api/v1/write`
 
@@ -219,7 +218,7 @@ All services have liveness and readiness probes configured:
 | squoosh | `GET /` | 8080 |
 | miniflux | `GET /healthcheck` | 8080 |
 | n8n | `GET /healthz` | 5678 |
-| rsshub | `GET /healthcheck` | 1200 |
+| rsshub | `GET /healthz` | 1200 |
 
 ### k3s-homelab
 

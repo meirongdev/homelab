@@ -1,6 +1,6 @@
 # Oracle K3s Cluster
 
-Single-node K3s cluster running on Oracle Cloud (Ampere A1, ARM64).
+Single-node K3s cluster running on Oracle Cloud (Ampere A1, ARM64), now using Cilium as CNI.
 
 ## Directory Structure
 
@@ -24,12 +24,17 @@ cloud/oracle/
 │   │   ├── vault-store.yaml
 │   │   ├── cloudflare-tunnel.yaml
 │   │   └── gateway.yaml
-│   └── rss-system/       # RSS pipeline (Miniflux + RSSHub + n8n)
+│   ├── homepage/         # Homepage dashboard
+│   ├── monitoring/       # OTel collector + exporters
+│   ├── personal-services/ # IT-Tools / Stirling-PDF / Squoosh / Timeslot
+│   ├── rss-system/       # RSS pipeline (Miniflux + RSSHub + KaraKeep + Redpanda Connect)
 │       ├── namespace.yaml
 │       ├── secrets.yaml
 │       ├── miniflux.yaml
 │       ├── rsshub.yaml
-│       └── n8n.yaml
+│       ├── karakeep.yaml
+│       └── redpanda-connect.yaml
+├── values/               # Helm values (for example Cilium)
 ├── terraform/            # Oracle Cloud infra (VCN, compute, etc.)
 ├── justfile              # Top-level commands for full cluster management
 └── README.md             # This file
@@ -38,18 +43,18 @@ cloud/oracle/
 ## Architecture
 
 ```
-Internet → Cloudflare DNS (rss.meirong.dev)
-         → Cloudflare Tunnel (oracle-k3s)
+Internet → Cloudflare DNS (*.meirong.dev)
+         → Cloudflare Tunnel (oracle-k3s, HTTP/2)
          → cloudflared pod (cloudflare namespace)
-         → Traefik (kube-system, Gateway API)
-         → HTTPRoute → miniflux service (rss-system)
+         → Cilium Gateway API (kube-system)
+         → HTTPRoute → Services
 ```
 
 ### Multi-Cluster Communication
 
 ```
 oracle-k3s pods → Tailscale (100.107.166.37)
-                → k8s-node (100.96.84.32:31144)
+                → k8s-node (100.96.84.32:31333)
                 → Vault (k3s-homelab)
 ```
 
@@ -57,6 +62,7 @@ Both clusters share HashiCorp Vault via Tailscale. Each cluster has its own:
 - Cloudflare tunnel (independent ingress)
 - External Secrets Operator
 - ClusterSecretStore (pointing to Vault via Tailscale IP)
+- Cilium VXLAN overlay with non-overlapping Pod CIDRs
 
 ## Quick Start (from scratch)
 
@@ -73,14 +79,24 @@ just setup-tailscale <authkey>
 just bootstrap
 ```
 
+`just bootstrap` now performs these steps in order:
+
+1. Install Cilium
+2. Install External Secrets Operator
+3. Create the Vault token secret
+4. Apply all manifests
+5. Deploy the Cloudflare tunnel connector
+
 ## Day-to-Day Operations
 
 ```bash
 just status          # Show all cluster resources
 just status-rss      # Show rss-system pods/services
+just status-monitoring # Show OTel collector status
+just cilium-status   # Show Cilium health
 just deploy-manifests # Re-apply all manifests
-just logs miniflux   # View miniflux logs
-just logs n8n        # View n8n logs
+just deploy-timeslot # Install Timeslot via Helm and patch chart bugs
+just logs miniflux   # Show recent miniflux logs
 ```
 
 ## Adding a New Subdomain
@@ -92,9 +108,11 @@ just logs n8n        # View n8n logs
 ## Network Notes
 
 - **firewalld**: Oracle Cloud Ubuntu uses firewalld with nftables. Oracle local pod/service CIDRs
-  (`10.52.0.0/16`, `10.53.0.0/16`) and interfaces (`cni0`, `flannel.1`) must be in
+  (`10.52.0.0/16`, `10.53.0.0/16`) and interfaces (`cni0`, `cilium_vxlan`) must be in
   the trusted zone. Cross-cluster Tailscale routing is intentionally narrower: only homelab pod CIDR
   (`10.42.0.0/16`) is trusted/advertised, while homelab service reachability should prefer public URLs,
   NodePort, or the node Tailscale IP.
 - **CoreDNS**: Patched to forward to `8.8.8.8` instead of `/etc/resolv.conf`
   (which points to Oracle's unreachable `169.254.169.254` metadata DNS).
+- **Cloudflared**: Oracle Cloud blocks outbound UDP/QUIC in practice for this node, so the in-cluster connector is pinned to `--protocol http2`.
+- **ClusterMesh**: the Cilium values already set `cluster.name`, `cluster.id`, and deploy `clustermesh-apiserver` on NodePort `32379`, but you still need the `cilium clustermesh enable/connect` workflow to activate the mesh.

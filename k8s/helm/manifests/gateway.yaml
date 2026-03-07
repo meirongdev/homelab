@@ -7,11 +7,11 @@ metadata:
   name: homelab-gateway
   namespace: kube-system
 spec:
-  gatewayClassName: traefik
+  gatewayClassName: cilium
   listeners:
     - name: http
       protocol: HTTP
-      port: 8000
+      port: 80
       allowedRoutes:
         namespaces:
           from: All
@@ -43,7 +43,7 @@ spec:
       kind: Gateway
       name: homelab-gateway
       namespace: kube-system
-      port: 8000
+      port: 80
   hostnames:
     - "book.meirong.dev"
   rules:
@@ -51,12 +51,6 @@ spec:
         - path:
             type: PathPrefix
             value: /
-      filters:
-        - type: ExtensionRef
-          extensionRef:
-            group: traefik.io
-            kind: Middleware
-            name: sso-forwardauth
       backendRefs:
         - group: ""
           kind: Service
@@ -90,7 +84,7 @@ spec:
       kind: Gateway
       name: homelab-gateway
       namespace: kube-system
-      port: 8000
+      port: 80
   hostnames:
     - "grafana.meirong.dev"
   rules:
@@ -98,12 +92,6 @@ spec:
         - path:
             type: PathPrefix
             value: /
-      filters:
-        - type: ExtensionRef
-          extensionRef:
-            group: traefik.io
-            kind: Middleware
-            name: sso-forwardauth
       backendRefs:
         - group: ""
           kind: Service
@@ -137,7 +125,7 @@ spec:
       kind: Gateway
       name: homelab-gateway
       namespace: kube-system
-      port: 8000
+      port: 80
   hostnames:
     - "vault.meirong.dev"
   rules:
@@ -145,12 +133,6 @@ spec:
         - path:
             type: PathPrefix
             value: /
-      filters:
-        - type: ExtensionRef
-          extensionRef:
-            group: traefik.io
-            kind: Middleware
-            name: sso-forwardauth
       backendRefs:
         - group: ""
           kind: Service
@@ -184,7 +166,7 @@ spec:
       kind: Gateway
       name: homelab-gateway
       namespace: kube-system
-      port: 8000
+      port: 80
   hostnames:
     - "argocd.meirong.dev"
   rules:
@@ -241,7 +223,7 @@ spec:
       kind: Gateway
       name: homelab-gateway
       namespace: kube-system
-      port: 8000
+      port: 80
   hostnames:
     - "auth.meirong.dev"
   rules:
@@ -278,7 +260,7 @@ spec:
       kind: Gateway
       name: homelab-gateway
       namespace: kube-system
-      port: 8000
+      port: 80
   hostnames:
     - "notify.meirong.dev"
   rules:
@@ -286,12 +268,6 @@ spec:
         - path:
             type: PathPrefix
             value: /
-      filters:
-        - type: ExtensionRef
-          extensionRef:
-            group: traefik.io
-            kind: Middleware
-            name: sso-forwardauth
       backendRefs:
         - group: ""
           kind: Service
@@ -311,7 +287,7 @@ spec:
       kind: Gateway
       name: homelab-gateway
       namespace: kube-system
-      port: 8000
+      port: 80
   hostnames:
     - "backup.meirong.dev"
   rules:
@@ -319,12 +295,6 @@ spec:
         - path:
             type: PathPrefix
             value: /
-      filters:
-        - type: ExtensionRef
-          extensionRef:
-            group: traefik.io
-            kind: Middleware
-            name: sso-forwardauth
       backendRefs:
         - group: ""
           kind: Service

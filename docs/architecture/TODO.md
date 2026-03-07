@@ -28,7 +28,7 @@
 ## Phase 3: Multi-Cloud & Security ✅
 
 - [x] Cross-Cluster Networking — Tailscale 双向 Pod CIDR 路由 (homelab ↔ oracle-k3s)
-- [x] SSO — ZITADEL + oauth2-proxy (OIDC) ForwardAuth 保护所有服务
+- [x] Identity simplification — 保留 ZITADEL 身份服务，移除共享入口层 SSO
 - [x] 信息管道 — Miniflux → Redpanda Connect → KaraKeep → Gotify → Telegram
 - [x] Cloudflare WAF — Zone 级 WAF 防护 (自定义规则、速率限制、安全设置)
 - [x] Uptime Kuma — 外部健康监控 (status.meirong.dev)
@@ -68,7 +68,7 @@
 - [x] Kopia 自动快照 CronJob (K8s manifest)
 - [ ] Alertmanager → Gotify 通知模板
 - [ ] Cert-Manager 安装 + Let's Encrypt ClusterIssuer
-- [ ] oracle-k3s Cilium 迁移
+- [x] oracle-k3s Cilium 迁移
 
 ### 🔴 High Effort
 

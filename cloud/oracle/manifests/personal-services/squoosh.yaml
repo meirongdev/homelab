@@ -62,7 +62,7 @@ spec:
       kind: Gateway
       name: oracle-gateway
       namespace: kube-system
-      port: 8000
+      port: 80
   hostnames:
     - "squoosh.meirong.dev"
   rules:

@@ -27,8 +27,8 @@
 
 | 集群 | CNI | 跨集群 underlay | Ingress Gateway |
 |------|-----|------------------|-----------------|
-| homelab | Cilium (eBPF + VXLAN) | Tailscale (Pod CIDR only) | Traefik Gateway API |
-| oracle-k3s | Flannel (待迁移 Cilium) | Tailscale (Pod CIDR only) | Traefik Gateway API |
+| homelab | Cilium (eBPF + VXLAN) | Tailscale (Pod CIDR only) | Cilium Gateway API |
+| oracle-k3s | Cilium (eBPF + VXLAN) | Tailscale (Pod CIDR only) | Cilium Gateway API |
 
 ### 服务总览
 
@@ -55,10 +55,10 @@
 
 | 数据 | 备份方式 | 状态 |
 |------|---------|------|
-| Vault PVC | Kopia (手动) | ⚠️ 需自动化 |
-| ZITADEL PostgreSQL | Kopia (手动) | ⚠️ 需自动化 |
-| Calibre-Web | Kopia (手动) | ⚠️ 需自动化 |
-| oracle-k3s 应用数据 | 无 | ❌ 待接入 |
+| Vault PVC | Kopia CronJob | ✅ 每日自动快照 |
+| ZITADEL PostgreSQL | Kopia CronJob | ✅ 每日自动快照 |
+| Calibre-Web / Gotify | Kopia CronJob | ✅ 周期快照 |
+| oracle-k3s 应用数据 | pg_dump + Kopia CronJob | ✅ 已接入 |
 
 详见 [备份与恢复方案](plans/2026-03-07-homelab-oracle-architecture-optimization.md#2-应用数据分类与备份策略)
 

@@ -9,7 +9,7 @@
 - **External Secrets Operator (ESO)** for syncing secrets to Kubernetes
 - **Prometheus, Loki, Tempo, Grafana** (LGTM Stack) for observability
 - **Cloudflare Tunnel** for secure, outbound-only external access
-- **K8s Gateway API (Traefik)** for unified ingress routing
+- **K8s Gateway API (Cilium)** for unified ingress routing
 
 ## Project Structure
 

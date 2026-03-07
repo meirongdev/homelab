@@ -156,7 +156,7 @@ Find the correct section under `services.yaml:` in the ConfigMap and add:
 Add to the `ingress_rules` map:
 
 ```hcl
-  "<subdomain>" = { service = "http://traefik.kube-system.svc:80" }
+  "<subdomain>" = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
 ```
 
 ### Step 7 — Commit and push (triggers ArgoCD auto-deploy)
