@@ -80,6 +80,7 @@ spec:
               cpu: 100m
               memory: 256Mi
             limits:
+              cpu: 500m
               memory: 512Mi
           volumeMounts:
             - name: data
@@ -116,6 +117,7 @@ spec:
               cpu: 100m
               memory: 256Mi
             limits:
+              cpu: 1000m
               memory: 1Gi
         # Meilisearch
         - name: meilisearch
@@ -138,6 +140,7 @@ spec:
               cpu: 100m
               memory: 256Mi
             limits:
+              cpu: 500m
               memory: 768Mi
           volumeMounts:
             - name: meili-data

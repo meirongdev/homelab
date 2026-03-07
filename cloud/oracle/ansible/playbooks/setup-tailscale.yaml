@@ -92,3 +92,19 @@
         --accept-routes
         --authkey={{ tailscale_authkey }}
       changed_when: true
+
+    - name: Add static route for homelab pod CIDR via Tailscale
+      ansible.builtin.command: >
+        ip route replace {{ item }} dev tailscale0
+      loop:
+        - 10.42.0.0/16
+      changed_when: true
+
+    - name: Persist homelab pod CIDR route across reboots
+      ansible.builtin.copy:
+        dest: /etc/networkd-dispatcher/routable.d/50-tailscale-routes.sh
+        mode: "0755"
+        content: |
+          #!/bin/bash
+          # Add route to homelab pod CIDR via Tailscale
+          ip route replace 10.42.0.0/16 dev tailscale0 2>/dev/null || true

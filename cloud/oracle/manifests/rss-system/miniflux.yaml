@@ -46,6 +46,7 @@ spec:
               cpu: 50m
               memory: 64Mi
             limits:
+              cpu: 500m
               memory: 256Mi
           livenessProbe:
             httpGet:
@@ -116,6 +117,7 @@ spec:
               cpu: 50m
               memory: 128Mi
             limits:
+              cpu: 500m
               memory: 512Mi
         - name: postgres-exporter
           image: prometheuscommunity/postgres-exporter:v0.16.0
@@ -135,6 +137,7 @@ spec:
               cpu: 10m
               memory: 32Mi
             limits:
+              cpu: 50m
               memory: 64Mi
       volumes:
         - name: postgres-data
