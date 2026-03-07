@@ -46,7 +46,7 @@ File: `/etc/rancher/k3s/config.yaml`
 ```yaml
 tls-san:
   - 10.10.10.10       # local network
-  - 100.107.254.112   # Tailscale IP
+  - 100.96.84.32      # Tailscale IP
 ```
 
 Allows `kubectl` to connect via Tailscale when local network is down.
@@ -72,7 +72,7 @@ K8s auto-restarts any cloudflared pod that loses tunnel connectivity.
 ### Step 1 — SSH via Tailscale
 
 ```bash
-ssh -i ~/.ssh/vgio root@100.107.254.112
+ssh -i ~/.ssh/vgio root@100.96.84.32
 ```
 
 > Local network path (`10.10.10.10`) may be down. Use Tailscale IP.
@@ -93,17 +93,17 @@ nslookup registry-1.docker.io  # verify
 ### Step 3 — Restore kubectl access via Tailscale
 
 ```bash
-kubectl config set-cluster k3s-homelab --server=https://100.107.254.112:6443
+kubectl config set-cluster k3s-homelab --server=https://100.96.84.32:6443
 ```
 
-If TLS error (`x509: certificate is not valid for 100.107.254.112`):
+If TLS error (`x509: certificate is not valid for 100.96.84.32`):
 
 ```bash
 # On the node:
 mkdir -p /etc/rancher/k3s
 cat > /etc/rancher/k3s/config.yaml << 'EOF'
 tls-san:
-  - 100.107.254.112
+  - 100.96.84.32
   - 10.10.10.10
 EOF
 systemctl restart k3s
@@ -148,7 +148,7 @@ networksetup -setdnsservers Wi-Fi "Empty"  # restore to DHCP/Tailscale
 | Resource | Address |
 |----------|---------|
 | Homelab node (local) | `10.10.10.10` |
-| Homelab node (Tailscale) | `100.107.254.112` |
+| Homelab node (Tailscale) | `100.96.84.32` |
 | K3s API server | `:6443` |
-| Vault UI | `100.107.254.112:31144` |
-| Loki OTLP NodePort | `100.107.254.112:31080` |
+| Vault UI | `100.96.84.32:31144` |
+| Loki OTLP NodePort | `100.96.84.32:31080` |

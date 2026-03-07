@@ -14,6 +14,12 @@ resource "proxmox_virtual_environment_vm" "k8s" {
     dedicated = var.vm_memory
   }
 
+  agent {
+    enabled = false
+  }
+
+  serial_device {}
+
   disk {
     datastore_id = "local-lvm"
     file_id      = var.cloud_image_id
@@ -34,7 +40,7 @@ resource "proxmox_virtual_environment_vm" "k8s" {
     }
 
     user_account {
-      username = "root"
+      username = "ubuntu"
       keys     = [var.ssh_public_key]
     }
   }

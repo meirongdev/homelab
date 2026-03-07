@@ -23,6 +23,7 @@ server:
 
   # 断电重启后自动解锁（密钥存储于 K8s Secret: vault/vault-auto-unseal）
   # 注意：vault-auto-unseal secret 需手动创建（见 justfile: just vault-setup-auto-unseal）
+  # 断电重启后自动解锁（密钥存储于 K8s Secret: vault/vault-auto-unseal）
   postStart:
     - /bin/sh
     - -c

@@ -322,19 +322,19 @@ data:
     exporters:
       # Logs → homelab Loki via Tailscale (OTLP HTTP)
       otlphttp:
-        endpoint: "http://100.107.254.112:31080/otlp"
+        endpoint: "http://100.96.84.32:31080/otlp"
         tls:
           insecure: true
       # Metrics → homelab Prometheus via Tailscale (Prometheus Remote Write)
       prometheusremotewrite:
-        endpoint: "http://100.107.254.112:31090/api/v1/write"
+        endpoint: "http://100.96.84.32:31090/api/v1/write"
         tls:
           insecure: true
         external_labels:
           cluster: oracle-k3s
       # Traces → homelab Tempo via Tailscale (OTLP gRPC)
       otlp/tempo:
-        endpoint: "100.107.254.112:31317"
+        endpoint: "100.96.84.32:31317"
         tls:
           insecure: true
       debug:
