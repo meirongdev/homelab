@@ -1,7 +1,9 @@
 # Grafana Loki Dashboard 集成设计文档
 
+> **Deprecated**: 本设计已实施完成，见 [2026-02-21-grafana-loki-dashboards.md](2026-02-21-grafana-loki-dashboards.md)
+
 **日期：** 2026-02-21
-**状态：** 已批准，待实施
+**状态：** ✅ 已完成
 **依赖：** OTel 日志迁移（`2026-02-21-otel-log-migration-design.md`）已完成
 
 ## 背景

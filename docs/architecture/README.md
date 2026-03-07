@@ -3,19 +3,22 @@
 > Source-of-truth for current production architecture.
 > Last updated: 2026-03-07
 
-## Read First
+## Core Architecture
 
-1. `tailscale-network.md`: 双集群互联模型（Pod CIDR only）
-2. `observability-multicluster.md`: 日志/指标/链路追踪统一架构
-3. `cloudflare-tunnel-observability.md`: Tunnel + Gateway 流量可观测
-4. `k8s-qos-resource-management.md`: 资源配额与 QoS 约定
-5. `gateway-controller-evaluation.md`: Traefik 与 Cilium Gateway 替换评估
+1. [tailscale-network.md](tailscale-network.md) — 双集群互联模型（Pod CIDR only）
+2. [observability-multicluster.md](observability-multicluster.md) — 日志/指标/链路追踪统一架构
+3. [observability-otel-logging.md](observability-otel-logging.md) — OTel 日志管道细节
+4. [cloudflare-tunnel-observability.md](cloudflare-tunnel-observability.md) — Tunnel + Gateway 流量可观测
+5. [k8s-qos-resource-management.md](k8s-qos-resource-management.md) — 资源配额与 QoS 约定
 
 ## Design Notes
 
-- `argocd-image-updater.md`: Image Updater 设计与约束
-- `observability-otel-logging.md`: OTel 日志路径细节
-- `TODO.md`: 路线图与待办（非运行事实）
+- [gateway-controller-evaluation.md](gateway-controller-evaluation.md) — Traefik vs Cilium Gateway 评估（决策: 短期保持 Traefik）
+- [argocd-image-updater.md](argocd-image-updater.md) — Image Updater CRD 模型与约束
+
+## Roadmap
+
+- [TODO.md](TODO.md) — 路线图与待办
 
 ## Lifecycle Rules
 

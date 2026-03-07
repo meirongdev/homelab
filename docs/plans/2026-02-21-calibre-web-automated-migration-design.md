@@ -1,5 +1,7 @@
 # Design: Calibre-Web → Calibre-Web-Automated Migration
 
+> **Deprecated**: 本设计已实施完成，见 [2026-02-21-calibre-web-automated-migration.md](2026-02-21-calibre-web-automated-migration.md)
+
 **Date:** 2026-02-21
 **Approach:** In-place update (Approach A)
 

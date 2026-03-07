@@ -5,12 +5,12 @@ It is symlinked as `CLAUDE.md` and `GEMINI.md` in the project root for automatic
 
 ## Project Overview
 
-A five-layer Homelab infrastructure-as-code setup:
+A five-layer dual-cluster Homelab infrastructure-as-code setup:
 1. **Proxmox VM** (`proxmox/`) — VM provisioning on Proxmox VE.
-2. **Kubernetes Cluster** (`k8s/ansible/`) — Single-node K3s cluster.
-3. **Applications** (`k8s/helm/`) — Helm charts and K8s manifests for observability, databases, and personal services.
+2. **Kubernetes Clusters** (`k8s/ansible/` + `cloud/oracle/`) — homelab K3s (Cilium CNI) + oracle-k3s (Flannel, pending Cilium migration).
+3. **Applications** (`k8s/helm/` + `cloud/oracle/manifests/`) — Helm charts and K8s manifests for observability, databases, and personal services.
 4. **External Access** (`cloudflare/`) — Cloudflare Tunnel and DNS management via Terraform.
-5. **GitOps** (`argocd/`) — ArgoCD continuously syncs `k8s/helm/manifests/` from Git to the cluster.
+5. **GitOps** (`argocd/`) — ArgoCD continuously syncs manifests from Git to both clusters.
 
 ## Project Structure
 
@@ -97,11 +97,12 @@ just apply   # Apply DNS/Tunnel changes
 
 ### Networking & Ingress
 - All external traffic flows: `Internet → Cloudflare DNS → Cloudflare Tunnel → Traefik (K8s) → Services`
-- **Cloudflare Tunnel**: `cloudflared` pod in `cloudflare` namespace forwards to `traefik.kube-system.svc:80`
+- **Cloudflare Tunnel**: `cloudflared` pod in `cloudflare` namespace forwards to `traefik.kube-system.svc:80` (HTTP/2 protocol, 2 replicas)
 - **Traefik**: Configured via K8s Gateway API (`HTTPRoute` resources in `manifests/gateway.yaml`)
+- **CNI**: homelab uses **Cilium** (eBPF + VXLAN, deployed 2026-03-06); oracle-k3s uses **Flannel** (pending Cilium migration)
 - **homelab K8s Node**: `10.10.10.10` / Tailscale `100.96.84.32` | **Proxmox**: `192.168.50.3`
 - **oracle-k3s Node**: `10.0.0.26` / Tailscale `100.107.166.37`
-- **Cross-cluster network**: Tailscale subnet routing remains the inter-cluster underlay: homelab 广播 `10.42.0.0/16`；oracle-k3s 广播 `10.52.0.0/16`。各集群 Service CIDR 保持本地化，跨集群关键路径尽量通过 Pod CIDR、NodePort 或公网入口完成。见 `docs/architecture/tailscale-network.md`
+- **Cross-cluster network**: Tailscale subnet routing (Pod CIDR only): homelab `10.42.0.0/16`; oracle-k3s `10.52.0.0/16`。Service CIDR 保持本地化，跨集群通过 Pod CIDR、NodePort 或公网入口。见 `docs/architecture/tailscale-network.md`
 - **Exception — Kopia**: Exposed via NodePort (31515) instead of Cloudflare Tunnel. Kopia's gRPC-Go client uses bidirectional streaming that fails through Cloudflare Tunnel (524 timeout), even though regular HTTP/2 works. Connect directly: `kopia repository connect server --url=https://10.10.10.10:31515 --server-cert-fingerprint=<sha256> --override-username=admin`
 
 ### Cloudflare WAF & Security
@@ -236,3 +237,12 @@ just apply   # Apply DNS/Tunnel changes
 - **Kustomize namespace caveat**: The global `namespace:` field in `kustomization.yaml` runs as a transformer after JSON patches, overriding them. Declare namespace explicitly in each manifest instead when resources span multiple namespaces.
 - **Chinese Comments**: Permitted and used in `justfile` for clarity.
 - **SSH**: User `root`, Key `~/.ssh/vgio`.
+
+### Backup & Recovery
+- **Kopia**: Backup server in `kopia` namespace (homelab), NFS repository 1Ti
+- **Web UI**: `backup.meirong.dev` (SSO-protected, via Cloudflare Tunnel)
+- **CLI**: NodePort 31515 (gRPC direct, NOT via Tunnel due to bidirectional streaming 524 timeout)
+- **Secrets**: Vault `secret/homelab/kopia` (keys: `password`, `repo-password`)
+- **Data priority**: P0 (Vault, ZITADEL PG) → P1 (Calibre-Web, Miniflux PG, KaraKeep, Gotify) → P2 (monitoring data)
+- **Current gap**: 无自动调度, oracle-k3s 未备份, 无离站副本。详见 `docs/plans/2026-03-07-homelab-oracle-architecture-optimization.md`
+- **Runbook**: `docs/runbooks/kopia-backup.md`
