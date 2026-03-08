@@ -10,6 +10,6 @@ ping:
 install-updates:
     ansible-playbook playbooks/install-updates.yaml
 
-# Download Ubuntu 26.04 cloud image to Proxmox hosts
+# Download Ubuntu 24.04 LTS cloud image to Proxmox hosts
 download-cloud-image:
     ansible-playbook playbooks/download-cloud-image.yaml

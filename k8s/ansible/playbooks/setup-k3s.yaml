@@ -2,83 +2,48 @@
   hosts: k8s_masters
   become: true
   tasks:
-    - name: Install prerequisites (nfs-common, curl)
+    - name: Install prerequisites (nfs-common, curl, qemu-guest-agent)
       ansible.builtin.apt:
         name:
           - nfs-common
           - curl
+          - qemu-guest-agent
         state: present
         update_cache: true
 
-- name: Configure Firewall
+- name: Disable host firewall on homelab node
   hosts: k8s_masters
   become: true
   tasks:
-    - name: Allow SSH connections
-      community.general.ufw:
-        rule: allow
-        name: OpenSSH
+    - name: Stop ufw if it is present
+      ansible.builtin.systemd:
+        name: ufw
+        state: stopped
+      failed_when: false
 
-    - name: Allow traffic on K3s pod CIDR
-      community.general.ufw:
-        rule: allow
-        src: 10.42.0.0/16
+    - name: Disable ufw if it is present
+      ansible.builtin.systemd:
+        name: ufw
+        enabled: false
+      failed_when: false
 
-    - name: Allow traffic on K3s service CIDR
-      community.general.ufw:
-        rule: allow
-        src: 10.43.0.0/16
+    - name: Ensure ufw is disabled
+      ansible.builtin.command: ufw disable
+      register: ufw_disable
+      changed_when: "'Firewall stopped' in ufw_disable.stdout or 'Firewall is inactive' not in ufw_disable.stdout"
+      failed_when: false
 
-    - name: Allow Kubernetes API Server access (port 6443)
-      community.general.ufw:
-        rule: allow
-        port: '6443'
-        proto: tcp
-
-    - name: Allow kubelet API (port 10250)
-      community.general.ufw:
-        rule: allow
-        port: '10250'
-        proto: tcp
-
-    - name: Allow Cilium health check (port 4240)
-      community.general.ufw:
-        rule: allow
-        port: '4240'
-        proto: tcp
-
-    - name: Allow Cilium VXLAN overlay (port 8472)
-      community.general.ufw:
-        rule: allow
-        port: '8472'
-        proto: udp
-
-    - name: Allow Hubble Relay (port 4244)
-      community.general.ufw:
-        rule: allow
-        port: '4244'
-        proto: tcp
-
-    - name: Allow ClusterMesh API server (port 32379) from Tailscale
-      community.general.ufw:
-        rule: allow
-        port: '32379'
-        proto: tcp
-        src: 100.64.0.0/10
-
-    - name: Allow all traffic from Proxmox subnet
-      community.general.ufw:
-        rule: allow
-        src: 192.168.50.0/24
-
-    - name: Enable ufw
-      community.general.ufw:
-        state: enabled
 
 - name: Install K3s single node
   hosts: k8s_masters
   become: true
   tasks:
+    - name: Enable qemu-guest-agent for Proxmox diagnostics
+      ansible.builtin.systemd:
+        name: qemu-guest-agent
+        enabled: true
+        state: started
+
     - name: Create K3s config directory
       ansible.builtin.file:
         path: /etc/rancher/k3s
@@ -94,8 +59,10 @@
             - {{ hostvars[inventory_hostname]['tailscale_ip'] | default('') }}
           flannel-backend: "none"
           disable-network-policy: true
+          disable-kube-proxy: true
           disable:
             - traefik
+            - servicelb
         mode: "0644"
 
     - name: Configure DNS fallback (prevent CoreDNS failure after network interruption)

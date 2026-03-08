@@ -45,7 +45,7 @@ The homelab project has a mature OTel-based observability stack for **logs** and
 │  processors: memory_limiter → resource → batch       │
 │  exporters:                                           │
 │    homelab  → otlp://tempo.monitoring.svc:4317       │
-│    oracle   → otlp://100.96.84.32:31317 (Tailscale)│
+│    oracle   → otlp://100.94.186.7:31317 (Tailscale)│
 └──────────────────────────────────────────────────────┘
                      │
                      ▼

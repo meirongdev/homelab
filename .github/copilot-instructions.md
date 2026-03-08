@@ -10,13 +10,13 @@ This is a 5-layer Infrastructure-as-Code (IaC) and GitOps homelab project:
 4. **External Access** (`cloudflare/`): Terraform manages Cloudflare Tunnels and DNS.
 5. **GitOps** (`argocd/`): ArgoCD continuously syncs `k8s/helm/manifests/` to the cluster.
 
-**Traffic Flow**: Internet → Cloudflare DNS → Cloudflare Tunnel (`cloudflared` pod) → Traefik (K8s Gateway API) → Services.
+**Traffic Flow**: Internet → Cloudflare DNS → Cloudflare Tunnel (`cloudflared` pod) → Cilium Gateway API → Services.
 *Exception*: Kopia uses NodePort (31515) directly due to gRPC bidirectional streaming issues with Cloudflare Tunnel.
 
 ## Critical Workflows & Commands
-We use `just` for most tasks and `make` for Proxmox Terraform.
+We use `just` for most tasks, including Proxmox Terraform.
 
-- **Proxmox IaC**: `cd proxmox/terraform && make plan` / `make apply`
+- **Proxmox IaC**: `cd proxmox/terraform && just plan` / `just apply`
 - **K3s Setup**: `cd k8s/ansible && just setup-k8s && just fetch-kubeconfig`
 - **App Deployment (Manual)**: `cd k8s/helm && just deploy-all` (for observability stack)
 - **GitOps Sync**: `cd k8s/helm && just argocd-sync` (bypasses 3-min poll)

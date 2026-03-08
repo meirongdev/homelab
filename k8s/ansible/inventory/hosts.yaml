@@ -6,7 +6,7 @@ all:
           hosts:
             k8s-node:
               ansible_host: 10.10.10.10
-              tailscale_ip: 100.96.84.32
+              tailscale_ip: 100.94.186.7
               ansible_ssh_common_args: '-o ProxyCommand="ssh -W %h:%p -i ~/.ssh/vgio root@192.168.50.4"'
       vars:
         ansible_user: ubuntu

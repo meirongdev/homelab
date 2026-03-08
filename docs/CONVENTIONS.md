@@ -100,9 +100,9 @@ just apply   # Apply DNS/Tunnel changes
 - **Cloudflare Tunnel**: `cloudflared` pod in `cloudflare` namespace forwards to the Cilium-managed Gateway service (`cilium-gateway-<gateway-name>.kube-system.svc:80`). oracle-k3s uses `--protocol http2` (Oracle Cloud NSG blocks outbound UDP/QUIC).
 - **Ingress**: Cilium Gateway API is the only in-cluster HTTP entrypoint (`HTTPRoute` resources in `manifests/gateway.yaml`)
 - **CNI**: Both clusters use **Cilium** (eBPF + VXLAN); homelab deployed 2026-03-06, oracle-k3s migrated from Flannel 2026-03-07
-- **homelab K8s Node**: `10.10.10.10` / Tailscale `100.96.84.32` | **Proxmox**: `192.168.50.3`
+- **homelab K8s Node**: `10.10.10.10` / Tailscale `100.94.186.7` | **Proxmox**: `192.168.50.3`
 - **oracle-k3s Node**: `10.0.0.26` / Tailscale `100.107.166.37`
-- **Cross-cluster network**: Tailscale subnet routing (Pod CIDR only): homelab `10.42.0.0/16`; oracle-k3s `10.52.0.0/16`。ClusterMesh prerequisites are encoded in Cilium values (`cluster.name`, `cluster.id`, `clustermesh.useAPIServer`), but the mesh is not active until the `cilium clustermesh enable/connect` workflow is run. 见 `docs/architecture/tailscale-network.md`
+- **Cross-cluster network**: Tailscale subnet routing (Pod CIDR only): homelab `10.42.0.0/16`; oracle-k3s `10.52.0.0/16`。Cilium ClusterMesh active (connected 2026-03-08 via `cilium clustermesh connect --source-endpoint 100.94.186.7:32379 --destination-endpoint 100.107.166.37:32379 --allow-mismatching-ca`). KVStoreMesh enabled on both sides. 见 `docs/architecture/tailscale-network.md`
 - **Exception — Kopia**: Exposed via NodePort (31515) instead of Cloudflare Tunnel. Kopia's gRPC-Go client uses bidirectional streaming that fails through Cloudflare Tunnel (524 timeout), even though regular HTTP/2 works. Connect directly: `kopia repository connect server --url=https://10.10.10.10:31515 --server-cert-fingerprint=<sha256> --override-username=admin`
 
 ### Cloudflare WAF & Security
@@ -162,12 +162,12 @@ just apply   # Apply DNS/Tunnel changes
 - **Three signals**: Logs (Loki), Metrics (Prometheus), Traces (Tempo) — all collected via OTel Collector
 - **Multi-cluster monitoring**: All telemetry carries a `cluster` label (`homelab` or `oracle-k3s`)
   - homelab: Prometheus `scrapeClasses` default relabeling adds `cluster=homelab` to all local scrape targets
-  - oracle-k3s: OTel Collector pushes all metrics (node-exporter, kube-state-metrics, cloudflared) via `prometheusremotewrite` with `cluster=oracle-k3s`
+  - oracle-k3s: OTel Collector pushes all metrics (node-exporter, kube-state-metrics, cloudflared, traefik) via `prometheusremotewrite` with `cluster=oracle-k3s`
   - **No prometheus-agent on oracle-k3s** — the single OTel Collector handles both logs, metrics, and traces
 - **Traces pipeline** (2026-03-01):
   - Apps send OTLP traces → OTel Collector (gRPC :4317 / HTTP :4318) → Tempo
   - homelab OTel Collector exports to `tempo.monitoring.svc.cluster.local:4317`
-  - oracle-k3s OTel Collector exports to `100.96.84.32:31317` (Tempo NodePort via Tailscale)
+  - oracle-k3s OTel Collector exports to `100.94.186.7:31317` (Tempo NodePort via Tailscale)
   - Grafana Tempo datasource: tracesToLogs (Loki), tracesToMetrics (Prometheus), nodeGraph, serviceMap
 - **App instrumentation** (env vars for any OTel SDK):
   ```
@@ -228,7 +228,7 @@ just apply   # Apply DNS/Tunnel changes
 - **HTTPRoute template**: Always include explicit `group`/`kind` in `parentRefs` and `group`/`kind`/`weight` in `backendRefs` to prevent ArgoCD OutOfSync drift caused by Gateway controller defaults.
 - **ArgoCD Image Updater** (v1.1.0): Uses CRD model — create an `ImageUpdater` CR (not just annotations). Set `useAnnotations: true` in the CR to read image config from Application annotations. Use strategy `newest-build` (not `latest`, deprecated). After changing Application annotations in Git, re-run `kubectl apply -f argocd/applications/<app>.yaml` — ArgoCD does not manage Application objects themselves.
 - **ArgoCD Application definitions** (`argocd/applications/*.yaml`): These files are **NOT** auto-synced by ArgoCD (no App-of-Apps). After editing any Application definition (e.g. changing `include` globs, adding new paths), manually apply: `kubectl apply -f argocd/applications/<app>.yaml`. Then run `just argocd-sync` to trigger immediate sync.
-- **ArgoCD self-heal caveat**: Resources already managed by an Application (for example `gateway` managing `manifests/gateway.yaml`) must be changed in Git first. Ad-hoc `kubectl patch/apply` fixes on live resources will be reconciled away on the next sync.
+- **ArgoCD self-heal caveat**: Resources already managed by an Application (for example `gateway` managing `manifests/traefik-config.yaml`) must be changed in Git first. Ad-hoc `kubectl patch/apply` fixes on live resources will be reconciled away on the next sync.
 - **Kustomize namespace caveat**: The global `namespace:` field in `kustomization.yaml` runs as a transformer after JSON patches, overriding them. Declare namespace explicitly in each manifest instead when resources span multiple namespaces.
 - **Chinese Comments**: Permitted and used in `justfile` for clarity.
 - **SSH**: User `root`, Key `~/.ssh/vgio`.

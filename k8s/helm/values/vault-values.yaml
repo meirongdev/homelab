@@ -29,10 +29,11 @@ server:
     - -c
     - |
       export VAULT_ADDR=http://127.0.0.1:8200
-      until vault status 2>/dev/null | grep -q "Initialized"; do sleep 2; done
-      if vault status 2>/dev/null | grep -q "Sealed.*true"; then
-        vault operator unseal "$(cat /vault/userconfig/vault-auto-unseal/key)"
-      fi
+      status_json="$(vault status -format=json 2>/dev/null || true)"
+      echo "$status_json" | grep -q '"initialized":true' || exit 0
+      echo "$status_json" | grep -q '"sealed":true' || exit 0
+      vault operator unseal "$(cat /vault/userconfig/vault-auto-unseal/key)" >/dev/null 2>&1 || true
+      exit 0
 
   extraVolumes:
     - type: secret

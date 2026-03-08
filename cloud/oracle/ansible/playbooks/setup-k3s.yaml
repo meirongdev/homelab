@@ -160,6 +160,7 @@
           service-cidr: "10.53.0.0/16"
           flannel-backend: "none"
           disable-network-policy: true
+          disable-kube-proxy: true
 
 - name: Install K3s single node
   hosts: oracle_masters

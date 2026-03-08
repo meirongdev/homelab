@@ -11,8 +11,8 @@ spec:
   provider:
     vault:
       # Access Vault in k3s-homelab via Tailscale (NodePort 31333)
-      # k8s-node Tailscale IP: 100.96.84.32
-      server: "http://100.96.84.32:31333"
+      # k8s-node Tailscale IP: 100.94.186.7
+      server: "http://100.94.186.7:31333"
       path: "secret"
       version: "v2"
       auth:

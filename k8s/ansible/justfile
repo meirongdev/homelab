@@ -10,7 +10,7 @@ setup-k8s:
 fetch-kubeconfig:
     ansible-playbook playbooks/fetch-kubeconfig.yaml
 
-# Update firewall rules
+# Disable ufw on homelab nodes (Cilium manages datapath; host firewall caused reboot-time access loss)
 update-firewall:
     ansible-playbook playbooks/update-firewall.yaml
 

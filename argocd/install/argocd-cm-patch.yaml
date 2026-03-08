@@ -4,5 +4,5 @@ metadata:
   name: argocd-cmd-params-cm
   namespace: argocd
 data:
-  # 禁用 ArgoCD 内置 TLS，由 Traefik 负责 TLS 终止
+  # 禁用 ArgoCD 内置 TLS，由 Cloudflare Tunnel + Cilium Gateway 的 HTTP 路径负责入口转发
   server.insecure: "true"
