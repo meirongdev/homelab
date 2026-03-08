@@ -40,6 +40,9 @@ FallbackDNS=8.8.4.4
 Applied automatically by `setup-k3s.yaml` Ansible playbook.
 Run manually on existing nodes: `cd k8s/ansible && just fix-dns`
 
+The same recovery playbook also reapplies the CoreDNS `forward . 1.1.1.1 8.8.8.8`
+setting, so the cluster does not depend on a one-off live patch.
+
 ### 2. K3s kubelet uses the non-stub resolver file
 
 File: `/etc/rancher/k3s/config.yaml`
