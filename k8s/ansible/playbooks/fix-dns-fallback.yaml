@@ -3,9 +3,25 @@
 # Prevents DNS failure when Tailscale MagicDNS is unavailable after network interruption
 # Run: just fix-dns  (or: ansible-playbook -i inventory playbooks/fix-dns-fallback.yaml)
 - name: Configure DNS fallback on K3s nodes
-  hosts: all
+  hosts: k8s_masters
   become: true
   tasks:
+    - name: Create K3s config directory
+      file:
+        path: /etc/rancher/k3s
+        state: directory
+        mode: "0755"
+
+    - name: Ensure K3s kubelet uses the non-stub systemd-resolved file
+      blockinfile:
+        path: /etc/rancher/k3s/config.yaml
+        create: true
+        marker: "# {mark} ANSIBLE MANAGED DNS"
+        block: |
+          kubelet-arg:
+            - resolv-conf=/run/systemd/resolve/resolv.conf
+      notify: restart k3s
+
     - name: Create systemd-resolved drop-in directory
       file:
         path: /etc/systemd/resolved.conf.d
@@ -32,4 +48,9 @@
     - name: restart systemd-resolved
       systemd:
         name: systemd-resolved
+        state: restarted
+
+    - name: restart k3s
+      systemd:
+        name: k3s
         state: restarted

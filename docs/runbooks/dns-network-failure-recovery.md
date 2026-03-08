@@ -12,12 +12,13 @@ recover automatically:
 
 ## Root Cause Chain
 
-```
+```text
 Network interruption
   → Tailscale MagicDNS (100.100.100.100) caches NXDOMAIN for external domains
       (negative TTL from SOA MINIMUM = 1800s)
   → systemd-resolved on K3s node has no fallback DNS configured
-  → CoreDNS (10.43.0.10) forwards to node's systemd-resolved → also broken
+  → K3s gives CoreDNS the stub resolver (`127.0.0.53`) from `/etc/resolv.conf`
+  → CoreDNS (10.43.0.10) forwards external queries to that unreachable stub → SERVFAIL
   → cloudflared can't resolve argotunnel.com → tunnel stays down → HTTP 530
   → kubelet can't pull images (registry-1.docker.io unresolvable)
       → ImagePullBackOff on ALL pods
@@ -39,7 +40,20 @@ FallbackDNS=8.8.4.4
 Applied automatically by `setup-k3s.yaml` Ansible playbook.
 Run manually on existing nodes: `cd k8s/ansible && just fix-dns`
 
-### 2. K3s TLS SAN includes Tailscale IP
+### 2. K3s kubelet uses the non-stub resolver file
+
+File: `/etc/rancher/k3s/config.yaml`
+
+```yaml
+kubelet-arg:
+  - resolv-conf=/run/systemd/resolve/resolv.conf
+```
+
+This makes `dnsPolicy: Default` pods such as CoreDNS inherit the real upstream resolver list
+(`8.8.8.8`, `1.1.1.1`, `100.100.100.100`) instead of the unreachable local stub
+`127.0.0.53`.
+
+### 3. K3s TLS SAN includes Tailscale IP
 
 File: `/etc/rancher/k3s/config.yaml`
 
@@ -52,7 +66,7 @@ tls-san:
 Allows `kubectl` to connect via Tailscale when local network is down.
 Applied by `setup-k3s.yaml`. kubeconfig now uses Tailscale IP by default.
 
-### 3. cloudflared: 2 replicas + liveness probe
+### 4. cloudflared: 2 replicas + liveness probe
 
 ```yaml
 replicas: 2
@@ -86,7 +100,23 @@ cat > /etc/systemd/resolved.conf.d/fallback.conf << 'EOF'
 DNS=8.8.8.8 1.1.1.1
 FallbackDNS=8.8.4.4
 EOF
+
+mkdir -p /etc/rancher/k3s
+python3 - <<'PY'
+from pathlib import Path
+
+path = Path('/etc/rancher/k3s/config.yaml')
+text = path.read_text() if path.exists() else ''
+block = 'kubelet-arg:\n  - resolv-conf=/run/systemd/resolve/resolv.conf\n'
+if 'resolv-conf=/run/systemd/resolve/resolv.conf' not in text:
+    if text and not text.endswith('\n'):
+        text += '\n'
+    text += block
+    path.write_text(text)
+PY
+
 systemctl restart systemd-resolved
+systemctl restart k3s
 nslookup registry-1.docker.io  # verify
 ```
 
@@ -146,9 +176,9 @@ networksetup -setdnsservers Wi-Fi "Empty"  # restore to DHCP/Tailscale
 ## Key IPs & Ports
 
 | Resource | Address |
-|----------|---------|
+| -------- | ------- |
 | Homelab node (local) | `10.10.10.10` |
 | Homelab node (Tailscale) | `100.94.186.7` |
 | K3s API server | `:6443` |
-| Vault UI | `100.94.186.7:31333` |
+| Vault UI | `100.94.186.7:31952` |
 | Loki OTLP NodePort | `100.94.186.7:31080` |

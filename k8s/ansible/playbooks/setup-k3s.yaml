@@ -57,6 +57,9 @@
           tls-san:
             - {{ ansible_host }}
             - {{ hostvars[inventory_hostname]['tailscale_ip'] | default('') }}
+          kubelet-arg:
+            # Use systemd-resolved's real upstream list instead of the 127.0.0.53 stub.
+            - resolv-conf=/run/systemd/resolve/resolv.conf
           flannel-backend: "none"
           disable-network-policy: true
           disable-kube-proxy: true
