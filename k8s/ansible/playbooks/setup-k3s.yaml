@@ -37,6 +37,8 @@
 - name: Install K3s single node
   hosts: k8s_masters
   become: true
+  vars:
+    coredns_public_forwarders: "forward . 1.1.1.1 8.8.8.8"
   tasks:
     - name: Enable qemu-guest-agent for Proxmox diagnostics
       ansible.builtin.systemd:
@@ -106,6 +108,24 @@
       retries: 30
       delay: 10
       changed_when: false
+
+    - name: Read current CoreDNS Corefile
+      ansible.builtin.command: >-
+        k3s kubectl -n kube-system get configmap coredns
+        -o go-template={{ "{{ index .data \"Corefile\" }}" }}
+      register: coredns_corefile
+      changed_when: false
+
+    - name: Patch CoreDNS to use public forwarders for external DNS
+      ansible.builtin.shell: |
+        cat > /tmp/coredns-patch.yaml <<'EOF'
+        data:
+          Corefile: |
+        {{ coredns_corefile.stdout | regex_replace('forward \\. .*', coredns_public_forwarders) | indent(12, true) }}
+        EOF
+        k3s kubectl patch configmap coredns -n kube-system --type merge --patch-file /tmp/coredns-patch.yaml
+      register: coredns_patch
+      changed_when: "'(no change)' not in coredns_patch.stdout"
 
 - name: Verify Cluster
   hosts: k8s_masters

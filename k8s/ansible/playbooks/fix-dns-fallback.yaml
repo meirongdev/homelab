@@ -5,6 +5,8 @@
 - name: Configure DNS fallback on K3s nodes
   hosts: k8s_masters
   become: true
+  vars:
+    coredns_public_forwarders: "forward . 1.1.1.1 8.8.8.8"
   tasks:
     - name: Create K3s config directory
       file:
@@ -43,6 +45,35 @@
         name: systemd-resolved
         state: started
         enabled: true
+
+    - name: Apply pending DNS service restarts before patching CoreDNS
+      meta: flush_handlers
+
+    - name: Wait for K3s API to be ready after DNS changes
+      command: k3s kubectl get nodes
+      register: k3s_ready
+      until: k3s_ready.rc == 0
+      retries: 30
+      delay: 10
+      changed_when: false
+
+    - name: Read current CoreDNS Corefile
+      command: >-
+        k3s kubectl -n kube-system get configmap coredns
+        -o go-template={{ "{{ index .data \"Corefile\" }}" }}
+      register: coredns_corefile
+      changed_when: false
+
+    - name: Reapply public forwarders to CoreDNS
+      shell: |
+        cat > /tmp/coredns-patch.yaml <<'EOF'
+        data:
+          Corefile: |
+        {{ coredns_corefile.stdout | regex_replace('forward \\. .*', coredns_public_forwarders) | indent(12, true) }}
+        EOF
+        k3s kubectl patch configmap coredns -n kube-system --type merge --patch-file /tmp/coredns-patch.yaml
+      register: coredns_patch
+      changed_when: "'(no change)' not in coredns_patch.stdout"
 
   handlers:
     - name: restart systemd-resolved
