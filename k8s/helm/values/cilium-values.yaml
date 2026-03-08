@@ -3,7 +3,13 @@
 # Docs: https://docs.cilium.io/en/stable/installation/k8s-install-helm/
 
 # --- kube-proxy replacement: required for Cilium Gateway API ---
+# Re-enabled after rebuilding homelab on Ubuntu 24.04 LTS (kernel 6.8.x).
+# K3s must also set disable-kube-proxy: true in /etc/rancher/k3s/config.yaml.
 kubeProxyReplacement: true
+
+# --- API server address: required when kube-proxy is disabled ---
+k8sServiceHost: "10.10.10.10"
+k8sServicePort: 6443
 
 cluster:
   name: homelab

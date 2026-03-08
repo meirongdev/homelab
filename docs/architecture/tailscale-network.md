@@ -6,13 +6,13 @@ Two K3s clusters are connected via Tailscale subnet routing. Each cluster's K3s 
 
 After the gateway cutover, ingress no longer depends on any cross-cluster auth hop. Cloudflare Tunnel now targets the local Cilium Gateway service in each cluster, while Tailscale remains the underlay for pod routing, Vault access, observability export, and future ClusterMesh control-plane connectivity.
 
-**Status**: Active as of 2026-02-21. Both nodes connected, bidirectional pod routing verified.
+**Status**: Active as of 2026-03-08. Both nodes connected, bidirectional pod routing verified. Cilium ClusterMesh also active over Tailscale (port 32379).
 
 ## CIDR Allocation
 
 | Cluster | Advertised Pod CIDR | Local Service CIDR | Node (LAN) IP | Tailscale IP |
 |---------|----------------------|--------------------|---------------|--------------|
-| Homelab K3s | 10.42.0.0/16 | 10.43.0.0/16 | 10.10.10.10 | 100.96.84.32 |
+| Homelab K3s | 10.42.0.0/16 | 10.43.0.0/16 | 10.10.10.10 | 100.94.186.7 |
 | Oracle K3s | 10.52.0.0/16 | 10.53.0.0/16 | 10.0.0.26 | 100.107.166.37 |
 
 Oracle K3s uses non-default CIDRs to avoid collision with homelab defaults.
@@ -130,7 +130,7 @@ ping 10.42.0.1   # from Oracle: homelab pod gateway
 
 # Cross-cluster K3s API access
 nc -z 100.107.166.37 6443   # homelab → Oracle K3s API
-nc -z 100.96.84.32 6443  # Oracle → homelab K3s API
+nc -z 100.94.186.7 6443  # Oracle → homelab K3s API
 
 # Cross-cluster DNS query (homelab node querying Oracle CoreDNS)
 nslookup kubernetes.default.svc.cluster.local 10.52.0.2

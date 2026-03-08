@@ -108,18 +108,14 @@ deploy-cloudflare-tunnel: create-cloudflare-secret
 delete-cloudflare-tunnel:
     kubectl --context {{ctx}} delete -f manifests/cloudflare-tunnel.yaml
 
-# 部署 Gateway API 配置 (Traefik + Gateway + HTTPRoutes)
+# 部署 Gateway API 配置 (Cilium Gateway + HTTPRoutes)
 deploy-gateway:
-    kubectl --context {{ctx}} apply -f manifests/traefik-config.yaml
-    @echo "⏳ Waiting for Traefik to restart with Gateway API provider..."
-    sleep 10
     kubectl --context {{ctx}} apply -f manifests/gateway.yaml
-    @echo "✅ Gateway API deployed!"
+    @echo "✅ Cilium Gateway API resources applied!"
 
 # 删除 Gateway API 配置
 delete-gateway:
     kubectl --context {{ctx}} delete -f manifests/gateway.yaml || true
-    kubectl --context {{ctx}} delete -f manifests/traefik-config.yaml || true
 
 # 查看个人服务状态
 status-personal:
@@ -326,7 +322,7 @@ deploy-argocd:
     kubectl --context {{ctx}} apply -n {{argocd_ns}} -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml --server-side
     @echo "⏳ Waiting for ArgoCD server to be ready..."
     kubectl --context {{ctx}} rollout status deployment/argocd-server -n {{argocd_ns}} --timeout=8m
-    # 3. 禁用内置 TLS（由 Traefik 处理）
+    # 3. 禁用内置 TLS（由 Cloudflare Tunnel -> Gateway HTTP 路径处理）
     # 注意：使用 --server-side 确保字段所有权，防止 install.yaml 重新 apply 后被覆盖
     kubectl --context {{ctx}} apply --server-side -f ../../argocd/install/argocd-cm-patch.yaml
     kubectl --context {{ctx}} rollout restart deployment/argocd-server -n {{argocd_ns}}

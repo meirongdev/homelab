@@ -15,7 +15,7 @@ resource "proxmox_virtual_environment_vm" "k8s" {
   }
 
   agent {
-    enabled = false
+    enabled = true
   }
 
   serial_device {}

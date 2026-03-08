@@ -10,7 +10,7 @@ Two k3s clusters are monitored from a single Grafana/Loki/Prometheus/Tempo stack
 ```
 ┌─────────────────────────────────────┐     Tailscale     ┌─────────────────────────────────────┐
 │          k3s-homelab                │                    │          oracle-k3s                 │
-│  (100.96.84.32)                     │                    │  (100.107.166.37)                   │
+│  (100.94.186.7)                     │                    │  (100.107.166.37)                   │
 │                                     │                    │                                     │
 │  Grafana ◄── Loki      :31080/otlp │◄── logs (OTLP) ─── │  OTel Collector DaemonSet           │
 │  Grafana ◄── Prometheus :31090     │◄── metrics (PRW) ── │    ├ filelog → logs pipeline         │
@@ -53,7 +53,7 @@ All metrics carry a `cluster` label for multi-cluster dashboard queries:
    - `attributes.container_name` → `resource["k8s.container.name"]`
 4. **k8sattributes processor** uses `k8s.pod.uid` (resource attribute) to look up the pod in the K8s API and enrich with `k8s.deployment.name`, `k8s.node.name`, etc.
 5. **resource processor** adds `cluster: oracle-k3s` label
-6. **otlphttp exporter** ships to `http://100.96.84.32:31080/otlp/v1/logs` (Loki gateway NodePort via Tailscale)
+6. **otlphttp exporter** ships to `http://100.94.186.7:31080/otlp/v1/logs` (Loki gateway NodePort via Tailscale)
 
 > **Bug fixed 2026-02-22:** The original config did not promote filepath-extracted attributes to resource attributes, so `k8sattributes` could never find the pod (all identifier values were empty strings). Logs arrived in Loki as `unknown_service` with no namespace/pod labels.
 
@@ -90,7 +90,7 @@ OTel resource attributes are converted to Loki stream labels (dots replaced with
 | `prometheus/kube-state-metrics` | `kube-state-metrics.monitoring.svc:8080` | 30s |
 | `prometheus/cloudflared` | `cloudflared-metrics.cloudflare.svc:2000` | 30s |
 
-All metrics pass through `resource` processor (adds `cluster: oracle-k3s`) → `batch` → `prometheusremotewrite` exporter → `http://100.96.84.32:31090/api/v1/write`
+All metrics pass through `resource` processor (adds `cluster: oracle-k3s`) → `batch` → `prometheusremotewrite` exporter → `http://100.94.186.7:31090/api/v1/write`
 
 ## Traces Pipeline
 
@@ -118,7 +118,7 @@ Application Pod                      OTel Collector              Tempo (homelab)
 
 **Pipeline:** `otlp → memory_limiter → resource(cluster=oracle-k3s) → batch → otlp/tempo`
 
-- Collector forwards traces to `100.96.84.32:31317` (Tempo NodePort via Tailscale)
+- Collector forwards traces to `100.94.186.7:31317` (Tempo NodePort via Tailscale)
 - ClusterIP Service: `otel-collector.monitoring.svc:4317/4318`
 
 ### Sampling Strategy
@@ -185,7 +185,7 @@ All 4 Loki dashboards (`k8s/helm/manifests/grafana-dashboards.yaml`) have a `clu
 
 Cloudflare Tunnel dashboard (`k8s/helm/manifests/cloudflare-tunnel-dashboard.yaml`):
 
-- **Cloudflare Tunnel + Per-Domain Traffic** — tunnel health, Traefik router metrics by cluster
+- **Cloudflare Tunnel + Per-Domain Traffic** — tunnel health and cluster-level ingress path visibility without Traefik router metrics
 
 Multi-cluster resource overview (`k8s/helm/manifests/multicluster-overview-dashboard.yaml`):
 
@@ -249,7 +249,7 @@ Oracle-k3s metrics are pushed (not scraped). Check the OTel Collector:
 1. Check OTel logs: `kubectl --context oracle-k3s logs -n monitoring daemonset/otel-collector --tail=30`
 2. Look for `Failed to scrape Prometheus endpoint` — means target is unreachable from within the pod
 3. Verify Prometheus receives data: Grafana → Explore → Prometheus → `count by (cluster, job) ({cluster="oracle-k3s"})`
-4. Check Tailscale connectivity: `kubectl --context oracle-k3s exec -n monitoring daemonset/otel-collector -- wget -qO- http://100.96.84.32:31090/api/v1/status/runtimeinfo 2>/dev/null | head`
+4. Check Tailscale connectivity: `kubectl --context oracle-k3s exec -n monitoring daemonset/otel-collector -- wget -qO- http://100.94.186.7:31090/api/v1/status/runtimeinfo 2>/dev/null | head`
 
 ### homelab metrics missing `cluster` label
 

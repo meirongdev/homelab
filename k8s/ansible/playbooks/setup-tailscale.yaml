@@ -56,17 +56,6 @@
         state: restarted
       when: tailscale_force_reregister | default(false) | bool
 
-    - name: Allow Tailscale UDP port (direct connections)
-      community.general.ufw:
-        rule: allow
-        port: '41641'
-        proto: udp
-
-    - name: Allow traffic from local bridge subnet (Proxmox vmbr0)
-      community.general.ufw:
-        rule: allow
-        src: 10.10.10.0/24
-
     - name: Join tailnet with subnet routes
       ansible.builtin.command: >
         tailscale up

@@ -2,8 +2,20 @@
   hosts: k8s_masters
   become: true
   tasks:
-    - name: Allow Kubernetes API Server access (port 6443)
-      community.general.ufw:
-        rule: allow
-        port: '6443'
-        proto: tcp
+    - name: Stop ufw if it is present
+      ansible.builtin.systemd:
+        name: ufw
+        state: stopped
+      failed_when: false
+
+    - name: Disable ufw if it is present
+      ansible.builtin.systemd:
+        name: ufw
+        enabled: false
+      failed_when: false
+
+    - name: Ensure ufw is disabled
+      ansible.builtin.command: ufw disable
+      register: ufw_disable
+      changed_when: "'Firewall stopped' in ufw_disable.stdout or 'Firewall is inactive' not in ufw_disable.stdout"
+      failed_when: false

@@ -1,6 +1,6 @@
 # Homelab Project TODO
 
-> Last updated: 2026-03-07
+> Last updated: 2026-03-08
 
 ## Phase 1: Foundation ✅
 
@@ -43,11 +43,13 @@
 - [ ] **Alertmanager**: 告警规则 → Gotify → Telegram 通知链路
 - [x] **oracle-k3s Cilium**: 从 Flannel 迁移到 Cilium，统一双集群数据面
 - [x] **Uptime Kuma SSO 修复**: maxredirects=0 + accepted_statuscodes 300-399
+- [x] **homelab Ubuntu 24.04 重建**: ✅ 2026-03-08 重建完成，K3s v1.34.5+k3s1 + Cilium 1.19.1
+- [x] **homelab Cilium Gateway 恢复**: ✅ kube-proxy replacement + Gateway API 验证通过
 
 ## Phase 5: Production Hardening 🎯 (Future)
 
-- [ ] Cilium ClusterMesh 评估 (跨集群 Service 发现)
-- [ ] Gateway 标准化 (Traefik → Cilium Gateway 迁移评估)
+- [x] Cilium ClusterMesh 启用 (跨集群 Service 发现) ✅ 2026-03-08 双集群 connected
+- [x] Gateway 标准化: 当前架构以 Cilium Gateway API 为统一入口
 - [ ] Cert-Manager (Let's Encrypt + Cloudflare DNS-01)
 - [ ] Vault Dynamic Secrets (PostgreSQL 动态凭据)
 - [ ] 离站备份 (Backblaze B2 / S3)
@@ -72,6 +74,6 @@
 
 ### 🔴 High Effort
 
-- [ ] Cilium ClusterMesh PoC
-- [ ] Traefik → Cilium Gateway 迁移 (需 ext_authz 设计)
+- [x] Cilium ClusterMesh connect + failover validation ✅ 2026-03-08
+- [x] homelab Cilium Gateway 恢复后双集群统一 cutover 验证 ✅ 2026-03-08
 - [ ] Vault HA + auto-unseal

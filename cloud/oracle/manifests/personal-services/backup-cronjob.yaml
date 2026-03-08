@@ -4,7 +4,7 @@
 # If ESO is broken, create the secret manually:
 #   kubectl --context oracle-k3s create secret generic kopia-backup-secret \
 #     -n personal-services \
-#     --from-literal=server-url=https://100.96.84.32:31515 \
+#     --from-literal=server-url=https://100.94.186.7:31515 \
 #     --from-literal=server-fingerprint=281d63a1f327c0e31791c4eaad48b8bd27675efd1dc73ceb374c8607ccb0be01 \
 #     --from-literal=password=<kopia-repo-password>
 apiVersion: external-secrets.io/v1

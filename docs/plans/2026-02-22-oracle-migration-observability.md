@@ -53,7 +53,7 @@
         ▼                         ▼
   k3s-homelab                oracle-k3s
   10.10.10.10                152.69.195.151
-  TS: 100.96.84.32        TS: 100.107.166.37
+  TS: 100.94.186.7        TS: 100.107.166.37
         │                         │
         └────── Tailscale ────────┘
               (private mesh)
@@ -132,7 +132,7 @@ oracle-k3s:
       ↓ batch processor
       ↓ otlphttp exporter
       │
-      │  HTTP via Tailscale (100.96.84.32)
+      │  HTTP via Tailscale (100.94.186.7)
       ▼
   k3s-homelab:
       Loki Gateway (:80/otlp) → Loki SingleBinary → Grafana
@@ -142,7 +142,7 @@ oracle-k3s:
 ```yaml
 exporters:
   otlphttp:
-    endpoint: "http://100.96.84.32:80"  # Loki Gateway via Tailscale
+    endpoint: "http://100.94.186.7:80"  # Loki Gateway via Tailscale
     # Loki Gateway on homelab is ClusterIP — needs NodePort or port-forward
 ```
 
@@ -167,7 +167,7 @@ spec:
       nodePort: 31080  # Loki Gateway
 ```
 
-Then the oracle OTel exporter targets: `http://100.96.84.32:31080/otlp`
+Then the oracle OTel exporter targets: `http://100.94.186.7:31080/otlp`
 
 #### Metrics: Prometheus Remote Write → Homelab Prometheus
 
@@ -180,7 +180,7 @@ oracle-k3s:
       ↓ external_labels: {cluster: "oracle-k3s"}
       ↓ remote_write
       │
-      │  HTTP via Tailscale (100.96.84.32)
+      │  HTTP via Tailscale (100.94.186.7)
       ▼
   k3s-homelab:
       Prometheus (:9090 via NodePort 31090) → Grafana
@@ -205,7 +205,7 @@ spec:
 ```
 
 **Oracle-k3s Prometheus config (agent mode, minimal):**
-- `prometheusSpec.remoteWrite` → `http://100.96.84.32:31090/api/v1/write`
+- `prometheusSpec.remoteWrite` → `http://100.94.186.7:31090/api/v1/write`
 - `prometheusSpec.externalLabels.cluster: oracle-k3s`
 - Disable: Grafana, Alertmanager, Prometheus persistence (agent mode)
 - Enable: node-exporter, kube-state-metrics (lightweight)

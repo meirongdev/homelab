@@ -1,6 +1,8 @@
 # Proxmox Terraform
 
-Provisions an Ubuntu 24.04 VM on Proxmox VE using Terraform.
+Provisions an Ubuntu 24.04 LTS VM on Proxmox VE using Terraform.
+
+For the homelab K3s node, prefer Ubuntu 24.04 LTS over Ubuntu development images so Cilium runs on a stable kernel baseline.
 
 ## Functionality
 
@@ -48,7 +50,7 @@ wget -O /var/lib/vz/template/iso/ubuntu-24.04-cloudimg-amd64.img https://cloud-i
 ## Init terraform project
 
 ```bash
-make init
+just init
 ```
 
 Modify the `terraform.tfvars` if in need
@@ -56,12 +58,12 @@ Modify the `terraform.tfvars` if in need
 ## Create VM
 
 ```bash
-make apply
+just apply
 ```
 
-## Clean 
+## Clean
 
 ```bash
-make destroy
-make clean
+just destroy
+just clean
 ```

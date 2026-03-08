@@ -54,7 +54,7 @@ Internet → Cloudflare DNS (*.meirong.dev)
 
 ```
 oracle-k3s pods → Tailscale (100.107.166.37)
-                → k8s-node (100.96.84.32:31333)
+                → k8s-node (100.94.186.7:31333)
                 → Vault (k3s-homelab)
 ```
 

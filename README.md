@@ -16,7 +16,7 @@ Network note: both clusters now use Cilium for the local data plane and Gateway 
 
 ## Quick Start Summary
 
-1. **Infrastructure**: `cd proxmox/terraform && make init && make apply`
+1. **Infrastructure**: `cd proxmox/terraform && just init && just apply`
 2. **Kubernetes**: `cd k8s/ansible && just setup-k8s && just fetch-kubeconfig`
 3. **Observability stack**: `cd k8s/helm && just init && just deploy-all`
 4. **Secrets**: `cd k8s/helm && just deploy-vault && just vault-init && just vault-unseal && just deploy-eso`
