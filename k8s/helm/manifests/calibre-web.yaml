@@ -69,6 +69,27 @@ spec:
       labels:
         app: calibre-web
     spec:
+      securityContext:
+        fsGroup: 1000
+      initContainers:
+        - name: fix-permissions
+          image: busybox
+          command: ["sh", "-c", "chown -R 1000:1000 /config /calibre-library /cwa-book-ingest"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: books
+              mountPath: /calibre-library
+            - name: books
+              mountPath: /cwa-book-ingest
+              subPath: ingest
       containers:
         - name: calibre-web
           image: crocodilestick/calibre-web-automated:latest
