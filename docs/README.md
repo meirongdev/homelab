@@ -34,22 +34,26 @@
 
 | 服务 | 集群 | URL | 认证 |
 |------|------|-----|------|
-| Calibre-Web | homelab | book.meirong.dev | SSO |
-| Gotify | homelab | notify.meirong.dev | SSO |
-| Grafana | homelab | grafana.meirong.dev | SSO |
-| Vault | homelab | vault.meirong.dev | SSO |
+| Calibre-Web | homelab | book.meirong.dev | 内置 |
+| Gotify | homelab | notify.meirong.dev | 内置 |
+| Grafana | homelab | grafana.meirong.dev | 内置 |
+| Vault | homelab | vault.meirong.dev | 内置 |
 | ArgoCD | homelab | argocd.meirong.dev | 内置 |
 | ZITADEL | homelab | auth.meirong.dev | OIDC |
-| Kopia | homelab | backup.meirong.dev | SSO + Basic Auth |
+| Kopia | homelab | backup.meirong.dev | Basic Auth |
 | Homepage | oracle-k3s | home.meirong.dev | 公开 |
 | IT-Tools | oracle-k3s | tool.meirong.dev | 公开 |
 | Stirling-PDF | oracle-k3s | pdf.meirong.dev | 公开 |
 | Squoosh | oracle-k3s | squoosh.meirong.dev | 公开 |
 | Miniflux | oracle-k3s | rss.meirong.dev | 内置 |
-| KaraKeep | oracle-k3s | keep.meirong.dev | SSO |
+| KaraKeep | oracle-k3s | keep.meirong.dev | 内置 |
 | Timeslot | oracle-k3s | slot.meirong.dev | Basic Auth |
 | Uptime Kuma | oracle-k3s | status.meirong.dev | 公开 |
 | Sink (短链) | Cloudflare Workers | s.meirong.dev | N/A |
+
+当前的统一入口认证状态：`HTTPRoute` 层不再承载共享 SSO。ZITADEL 仍作为身份提供方保留，后续如需重新引入单点登录，优先采用应用原生 OIDC 或每应用独立 `oauth2-proxy`，详见 [plans/2026-03-08-cilium-zitadel-sso-plan.md](plans/2026-03-08-cilium-zitadel-sso-plan.md)。
+
+Oracle 集群工作负载的 Vault 路径约定：使用 `secret/oracle-k3s/<service>`，不要把 Oracle-only 凭据继续存放在 `secret/homelab/*`。
 
 ### 备份状态
 

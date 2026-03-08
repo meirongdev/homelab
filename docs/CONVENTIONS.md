@@ -122,23 +122,23 @@ just apply   # Apply DNS/Tunnel changes
 
 ### Identity
 - **Status**: ZITADEL remains available at `auth.meirong.dev`, but shared ingress-layer SSO has been removed.
-- **Current model**: services are now either public or rely on their own built-in auth (for example ArgoCD, Vault, Miniflux, and Timeslot admin Basic Auth).
+- **Current model**: services are now either public or rely on their own built-in auth (for example ArgoCD, Vault, Grafana, Miniflux, KaraKeep, and Timeslot admin Basic Auth).
 - **Reason**: removing the Traefik ForwardAuth / oauth2-proxy chain simplifies ingress and avoids a second auth hop on every request.
+- **Recommended direction**: keep `HTTPRoute` resources controller-neutral and add auth at the app layer. Prefer native OIDC with ZITADEL first; use a per-app `oauth2-proxy` reverse-proxy only for apps that cannot speak OIDC directly.
 
 ### GitOps (ArgoCD)
 - ArgoCD runs in the `argocd` namespace, UI at `argocd.meirong.dev`
 - **Sync poll interval**: 3 minutes (auto-syncs after every `git push`)
 - **Managed by ArgoCD** (auto-sync + selfHeal):
-  - `personal-services` App → `manifests/{calibre-web.yaml,gotify.yaml}`
-  - `it-tools` App → `manifests/it-tools/` (Kustomize; managed separately to support Image Updater write-back)
-  - `argocd-image-updater` App → Helm chart `argo/argocd-image-updater` v1.1.0, values from `values/argocd-image-updater.yaml`
-  - `gateway` App → `manifests/gateway.yaml`
-  - `cloudflare` App → `manifests/cloudflare-tunnel.yaml`
-  - `vault-eso` App → `manifests/{vault-eso-config,*-external-secret}.yaml`
-  - `kopia` App → `manifests/kopia.yaml`
-  - `zitadel` App → `manifests/zitadel.yaml`
-  - `rss-system` App → `cloud/oracle/manifests/rss-system/` (on oracle-k3s: Miniflux, KaraKeep, Redpanda Connect)
+  - `personal-services` App → `manifests/{calibre-web.yaml,gotify.yaml}` (homelab)
+  - `oracle-k3s` App → `cloud/oracle/manifests/` (oracle-k3s: Homepage, RSS System, Personal Services, Uptime Kuma)
+  - `gateway` App → `manifests/gateway.yaml` (homelab Cilium Gateway)
+  - `cloudflare` App → `manifests/cloudflare-tunnel.yaml` (homelab)
+  - `vault-eso` App → `manifests/{vault-eso-config,*-external-secret}.yaml` (homelab)
+  - `kopia` App → `manifests/{kopia.yaml,kopia-backup.yaml}` (homelab)
+  - `zitadel` App → `manifests/zitadel.yaml` (homelab)
   - `monitoring-dashboards` App → `k8s/helm/manifests/grafana-dashboards.yaml` 等 ConfigMap
+  - `argocd-image-updater` App → Helm chart `argo/argocd-image-updater` v1.1.0
 - **NOT managed by ArgoCD** (manual `just` commands):
   - HashiCorp Vault — requires manual init/unseal
   - External Secrets Operator — depends on Vault
@@ -159,7 +159,7 @@ just apply   # Apply DNS/Tunnel changes
 ### Observability
 - LGTM stack (Loki, Grafana, Tempo, Prometheus/Mimir) in `monitoring` namespace
 - Grafana accessible at `grafana.meirong.dev`
-- **Three signals**: Logs (Loki), Metrics (Prometheus), Traces (Tempo) — all collected via OTel Collector
+- **Three signals**: Logs (Loki), Metrics (Prometheus), Traces (Tempo) — all collected via Otel Collector
 - **Multi-cluster monitoring**: All telemetry carries a `cluster` label (`homelab` or `oracle-k3s`)
   - homelab: Prometheus `scrapeClasses` default relabeling adds `cluster=homelab` to all local scrape targets
   - oracle-k3s: OTel Collector pushes all metrics (node-exporter, kube-state-metrics, cloudflared, traefik) via `prometheusremotewrite` with `cluster=oracle-k3s`
@@ -223,7 +223,8 @@ just apply   # Apply DNS/Tunnel changes
      ```
   2. `git push` → ArgoCD PostSync hook re-runs the provisioner Job automatically
   3. The script is idempotent: existing monitors are skipped, only new ones are created
-  - Admin credentials live in Vault at `secret/homelab/uptime-kuma` (keys: `admin_username`, `admin_password`), synced via ESO ExternalSecret `uptime-kuma-admin` in `personal-services` namespace
+  - Admin credentials live in Vault at `secret/oracle-k3s/uptime-kuma` (keys: `admin_username`, `admin_password`), synced via ESO ExternalSecret `uptime-kuma-admin` in `personal-services` namespace
+- **Oracle service secrets**: workloads running on `oracle-k3s` should use Vault paths under `secret/oracle-k3s/<service>`. Do not store Oracle-only app credentials under `secret/homelab/*`.
 - **Homepage config updates**: ArgoCD auto-syncs the ConfigMap on `git push`, but `subPath` volume mounts require a pod restart to reload — run `just update-homepage` (does `apply` + `rollout restart` in one step). Do NOT use `kubectl delete configmap` as ArgoCD will conflict.
 - **HTTPRoute template**: Always include explicit `group`/`kind` in `parentRefs` and `group`/`kind`/`weight` in `backendRefs` to prevent ArgoCD OutOfSync drift caused by Gateway controller defaults.
 - **ArgoCD Image Updater** (v1.1.0): Uses CRD model — create an `ImageUpdater` CR (not just annotations). Set `useAnnotations: true` in the CR to read image config from Application annotations. Use strategy `newest-build` (not `latest`, deprecated). After changing Application annotations in Git, re-run `kubectl apply -f argocd/applications/<app>.yaml` — ArgoCD does not manage Application objects themselves.

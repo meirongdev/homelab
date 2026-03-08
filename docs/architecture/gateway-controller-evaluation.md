@@ -29,6 +29,7 @@
 1. **Ingress**: keep Cilium Gateway API as the single HTTP entrypoint.
 2. **Auth**: keep ingress layer stateless and let applications own their own auth unless there is a strong reason to centralize again.
 3. **ClusterMesh**: treat it as a separate concern from ingress; prepare the control plane in values, but enable/connect it explicitly with Cilium CLI.
+4. **Future SSO**: if shared sign-in is reintroduced, prefer native OIDC or per-app reverse-proxy auth instead of reviving controller-specific ForwardAuth. See `docs/plans/2026-03-08-cilium-zitadel-sso-plan.md`.
 
 ## Migration Guardrails
 

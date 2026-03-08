@@ -33,11 +33,11 @@ data:
         {"name": "HashiCorp Vault","url": "https://vault.meirong.dev/",         "accepted_statuscodes": ["300-399"], "maxredirects": 0},
         {"name": "Calibre-Web",    "url": "https://book.meirong.dev/",          "accepted_statuscodes": ["300-399"], "maxredirects": 0},
         {"name": "ArgoCD",         "url": "https://argocd.meirong.dev/",        "accepted_statuscodes": ["200-299", "300-399"]},
-        {"name": "Kopia Backup",   "url": "https://backup.meirong.dev/",        "accepted_statuscodes": ["300-399"], "maxredirects": 0},
+        {"name": "Kopia Backup",   "url": "https://backup.meirong.dev/",        "accepted_statuscodes": ["300-399", "401-401"], "maxredirects": 0},
         # --- new info pipeline services ---
         # KaraKeep: root / redirects 307 to /signin; monitor /signin directly (returns 200)
         {"name": "KaraKeep",       "url": "http://karakeep.rss-system.svc:3000/signin"},
-        {"name": "Gotify",         "url": "https://notify.meirong.dev/",        "accepted_statuscodes": ["300-399"], "maxredirects": 0},
+        {"name": "Gotify",         "url": "https://notify.meirong.dev/",        "accepted_statuscodes": ["200-299", "300-399"], "maxredirects": 0},
         # Timeslot: oracle-k3s local service, direct ClusterDNS bypasses SSO
         {"name": "Timeslot",       "url": "http://timeslot.personal-services.svc:8080/api/slots"},
     ]
