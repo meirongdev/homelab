@@ -17,7 +17,10 @@ spec:
   target:
     name: zitadel-masterkey
     creationPolicy: Owner
+    deletionPolicy: Retain
     template:
+      engineVersion: v2
+      mergePolicy: Replace
       type: Opaque
       data:
         masterkey: "{{ .masterkey }}"
@@ -26,6 +29,9 @@ spec:
       remoteRef:
         key: secret/homelab/zitadel
         property: master-key
+        conversionStrategy: Default
+        decodingStrategy: None
+        metadataPolicy: None
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -40,7 +46,10 @@ spec:
   target:
     name: zitadel-postgres-auth
     creationPolicy: Owner
+    deletionPolicy: Retain
     template:
+      engineVersion: v2
+      mergePolicy: Replace
       type: Opaque
       data:
         postgres-password: "{{ .db_password }}"
@@ -50,6 +59,9 @@ spec:
       remoteRef:
         key: secret/homelab/zitadel
         property: db-password
+        conversionStrategy: Default
+        decodingStrategy: None
+        metadataPolicy: None
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -64,7 +76,10 @@ spec:
   target:
     name: zitadel-config
     creationPolicy: Owner
+    deletionPolicy: Retain
     template:
+      engineVersion: v2
+      mergePolicy: Replace
       type: Opaque
       data:
         config-yaml: |
@@ -79,6 +94,9 @@ spec:
       remoteRef:
         key: secret/homelab/zitadel
         property: db-password
+        conversionStrategy: Default
+        decodingStrategy: None
+        metadataPolicy: None
 ---
 apiVersion: helm.cattle.io/v1
 kind: HelmChart

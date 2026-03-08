@@ -14,11 +14,15 @@ spec:
   target:
     name: gotify-secret
     creationPolicy: Owner
+    deletionPolicy: Retain
   data:
     - secretKey: default-user-password
       remoteRef:
         key: homelab/gotify
         property: default_user_password
+        conversionStrategy: Default
+        decodingStrategy: None
+        metadataPolicy: None
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

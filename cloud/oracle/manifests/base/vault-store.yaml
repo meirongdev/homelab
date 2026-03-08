@@ -10,9 +10,9 @@ metadata:
 spec:
   provider:
     vault:
-      # Access Vault in k3s-homelab via Tailscale (NodePort 31333)
+      # Access Vault in k3s-homelab via Tailscale (current NodePort 31952)
       # k8s-node Tailscale IP: 100.94.186.7
-      server: "http://100.94.186.7:31333"
+      server: "http://100.94.186.7:31952"
       path: "secret"
       version: "v2"
       auth:
