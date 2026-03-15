@@ -99,6 +99,8 @@ just deploy-timeslot # Install Timeslot via Helm and patch chart bugs
 just logs miniflux   # Show recent miniflux logs
 ```
 
+`just deploy-cilium` is intentionally state-resetting: it uses `helm upgrade --install --reset-values`, deletes the Hubble TLS secrets first, and waits for `hubble-relay` to become healthy. This prevents stale manual Helm values or old Hubble certificates from surviving a partial rebuild and breaking Relay TLS.
+
 ## Adding a New Subdomain
 
 1. Add ingress rule in `cloudflare/terraform.tfvars`
@@ -115,4 +117,4 @@ just logs miniflux   # Show recent miniflux logs
 - **CoreDNS**: Patched to forward to `8.8.8.8` instead of `/etc/resolv.conf`
   (which points to Oracle's unreachable `169.254.169.254` metadata DNS).
 - **Cloudflared**: Oracle Cloud blocks outbound UDP/QUIC in practice for this node, so the in-cluster connector is pinned to `--protocol http2`.
-- **ClusterMesh**: the Cilium values already set `cluster.name`, `cluster.id`, and deploy `clustermesh-apiserver` on NodePort `32379`, but you still need the `cilium clustermesh enable/connect` workflow to activate the mesh.
+- **ClusterMesh**: the Cilium values already set `cluster.name`, `cluster.id`, and deploy `clustermesh-apiserver` on NodePort `32379`, but after rebuilding either cluster you must re-run `just connect-clustermesh <homelab-ts-ip>:32379 <oracle-ts-ip>:32379` so the cross-cluster config and CA bundle are refreshed. In this environment the reconnect must allow mismatching cluster CAs because each rebuilt cluster mints a new local Cilium CA.

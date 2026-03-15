@@ -136,6 +136,28 @@ nc -z 100.94.186.7 6443  # Oracle → homelab K3s API
 nslookup kubernetes.default.svc.cluster.local 10.52.0.2
 ```
 
+## ClusterMesh Reconnect After Rebuild
+
+If either cluster is rebuilt or Cilium is reinstalled, rerun the ClusterMesh connect step so both clusters exchange fresh remote configs and CA bundles.
+
+Use the Tailscale NodePort endpoints, not the private LAN IPs:
+
+```bash
+cd k8s/helm
+just connect-clustermesh 100.94.186.7:32379 100.107.166.37:32379
+```
+
+Why this is required:
+
+- each rebuilt cluster mints a new local Cilium CA
+- stale `cilium-clustermesh` remote config can leave `kvstoremesh` disconnected even when node-level ClusterMesh still shows connected
+- `--allow-mismatching-ca` is required in this environment so the remote CA is appended to the trust bundle instead of being rejected
+
+Healthy output must show both:
+
+- `All 1 nodes are connected to all clusters`
+- `All 1 KVStoreMesh replicas are connected to all clusters`
+
 ## Pre-auth Key Renewal
 
 Keys expire after 90 days. After expiry:

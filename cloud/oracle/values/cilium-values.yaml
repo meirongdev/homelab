@@ -31,6 +31,15 @@ operator:
 # --- Hubble: observability ---
 hubble:
   enabled: true
+  tls:
+    enabled: true
+    auto:
+      enabled: true
+      # Cilium chart expects "cronJob" (capital J). Using "cronjob" skips certgen resources
+      # and leaves Hubble Relay waiting for hubble-relay-client-certs forever.
+      method: cronJob
+      # Keep the default 1-year lifetime; longer self-signed certs break some macOS clients.
+      certValidityDuration: 365
   relay:
     enabled: true
   ui:
