@@ -8,9 +8,16 @@ When uploading books or performing automated ingest in Calibre-Web-Automated, ne
 2. **NFS Ownership**: If directory creation happens during the root phase or if the NFS server defaults to root ownership for new entries created by a root client, the resulting files are inaccessible to the app's unprivileged user.
 3. **Recursive Chown Limitation**: On large NFS volumes, the container's built-in `chown` logic might be skipped or fail due to `NETWORK_SHARE_MODE=true` or timeout, leaving subdirectories with incorrect ownership.
 
-## Proposed Solution
+## Implementation Status (2026-03-15 Update)
+**DEPRECATED**: The `initContainer` approach was found to be unreliable due to NFS `root_squash` restrictions and potential performance issues on large libraries.
 
-### 1. Add Permission-Fixing Init Container
+**FINAL DECISION**: Fixed via NFS Server-side configuration (`all_squash`).
+- **NFS Server Export**: `/storage/calibre *(rw,sync,no_subtree_check,all_squash,anonuid=1000,anongid=1000)`
+- **Reasoning**: This ensures all files, including those created by background automated processes, are consistently owned by UID 1000, regardless of the container's internal UID transitions.
+- **Manual Cleanup**: Permissions were manually normalized on the NFS host using `chown -R 1000:1000 /storage/calibre`.
+
+## Original Proposed Solution (Retained for history)
+... (rest of the original content) ...
 Add an `initContainer` to the `calibre-web` deployment that explicitly sets ownership of the library and config directories to `1000:1000`. This ensures that even if the NFS server or provisioner created them as root, they are corrected before the app starts.
 
 ### 2. Update Pod Security Context
