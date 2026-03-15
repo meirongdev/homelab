@@ -2,7 +2,7 @@
 
 This project manages a home laboratory environment: infrastructure provisioning on Proxmox, Kubernetes cluster setup using K3s, application deployment via Helm, GitOps with ArgoCD, and secrets management with HashiCorp Vault + External Secrets Operator.
 
-Network note: both clusters now use Cilium for the local data plane and Gateway API ingress, while inter-cluster connectivity still rides on Tailscale. ClusterMesh control-plane pieces are prepared in Cilium values, but the mesh still needs an explicit `cilium clustermesh enable/connect` step before cross-cluster service discovery is active.
+Network note: both clusters now use Cilium for the local data plane and Gateway API ingress, while inter-cluster connectivity still rides on Tailscale. After rebuilding either cluster, re-run `just connect-clustermesh <homelab-ts-ip>:32379 <oracle-ts-ip>:32379` from `k8s/helm/` or `cloud/oracle/` so ClusterMesh refreshes the remote config and CA bundle over the Tailscale NodePort path.
 
 ## Documentation Index
 

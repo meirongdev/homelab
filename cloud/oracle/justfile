@@ -24,18 +24,49 @@ setup-tailscale authkey:
 
 # Deploy Cilium (replaces Flannel as CNI)
 deploy-cilium:
+    # Reset release values so old manual --set flags cannot poison future upgrades, then
+    # drop stale Hubble cert secrets so certgen re-issues them for the current cluster name.
+    kubectl --context {{ctx}} -n kube-system delete secret hubble-server-certs hubble-relay-client-certs --ignore-not-found
     helm repo add cilium https://helm.cilium.io/ || true
     helm repo update cilium
     helm upgrade --install cilium cilium/cilium \
         --namespace kube-system \
         --kube-context {{ctx}} \
         --values values/cilium-values.yaml \
+        --reset-values \
         --wait \
         --timeout 10m
+    bash -euc 'for _ in $(seq 1 24); do \
+        if kubectl --context {{ctx}} -n kube-system get job -l k8s-app=hubble-generate-certs -o name | grep -q .; then \
+            kubectl --context {{ctx}} -n kube-system wait --for=condition=complete job -l k8s-app=hubble-generate-certs --timeout=5m; \
+            exit 0; \
+        fi; \
+        sleep 5; \
+    done; \
+    echo "Timed out waiting for hubble-generate-certs job creation" >&2; \
+    exit 1'
+    kubectl --context {{ctx}} -n kube-system get secret hubble-server-certs hubble-relay-client-certs
+    kubectl --context {{ctx}} -n kube-system rollout status deployment/hubble-relay --timeout=5m
+    kubectl --context {{ctx}} exec -n kube-system ds/cilium -c cilium-agent -- cilium status --brief
 
 # Cilium 状态检查
 cilium-status:
     kubectl --context {{ctx}} exec -n kube-system ds/cilium -c cilium-agent -- cilium status --brief
+
+# Show bidirectional ClusterMesh / KVStoreMesh status
+clustermesh-status:
+    cilium clustermesh status --context k3s-homelab --wait
+    cilium clustermesh status --context oracle-k3s --wait
+
+# Reconnect ClusterMesh over Tailscale NodePort after rebuilding either cluster
+connect-clustermesh homelab_endpoint oracle_endpoint:
+    cilium clustermesh connect \
+        --context k3s-homelab \
+        --destination-context oracle-k3s \
+        --source-endpoint {{homelab_endpoint}} \
+        --destination-endpoint {{oracle_endpoint}} \
+        --allow-mismatching-ca
+    just clustermesh-status
 
 # Hubble UI 端口转发
 hubble-ui:

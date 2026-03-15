@@ -255,7 +255,8 @@ Only do this after ingress is already stable.
 ```bash
 cilium clustermesh enable --context k3s-homelab --service-type NodePort
 cilium clustermesh enable --context oracle-k3s --service-type NodePort
-cilium clustermesh connect --context k3s-homelab --destination-context oracle-k3s
+cd k8s/helm
+just connect-clustermesh 100.94.186.7:32379 100.107.166.37:32379
 ```
 
 ### 6.3 Validate mesh status
