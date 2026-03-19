@@ -77,3 +77,9 @@
 - [x] Cilium ClusterMesh connect + failover validation ✅ 2026-03-08
 - [x] homelab Cilium Gateway 恢复后双集群统一 cutover 验证 ✅ 2026-03-08
 - [ ] Vault HA + auto-unseal
+
+### ❌ 已取消
+
+- ~~Cilium External Workloads — NAS 纳入 Cilium 网络~~ (取消，2026-03-19)
+  - 原因：`CiliumExternalWorkload` CRD 及 `cilium external-workloads` CLI 命令已从 Cilium 1.15+ Helm chart 中移除，Cilium 1.19.1 不再支持此功能。
+  - 若需限制 NFS 访问，可改用 `CiliumNetworkPolicy` + `fromCIDR: 192.168.50.106/32` 的轻量方案，无需在 NAS 上安装 Cilium agent。
