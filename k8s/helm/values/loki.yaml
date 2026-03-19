@@ -7,6 +7,14 @@ loki:
   storage:
     type: filesystem
   
+  compactor:
+    retention_enabled: true
+    working_directory: /var/loki/compactor
+    delete_request_store: filesystem
+    compaction_interval: 10m
+    retention_delete_delay: 2h
+    retention_delete_worker_count: 150
+
   limits_config:
     retention_period: 168h
     otlp_config:
