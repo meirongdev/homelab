@@ -1,6 +1,6 @@
 # Homelab Project TODO
 
-> Last updated: 2026-03-08
+> Last updated: 2026-03-19
 
 ## Phase 1: Foundation ✅
 
@@ -39,7 +39,7 @@
 - [x] **Kopia 自动快照**: P0 数据 (Vault / ZITADEL PG) 每日快照 + P1 数据每周快照
 - [x] **oracle-k3s 备份接入**: pg_dump CronJob + SQLite 文件级快照 (Miniflux / KaraKeep / Timeslot)
 - [ ] **恢复演练**: 验证 Vault 恢复 SOP
-- [ ] **Loki 日志保留**: 配置 compaction 与 retention policies
+- [x] **Loki 日志保留**: ✅ 2026-03-19 compactor + retention 168h 已启用
 - [ ] **Alertmanager**: 告警规则 → Gotify → Telegram 通知链路
 - [x] **oracle-k3s Cilium**: 从 Flannel 迁移到 Cilium，统一双集群数据面
 - [x] **Uptime Kuma SSO 修复**: maxredirects=0 + accepted_statuscodes 300-399
@@ -62,8 +62,8 @@
 ### 🟢 Quick Wins
 
 - [x] Uptime Kuma SSO 监控修复 (maxredirects config)
-- [ ] Loki retention 配置 (values.yaml update)
-- [ ] Grafana 旧 dashboard 清理
+- [x] Loki retention 配置 (values.yaml update) ✅ 2026-03-19
+- [x] Grafana 旧 dashboard 清理 ✅ 2026-03-19 禁用 AIX/Darwin/proxy dashboard
 
 ### 🟡 Medium Effort
 
