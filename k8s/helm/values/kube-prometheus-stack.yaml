@@ -162,6 +162,11 @@ nodeExporter:
     limits:
       cpu: 200m
       memory: 128Mi
+  operatingSystem:
+    aix:
+      enabled: false       # AIX 节点，不适用
+    darwin:
+      enabled: false       # macOS 节点，不适用
 
 prometheusOperator:
   resources:
@@ -171,6 +176,9 @@ prometheusOperator:
     limits:
       cpu: 500m
       memory: 256Mi
+
+kubeProxy:
+  enabled: false             # Cilium kube-proxy replacement，无 kube-proxy 指标
 
 # 如果不需要监控 etcd、scheduler 等控制平面组件，可以禁用
 kubeEtcd:
