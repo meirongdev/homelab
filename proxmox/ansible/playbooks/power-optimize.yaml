@@ -1,0 +1,161 @@
+---
+# Power optimization playbook for Proxmox host (AMD Ryzen 5 5600H)
+# Reduces CPU temperature and power consumption
+- name: Power & thermal optimization
+  hosts: proxmox
+  tasks:
+    # ── 诊断：安装 lm-sensors 并采集温度 ──
+    - name: Install lm-sensors
+      apt:
+        name: lm-sensors
+        state: present
+        update_cache: true
+
+    - name: Detect sensors
+      command: sensors-detect --auto
+      changed_when: false
+
+    - name: Read current temperatures
+      command: sensors
+      register: sensors_output
+      changed_when: false
+
+    - name: Show temperatures
+      debug:
+        var: sensors_output.stdout_lines
+
+    # ── 优化1：禁用 Turbo Boost（降温效果最明显）──
+    - name: Disable AMD Turbo Boost
+      shell: echo 0 > /sys/devices/system/cpu/cpufreq/boost
+      changed_when: true
+
+    - name: Persist turbo boost disable via sysctl-like service
+      copy:
+        dest: /etc/systemd/system/disable-turbo-boost.service
+        content: |
+          [Unit]
+          Description=Disable CPU Turbo Boost
+          After=multi-user.target
+
+          [Service]
+          Type=oneshot
+          ExecStart=/bin/sh -c 'echo 0 > /sys/devices/system/cpu/cpufreq/boost'
+          RemainAfterExit=yes
+
+          [Install]
+          WantedBy=multi-user.target
+        mode: "0644"
+
+    - name: Enable disable-turbo-boost service
+      systemd:
+        name: disable-turbo-boost
+        enabled: true
+        daemon_reload: true
+
+    # ── 优化2：PCIe ASPM 省电模式 ──
+    - name: Check current ASPM policy
+      command: cat /sys/module/pcie_aspm/parameters/policy
+      register: aspm_current
+      changed_when: false
+
+    - name: Show current ASPM
+      debug:
+        var: aspm_current.stdout
+
+    - name: Set ASPM to powersupersave in GRUB
+      lineinfile:
+        path: /etc/default/grub
+        regexp: '^GRUB_CMDLINE_LINUX_DEFAULT='
+        line: 'GRUB_CMDLINE_LINUX_DEFAULT="quiet pcie_aspm=powersupersave"'
+        backup: true
+      register: grub_updated
+
+    - name: Update GRUB
+      command: update-grub
+      when: grub_updated.changed
+
+    # ── 优化3：powertop auto-tune（持久化）──
+    - name: Create powertop auto-tune service
+      copy:
+        dest: /etc/systemd/system/powertop-autotune.service
+        content: |
+          [Unit]
+          Description=PowerTOP auto-tune
+          After=multi-user.target
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/sbin/powertop --auto-tune
+          RemainAfterExit=yes
+
+          [Install]
+          WantedBy=multi-user.target
+        mode: "0644"
+
+    - name: Enable and start powertop auto-tune
+      systemd:
+        name: powertop-autotune
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    # ── 优化4：降低 KSM 扫描频率（减少 CPU 开销）──
+    - name: Reduce KSM scan frequency (sleep_millisecs)
+      sysctl:
+        name: vm.dirty_writeback_centisecs
+        value: "1500"
+        state: present
+        sysctl_file: /etc/sysctl.d/99-power-save.conf
+
+    - name: Slow down KSM scanning
+      shell: echo 200 > /sys/kernel/mm/ksm/sleep_millisecs
+      changed_when: true
+
+    - name: Persist KSM sleep via systemd service
+      copy:
+        dest: /etc/systemd/system/ksm-tuning.service
+        content: |
+          [Unit]
+          Description=Tune KSM sleep interval
+          After=multi-user.target
+
+          [Service]
+          Type=oneshot
+          ExecStart=/bin/sh -c 'echo 200 > /sys/kernel/mm/ksm/sleep_millisecs'
+          RemainAfterExit=yes
+
+          [Install]
+          WantedBy=multi-user.target
+        mode: "0644"
+
+    - name: Enable KSM tuning service
+      systemd:
+        name: ksm-tuning
+        enabled: true
+        daemon_reload: true
+
+    # ── 验证 ──
+    - name: Verify turbo boost disabled
+      command: cat /sys/devices/system/cpu/cpufreq/boost
+      register: turbo_status
+      changed_when: false
+
+    - name: Verify CPU frequencies (should be lower now)
+      shell: cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq | sort -n
+      register: freq_status
+      changed_when: false
+
+    - name: Read temperatures after optimization
+      command: sensors
+      register: sensors_after
+      changed_when: false
+
+    - name: "=== Optimization Results ==="
+      debug:
+        msg:
+          - "Turbo Boost: {{ 'DISABLED ✓' if turbo_status.stdout == '0' else 'STILL ENABLED ✗' }}"
+          - "CPU frequencies (KHz): {{ freq_status.stdout_lines }}"
+          - "Temperatures: {{ sensors_after.stdout_lines }}"
+          - ""
+          - "NOTE: ASPM powersupersave requires reboot to take effect"
+          - "RECOMMENDATION: Reduce VM k8s-node memory from 15GB to 10-11GB to eliminate swap pressure"

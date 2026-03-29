@@ -13,3 +13,7 @@ install-updates:
 # Download Ubuntu 24.04 LTS cloud image to Proxmox hosts
 download-cloud-image:
     ansible-playbook playbooks/download-cloud-image.yaml
+
+# 优化电源和散热（禁用 turbo boost、ASPM 省电、powertop 自动调优）
+power-optimize:
+    ansible-playbook playbooks/power-optimize.yaml
