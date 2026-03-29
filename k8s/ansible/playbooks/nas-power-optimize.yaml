@@ -1,0 +1,113 @@
+---
+# Power optimization for NAS (storage-node-1, Intel Celeron J4105 + ZFS)
+# NOTE: HDD spin-down/APM is intentionally skipped — disks are in a ZFS pool.
+#       ZFS background activity (scrub, checksum) would cause constant wakeups,
+#       accelerating disk wear and causing NFS client timeouts.
+- name: NAS power & thermal optimization
+  hosts: storage_nodes
+  become: true
+  tasks:
+    # ── 诊断 ──
+    - name: Install lm-sensors and powertop
+      apt:
+        name:
+          - lm-sensors
+          - powertop
+        state: present
+        update_cache: true
+
+    - name: Detect sensors
+      command: sensors-detect --auto
+      changed_when: false
+
+    - name: Read current temperatures
+      command: sensors
+      register: sensors_before
+      changed_when: false
+
+    - name: Show baseline temperatures
+      debug:
+        var: sensors_before.stdout_lines
+
+    # ── 优化1：powertop auto-tune（USB/PCIe 省电）──
+    - name: Create powertop auto-tune service
+      copy:
+        dest: /etc/systemd/system/powertop-autotune.service
+        content: |
+          [Unit]
+          Description=PowerTOP auto-tune
+          After=multi-user.target
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/sbin/powertop --auto-tune
+          RemainAfterExit=yes
+
+          [Install]
+          WantedBy=multi-user.target
+        mode: "0644"
+
+    - name: Enable and start powertop auto-tune
+      systemd:
+        name: powertop-autotune
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    # ── 优化2：限制 ZFS ARC 内存（默认最多吃 50% RAM = 1.8GB）──
+    # 限制为 512MB，减少内存压力（NFS 用途不需要太大缓存）
+    - name: Set ZFS ARC max to 512MB
+      copy:
+        dest: /etc/modprobe.d/zfs.conf
+        content: |
+          # Limit ZFS ARC to 512MB (default: up to 50% of RAM)
+          # NAS NFS use case doesn't need a large ARC
+          options zfs zfs_arc_max=536870912
+        mode: "0644"
+
+    - name: Apply ZFS ARC limit immediately
+      shell: echo 536870912 > /sys/module/zfs/parameters/zfs_arc_max
+      changed_when: true
+
+    - name: Check current ARC usage
+      shell: "awk '/^size/ {printf \"ARC size: %.0f MB\\n\", $3/1024/1024}' /proc/spl/kstat/zfs/arcstats 2>/dev/null || echo 'ARC stats not available'"
+      register: arc_stats
+      changed_when: false
+
+    - name: Show ARC stats
+      debug:
+        var: arc_stats.stdout
+
+    # ── 优化3：移除 snapd（NAS 不需要，会定期唤醒）──
+    - name: Check if snapd is installed
+      shell: dpkg -l snapd 2>/dev/null | grep -q "^ii" && echo "installed" || echo "not installed"
+      register: snapd_status
+      changed_when: false
+
+    - name: Remove snapd
+      apt:
+        name: snapd
+        state: absent
+        purge: true
+      when: snapd_status.stdout == "installed"
+
+    # ── 验证 ──
+    - name: Read temperatures after optimization
+      command: sensors
+      register: sensors_after
+      changed_when: false
+
+    - name: Check memory after ARC limit
+      shell: "free -h && echo '' && awk '/^size/ {printf \"ZFS ARC: %.0f MB\\n\", $3/1024/1024}' /proc/spl/kstat/zfs/arcstats 2>/dev/null"
+      register: mem_after
+      changed_when: false
+
+    - name: "=== Optimization Results ==="
+      debug:
+        msg:
+          - "Temperatures: {{ sensors_after.stdout_lines }}"
+          - "Memory & ARC: {{ mem_after.stdout_lines }}"
+          - "snapd: {{ 'removed' if snapd_status.stdout == 'installed' else 'was not installed' }}"
+          - ""
+          - "NOTE: HDD spin-down skipped intentionally (ZFS pool)"
+          - "NOTE: ZFS ARC limit takes full effect after next reboot"
