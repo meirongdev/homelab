@@ -45,6 +45,15 @@ spec:
       labels:
         app: cloudflared
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: cloudflared
+                topologyKey: kubernetes.io/hostname
       containers:
         - name: cloudflared
           image: cloudflare/cloudflared@sha256:404528c1cd63c3eb882c257ae524919e4376115e6fe57befca8d603656a91a4c  # 当前运行 digest 固定（原 :latest）
@@ -105,3 +114,16 @@ spec:
     - port: 2000
       targetPort: 2000
       name: metrics
+---
+# Keep at least one cloudflared replica available during voluntary disruptions.
+# Critical because all *.meirong.dev ingress on oracle-k3s depends on this tunnel.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cloudflared
+  namespace: cloudflare
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: cloudflared

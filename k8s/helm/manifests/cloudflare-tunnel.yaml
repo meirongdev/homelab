@@ -13,6 +13,15 @@ spec:
       labels:
         app: cloudflared
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: cloudflared
+                topologyKey: kubernetes.io/hostname
       containers:
         - name: cloudflared
           image: cloudflare/cloudflared@sha256:a5b5e6fd9a372f054b9a843c219bfbcdceb54691605312a8b1ee72978bdf1aa1
@@ -73,3 +82,17 @@ spec:
     - port: 2000
       targetPort: 2000
       name: metrics
+---
+# Keep at least one cloudflared replica available during voluntary disruptions
+# (node drain, rolling update). Critical because all *.meirong.dev ingress
+# depends on this tunnel.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cloudflared
+  namespace: cloudflare
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: cloudflared
