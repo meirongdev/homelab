@@ -94,6 +94,12 @@ spec:
         key: secret/homelab/zitadel
         property: db-password
 ---
+# NOTE: Bitnami moved all free images to `bitnamilegacy/*` in 2025-08; original
+# `bitnami/*` images are now paywalled. `bitnamilegacy` images still pull but will
+# not get future CVE patches. Plan to migrate off Bitnami — options:
+#   1. CloudNativePG operator (better: backup, failover, PITR) — recommended
+#   2. Official `postgres:16-alpine` in a plain StatefulSet
+# Any migration needs a pg_dump/pg_restore cycle; not trivial — track in TODO.
 apiVersion: helm.cattle.io/v1
 kind: HelmChart
 metadata:
