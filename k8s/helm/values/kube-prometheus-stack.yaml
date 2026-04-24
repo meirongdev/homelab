@@ -367,7 +367,7 @@ alertmanager:
   alertmanagerSpec:
     resources:
       requests:
-        cpu: 50m             
+        cpu: 50m
         memory: 64Mi
       limits:
         cpu: 200m
@@ -380,6 +380,15 @@ alertmanager:
           resources:
             requests:
               storage: 1Gi
+    # Pick up AlertmanagerConfig CRDs labeled alertmanagerConfig=homelab
+    # (see manifests/alertmanager-config.yaml). Default selector = nothing picked up.
+    alertmanagerConfigSelector:
+      matchLabels:
+        alertmanagerConfig: homelab
+    # "None" lets AlertmanagerConfig routes match alerts cross-namespace.
+    # Default "OnNamespace" prepends a namespace= matcher that filters out most alerts.
+    alertmanagerConfigMatcherStrategy:
+      type: None
 
 # 默认会安装很多 ServiceMonitors，如果资源有限可以禁用一些
 kubeStateMetrics:

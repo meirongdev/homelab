@@ -1,0 +1,128 @@
+---
+# Supplementary PrometheusRules for homelab-specific alerts.
+# kube-prometheus-stack ships 150+ default alerts; these cover gaps:
+#   - NFS storage node specifically (not just kubelet-level PVC Pending)
+#   - Vault sealed state (blocks ESO → blocks secret sync → cascades)
+#   - Backup CronJobs not running on schedule
+# Label release=kube-prometheus-stack required for Prometheus Operator to pick up.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: homelab-infrastructure
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: storage-nodes
+      rules:
+        - alert: NFSStorageNodeDown
+          expr: up{job="node-exporter-metal-nodes", instance="192.168.50.106:9100"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            component: storage
+          annotations:
+            summary: "NFS storage node 192.168.50.106 is unreachable"
+            description: |
+              node-exporter on storage-node-1 (192.168.50.106) has been down for more than 2 minutes.
+              Every PVC using nfs-client StorageClass is at risk: Vault, Kopia, Grafana, Loki, Prometheus,
+              Zitadel DB, Calibre-Web, Gotify.
+              Check: `ping 192.168.50.106` from k8s-node, then NFS service on the NAS.
+
+        - alert: ProxmoxHostDown
+          expr: up{job="node-exporter-metal-nodes", instance="192.168.50.4:9100"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            component: infrastructure
+          annotations:
+            summary: "Proxmox host 192.168.50.4 is unreachable"
+            description: |
+              The Proxmox host hosting the homelab K3s VM has been down for 2+ minutes.
+              The entire homelab cluster may be inaccessible.
+
+    - name: vault
+      rules:
+        - alert: VaultSealed
+          expr: vault_core_unsealed == 0
+          for: 1m
+          labels:
+            severity: critical
+            component: vault
+          annotations:
+            summary: "Vault is sealed — ESO cannot sync secrets"
+            description: |
+              Vault has been sealed for 1+ minute. All ExternalSecrets will fail until unsealed.
+              Run: `just vault-unseal` (from k8s/helm/) or `kubectl exec -n vault vault-0 -- vault operator unseal <key>`
+
+        - alert: VaultUnreachable
+          expr: up{job=~".*vault.*"} == 0
+          for: 5m
+          labels:
+            severity: warning
+            component: vault
+          annotations:
+            summary: "Vault is unreachable from Prometheus"
+            description: "Prometheus has been unable to scrape Vault for 5+ minutes."
+
+    - name: backups
+      rules:
+        - alert: KopiaBackupNotRunning
+          expr: |
+            (time() - kube_cronjob_status_last_schedule_time{cronjob=~".*backup.*"}) > 32 * 3600
+          for: 1h
+          labels:
+            severity: warning
+            component: backup
+          annotations:
+            summary: "Backup CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} has not run in 32h"
+            description: |
+              Expected daily backups (02:00/03:00/03:30 UTC). If this fires, the scheduler missed runs
+              or the CronJob is suspended. Check: `kubectl get cronjob -A` and recent Job status.
+
+        - alert: BackupJobFailed
+          expr: kube_job_failed{job_name=~".*backup.*"} > 0
+          for: 5m
+          labels:
+            severity: warning
+            component: backup
+          annotations:
+            summary: "Backup Job {{ $labels.job_name }} failed"
+            description: "Inspect pod logs: `kubectl logs -n {{ $labels.namespace }} job/{{ $labels.job_name }}`"
+
+    - name: workloads
+      rules:
+        - alert: PodStuckInUnknown
+          expr: kube_pod_status_phase{phase="Unknown"} == 1
+          for: 10m
+          labels:
+            severity: warning
+            component: workload
+          annotations:
+            summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} has been in Unknown state for 10m"
+            description: |
+              Kubelet lost contact with the pod. Usually resolves on its own; if persistent, delete the pod
+              so the controller recreates it.
+
+        - alert: PVCPendingTooLong
+          expr: kube_persistentvolumeclaim_status_phase{phase="Pending"} == 1
+          for: 10m
+          labels:
+            severity: warning
+            component: storage
+          annotations:
+            summary: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} stuck Pending"
+            description: "Storage class may be misconfigured or backing storage is unreachable."
+
+        - alert: CloudflaredAllReplicasDown
+          expr: kube_deployment_status_replicas_available{deployment="cloudflared"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            component: ingress
+          annotations:
+            summary: "All cloudflared replicas are down — external ingress is broken"
+            description: |
+              No cloudflared replicas are available. All `*.meirong.dev` services are inaccessible
+              from the internet.
