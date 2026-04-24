@@ -126,6 +126,39 @@ prometheus:
 
 alertmanager:
   enabled: true
+  config:
+    global:
+      resolve_timeout: 5m
+    inhibit_rules:
+      - equal: [namespace, alertname]
+        source_matchers: [severity = critical]
+        target_matchers: [severity =~ "warning|info"]
+      - equal: [namespace, alertname]
+        source_matchers: [severity = warning]
+        target_matchers: [severity = info]
+      - equal: [namespace]
+        source_matchers: [alertname = InfoInhibitor]
+        target_matchers: [severity = info]
+      - target_matchers: [alertname = InfoInhibitor]
+    route:
+      group_by: [namespace]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 12h
+      receiver: "null"
+      routes:
+        - matchers: [alertname = "Watchdog"]
+          receiver: "null"
+        - matchers: [severity =~ "critical|warning"]
+          receiver: gotify
+    receivers:
+      - name: "null"
+      - name: gotify
+        webhook_configs:
+          - url: "http://alertmanager-gotify-bridge.monitoring.svc:8080/"
+            send_resolved: true
+    templates:
+      - /etc/alertmanager/config/*.tmpl
   alertmanagerSpec:
     resources:
       requests:
