@@ -2,6 +2,18 @@ namespace := "monitoring"
 ctx := "k3s-homelab"
 set dotenv-load
 
+# Pinned Helm chart versions — bump deliberately after reviewing release notes.
+# Match what is currently deployed on the cluster (see `helm list -A`).
+prometheus_stack_version := "82.10.1"
+loki_version             := "6.53.0"
+tempo_version            := "1.24.4"
+otel_collector_version   := "0.147.1"
+cilium_version           := "1.19.1"
+vault_version            := "0.32.0"
+eso_version              := "2.1.0"
+nfs_provisioner_version  := "4.0.18"
+postgresql_version       := "16.4.5"
+
 add-repos:
     helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
     helm repo add grafana https://grafana.github.io/helm-charts
@@ -38,6 +50,7 @@ deploy-prometheus: create-grafana-secret
     helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
         --namespace {{namespace}} \
         --kube-context {{ctx}} \
+        --version {{prometheus_stack_version}} \
         --values values/kube-prometheus-stack.yaml \
         --version {{kube_prometheus_stack_version}} \
         --wait \
@@ -48,6 +61,7 @@ deploy-prometheus-nowait: create-grafana-secret
     helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
         --namespace {{namespace}} \
         --kube-context {{ctx}} \
+        --version {{prometheus_stack_version}} \
         --values values/kube-prometheus-stack.yaml \
         --version {{kube_prometheus_stack_version}} \
         --timeout 15m
@@ -60,6 +74,7 @@ deploy-loki:
     helm upgrade --install loki grafana/loki \
         --namespace {{namespace}} \
         --kube-context {{ctx}} \
+        --version {{loki_version}} \
         --values values/loki.yaml \
         --wait \
         --timeout 10m
@@ -82,6 +97,7 @@ deploy-tempo:
     helm upgrade --install tempo grafana/tempo \
         --namespace {{namespace}} \
         --kube-context {{ctx}} \
+        --version {{tempo_version}} \
         --values values/tempo.yaml \
         --wait \
         --timeout 10m
@@ -91,6 +107,7 @@ deploy-otel-collector: add-repos
     helm upgrade --install opentelemetry-collector open-telemetry/opentelemetry-collector \
         --namespace {{namespace}} \
         --kube-context {{ctx}} \
+        --version {{otel_collector_version}} \
         --values values/opentelemetry-collector.yaml \
         --wait \
         --timeout 5m
@@ -281,7 +298,7 @@ deploy-cilium: add-repos
     helm upgrade --install cilium cilium/cilium \
         --namespace kube-system \
         --kube-context "$ctx" \
-        --version 1.19.1 \
+        --version {{cilium_version}} \
         --values ../cilium/values.yaml \
         "${ca_args[@]}" \
         --reset-values \
@@ -401,6 +418,7 @@ setup-nfs-provisioner: add-repos
     helm upgrade --install nfs-client nfs-subdir-external-provisioner/nfs-subdir-external-provisioner \
       --namespace default \
       --kube-context {{ctx}} \
+      --version {{nfs_provisioner_version}} \
       --values values/nfs-values.yaml
 
 # Update Prometheus stack
@@ -416,6 +434,7 @@ setup-postgres: add-repos
     helm upgrade --install postgresql bitnami/postgresql -n database \
     --create-namespace \
     --kube-context {{ctx}} \
+    --version {{postgresql_version}} \
     -f values/postgresql-values.yaml
 
 # get postgres auto-generated password
@@ -431,6 +450,7 @@ deploy-vault:
     helm upgrade --install vault hashicorp/vault \
         --namespace {{vault_ns}} \
         --kube-context {{ctx}} \
+        --version {{vault_version}} \
         --values values/vault-values.yaml
 
 # 初始化 Vault (仅第一次运行)
@@ -452,6 +472,7 @@ deploy-eso:
         --namespace external-secrets \
         --create-namespace \
         --kube-context {{ctx}} \
+        --version {{eso_version}} \
         --values values/external-secrets-values.yaml
 
 # 配置 Vault 与 ESO 的连接 (需要先 init)
@@ -581,7 +602,7 @@ vault-setup-auto-unseal:
     kubectl --context {{ctx}} create secret generic vault-auto-unseal -n {{vault_ns}} \
         --from-literal=unseal-key="$UNSEAL_KEY" --dry-run=client -o yaml | kubectl --context {{ctx}} apply -f -
     echo "⏳ Upgrading Vault Helm chart with auto-unseal postStart hook..."
-    helm upgrade vault hashicorp/vault -n {{vault_ns}} --kube-context {{ctx}} -f values/vault-values.yaml
+    helm upgrade vault hashicorp/vault -n {{vault_ns}} --kube-context {{ctx}} --version {{vault_version}} -f values/vault-values.yaml
     echo "✅ Vault auto-unseal configured. Next restart will unseal automatically."
 
 # 重启后健康检查（快速诊断断电恢复状态）
