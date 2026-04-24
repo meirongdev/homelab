@@ -155,7 +155,7 @@ alertmanager:
       - name: "null"
       - name: gotify
         webhook_configs:
-          - url: "http://alertmanager-gotify-bridge.monitoring.svc:8080/"
+          - url: "http://alertmanager-gotify-bridge.monitoring.svc:8080/gotify_webhook"
             send_resolved: true
     templates:
       - /etc/alertmanager/config/*.tmpl
