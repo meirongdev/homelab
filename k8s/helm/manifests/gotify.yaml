@@ -153,13 +153,13 @@ spec:
     spec:
       containers:
         - name: bridge
-          image: ndrpnt/alertmanager-gotify:latest
+          image: ghcr.io/druggeri/alertmanager_gotify_bridge:latest
           ports:
             - containerPort: 8080
               name: http
           env:
-            - name: GOTIFY_URL
-              value: "https://notify.meirong.dev"
+            - name: GOTIFY_ENDPOINT
+              value: "https://notify.meirong.dev/message"
             - name: GOTIFY_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -173,14 +173,12 @@ spec:
               cpu: 100m
               memory: 64Mi
           livenessProbe:
-            httpGet:
-              path: /healthz
+            tcpSocket:
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 10
           readinessProbe:
-            httpGet:
-              path: /healthz
+            tcpSocket:
               port: 8080
             initialDelaySeconds: 3
             periodSeconds: 5
