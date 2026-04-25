@@ -226,6 +226,13 @@ spec:
               persistentVolumeClaim:
                 claimName: kopia-config
                 readOnly: true
+            # Kopia repository storage (filesystem backend at /repository).
+            # The from-config repository.config points at /repository, so the
+            # client must see the same RWX NFS path the server uses. Kopia is
+            # concurrency-safe across multiple clients on the same repo.
+            - name: kopia-repository
+              persistentVolumeClaim:
+                claimName: kopia-repository
 
           initContainers:
             # Step 1: Vault file-level backup
@@ -414,6 +421,8 @@ spec:
                 - name: kopia-config
                   mountPath: /app/config
                   readOnly: true
+                - name: kopia-repository
+                  mountPath: /repository
               resources:
                 requests:
                   cpu: 100m
