@@ -375,9 +375,15 @@ spec:
                 - -c
                 - |
                   set -e
+                  # `connect from-config` writes a temp file next to --file,
+                  # so the source must be in a writable dir. The kopia-config
+                  # PVC is mounted read-only (and shared with the server), so
+                  # copy the repository.config into /tmp before connecting.
+                  mkdir -p /tmp/kopia-config
+                  cp /app/config/repository.config /tmp/kopia-config/repository.config
                   echo "Connecting to kopia repository..."
                   kopia repository connect from-config \
-                    --file=/app/config/repository.config \
+                    --file=/tmp/kopia-config/repository.config \
                     --cache-directory=/tmp/kopia-cache \
                     --override-username=backup \
                     --override-hostname=homelab
