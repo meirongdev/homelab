@@ -1,4 +1,175 @@
 ---
+# Static PV/PVC mirrors of source data NFS subpaths into the kopia namespace.
+# K8s PVC references in pod spec are namespace-local, so the backup CronJob
+# (in `kopia`) cannot mount the original PVCs that live in `vault` /
+# `personal-services`. We instead create cluster-scoped PVs that point at the
+# same NFS paths the dynamic provisioner allocated, and bind them to local
+# PVCs via `volumeName`. Reclaim policy is Retain so deleting these objects
+# never touches the source data on NFS.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: kopia-source-vault-data
+  labels:
+    app: kopia-backup
+    source: vault-data-vault-0
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions:
+    - nfsvers=4.1
+  nfs:
+    server: 192.168.50.106
+    path: /storage/nfs/k8s/vault-data-vault-0-pvc-b7460c9f-2c6f-407b-a1ed-ef45a11a2c1d
+  claimRef:
+    namespace: kopia
+    name: kopia-source-vault-data
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: kopia-source-vault-audit
+  labels:
+    app: kopia-backup
+    source: vault-audit-vault-0
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions:
+    - nfsvers=4.1
+  nfs:
+    server: 192.168.50.106
+    path: /storage/nfs/k8s/vault-audit-vault-0-pvc-21f67c95-a7c9-4390-8deb-526ee6c931ed
+  claimRef:
+    namespace: kopia
+    name: kopia-source-vault-audit
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: kopia-source-calibre-config
+  labels:
+    app: kopia-backup
+    source: personal-services-calibre-web-automated-config
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions:
+    - nfsvers=4.1
+  nfs:
+    server: 192.168.50.106
+    path: /storage/nfs/k8s/personal-services-calibre-web-automated-config-pvc-17f5dbf3-9634-4fe7-880a-c06033095a19
+  claimRef:
+    namespace: kopia
+    name: kopia-source-calibre-config
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: kopia-source-gotify-data
+  labels:
+    app: kopia-backup
+    source: personal-services-gotify-data
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions:
+    - nfsvers=4.1
+  nfs:
+    server: 192.168.50.106
+    path: /storage/nfs/k8s/personal-services-gotify-data-pvc-44034e9a-54c7-4064-beaf-eac59671f1b7
+  claimRef:
+    namespace: kopia
+    name: kopia-source-gotify-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kopia-source-vault-data
+  namespace: kopia
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ""
+  volumeName: kopia-source-vault-data
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kopia-source-vault-audit
+  namespace: kopia
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ""
+  volumeName: kopia-source-vault-audit
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kopia-source-calibre-config
+  namespace: kopia
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ""
+  volumeName: kopia-source-calibre-config
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kopia-source-gotify-data
+  namespace: kopia
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ""
+  volumeName: kopia-source-gotify-data
+  resources:
+    requests:
+      storage: 1Gi
+---
 # CronJob: daily backup of homelab P0/P1 data to local Kopia server
 # P0: Vault (file-level), ZITADEL PostgreSQL (pg_dump)
 # P1: Calibre-Web config (file-level), Gotify (file-level)
@@ -28,25 +199,25 @@ spec:
             - name: staging
               emptyDir:
                 sizeLimit: 2Gi
-            # Vault data (NFS PVC)
+            # Vault data (mirrored NFS PV in kopia ns)
             - name: vault-data
               persistentVolumeClaim:
-                claimName: data-vault-0
+                claimName: kopia-source-vault-data
                 readOnly: true
             # Vault audit logs
             - name: vault-audit
               persistentVolumeClaim:
-                claimName: audit-vault-0
+                claimName: kopia-source-vault-audit
                 readOnly: true
-            # Calibre-Web automated config (NFS PVC)
+            # Calibre-Web automated config
             - name: calibre-config
               persistentVolumeClaim:
-                claimName: calibre-web-automated-config
+                claimName: kopia-source-calibre-config
                 readOnly: true
-            # Gotify data (NFS PVC)
+            # Gotify data
             - name: gotify-data
               persistentVolumeClaim:
-                claimName: gotify-data
+                claimName: kopia-source-gotify-data
                 readOnly: true
             # Kopia config (to reuse server's repo config)
             - name: kopia-config
@@ -89,24 +260,13 @@ spec:
             # Step 2: ZITADEL PostgreSQL dump (cross-namespace via service DNS)
             - name: zitadel-pg-dump
               image: postgres:15-alpine
-              env:
-                - name: PGPASSWORD
-                  valueFrom:
-                    secretKeyRef:
-                      name: kopia-secret
-                      key: password
               command:
                 - /bin/sh
                 - -c
                 - |
                   set -e
                   mkdir -p /staging/zitadel-postgres
-
-                  # Get ZITADEL DB password from the zitadel namespace secret
-                  # The pg_dump connects via the service DNS name
                   echo "Dumping ZITADEL PostgreSQL..."
-
-                  # Use the default zitadel db credentials (postgres superuser)
                   PGPASSWORD="${ZITADEL_DB_PASSWORD}" pg_dump \
                     -h zitadel-db-postgresql.zitadel.svc.cluster.local \
                     -U postgres \
@@ -116,11 +276,9 @@ spec:
                       echo "WARNING: ZITADEL pg_dump failed (DB credentials may need updating)"
                       echo "Skipping ZITADEL DB backup"
                     }
-
                   if [ -f /staging/zitadel-postgres/zitadel.dump ]; then
                     echo "ZITADEL dump done: $(du -sh /staging/zitadel-postgres/zitadel.dump | cut -f1)"
                   fi
-              envFrom: []
               env:
                 - name: ZITADEL_DB_PASSWORD
                   valueFrom:
