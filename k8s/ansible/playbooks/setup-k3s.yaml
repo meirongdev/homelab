@@ -34,6 +34,29 @@
       failed_when: false
 
 
+- name: Tune kernel limits for K8s workloads
+  hosts: k8s_masters
+  become: true
+  tasks:
+    # K3s + Cilium + workloads (kopia, fluent-bit, kubelet, containerd, ...)
+    # all create inotify watchers under uid=0. Ubuntu's default
+    # max_user_instances=128 is exhausted in practice, surfacing as
+    # "failed to create fsnotify watcher: too many open files".
+    - name: Drop sysctl tuning for inotify + file-max
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/30-k8s-inotify.conf
+        content: |
+          fs.inotify.max_user_instances = 8192
+          fs.inotify.max_user_watches = 524288
+          fs.inotify.max_queued_events = 32768
+        mode: "0644"
+      notify: Reload sysctl
+
+  handlers:
+    - name: Reload sysctl
+      ansible.builtin.command: sysctl --system
+      changed_when: false
+
 - name: Install K3s single node
   hosts: k8s_masters
   become: true
