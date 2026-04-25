@@ -198,7 +198,9 @@ spec:
           volumes:
             - name: staging
               emptyDir:
-                sizeLimit: 2Gi
+                # sized for: calibre-web config (~2.1Gi), zitadel pg_dump,
+                # vault data/audit (<1MiB), gotify (<1MiB) plus headroom
+                sizeLimit: 8Gi
             # Vault data (mirrored NFS PV in kopia ns)
             - name: vault-data
               persistentVolumeClaim:
