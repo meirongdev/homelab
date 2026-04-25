@@ -133,9 +133,17 @@
       changed_when: false
 
     - name: Read current CoreDNS Corefile
-      ansible.builtin.command: >-
-        k3s kubectl -n kube-system get configmap coredns
-        -o go-template={{ "{{ index .data \"Corefile\" }}" }}
+      ansible.builtin.command:
+        argv:
+          - k3s
+          - kubectl
+          - -n
+          - kube-system
+          - get
+          - configmap
+          - coredns
+          - -o
+          - jsonpath={.data.Corefile}
       register: coredns_corefile
       changed_when: false
 
