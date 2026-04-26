@@ -1,0 +1,69 @@
+# ArgoCD values for homelab K3s (single-node)
+# 取代旧的 stock manifest 部署（argo-cd/stable/manifests/install.yaml）。
+# Chart: argo/argo-cd (https://github.com/argoproj/argo-helm)
+#
+# 部署：cd k8s/helm && just deploy-argocd
+# 升级：编辑本文件后重跑 just deploy-argocd
+
+global:
+  domain: argocd.meirong.dev
+
+# Cloudflare Tunnel + Cilium Gateway 经 HTTP 路径转发，禁用 ArgoCD 自带 TLS。
+# 等价于旧的 argocd/install/argocd-cm-patch.yaml。
+configs:
+  params:
+    server.insecure: "true"
+  # 允许通过 cm.url 让 OAuth/回调走外部 URL（即使没用 SSO 也保留 URL 自洽）
+  cm:
+    url: https://argocd.meirong.dev
+
+# CRDs 由 chart 安装；旧 stock manifest 装的同名 CRD 在迁移时保留即可
+crds:
+  install: true
+  keep: true
+
+# --- 禁用未使用的可选组件 ---
+# Reason: SSO 已下线（CLAUDE.md），仓库内无 ApplicationSet CR，无 notifier 配置
+dex:
+  enabled: false
+notifications:
+  enabled: false
+applicationSet:
+  enabled: false
+
+# --- 资源声明 ---
+controller:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+repoServer:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+server:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+
+redis:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 96Mi
