@@ -11,6 +11,7 @@ add-repos:
     helm repo add external-secrets https://charts.external-secrets.io
     helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
     helm repo add cilium https://helm.cilium.io/
+    helm repo add argo https://argoproj.github.io/argo-helm
     helm repo update
 
 create-namespace:
@@ -345,22 +346,25 @@ vault-backup-keys:
 # ⬇️ ArgoCD GitOps ⬇️
 argocd_ns := "argocd"
 
+# Argo CD chart version — 调整前先 helm search repo argo/argo-cd 看最新
+argocd_chart_version := "7.7.13"
+
 # 一键安装 ArgoCD + 应用配置（幂等，可重复执行）
-deploy-argocd:
-    # 1. 创建 namespace（idempotent）
-    kubectl --context {{ctx}} create namespace {{argocd_ns}} --dry-run=client -o yaml | kubectl --context {{ctx}} apply -f -
-    # 2. 安装/更新 ArgoCD 核心组件（--server-side 避免 CRD 注释超限问题）
-    kubectl --context {{ctx}} apply -n {{argocd_ns}} -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml --server-side
-    @echo "⏳ Waiting for ArgoCD server to be ready..."
-    kubectl --context {{ctx}} rollout status deployment/argocd-server -n {{argocd_ns}} --timeout=8m
-    # 3. 禁用内置 TLS（由 Cloudflare Tunnel -> Gateway HTTP 路径处理）
-    # 注意：使用 --server-side 确保字段所有权，防止 install.yaml 重新 apply 后被覆盖
-    kubectl --context {{ctx}} apply --server-side -f ../../argocd/install/argocd-cm-patch.yaml
-    kubectl --context {{ctx}} rollout restart deployment/argocd-server -n {{argocd_ns}}
-    kubectl --context {{ctx}} rollout status deployment/argocd-server -n {{argocd_ns}} --timeout=3m
-    # 4. 注册 Gateway HTTPRoute（argocd namespace 已存在）
+# 改为官方 Helm chart 部署（k8s/helm/values/argocd-values.yaml）
+# 该 values 关闭了 dex/notifications/applicationSet 三个未使用组件、给所有组件加了 resources
+deploy-argocd: add-repos
+    # 1. 安装/升级 ArgoCD（CRD 由 chart 接管，重装时保留旧 CRD）
+    helm upgrade --install argocd argo/argo-cd \
+        --namespace {{argocd_ns}} \
+        --create-namespace \
+        --kube-context {{ctx}} \
+        --version {{argocd_chart_version}} \
+        --values values/argocd-values.yaml \
+        --wait \
+        --timeout 10m
+    # 2. 注册 Gateway HTTPRoute（argocd namespace 已存在）
     kubectl --context {{ctx}} apply -f manifests/gateway.yaml
-    # 5. 注册 AppProject + Applications
+    # 3. 注册 AppProject + Applications
     kubectl --context {{ctx}} apply -f ../../argocd/projects/homelab.yaml
     kubectl --context {{ctx}} apply -f ../../argocd/applications/
     @echo "✅ ArgoCD deployed! Access at https://argocd.meirong.dev"
@@ -460,9 +464,7 @@ post-restart-check:
     @echo "=== ArgoCD Insecure Mode (防止 redirect loop) ==="
     @kubectl --context {{ctx}} get configmap argocd-cmd-params-cm -n {{argocd_ns}} -o jsonpath='{.data.server\.insecure}' 2>/dev/null | grep -q "true" \
         && echo "✅ server.insecure=true (正常)" \
-        || (echo "❌ server.insecure 未设置！正在修复..." && \
-            kubectl --context {{ctx}} apply --server-side -f ../../argocd/install/argocd-cm-patch.yaml && \
-            kubectl --context {{ctx}} rollout restart deployment/argocd-server -n {{argocd_ns}})
+        || (echo "❌ server.insecure 未设置！请重跑 'just deploy-argocd' 让 Helm chart 重写 ConfigMap" && exit 1)
     @echo ""
     @echo "=== ArgoCD Apps ==="
     @kubectl --context {{ctx}} get applications -n {{argocd_ns}} 2>/dev/null
