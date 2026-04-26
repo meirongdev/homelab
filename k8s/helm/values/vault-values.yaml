@@ -1,5 +1,12 @@
 server:
   affinity: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
   ha:
     enabled: true
     replicas: 1
@@ -54,3 +61,12 @@ ui:
   enabled: true
   serviceType: "NodePort"
   nodePort: 30820
+
+injector:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 250m
+      memory: 96Mi
