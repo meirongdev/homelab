@@ -39,7 +39,7 @@ server:
       status_json="$(vault status -format=json 2>/dev/null || true)"
       echo "$status_json" | grep -q '"initialized":true' || exit 0
       echo "$status_json" | grep -q '"sealed":true' || exit 0
-      vault operator unseal "$(cat /vault/userconfig/vault-auto-unseal/key)" >/dev/null 2>&1 || true
+      vault operator unseal "$(cat /vault/userconfig/vault-auto-unseal/unseal-key)" >/dev/null 2>&1 || true
       exit 0
 
   extraVolumes:

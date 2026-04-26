@@ -445,7 +445,7 @@ vault-setup-auto-unseal:
         -o jsonpath='{.data.vault-keys\.json}' | base64 -d | \
         python3 -c "import json,sys; print(json.load(sys.stdin)['unseal_keys_b64'][0])")
     kubectl --context {{ctx}} create secret generic vault-auto-unseal -n {{vault_ns}} \
-        --from-literal=key="$UNSEAL_KEY" --dry-run=client -o yaml | kubectl --context {{ctx}} apply -f -
+        --from-literal=unseal-key="$UNSEAL_KEY" --dry-run=client -o yaml | kubectl --context {{ctx}} apply -f -
     echo "⏳ Upgrading Vault Helm chart with auto-unseal postStart hook..."
     helm upgrade vault hashicorp/vault -n {{vault_ns}} --kube-context {{ctx}} -f values/vault-values.yaml
     echo "✅ Vault auto-unseal configured. Next restart will unseal automatically."
