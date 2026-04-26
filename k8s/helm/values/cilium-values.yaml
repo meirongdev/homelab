@@ -25,9 +25,35 @@ ipam:
     clusterPoolIPv4PodCIDRList:
       - "10.42.0.0/16"
 
+# --- Resources: bound the cilium-agent DaemonSet ---
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+
+# --- Envoy DaemonSet (L7 features for Gateway API) ---
+envoy:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 192Mi
+
 # --- Operator: single node, no anti-affinity needed ---
 operator:
   replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 500m
+      memory: 192Mi
 
 # --- Hubble: observability ---
 hubble:
@@ -43,8 +69,9 @@ hubble:
       certValidityDuration: 365
   relay:
     enabled: true
+  # Hubble UI 浏览器界面用得少；CLI 仍可经 hubble-relay 使用
   ui:
-    enabled: true
+    enabled: false
 
 # --- Gateway API: Cilium-managed ingress ---
 gatewayAPI:
@@ -59,6 +86,29 @@ clustermesh:
     service:
       type: NodePort
       nodePort: 32379
+    resources:
+      requests:
+        cpu: 50m
+        memory: 96Mi
+      limits:
+        cpu: 500m
+        memory: 192Mi
+    etcd:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 96Mi
+        limits:
+          cpu: 500m
+          memory: 256Mi
+    kvstoremesh:
+      resources:
+        requests:
+          cpu: 25m
+          memory: 64Mi
+        limits:
+          cpu: 250m
+          memory: 128Mi
 
 # --- cgroup: K3s mounts cgroup v2 at /sys/fs/cgroup ---
 cgroup:
