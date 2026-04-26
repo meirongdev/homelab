@@ -126,6 +126,13 @@ spec:
         enabled: true
         storageClass: nfs-client
         size: 8Gi
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 256Mi
 ---
 apiVersion: helm.cattle.io/v1
 kind: HelmChart
@@ -165,9 +172,23 @@ spec:
               Username: postgres
               SSL:
                 Mode: disable
+    resources:
+      requests:
+        cpu: 100m
+        memory: 192Mi
+      limits:
+        cpu: 500m
+        memory: 384Mi
     ingress:
       enabled: false
     login:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 96Mi
+        limits:
+          cpu: 250m
+          memory: 192Mi
       ingress:
         enabled: false
       service:
