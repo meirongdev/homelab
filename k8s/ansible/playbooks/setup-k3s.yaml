@@ -85,6 +85,15 @@
           kubelet-arg:
             # Use systemd-resolved's real upstream list instead of the 127.0.0.53 stub.
             - resolv-conf=/run/systemd/resolve/resolv.conf
+            # Reserve resources for K3s server, containerd, Cilium agent
+            - kube-reserved=cpu=200m,memory=512Mi,ephemeral-storage=2Gi
+            # Reserve resources for systemd, sshd, journald, Tailscale
+            - system-reserved=cpu=200m,memory=512Mi,ephemeral-storage=2Gi
+            # Explicit eviction thresholds (default memory.available<100Mi is too low for a 10 GiB node)
+            - eviction-hard=memory.available<300Mi,nodefs.available<10%
+            - eviction-soft=memory.available<500Mi,nodefs.available<15%
+            - eviction-soft-grace-period=memory.available=2m,nodefs.available=2m
+            - eviction-max-pod-grace-period=60
           flannel-backend: "none"
           disable-network-policy: true
           disable-kube-proxy: true
