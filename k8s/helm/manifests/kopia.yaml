@@ -147,8 +147,8 @@ spec:
               cpu: 100m
               memory: 256Mi
             limits:
-              cpu: 1000m
-              memory: 1Gi
+              cpu: 500m
+              memory: 384Mi
           volumeMounts:
             - name: repository
               mountPath: /repository
