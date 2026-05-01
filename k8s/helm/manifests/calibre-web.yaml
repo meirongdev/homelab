@@ -92,11 +92,11 @@ spec:
               value: "poll"
           resources:
             requests:
-              cpu: 100m
-              memory: 256Mi
-            limits:
-              cpu: 1000m
+              cpu: 200m
               memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
           livenessProbe:
             httpGet:
               path: /login
@@ -132,6 +132,35 @@ spec:
             - name: config
               mountPath: /config
               readOnly: true
+        # Fixes ownership of files created by the cwa-ingest pipeline, which runs
+        # as root inside the upstream image and produces root-owned books that
+        # the web process (uid 1000) cannot edit afterwards.
+        - name: permission-fixer
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              set -u
+              echo "[fix-perms] starting; target uid:gid = 1000:1000"
+              while true; do
+                fixed=$(find /library \( ! -uid 1000 -o ! -gid 1000 \) -print 2>/dev/null | wc -l)
+                if [ "$fixed" -gt 0 ]; then
+                  find /library \( ! -uid 1000 -o ! -gid 1000 \) -exec chown 1000:1000 {} + 2>/dev/null || true
+                  echo "[fix-perms] chowned $fixed entries to 1000:1000"
+                fi
+                sleep 30
+              done
+          resources:
+            requests:
+              cpu: 1m
+              memory: 8Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
+          volumeMounts:
+            - name: books
+              mountPath: /library
       volumes:
         - name: config
           persistentVolumeClaim:
