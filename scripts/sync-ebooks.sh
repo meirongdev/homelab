@@ -13,6 +13,7 @@ INGEST_POD_NAMESPACE="personal-services"
 INGEST_POD_SELECTOR="app=calibre-web"
 INGEST_PATH="/cwa-book-ingest"
 LOG_FILE="${HOME}/.local/share/calibre-web-sync.log"
+KUBE_CONTEXT="${KUBE_CONTEXT:-k3s-homelab}"
 
 # 支持的电子书格式
 SUPPORTED_FORMATS=("pdf" "epub" "mobi" "azw" "azw3")
@@ -136,6 +137,7 @@ init() {
     info "备份目录: $BACKUP_DIR"
     [ "$DRY_RUN" = true ] && info "测试模式: 仅显示操作"
     [ "$CLEANUP" = true ] && info "清理模式: 导入后删除本地文件"
+    return 0
 }
 
 # 验证环境
@@ -147,8 +149,8 @@ check_env() {
     fi
     
     # 检查 kubernetes 连接
-    if ! kubectl cluster-info &> /dev/null; then
-        error "无法连接到 Kubernetes 集群"
+    if ! kubectl --context "$KUBE_CONTEXT" cluster-info &> /dev/null; then
+        error "无法连接到 Kubernetes 集群 ($KUBE_CONTEXT)"
         return 1
     fi
     
@@ -164,11 +166,11 @@ check_env() {
 
 # 获取 calibre-web pod
 get_calibre_pod() {
-    local pod=$(kubectl get pods -n "$INGEST_POD_NAMESPACE" \
+    local pod=$(kubectl --context "$KUBE_CONTEXT" get pods -n "$INGEST_POD_NAMESPACE" \
         -l "$INGEST_POD_SELECTOR" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
     
     if [ -z "$pod" ]; then
-        error "找不到 calibre-web pod"
+        error "找不到 calibre-web pod (context: $KUBE_CONTEXT)"
         return 1
     fi
     
@@ -190,7 +192,7 @@ check_book_exists() {
     book_title=$(echo "$book_title" | sed -E 's/ \([^)]*\)$//; s/ \[[^]]*\]$//; s/ - [^-]*$//')
     
     # 在数据库中查询相同标题的书籍
-    local count=$(kubectl exec -n "$INGEST_POD_NAMESPACE" "$pod" -- \
+    local count=$(kubectl --context "$KUBE_CONTEXT" exec -n "$INGEST_POD_NAMESPACE" "$pod" -- \
         sqlite3 /calibre-library/metadata.db \
         "SELECT COUNT(*) FROM books WHERE title = '$book_title' ESCAPE '\\\\';" 2>/dev/null || echo "0")
     
@@ -207,31 +209,38 @@ get_existing_books() {
     local pod=$(get_calibre_pod) || return 1
     
     # 获取数据库中所有书籍的标题
-    kubectl exec -n "$INGEST_POD_NAMESPACE" "$pod" -- \
+    kubectl --context "$KUBE_CONTEXT" exec -n "$INGEST_POD_NAMESPACE" "$pod" -- \
         sqlite3 /calibre-library/metadata.db \
         "SELECT DISTINCT title FROM books;" 2>/dev/null || true
 }
 
 # 扫描电子书
 scan_ebooks() {
-    local format_pattern=""
+    # 构建查找条件
+    local find_expr=()
     for fmt in "${SUPPORTED_FORMATS[@]}"; do
-        if [ -z "$format_pattern" ]; then
-            format_pattern="-name '*.$fmt'"
-        else
-            format_pattern="$format_pattern -o -name '*.$fmt'"
-        fi
+        find_expr+=(-o -name "*.$fmt")
     done
     
+    # 删除第一个 -o
+    if [ ${#find_expr[@]} -gt 0 ]; then
+        find_expr=("${find_expr[@]:1}")
+    fi
+    
     # 使用 find 查找所有支持的格式
-    find "$LOCAL_BOOKS_DIR" -maxdepth 1 -type f \( $format_pattern \) 2>/dev/null | sort
+    find "$LOCAL_BOOKS_DIR" -maxdepth 1 -type f \( "${find_expr[@]}" \) 2>/dev/null | sort
 }
 
 # 同步电子书
 sync_ebooks() {
     local pod=$(get_calibre_pod) || return 1
     
+    # 保存当前 IFS 并在完成后恢复
+    local OLDIFS="$IFS"
+    IFS=$'\n'
     local files=($(scan_ebooks))
+    IFS="$OLDIFS"
+    
     local total=${#files[@]}
     
     if [ $total -eq 0 ]; then
@@ -264,7 +273,7 @@ sync_ebooks() {
         book_title=$(echo "$book_title" | sed -E 's/ \([^)]*\)$//; s/ \[[^]]*\]$//; s/ - [^-]*$//')
         
         # 检查是否已存在于 ingest 目录
-        if kubectl exec -n "$INGEST_POD_NAMESPACE" "$pod" -- \
+        if kubectl --context "$KUBE_CONTEXT" exec -n "$INGEST_POD_NAMESPACE" "$pod" -- \
             test -f "${INGEST_PATH}/${filename}" 2>/dev/null; then
             warn "  ⊘ $filename (已在 ingest 目录中)"
             ((skipped_count++))
@@ -282,7 +291,7 @@ sync_ebooks() {
             info "  ▶ $filename ($filesize)"
         else
             # 复制文件到 pod
-            if kubectl cp "$file" "$INGEST_POD_NAMESPACE/$pod:${INGEST_PATH}/${filename}" 2>/dev/null; then
+            if kubectl --context "$KUBE_CONTEXT" cp "$file" "$INGEST_POD_NAMESPACE/$pod:${INGEST_PATH}/${filename}" 2>/dev/null; then
                 # 备份文件
                 if [ "$BACKUP" = true ]; then
                     cp "$file" "$BACKUP_DIR/" 2>/dev/null
@@ -319,7 +328,7 @@ verify_import() {
     info "验证导入..."
     
     # 获取 ingest 目录中的文件数
-    local ingest_count=$(kubectl exec -n "$INGEST_POD_NAMESPACE" "$pod" -- \
+    local ingest_count=$(kubectl --context "$KUBE_CONTEXT" exec -n "$INGEST_POD_NAMESPACE" "$pod" -- \
         find "${INGEST_PATH}" -maxdepth 1 -type f 2>/dev/null | wc -l)
     
     info "Ingest 目录中的文件: $ingest_count"
@@ -341,5 +350,7 @@ main() {
     success "完成"
 }
 
-# 运行
-main "$@"
+# 仅当脚本被直接执行（而非源引入）时运行 main 函数
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
