@@ -71,6 +71,23 @@ spec:
     spec:
       securityContext:
         fsGroup: 1000
+      initContainers:
+        - name: fix-permissions-init
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              set -u
+              echo "[init] fixing permissions on /library..."
+              # Fix all file permissions to 666
+              find /library -type f -exec chmod 666 {} + 2>/dev/null || true
+              # Fix all directory permissions to 777
+              find /library -type d -exec chmod 777 {} + 2>/dev/null || true
+              echo "[init] permissions fixed"
+          volumeMounts:
+            - name: books
+              mountPath: /library
       containers:
         - name: calibre-web
           image: crocodilestick/calibre-web-automated:latest
@@ -132,9 +149,8 @@ spec:
             - name: config
               mountPath: /config
               readOnly: true
-        # Fixes ownership of files created by the cwa-ingest pipeline, which runs
-        # as root inside the upstream image and produces root-owned books that
-        # the web process (uid 1000) cannot edit afterwards.
+        # Fixes permissions on files created by the cwa-ingest pipeline, which runs
+        # as root and produces files that the web process (uid 1000) cannot edit.
         - name: permission-fixer
           image: busybox:1.36
           command:
@@ -142,12 +158,14 @@ spec:
             - -c
             - |
               set -u
-              echo "[fix-perms] starting; target uid:gid = 1000:1000"
+              echo "[fix-perms] starting permission fixer loop"
               while true; do
-                fixed=$(find /library \( ! -uid 1000 -o ! -gid 1000 \) -print 2>/dev/null | wc -l)
-                if [ "$fixed" -gt 0 ]; then
-                  find /library \( ! -uid 1000 -o ! -gid 1000 \) -exec chown 1000:1000 {} + 2>/dev/null || true
-                  echo "[fix-perms] chowned $fixed entries to 1000:1000"
+                # Find and fix files not at 666
+                files=$(find /library -type f ! -perm 666 -exec chmod 666 {} + 2>/dev/null | wc -l)
+                # Find and fix directories not at 777
+                dirs=$(find /library -type d ! -perm 777 -exec chmod 777 {} + 2>/dev/null | wc -l)
+                if [ "$files" -gt 0 ] || [ "$dirs" -gt 0 ]; then
+                  echo "[fix-perms] fixed $files files and $dirs directories"
                 fi
                 sleep 30
               done
