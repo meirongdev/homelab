@@ -134,6 +134,26 @@ ebook-backup-list:
 ebook-sync-logs:
     @tail -50 ~/.local/share/calibre-web-sync.log 2>/dev/null || echo "日志文件不存在"
 
+# ⬇️ 电子书清理 ⬇️
+
+# 测试模式查看重复书籍
+cleanup-calibre-dry-run:
+    @echo "🔍 测试模式: 显示会删除的重复书籍..."
+    bash ../../scripts/cleanup-calibre-duplicates.sh --dry-run
+
+# 清理 calibre 数据库中的重复书籍
+cleanup-calibre-duplicates:
+    @echo "🧹 清理 calibre 数据库中的重复书籍..."
+    bash ../../scripts/cleanup-calibre-duplicates.sh
+
+# 查看清理日志
+cleanup-logs:
+    @echo "=== 最近的清理日志 ==="
+    @ls -lht ~/.local/share/calibre-cleanup/*.log 2>/dev/null | head -5
+    @echo ""
+    @echo "=== 最后一次清理的详细信息 ==="
+    @tail -30 $(ls -t ~/.local/share/calibre-cleanup/*.log 2>/dev/null | head -1) 2>/dev/null || echo "暂无清理日志"
+
 # 部署 IT-Tools
 deploy-it-tools:
     kubectl --context {{ctx}} apply -f manifests/it-tools.yaml
