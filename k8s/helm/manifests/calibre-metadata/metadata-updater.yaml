@@ -1,0 +1,125 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ebook-metadata-script
+  namespace: personal-services
+data:
+  update_metadata.sh: |
+    #!/bin/bash
+    
+    # 自动提取电子书元数据并更新 calibre-web 数据库
+    # 使用 ebook-meta 工具从电子书文件中提取元数据（发布时间、封面等）
+    
+    set -e
+    
+    CALIBRE_LIBRARY="/calibre-library"
+    METADATA_DB="$CALIBRE_LIBRARY/metadata.db"
+    LOCK_FILE="/tmp/metadata-update.lock"
+    
+    echo "[$(date)] 开始更新电子书元数据..."
+    
+    # 防止并发执行
+    if [ -f "$LOCK_FILE" ]; then
+      echo "[$(date)] 另一个进程正在运行，退出"
+      exit 0
+    fi
+    
+    touch "$LOCK_FILE"
+    trap "rm -f $LOCK_FILE" EXIT
+    
+    TOTAL=$(sqlite3 "$METADATA_DB" "SELECT COUNT(*) FROM books WHERE pubdate = '0101-01-01';")
+    PROCESSED=0
+    UPDATED=0
+    
+    echo "需要更新元数据的书籍: $TOTAL"
+    echo ""
+    
+    # 处理发布时间未知的书籍
+    sqlite3 "$METADATA_DB" "SELECT id, path, title FROM books WHERE pubdate = '0101-01-01' LIMIT 100;" | while IFS='|' read -r book_id book_path book_title; do
+      FULL_PATH="$CALIBRE_LIBRARY/$book_path"
+      
+      if [ ! -d "$FULL_PATH" ]; then
+        continue
+      fi
+      
+      # 查找电子书文件
+      EBOOK_FILE=""
+      for ext in pdf epub mobi azw azw3; do
+        FOUND=$(find "$FULL_PATH" -maxdepth 1 -name "*.$ext" -type f 2>/dev/null | head -1)
+        if [ -n "$FOUND" ]; then
+          EBOOK_FILE="$FOUND"
+          break
+        fi
+      done
+      
+      if [ -z "$EBOOK_FILE" ]; then
+        continue
+      fi
+      
+      # 使用 ebook-meta 提取元数据
+      if METADATA=$(ebook-meta "$EBOOK_FILE" 2>/dev/null); then
+        # 提取发布日期
+        PUBLISHED=$(echo "$METADATA" | grep "^Published" | awk -F': ' '{print $2}' | head -1)
+        
+        if [ -n "$PUBLISHED" ]; then
+          PUBDATE=$(echo "$PUBLISHED" | cut -d'T' -f1)
+          
+          if [ -n "$PUBDATE" ] && [ "$PUBDATE" != "0101-01-01" ]; then
+            # 更新数据库
+            sqlite3 "$METADATA_DB" "UPDATE books SET pubdate = '$PUBDATE', last_modified = CURRENT_TIMESTAMP WHERE id = $book_id;" 2>/dev/null || true
+            ((UPDATED++))
+          fi
+        fi
+      fi
+      
+      ((PROCESSED++))
+    done
+    
+    echo "[$(date)] 完成: $PROCESSED 本书籍已检查, $UPDATED 本书籍元数据已更新"
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: calibre-metadata-updater
+  namespace: personal-services
+spec:
+  schedule: "0 2 * * *"  # 每天凌晨 2:00 UTC 执行
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          serviceAccountName: default
+          containers:
+          - name: metadata-updater
+            image: crocodilestick/calibre-web-automated:latest
+            command:
+            - /bin/bash
+            - -c
+            - bash /scripts/update_metadata.sh
+            volumeMounts:
+            - name: calibre-library
+              mountPath: /calibre-library
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            resources:
+              requests:
+                cpu: 500m
+                memory: 512Mi
+              limits:
+                cpu: 2000m
+                memory: 2Gi
+          volumes:
+          - name: calibre-library
+            persistentVolumeClaim:
+              claimName: calibre-books
+          - name: scripts
+            configMap:
+              name: ebook-metadata-script
+              defaultMode: 0755
+          restartPolicy: Never
