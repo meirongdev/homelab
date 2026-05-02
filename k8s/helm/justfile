@@ -139,12 +139,12 @@ ebook-sync-logs:
 # 测试模式查看重复书籍
 cleanup-calibre-dry-run:
     @echo "🔍 测试模式: 显示会删除的重复书籍..."
-    bash ../../scripts/cleanup-calibre-duplicates.sh --dry-run
+    bash ../../scripts/cleanup-duplicates.sh k3s-homelab --dry-run
 
 # 清理 calibre 数据库中的重复书籍
 cleanup-calibre-duplicates:
     @echo "🧹 清理 calibre 数据库中的重复书籍..."
-    bash ../../scripts/cleanup-calibre-duplicates.sh
+    bash ../../scripts/cleanup-duplicates.sh k3s-homelab
 
 # 查看清理日志
 cleanup-logs:
