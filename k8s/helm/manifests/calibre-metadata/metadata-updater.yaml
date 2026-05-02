@@ -10,11 +10,13 @@ data:
     # 自动提取电子书元数据并更新 calibre-web 数据库
     # 使用 ebook-meta 工具从电子书文件中提取元数据（发布时间、封面等）
     
-    set -e
-    
     CALIBRE_LIBRARY="/calibre-library"
     METADATA_DB="$CALIBRE_LIBRARY/metadata.db"
     LOCK_FILE="/tmp/metadata-update.lock"
+    TEMP_DIR="/tmp/calibre-covers"
+    TEMP_LIST="/tmp/calibre-books-$$.txt"
+    
+    mkdir -p "$TEMP_DIR"
     
     echo "[$(date)] 开始更新电子书元数据..."
     
@@ -25,57 +27,70 @@ data:
     fi
     
     touch "$LOCK_FILE"
-    trap "rm -f $LOCK_FILE" EXIT
+    trap "rm -f $LOCK_FILE $TEMP_LIST; rm -rf $TEMP_DIR" EXIT
     
-    TOTAL=$(sqlite3 "$METADATA_DB" "SELECT COUNT(*) FROM books WHERE pubdate = '0101-01-01';")
-    PROCESSED=0
-    UPDATED=0
+    # 提取和更新封面
+    echo "[$(date)] 提取和更新书籍封面..."
+    COVER_TOTAL=$(sqlite3 "$METADATA_DB" "SELECT COUNT(*) FROM books WHERE has_cover = 0;")
+    COVER_UPDATED=0
+    COVER_CHECKED=0
+    COVER_FOUND=0
     
-    echo "需要更新元数据的书籍: $TOTAL"
+    echo "需要添加封面的书籍: $COVER_TOTAL"
+    echo "处理前 1000 本书籍..."
     echo ""
     
-    # 处理发布时间未知的书籍
-    sqlite3 "$METADATA_DB" "SELECT id, path, title FROM books WHERE pubdate = '0101-01-01' LIMIT 100;" | while IFS='|' read -r book_id book_path book_title; do
+    # 导出书籍列表到文件
+    sqlite3 -batch "$METADATA_DB" "SELECT id || '|' || path FROM books WHERE has_cover = 0 LIMIT 1000;" > "$TEMP_LIST"
+    
+    while IFS='|' read -r book_id book_path; do
+      # 跳过空行或无效行
+      if [ -z "$book_id" ] || [ "$book_id" = "id" ]; then
+        continue
+      fi
+      
+      ((COVER_CHECKED++))
+      
       FULL_PATH="$CALIBRE_LIBRARY/$book_path"
       
+      # 验证目录存在
       if [ ! -d "$FULL_PATH" ]; then
         continue
       fi
       
-      # 查找电子书文件
-      EBOOK_FILE=""
-      for ext in pdf epub mobi azw azw3; do
-        FOUND=$(find "$FULL_PATH" -maxdepth 1 -name "*.$ext" -type f 2>/dev/null | head -1)
-        if [ -n "$FOUND" ]; then
-          EBOOK_FILE="$FOUND"
-          break
-        fi
-      done
+      # 使用 find 查找电子书文件（支持多种格式）
+      EBOOK_FILE=$(find "$FULL_PATH" -maxdepth 1 \( -name "*.pdf" -o -name "*.epub" -o -name "*.mobi" -o -name "*.azw" -o -name "*.azw3" \) -type f 2>/dev/null | head -1)
       
       if [ -z "$EBOOK_FILE" ]; then
         continue
       fi
       
-      # 使用 ebook-meta 提取元数据
-      if METADATA=$(ebook-meta "$EBOOK_FILE" 2>/dev/null); then
-        # 提取发布日期
-        PUBLISHED=$(echo "$METADATA" | grep "^Published" | awk -F': ' '{print $2}' | head -1)
+      # 尝试从电子书中提取封面
+      COVER_FILE="$TEMP_DIR/cover_${book_id}.jpg"
+      if ebook-meta "$EBOOK_FILE" --get-cover="$COVER_FILE" 2>/dev/null && [ -f "$COVER_FILE" ] && [ -s "$COVER_FILE" ]; then
+        ((COVER_FOUND++))
         
-        if [ -n "$PUBLISHED" ]; then
-          PUBDATE=$(echo "$PUBLISHED" | cut -d'T' -f1)
-          
-          if [ -n "$PUBDATE" ] && [ "$PUBDATE" != "0101-01-01" ]; then
-            # 更新数据库
-            sqlite3 "$METADATA_DB" "UPDATE books SET pubdate = '$PUBDATE', last_modified = CURRENT_TIMESTAMP WHERE id = $book_id;" 2>/dev/null || true
-            ((UPDATED++))
+        # 将封面复制到书籍目录
+        TARGET_COVER="$FULL_PATH/cover.jpg"
+        if cp "$COVER_FILE" "$TARGET_COVER" 2>/dev/null && [ -f "$TARGET_COVER" ]; then
+          # 更新数据库标志
+          sqlite3 "$METADATA_DB" "UPDATE books SET has_cover = 1, last_modified = CURRENT_TIMESTAMP WHERE id = $book_id;" 2>/dev/null || true
+          ((COVER_UPDATED++))
+          if [ $((COVER_UPDATED % 10)) -eq 0 ]; then
+            echo "[$(date)] ✅ 已添加 $COVER_UPDATED 本书籍的封面"
           fi
         fi
+        rm -f "$COVER_FILE"
       fi
-      
-      ((PROCESSED++))
-    done
+    done < "$TEMP_LIST"
     
-    echo "[$(date)] 完成: $PROCESSED 本书籍已检查, $UPDATED 本书籍元数据已更新"
+    echo ""
+    echo "[$(date)] 元数据更新完成:"
+    echo "  检查了 $COVER_CHECKED 本书籍"
+    echo "  发现了 $COVER_FOUND 本有内嵌封面的书籍"
+    echo "  成功保存了 $COVER_UPDATED 本书籍的封面"
+    echo ""
+    echo "仍需添加封面的书籍: $((COVER_TOTAL - COVER_UPDATED))"
 
 ---
 apiVersion: batch/v1
