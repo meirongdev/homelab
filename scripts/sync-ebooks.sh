@@ -175,6 +175,43 @@ get_calibre_pod() {
     echo "$pod"
 }
 
+# 检查书籍是否已存在于 calibre 数据库
+check_book_exists() {
+    local filename="$1"
+    local pod=$(get_calibre_pod) || return 1
+    
+    # 提取文件名（不含路径）
+    local basename=$(basename "$filename")
+    
+    # 移除文件扩展名
+    local book_title="${basename%.*}"
+    
+    # 移除常见的元信息后缀（如 (Author Name), [Z-Library] 等）
+    book_title=$(echo "$book_title" | sed -E 's/ \([^)]*\)$//; s/ \[[^]]*\]$//; s/ - [^-]*$//')
+    
+    # 在数据库中查询相同标题的书籍
+    local count=$(kubectl exec -n "$INGEST_POD_NAMESPACE" "$pod" -- \
+        sqlite3 /calibre-library/metadata.db \
+        "SELECT COUNT(*) FROM books WHERE title = '$book_title' ESCAPE '\\\\';" 2>/dev/null || echo "0")
+    
+    # 如果找到相同标题的书籍，返回已存在
+    if [ "$count" -gt 0 ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# 批量查询已存在的书籍
+get_existing_books() {
+    local pod=$(get_calibre_pod) || return 1
+    
+    # 获取数据库中所有书籍的标题
+    kubectl exec -n "$INGEST_POD_NAMESPACE" "$pod" -- \
+        sqlite3 /calibre-library/metadata.db \
+        "SELECT DISTINCT title FROM books;" 2>/dev/null || true
+}
+
 # 扫描电子书
 scan_ebooks() {
     local format_pattern=""
@@ -203,23 +240,41 @@ sync_ebooks() {
     fi
     
     info "找到 $total 本电子书"
+    
+    # 加载已存在的书籍列表以加快查询
+    info "加载已存在的书籍列表..."
+    local existing_books=$(get_existing_books)
+    
     echo ""
     
     # 统计
     local success_count=0
     local failed_count=0
     local skipped_count=0
+    local duplicate_count=0
     
     # 处理每个文件
     for file in "${files[@]}"; do
         local filename=$(basename "$file")
         local filesize=$(du -h "$file" | awk '{print $1}')
         
+        # 移除文件扩展名获取标题
+        local book_title="${filename%.*}"
+        # 移除常见的元信息后缀（如 (Author Name), [Z-Library] 等）
+        book_title=$(echo "$book_title" | sed -E 's/ \([^)]*\)$//; s/ \[[^]]*\]$//; s/ - [^-]*$//')
+        
         # 检查是否已存在于 ingest 目录
         if kubectl exec -n "$INGEST_POD_NAMESPACE" "$pod" -- \
             test -f "${INGEST_PATH}/${filename}" 2>/dev/null; then
-            warn "  ⊘ $filename (已存在)"
+            warn "  ⊘ $filename (已在 ingest 目录中)"
             ((skipped_count++))
+            continue
+        fi
+        
+        # 检查是否在数据库中已存在
+        if echo "$existing_books" | grep -F -q "$book_title"; then
+            warn "  ⊘ $filename (已存在于 calibre 数据库)"
+            ((duplicate_count++))
             continue
         fi
         
@@ -251,7 +306,8 @@ sync_ebooks() {
     info "同步统计:"
     info "  成功: $success_count"
     info "  失败: $failed_count"
-    info "  跳过: $skipped_count"
+    info "  跳过 (ingest): $skipped_count"
+    info "  重复 (数据库): $duplicate_count"
     
     return 0
 }
