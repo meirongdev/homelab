@@ -1,0 +1,158 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ebook-sync-script
+  namespace: personal-services
+data:
+  sync-ebooks.sh: |
+    #!/bin/bash
+    
+    # 电子书自动同步脚本（在 K8s 中运行）
+    # 功能: 监视本地电子书目录并自动导入到 calibre-web
+    
+    set -euo pipefail
+    
+    CALIBRE_LIBRARY="/calibre-library"
+    INGEST_DIR="/cwa-book-ingest"
+    LOCK_FILE="/tmp/ebook-sync.lock"
+    LOG_FILE="/tmp/ebook-sync.log"
+    BOOKS_IMPORTED_FILE="/tmp/ebook-sync-imported.txt"
+    
+    # 支持的格式
+    FORMATS="pdf epub mobi azw azw3"
+    
+    log() {
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] $@" | tee -a "$LOG_FILE"
+    }
+    
+    log "=== 电子书自动同步开始 ==="
+    
+    # 防止并发执行
+    if [ -f "$LOCK_FILE" ]; then
+        log "另一个同步进程正在运行，退出"
+        exit 0
+    fi
+    
+    touch "$LOCK_FILE"
+    trap "rm -f $LOCK_FILE" EXIT
+    
+    # 初始化已导入列表
+    if [ ! -f "$BOOKS_IMPORTED_FILE" ]; then
+        touch "$BOOKS_IMPORTED_FILE"
+    fi
+    
+    # 检查 ingest 目录是否存在
+    if [ ! -d "$INGEST_DIR" ]; then
+        log "错误: Ingest 目录不存在: $INGEST_DIR"
+        exit 1
+    fi
+    
+    # 扫描电子书（这个脚本在 pod 内运行，所以目录是 pod 内的）
+    # 但实际上 ingest 目录会自动被 calibre-web 处理
+    # 所以这个脚本主要是用于监控和报告
+    
+    # 统计 ingest 目录中的文件
+    PENDING_COUNT=$(find "$INGEST_DIR" -maxdepth 1 -type f 2>/dev/null | wc -l)
+    
+    log "待导入的电子书: $PENDING_COUNT 本"
+    log "元数据库位置: $CALIBRE_LIBRARY/metadata.db"
+    
+    # 获取当前数据库中的书籍数
+    if [ -f "$CALIBRE_LIBRARY/metadata.db" ]; then
+        TOTAL_BOOKS=$(sqlite3 "$CALIBRE_LIBRARY/metadata.db" "SELECT COUNT(*) FROM books;" 2>/dev/null || echo "0")
+        log "calibre-web 中的书籍总数: $TOTAL_BOOKS"
+    fi
+    
+    log "=== 电子书自动同步结束 ==="
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ebook-sync-monitor
+  namespace: personal-services
+spec:
+  # 每6小时执行一次 (0 */6 * * *)
+  # 每4小时执行一次 (0 */4 * * *)
+  # 每日两次: 02:00 和 14:00 (0 2,14 * * *)
+  schedule: "0 */6 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: calibre-web-sync
+          containers:
+            - name: sync-monitor
+              image: crocodilestick/calibre-web-automated:latest
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  #!/bin/bash
+                  source /scripts/sync-ebooks.sh
+              env:
+                - name: TZ
+                  value: "Asia/Shanghai"
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: calibre-library
+                  mountPath: /calibre-library
+                - name: ingest
+                  mountPath: /cwa-book-ingest
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 128Mi
+          volumes:
+            - name: scripts
+              configMap:
+                name: ebook-sync-script
+                defaultMode: 0755
+            - name: calibre-library
+              persistentVolumeClaim:
+                claimName: calibre-books
+            - name: ingest
+              persistentVolumeClaim:
+                claimName: calibre-books
+          restartPolicy: OnFailure
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: calibre-web-sync
+  namespace: personal-services
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: calibre-web-sync
+  namespace: personal-services
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: calibre-web-sync
+  namespace: personal-services
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: calibre-web-sync
+subjects:
+  - kind: ServiceAccount
+    name: calibre-web-sync
+    namespace: personal-services

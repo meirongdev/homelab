@@ -85,6 +85,55 @@ deploy-calibre:
 delete-calibre:
     kubectl --context {{ctx}} delete -f manifests/calibre-web.yaml
 
+# ⬇️ 电子书同步 ⬇️
+
+# 部署电子书同步 CronJob 和监控
+deploy-ebook-sync:
+    kubectl --context {{ctx}} apply -f manifests/calibre-ebook-sync.yaml
+    @echo "✅ 电子书同步 CronJob 已部署"
+
+# 查看电子书同步 CronJob 状态
+ebook-sync-status:
+    @echo "=== 电子书同步 CronJob ==="
+    @kubectl --context {{ctx}} get cronjob -n personal-services ebook-sync-monitor
+    @echo ""
+    @echo "=== 最近的 Job 执行 ==="
+    @kubectl --context {{ctx}} get jobs -n personal-services -l job-name=ebook-sync-monitor --sort-by=.metadata.creationTimestamp | tail -5
+
+# 本地同步电子书 (测试模式)
+sync-ebooks-dry-run:
+    @echo "⏳ 测试模式: 显示会同步的电子书..."
+    bash scripts/sync-ebooks.sh --dry-run
+
+# 本地同步电子书 (导入+备份)
+sync-ebooks:
+    @echo "⏳ 同步电子书到 calibre-web..."
+    bash scripts/sync-ebooks.sh --backup
+
+# 本地同步电子书 (导入+备份+清理)
+sync-ebooks-cleanup:
+    @echo "⏳ 同步电子书到 calibre-web 并删除本地副本..."
+    bash scripts/sync-ebooks.sh --backup --cleanup
+
+# 本地同步电子书 (导入+清理，不备份)
+sync-ebooks-no-backup:
+    @echo "⏳ 同步电子书到 calibre-web (不备份)..."
+    bash scripts/sync-ebooks.sh --no-backup --cleanup
+
+# 删除电子书同步 CronJob
+delete-ebook-sync:
+    kubectl --context {{ctx}} delete -f manifests/calibre-ebook-sync.yaml || true
+    @echo "✅ 电子书同步 CronJob 已删除"
+
+# 查看电子书备份
+ebook-backup-list:
+    @echo "=== 本地电子书备份 ==="
+    @ls -lh ~/.local/share/calibre-web-sync-backup/ 2>/dev/null | tail -20 || echo "备份目录为空"
+
+# 查看电子书同步日志
+ebook-sync-logs:
+    @tail -50 ~/.local/share/calibre-web-sync.log 2>/dev/null || echo "日志文件不存在"
+
 # 部署 IT-Tools
 deploy-it-tools:
     kubectl --context {{ctx}} apply -f manifests/it-tools.yaml
