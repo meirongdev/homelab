@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat *)",
+      "Bash(kubectl config *)",
+      "Bash(kubectl *)",
+      "Bash(sleep *)",
+      "Bash(curl *)",
+      "Bash(python3 *)",
+      "Bash(kill *)",
+      "Bash(true)",
+      "Bash(tr *)",
+      "Bash(which *)",
+      "Bash(ls *)",
+      "Bash(command *)",
+      "Bash(find *)",
+      "Bash(brew *)",
+      "Bash(npm *)",
+      "Bash(pip show *)",
+      "Bash(rm *)"
+    ]
+  },
+  "$version": 3
+}
