@@ -60,6 +60,9 @@ cloudflare_credential.md
 *.bak
 *.tmp
 
+# Merge conflict leftovers
+*.orig
+
 # Packer
 credentials.pkr.hcl
 variables.json
