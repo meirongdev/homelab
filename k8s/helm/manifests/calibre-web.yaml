@@ -61,6 +61,11 @@ metadata:
     app: calibre-web
 spec:
   replicas: 1
+  # SQLite (/config/cwa.db) is held with an exclusive write lock by the live
+  # calibre-web container; a rolling update would let the new pod's
+  # disable-auto-convert init container race the old pod for that lock.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: calibre-web
@@ -72,6 +77,32 @@ spec:
       securityContext:
         fsGroup: 1000
       initContainers:
+        - name: disable-auto-convert
+          image: python:3.11-slim
+          command:
+            - python3
+            - -c
+            - |
+              import sqlite3, sys
+              db_path = '/config/cwa.db'
+              try:
+                db = sqlite3.connect(db_path, timeout=30)
+                cursor = db.cursor()
+                cursor.execute("UPDATE cwa_settings SET auto_convert = 0;")
+                db.commit()
+                cursor.execute("SELECT auto_convert FROM cwa_settings;")
+                result = cursor.fetchone()
+                if not result or result[0] != 0:
+                    print(f"[INIT] verification failed, auto_convert is {result}")
+                    sys.exit(1)
+                print(f"[INIT] auto_convert set to: {result[0]}")
+                db.close()
+              except Exception as e:
+                print(f"[INIT] could not modify cwa.db: {e}")
+                sys.exit(1)
+          volumeMounts:
+            - name: config
+              mountPath: /config
         - name: fix-permissions-init
           image: busybox:1.36
           command:
