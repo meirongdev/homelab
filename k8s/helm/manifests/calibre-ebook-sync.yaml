@@ -76,8 +76,14 @@ spec:
   # 每4小时执行一次 (0 */4 * * *)
   # 每日两次: 02:00 和 14:00 (0 2,14 * * *)
   schedule: "0 */6 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  startingDeadlineSeconds: 300
   jobTemplate:
     spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 600
       template:
         spec:
           serviceAccountName: calibre-web-sync
