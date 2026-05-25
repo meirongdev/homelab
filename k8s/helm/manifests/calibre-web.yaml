@@ -66,6 +66,9 @@ spec:
   # disable-auto-convert init container race the old pod for that lock.
   strategy:
     type: Recreate
+    # Explicit null so server-side apply drops any prior rollingUpdate block
+    # K8s rejects rollingUpdate when type=Recreate.
+    rollingUpdate: null
   selector:
     matchLabels:
       app: calibre-web
