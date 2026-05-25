@@ -103,10 +103,11 @@ spec:
                 - name: scripts
                   mountPath: /scripts
                   readOnly: true
-                - name: calibre-library
+                - name: books
                   mountPath: /calibre-library
-                - name: ingest
+                - name: books
                   mountPath: /cwa-book-ingest
+                  subPath: ingest
               resources:
                 requests:
                   cpu: 10m
@@ -119,10 +120,7 @@ spec:
               configMap:
                 name: ebook-sync-script
                 defaultMode: 0755
-            - name: calibre-library
-              persistentVolumeClaim:
-                claimName: calibre-books
-            - name: ingest
+            - name: books
               persistentVolumeClaim:
                 claimName: calibre-books
           restartPolicy: OnFailure
