@@ -23,6 +23,7 @@ DRY_RUN=false
 BACKUP=true
 CLEANUP=false
 VERBOSE=false
+SKIP_VALIDATION=false
 
 # 颜色输出
 RED='\033[0;31m'
@@ -68,25 +69,29 @@ usage() {
 用法: $(basename "$0") [选项]
 
 选项:
-  -n, --dry-run      显示会做什么，但不实际执行
-  -b, --backup       备份已导入的电子书 (默认: 启用)
-  --no-backup        禁用备份
-  -c, --cleanup      导入后删除本地文件
-  -v, --verbose      详细输出
-  -h, --help         显示帮助信息
+  -n, --dry-run       显示会做什么，但不实际执行
+  -b, --backup        备份已导入的电子书 (默认: 启用)
+  --no-backup         禁用备份
+  -c, --cleanup       导入后删除本地文件
+  --skip-validation   跳过文件完整性验证（不推荐）
+  -v, --verbose       详细输出
+  -h, --help          显示帮助信息
 
 示例:
   # 查看会导入的文件
   $(basename "$0") --dry-run
 
-  # 导入并备份
+  # 导入并备份（包含验证）
   $(basename "$0") --backup
 
-  # 导入、备份并删除本地文件
+  # 导入、备份并删除本地文件（包含验证）
   $(basename "$0") --backup --cleanup
 
   # 不备份直接导入
   $(basename "$0") --no-backup
+
+  # 跳过文件验证（快速模式）
+  $(basename "$0") --skip-validation
 
 EOF
     exit 0
@@ -110,6 +115,10 @@ parse_args() {
                 ;;
             -c|--cleanup)
                 CLEANUP=true
+                shift
+                ;;
+            --skip-validation)
+                SKIP_VALIDATION=true
                 shift
                 ;;
             -v|--verbose)
@@ -137,6 +146,7 @@ init() {
     info "备份目录: $BACKUP_DIR"
     [ "$DRY_RUN" = true ] && info "测试模式: 仅显示操作"
     [ "$CLEANUP" = true ] && info "清理模式: 导入后删除本地文件"
+    [ "$SKIP_VALIDATION" = true ] && warn "跳过验证模式: 不检查文件完整性"
     return 0
 }
 
@@ -160,6 +170,14 @@ check_env() {
         return 1
     fi
     
+    # 检查 Python（用于验证）
+    if [ "$SKIP_VALIDATION" = false ]; then
+        if ! command -v python3 &> /dev/null; then
+            warn "Python3 未安装，将跳过文件验证"
+            SKIP_VALIDATION=true
+        fi
+    fi
+    
     success "环境检查完成"
     return 0
 }
@@ -175,6 +193,197 @@ get_calibre_pod() {
     fi
     
     echo "$pod"
+}
+
+# 检测 EPUB 文件中的 DRM 保护
+detect_epub_drm() {
+    local filepath="$1"
+
+    python3 - "$filepath" << 'PYTHON_EOF'
+import zipfile
+import sys
+
+filepath = sys.argv[1]
+
+try:
+    with zipfile.ZipFile(filepath, 'r') as zf:
+        files = zf.namelist()
+
+        # Adobe DRM 标记
+        if 'META-INF/encryption.xml' in files:
+            print("ADOBE_DRM")
+            sys.exit(2)
+
+        # Apple DRM 标记
+        if 'META-INF/rights.xml' in files:
+            print("APPLE_DRM")
+            sys.exit(2)
+
+        # 数字签名
+        if 'META-INF/signatures.xml' in files:
+            print("SIGNED")
+            sys.exit(2)
+
+        # 检查 OPF 中的加密声明
+        opf_files = [f for f in files if f.endswith('.opf')]
+        if opf_files:
+            try:
+                with zf.open(opf_files[0]) as f:
+                    content = f.read().decode('utf-8', errors='ignore')
+                    if 'encryption' in content.lower():
+                        print("DRM_MARKED")
+                        sys.exit(2)
+            except:
+                pass
+
+        print("NO_DRM")
+        sys.exit(0)
+
+except zipfile.BadZipFile:
+    print("NOT_ZIP")
+    sys.exit(1)
+except Exception:
+    print("ERROR")
+    sys.exit(1)
+PYTHON_EOF
+
+    return $?
+}
+validate_epub() {
+    local filepath="$1"
+
+    # 使用 Python 验证 EPUB 是否为有效的 ZIP 文件并包含必要的 EPUB 结构
+    python3 - "$filepath" << 'PYTHON_EOF'
+import sys
+import zipfile
+import os
+
+filepath = sys.argv[1]
+
+try:
+    # 检查文件是否存在
+    if not os.path.exists(filepath):
+        sys.exit(1)
+
+    # 检查文件大小
+    file_size = os.path.getsize(filepath)
+    if file_size == 0:
+        sys.exit(1)
+
+    # 尝试打开为 ZIP
+    with zipfile.ZipFile(filepath, 'r') as zf:
+        # 测试 ZIP 完整性
+        result = zf.testzip()
+        if result is not None:
+            sys.exit(1)
+
+        # 检查 EPUB 必要文件
+        file_list = zf.namelist()
+
+        # EPUB 必须至少有 mimetype 文件
+        if 'mimetype' not in file_list:
+            sys.exit(1)
+
+        # 检查 META-INF/container.xml（EPUB2/3 标准要求）
+        has_container = any('META-INF/container.xml' in f or 'container.xml' in f for f in file_list)
+        if not has_container:
+            sys.exit(1)
+
+        sys.exit(0)
+
+except zipfile.BadZipFile:
+    sys.exit(1)
+except Exception as e:
+    sys.exit(1)
+PYTHON_EOF
+
+    # 检查 Python 脚本的返回值
+    local result=$?
+    return $result
+}
+
+# 验证 PDF 文件完整性
+validate_pdf() {
+    local filepath="$1"
+    
+    # 检查 PDF 魔数（PDF 文件应该以 %PDF 开头）
+    local magic=$(head -c 4 "$filepath" 2>/dev/null)
+    if [ "$magic" != "%PDF" ]; then
+        return 1
+    fi
+    
+    # 基本验证：检查 %%EOF 标记
+    if ! tail -c 100 "$filepath" 2>/dev/null | grep -q "%%EOF"; then
+        # 有些 PDF 没有完整的 EOF 标记，但仍然有效，所以不是硬错误
+        return 0
+    fi
+    
+    return 0
+}
+
+# 验证电子书文件
+validate_ebook() {
+    local filepath="$1"
+    local filename=$(basename "$filepath")
+    local extension="${filename##*.}"
+    extension="${extension,,}"  # 转换为小写
+    
+    # 如果跳过验证，直接返回成功
+    if [ "$SKIP_VALIDATION" = true ]; then
+        return 0
+    fi
+    
+    case "$extension" in
+        epub)
+            validate_epub "$filepath"
+            return $?
+            ;;
+        pdf)
+            validate_pdf "$filepath"
+            return $?
+            ;;
+        *)
+            # 其他格式暂不进行验证
+            return 0
+            ;;
+    esac
+}
+
+# 获取验证错误描述
+get_validation_error() {
+    local filepath="$1"
+
+    python3 - "$filepath" 2>/dev/null << 'PYTHON_EOF' || echo "验证过程出错"
+import sys
+import zipfile
+import os
+
+filepath = sys.argv[1]
+
+try:
+    if not os.path.exists(filepath):
+        print("文件不存在")
+    elif os.path.getsize(filepath) == 0:
+        print("文件为空")
+    else:
+        try:
+            with zipfile.ZipFile(filepath, 'r') as zf:
+                result = zf.testzip()
+                if result is not None:
+                    print(f"ZIP损坏")
+                else:
+                    file_list = zf.namelist()
+                    if 'mimetype' not in file_list:
+                        print("缺少mimetype文件")
+                    else:
+                        print("文件结构不完整")
+        except zipfile.BadZipFile:
+            print("不是有效的ZIP文件")
+        except Exception as e:
+            print(f"验证失败: {str(e)}")
+except:
+    print("验证过程出错")
+PYTHON_EOF
 }
 
 # 检查书籍是否已存在于 calibre 数据库
@@ -261,6 +470,7 @@ sync_ebooks() {
     local failed_count=0
     local skipped_count=0
     local duplicate_count=0
+    local corrupted_count=0
     
     # 处理每个文件
     for file in "${files[@]}"; do
@@ -285,6 +495,28 @@ sync_ebooks() {
             warn "  ⊘ $filename (已存在于 calibre 数据库)"
             ((duplicate_count++))
             continue
+        fi
+        
+        # 验证文件完整性
+        local extension="${filename##*.}"
+        extension="${extension,,}"
+        if [[ "$extension" == "epub" || "$extension" == "pdf" ]]; then
+            if ! validate_ebook "$file" &>/dev/null; then
+                local error_msg=$(get_validation_error "$file")
+                error "  ✗ $filename (文件损坏或无效: $error_msg)"
+                log "ERROR" "CORRUPTED_FILE: $filename ($error_msg)"
+                ((corrupted_count++))
+                continue
+            fi
+            
+            # 如果是EPUB，检查DRM保护
+            if [[ "$extension" == "epub" ]]; then
+                local drm_result=$(detect_epub_drm "$file" 2>&1)
+                if [ $? -eq 2 ]; then
+                    warn "  ⚠ $filename (DRM保护: $drm_result - 可能无法打开)"
+                    log "WARN" "DRM_PROTECTED: $filename ($drm_result)"
+                fi
+            fi
         fi
         
         if [ "$DRY_RUN" = true ]; then
@@ -315,6 +547,7 @@ sync_ebooks() {
     info "同步统计:"
     info "  成功: $success_count"
     info "  失败: $failed_count"
+    [ $corrupted_count -gt 0 ] && warn "  损坏: $corrupted_count"
     info "  跳过 (ingest): $skipped_count"
     info "  重复 (数据库): $duplicate_count"
     
