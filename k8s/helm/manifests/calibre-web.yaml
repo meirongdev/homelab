@@ -113,14 +113,17 @@ spec:
             - -c
             - |
               set -u
-              echo "[init] checking permissions on /library..."
-              # Only chmod inodes that don't already have the target mode — avoids
-              # an unconditional chmod-all that took 2-3min on NFS even when the
-              # bulk of files were already 666/777. Same predicate the
-              # permission-fixer sidecar uses, so end-state is identical.
-              files=$(find /library -type f ! -perm 666 -exec chmod 666 {} + 2>/dev/null | wc -l)
-              dirs=$(find /library -type d ! -perm 777 -exec chmod 777 {} + 2>/dev/null | wc -l)
-              echo "[init] fixed $files files / $dirs directories"
+              MARKER=/library/.permissions-baseline-v1
+              if [ -f "$MARKER" ]; then
+                echo "[init] marker found — skipping full scan (~1900 books on NFS would cost ~90s)"
+                echo "[init] permission-fixer sidecar will catch incremental drift within 30s"
+                exit 0
+              fi
+              echo "[init] no marker — applying baseline permissions once..."
+              find /library -type f ! -perm 666 -exec chmod 666 {} + 2>/dev/null || true
+              find /library -type d ! -perm 777 -exec chmod 777 {} + 2>/dev/null || true
+              touch "$MARKER"
+              echo "[init] baseline applied + marker placed"
           volumeMounts:
             - name: books
               mountPath: /library
