@@ -133,9 +133,6 @@ spec:
       remoteRef:
         key: homelab/gotify
         property: alertmanager_app_token
-        conversionStrategy: Default
-        decodingStrategy: None
-        metadataPolicy: None
 ---
 apiVersion: apps/v1
 kind: Deployment
