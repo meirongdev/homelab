@@ -1,0 +1,36 @@
+---
+# Root Application — App-of-Apps pattern.
+# Watches argocd/applications/ and keeps every child Application in sync with Git.
+# Bootstrap (run once): kubectl apply -f argocd/applications/root.yaml
+# After that, editing any sibling *.yaml is enough — no more manual `kubectl apply`.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: homelab
+
+  source:
+    repoURL: https://github.com/meirongdev/homelab
+    targetRevision: main
+    path: argocd/applications
+    directory:
+      recurse: false
+      # Exclude root.yaml so this Application doesn't try to manage itself
+      # (managing yourself works but causes pointless reconciliation loops).
+      exclude: "root.yaml"
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
