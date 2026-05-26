@@ -129,23 +129,25 @@ just apply   # Apply DNS/Tunnel changes
 ### GitOps (ArgoCD)
 - ArgoCD runs in the `argocd` namespace, UI at `argocd.meirong.dev`
 - **Sync poll interval**: 3 minutes (auto-syncs after every `git push`)
-- **Managed by ArgoCD** (auto-sync + selfHeal):
-  - `personal-services` App → `manifests/{calibre-web.yaml,gotify.yaml}` (homelab)
-  - `oracle-k3s` App → `cloud/oracle/manifests/` (oracle-k3s: Homepage, RSS System, Personal Services, Uptime Kuma)
+- **Managed by ArgoCD** (auto-sync + selfHeal, homelab cluster only):
+  - `root` App → `argocd/applications/` (App-of-Apps; manages all child Applications below)
+  - `personal-services` App → `manifests/{calibre-web.yaml,calibre-ebook-sync.yaml,gotify.yaml}` (homelab)
   - `gateway` App → `manifests/gateway.yaml` (homelab Cilium Gateway)
   - `cloudflare` App → `manifests/cloudflare-tunnel.yaml` (homelab)
   - `vault-eso` App → `manifests/{vault-eso-config,*-external-secret}.yaml` (homelab)
   - `kopia` App → `manifests/{kopia.yaml,kopia-backup.yaml}` (homelab)
   - `zitadel` App → `manifests/zitadel.yaml` (homelab)
+  - `calibre-metadata` App → `k8s/helm/manifests/calibre-metadata/` (Kustomize)
   - `monitoring-dashboards` App → `k8s/helm/manifests/grafana-dashboards.yaml` 等 ConfigMap
   - `argocd-image-updater` App → Helm chart `argo/argocd-image-updater` v1.1.0
 - **NOT managed by ArgoCD** (manual `just` commands):
-  - HashiCorp Vault — requires manual init/unseal
+  - HashiCorp Vault — requires manual init/unseal (see `just homelab-recover` for restart recovery)
   - External Secrets Operator — depends on Vault
   - kube-prometheus-stack / Loki / Tempo — Helm releases
   - PostgreSQL — stateful, avoid auto-prune
   - NFS Provisioner — infrastructure layer
   - Cloudflare Terraform — non-K8s resources
+- **oracle-k3s manifests** (`cloud/oracle/manifests/`): currently hand-applied via `kubectl --context oracle-k3s apply -k cloud/oracle/manifests/`. There is no ArgoCD running on oracle-k3s, and homelab ArgoCD does not have a cluster secret for it. Treat this directory as a source of truth for what should be deployed there, but expect drift; bringing it under GitOps would require registering the cluster + reconciling current cluster state to git first.
 
 ### Storage
 - Persistent volumes use NFS (`nfs-client` StorageClass) at `192.168.50.106:/export`
