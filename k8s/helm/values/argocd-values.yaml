@@ -16,6 +16,14 @@ configs:
   # 允许通过 cm.url 让 OAuth/回调走外部 URL（即使没用 SSO 也保留 URL 自洽）
   cm:
     url: https://argocd.meirong.dev
+    # ESO 的 ExternalSecret CRD 给 remoteRef 自动填默认值，ArgoCD 的 SSA diff 会
+    # 把这视作 drift。这里忽略掉 ESO 自己默认的字段，避免每次写新 ExternalSecret
+    # 都得手动复制 conversionStrategy/decodingStrategy/metadataPolicy。
+    resource.customizations.ignoreDifferences.external-secrets.io_ExternalSecret: |
+      jqPathExpressions:
+        - .spec.data[].remoteRef.conversionStrategy
+        - .spec.data[].remoteRef.decodingStrategy
+        - .spec.data[].remoteRef.metadataPolicy
 
 # CRDs 由 chart 安装；旧 stock manifest 装的同名 CRD 在迁移时保留即可
 crds:
