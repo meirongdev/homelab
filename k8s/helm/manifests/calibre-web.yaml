@@ -113,12 +113,14 @@ spec:
             - -c
             - |
               set -u
-              echo "[init] fixing permissions on /library..."
-              # Fix all file permissions to 666
-              find /library -type f -exec chmod 666 {} + 2>/dev/null || true
-              # Fix all directory permissions to 777
-              find /library -type d -exec chmod 777 {} + 2>/dev/null || true
-              echo "[init] permissions fixed"
+              echo "[init] checking permissions on /library..."
+              # Only chmod inodes that don't already have the target mode — avoids
+              # an unconditional chmod-all that took 2-3min on NFS even when the
+              # bulk of files were already 666/777. Same predicate the
+              # permission-fixer sidecar uses, so end-state is identical.
+              files=$(find /library -type f ! -perm 666 -exec chmod 666 {} + 2>/dev/null | wc -l)
+              dirs=$(find /library -type d ! -perm 777 -exec chmod 777 {} + 2>/dev/null | wc -l)
+              echo "[init] fixed $files files / $dirs directories"
           volumeMounts:
             - name: books
               mountPath: /library
