@@ -545,3 +545,64 @@ vault-ui:
     @jq -r ".root_token" vault-keys.json
     @echo "Starting port-forward to http://localhost:8200 ... Press Ctrl+C to stop."
     kubectl --context {{ctx}} port-forward -n {{vault_ns}} svc/vault 8200:8200
+
+# 一键恢复 homelab cluster 在 VM 重启后的常见 stuck 状态：
+#   1. unseal Vault（如果还密封）
+#   2. 重启 ESO controller（让 ClusterSecretStore 重新 validate）
+#   3. 重启 argocd-repo-server（DNS/Cilium bootstrap 期常踩 stuck）
+#   4. 等所有 ExternalSecret SecretSynced + ArgoCD Apps Healthy
+# 幂等，多跑无副作用。
+homelab-recover:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ctx="{{ctx}}"
+
+    echo "▶ [1/4] checking Vault seal status..."
+    if kubectl --context "$ctx" exec -n {{vault_ns}} vault-0 -- vault status 2>/dev/null | grep -q "Sealed.*true"; then
+        echo "  Vault is sealed, unsealing from vault-keys.json"
+        key=$(jq -r ".unseal_keys_b64[0]" vault-keys.json)
+        kubectl --context "$ctx" exec -n {{vault_ns}} vault-0 -- vault operator unseal "$key" >/dev/null
+        echo "  ✓ unsealed"
+    else
+        echo "  ✓ Vault already unsealed"
+    fi
+
+    echo "▶ [2/4] checking ClusterSecretStore validation..."
+    if kubectl --context "$ctx" get clustersecretstore vault-backend -o jsonpath='{.status.conditions[0].status}' 2>/dev/null | grep -q "False"; then
+        echo "  ClusterSecretStore is invalid, restarting ESO"
+        kubectl --context "$ctx" rollout restart deployment external-secrets -n external-secrets
+        kubectl --context "$ctx" rollout status deployment external-secrets -n external-secrets --timeout=90s
+        echo "  ✓ ESO restarted"
+    else
+        echo "  ✓ ClusterSecretStore already valid"
+    fi
+
+    echo "▶ [3/4] restarting argocd-repo-server (defensive — first sync after VM reboot tends to hang on DNS)..."
+    kubectl --context "$ctx" rollout restart deployment/argocd-repo-server -n {{argocd_ns}}
+    kubectl --context "$ctx" rollout status deployment/argocd-repo-server -n {{argocd_ns}} --timeout=90s
+    echo "  ✓ argocd-repo-server restarted"
+
+    echo "▶ [4/4] waiting for ExternalSecrets to converge..."
+    # kubectl get externalsecret columns: NAMESPACE NAME STORETYPE STORE REFRESH STATUS READY
+    for i in $(seq 1 12); do
+        bad=$(kubectl --context "$ctx" get externalsecret -A --no-headers 2>/dev/null | awk '$6!="SecretSynced"' | wc -l | tr -d ' ')
+        if [ "$bad" = "0" ]; then
+            echo "  ✓ all ExternalSecrets synced"
+            break
+        fi
+        printf "  [%ds] still not synced: %s\n" $((i*10)) "$bad"
+        sleep 10
+    done
+
+    echo ""
+    echo "=== final state ==="
+    notsynced=$(kubectl --context "$ctx" get externalsecret -A --no-headers 2>/dev/null | awk '$6!="SecretSynced"')
+    if [ -n "$notsynced" ]; then
+        echo "$notsynced" | awk '{print "  ❌ " $0}'
+    else
+        echo "  ✓ all 12 ExternalSecrets SecretSynced"
+    fi
+    echo ""
+    kubectl --context "$ctx" get applications -n {{argocd_ns}} 2>/dev/null
+    echo ""
+    echo "✅ homelab-recover done"
