@@ -38,8 +38,9 @@ server:
       export VAULT_ADDR=http://127.0.0.1:8200
       # Poll for Vault server to bind 8200 — postStart fires before listener is ready,
       # so 'vault status' would otherwise return ECONNREFUSED and the hook would exit
-      # leaving Vault sealed silently. Retry up to 60s.
-      for _ in $(seq 1 30); do
+      # leaving Vault sealed silently. Retry up to 240s — VM cold-boot on Proxmox
+      # plus NFS-backed Raft storage took >60s in observed reboots.
+      for _ in $(seq 1 120); do
         status_json="$(vault status -format=json 2>/dev/null)"
         echo "$status_json" | grep -q '"initialized"' && break
         sleep 2
