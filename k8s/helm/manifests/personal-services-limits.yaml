@@ -1,0 +1,41 @@
+---
+# Defensive guardrails for the personal-services namespace.
+#
+# Context: a misconfigured ebook-sync-monitor CronJob (no concurrencyPolicy,
+# no history limits) once leaked 92 stuck Job pods, pushing the single node
+# past its 110-pod limit and blocking ALL new scheduling cluster-wide. The
+# CronJob itself is now hardened, but these caps make a future runaway
+# impossible to take down the node — it gets rejected at the namespace edge.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: personal-services-defaults
+  namespace: personal-services
+spec:
+  limits:
+    # Containers that don't declare resources get sane defaults instead of
+    # being treated as 0-request / unbounded. All current workloads declare
+    # their own, so this only affects future resource-less manifests.
+    - type: Container
+      defaultRequest:
+        cpu: 50m
+        memory: 64Mi
+      default:
+        cpu: 500m
+        memory: 256Mi
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: personal-services-object-caps
+  namespace: personal-services
+spec:
+  hard:
+    # Non-terminal pods. Namespace normally runs ~5-8; 30 is generous headroom
+    # but far below the node's 110-pod ceiling, so a runaway controller is
+    # capped here instead of starving the whole cluster.
+    pods: "30"
+    # Total Job objects (any state). The leak was 92 accumulated Jobs; this
+    # stops a misbehaving CronJob at the earliest point. Two CronJobs with
+    # history limits sit well under this in steady state.
+    count/jobs.batch: "15"
