@@ -557,14 +557,43 @@ homelab-recover:
     set -euo pipefail
     ctx="{{ctx}}"
 
-    echo "▶ [1/4] checking Vault seal status..."
-    if kubectl --context "$ctx" exec -n {{vault_ns}} vault-0 -- vault status 2>/dev/null | grep -q "Sealed.*true"; then
-        echo "  Vault is sealed, unsealing from vault-keys.json"
+    echo "▶ [1/4] Vault: wait for pod + API, then unseal only if sealed..."
+    # keys file must be reachable (just runs recipes from k8s/helm, so relative path is fine)
+    [ -f vault-keys.json ] || { echo "  ❌ vault-keys.json not found in $(pwd) — run from k8s/helm/"; exit 1; }
+
+    # 1) wait for vault-0 to be Running. NOTE: a sealed Vault is deliberately NOT Ready,
+    #    so we cannot use 'kubectl wait --for=condition=Ready' here — only phase=Running.
+    phase=""
+    for _ in $(seq 1 30); do   # up to 150s
+        phase=$(kubectl --context "$ctx" get pod vault-0 -n {{vault_ns}} -o jsonpath='{.status.phase}' 2>/dev/null || true)
+        [ "$phase" = "Running" ] && break
+        sleep 5
+    done
+    [ "$phase" = "Running" ] || { echo "  ❌ vault-0 not Running after 150s (phase=$phase)"; exit 1; }
+
+    # 2) poll until the Vault API gives a definitive answer.
+    #    vault status exit codes: 0=unsealed, 2=sealed, anything else (1/126/137...)=not ready yet.
+    sealed=""
+    for _ in $(seq 1 30); do   # up to 150s
+        set +e
+        kubectl --context "$ctx" exec -n {{vault_ns}} vault-0 -- vault status >/dev/null 2>&1
+        rc=$?
+        set -e
+        [ "$rc" -eq 0 ] && { sealed=false; break; }
+        [ "$rc" -eq 2 ] && { sealed=true; break; }
+        sleep 5
+    done
+
+    # 3) act on the definitive state — never silently assume "already unsealed"
+    if [ "$sealed" = "true" ]; then
+        echo "  Vault is sealed → unsealing from vault-keys.json"
         key=$(jq -r ".unseal_keys_b64[0]" vault-keys.json)
         kubectl --context "$ctx" exec -n {{vault_ns}} vault-0 -- vault operator unseal "$key" >/dev/null
         echo "  ✓ unsealed"
-    else
+    elif [ "$sealed" = "false" ]; then
         echo "  ✓ Vault already unsealed"
+    else
+        echo "  ❌ Vault API never became reachable after 150s — aborting (check: kubectl logs vault-0 -n {{vault_ns}})"; exit 1
     fi
 
     echo "▶ [2/4] checking ClusterSecretStore validation..."
