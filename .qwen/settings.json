@@ -17,7 +17,8 @@
       "Bash(brew *)",
       "Bash(npm *)",
       "Bash(pip show *)",
-      "Bash(rm *)"
+      "Bash(rm *)",
+      "Agent(Explore)"
     ]
   },
   "$version": 4
