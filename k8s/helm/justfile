@@ -416,7 +416,7 @@ vault-backup-keys:
 argocd_ns := "argocd"
 
 # Argo CD chart version — 调整前先 helm search repo argo/argo-cd 看最新
-argocd_chart_version := "7.7.13"
+argocd_chart_version := "9.4.9"
 
 # 一键安装 ArgoCD + 应用配置（幂等，可重复执行）
 # 改为官方 Helm chart 部署（k8s/helm/values/argocd-values.yaml）

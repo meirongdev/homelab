@@ -128,6 +128,7 @@ just apply   # Apply DNS/Tunnel changes
 
 ### GitOps (ArgoCD)
 - ArgoCD runs in the `argocd` namespace, UI at `argocd.meirong.dev`
+- **Install method caveat**: the live ArgoCD is **v3.3.2 installed from upstream stock manifests via `kubectl`, NOT Helm-managed** (no helm release, resources owned by the `kubectl` field manager). `k8s/helm/values/argocd-values.yaml` + `just deploy-argocd` (chart `9.4.9` = appVersion v3.3.2) are the *aspirational* Helm definition and are kept accurate, but are not what's currently running. A clean `helm upgrade --install` adoption was attempted and **blocked by immutable `.spec.selector` differences** (stock install uses `{app.kubernetes.io/name}`, the chart uses `{app.kubernetes.io/name, app.kubernetes.io/instance}` — selectors can't be mutated, so adoption would require **deleting + recreating** argocd-server / repo-server / application-controller = control-plane downtime). Until that's done in a maintenance window, live ArgoCD config changes (e.g. the repo-server DNS-gate initContainer) are applied via `kubectl patch` AND mirrored into `argocd-values.yaml`.
 - **Sync poll interval**: 3 minutes (auto-syncs after every `git push`)
 - **Managed by ArgoCD** (auto-sync + selfHeal, homelab cluster only):
   - `root` App → `argocd/applications/` (App-of-Apps; manages all child Applications below)

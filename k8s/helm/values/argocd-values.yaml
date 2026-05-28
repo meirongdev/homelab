@@ -24,10 +24,54 @@ configs:
         - .spec.data[].remoteRef.conversionStrategy
         - .spec.data[].remoteRef.decodingStrategy
         - .spec.data[].remoteRef.metadataPolicy
+    # Cilium Gateway API health: a Gateway is Healthy once Programmed (or
+    # Accepted on the cilium-nodeport class). Without this, the `gateway`
+    # Application sits Degraded because ArgoCD has no built-in health for the
+    # Gateway CRD. Previously applied imperatively to argocd-cm; folded into
+    # values so Helm adoption doesn't drop it.
+    resource.customizations.health.gateway.networking.k8s.io_Gateway: |
+      hs = {}
+      local accepted = false
+      local programmed = false
 
-# CRDs 由 chart 安装；旧 stock manifest 装的同名 CRD 在迁移时保留即可
+      if obj.status ~= nil and obj.status.conditions ~= nil then
+        for _, condition in ipairs(obj.status.conditions) do
+          if condition.type == "Accepted" and condition.status == "True" then
+            accepted = true
+          end
+          if condition.type == "Programmed" and condition.status == "True" then
+            programmed = true
+          end
+        end
+      end
+
+      if programmed then
+        hs.status = "Healthy"
+        hs.message = "Gateway is programmed"
+        return hs
+      end
+
+      if accepted and obj.spec ~= nil and obj.spec.gatewayClassName == "cilium-nodeport" then
+        hs.status = "Healthy"
+        hs.message = "Gateway accepted and exposed via Cilium NodePort"
+        return hs
+      end
+
+      if accepted then
+        hs.status = "Progressing"
+        hs.message = "Gateway accepted but still waiting to be programmed"
+        return hs
+      end
+
+      hs.status = "Degraded"
+      hs.message = "Gateway has not been accepted by the controller"
+      return hs
+
+# CRDs 已由原始 stock-manifest 安装且 ArgoCD 正在使用（Application/AppProject/
+# ApplicationSet）。收编进 Helm 时不让 chart 接管 CRD，避免对正在被 CR 使用的
+# CRD 做有风险的 ownership 变更；CRD 继续独立存在，Applications 不受影响。
 crds:
-  install: true
+  install: false
   keep: true
 
 # --- 禁用未使用的可选组件 ---
