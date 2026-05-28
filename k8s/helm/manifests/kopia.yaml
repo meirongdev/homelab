@@ -76,7 +76,7 @@ spec:
     spec:
       initContainers:
         - name: kopia-init
-          image: kopia/kopia:latest
+          image: kopia/kopia@sha256:bd6a449c263465c388339c0637dcd25562e99dcdde286c9d51ade81e138bbf2c
           command:
             - sh
             - -c
@@ -106,7 +106,7 @@ spec:
               mountPath: /app/cache
       containers:
         - name: kopia
-          image: kopia/kopia:latest
+          image: kopia/kopia@sha256:bd6a449c263465c388339c0637dcd25562e99dcdde286c9d51ade81e138bbf2c
           command:
             - kopia
             - server
