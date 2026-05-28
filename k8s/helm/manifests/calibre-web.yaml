@@ -129,7 +129,7 @@ spec:
               mountPath: /library
       containers:
         - name: calibre-web
-          image: crocodilestick/calibre-web-automated:latest
+          image: crocodilestick/calibre-web-automated@sha256:c31a738b6d5ec6982c050063dd3f063b6943eb1051fc81144789f840d9093a8d
           ports:
             - containerPort: 8083
               name: http
@@ -175,7 +175,7 @@ spec:
               mountPath: /cwa-book-ingest
               subPath: ingest
         - name: log-exporter
-          image: busybox
+          image: busybox:1.36
           command: ["sh", "-c", "tail -F /config/calibre-web.log 2>/dev/null"]
           resources:
             requests:

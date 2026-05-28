@@ -58,7 +58,7 @@ spec:
     spec:
       containers:
         - name: gotify
-          image: gotify/server:latest
+          image: gotify/server@sha256:a3af47067ce6aad76aadf5ba32d6ddfecd1ae576a961359f039fd1831e8b7652
           ports:
             - containerPort: 80
               name: http
@@ -153,7 +153,7 @@ spec:
     spec:
       containers:
         - name: bridge
-          image: ghcr.io/druggeri/alertmanager_gotify_bridge:latest
+          image: ghcr.io/druggeri/alertmanager_gotify_bridge@sha256:242441023c6a7956fc7bcdd30350a8fed38f791e703d670aa286fc0465f88b41
           ports:
             - containerPort: 8080
               name: http
