@@ -136,6 +136,8 @@ The API token needs these permissions:
 - **Zone** → `Zone WAF` → **Edit**
 - **Zone** → `Zone Settings` → **Edit**
 - **Account** → `Cloudflare Tunnel` → **Edit**
+- **Account** → `AI Gateway` → **Read**
+- **Account** → `AI Gateway` → **Edit**
 
 ## State Management
 
