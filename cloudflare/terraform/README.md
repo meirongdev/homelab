@@ -19,6 +19,8 @@ All subdomains point to the same Cloudflare Tunnel, which forwards traffic to th
   - **Zone** → `Zone WAF` → **Edit**
   - **Zone** → `Zone Settings` → **Edit**
   - **Account** → `Cloudflare Tunnel` → **Edit**
+  - **Account** → `AI Gateway` → **Read**
+  - **Account** → `AI Gateway` → **Edit**
 
 ## Setup
 
@@ -41,6 +43,22 @@ just init
 just plan   # Preview changes
 just apply  # Apply changes
 ```
+
+## AI Gateway
+
+This Terraform project also manages a shared Cloudflare AI Gateway named `shared-llm`.
+
+- The gateway is an **account-level Cloudflare resource**, not a Kubernetes workload.
+- `homelab` and `oracle-k3s` applications can both call this same gateway.
+- This repository only creates the gateway itself for now; it does **not** yet create custom providers for self-hosted models.
+
+### Why no self-hosted model providers yet?
+
+Cloudflare AI Gateway custom providers require a **Cloudflare-reachable HTTPS upstream**.
+
+- A Tailscale `100.x` address is reachable from your tailnet, but not from Cloudflare's edge.
+- Before wiring `nv-dgx-spark` or `100.89.15.120` into AI Gateway, expose each model endpoint behind a Cloudflare-reachable HTTPS hostname.
+- For DGX Spark, prefer exposing the Bifrost gateway rather than individual `vLLM` ports so AI Gateway only targets one stable upstream.
 
 ## Adding a New Subdomain
 
@@ -129,14 +147,15 @@ Terraform state is stored **locally** (`terraform.tfstate`). This file is gitign
 
 ```
 cloudflare/terraform/
-├── .env                    # API token (gitignored)
-├── .env.example            # Template for .env
-├── main.tf                 # Tunnel config + DNS records
-├── waf.tf                  # WAF rules + zone security settings
-├── provider.tf             # Cloudflare provider + backend config
-├── variables.tf            # Variable definitions
-├── terraform.tfvars        # Actual values (gitignored)
+├── .env                     # API token (gitignored)
+├── .env.example             # Template for .env
+├── ai-gateway.tf            # Shared Cloudflare AI Gateway
+├── main.tf                  # Tunnel config + DNS records
+├── waf.tf                   # WAF rules + zone security settings
+├── provider.tf              # Cloudflare provider + backend config
+├── variables.tf             # Variable definitions
+├── terraform.tfvars         # Actual values (gitignored)
 ├── terraform.tfvars.example # Template for terraform.tfvars
-├── justfile                # just init/plan/apply
-└── README.md               # This file
+├── justfile                 # just init/plan/apply
+└── README.md                # This file
 ```
