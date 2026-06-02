@@ -52,6 +52,17 @@ This Terraform project also manages a shared Cloudflare AI Gateway named `shared
 - `homelab` and `oracle-k3s` applications can both call this same gateway.
 - This repository only creates the gateway itself for now; it does **not** yet create custom providers for self-hosted models.
 
+### Lifecycle Caveat: Manual Delete Required
+
+⚠️ The current pinned Cloudflare provider (v5.19.1) supports AI Gateway **create/update**, but has broken delete semantics. Removing `cloudflare_ai_gateway.shared` from configuration may leave stale state instead of cleanly destroying the resource.
+
+**If you need to remove the gateway:**
+1. Delete it manually via the Cloudflare dashboard (Account Home → AI → AI Gateway → Delete `shared-llm`)
+2. Remove it from Terraform state: `terraform state rm cloudflare_ai_gateway.shared`
+3. Then remove the resource block from `ai-gateway.tf`
+
+This is a known upstream provider issue. Do not rely on normal `terraform destroy` for this resource.
+
 ### Why no self-hosted model providers yet?
 
 Cloudflare AI Gateway custom providers require a **Cloudflare-reachable HTTPS upstream**.
