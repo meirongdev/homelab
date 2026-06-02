@@ -54,14 +54,15 @@ This Terraform project also manages a shared Cloudflare AI Gateway named `shared
 
 ### Lifecycle Caveat: Manual Delete Required
 
-⚠️ The current pinned Cloudflare provider (v5.19.1) supports AI Gateway **create/update**, but has broken delete semantics. Removing `cloudflare_ai_gateway.shared` from configuration may leave stale state instead of cleanly destroying the resource.
+⚠️ The current pinned Cloudflare provider (v5.19.1) supports AI Gateway **create/update**, but has broken delete semantics. The resource includes `lifecycle { prevent_destroy = true }` to prevent `terraform destroy` or replacement operations from hitting the broken delete path and stranding state.
 
 **If you need to remove the gateway:**
 1. Delete it manually via the Cloudflare dashboard (Account Home → AI → AI Gateway → Delete `shared-llm`)
 2. Remove it from Terraform state: `terraform state rm cloudflare_ai_gateway.shared`
-3. Then remove the resource block from `ai-gateway.tf`
+3. Remove the `prevent_destroy` lifecycle block from `ai-gateway.tf`
+4. Then remove the resource block from `ai-gateway.tf`
 
-This is a known upstream provider issue. Do not rely on normal `terraform destroy` for this resource.
+This is a known upstream provider issue. The `prevent_destroy` lifecycle guard remains in place until the provider delete path is fixed.
 
 ### Why no self-hosted model providers yet?
 

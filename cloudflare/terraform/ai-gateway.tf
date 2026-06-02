@@ -8,4 +8,8 @@ resource "cloudflare_ai_gateway" "shared" {
   collect_logs               = var.ai_gateway_collect_logs
   rate_limiting_interval     = var.ai_gateway_rate_limiting_interval
   rate_limiting_limit        = var.ai_gateway_rate_limiting_limit
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
