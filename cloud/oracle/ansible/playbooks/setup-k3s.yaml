@@ -156,6 +156,9 @@
           node-name: oracle-k3s
           tls-san:
             - {{ ansible_host }}
+            # Tailscale IP — homelab ArgoCD 经此连接 oracle API (GitOps)。
+            # 节点内网 IP (10.0.0.26) 由 k3s 自动加入证书 SAN，无需在此声明。
+            - 100.107.166.37
           cluster-cidr: "10.52.0.0/16"
           service-cidr: "10.53.0.0/16"
           flannel-backend: "none"
@@ -184,6 +187,23 @@
       retries: 30
       delay: 10
       changed_when: false
+
+- name: Install Gateway API CRDs (Cilium Gateway dependency)
+  hosts: oracle_masters
+  become: true
+  tasks:
+    # k3s 内置 traefik 被 disable（见上面的 config），不再提供 Gateway API CRD。
+    # Cilium Gateway 依赖标准 Gateway API CRD，必须独立安装（与 homelab 一致：v1.2.1 standard channel）。
+    # 切勿改回让 traefik 托管这些 CRD —— disable traefik 会触发 helm-delete-traefik-crd
+    # 把 CRD 一起删掉，导致 Gateway/HTTPRoute 级联回收、路由全断。
+    # 见 docs/plans/2026-06-04-oracle-k3s-argocd-gitops.md 事故复盘。
+    - name: Apply Gateway API CRDs v1.2.1 (standard channel)
+      ansible.builtin.command:
+        cmd: >-
+          k3s kubectl apply -f
+          https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
+      register: gwapi_crd
+      changed_when: "'created' in gwapi_crd.stdout or 'configured' in gwapi_crd.stdout"
 
 - name: Verify cluster
   hosts: oracle_masters
