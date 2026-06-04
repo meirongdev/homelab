@@ -130,7 +130,7 @@ just apply   # Apply DNS/Tunnel changes
 - ArgoCD runs in the `argocd` namespace, UI at `argocd.meirong.dev`
 - **Install**: ArgoCD is **Helm-managed** — chart `argo/argo-cd` `9.4.9` (appVersion v3.3.2), release `argocd`, values in `k8s/helm/values/argocd-values.yaml`, deployed via `just deploy-argocd`. `argocd-values.yaml` is the source of truth (repo-server DNS-gate initContainer, Cilium Gateway health check, ESO ignoreDifferences, `server.insecure`, slim install with dex/notifications/CRDs disabled all live there). History: originally a stock-manifest kubectl install; an in-place Helm adoption was impossible (immutable `.spec.selector` label differences between stock and chart), so it was migrated via a maintenance-window reinstall (delete chart-managed workloads, keep CRDs + Application CRs + `argocd-secret`/`argocd-redis`, then `helm upgrade --install`). Applications survived untouched (they're CRs); ArgoCD downtime ~4 min, managed services unaffected.
 - **Sync poll interval**: 3 minutes (auto-syncs after every `git push`)
-- **Managed by ArgoCD** (auto-sync + selfHeal, homelab cluster only):
+- **Managed by ArgoCD** (auto-sync + selfHeal; homelab in-cluster, plus oracle-k3s as an external cluster):
   - `root` App → `argocd/applications/` (App-of-Apps; manages all child Applications below)
   - `personal-services` App → `manifests/{calibre-web.yaml,calibre-ebook-sync.yaml,gotify.yaml}` (homelab)
   - `gateway` App → `manifests/gateway.yaml` (homelab Cilium Gateway)
@@ -141,6 +141,7 @@ just apply   # Apply DNS/Tunnel changes
   - `calibre-metadata` App → `k8s/helm/manifests/calibre-metadata/` (Kustomize)
   - `monitoring-dashboards` App → `k8s/helm/manifests/grafana-dashboards.yaml` 等 ConfigMap
   - `argocd-image-updater` App → Helm chart `argo/argocd-image-updater` v1.1.0
+  - `oracle-k3s` App → `cloud/oracle/manifests/` (Kustomize) on the **oracle-k3s external cluster** via Tailscale (`https://100.107.166.37:6443`); cluster cred from Vault→ESO secret `oracle-k3s-cluster` (Task: `docs/plans/2026-06-04-oracle-k3s-argocd-gitops.md`). Added 2026-06-04.
 - **NOT managed by ArgoCD** (manual `just` commands):
   - HashiCorp Vault — requires manual init/unseal (see `just homelab-recover` for restart recovery)
   - External Secrets Operator — depends on Vault
@@ -148,7 +149,7 @@ just apply   # Apply DNS/Tunnel changes
   - PostgreSQL — stateful, avoid auto-prune
   - NFS Provisioner — infrastructure layer
   - Cloudflare Terraform — non-K8s resources
-- **oracle-k3s manifests** (`cloud/oracle/manifests/`): currently hand-applied via `kubectl --context oracle-k3s apply -k cloud/oracle/manifests/`. There is no ArgoCD running on oracle-k3s, and homelab ArgoCD does not have a cluster secret for it. Treat this directory as a source of truth for what should be deployed there, but expect drift; bringing it under GitOps would require registering the cluster + reconciling current cluster state to git first.
+- **oracle-k3s manifests** (`cloud/oracle/manifests/`): **under GitOps as of 2026-06-04** — managed by the homelab ArgoCD `oracle-k3s` Application over Tailscale (oracle registered as an external cluster, `https://100.107.166.37:6443`, bearer-token cred from Vault `secret/homelab/argocd-oracle-cluster` materialised by ESO into the `oracle-k3s-cluster` cluster Secret). Auto-sync + selfHeal + **prune** are on; stateful PVCs (`miniflux-db-pvc`, `karakeep-data`, `meilisearch-data`, `uptime-kuma-data`, `stirling-pdf-configs`) carry `argocd.argoproj.io/sync-options: Prune=false`. `git push` → reconciles within 3 min, same as homelab. Bootstrap RBAC (`argocd-manager` SA + cluster-admin) is in `cloud/oracle/bootstrap/argocd-manager.yaml` — applied manually once, kept **out** of the kustomize tree. The `vault-token` Secret (rss-system) remains a manual bootstrap dependency (not pruned, see `base/vault-store.yaml`). Migration record + caveats: `docs/plans/2026-06-04-oracle-k3s-argocd-gitops.md`.
 
 ### Storage
 - Persistent volumes use NFS (`nfs-client` StorageClass) at `192.168.50.106:/export`
