@@ -1,7 +1,7 @@
 # oracle-k3s 纳入 ArgoCD GitOps 实现计划
 
-> **状态:** 📝 Draft / 待 review
-> **结论:** 可行。采用 hub-and-spoke(复用 homelab ArgoCD),经 Tailscale `100.107.166.37:6443` 连接 oracle API。先手动同步验证,确认无 drift 后再开 selfHeal + prune。
+> **状态:** ✅ Complete(2026-06-04)
+> **结论:** 已落地。hub-and-spoke(复用 homelab ArgoCD),经 Tailscale `100.107.166.37:6443` 连接 oracle API,Vault→ESO 物化 cluster 凭据。oracle-k3s App 现 Synced/Healthy + auto-sync/selfHeal/prune,有状态 PVC 带 Prune=false。执行中另修复了 3 个既存隐患(见末尾完成总结)。
 
 **Goal:** 将 `cloud/oracle/manifests/`(目前 `kubectl apply -k` 手动部署)纳入 GitOps,由 homelab 现有 ArgoCD 持续校准 oracle-k3s,实现 `git push` 即部署。
 
@@ -339,3 +339,32 @@ spec:
 - RBAC 是否一步到位收窄(非 cluster-admin)?起步建议 cluster-admin,稳定后按需收窄。
 - 单 Application vs 按 namespace 拆多 Application —— 本计划默认单 App,简单且贴合现状。
 - 是否最终从 `tls-san` 移除公网 IP、彻底只走 Tailscale —— 视外部访问需求,本计划暂保留双端点。
+
+---
+
+## 完成总结(2026-06-04)
+
+**最终状态:** oracle-k3s App `Synced / Healthy`,`automated: {prune, selfHeal}`,Pruned=0,8 个服务全部可达,全集群 ArgoCD app 均 Synced/Healthy。提交:`d1ac026`、`d6504ab`、`bafaaf9`、`451f136`、`72e5355`(均已 push)。
+
+**关键资源:**
+- 集群凭据:`argocd-manager` SA(`cloud/oracle/bootstrap/argocd-manager.yaml`,手动 apply)→ token+CA 存 Vault `secret/homelab/argocd-oracle-cluster` → ESO `oracle-k3s-cluster` ExternalSecret(`k8s/helm/manifests/`,接入 `vault-eso` app)物化 cluster Secret。
+- Application:`argocd/applications/oracle-k3s.yaml`;Project destination 加 Tailscale 端点。
+- uptime-kuma provisioner 从 standalone Job 转为 **PostSync hook**(`BeforeHookCreation,HookSucceeded`)。
+
+**执行中发现并修复的 3 个既存隐患(原计划未预见):**
+
+1. **Task 1 事故 — `disable: traefik` 删掉 Gateway API CRD**(详见上方"Task 1 执行记录")。k3s 内置 traefik 包托管 Gateway API CRD;ansible 重推 config 同步了 playbook 里的 `disable: traefik`,重启 k3s 后级联删除 CRD → oracle 路由全断。已恢复:从上游独立装回 v1.2.1 standard CRD + 重建 GatewayClass。**playbook 已固化独立安装 Gateway API CRD 的任务**,埋雷拆除。
+
+2. **uptime-kuma provisioner 两个 bug**(GitOps 化后暴露):
+   - Vault `secret/oracle-k3s/uptime-kuma` 的 `admin_password` 与实际不符 → login 失败(用户修复)。
+   - `accepted_statuscodes: "401-401"`(单码范围非法,uptime_kuma_api 拒绝)→ 改为 `"401"`。
+   修好后转 PostSync hook。
+
+3. **homelab CoreDNS 间歇解析失败 → repo-server 拉 git 不稳**:根因是 **Tailscale MagicDNS(`100.100.100.100`,在节点 resolv.conf eth0 链路上)解析公网域名 8/8 失败**(tailnet 未配 Global nameservers 时 MagicDNS 无法转发公网;且 `accept-dns=false`/`true` 切换均无法让它可靠)。修法:CoreDNS Corefile `forward . 8.8.8.8 1.1.1.1` 绕开节点 resolv.conf —— **此修复早已固化在 `k8s/ansible`(setup-k3s.yaml + `fix-dns-fallback.yaml` / `just fix-dns`),只是 k3s addon 在某次重启后回滚、无人重跑**。⚠️ **k3s 重启会把 CoreDNS forward 回滚成 `/etc/resolv.conf`,届时重跑 `just fix-dns`。**
+
+4. **ArgoCD Gateway 健康检查不覆盖 `cilium` class**:`argocd-values.yaml` 的 Gateway 健康 Lua 只把 `cilium-nodeport`(homelab)的 Accepted 判 Healthy,oracle 的 `cilium` class 落到 Progressing → 带 PostSync hook 的 sync 卡在"waiting for healthy state of Gateway"。已扩展为同时覆盖 `cilium` / `cilium-nodeport`(两集群均无外部 LB,`Programmed` 恒为 False,`Accepted=True` 才是稳态)。
+
+**遗留 / 后续:**
+- 节点 Tailscale `accept-dns` 被切到 `true`(playbook 为 `false`);因 CoreDNS 已不走节点 resolv.conf,此设置对集群无影响,可择机改回 `false` 对齐 playbook。
+- RBAC 仍为 cluster-admin,稳定后可收窄。
+- 单 Application,未按 namespace 拆分。

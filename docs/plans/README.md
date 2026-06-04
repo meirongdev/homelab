@@ -15,7 +15,7 @@
 
 | Plan | Status |
 |------|--------|
-| [2026-06-04 oracle-k3s 纳入 ArgoCD GitOps](2026-06-04-oracle-k3s-argocd-gitops.md) | 📝 Draft / 待 review |
+| [2026-06-04 oracle-k3s 纳入 ArgoCD GitOps](2026-06-04-oracle-k3s-argocd-gitops.md) | ✅ Complete |
 | [2026-03-07 架构优化方案](2026-03-07-homelab-oracle-architecture-optimization.md) | ✅ Approved |
 | [2026-03-07 Cilium 迁移修复](2026-03-07-post-cilium-fix-plan.md) | ✅ Complete |
 | [2026-03-06 Cilium 安装](2026-03-06-cilium-mesh-installation.md) | ✅ Complete |
