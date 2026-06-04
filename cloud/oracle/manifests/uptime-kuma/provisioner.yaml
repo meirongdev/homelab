@@ -33,7 +33,7 @@ data:
         {"name": "HashiCorp Vault","url": "https://vault.meirong.dev/",         "accepted_statuscodes": ["300-399"], "maxredirects": 0},
         {"name": "Calibre-Web",    "url": "https://book.meirong.dev/",          "accepted_statuscodes": ["300-399"], "maxredirects": 0},
         {"name": "ArgoCD",         "url": "https://argocd.meirong.dev/",        "accepted_statuscodes": ["200-299", "300-399"]},
-        {"name": "Kopia Backup",   "url": "https://backup.meirong.dev/",        "accepted_statuscodes": ["300-399", "401-401"], "maxredirects": 0},
+        {"name": "Kopia Backup",   "url": "https://backup.meirong.dev/",        "accepted_statuscodes": ["300-399", "401"], "maxredirects": 0},
         # --- new info pipeline services ---
         # KaraKeep: root / redirects 307 to /signin; monitor /signin directly (returns 200)
         {"name": "KaraKeep",       "url": "http://karakeep.rss-system.svc:3000/signin"},
@@ -125,15 +125,19 @@ data:
     api.disconnect()
     print("Provisioning complete.")
 ---
-# Standalone Job (not ArgoCD hook — oracle-k3s has no ArgoCD)
-# Run manually: just provision-uptime-kuma
+# ArgoCD PostSync hook：每次 sync 后运行，重新校准 uptime-kuma monitors(脚本幂等)。
+# 改 MONITORS 后 git push → ArgoCD 同步 → 此 hook 自动 reprovision(贴合 CLAUDE.md 意图)。
+# hook-delete-policy: 成功即删 + 下次创建前先删;失败则保留 Job 供排查并使 sync 标记失败。
+# 集群已纳入 homelab ArgoCD(2026-06-04);亦可手动 kubectl apply -f 跑。
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: uptime-kuma-provisioner
   namespace: personal-services
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 spec:
-  ttlSecondsAfterFinished: 300
   backoffLimit: 3
   template:
     spec:
