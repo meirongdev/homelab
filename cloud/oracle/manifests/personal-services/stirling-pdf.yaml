@@ -29,6 +29,8 @@ kind: PersistentVolumeClaim
 metadata:
   name: stirling-pdf-configs
   namespace: personal-services
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
 spec:
   accessModes:
     - ReadWriteOnce

@@ -7,6 +7,8 @@ kind: PersistentVolumeClaim
 metadata:
   name: karakeep-data
   namespace: rss-system
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
 spec:
   accessModes:
     - ReadWriteOnce
@@ -20,6 +22,8 @@ kind: PersistentVolumeClaim
 metadata:
   name: meilisearch-data
   namespace: rss-system
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
 spec:
   accessModes:
     - ReadWriteOnce
