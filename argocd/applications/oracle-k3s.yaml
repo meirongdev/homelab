@@ -1,0 +1,29 @@
+---
+# oracle-k3s 工作负载,由 homelab ArgoCD 经 Tailscale 纳管。
+# 起步阶段故意不开 automated（先人工对账 diff，确认无意外删除后再开 prune+selfHeal，见 Task 7）。
+# 集群凭据见 ESO oracle-k3s-cluster（Task 3），destination 走 Tailscale（Task 1/4）。
+# 见 docs/plans/2026-06-04-oracle-k3s-argocd-gitops.md
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: oracle-k3s
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: homelab
+
+  source:
+    repoURL: https://github.com/meirongdev/homelab
+    targetRevision: main
+    path: cloud/oracle/manifests # Kustomize 树
+
+  destination:
+    server: https://100.107.166.37:6443
+    namespace: default # 仅作无 namespace 资源的兜底；manifests 各自声明 ns
+
+  syncPolicy:
+    # 起步不写 automated —— 先人工 diff + sync（不带 prune）
+    syncOptions:
+      - ServerSideApply=true
+      - CreateNamespace=false # namespace 已在 kustomize 树内

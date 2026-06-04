@@ -15,7 +15,11 @@ spec:
   destinations:
     - server: https://kubernetes.default.svc
       namespace: "*"
+    # oracle-k3s 公网端点(保留作 fallback)
     - server: https://152.69.195.151:6443
+      namespace: "*"
+    # oracle-k3s Tailscale 端点(canonical;cluster Secret + Application 均用此)
+    - server: https://100.107.166.37:6443
       namespace: "*"
 
   # 允许管理集群级资源（Namespace、ClusterRole 等）
