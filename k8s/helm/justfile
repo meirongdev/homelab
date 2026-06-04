@@ -557,7 +557,7 @@ homelab-recover:
     set -euo pipefail
     ctx="{{ctx}}"
 
-    echo "▶ [1/4] Vault: wait for pod + API, then unseal only if sealed..."
+    echo "▶ [1/5] Vault: wait for pod + API, then unseal only if sealed..."
     # keys file must be reachable (just runs recipes from k8s/helm, so relative path is fine)
     [ -f vault-keys.json ] || { echo "  ❌ vault-keys.json not found in $(pwd) — run from k8s/helm/"; exit 1; }
 
@@ -596,7 +596,7 @@ homelab-recover:
         echo "  ❌ Vault API never became reachable after 150s — aborting (check: kubectl logs vault-0 -n {{vault_ns}})"; exit 1
     fi
 
-    echo "▶ [2/4] checking ClusterSecretStore validation..."
+    echo "▶ [2/5] checking ClusterSecretStore validation..."
     if kubectl --context "$ctx" get clustersecretstore vault-backend -o jsonpath='{.status.conditions[0].status}' 2>/dev/null | grep -q "False"; then
         echo "  ClusterSecretStore is invalid, restarting ESO"
         kubectl --context "$ctx" rollout restart deployment external-secrets -n external-secrets
@@ -606,12 +606,24 @@ homelab-recover:
         echo "  ✓ ClusterSecretStore already valid"
     fi
 
-    echo "▶ [3/4] restarting argocd-repo-server (defensive — first sync after VM reboot tends to hang on DNS)..."
+    echo "▶ [3/5] re-applying CoreDNS public upstreams (k3s addon reverts forward to MagicDNS-tainted /etc/resolv.conf on restart; Tailscale MagicDNS can't resolve public names)..."
+    cf=$(kubectl --context "$ctx" -n kube-system get configmap coredns -o jsonpath='{.data.Corefile}')
+    newcf=$(printf '%s' "$cf" | sed 's|forward \. .*|forward . 1.1.1.1 8.8.8.8|')
+    if [ "$cf" != "$newcf" ]; then
+        kubectl --context "$ctx" -n kube-system patch configmap coredns --type merge -p "$(jq -n --arg c "$newcf" '{data:{Corefile:$c}}')"
+        kubectl --context "$ctx" -n kube-system rollout restart deployment/coredns
+        kubectl --context "$ctx" -n kube-system rollout status deployment/coredns --timeout=90s
+        echo "  ✓ CoreDNS forward reset to public upstreams + restarted"
+    else
+        echo "  ✓ CoreDNS forward already public"
+    fi
+
+    echo "▶ [4/5] restarting argocd-repo-server (defensive — first sync after VM reboot tends to hang on DNS)..."
     kubectl --context "$ctx" rollout restart deployment/argocd-repo-server -n {{argocd_ns}}
     kubectl --context "$ctx" rollout status deployment/argocd-repo-server -n {{argocd_ns}} --timeout=90s
     echo "  ✓ argocd-repo-server restarted"
 
-    echo "▶ [4/4] waiting for ExternalSecrets to converge..."
+    echo "▶ [5/5] waiting for ExternalSecrets to converge..."
     # kubectl get externalsecret columns: NAMESPACE NAME STORETYPE STORE REFRESH STATUS READY
     for i in $(seq 1 12); do
         bad=$(kubectl --context "$ctx" get externalsecret -A --no-headers 2>/dev/null | awk '$6!="SecretSynced"' | wc -l | tr -d ' ')
