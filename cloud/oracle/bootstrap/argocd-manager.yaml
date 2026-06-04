@@ -1,0 +1,39 @@
+# Bootstrap RBAC：让 homelab ArgoCD 把 oracle-k3s 作为外部集群纳管。
+#
+# 手动 apply（一次性），不进 GitOps —— 这是 ArgoCD 纳管本集群前必须先存在的凭据，
+# 故意不放进 cloud/oracle/manifests/ 的 kustomize 树（避免被它要 bootstrap 的 ArgoCD 反过来管）。
+#
+#   kubectl --context oracle-k3s apply -f cloud/oracle/bootstrap/argocd-manager.yaml
+#
+# 之后取出 token + CA，存入 Vault secret/homelab/argocd-oracle-cluster，
+# 由 ESO 物化成 ArgoCD cluster Secret（见 Task 3）。
+# 说明见 docs/plans/2026-06-04-oracle-k3s-argocd-gitops.md
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: argocd-manager
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: argocd-manager
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin # 起步用 cluster-admin；稳定后可按需收窄
+subjects:
+  - kind: ServiceAccount
+    name: argocd-manager
+    namespace: kube-system
+---
+# k8s 1.24+ 不再自动签发长期 SA token；显式创建该类型 Secret 拿不过期 token。
+apiVersion: v1
+kind: Secret
+metadata:
+  name: argocd-manager-token
+  namespace: kube-system
+  annotations:
+    kubernetes.io/service-account.name: argocd-manager
+type: kubernetes.io/service-account-token
