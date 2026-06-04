@@ -25,10 +25,12 @@ configs:
         - .spec.data[].remoteRef.decodingStrategy
         - .spec.data[].remoteRef.metadataPolicy
     # Cilium Gateway API health: a Gateway is Healthy once Programmed (or
-    # Accepted on the cilium-nodeport class). Without this, the `gateway`
-    # Application sits Degraded because ArgoCD has no built-in health for the
-    # Gateway CRD. Previously applied imperatively to argocd-cm; folded into
-    # values so Helm adoption doesn't drop it.
+    # Accepted on the cilium / cilium-nodeport classes — neither homelab nor
+    # oracle-k3s has an external LB, so Programmed stays False / AddressNotAssigned
+    # forever and Accepted=True is the real steady state). Without this, the
+    # gateway Applications sit Progressing/Degraded (and PostSync-hook syncs hang
+    # waiting for Gateway health). Previously applied imperatively to argocd-cm;
+    # folded into values so Helm adoption doesn't drop it.
     resource.customizations.health.gateway.networking.k8s.io_Gateway: |
       hs = {}
       local accepted = false
@@ -51,9 +53,9 @@ configs:
         return hs
       end
 
-      if accepted and obj.spec ~= nil and obj.spec.gatewayClassName == "cilium-nodeport" then
+      if accepted and obj.spec ~= nil and (obj.spec.gatewayClassName == "cilium-nodeport" or obj.spec.gatewayClassName == "cilium") then
         hs.status = "Healthy"
-        hs.message = "Gateway accepted and exposed via Cilium NodePort"
+        hs.message = "Gateway accepted (Cilium, no external LB on this cluster)"
         return hs
       end
 
