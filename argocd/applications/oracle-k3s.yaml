@@ -23,7 +23,11 @@ spec:
     namespace: default # 仅作无 namespace 资源的兜底；manifests 各自声明 ns
 
   syncPolicy:
-    # 起步不写 automated —— 先人工 diff + sync（不带 prune）
+    automated:
+      prune: true
+      selfHeal: true
     syncOptions:
       - ServerSideApply=true
       - CreateNamespace=false # namespace 已在 kustomize 树内
+      # 有状态 PVC（miniflux-db/karakeep/meilisearch/uptime-kuma/stirling-pdf）
+      # 带 argocd.argoproj.io/sync-options: Prune=false 护栏，防误删数据。

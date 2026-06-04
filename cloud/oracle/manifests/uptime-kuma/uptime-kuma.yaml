@@ -4,6 +4,8 @@ kind: PersistentVolumeClaim
 metadata:
   name: uptime-kuma-data
   namespace: personal-services
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
 spec:
   accessModes:
     - ReadWriteOnce
