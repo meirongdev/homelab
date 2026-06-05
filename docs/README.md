@@ -1,6 +1,6 @@
 # Homelab Docs Portal
 
-> Last updated: 2026-03-07
+> Last updated: 2026-06-05
 > Scope: 双集群 homelab（homelab + oracle-k3s）的架构、运维与实施记录。
 
 ## 文档分层

@@ -1,6 +1,6 @@
 # Homelab Project TODO
 
-> Last updated: 2026-03-19
+> Last updated: 2026-06-05
 
 ## Phase 1: Foundation ✅
 
@@ -45,6 +45,7 @@
 - [x] **Uptime Kuma SSO 修复**: maxredirects=0 + accepted_statuscodes 300-399
 - [x] **homelab Ubuntu 24.04 重建**: ✅ 2026-03-08 重建完成，K3s v1.34.5+k3s1 + Cilium 1.19.1
 - [x] **homelab Cilium Gateway 恢复**: ✅ kube-proxy replacement + Gateway API 验证通过
+- [x] **oracle-k3s GitOps 纳管**: ✅ 2026-06-04 hub-and-spoke ArgoCD 经 Tailscale 纳管 oracle-k3s manifests，auto-sync/selfHeal/prune 启用
 
 ## Phase 5: Production Hardening 🎯 (Future)
 
