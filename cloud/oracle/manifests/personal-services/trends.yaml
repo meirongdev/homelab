@@ -20,9 +20,9 @@ spec:
       storage: 2Gi
 ---
 # 采集用的 GitHub PAT(逗号分隔可多 token 轮询)。
-# Vault: secret/oracle-k3s/trends,key: github_tokens
+# Vault: secret/oracle-k3s/trends,key: GITHUB_TOKENS
 #   kubectl --context k3s-homelab exec -n vault vault-0 -- \
-#     sh -c 'VAULT_TOKEN=$VAULT_TOKEN vault kv put secret/oracle-k3s/trends github_tokens=ghp_xxx,ghp_yyy'
+#     sh -c 'VAULT_TOKEN=$VAULT_TOKEN vault kv put secret/oracle-k3s/trends GITHUB_TOKENS=ghp_xxx,ghp_yyy'
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
@@ -40,7 +40,7 @@ spec:
     - secretKey: github-tokens
       remoteRef:
         key: oracle-k3s/trends
-        property: github_tokens
+        property: GITHUB_TOKENS
 ---
 apiVersion: apps/v1
 kind: Deployment
