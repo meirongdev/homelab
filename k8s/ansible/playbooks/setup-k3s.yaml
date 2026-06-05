@@ -75,6 +75,20 @@
         state: directory
         mode: "0755"
 
+    # Pods' upstream DNS. Deliberately NOT systemd-resolved's flat resolv.conf:
+    # that file flattens away split-DNS routing and carries Tailscale MagicDNS
+    # (100.100.100.100), which can't resolve public names → CoreDNS forward fails
+    # intermittently. A static public-DNS file keeps CoreDNS's default
+    # `forward . /etc/resolv.conf` correct and self-healing across reboots.
+    # The node's own resolution is unaffected (it uses the 127.0.0.53 stub).
+    - name: Write clean resolv.conf for kubelet (pods' upstream DNS, no MagicDNS)
+      ansible.builtin.copy:
+        dest: /etc/rancher/k3s/resolv.conf
+        content: |
+          nameserver 8.8.8.8
+          nameserver 1.1.1.1
+        mode: "0644"
+
     - name: Write K3s config (TLS SANs + Cilium CNI mode)
       ansible.builtin.copy:
         dest: /etc/rancher/k3s/config.yaml
@@ -83,8 +97,9 @@
             - {{ ansible_host }}
             - {{ hostvars[inventory_hostname]['tailscale_ip'] | default('') }}
           kubelet-arg:
-            # Use systemd-resolved's real upstream list instead of the 127.0.0.53 stub.
-            - resolv-conf=/run/systemd/resolve/resolv.conf
+            # Clean public-DNS resolv.conf (see the "Write clean resolv.conf" task
+            # above) — avoids the MagicDNS-tainted systemd-resolved flat file.
+            - resolv-conf=/etc/rancher/k3s/resolv.conf
             # Reserve resources for K3s server, containerd, Cilium agent
             - kube-reserved=cpu=200m,memory=512Mi,ephemeral-storage=2Gi
             # Reserve resources for systemd, sshd, journald, Tailscale
