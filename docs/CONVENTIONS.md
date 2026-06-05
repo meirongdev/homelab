@@ -166,7 +166,7 @@ just apply   # Apply DNS/Tunnel changes
 - **Three signals**: Logs (Loki), Metrics (Prometheus), Traces (Tempo) — all collected via Otel Collector
 - **Multi-cluster monitoring**: All telemetry carries a `cluster` label (`homelab` or `oracle-k3s`)
   - homelab: Prometheus `scrapeClasses` default relabeling adds `cluster=homelab` to all local scrape targets
-  - oracle-k3s: OTel Collector pushes all metrics (node-exporter, kube-state-metrics, cloudflared, traefik) via `prometheusremotewrite` with `cluster=oracle-k3s`
+  - oracle-k3s: OTel Collector pushes all metrics (node-exporter, kube-state-metrics, cloudflared) via `prometheusremotewrite` with `cluster=oracle-k3s`
   - **No prometheus-agent on oracle-k3s** — the single OTel Collector handles both logs, metrics, and traces
 - **Traces pipeline** (2026-03-01):
   - Apps send OTLP traces → OTel Collector (gRPC :4317 / HTTP :4318) → Tempo
@@ -232,7 +232,7 @@ just apply   # Apply DNS/Tunnel changes
 - **HTTPRoute template**: Always include explicit `group`/`kind` in `parentRefs` and `group`/`kind`/`weight` in `backendRefs` to prevent ArgoCD OutOfSync drift caused by Gateway controller defaults.
 - **ArgoCD Image Updater** (v1.1.0): Uses CRD model — create an `ImageUpdater` CR (not just annotations). Set `useAnnotations: true` in the CR to read image config from Application annotations. Use strategy `newest-build` (not `latest`, deprecated).
 - **ArgoCD Application definitions** (`argocd/applications/*.yaml`): The `root` Application (App-of-Apps) watches this directory recursively, so editing any `*.yaml` here and pushing is enough — ArgoCD will reconcile within the 3-min poll. Manual `kubectl apply` is only needed for the initial `root.yaml` bootstrap, or if `root` itself is missing.
-- **ArgoCD self-heal caveat**: Resources already managed by an Application (for example `gateway` managing `manifests/traefik-config.yaml`) must be changed in Git first. Ad-hoc `kubectl patch/apply` fixes on live resources will be reconciled away on the next sync.
+- **ArgoCD self-heal caveat**: Resources already managed by an Application (for example `gateway` managing `manifests/gateway.yaml`) must be changed in Git first. Ad-hoc `kubectl patch/apply` fixes on live resources will be reconciled away on the next sync.
 - **Kustomize namespace caveat**: The global `namespace:` field in `kustomization.yaml` runs as a transformer after JSON patches, overriding them. Declare namespace explicitly in each manifest instead when resources span multiple namespaces.
 - **Chinese Comments**: Permitted and used in `justfile` for clarity.
 - **SSH**: User `root`, Key `~/.ssh/vgio`.

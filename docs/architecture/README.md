@@ -1,7 +1,7 @@
 # Architecture Docs
 
 > Source-of-truth for current production architecture.
-> Last updated: 2026-03-07
+> Last updated: 2026-06-05
 
 ## Core Architecture
 

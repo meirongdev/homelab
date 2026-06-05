@@ -217,7 +217,6 @@ All services have liveness and readiness probes configured:
 | stirling-pdf | `GET /api/v1/info` | 8080 |
 | squoosh | `GET /` | 8080 |
 | miniflux | `GET /healthcheck` | 8080 |
-| n8n | `GET /healthz` | 5678 |
 | rsshub | `GET /healthz` | 1200 |
 
 ### k3s-homelab
