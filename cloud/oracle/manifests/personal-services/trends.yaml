@@ -79,6 +79,29 @@ spec:
               value: ":8080"
             - name: OAUTH_BASE_URL
               value: https://trends.meirong.dev
+            # 发现查询:全局 star 切片(跨语言主榜)+ 按语言补强(让这些生态的高星仓库也进候选池)。
+            # 换行分隔;每条走 GitHub Search(sort=stars desc,最多翻 DISCOVERY_MAX_PAGES=10 页)。
+            # 增删语言行即可调覆盖;小众语言不足一页会自动早停,不浪费配额。改这里 ArgoCD 同步即生效,无需重建镜像。
+            - name: DISCOVERY_QUERIES
+              value: |
+                stars:50..100
+                stars:100..250
+                stars:250..1000
+                stars:1000..5000
+                stars:5000..20000
+                stars:>20000
+                language:rust stars:>50
+                language:go stars:>50
+                language:typescript stars:>100
+                language:python stars:>100
+                language:kotlin stars:>50
+                language:swift stars:>50
+                language:zig stars:>20
+                language:elixir stars:>30
+                language:scala stars:>50
+                language:haskell stars:>30
+                language:lua stars:>50
+                language:ocaml stars:>20
             - name: GITHUB_TOKENS
               valueFrom:
                 secretKeyRef:
