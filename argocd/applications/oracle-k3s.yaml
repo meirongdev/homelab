@@ -10,6 +10,16 @@ metadata:
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
+  annotations:
+    # argocd-image-updater 仅跟踪 trends 这一个镜像(其余 workload 不受影响)。
+    # 跟踪 ghcr 上 :main 的 digest,变更时把 digest pin 写回 Git(走已有 git-creds),
+    # ArgoCD 再同步到 oracle-k3s。镜像由 trends 仓库 CI 推送。
+    argocd-image-updater.argoproj.io/image-list: trends=ghcr.io/meirongdev/trends
+    argocd-image-updater.argoproj.io/trends.update-strategy: digest
+    argocd-image-updater.argoproj.io/trends.allow-tags: regexp:^main$
+    argocd-image-updater.argoproj.io/trends.kustomize.image-name: ghcr.io/meirongdev/trends
+    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/git-creds
+    argocd-image-updater.argoproj.io/git-branch: main
 spec:
   project: homelab
 
