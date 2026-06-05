@@ -27,9 +27,10 @@ resources:
   - monitoring/namespace.yaml
   - monitoring/otel-collector.yaml
   - monitoring/exporters.yaml
-  # Personal services (IT-Tools, Stirling-PDF, Squoosh, Timeslot)
+  # Personal services (IT-Tools, Stirling-PDF, Squoosh, Timeslot, Trends)
   - personal-services/it-tools.yaml
   - personal-services/stirling-pdf.yaml
   - personal-services/squoosh.yaml
   - personal-services/timeslot.yaml
+  - personal-services/trends.yaml
   - personal-services/backup-cronjob.yaml

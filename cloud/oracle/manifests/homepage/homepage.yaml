@@ -110,6 +110,15 @@ data:
               namespace: personal-services
               app: timeslot
 
+        - Trends:
+            icon: mdi-trending-up
+            href: https://trends.meirong.dev
+            description: GitHub 趋势追踪
+            kubernetes:
+              namespace: personal-services
+              container: trends
+              label_selector: app=trends
+
     - RSS & 自动化:
         - Miniflux:
             icon: miniflux.png

@@ -1,0 +1,153 @@
+# trends — GitHub 趋势追踪(单 Go 二进制:cron 采集/评分 worker + 只读 API + 内嵌 SPA + SQLite/WAL)
+# 镜像由 trends 仓库 CI 推到 ghcr;tag 由 argocd-image-updater 跟踪 :main 的 digest 写回(见 oracle-k3s Application 注解)。
+# ns 复用 personal-services(由 uptime-kuma/namespace.yaml 创建);HTTPRoute 经 ReferenceGrant allow-gateway-to-personal-services 放行。
+# 暴露:trends.meirong.dev —— 需在 cloud/oracle/cloudflare/terraform.tfvars 的 ingress_rules 加 "trends" 后 terraform apply(建隧道路由 + DNS)。
+---
+# SQLite 落在节点本地盘(local-path,单节点无冗余);Prune=false 护栏,防 ArgoCD 误删数据。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: trends-data
+  namespace: personal-services
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 2Gi
+---
+# 采集用的 GitHub PAT(逗号分隔可多 token 轮询)。
+# Vault: secret/oracle-k3s/trends,key: github_tokens
+#   kubectl --context k3s-homelab exec -n vault vault-0 -- \
+#     sh -c 'VAULT_TOKEN=$VAULT_TOKEN vault kv put secret/oracle-k3s/trends github_tokens=ghp_xxx,ghp_yyy'
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: trends-secrets
+  namespace: personal-services
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: trends-secrets
+    creationPolicy: Owner
+  data:
+    - secretKey: github-tokens
+      remoteRef:
+        key: oracle-k3s/trends
+        property: github_tokens
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trends
+  namespace: personal-services
+  labels:
+    app: trends
+spec:
+  replicas: 1
+  # SQLite 单写锁:滚动更新会让新旧 pod 抢同一个 db 文件的写锁,故用 Recreate。
+  strategy:
+    type: Recreate
+    rollingUpdate: null
+  selector:
+    matchLabels:
+      app: trends
+  template:
+    metadata:
+      labels:
+        app: trends
+    spec:
+      securityContext:
+        # distroless nonroot 的 uid/gid;让进程对 local-path 卷可写
+        fsGroup: 65532
+      containers:
+        - name: trends
+          image: ghcr.io/meirongdev/trends:main
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: DB_PATH
+              value: /data/trends.db
+            - name: API_LISTEN_ADDR
+              value: ":8080"
+            - name: OAUTH_BASE_URL
+              value: https://trends.meirong.dev
+            - name: GITHUB_TOKENS
+              valueFrom:
+                secretKeyRef:
+                  name: trends-secrets
+                  key: github-tokens
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: trends-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trends
+  namespace: personal-services
+spec:
+  type: ClusterIP
+  selector:
+    app: trends
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+---
+# trends.meirong.dev -> trends:8080
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: trends
+  namespace: personal-services
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: oracle-gateway
+      namespace: kube-system
+      port: 80
+  hostnames:
+    - "trends.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: trends
+          port: 8080
+          weight: 1
