@@ -9,6 +9,14 @@ resource "cloudflare_ai_gateway" "shared" {
   rate_limiting_interval     = var.ai_gateway_rate_limiting_interval
   rate_limiting_limit        = var.ai_gateway_rate_limiting_limit
 
+  # Declare the provider's computed defaults explicitly to avoid a perpetual
+  # in-place diff (cloudflare provider 5.x otherwise plans these back to null).
+  log_management          = 100000
+  log_management_strategy = "DELETE_OLDEST"
+  logpush                 = false
+  store_id                = ""
+  zdr                     = false
+
   lifecycle {
     prevent_destroy = true
   }
