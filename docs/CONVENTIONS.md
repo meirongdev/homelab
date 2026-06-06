@@ -120,13 +120,14 @@ just apply   # Apply DNS/Tunnel changes
   5. Block non-standard HTTP methods (TRACE, CONNECT, etc.)
 - **Rate limiting**: Auth endpoints (`/login`, `/oauth2`, `/signin`, `/v1/auth`) — 30 req/10s per IP
 - **Pro plan upgrade**: Managed Ruleset (SQLi/XSS/RCE) + OWASP CRS + Leaked Credentials Detection（见 `waf.tf` 注释段）
-- **API Token 权限**: Zone DNS Edit + Zone WAF Edit + Zone Settings Edit + Cloudflare Tunnel Edit + Account AI Gateway Edit
+- **API Token 权限**: Zone DNS Edit + Zone WAF Edit + Zone Settings Edit + Cloudflare Tunnel Edit
 
 ### Identity
 - **Status**: ZITADEL remains available at `auth.meirong.dev`, but shared ingress-layer SSO has been removed.
 - **Current model**: services are now either public or rely on their own built-in auth (for example ArgoCD, Vault, Grafana, Miniflux, KaraKeep, and Timeslot admin Basic Auth).
 - **Reason**: removing the Traefik ForwardAuth / oauth2-proxy chain simplifies ingress and avoids a second auth hop on every request.
 - **Recommended direction**: keep `HTTPRoute` resources controller-neutral and add auth at the app layer. Prefer native OIDC with ZITADEL first; use a per-app `oauth2-proxy` reverse-proxy only for apps that cannot speak OIDC directly.
+- **Bifrost example of this pattern**: Bifrost's OSS admin UI/config-API have no auth, so they sit behind a per-app `oauth2-proxy` (reverse-proxy mode, ZITADEL OIDC) in the `bifrost` namespace; the inference API (`/v1`,`/openai`,`/anthropic`,`/genai`) is routed direct to Bifrost and gated by Bifrost virtual keys. The OIDC client is provisioned by `zitadel/scripts/configure-bifrost-oauth.sh` (REST, not Terraform — TF writes break across the CF edge); creds land in Vault `secret/homelab/bifrost-oauth2-proxy` → ESO.
 
 ### GitOps (ArgoCD)
 - ArgoCD runs in the `argocd` namespace, UI at `argocd.meirong.dev`
@@ -204,6 +205,7 @@ just apply   # Apply DNS/Tunnel changes
 | HashiCorp Vault | homelab | `vault` | `vault.meirong.dev` |
 | ArgoCD | homelab | `argocd` | `argocd.meirong.dev` |
 | ZITADEL (SSO) | homelab | `zitadel` | `auth.meirong.dev` |
+| Bifrost (LLM gateway) | homelab | `bifrost` | `llm.meirong.dev` (inference API + ZITADEL-gated admin UI) |
 | Kopia Backup | homelab | `kopia` | `backup.meirong.dev` (Web) / `https://10.10.10.10:31515` (CLI) |
 | PostgreSQL | oracle-k3s | `rss-system` | Internal only |
 
