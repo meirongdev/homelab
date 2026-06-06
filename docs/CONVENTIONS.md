@@ -118,7 +118,7 @@ just apply   # Apply DNS/Tunnel changes
   3. Block known vulnerability scanner user agents (sqlmap, nikto, nmap, etc.)
   4. Managed Challenge for high threat score visitors (score > 14)
   5. Block non-standard HTTP methods (TRACE, CONNECT, etc.)
-- **Rate limiting**: Auth endpoints (`/login`, `/oauth2`, `/signin`, `/v1/auth`) — 10 req/10s per IP
+- **Rate limiting**: Auth endpoints (`/login`, `/oauth2`, `/signin`, `/v1/auth`) — 30 req/10s per IP
 - **Pro plan upgrade**: Managed Ruleset (SQLi/XSS/RCE) + OWASP CRS + Leaked Credentials Detection（见 `waf.tf` 注释段）
 - **API Token 权限**: Zone DNS Edit + Zone WAF Edit + Zone Settings Edit + Cloudflare Tunnel Edit
 
