@@ -100,6 +100,8 @@ just apply   # Apply DNS/Tunnel changes
 - **Cloudflare Tunnel**: `cloudflared` pod in `cloudflare` namespace forwards to the Cilium-managed Gateway service (`cilium-gateway-<gateway-name>.kube-system.svc:80`). oracle-k3s uses `--protocol http2` (Oracle Cloud NSG blocks outbound UDP/QUIC).
 - **Ingress**: Cilium Gateway API is the only in-cluster HTTP entrypoint (`HTTPRoute` resources in `manifests/gateway.yaml`)
 - **CNI**: Both clusters use **Cilium** (eBPF + VXLAN); homelab deployed 2026-03-06, oracle-k3s migrated from Flannel 2026-03-07
+  - homelab Cilium is **Helm-managed but applied manually** (not ArgoCD); values codified in `k8s/cilium/values.yaml` (+ `README.md`). Pinned to v1.19.1 images.
+  - **`gatewayAPI.enableAppProtocol: true` is required** — without it, ZITADEL console v1 gRPC calls (auth.v1/admin.v1) 404 through the gateway because Envoy's grpc_web filter sends converted native-gRPC over HTTP/1.1 to a backend that needs h2c. Honouring Service `appProtocol` gives `zitadel:8080` an explicit h2c upstream. Runbook: `docs/runbooks/zitadel-console-grpc-404.md`
 - **homelab K8s Node**: `10.10.10.10` / Tailscale `100.94.186.7` | **Proxmox**: `192.168.50.3`
 - **oracle-k3s Node**: `10.0.0.26` / Tailscale `100.107.166.37`
 - **Cross-cluster network**: Tailscale subnet routing (Pod CIDR only): homelab `10.42.0.0/16`; oracle-k3s `10.52.0.0/16`。Cilium ClusterMesh active (connected 2026-03-08 via `cilium clustermesh connect --source-endpoint 100.94.186.7:32379 --destination-endpoint 100.107.166.37:32379 --allow-mismatching-ca`). KVStoreMesh enabled on both sides. 见 `docs/architecture/tailscale-network.md`

@@ -1,0 +1,104 @@
+# Cilium Helm values — homelab cluster (source of truth for a previously manual install).
+#
+# Cilium was originally installed by hand with the Helm CLI (chart cilium/cilium),
+# so its config lived ONLY in the live release. This file codifies it so it is not
+# lost on reinstall. Apply with the commands in README.md.
+#
+# Chart: cilium/cilium  (images pinned to v1.19.1 by digest in-cluster; keep --version aligned)
+# Cluster: homelab (id 1), ClusterMesh peer: oracle-k3s @ 100.107.166.37:32379
+
+cluster:
+  id: 1
+  name: homelab
+
+k8sServiceHost: 10.10.10.10
+k8sServicePort: 6443
+kubeProxyReplacement: true
+routingMode: tunnel
+tunnelProtocol: vxlan
+
+ipam:
+  operator:
+    clusterPoolIPv4PodCIDRList:
+      - 10.42.0.0/16
+
+cgroup:
+  autoMount:
+    enabled: false
+  hostRoot: /sys/fs/cgroup
+
+# Gateway API. enableAppProtocol=true is REQUIRED for the ZITADEL console:
+# it makes Cilium honour Service appProtocol (zitadel:8080 -> kubernetes.io/h2c),
+# giving that backend an explicit h2c upstream cluster. Without it, Envoy's grpc_web
+# filter converts grpc-web -> native grpc but sends it over HTTP/1.1, and ZITADEL's
+# v1 gRPC services (auth.v1/admin.v1) return 404 -> the /ui/console/* pages break.
+# See docs/runbooks/zitadel-console-grpc-404.md.
+gatewayAPI:
+  enabled: true
+  enableAppProtocol: true
+
+clustermesh:
+  useAPIServer: true
+  config:
+    enabled: true
+    clusters:
+      - name: oracle-k3s
+        ips:
+          - 100.107.166.37
+        port: 32379
+  apiserver:
+    service:
+      type: NodePort
+      nodePort: 32379
+    podAnnotations:
+      cilium.io/caBundleChangeRestartedAt: "2026-04-27T00:04:05+08:00"
+    resources:
+      requests: { cpu: 50m, memory: 96Mi }
+      limits: { cpu: 500m, memory: 192Mi }
+    etcd:
+      resources:
+        requests: { cpu: 50m, memory: 96Mi }
+        limits: { cpu: 500m, memory: 256Mi }
+    kvstoremesh:
+      resources:
+        requests: { cpu: 25m, memory: 64Mi }
+        limits: { cpu: 250m, memory: 128Mi }
+
+hubble:
+  enabled: true
+  relay:
+    enabled: true
+  ui:
+    enabled: false
+  tls:
+    enabled: true
+    auto:
+      enabled: true
+      method: cronJob
+      certValidityDuration: 365
+
+envoy:
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 192Mi }
+
+operator:
+  replicas: 1
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits: { cpu: 500m, memory: 192Mi }
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits: { cpu: 1000m, memory: 512Mi }
+
+# ClusterMesh CA bundle — NOT committed (crypto material, per repo secret-hygiene).
+# This is the shared CA that homelab + oracle-k3s trust for ClusterMesh. On reinstall,
+# either let Cilium generate a fresh CA (then reconnect clustermesh on both sides) or
+# restore the existing one. Retrieve the live value with:
+#   kubectl -n kube-system get secret cilium-ca -o jsonpath='{.data.ca\.crt}' | base64 -d
+# and supply it at apply time via:  --set-file tls.caBundle.content=<file>
+tls:
+  caBundle:
+    enabled: true
+    # content: <inject at apply time — see note above>
