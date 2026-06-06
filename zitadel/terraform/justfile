@@ -1,0 +1,31 @@
+set dotenv-load
+
+# Secrets come from .env (gitignored). Mirror Vault: secret/homelab/zitadel-terraform
+export ZITADEL_TOKEN := env_var_or_default("ZITADEL_TOKEN", "")
+export SMTP_USER := env_var_or_default("SMTP_USER", "")
+export SMTP_PASSWORD := env_var_or_default("SMTP_PASSWORD", "")
+export SMTP_FROM := env_var_or_default("SMTP_FROM", "")
+
+init:
+    terraform init
+
+plan:
+    terraform plan \
+        -var="zitadel_token=${ZITADEL_TOKEN}" \
+        -var="smtp_user=${SMTP_USER}" \
+        -var="smtp_password=${SMTP_PASSWORD}" \
+        -var="smtp_from=${SMTP_FROM}"
+
+apply:
+    terraform apply -auto-approve \
+        -var="zitadel_token=${ZITADEL_TOKEN}" \
+        -var="smtp_user=${SMTP_USER}" \
+        -var="smtp_password=${SMTP_PASSWORD}" \
+        -var="smtp_from=${SMTP_FROM}"
+
+destroy:
+    terraform destroy \
+        -var="zitadel_token=${ZITADEL_TOKEN}" \
+        -var="smtp_user=${SMTP_USER}" \
+        -var="smtp_password=${SMTP_PASSWORD}" \
+        -var="smtp_from=${SMTP_FROM}"
