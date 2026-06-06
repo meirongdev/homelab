@@ -1,0 +1,10 @@
+# Copy to terraform.tfvars (gitignored) and fill in your values.
+# Alternatively, set environment variables and use the justfile targets.
+zitadel_domain = "auth.meirong.dev"
+zitadel_token  = "service-user-personal-access-token"
+
+smtp_host      = "smtp.gmail.com:587"
+smtp_user      = "youraddress@gmail.com"
+smtp_password  = "gmail-app-password-16-chars-no-spaces"
+smtp_from      = "youraddress@gmail.com"
+smtp_from_name = "ZITADEL Homelab"
