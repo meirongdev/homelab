@@ -1,5 +1,15 @@
 # ZITADEL Terraform
 
+> ⚠️ **This module does not work against `auth.meirong.dev` for *writes*.** The
+> provider uses native gRPC; its write responses lose their trailers across the
+> Cloudflare edge (`server closed the stream without sending trailers`), and a
+> direct/bypass connection fails ZITADEL's instance-host check. **SMTP is instead
+> configured via REST** by `../scripts/configure-smtp.sh` (idempotent, plain
+> HTTP/JSON — no trailers). This module is kept for reference / for the day the
+> provider can reach ZITADEL over a trailers-clean path. The service user still
+> needs **IAM_OWNER** either way (instance-level membership; an org role is not
+> enough — you get `membership not found (AUTHZ-...)`).
+
 Manages the **instance-level SMTP email provider** for the ZITADEL instance at
 `auth.meirong.dev` declaratively, replacing the manual Console click-through.
 
