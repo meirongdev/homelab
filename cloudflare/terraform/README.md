@@ -19,8 +19,6 @@ All subdomains point to the same Cloudflare Tunnel, which forwards traffic to th
   - **Zone** → `Zone WAF` → **Edit**
   - **Zone** → `Zone Settings` → **Edit**
   - **Account** → `Cloudflare Tunnel` → **Edit**
-  - **Account** → `AI Gateway` → **Read**
-  - **Account** → `AI Gateway` → **Edit**
 
 ## Setup
 
@@ -44,33 +42,11 @@ just plan   # Preview changes
 just apply  # Apply changes
 ```
 
-## AI Gateway
-
-This Terraform project also manages a shared Cloudflare AI Gateway named `shared-llm`.
-
-- The gateway is an **account-level Cloudflare resource**, not a Kubernetes workload.
-- `homelab` and `oracle-k3s` applications can both call this same gateway.
-- This repository only creates the gateway itself for now; it does **not** yet create custom providers for self-hosted models.
-
-### Lifecycle Caveat: Manual Delete Required
-
-⚠️ The current pinned Cloudflare provider (v5.19.1) supports AI Gateway **create/update**, but has broken delete semantics. The resource includes `lifecycle { prevent_destroy = true }` to prevent `terraform destroy` or replacement operations from hitting the broken delete path and stranding state.
-
-**If you need to remove the gateway:**
-1. Delete it manually via the Cloudflare dashboard (Account Home → AI → AI Gateway → Delete `shared-llm`)
-2. Remove it from Terraform state: `terraform state rm cloudflare_ai_gateway.shared`
-3. Remove the `prevent_destroy` lifecycle block from `ai-gateway.tf`
-4. Then remove the resource block from `ai-gateway.tf`
-
-This is a known upstream provider issue. The `prevent_destroy` lifecycle guard remains in place until the provider delete path is fixed.
-
-### Why no self-hosted model providers yet?
-
-Cloudflare AI Gateway custom providers require a **Cloudflare-reachable HTTPS upstream**.
-
-- A Tailscale `100.x` address is reachable from your tailnet, but not from Cloudflare's edge.
-- Before wiring `nv-dgx-spark` or `100.89.15.120` into AI Gateway, expose each model endpoint behind a Cloudflare-reachable HTTPS hostname.
-- For DGX Spark, prefer exposing the Bifrost gateway rather than individual `vLLM` ports so AI Gateway only targets one stable upstream.
+> **LLM gateway**: self-hosted LLM access is handled by **Bifrost** in the homelab
+> cluster (`llm.meirong.dev`), not a Cloudflare AI Gateway. Bifrost runs inside the
+> Tailscale-connected cluster so it can reach `100.x` model machines directly — which
+> a Cloudflare AI Gateway custom provider never could (CF's edge can't see the tailnet).
+> See `docs/plans/2026-06-07-bifrost-llm-gateway.md`.
 
 ## Adding a New Subdomain
 
@@ -148,8 +124,6 @@ The API token needs these permissions:
 - **Zone** → `Zone WAF` → **Edit**
 - **Zone** → `Zone Settings` → **Edit**
 - **Account** → `Cloudflare Tunnel` → **Edit**
-- **Account** → `AI Gateway` → **Read**
-- **Account** → `AI Gateway` → **Edit**
 
 ## State Management
 
@@ -163,7 +137,6 @@ Terraform state is stored **locally** (`terraform.tfstate`). This file is gitign
 cloudflare/terraform/
 ├── .env                     # API token (gitignored)
 ├── .env.example             # Template for .env
-├── ai-gateway.tf            # Shared Cloudflare AI Gateway
 ├── main.tf                  # Tunnel config + DNS records
 ├── waf.tf                   # WAF rules + zone security settings
 ├── provider.tf              # Cloudflare provider + backend config

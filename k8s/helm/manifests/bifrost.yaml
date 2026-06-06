@@ -1,0 +1,318 @@
+# Bifrost — self-hosted LLM gateway (homelab)
+#
+# WHY here and not a Cloudflare AI Gateway: Bifrost runs *inside* the homelab
+# cluster, whose node is on Tailscale (100.94.186.7), so it can reach LLMs on
+# other tailnet machines (e.g. DGX Spark / 100.89.15.120) directly. A Cloudflare
+# AI Gateway custom provider cannot — CF's edge can't see 100.x addresses.
+#
+# Public surface (llm.meirong.dev), split by the HTTPRoute at the bottom:
+#   - inference API (/v1, /openai, /anthropic, /genai) -> Bifrost direct,
+#     gated by Bifrost virtual keys (config.json: enforce_auth_on_inference)
+#   - everything else (UI '/', config API '/api') -> oauth2-proxy -> ZITADEL login
+#     (Bifrost's OSS admin plane has no auth of its own)
+#
+# Providers + virtual keys are created in the UI after first boot and persist to
+# the PVC DB — they are intentionally NOT committed here (secrets stay out of git).
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bifrost-config
+  namespace: bifrost
+data:
+  # Bootstrap config (non-secret). Bifrost hashes this on first load; later UI/API
+  # changes are persisted to the DB on the PVC and survive restarts.
+  #
+  # enforce_auth_on_inference=true => inference requests WITHOUT a virtual key are
+  # rejected. This is the control that keeps the public inference endpoint from being
+  # an open relay to the models. VERIFY after deploy (see plan): an un-keyed
+  # `curl https://llm.meirong.dev/v1/models` must be rejected.
+  #
+  # To add a Tailscale-hosted model later, either use the UI (Providers -> Add custom)
+  # or extend this file with a custom OpenAI-compatible provider, e.g.:
+  #   "providers": {
+  #     "dgx-spark": {
+  #       "base_url": "http://100.89.15.120:8000/v1",   # tailnet address, reachable from the pod
+  #       "type": "openai"
+  #     }
+  #   }
+  config.json: |
+    {
+      "client": {
+        "enforce_auth_on_inference": true
+      }
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bifrost-data
+  namespace: bifrost
+  annotations:
+    # config + governance (virtual keys) DB lives here — never auto-prune
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bifrost
+  namespace: bifrost
+  labels:
+    app: bifrost
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bifrost
+  strategy:
+    type: Recreate # single RWO PVC
+  template:
+    metadata:
+      labels:
+        app: bifrost
+    spec:
+      containers:
+        - name: bifrost
+          # maximhq/bifrost:latest @ 2026-06-07
+          image: maximhq/bifrost@sha256:775f4384a4692253966a6bc19d8e444a7c2b368d46f02896e3a51fd356b410a6
+          ports:
+            - containerPort: 8080
+              name: http
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: config
+              mountPath: /app/data/config.json
+              subPath: config.json
+              readOnly: true
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: bifrost-data
+        - name: config
+          configMap:
+            name: bifrost-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bifrost
+  namespace: bifrost
+spec:
+  type: ClusterIP
+  selector:
+    app: bifrost
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+---
+# oauth2-proxy — guards Bifrost's admin UI / config API with ZITADEL OIDC.
+# Reverse-proxy (upstream) mode: authenticated requests are forwarded to Bifrost.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: oauth2-proxy-secret
+  namespace: bifrost
+spec:
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: oauth2-proxy-secret
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: client-id
+      remoteRef:
+        key: homelab/bifrost-oauth2-proxy
+        property: client-id
+    - secretKey: client-secret
+      remoteRef:
+        key: homelab/bifrost-oauth2-proxy
+        property: client-secret
+    - secretKey: cookie-secret
+      remoteRef:
+        key: homelab/bifrost-oauth2-proxy
+        property: cookie-secret
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oauth2-proxy
+  namespace: bifrost
+  labels:
+    app: oauth2-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oauth2-proxy
+  template:
+    metadata:
+      labels:
+        app: oauth2-proxy
+    spec:
+      containers:
+        - name: oauth2-proxy
+          # quay.io/oauth2-proxy/oauth2-proxy:v7.7.1
+          image: quay.io/oauth2-proxy/oauth2-proxy@sha256:f6a4aa83a27e316114bf79664302b1ffb2cc8ce697fb479273af4feb3fb16fe3
+          ports:
+            - containerPort: 4180
+              name: http
+          args:
+            - --provider=oidc
+            - --oidc-issuer-url=https://auth.meirong.dev
+            - --scope=openid profile email
+            - --email-domain=*
+            # reverse-proxy to Bifrost: authed requests are forwarded to the UI/API
+            - --upstream=http://bifrost.bifrost.svc.cluster.local:8080
+            - --http-address=0.0.0.0:4180
+            - --redirect-url=https://llm.meirong.dev/oauth2/callback
+            - --cookie-domain=llm.meirong.dev
+            - --cookie-secure=true
+            - --cookie-samesite=lax
+            - --cookie-expire=168h
+            - --skip-provider-button=true
+            # trust X-Forwarded-* from the Cilium Gateway / Cloudflare Tunnel
+            - --reverse-proxy=true
+            - --whitelist-domain=.meirong.dev
+            - --silence-ping-logging=true
+          env:
+            - name: OAUTH2_PROXY_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: oauth2-proxy-secret
+                  key: client-id
+            - name: OAUTH2_PROXY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: oauth2-proxy-secret
+                  key: client-secret
+            - name: OAUTH2_PROXY_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: oauth2-proxy-secret
+                  key: cookie-secret
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 4180
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 4180
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oauth2-proxy
+  namespace: bifrost
+spec:
+  type: ClusterIP
+  selector:
+    app: oauth2-proxy
+  ports:
+    - port: 4180
+      targetPort: 4180
+      name: http
+---
+# Allow the HTTPRoute in this namespace to reference the Services above.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-gateway-to-bifrost
+  namespace: bifrost
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: bifrost
+  to:
+    - group: ""
+      kind: Service
+---
+# HTTPRoute: llm.meirong.dev
+#   /v1,/openai,/anthropic,/genai -> bifrost (inference, virtual-key auth)
+#   everything else (UI, /api, /oauth2/*) -> oauth2-proxy (ZITADEL login)
+# Longest-prefix wins (Gateway API spec), so the inference prefixes take priority
+# over the '/' catch-all.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: bifrost
+  namespace: bifrost
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: homelab-gateway
+      namespace: kube-system
+      port: 80
+  hostnames:
+    - "llm.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1
+        - path:
+            type: PathPrefix
+            value: /openai
+        - path:
+            type: PathPrefix
+            value: /anthropic
+        - path:
+            type: PathPrefix
+            value: /genai
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: bifrost
+          port: 8080
+          weight: 1
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: oauth2-proxy
+          port: 4180
+          weight: 1
