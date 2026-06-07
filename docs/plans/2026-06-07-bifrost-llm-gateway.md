@@ -55,7 +55,9 @@ and authenticate with virtual keys; browsers hit the admin UI and must log in vi
 - Bifrost **Running**; oauth2-proxy **CreateContainerConfigError** (waiting on the Vault secret — expected).
 - **Pod → Tailscale egress CONFIRMED**: a bifrost-ns pod reached `http://100.97.87.120:8000/v1/models`
   (vLLM `deepseek-v4-flash`). Cilium masquerade + tailnet routing work; no ACL change needed.
-- **No provider configured** in the running instance, so `/v1` returns 400 — nothing is exposed yet.
+- **Inference gate configured + VERIFIED end-to-end** (Bifrost virtual keys):
+  - `enforce_auth_on_inference=true` (via API) + routing rule `require-vk-gate` (passthrough, engages the gate) + provider `custom_dgx` (base_url `http://100.97.87.120:8000`, key `dummy`, model `deepseek-v4-flash`) + a virtual key — all in the PVC SQLite DB.
+  - **un-keyed `POST /v1/chat/completions` → 401** "virtual key is required"; **keyed (x-bf-vk) → 200** with a real `deepseek-v4-flash` completion. The public endpoint is gated and the DGX model works through Bifrost.
 
 ## Enforcement — Bifrost OSS quirk (security-critical)
 
@@ -67,16 +69,19 @@ and authenticate with virtual keys; browsers hit the admin UI and must log in vi
 
 ## Operator runbook (remaining manual steps)
 
+The inference gate + DGX provider are already configured and verified (above). Remaining:
+
 1. `./zitadel/scripts/configure-bifrost-oauth.sh` → copy the printed `vault kv put`.
-2. `vault kv put secret/homelab/bifrost-oauth2-proxy client-id=… client-secret=… cookie-secret=…` → oauth2-proxy starts.
+2. `vault kv put secret/homelab/bifrost-oauth2-proxy client-id=… client-secret=… cookie-secret=…` → oauth2-proxy starts → UI reachable at `https://llm.meirong.dev/` (ZITADEL login).
 3. Delete `shared-llm` in the Cloudflare dashboard (Account → AI → AI Gateway).
-4. Log in to `https://llm.meirong.dev/` via ZITADEL, then **in this order**:
-   a. Settings → enable **Enforce auth on inference**.
-   b. Create a **routing rule** (so the PreHook engages) — and a **virtual key** for each consumer.
-   c. **Verify** un-keyed `curl https://llm.meirong.dev/v1/models` → **401** before continuing.
-   d. Add the provider: **custom** OpenAI-compatible, `base_url http://100.97.87.120:8000`
-      (no `/v1`), `base_provider_type=openai`, key `dummy`, model `deepseek-v4-flash`.
-5. End-to-end: keyed `curl -H "x-bf-vk: sk-bf-…" …/v1/chat/completions` → 200; un-keyed → 401.
+4. In the UI, create a **virtual key per consumer** (the test key I made isn't shared). Consumers call:
+   `curl https://llm.meirong.dev/v1/chat/completions -H "x-bf-vk: sk-bf-…" -d '{"model":"custom_dgx/deepseek-v4-flash",...}'`.
+
+**Persistence caveat**: enforce flag + routing rule + provider + VKs live in the **PVC SQLite DB**
+(`bifrost-data`, `Prune=false`), NOT in git — Bifrost's intended runtime-config model. If that PVC is
+ever rebuilt, **re-create the `require-vk-gate` routing rule and re-enable enforce**, or the gate opens
+(config.json's `enforce_auth_on_inference` alone does not gate — see above). Consider adding `bifrost-data`
+to the Kopia backup set.
 
 ## Verify (admin plane)
 
