@@ -23,32 +23,28 @@ data:
   # Bootstrap config (non-secret). Bifrost hashes this on first load; later UI/API
   # changes are persisted to the DB on the PVC and survive restarts.
   #
-  # Lock the public inference endpoint to virtual keys so it is NOT an open relay:
-  #   - client.enforce_auth_on_inference=true       require auth on /v1 inference
-  #   - client.allow_direct_keys=false              forbid x-bf-direct-key bypass (managed keys only)
-  #   - governance.auth_config.disable_auth_on_inference=false
-  #       CRITICAL: this defaults to TRUE in the OSS build and OVERRIDES enforce_auth_on_inference,
-  #       so without it set false, un-keyed inference is allowed through. (verified empirically)
-  #   - governance.auth_config.is_enabled=false     Bifrost's own admin-auth stays off; the admin
-  #       UI/API is protected at the network layer by oauth2-proxy + ZITADEL instead.
-  # VERIFY after any change: an un-keyed POST to /v1/chat/completions must return 401/403,
-  # NOT a provider/model error.
-  #
-  # To add a Tailscale-hosted model later, use the UI (Providers -> Add custom) or add a
-  # custom OpenAI-compatible provider whose base_url is the tailnet address, e.g.
-  #   http://100.89.15.120:8000/v1  (reachable from the pod via the node's tailnet route).
+  # config.json expresses INTENT but is NOT sufficient to gate the public endpoint on its own.
+  # Verified against this OSS build (source: plugins/governance/main.go):
+  #   - enforce_auth_on_inference set via config.json is NOT wired at startup (bug #2408);
+  #     the runtime flag is only set through the API/UI (PUT /api/config), which persists to
+  #     the SQLite config store on the PVC.
+  #   - Even with it on, the governance PreHook SHORT-CIRCUITS when a request has no virtual key
+  #     AND no routing rules exist:  `if vk == nil && !hasRoutingRules { return nil }` — so the
+  #     "virtual key required" (401) check is skipped. To actually reject un-keyed inference you
+  #     need BOTH enforce_auth_on_inference=true AND >=1 governance routing rule (or a present VK).
+  # => Enforcement + virtual keys are configured in the ZITADEL-gated UI (persisted to the PVC),
+  #    NOT here. SAFETY: no provider is defined below, so /v1 returns 400 (nothing to abuse).
+  #    Only add a provider AFTER enforcement is set up and an un-keyed POST /v1/chat/completions
+  #    returns 401. Reachability to the tailnet model is already verified from a bifrost pod.
+  #    First model (from ~/.zshrc qwen-dgx): custom OpenAI provider, base_url
+  #    http://100.97.87.120:8000 (no /v1 suffix — Bifrost appends it), base_provider_type=openai,
+  #    model deepseek-v4-flash, key "dummy".
   config.json: |
     {
       "$schema": "https://www.getbifrost.ai/schema",
       "client": {
         "enforce_auth_on_inference": true,
         "allow_direct_keys": false
-      },
-      "governance": {
-        "auth_config": {
-          "is_enabled": false,
-          "disable_auth_on_inference": false
-        }
       }
     }
 ---
