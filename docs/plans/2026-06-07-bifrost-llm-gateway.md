@@ -52,7 +52,7 @@ and authenticate with virtual keys; browsers hit the admin UI and must log in vi
 
 - CF AI Gateway removed (code + `terraform state rm`); **dashboard delete of `shared-llm` still pending (manual)**.
 - `llm.meirong.dev` DNS + tunnel ingress **applied**.
-- Bifrost **Running**; oauth2-proxy **CreateContainerConfigError** (waiting on the Vault secret — expected).
+- Bifrost **Running**; oauth2-proxy **Running** — ZITADEL OIDC client `bifrost-admin` (project `Homelab`) created via the REST script; creds in Vault `secret/homelab/bifrost-oauth2-proxy` → ESO. `GET https://llm.meirong.dev/` → 302 to ZITADEL login (verified). Admin login user: `zitadel-admin@zitadel.auth.meirong.dev`.
 - **Pod → Tailscale egress CONFIRMED**: a bifrost-ns pod reached `http://100.97.87.120:8000/v1/models`
   (vLLM `deepseek-v4-flash`). Cilium masquerade + tailnet routing work; no ACL change needed.
 - **Inference gate configured + VERIFIED end-to-end** (Bifrost virtual keys):
