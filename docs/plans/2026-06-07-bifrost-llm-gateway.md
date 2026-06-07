@@ -48,25 +48,37 @@ and authenticate with virtual keys; browsers hit the admin UI and must log in vi
   `secret/homelab/bifrost-oauth2-proxy` → ESO `ExternalSecret oauth2-proxy-secret` →
   K8s Secret in the `bifrost` namespace.
 
+## Status of automated deploy (2026-06-07)
+
+- CF AI Gateway removed (code + `terraform state rm`); **dashboard delete of `shared-llm` still pending (manual)**.
+- `llm.meirong.dev` DNS + tunnel ingress **applied**.
+- Bifrost **Running**; oauth2-proxy **CreateContainerConfigError** (waiting on the Vault secret — expected).
+- **Pod → Tailscale egress CONFIRMED**: a bifrost-ns pod reached `http://100.97.87.120:8000/v1/models`
+  (vLLM `deepseek-v4-flash`). Cilium masquerade + tailnet routing work; no ACL change needed.
+- **No provider configured** in the running instance, so `/v1` returns 400 — nothing is exposed yet.
+
+## Enforcement — Bifrost OSS quirk (security-critical)
+
+`enforce_auth_on_inference` in `config.json` does **not** gate the public endpoint on its own:
+1. It is ignored at startup in OSS (bug #2408); only `PUT /api/config` (UI/API) wires the runtime flag, persisted to the PVC config store.
+2. Even when set, the governance PreHook (`plugins/governance/main.go`) short-circuits for an un-keyed request when no routing rules exist: `if vk == nil && !hasRoutingRules { return nil }` — so the "virtual key required" (401) check never runs.
+
+**To actually reject un-keyed inference you need BOTH** `enforce_auth_on_inference=true` **AND ≥1 governance routing rule** (or a present VK). This is done in the UI (persisted to PVC), not via config.json.
+
 ## Operator runbook (remaining manual steps)
 
 1. `./zitadel/scripts/configure-bifrost-oauth.sh` → copy the printed `vault kv put`.
-2. `vault kv put secret/homelab/bifrost-oauth2-proxy client-id=… client-secret=… cookie-secret=…`
-3. `git push origin main` (ArgoCD deploys bifrost + oauth2-proxy within ~3 min).
-4. `cd cloudflare/terraform && just apply` (creates the `llm` CNAME + tunnel ingress).
-5. Delete `shared-llm` in the Cloudflare dashboard (Account → AI → AI Gateway).
-6. Log in to `https://llm.meirong.dev/` via ZITADEL, create a virtual key, and add the
-   first Tailscale model provider (UI → Providers → custom, `base_url: http://100.x:port/v1`).
+2. `vault kv put secret/homelab/bifrost-oauth2-proxy client-id=… client-secret=… cookie-secret=…` → oauth2-proxy starts.
+3. Delete `shared-llm` in the Cloudflare dashboard (Account → AI → AI Gateway).
+4. Log in to `https://llm.meirong.dev/` via ZITADEL, then **in this order**:
+   a. Settings → enable **Enforce auth on inference**.
+   b. Create a **routing rule** (so the PreHook engages) — and a **virtual key** for each consumer.
+   c. **Verify** un-keyed `curl https://llm.meirong.dev/v1/models` → **401** before continuing.
+   d. Add the provider: **custom** OpenAI-compatible, `base_url http://100.97.87.120:8000`
+      (no `/v1`), `base_provider_type=openai`, key `dummy`, model `deepseek-v4-flash`.
+5. End-to-end: keyed `curl -H "x-bf-vk: sk-bf-…" …/v1/chat/completions` → 200; un-keyed → 401.
 
-## Key prerequisite / risk
-
-**Pod → Tailscale `100.x` egress**: Bifrost pods must reach model machines' tailnet IPs.
-Needs Cilium masquerading pod egress to the node's tailnet IP **and** the target machine's
-Tailscale ACL allowing the homelab node. Verify when wiring the first provider:
-`kubectl -n bifrost exec deploy/bifrost -- wget -qO- http://<tailscale-ip>:<port>/v1/models`.
-
-## Verify (security-critical)
+## Verify (admin plane)
 
 - `https://llm.meirong.dev/` → 302 to `auth.meirong.dev`, then UI after login.
-- `curl https://llm.meirong.dev/v1/models` with **no** key → rejected; with `x-bf-vk` → 200.
 - `curl -sI https://llm.meirong.dev/api/...` with no cookie → not anonymous (302/403).
