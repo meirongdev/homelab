@@ -23,23 +23,32 @@ data:
   # Bootstrap config (non-secret). Bifrost hashes this on first load; later UI/API
   # changes are persisted to the DB on the PVC and survive restarts.
   #
-  # enforce_auth_on_inference=true => inference requests WITHOUT a virtual key are
-  # rejected. This is the control that keeps the public inference endpoint from being
-  # an open relay to the models. VERIFY after deploy (see plan): an un-keyed
-  # `curl https://llm.meirong.dev/v1/models` must be rejected.
+  # Lock the public inference endpoint to virtual keys so it is NOT an open relay:
+  #   - client.enforce_auth_on_inference=true       require auth on /v1 inference
+  #   - client.allow_direct_keys=false              forbid x-bf-direct-key bypass (managed keys only)
+  #   - governance.auth_config.disable_auth_on_inference=false
+  #       CRITICAL: this defaults to TRUE in the OSS build and OVERRIDES enforce_auth_on_inference,
+  #       so without it set false, un-keyed inference is allowed through. (verified empirically)
+  #   - governance.auth_config.is_enabled=false     Bifrost's own admin-auth stays off; the admin
+  #       UI/API is protected at the network layer by oauth2-proxy + ZITADEL instead.
+  # VERIFY after any change: an un-keyed POST to /v1/chat/completions must return 401/403,
+  # NOT a provider/model error.
   #
-  # To add a Tailscale-hosted model later, either use the UI (Providers -> Add custom)
-  # or extend this file with a custom OpenAI-compatible provider, e.g.:
-  #   "providers": {
-  #     "dgx-spark": {
-  #       "base_url": "http://100.89.15.120:8000/v1",   # tailnet address, reachable from the pod
-  #       "type": "openai"
-  #     }
-  #   }
+  # To add a Tailscale-hosted model later, use the UI (Providers -> Add custom) or add a
+  # custom OpenAI-compatible provider whose base_url is the tailnet address, e.g.
+  #   http://100.89.15.120:8000/v1  (reachable from the pod via the node's tailnet route).
   config.json: |
     {
+      "$schema": "https://www.getbifrost.ai/schema",
       "client": {
-        "enforce_auth_on_inference": true
+        "enforce_auth_on_inference": true,
+        "allow_direct_keys": false
+      },
+      "governance": {
+        "auth_config": {
+          "is_enabled": false,
+          "disable_auth_on_inference": false
+        }
       }
     }
 ---
