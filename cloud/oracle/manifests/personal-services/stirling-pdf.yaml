@@ -1,6 +1,9 @@
-# stirling-pdf-auth ExternalSecret: provides initial admin credentials for Stirling-PDF's
-# built-in H2 database login. ForwardAuth is the outer SSO gate; this is the inner app login.
-# Phase 2: when ZITADEL is deployed, configure OAUTH2_ISSUER_URL env var for native SSO.
+# stirling-pdf-auth ExternalSecret: built-in H2 login (username/password) kept as a
+# FALLBACK, plus the ZITADEL OIDC client credentials for native SSO ("Sign in with
+# GitHub" via ZITADEL's federated IdP). OIDC client provisioned by
+# zitadel/scripts/configure-oidc-app.sh (app "stirling-pdf", redirect
+# https://pdf.meirong.dev/login/oauth2/code/oidc). Creds live in Vault at
+# secret/oracle-k3s/stirling-pdf (keys: oauth_client_id, oauth_client_secret).
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
@@ -23,6 +26,14 @@ spec:
       remoteRef:
         key: oracle-k3s/stirling-pdf
         property: password
+    - secretKey: oauth-client-id
+      remoteRef:
+        key: oracle-k3s/stirling-pdf
+        property: oauth_client_id
+    - secretKey: oauth-client-secret
+      remoteRef:
+        key: oracle-k3s/stirling-pdf
+        property: oauth_client_secret
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -76,6 +87,34 @@ spec:
                 secretKeyRef:
                   name: stirling-pdf-auth
                   key: password
+            # --- ZITADEL OIDC SSO (native generic OIDC; password login above stays as fallback) ---
+            - name: SECURITY_OAUTH2_ENABLED
+              value: "true"
+            # Bare issuer — Stirling appends /.well-known/openid-configuration itself.
+            - name: SECURITY_OAUTH2_ISSUER
+              value: "https://auth.meirong.dev"
+            - name: SECURITY_OAUTH2_CLIENTID
+              valueFrom:
+                secretKeyRef:
+                  name: stirling-pdf-auth
+                  key: oauth-client-id
+            - name: SECURITY_OAUTH2_CLIENTSECRET
+              valueFrom:
+                secretKeyRef:
+                  name: stirling-pdf-auth
+                  key: oauth-client-secret
+            - name: SECURITY_OAUTH2_SCOPES
+              value: "openid, profile, email"
+            - name: SECURITY_OAUTH2_USEASUSERNAME
+              value: "email"
+            # Display label only; the registration id (and thus redirect path) is hard-coded to "oidc".
+            - name: SECURITY_OAUTH2_PROVIDER
+              value: "zitadel"
+            # First SSO login auto-provisions a Stirling user keyed by email.
+            - name: SECURITY_OAUTH2_AUTOCREATEUSER
+              value: "true"
+            - name: SECURITY_OAUTH2_BLOCKREGISTRATION
+              value: "false"
           volumeMounts:
             - name: configs
               mountPath: /configs
