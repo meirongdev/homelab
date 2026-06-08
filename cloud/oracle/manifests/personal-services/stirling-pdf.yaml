@@ -57,6 +57,13 @@ metadata:
   namespace: personal-services
 spec:
   replicas: 1
+  # Embedded H2 file DB on a ReadWriteOnce PVC = single writer. The default
+  # RollingUpdate starts the new pod before the old releases the H2 file lock
+  # (/configs/stirling-pdf-DB-*.mv.db), so the new pod crashes on JPA init
+  # ("The file is locked"). Recreate tears down the old pod first. Brief
+  # downtime on each roll is the unavoidable trade for a single-file DB.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: stirling-pdf
