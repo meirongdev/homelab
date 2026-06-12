@@ -1,0 +1,526 @@
+# Grafana Dashboard: DGX Spark / Node Exporter
+# Host metrics for the 2× NVIDIA DGX Spark (GB10) servers (cluster=dgx-spark),
+# scraped over Tailscale by homelab Prometheus (job node-exporter-dgx-spark).
+# node_exporter is deployed from the nv-dgx-spark repo: `make node-exporter-deploy`.
+# Auto-loaded via the kube-prometheus-stack grafana-sc-dashboard sidecar
+# (label grafana_dashboard: "1") and synced by the ArgoCD monitoring-dashboards App.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dgx-spark-node-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  dgx-spark-node.json: |-
+    {
+      "annotations": {"list": []},
+      "description": "DGX Spark (2× GB10) 主机指标：CPU/负载、统一内存、磁盘、网络（含 200G CX7 链路）、温度",
+      "editable": true,
+      "graphTooltip": 1,
+      "links": [],
+      "panels": [
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+          "id": 100,
+          "title": "🖥️ 概览 / Overview",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]},
+              "unit": "none",
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 0, "y": 1},
+          "id": 1,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "value"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "count(up{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\"} == 1)",
+              "legendFormat": "nodes up",
+              "refId": "A"
+            }
+          ],
+          "title": "节点在线 / Nodes Up",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}, "unit": "s", "mappings": []},
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 5, "x": 4, "y": 1},
+          "id": 2,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "value_and_name"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "time() - node_boot_time_seconds{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}}",
+              "refId": "A"
+            }
+          ],
+          "title": "运行时长 / Uptime",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}, "unit": "none", "mappings": []},
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 5, "x": 9, "y": 1},
+          "id": 3,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "value_and_name"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "count by (nodename) (node_cpu_seconds_total{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\", mode=\"idle\"})",
+              "legendFormat": "{{nodename}}",
+              "refId": "A"
+            }
+          ],
+          "title": "CPU 核心数 / Cores",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "purple", "value": null}]}, "unit": "decbytes", "mappings": []},
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 5, "x": 14, "y": 1},
+          "id": 4,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "value_and_name"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "node_memory_MemTotal_bytes{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}}",
+              "refId": "A"
+            }
+          ],
+          "title": "统一内存总量 / Total RAM",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "description": "DGX Spark 上 swap 必须关闭（swapoff -a），否则有 OOM 冻结风险。应恒为 0。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "green", "value": null},
+                {"color": "red", "value": 1}
+              ]},
+              "unit": "decbytes",
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 5, "x": 19, "y": 1},
+          "id": 5,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "value_and_name"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "node_memory_SwapTotal_bytes{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Swap (必须为 0)",
+          "type": "stat"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5},
+          "id": 101,
+          "title": "⚙️ CPU / 负载",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+          "id": 6,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "100 - (avg by (nodename) (rate(node_cpu_seconds_total{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\", mode=\"idle\"}[$__rate_interval])) * 100)",
+              "legendFormat": "{{nodename}}",
+              "refId": "A"
+            }
+          ],
+          "title": "CPU 使用率 %",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 0, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "unit": "none",
+              "min": 0,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+          "id": 7,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "node_load1{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}} 1m",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "node_load5{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}} 5m",
+              "refId": "B"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "node_load15{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}} 15m",
+              "refId": "C"
+            }
+          ],
+          "title": "负载均值 / Load Average",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 14},
+          "id": 102,
+          "title": "🧠 内存 / Memory (128GB 统一内存)",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 80}, {"color": "red", "value": 92}]}
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 15},
+          "id": 8,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "(1 - node_memory_MemAvailable_bytes{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\"} / node_memory_MemTotal_bytes{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\"}) * 100",
+              "legendFormat": "{{nodename}}",
+              "refId": "A"
+            }
+          ],
+          "title": "内存使用率 %",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "unit": "decbytes",
+              "min": 0,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 15},
+          "id": 9,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "node_memory_MemTotal_bytes{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\"} - node_memory_MemAvailable_bytes{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}} used",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "node_memory_MemAvailable_bytes{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}} available",
+              "refId": "B"
+            }
+          ],
+          "title": "内存 used / available",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 23},
+          "id": 103,
+          "title": "💾 磁盘 / Disk",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+          "id": 10,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "100 - (node_filesystem_avail_bytes{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\", fstype!~\"tmpfs|overlay|squashfs|ramfs\"} / node_filesystem_size_bytes{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\", fstype!~\"tmpfs|overlay|squashfs|ramfs\"} * 100)",
+              "legendFormat": "{{nodename}} {{mountpoint}}",
+              "refId": "A"
+            }
+          ],
+          "title": "磁盘使用率 % (by mountpoint)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "unit": "binBps",
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+          "id": 11,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "rate(node_disk_read_bytes_total{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\"}[$__rate_interval])",
+              "legendFormat": "{{nodename}} {{device}} read",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "rate(node_disk_written_bytes_total{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\"}[$__rate_interval])",
+              "legendFormat": "{{nodename}} {{device}} write",
+              "refId": "B"
+            }
+          ],
+          "title": "磁盘 I/O",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 32},
+          "id": 104,
+          "title": "🌐 网络 / Network (含 200G CX7 链路)",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "description": "ifb/lo/veth/docker/cilium 等虚拟接口已过滤。物理接口含 200G CX7 互联链路（如 enp1s0f0np0），TP=2 推理时承载 NCCL 流量。单位为 bit/s。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "unit": "bps",
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 33},
+          "id": 12,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "rate(node_network_receive_bytes_total{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\", device!~\"lo|veth.*|docker.*|br-.*|cni.*|cilium.*|nerdctl.*|ifb.*\"}[$__rate_interval]) * 8",
+              "legendFormat": "{{nodename}} {{device}} rx",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "rate(node_network_transmit_bytes_total{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\", device!~\"lo|veth.*|docker.*|br-.*|cni.*|cilium.*|nerdctl.*|ifb.*\"}[$__rate_interval]) * 8",
+              "legendFormat": "{{nodename}} {{device}} tx",
+              "refId": "B"
+            }
+          ],
+          "title": "网络吞吐 (rx / tx)",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 41},
+          "id": 105,
+          "title": "🌡️ 温度 / Temperature",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "description": "依赖 hwmon。GB10 若无 hwmon 传感器，此面板可能无数据。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 0, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "unit": "celsius",
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 42},
+          "id": 13,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "node_hwmon_temp_celsius{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}} {{chip}} {{sensor}}",
+              "refId": "A"
+            }
+          ],
+          "title": "温度 / Temperature",
+          "type": "timeseries"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 40,
+      "tags": ["node-exporter", "dgx-spark", "prometheus", "hardware"],
+      "templating": {
+        "list": [
+          {
+            "current": {},
+            "hide": 0,
+            "includeAll": false,
+            "label": "Data Source",
+            "name": "datasource",
+            "options": [],
+            "query": "prometheus",
+            "refresh": 1,
+            "type": "datasource"
+          },
+          {
+            "current": {},
+            "datasource": {"type": "prometheus", "uid": "${datasource}"},
+            "definition": "label_values(up{job=\"node-exporter-dgx-spark\"}, nodename)",
+            "hide": 0,
+            "includeAll": true,
+            "allValue": ".*",
+            "label": "Node",
+            "multi": true,
+            "name": "nodename",
+            "query": {
+              "query": "label_values(up{job=\"node-exporter-dgx-spark\"}, nodename)",
+              "refId": "StandardVariableQuery"
+            },
+            "refresh": 2,
+            "sort": 1,
+            "type": "query"
+          }
+        ]
+      },
+      "time": {"from": "now-3h", "to": "now"},
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "DGX Spark / Node Exporter",
+      "uid": "dgx-spark-nodes",
+      "version": 1
+    }

@@ -174,10 +174,11 @@ just apply   # Apply DNS/Tunnel changes
 - LGTM stack (Loki, Grafana, Tempo, Prometheus/Mimir) in `monitoring` namespace
 - Grafana accessible at `grafana.meirong.dev`
 - **Three signals**: Logs (Loki), Metrics (Prometheus), Traces (Tempo) — all collected via Otel Collector
-- **Multi-cluster monitoring**: All telemetry carries a `cluster` label (`homelab` or `oracle-k3s`)
+- **Multi-cluster monitoring**: All telemetry carries a `cluster` label (`homelab`, `oracle-k3s`, or `dgx-spark`)
   - homelab: Prometheus `scrapeClasses` default relabeling adds `cluster=homelab` to all local scrape targets
   - oracle-k3s: OTel Collector pushes all metrics (node-exporter, kube-state-metrics, cloudflared) via `prometheusremotewrite` with `cluster=oracle-k3s`
   - **No prometheus-agent on oracle-k3s** — the single OTel Collector handles both logs, metrics, and traces
+  - **dgx-spark** (2× GB10, metrics-only — not a K8s cluster): homelab Prometheus pull-scrapes node_exporter on both DGX Spark servers over **Tailscale** (job `node-exporter-dgx-spark`, static targets `100.97.87.120:9100` / `100.67.164.92:9100`, `cluster=dgx-spark`). `additionalScrapeConfigs` are injected verbatim (scrapeClasses don't relabel them), so `cluster`/`nodename` are set per-target. node_exporter is deployed from the **`nv-dgx-spark` repo** (`make node-exporter-deploy`, docker `--net=host --pid=host`); Grafana dashboard **"DGX Spark / Node Exporter"** (`k8s/helm/manifests/dgx-spark-node-dashboard.yaml`). Tailnet ACL already allows `tag:homelab → *:*`.
 - **Traces pipeline** (2026-03-01):
   - Apps send OTLP traces → OTel Collector (gRPC :4317 / HTTP :4318) → Tempo
   - homelab OTel Collector exports to `tempo.monitoring.svc.cluster.local:4317`
@@ -193,6 +194,7 @@ just apply   # Apply DNS/Tunnel changes
   1. `just deploy-prometheus` (homelab kube-prometheus-stack Helm release)
   2. `kubectl --context oracle-k3s apply -f cloud/oracle/manifests/monitoring/otel-collector.yaml` + `kubectl --context oracle-k3s rollout restart daemonset/otel-collector -n monitoring` (oracle-k3s OTel Collector)
   - Dashboard ConfigMaps: auto-synced by ArgoCD after `git push` (via `monitoring-dashboards` Application)
+  - **DGX Spark node_exporter** is a one-time deploy from the `nv-dgx-spark` repo (`make node-exporter-deploy`); the homelab scrape job + dashboard land via `just deploy-prometheus` + `git push`.
 
 ### Services
 | Service | Cluster | Namespace | URL |
