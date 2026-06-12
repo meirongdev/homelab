@@ -79,6 +79,29 @@ spec:
               value: "true"
             - name: CRON_PATTERNS_ENABLED
               value: "true"
+            # --- ZITADEL OIDC SSO (NextAuth custom provider; password login stays as fallback) ---
+            - name: OAUTH_PROVIDER_NAME
+              value: "ZITADEL"
+            # KaraKeep wants the FULL discovery URL (unlike Miniflux's bare issuer).
+            - name: OAUTH_WELLKNOWN_URL
+              value: "https://auth.meirong.dev/.well-known/openid-configuration"
+            - name: OAUTH_SCOPE
+              value: "openid email profile"
+            # ZITADEL verifies emails, so linking the ZITADEL identity to the existing
+            # KaraKeep account by matching email is safe — lets SSO log into the current
+            # admin account while DISABLE_SIGNUPS=true blocks new self-registration.
+            - name: OAUTH_ALLOW_DANGEROUS_EMAIL_ACCOUNT_LINKING
+              value: "true"
+            - name: OAUTH_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: karakeep-secret
+                  key: oauth-client-id
+            - name: OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: karakeep-secret
+                  key: oauth-client-secret
           resources:
             requests:
               cpu: 100m

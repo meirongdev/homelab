@@ -13,9 +13,34 @@ global:
 configs:
   params:
     server.insecure: "true"
+  # Authz for SSO logins. policy.default grants every authenticated ZITADEL identity
+  # full admin — acceptable here because ZITADEL is a single-user, locked-down IdP
+  # (no self-registration; GitHub federation email-linked to one pre-existing user).
+  # The local `admin` account is unaffected. To tighten later: drop policy.default
+  # and map a specific subject, e.g.
+  #   policy.csv: |
+  #     g, <zitadel-sub-or-email>, role:admin
+  #   scopes: '[email]'
+  rbac:
+    policy.default: role:admin
   # 允许通过 cm.url 让 OAuth/回调走外部 URL（即使没用 SSO 也保留 URL 自洽）
   cm:
     url: https://argocd.meirong.dev
+    # --- ZITADEL native OIDC SSO (no dex). Local `admin` account stays enabled as a
+    # fallback (no lockout). clientID/clientSecret are pulled from the ESO-managed
+    # secret `argocd-oidc` (labeled app.kubernetes.io/part-of=argocd) via ArgoCD's
+    # $<secret>:<key> value reference. Client provisioned by
+    # zitadel/scripts/configure-oidc-app.sh (app "argocd", redirects
+    # https://argocd.meirong.dev/auth/callback + http://localhost:8085/auth/callback).
+    oidc.config: |
+      name: ZITADEL
+      issuer: https://auth.meirong.dev
+      clientID: $argocd-oidc:oidc.clientID
+      clientSecret: $argocd-oidc:oidc.clientSecret
+      requestedScopes:
+        - openid
+        - profile
+        - email
     # ESO 的 ExternalSecret CRD 给 remoteRef 自动填默认值，ArgoCD 的 SSA diff 会
     # 把这视作 drift。这里忽略掉 ESO 自己默认的字段，避免每次写新 ExternalSecret
     # 都得手动复制 conversionStrategy/decodingStrategy/metadataPolicy。
