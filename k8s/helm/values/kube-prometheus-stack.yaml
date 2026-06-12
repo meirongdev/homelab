@@ -4,7 +4,46 @@ grafana:
   admin:
     existingSecret: "grafana-admin-credentials" # ✅ 使用预先创建的 Secret
     userKey: ""              # ✅ 显式设置为空，覆盖默认值
-    passwordKey: "admin-password" 
+    passwordKey: "admin-password"
+
+  # ZITADEL native OIDC SSO (generic_oauth). Local admin login (admin/ existingSecret
+  # above) stays enabled as a fallback — no lockout risk. Client id/secret come from
+  # the same grafana-admin-credentials Secret (ESO ← Vault secret/homelab/grafana),
+  # injected as env so Grafana's GF_AUTH_GENERIC_OAUTH_* overrides win over grafana.ini.
+  # Client provisioned by zitadel/scripts/configure-oidc-app.sh (app "grafana",
+  # redirect https://grafana.meirong.dev/login/generic_oauth).
+  envValueFrom:
+    GF_AUTH_GENERIC_OAUTH_CLIENT_ID:
+      secretKeyRef:
+        name: grafana-admin-credentials
+        key: oauth-client-id
+    GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET:
+      secretKeyRef:
+        name: grafana-admin-credentials
+        key: oauth-client-secret
+
+  grafana.ini:
+    server:
+      # Required so Grafana builds the OAuth callback as https://grafana.meirong.dev/...
+      # (it sits behind the Cloudflare Tunnel → Cilium Gateway, not localhost).
+      root_url: https://grafana.meirong.dev
+    auth.generic_oauth:
+      enabled: true
+      name: ZITADEL
+      # client_id / client_secret injected via env (GF_AUTH_GENERIC_OAUTH_CLIENT_ID/SECRET).
+      scopes: "openid email profile"
+      auth_url: https://auth.meirong.dev/oauth/v2/authorize
+      token_url: https://auth.meirong.dev/oauth/v2/token
+      api_url: https://auth.meirong.dev/oidc/v1/userinfo
+      use_pkce: true
+      allow_sign_up: true
+      email_attribute_path: email
+      login_attribute_path: preferred_username
+      name_attribute_path: name
+      # Single-user homelab gated by ZITADEL (one user + locked-down GitHub federation),
+      # so any ZITADEL-authenticated identity is granted Admin.
+      role_attribute_path: "'Admin'"
+      role_attribute_strict: false
 
   # 持久化存储
   persistence:
