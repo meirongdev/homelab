@@ -4,7 +4,6 @@ tunnel_id             = "bc630e77-867f-4716-a1d0-8721bf9880da"
 
 ingress_rules = {
   "rss"     = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }
-  "n8n"     = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }
   "home"    = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }
   "status"  = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }
   "tool"    = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }

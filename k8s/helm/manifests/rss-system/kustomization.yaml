@@ -7,6 +7,5 @@ resources:
   - secrets.yaml
   - miniflux.yaml
   - rsshub.yaml
-  - n8n.yaml
   - gateway.yaml
   - cloudflare-tunnel.yaml
