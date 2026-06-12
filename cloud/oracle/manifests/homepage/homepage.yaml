@@ -67,6 +67,10 @@ data:
         columns: 3
 
   bookmarks.yaml: |
+    - 账户:
+        - 登录 / SSO:
+            - abbr: "🔑"
+              href: https://auth.meirong.dev
     - 开发工具:
         - GitHub:
             - abbr: GH
@@ -189,6 +193,16 @@ data:
             icon: kopia.png
             href: https://backup.meirong.dev
             description: 备份服务器 (Homelab)
+
+        - ZITADEL:
+            icon: zitadel.png
+            href: https://auth.meirong.dev
+            description: 单点登录 / 身份中心 (Homelab)
+
+        - Bifrost:
+            icon: mdi-robot
+            href: https://llm.meirong.dev
+            description: LLM 网关 admin (Homelab)
 
   widgets.yaml: |
     - datetime:
