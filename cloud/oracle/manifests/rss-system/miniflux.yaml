@@ -41,6 +41,34 @@ spec:
                 secretKeyRef:
                   name: miniflux-admin-secret
                   key: password
+            # --- ZITADEL OIDC SSO (native; local admin login above stays as fallback) ---
+            # BASE_URL makes Miniflux build absolute/redirect URLs as https://rss.meirong.dev
+            # (it sits behind Cloudflare Tunnel → Cilium Gateway, not localhost).
+            - name: BASE_URL
+              value: https://rss.meirong.dev
+            - name: OAUTH2_PROVIDER
+              value: oidc
+            # Bare issuer — Miniflux appends /.well-known/openid-configuration itself.
+            - name: OAUTH2_OIDC_DISCOVERY_ENDPOINT
+              value: https://auth.meirong.dev
+            - name: OAUTH2_OIDC_PROVIDER_NAME
+              value: ZITADEL
+            - name: OAUTH2_REDIRECT_URL
+              value: https://rss.meirong.dev/oauth2/oidc/callback
+            # Auto-provision a Miniflux user on first SSO login (keyed by OIDC sub/email).
+            # The existing local admin can instead link SSO under Settings → keeps admin rights.
+            - name: OAUTH2_USER_CREATION
+              value: "1"
+            - name: OAUTH2_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: miniflux-admin-secret
+                  key: oauth-client-id
+            - name: OAUTH2_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: miniflux-admin-secret
+                  key: oauth-client-secret
           resources:
             requests:
               cpu: 50m
