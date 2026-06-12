@@ -148,6 +148,26 @@ prometheus:
             labels:
               cluster: homelab
 
+      # DGX Spark cluster (2× GB10) — host metrics via node_exporter (docker, :9100),
+      # scraped over Tailscale. node_exporter deployed from the nv-dgx-spark repo:
+      #   make node-exporter-deploy  (playbooks/node-exporter-deploy.yml)
+      # Tailnet ACL already allows tag:homelab → *:* so the Prometheus pod can reach 100.x.
+      # additionalScrapeConfigs are injected verbatim (scrapeClasses don't relabel them),
+      # so cluster/nodename are set explicitly here per target.
+      - job_name: 'node-exporter-dgx-spark'
+        scrape_interval: 15s
+        static_configs:
+          - targets:
+              - 100.97.87.120:9100   # dgx-spark-1 (V4-Flash head)
+            labels:
+              cluster: dgx-spark
+              nodename: dgx-spark-1
+          - targets:
+              - 100.67.164.92:9100   # dgx-spark-2 (V4-Flash TP worker)
+            labels:
+              cluster: dgx-spark
+              nodename: dgx-spark-2
+
       # oracle-k3s 指标均为 push 模式（OTel Collector → prometheusremotewrite）
       # 包含: node-exporter, kube-state-metrics, cloudflared, traefik
       # See: cloud/oracle/manifests/monitoring/otel-collector.yaml
