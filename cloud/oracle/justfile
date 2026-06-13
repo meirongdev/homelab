@@ -87,6 +87,7 @@ install-eso:
         --namespace external-secrets \
         --create-namespace \
         --kube-context {{ctx}} \
+        --set metrics.service.enabled=true \
         --wait --timeout 5m
 
 # Create Vault token secret (needed by ClusterSecretStore)
