@@ -61,7 +61,7 @@ kopia restore <snapshot-id> /tmp/vault-restore/
 kubectl --context k3s-homelab -n vault scale deploy vault --replicas=0
 
 # 4. 将恢复数据拷贝到 NFS mount
-#    NFS path: 192.168.50.106:/export/vault-*
+#    NFS path: 192.168.50.106:/storage/nfs/k8s/vault-*  (provisioner 子目录, 见 kopia-backup.yaml)
 #    确认 PVC 对应的 NFS 子目录
 
 # 5. 重启 Vault

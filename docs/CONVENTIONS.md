@@ -162,7 +162,12 @@ just apply   # Apply DNS/Tunnel changes
 - **oracle-k3s manifests** (`cloud/oracle/manifests/`): **under GitOps as of 2026-06-04** — managed by the homelab ArgoCD `oracle-k3s` Application over Tailscale (oracle registered as an external cluster, `https://100.107.166.37:6443`, bearer-token cred from Vault `secret/homelab/argocd-oracle-cluster` materialised by ESO into the `oracle-k3s-cluster` cluster Secret). Auto-sync + selfHeal + **prune** are on; stateful PVCs (`miniflux-db-pvc`, `karakeep-data`, `meilisearch-data`, `uptime-kuma-data`, `stirling-pdf-configs`) carry `argocd.argoproj.io/sync-options: Prune=false`. `git push` → reconciles within 3 min, same as homelab. Bootstrap RBAC (`argocd-manager` SA + cluster-admin) is in `cloud/oracle/bootstrap/argocd-manager.yaml` — applied manually once, kept **out** of the kustomize tree. The `vault-token` Secret (rss-system) remains a manual bootstrap dependency (not pruned, see `base/vault-store.yaml`). Migration record + caveats: `docs/plans/2026-06-04-oracle-k3s-argocd-gitops.md`.
 
 ### Storage
-- Persistent volumes use NFS (`nfs-client` StorageClass) at `192.168.50.106:/export`
+- **NFS host**: `192.168.50.106` (PVE node, `storage` group in `proxmox/ansible/inventory.yaml`). Data lives on a **ZFS pool `mrstorage` mounted at `/storage`** (separate from the OS disk), provisioned by `proxmox/ansible/storage-playbook.yaml`.
+- **Two NFS exports** (`/etc/exports`, Ansible-managed):
+  - `/storage` (`192.168.50.0/24` + Tailscale `100.89.15.120`) — backs the `nfs-client` dynamic provisioner (`nfs-subdir-external-provisioner`), which creates per-PVC subdirs under `/storage/nfs/k8s/` (see `k8s/helm/values/nfs-values.yaml`).
+  - `/storage/calibre` (`*`, `all_squash` anon uid/gid 1000) — static RWX PV for the Calibre book library (`calibre-books-pv`).
+- **Only homelab uses this NFS.** oracle-k3s has no `nfs-client` StorageClass — its stateful PVCs use OCI-local `local-path`.
+- **OS reinstall is data-safe**: the OS is on the boot disk; all data is on the `mrstorage` ZFS pool. After a host rebuild, re-running `storage-playbook.yaml` does `zpool import -f mrstorage` + rebuilds `/etc/exports` + `exportfs -ra`. Because the ZFS dataset is unchanged, existing NFS PVs keep the same file handles (no `ESTALE`) and pods re-mount transparently. Expect a brief node wedge while NFS is down — the classic containerd `failed to reserve container name` symptom — which self-heals once NFS returns. (Verified 2026-06-13 reinstall: pods restarted/recovered, no data loss.)
 - PVCs for stateful services (e.g. Calibre-Web) carry `argocd.argoproj.io/sync-options: Prune=false` to prevent accidental deletion
 
 ### Secrets Management
