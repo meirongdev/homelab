@@ -1,0 +1,116 @@
+---
+- name: Provision storage server (PVE node)
+  hosts: storage
+  gather_facts: true
+  vars:
+    zfs_pool_name: mrstorage
+    zfs_mountpoint: /storage
+    nfs_exports:
+      - path: /storage
+        clients:
+          - "192.168.50.0/24(rw,sync,no_subtree_check,no_root_squash)"
+          - "100.89.15.120(rw,sync,no_subtree_check,no_root_squash)"
+      - path: /storage/calibre
+        clients:
+          - "*(rw,sync,no_subtree_check,all_squash,anonuid=1000,anongid=1000)"
+    # mr_user_password is in vars/vault.yaml (ansible-vault encrypted)
+  vars_files:
+    - vars/vault.yaml
+
+  tasks:
+    - name: Import ZFS pool
+      ansible.builtin.command:
+        cmd: zpool import -f {{ zfs_pool_name }}
+        creates: "{{ zfs_mountpoint }}"
+      register: zpool_import
+
+    - name: Ensure ZFS mountpoint is set
+      ansible.builtin.command:
+        cmd: zfs set mountpoint={{ zfs_mountpoint }} {{ zfs_pool_name }}
+      when: zpool_import.changed
+
+    - name: Create mr user
+      ansible.builtin.user:
+        name: mr
+        uid: 1000
+        group: root
+        groups: sudo
+        shell: /bin/bash
+        create_home: true
+        password: "{{ mr_user_password }}"
+        state: present
+
+    - name: Create .ssh directory for mr
+      ansible.builtin.file:
+        path: ~mr/.ssh
+        state: directory
+        owner: mr
+        group: root
+        mode: "0700"
+
+    - name: Copy vgio public key to mr's authorized_keys
+      ansible.builtin.copy:
+        src: ~/.ssh/vgio.pub
+        dest: ~mr/.ssh/authorized_keys
+        owner: mr
+        group: root
+        mode: "0600"
+
+    - name: Ensure mr has passwordless sudo
+      ansible.builtin.lineinfile:
+        path: /etc/sudoers.d/mr
+        line: "mr ALL=(ALL) NOPASSWD: ALL"
+        create: true
+        mode: "0440"
+
+    - name: Install required packages
+      ansible.builtin.apt:
+        name:
+          - sudo
+          - nfs-kernel-server
+          - htop
+          - screen
+          - lm-sensors
+          - powertop
+          - build-essential
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Configure NFS exports
+      ansible.builtin.copy:
+        dest: /etc/exports
+        content: |
+          # /etc/exports: managed by Ansible
+          {% for export in nfs_exports %}
+          {% for client in export.clients %}
+          {{ export.path }}	{{ client }}
+          {% endfor %}
+          {% endfor %}
+        mode: "0644"
+      register: exports_file
+
+    - name: Create /storage/calibre directory if not exists
+      ansible.builtin.file:
+        path: /storage/calibre
+        state: directory
+        owner: mr
+        group: root
+        mode: "0755"
+
+    - name: Export NFS shares
+      ansible.builtin.command:
+        cmd: exportfs -ra
+      when: exports_file.changed
+
+    - name: Enable and start NFS server
+      ansible.builtin.systemd:
+        name: nfs-server
+        enabled: true
+        state: started
+
+    - name: Enable and start ZFS Event Daemon
+      ansible.builtin.systemd:
+        name: zfs-zed
+        enabled: true
+        state: started
