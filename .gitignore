@@ -83,3 +83,4 @@ openspec/
 .qwen/skills/
 .github/prompts/
 .github/skills/
+proxmox/ansible/.vault_pass
