@@ -113,6 +113,10 @@ metadata:
     app: rss-postgres
 spec:
   replicas: 1
+  # Single-writer RWO PVC (miniflux-db-pvc). Default RollingUpdate would start a 2nd
+  # postmaster on the same data dir; Recreate stops the old pod first.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: rss-postgres

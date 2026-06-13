@@ -23,6 +23,10 @@ metadata:
     app: uptime-kuma
 spec:
   replicas: 1
+  # Single-writer RWO PVC (uptime-kuma-data, SQLite). Default RollingUpdate would
+  # run a 2nd pod on the same volume; Recreate stops the old pod first.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: uptime-kuma

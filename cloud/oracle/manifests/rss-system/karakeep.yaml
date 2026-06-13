@@ -41,6 +41,10 @@ metadata:
     app: karakeep
 spec:
   replicas: 1
+  # Single-writer RWO PVCs (karakeep SQLite + meilisearch LMDB). Default RollingUpdate
+  # would run a 2nd pod on the same volumes; Recreate stops the old pod first.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: karakeep
