@@ -111,6 +111,10 @@ metadata:
   namespace: rss-system
   labels:
     app: rss-postgres
+  annotations:
+    # RollingUpdate->Recreate migration: ArgoCD's apply can't drop the API-defaulted
+    # spec.strategy.rollingUpdate block (fails validation), so replace (PUT) the object.
+    argocd.argoproj.io/sync-options: Replace=true
 spec:
   replicas: 1
   # Single-writer RWO PVC (miniflux-db-pvc). Default RollingUpdate would start a 2nd
