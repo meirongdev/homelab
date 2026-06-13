@@ -46,6 +46,10 @@ metadata:
   namespace: personal-services
   labels:
     app: gotify
+  annotations:
+    # RollingUpdate->Recreate migration: ArgoCD's apply can't drop the API-defaulted
+    # spec.strategy.rollingUpdate block (fails validation), so replace (PUT) the object.
+    argocd.argoproj.io/sync-options: Replace=true
 spec:
   replicas: 1
   # Single-writer RWO PVC (gotify-data, SQLite). Default RollingUpdate would briefly
