@@ -168,6 +168,7 @@ just apply   # Apply DNS/Tunnel changes
 ### Secrets Management
 - **HashiCorp Vault**: Primary source of truth for all app secrets (running in `vault` namespace)
 - **External Secrets Operator (ESO)**: Syncs Vault secrets → K8s Secrets automatically
+- **ESO health alerting**: `externalsecret`/`(cluster)secretstore` `Ready=False` (Vault sealed, token expired/revoked, or a bad `remoteRef` key) alerts via Gotify — closes the silent-stale-secret gap (an unsynced Secret otherwise keeps serving its last value with no error). Rule: `k8s/helm/manifests/eso-alerts.yaml`; details under Observability › Alerting.
 - Local `.env` files: Used for initial bootstrap tokens only (gitignored)
 
 ### Observability
@@ -176,7 +177,7 @@ just apply   # Apply DNS/Tunnel changes
 - **Three signals**: Logs (Loki), Metrics (Prometheus), Traces (Tempo) — all collected via Otel Collector
 - **Multi-cluster monitoring**: All telemetry carries a `cluster` label (`homelab`, `oracle-k3s`, or `dgx-spark`)
   - homelab: Prometheus `scrapeClasses` default relabeling adds `cluster=homelab` to all local scrape targets
-  - oracle-k3s: OTel Collector pushes all metrics (node-exporter, kube-state-metrics, cloudflared) via `prometheusremotewrite` with `cluster=oracle-k3s`
+  - oracle-k3s: OTel Collector pushes all metrics (node-exporter, kube-state-metrics, cloudflared, external-secrets) via `prometheusremotewrite` with `cluster=oracle-k3s`
   - **No prometheus-agent on oracle-k3s** — the single OTel Collector handles both logs, metrics, and traces
   - **dgx-spark** (2× GB10, metrics-only — not a K8s cluster): homelab Prometheus pull-scrapes node_exporter on both DGX Spark servers over **Tailscale** (job `node-exporter-dgx-spark`, static targets `100.97.87.120:9100` / `100.67.164.92:9100`, `cluster=dgx-spark`). `additionalScrapeConfigs` are injected verbatim (scrapeClasses don't relabel them), so `cluster`/`nodename` are set per-target. node_exporter is deployed from the **`nv-dgx-spark` repo** (`make node-exporter-deploy`, docker `--net=host --pid=host`); Grafana dashboard **"DGX Spark / Node Exporter"** (`k8s/helm/manifests/dgx-spark-node-dashboard.yaml`). Tailnet ACL already allows `tag:homelab → *:*`.
 - **Traces pipeline** (2026-03-01):
@@ -190,11 +191,13 @@ just apply   # Apply DNS/Tunnel changes
   OTEL_SERVICE_NAME=<service-name>
   OTEL_RESOURCE_ATTRIBUTES=cluster=<homelab|oracle-k3s>,k8s.namespace.name=<ns>
   ```
+- **Alerting** (Alertmanager → Gotify): `severity: warning|critical` rules route to Gotify (via `alertmanager-gotify-bridge`); `info`/`Watchdog` are dropped. **New `PrometheusRule`/`ServiceMonitor` resources MUST carry the label `release: kube-prometheus-stack`** or the operator's `ruleSelector`/`serviceMonitorSelector` ignores them silently. First rule: **ESO health** (`eso-alerts.yaml`, deployed via the ArgoCD `monitoring-dashboards` Application). A single rule covers both clusters since oracle ESO metrics arrive remote-written with `cluster=oracle-k3s`.
 - **Deployment summary**: Only two components to deploy for observability changes:
   1. `just deploy-prometheus` (homelab kube-prometheus-stack Helm release)
   2. `kubectl --context oracle-k3s apply -f cloud/oracle/manifests/monitoring/otel-collector.yaml` + `kubectl --context oracle-k3s rollout restart daemonset/otel-collector -n monitoring` (oracle-k3s OTel Collector)
   - Dashboard ConfigMaps: auto-synced by ArgoCD after `git push` (via `monitoring-dashboards` Application)
   - **DGX Spark node_exporter** is a one-time deploy from the `nv-dgx-spark` repo (`make node-exporter-deploy`); the homelab scrape job + dashboard land via `just deploy-prometheus` + `git push`.
+  - **ESO metrics** are a one-time enablement: homelab ServiceMonitor via `just deploy-eso` (`serviceMonitor.enabled` in `external-secrets-values.yaml`); oracle metrics Service via `just install-eso` (`--set metrics.service.enabled=true`). The `eso-alerts.yaml` PrometheusRule then reconciles via ArgoCD on `git push`.
 
 ### Services
 | Service | Cluster | Namespace | URL |

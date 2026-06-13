@@ -1,0 +1,75 @@
+---
+# External Secrets Operator alerting.
+#
+# Closes the "silent stale secret" gap: when Vault is sealed, an auth token
+# expires / is revoked, or a remoteRef key is wrong, ESO stops refreshing the
+# K8s Secret but workloads keep the last-synced value with no signal.
+#
+# Metrics come from the ESO controller (/metrics :8080):
+#   - homelab:    ServiceMonitor enabled in values/external-secrets-values.yaml
+#                 (gets cluster=homelab via the Prometheus scrapeClasses relabel)
+#   - oracle-k3s: scraped by the OTel Collector (prometheus/external-secrets
+#                 receiver) and remote-written with cluster=oracle-k3s
+# One rule therefore covers BOTH clusters; {{ $labels.cluster }} disambiguates.
+#
+# severity warning|critical → routed to Gotify by Alertmanager
+# (see values/kube-prometheus-stack.yaml). The `release` label is REQUIRED so the
+# kube-prometheus-stack ruleSelector adopts this PrometheusRule.
+#
+# Deployed via the ArgoCD `monitoring-dashboards` Application (git push → 3-min sync).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: external-secrets-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: external-secrets
+      rules:
+        # A single ExternalSecret can no longer sync (bad key/path, or its store
+        # is degraded). The downstream Secret is stale; the consuming app silently
+        # keeps the last value.
+        - alert: ExternalSecretNotReady
+          expr: externalsecret_status_condition{condition="Ready",status="False"} == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ExternalSecret {{ $labels.namespace }}/{{ $labels.name }} not syncing on {{ $labels.cluster }}"
+            description: "Ready=False for >15m. The K8s Secret is stale; the consuming app keeps the last-synced value with no error. Inspect with `kubectl describe externalsecret {{ $labels.name }} -n {{ $labels.namespace }}`."
+
+        # Backing store unreachable — Vault sealed, or the auth token expired / was
+        # revoked. Usually trips many ExternalSecrets at once. This is exactly the
+        # "Vault sealed / oracle static vault-token expired" blind spot.
+        - alert: ClusterSecretStoreNotReady
+          expr: clustersecretstore_status_condition{condition="Ready",status="False"} == 1
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "ClusterSecretStore {{ $labels.name }} not ready on {{ $labels.cluster }}"
+            description: "Ready=False for >10m — Vault is likely sealed or its auth token expired/was revoked. Every ExternalSecret backed by this store has stopped refreshing."
+
+        - alert: SecretStoreNotReady
+          expr: secretstore_status_condition{condition="Ready",status="False"} == 1
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "SecretStore {{ $labels.namespace }}/{{ $labels.name }} not ready on {{ $labels.cluster }}"
+            description: "Ready=False for >10m — the backing Vault store is unreachable for this namespace."
+
+        # Meta-failure: if ESO metrics vanish entirely (controller crashed or the
+        # scrape broke), the condition alerts above CAN'T fire — no data, no alert.
+        # Scoped to homelab, where the ServiceMonitor guarantees the series exists
+        # whenever ESO is healthy. (oracle metrics are best-effort via OTel.)
+        - alert: ExternalSecretsMetricsAbsent
+          expr: absent(externalsecret_status_condition{cluster="homelab"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "External Secrets Operator metrics absent on homelab"
+            description: "No externalsecret_status_condition series for >15m — the ESO controller is down or its ServiceMonitor scrape is broken, which would mask every other ESO alert."

@@ -109,11 +109,14 @@ spec:
             periodSeconds: 10
           resources:
             requests:
-              cpu: 50m
-              memory: 64Mi
+              cpu: 100m
+              memory: 128Mi
             limits:
-              cpu: 250m
-              memory: 256Mi
+              # Sole logs+metrics+traces pipeline for oracle-k3s — under-resourcing
+              # it means an OOM blinds the whole cluster. memory_limiter (below) is
+              # kept well under this ceiling to account for Go RSS > heap.
+              cpu: 500m
+              memory: 512Mi
           volumeMounts:
             - name: config
               mountPath: /etc/otel/config.yaml
@@ -273,10 +276,25 @@ data:
                   labels:
                     cluster: oracle-k3s
 
+      # External Secrets Operator metrics → homelab Prometheus (cluster=oracle-k3s).
+      # Surfaces ExternalSecret/SecretStore Ready=False so a stale/expired
+      # vault-token (silent secret-sync failure) trips the shared PrometheusRule.
+      # Requires the ESO metrics Service — `just install-eso` now sets
+      # metrics.service.enabled=true.
+      prometheus/external-secrets:
+        config:
+          scrape_configs:
+            - job_name: 'external-secrets'
+              scrape_interval: 30s
+              static_configs:
+                - targets: ['external-secrets-metrics.external-secrets.svc.cluster.local:8080']
+                  labels:
+                    cluster: oracle-k3s
+
     processors:
       memory_limiter:
-        limit_mib: 200
-        spike_limit_mib: 50
+        limit_mib: 400
+        spike_limit_mib: 100
         check_interval: 5s
       k8sattributes:
         auth_type: "serviceAccount"
@@ -352,5 +370,9 @@ data:
           exporters: [prometheusremotewrite]
         metrics/kube-state-metrics:
           receivers: [prometheus/kube-state-metrics]
+          processors: [memory_limiter, resource, batch]
+          exporters: [prometheusremotewrite]
+        metrics/external-secrets:
+          receivers: [prometheus/external-secrets]
           processors: [memory_limiter, resource, batch]
           exporters: [prometheusremotewrite]
