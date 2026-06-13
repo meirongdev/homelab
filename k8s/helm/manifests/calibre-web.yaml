@@ -153,19 +153,33 @@ spec:
             limits:
               cpu: 2000m
               memory: 2Gi
+          # startupProbe gates liveness/readiness until the app finishes its
+          # slow NFS-backed cold start (~50s); allows up to 30×10s = 5min.
+          startupProbe:
+            httpGet:
+              path: /login
+              port: 8083
+            periodSeconds: 10
+            failureThreshold: 30
+            timeoutSeconds: 10
+          # timeoutSeconds defaults to 1s — far too tight for an NFS-backed
+          # (NETWORK_SHARE_MODE=true) /login render. Under NFS latency spikes
+          # the 1s default failed 5× and kubelet killed the container, causing
+          # a chronic restart loop. 10s gives the render room; a true hang
+          # (>5×30s) still triggers a restart.
           livenessProbe:
             httpGet:
               path: /login
               port: 8083
-            initialDelaySeconds: 60
             periodSeconds: 30
+            timeoutSeconds: 10
             failureThreshold: 5
           readinessProbe:
             httpGet:
               path: /login
               port: 8083
-            initialDelaySeconds: 30
             periodSeconds: 10
+            timeoutSeconds: 10
           volumeMounts:
             - name: config
               mountPath: /config
