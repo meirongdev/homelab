@@ -82,29 +82,59 @@ grafana:
       cpu: 500m
       memory: 512Mi
   
+  # 给 Loki/Tempo 赋稳定 uid 以支持 trace↔log↔metric 关联。
+  # 关键坑（2026-06-15）：本集群 Grafana 用 NFS PVC 持久化，库里已有按 name 自动生成
+  # 随机 uid 的 Loki/Tempo；直接在 provisioning 里改它们的 uid 会让 Grafana 12.x 报
+  # "Datasource provisioning error: data source not found" 并整个 Pod CrashLoop。
+  # 解法：先用 deleteDatasources 按 name 删旧记录，再以稳定 uid 重建（Grafana 官方对
+  # “给已有数据源赋 uid”的标准做法）。删除-重建用同一 uid，幂等、对引用方无副作用。
+  deleteDatasources:
+    - name: Loki
+      orgId: 1
+    - name: Tempo
+      orgId: 1
   additionalDataSources:
-    # 注意：不要给 Loki/Tempo 设置显式 `uid:`。本集群 Grafana 用 NFS PVC 持久化，
-    # 库里已存在按 name 自动生成 uid 的 Loki/Tempo 数据源；provisioning 按 name 匹配，
-    # 强行改成新 uid 会让 Grafana 12.x 报 "Datasource provisioning error: data source
-    # not found" 并整个 Pod CrashLoop（2026-06-15 踩坑）。让 Grafana 自管 uid 即可。
     - name: Loki
       type: loki
+      uid: loki
       url: http://loki-gateway.monitoring.svc.cluster.local
       access: proxy
       isDefault: false
       jsonData:
+        # 不在 Loki 侧配指向 Tempo 的 datasourceUid：Loki 在本文件中先于 Tempo 创建，
+        # 指向 Tempo 属前向引用，provisioning 时 Tempo 尚未建立 → 仍会 not found。
+        # 故此处仅提取 TraceID 字段；logs→trace 跳转后续用 Correlations 单独加。
         derivedFields:
           - name: TraceID
             matcherRegex: "traceID=(\\w+)"
     - name: Tempo
       type: tempo
+      uid: tempo
       url: http://tempo.monitoring.svc.cluster.local:3200
       access: proxy
       isDefault: false
       jsonData:
-        # 暂不配 tracesToLogs/tracesToMetrics/serviceMap：它们的 datasourceUid 需要
-        # 引用 Loki/Prometheus 的稳定 uid，而本集群不设显式 uid（见上方 Loki 注释）。
-        # trace↔log↔metric 关联后续用 tracesToLogsV2 + 运行时实际 uid 单独修复。
+        # Tempo 在 Loki/Prometheus 之后创建，以下 datasourceUid 均为后向引用，可安全解析。
+        tracesToLogsV2:
+          datasourceUid: loki
+          spanStartTimeShift: '-1h'
+          spanEndTimeShift: '1h'
+          filterByTraceID: true
+          filterBySpanID: false
+          tags:
+            - key: service.name
+              value: service_name
+            - key: service.namespace
+              value: service_namespace
+            - key: k8s.pod.name
+              value: k8s_pod_name
+        tracesToMetrics:
+          datasourceUid: prometheus
+          tags:
+            - key: service.name
+              value: service
+        serviceMap:
+          datasourceUid: prometheus
         nodeGraph:
           enabled: true
 
