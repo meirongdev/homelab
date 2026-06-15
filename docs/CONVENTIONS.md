@@ -197,6 +197,14 @@ just apply   # Apply DNS/Tunnel changes
   OTEL_RESOURCE_ATTRIBUTES=cluster=<homelab|oracle-k3s>,k8s.namespace.name=<ns>
   ```
 - **Alerting** (Alertmanager → Gotify): `severity: warning|critical` rules route to Gotify (via `alertmanager-gotify-bridge`); `info`/`Watchdog` are dropped. **New `PrometheusRule`/`ServiceMonitor` resources MUST carry the label `release: kube-prometheus-stack`** or the operator's `ruleSelector`/`serviceMonitorSelector` ignores them silently. First rule: **ESO health** (`eso-alerts.yaml`, deployed via the ArgoCD `monitoring-dashboards` Application). A single rule covers both clusters since oracle ESO metrics arrive remote-written with `cluster=oracle-k3s`.
+- **Dashboards 组织** (2026-06-15 整改，治理面板平铺混乱 + 跨集群指标叠加): Grafana 面板按文件夹分组，核心配置在 `k8s/helm/values/kube-prometheus-stack.yaml` 的 `grafana.sidecar.dashboards`：
+  - **文件夹**: `folderAnnotation: grafana_folder` + `provider.foldersFromFilesStructure: true`。每个 dashboard ConfigMap 用注解 `grafana_folder: <名称>` 指定文件夹。当前布局: `Platform`(多集群总览, Home) / `Logs`(Loki 日志) / `Hardware`(DGX Spark) / `Kubernetes Built-in`(chart 自带 mixin 面板, 由 `sidecar.dashboards.annotations.grafana_folder` 统一归档, 不污染顶层)。
+  - **多集群选择器**: `multicluster.global.enabled: true` 让 ~21 张内置 mixin 面板出现可见的 `cluster` 下拉(`hide:0`)。指标均带 `cluster` 标签(`homelab`/`oracle-k3s`/`dgx-spark`); 关闭时这些面板会把三集群指标求和叠加，无法分析。
+  - **Home 面板**: `grafana.ini` 的 `dashboards.default_home_dashboard_path: /tmp/dashboards/Platform/multicluster-overview.json`(sidecar 把带 `grafana_folder: Platform` 注解的 CM 写入该子目录, 故路径含 `Platform/`)。
+  - **数据源固定**: 自定义面板 `datasource` 模板变量已固定并隐藏(`hide:2`, 值 `loki`/`prometheus`); Loki/Tempo 数据源在 values 中带显式 `uid: loki`/`uid: tempo`, 供面板变量与 Tempo↔Loki↔Prometheus 关联(`tracesToLogs`/`derivedFields`)引用。
+  - **门户下钻**: `Platform` 总览顶部有按 **tag** 的 dashboard 链接(`kubernetes-mixin`/`node-exporter-mixin`/`loki`/`dgx-spark`) — 用 tag 而非 UID, 避免内置面板 UID 变更后失效。
+  - **Tag 体系**: 自定义面板统一带 `curated`; 按信号带 `logs`/`metrics`(便于在 Dashboards 列表按 tag 过滤)。
+  - 分工: folder/多集群/Home/datasource-uid 在 values(Helm, 需 `just deploy-prometheus`); `grafana_folder` 注解与 dashboard JSON 在 manifests(ArgoCD `monitoring-dashboards` App 自动同步)。
 - **Deployment summary**: Only two components to deploy for observability changes:
   1. `just deploy-prometheus` (homelab kube-prometheus-stack Helm release)
   2. `kubectl --context oracle-k3s apply -f cloud/oracle/manifests/monitoring/otel-collector.yaml` + `kubectl --context oracle-k3s rollout restart daemonset/otel-collector -n monitoring` (oracle-k3s OTel Collector)
@@ -249,6 +257,13 @@ just apply   # Apply DNS/Tunnel changes
   3. The script is idempotent: existing monitors are skipped, only new ones are created
   - Admin credentials live in Vault at `secret/oracle-k3s/uptime-kuma` (keys: `admin_username`, `admin_password`), synced via ESO ExternalSecret `uptime-kuma-admin` in `personal-services` namespace
 - **Oracle service secrets**: workloads running on `oracle-k3s` should use Vault paths under `secret/oracle-k3s/<service>`. Do not store Oracle-only app credentials under `secret/homelab/*`.
+- **Grafana dashboards (新增/修改)**: dashboard 以 ConfigMap 形式放 `k8s/helm/manifests/`，由 ArgoCD `monitoring-dashboards` App 同步、Grafana sidecar 热加载。约定:
+  1. ConfigMap 必须带 label `grafana_dashboard: "1"`、annotation `grafana_folder: <Platform|Logs|Hardware|…>`(否则掉进顶层 General)，data key 以 `.json` 结尾。
+  2. dashboard JSON 的 `datasource` 模板变量固定并隐藏(`hide:2`, 值 `loki`/`prometheus`); 查询尽量用 `cluster=~"$cluster"` 以支持多集群过滤。
+  3. tag 带 `curated` + 信号 tag(`logs`/`metrics`), 便于按 tag 过滤。
+  4. 把文件名加入 `argocd/applications/monitoring-dashboards.yaml` 的 `directory.include` 列表。
+  5. `git push` → ArgoCD 同步; 若改动落在 `grafana.sidecar`/`grafana.ini`(folder / 多集群选择器 / Home / datasource uid) 则还需 `just deploy-prometheus`。
+  - 详见 Observability › **Dashboards 组织**。
 - **Homepage config updates**: ArgoCD auto-syncs the ConfigMap on `git push`, but `subPath` volume mounts require a pod restart to reload — run `just update-homepage` (does `apply` + `rollout restart` in one step). Do NOT use `kubectl delete configmap` as ArgoCD will conflict.
 - **HTTPRoute template**: Always include explicit `group`/`kind` in `parentRefs` and `group`/`kind`/`weight` in `backendRefs` to prevent ArgoCD OutOfSync drift caused by Gateway controller defaults.
 - **ArgoCD Image Updater** (v1.1.0): Uses CRD model — create an `ImageUpdater` CR (not just annotations). Set `useAnnotations: true` in the CR to read image config from Application annotations. Use strategy `newest-build` (not `latest`, deprecated).
