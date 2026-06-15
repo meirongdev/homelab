@@ -9,6 +9,8 @@ metadata:
   namespace: monitoring
   labels:
     grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Logs"
 data:
   loki-logs-overview.json: |-
     {
@@ -93,8 +95,8 @@ data:
       "templating": {
         "list": [
           {
-            "current": {},
-            "hide": 0,
+            "current": {"selected": true, "text": "Loki", "value": "loki"},
+            "hide": 2,
             "includeAll": false,
             "label": "Data Source",
             "name": "datasource",
@@ -135,6 +137,8 @@ metadata:
   namespace: monitoring
   labels:
     grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Logs"
 data:
   loki-logs-pod-browser.json: |-
     {
@@ -177,8 +181,8 @@ data:
       "templating": {
         "list": [
           {
-            "current": {},
-            "hide": 0,
+            "current": {"selected": true, "text": "Loki", "value": "loki"},
+            "hide": 2,
             "includeAll": false,
             "label": "Data Source",
             "name": "datasource",
@@ -258,6 +262,8 @@ metadata:
   namespace: monitoring
   labels:
     grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Logs"
 data:
   loki-logs-error-aggregation.json: |-
     {
@@ -328,8 +334,8 @@ data:
       "templating": {
         "list": [
           {
-            "current": {},
-            "hide": 0,
+            "current": {"selected": true, "text": "Loki", "value": "loki"},
+            "hide": 2,
             "includeAll": false,
             "label": "Data Source",
             "name": "datasource",
@@ -385,6 +391,8 @@ metadata:
   namespace: monitoring
   labels:
     grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Logs"
 data:
   loki-logs-cluster-search.json: |-
     {
@@ -448,8 +456,8 @@ data:
       "templating": {
         "list": [
           {
-            "current": {},
-            "hide": 0,
+            "current": {"selected": true, "text": "Loki", "value": "loki"},
+            "hide": 2,
             "includeAll": false,
             "label": "Data Source",
             "name": "datasource",

@@ -12,6 +12,8 @@ metadata:
   namespace: monitoring
   labels:
     grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Hardware"
 data:
   dgx-spark-node.json: |-
     {
@@ -487,8 +489,8 @@ data:
       "templating": {
         "list": [
           {
-            "current": {},
-            "hide": 0,
+            "current": {"selected": true, "text": "Prometheus", "value": "prometheus"},
+            "hide": 2,
             "includeAll": false,
             "label": "Data Source",
             "name": "datasource",

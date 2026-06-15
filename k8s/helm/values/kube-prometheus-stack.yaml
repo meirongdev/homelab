@@ -6,6 +6,25 @@ grafana:
     userKey: ""              # ✅ 显式设置为空，覆盖默认值
     passwordKey: "admin-password"
 
+  # Dashboard sidecar 组织化（让面板列表不再平铺混乱）
+  #  - multicluster.global: 给 chart 内置 mixin 面板注入 $cluster 选择器，
+  #    避免 homelab/oracle-k3s/dgx-spark 指标在同一张图里被叠加（指标均带 cluster 标签）
+  #  - folderAnnotation + provider.foldersFromFilesStructure: 按 ConfigMap 的
+  #    grafana_folder 注解分文件夹（sidecar 写入 /tmp/dashboards/<注解值>/）
+  #  - annotations.grafana_folder: chart 自带的内置面板统一归档，避免污染顶层
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      multicluster:
+        global:
+          enabled: true
+      folderAnnotation: grafana_folder
+      provider:
+        foldersFromFilesStructure: true
+      annotations:
+        grafana_folder: "Kubernetes Built-in"
+
   # ZITADEL native OIDC SSO (generic_oauth). Local admin login (admin/ existingSecret
   # above) stays enabled as a fallback — no lockout risk. Client id/secret come from
   # the same grafana-admin-credentials Secret (ESO ← Vault secret/homelab/grafana),
@@ -23,6 +42,9 @@ grafana:
         key: oauth-client-secret
 
   grafana.ini:
+    dashboards:
+      # 登录后默认落到多集群总览（sidecar 把该 ConfigMap 写入 Platform 文件夹）
+      default_home_dashboard_path: /tmp/dashboards/Platform/multicluster-overview.json
     server:
       # Required so Grafana builds the OAuth callback as https://grafana.meirong.dev/...
       # (it sits behind the Cloudflare Tunnel → Cilium Gateway, not localhost).
@@ -63,6 +85,7 @@ grafana:
   additionalDataSources:
     - name: Loki
       type: loki
+      uid: loki               # 固定 uid，供 dashboard 变量与 Tempo↔Loki 关联引用
       url: http://loki-gateway.monitoring.svc.cluster.local
       access: proxy
       isDefault: false
@@ -74,6 +97,7 @@ grafana:
             datasourceUid: tempo
     - name: Tempo
       type: tempo
+      uid: tempo              # 固定 uid，供 dashboard 变量与 tracesTo* 关联引用
       url: http://tempo.monitoring.svc.cluster.local:3200
       access: proxy
       isDefault: false
