@@ -29,7 +29,8 @@
   → chart 自带的 24 张内置面板统一归档到该文件夹。
 - `grafana.ini` `dashboards.default_home_dashboard_path: /tmp/dashboards/Platform/multicluster-overview.json`
   → 登录直达多集群总览。
-- ~~Loki / Tempo 数据源补显式 `uid`~~ **(已回退，见下方"踩坑")**。
+- Loki / Tempo 数据源补稳定 `uid: loki` / `uid: tempo` —— **经 `deleteDatasources` 删建实现**
+  (直接改 uid 会崩，见"踩坑#1")，并据此配好 trace↔log↔metric 关联。
 
 ### manifests（ArgoCD `monitoring-dashboards` App 自动同步）
 
@@ -59,11 +60,15 @@
 
 ## 踩坑与教训（部署阶段）
 
-1. **不要给 Loki/Tempo 设显式 `uid`**（已回退）。本集群 Grafana 用 NFS PVC 持久化，库里
-   已有按 name 自动生成 uid 的 Loki/Tempo；provisioning 按 name 匹配，强行改 uid → Grafana
-   12.x 报 `Datasource provisioning error: data source not found` → **整个 Grafana Pod
-   CrashLoop**。最终方案：不设显式 uid，Prometheus 面板用 chart 稳定 uid `prometheus` 固定，
-   Loki 面板数据源变量保持自动选择。trace↔log 关联待用 `tracesToLogsV2` + 运行时实际 uid 另修。
+1. **给已存在的数据源赋 uid 必须用 `deleteDatasources`**。本集群 Grafana 用 NFS PVC 持久化，
+   库里已有按 name 自动生成随机 uid 的 Loki/Tempo；直接在 provisioning 里改它们的 uid →
+   Grafana 12.x 报 `Datasource provisioning error: data source not found` → **整个 Grafana
+   Pod CrashLoop**。**最终方案**：`grafana.deleteDatasources`(按 name 先删旧记录)+
+   `additionalDataSources`(以稳定 uid `loki`/`tempo` 重建)——删建同 uid、幂等。踩坑过程：先
+   误判为"跨数据源前向引用"，逐步删引用仍崩(rev-10→12)，最终定位是 **uid 变更**本身；一度
+   全量回退(不设 uid)恢复，再用 deleteDatasources 正解重新启用。
+   - 关联只配**后向引用**：Tempo(排在 Loki/Prometheus 之后)配 `tracesToLogsV2`→loki /
+     `tracesToMetrics`/`serviceMap`→prometheus；Loki 侧**不**配指向 Tempo 的前向引用。
 2. **首次 `just deploy-prometheus` 挂起 1h+**：瞬时基础设施卡顿(本机是发热的 5600H 笔记本)
    让 helm `--wait` 卡在陈旧连接上、超过 `--timeout` 仍不退出。处理：停掉进程 →
    `helm rollback <release> <上一个 deployed revision>` 清除 `pending-upgrade` → 重试。
