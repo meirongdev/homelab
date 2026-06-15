@@ -83,9 +83,12 @@ grafana:
       memory: 512Mi
   
   additionalDataSources:
+    # 注意：不要给 Loki/Tempo 设置显式 `uid:`。本集群 Grafana 用 NFS PVC 持久化，
+    # 库里已存在按 name 自动生成 uid 的 Loki/Tempo 数据源；provisioning 按 name 匹配，
+    # 强行改成新 uid 会让 Grafana 12.x 报 "Datasource provisioning error: data source
+    # not found" 并整个 Pod CrashLoop（2026-06-15 踩坑）。让 Grafana 自管 uid 即可。
     - name: Loki
       type: loki
-      uid: loki               # 固定 uid，供 dashboard 变量与 Tempo↔Loki 关联引用
       url: http://loki-gateway.monitoring.svc.cluster.local
       access: proxy
       isDefault: false
@@ -93,36 +96,17 @@ grafana:
         derivedFields:
           - name: TraceID
             matcherRegex: "traceID=(\\w+)"
-            url: "$${__value.raw}"
-            datasourceUid: tempo
     - name: Tempo
       type: tempo
-      uid: tempo              # 固定 uid，供 dashboard 变量与 tracesTo* 关联引用
       url: http://tempo.monitoring.svc.cluster.local:3200
       access: proxy
       isDefault: false
       jsonData:
-        tracesToLogs:
-          datasourceUid: loki
-          lokiSearch: true
-          filterByTraceID: true
-          filterBySpanID: true
-          tags:
-            - key: k8s.namespace.name
-              value: k8s_namespace_name
-            - key: k8s.pod.name
-              value: k8s_pod_name
-            - key: service.name
-              value: service_name
-        tracesToMetrics:
-          datasourceUid: prometheus
-          tags:
-            - key: service.name
-              value: service
+        # 暂不配 tracesToLogs/tracesToMetrics/serviceMap：它们的 datasourceUid 需要
+        # 引用 Loki/Prometheus 的稳定 uid，而本集群不设显式 uid（见上方 Loki 注释）。
+        # trace↔log↔metric 关联后续用 tracesToLogsV2 + 运行时实际 uid 单独修复。
         nodeGraph:
           enabled: true
-        serviceMap:
-          datasourceUid: prometheus
 
 prometheus:
   prometheusSpec:
