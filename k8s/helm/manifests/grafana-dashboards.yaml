@@ -95,8 +95,8 @@ data:
       "templating": {
         "list": [
           {
-            "current": {"selected": true, "text": "Loki", "value": "loki"},
-            "hide": 2,
+            "current": {},
+            "hide": 0,
             "includeAll": false,
             "label": "Data Source",
             "name": "datasource",
@@ -181,8 +181,8 @@ data:
       "templating": {
         "list": [
           {
-            "current": {"selected": true, "text": "Loki", "value": "loki"},
-            "hide": 2,
+            "current": {},
+            "hide": 0,
             "includeAll": false,
             "label": "Data Source",
             "name": "datasource",
@@ -334,8 +334,8 @@ data:
       "templating": {
         "list": [
           {
-            "current": {"selected": true, "text": "Loki", "value": "loki"},
-            "hide": 2,
+            "current": {},
+            "hide": 0,
             "includeAll": false,
             "label": "Data Source",
             "name": "datasource",
@@ -456,8 +456,8 @@ data:
       "templating": {
         "list": [
           {
-            "current": {"selected": true, "text": "Loki", "value": "loki"},
-            "hide": 2,
+            "current": {},
+            "hide": 0,
             "includeAll": false,
             "label": "Data Source",
             "name": "datasource",
