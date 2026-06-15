@@ -485,7 +485,7 @@ data:
       ],
       "refresh": "30s",
       "schemaVersion": 40,
-      "tags": ["node-exporter", "dgx-spark", "prometheus", "hardware"],
+      "tags": ["node-exporter", "dgx-spark", "prometheus", "hardware", "metrics", "curated"],
       "templating": {
         "list": [
           {

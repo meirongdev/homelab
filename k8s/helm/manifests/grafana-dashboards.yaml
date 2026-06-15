@@ -91,7 +91,7 @@ data:
       ],
       "refresh": "30s",
       "schemaVersion": 40,
-      "tags": ["kubernetes", "logs", "loki", "otel", "multi-cluster"],
+      "tags": ["kubernetes", "logs", "loki", "otel", "multi-cluster", "curated"],
       "templating": {
         "list": [
           {
@@ -177,7 +177,7 @@ data:
       ],
       "refresh": "30s",
       "schemaVersion": 40,
-      "tags": ["kubernetes", "logs", "loki", "otel", "multi-cluster"],
+      "tags": ["kubernetes", "logs", "loki", "otel", "multi-cluster", "curated"],
       "templating": {
         "list": [
           {
@@ -330,7 +330,7 @@ data:
       ],
       "refresh": "1m",
       "schemaVersion": 40,
-      "tags": ["kubernetes", "logs", "loki", "otel", "errors", "multi-cluster"],
+      "tags": ["kubernetes", "logs", "loki", "otel", "errors", "multi-cluster", "curated"],
       "templating": {
         "list": [
           {
@@ -452,7 +452,7 @@ data:
       ],
       "refresh": "30s",
       "schemaVersion": 40,
-      "tags": ["kubernetes", "logs", "loki", "otel", "search", "multi-cluster"],
+      "tags": ["kubernetes", "logs", "loki", "otel", "search", "multi-cluster", "curated"],
       "templating": {
         "list": [
           {

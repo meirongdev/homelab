@@ -19,7 +19,12 @@ data:
       "description": "双集群资源概览：homelab k3s + oracle k3s 的 CPU/内存/Pod/节点状态",
       "editable": true,
       "graphTooltip": 1,
-      "links": [],
+      "links": [
+        {"asDropdown": true, "icon": "external link", "keepTime": true, "tags": ["kubernetes-mixin"], "title": "☸️ K8s 资源详情 (下钻)", "type": "dashboards"},
+        {"asDropdown": true, "icon": "external link", "keepTime": true, "tags": ["node-exporter-mixin"], "title": "🖥️ 节点详情 (下钻)", "type": "dashboards"},
+        {"asDropdown": true, "icon": "external link", "keepTime": true, "tags": ["loki"], "title": "📜 日志", "type": "dashboards"},
+        {"asDropdown": true, "icon": "external link", "keepTime": true, "tags": ["dgx-spark"], "title": "🌡️ DGX Spark", "type": "dashboards"}
+      ],
       "panels": [
         {
           "collapsed": false,
@@ -797,7 +802,7 @@ data:
       ],
       "refresh": "1m",
       "schemaVersion": 40,
-      "tags": ["kubernetes", "multi-cluster", "prometheus", "node-exporter", "kube-state-metrics", "resources"],
+      "tags": ["kubernetes", "multi-cluster", "prometheus", "node-exporter", "kube-state-metrics", "resources", "metrics", "curated"],
       "templating": {
         "list": [
           {
