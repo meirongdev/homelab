@@ -1,0 +1,409 @@
+# Grafana Dashboard: SLO / Service Availability
+# 展示 Sloth 生成的服务可用性 SLO（错误预算剩余 / 燃尽率 / SLI 错误率）。
+# 数据源: Prometheus（slo:* 录制规则，来自 manifests/slos.yaml + Cilium Envoy 一手指标）。
+# Auto-loaded via kube-prometheus-stack grafana-sc-dashboard sidecar。
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: slo-overview-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "SLO"
+data:
+  slo-overview.json: |-
+    {
+      "annotations": {
+        "list": []
+      },
+      "description": "homelab 服务可用性 SLO（Sloth，99%/30d，基于 Cilium Gateway Envoy 一手请求指标）",
+      "editable": true,
+      "graphTooltip": 1,
+      "links": [],
+      "panels": [
+        {
+          "type": "row",
+          "id": 1,
+          "collapsed": false,
+          "title": "🎯 SLO 概览（基于 Cilium Gateway 一手请求指标）",
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "type": "bargauge",
+          "id": 2,
+          "title": "错误预算剩余 (30d)",
+          "description": "slo:period_error_budget_remaining:ratio。1=预算全满，0=耗尽，<0=已超支(违反 SLO)。闲置无流量服务可能为 N/A。",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 1
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "noValue": "N/A",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 0.25
+                  },
+                  {
+                    "color": "green",
+                    "value": 0.5
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "displayMode": "gradient",
+            "orientation": "horizontal",
+            "showUnfilled": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "slo:period_error_budget_remaining:ratio{sloth_window=\"30d\", sloth_slo=~\"$slo\"}",
+              "refId": "A",
+              "legendFormat": "{{sloth_slo}}",
+              "instant": true,
+              "format": "time_series"
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "id": 3,
+          "title": "当前燃尽率 (5m，>1=超速消耗预算)",
+          "description": "slo:current_burn_rate:ratio。>1 表示当前错误率正在比 SLO 允许的更快地消耗预算；0=无错误；N/A=无流量。",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 1
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "decimals": 2,
+              "noValue": "N/A",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 5
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "textMode": "value_and_name",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "slo:current_burn_rate:ratio{sloth_window=\"5m\", sloth_slo=~\"$slo\"}",
+              "refId": "A",
+              "legendFormat": "{{sloth_slo}}",
+              "instant": true,
+              "format": "time_series"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "id": 4,
+          "title": "SLI 错误率 (rate1h) — 红线=错误预算 (1%)",
+          "description": "slo:sli_error:ratio_rate1h 各服务 1 小时错误率。持续高于 1%(=1-99%目标)就在烧预算。",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 9
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "showPoints": "never",
+                "thresholdsStyle": {
+                  "mode": "line"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 0.01
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "slo:sli_error:ratio_rate1h{sloth_slo=~\"$slo\"}",
+              "refId": "A",
+              "legendFormat": "{{sloth_slo}}"
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "id": 5,
+          "title": "SLO 错误预算剩余明细 (30d，升序，最差在上)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 24,
+            "x": 0,
+            "y": 17
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "slo:period_error_budget_remaining:ratio{sloth_window=\"30d\", sloth_slo=~\"$slo\"}",
+              "refId": "A",
+              "instant": true,
+              "format": "table"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "sloth_id": true,
+                  "sloth_service": true,
+                  "sloth_window": true,
+                  "__name__": true,
+                  "cluster": true,
+                  "job": true,
+                  "release": true,
+                  "instance": true,
+                  "prometheus": true,
+                  "namespace": true,
+                  "service": true
+                },
+                "renameByName": {
+                  "sloth_slo": "SLO",
+                  "Value": "错误预算剩余(30d)"
+                },
+                "indexByName": {
+                  "sloth_slo": 0,
+                  "Value": 1
+                }
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "filterable": true
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "错误预算剩余(30d)"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "percentunit"
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-background"
+                    }
+                  },
+                  {
+                    "id": "thresholds",
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "red",
+                          "value": null
+                        },
+                        {
+                          "color": "orange",
+                          "value": 0.25
+                        },
+                        {
+                          "color": "green",
+                          "value": 0.5
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "showHeader": true,
+            "sortBy": [
+              {
+                "displayName": "错误预算剩余(30d)",
+                "desc": false
+              }
+            ]
+          }
+        }
+      ],
+      "refresh": "1m",
+      "schemaVersion": 39,
+      "tags": [
+        "slo",
+        "sloth",
+        "curated"
+      ],
+      "templating": {
+        "list": [
+          {
+            "current": {
+              "selected": true,
+              "text": "Prometheus",
+              "value": "prometheus"
+            },
+            "hide": 2,
+            "includeAll": false,
+            "label": "Data Source",
+            "name": "datasource",
+            "options": [],
+            "query": "prometheus",
+            "refresh": 1,
+            "type": "datasource"
+          },
+          {
+            "current": {},
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "definition": "label_values(slo:objective:ratio, sloth_slo)",
+            "hide": 0,
+            "includeAll": true,
+            "allValue": ".*",
+            "label": "SLO",
+            "multi": true,
+            "name": "slo",
+            "query": {
+              "query": "label_values(slo:objective:ratio, sloth_slo)",
+              "refId": "StandardVariableQuery"
+            },
+            "refresh": 2,
+            "sort": 1,
+            "type": "query"
+          }
+        ]
+      },
+      "time": {
+        "from": "now-7d",
+        "to": "now"
+      },
+      "timezone": "browser",
+      "title": "SLO / Service Availability",
+      "uid": "homelab-slo-overview",
+      "version": 1
+    }

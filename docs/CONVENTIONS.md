@@ -207,6 +207,13 @@ just apply   # Apply DNS/Tunnel changes
   - **门户下钻**: `Platform` 总览顶部有按 **tag** 的 dashboard 链接(`kubernetes-mixin`/`node-exporter-mixin`/`loki`/`dgx-spark`) — 用 tag 而非 UID, 避免内置面板 UID 变更后失效。
   - **Tag 体系**: 自定义面板统一带 `curated`; 按信号带 `logs`/`metrics`(便于在 Dashboards 列表按 tag 过滤)。
   - 分工: folder/多集群/Home/datasource-uid 在 values(Helm, 需 `just deploy-prometheus`); `grafana_folder` 注解与 dashboard JSON 在 manifests(ArgoCD `monitoring-dashboards` App 自动同步)。
+- **SLI / SLO** (2026-06-16 上线): 服务可用性 SLO 基于**一手的 Cilium Gateway Envoy L7 指标**(真实入口请求，非合成探测)，用 **Sloth** 生成规则。
+  - **一手指标来源**: `cilium-envoy` DaemonSet 默认在 `:9964` 暴露 Envoy 指标(`cilium-config` `enable-metrics=true`/`external-envoy-proxy=true`)，`manifests/cilium-envoy-servicemonitor.yaml` 的 ServiceMonitor 抓取它(metricRelabelings 只留 RED 指标)。关键指标 `envoy_cluster_upstream_rq_xx{envoy_cluster_name="<gw>/<ns>_<svc>_<port>", envoy_response_code_class="2|3|4|5"}` —— 按网关路由 + 响应码。**无需改 Cilium**(数据面/ClusterMesh CA 不动)。
+  - **Sloth**: `just deploy-sloth`(Helm，`values/sloth-values.yaml`，**非 ArgoCD**)。`sloth.extraLabels.release=kube-prometheus-stack` 让生成的 PrometheusRule 被 operator 的 ruleSelector 选中; `defaultSloPeriod=30d`; 关掉 commonPlugins 的 git-sync sidecar。CRD `PrometheusServiceLevel` 由 chart 安装。
+  - **SLO 定义**: `manifests/slos.yaml`(一个 `PrometheusServiceLevel`，多条 SLO，ArgoCD 管理)。当前 6 个服务可用性 99%/30d(error=5xx, total=全部类)。**新增/改服务或目标**: 在 `spec.slos[]` 追加一条(`errorQuery`/`totalQuery` 用 `envoy_cluster_name=~".*/<ns>_<svc>_.*"` 正则匹配路由) + 改 `objective`，`git push` 即可。
+  - **告警**: 每个 SLO 生成多窗口燃尽率告警，`pageAlert→severity:critical` / `ticketAlert→severity:warning`，经现有 Alertmanager(`severity=~"critical|warning"`)路由到 Gotify。
+  - **看板**: Grafana `SLO` 文件夹 → "SLO / Service Availability"(`manifests/slo-dashboard.yaml`，错误预算剩余/燃尽率/SLI 错误率)。
+  - **⚠️ 零流量盲区**: 真实流量 SLI 在服务**无人访问时为空/NaN**(`rate()` 无样本)。这是一手指标的固有特性，非故障; 燃尽率告警只在真出现 5xx 时触发。闲置服务若要稳定可用性信号，叠一层合成探测(Uptime Kuma/blackbox)兜底。
 - **Deployment summary**: Only two components to deploy for observability changes:
   1. `just deploy-prometheus` (homelab kube-prometheus-stack Helm release)
   2. `kubectl --context oracle-k3s apply -f cloud/oracle/manifests/monitoring/otel-collector.yaml` + `kubectl --context oracle-k3s rollout restart daemonset/otel-collector -n monitoring` (oracle-k3s OTel Collector)
