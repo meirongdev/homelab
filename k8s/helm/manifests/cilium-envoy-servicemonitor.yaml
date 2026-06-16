@@ -1,0 +1,41 @@
+# 抓取 Cilium Gateway 的 Envoy L7 指标 —— 一手的入口请求 RED 数据
+# (请求成功率 / 响应码 / 延迟，按网关路由 envoy_cluster_name 区分)。
+#
+# 背景：流量 CF → cloudflared → Cilium Gateway(=cilium-envoy) → Service。
+# cilium-envoy DaemonSet 默认就在 :9964 暴露 envoy-metrics（cilium-config
+# enable-metrics=true / external-envoy-proxy=true），且已有 headless Service
+# `cilium-envoy`。本资源只是补上缺失的抓取配置，不改动 Cilium 本身（CNI，手动 helm）。
+#
+# 关键指标：
+#   envoy_cluster_upstream_rq{envoy_response_code, envoy_cluster_name}
+#   envoy_cluster_upstream_rq_xx{envoy_response_code_class="2|4|5"}
+#   envoy_cluster_upstream_rq_time_bucket   (延迟直方图)
+# envoy_cluster_name 形如 "<gw-ns>/cilium-gateway-<gw>/<ns>_<svc>_<port>"。
+#
+# ⚠️ 必须带 label release=kube-prometheus-stack，否则 Prometheus Operator 的
+#    serviceMonitorSelector 会静默忽略（见 CONVENTIONS.md › Observability › Alerting）。
+# cluster=homelab 由 Prometheus 默认 scrapeClass 的 relabeling 自动补上，无需手设。
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: cilium-envoy
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app.kubernetes.io/part-of: cilium
+spec:
+  namespaceSelector:
+    matchNames:
+      - kube-system
+  selector:
+    matchLabels:
+      k8s-app: cilium-envoy
+  endpoints:
+    - port: envoy-metrics
+      interval: 30s
+      path: /metrics
+      metricRelabelings:
+        # 只保留做 RED SLI 所需的 HTTP 请求指标，丢弃其余 ~5000 条 Envoy 内部指标
+        - sourceLabels: [__name__]
+          regex: 'envoy_cluster_upstream_rq(_xx|_total|_time_(bucket|sum|count))?|envoy_http_downstream_rq(_xx|_time_(bucket|sum|count))?'
+          action: keep
