@@ -198,9 +198,10 @@ spec:
           volumes:
             - name: staging
               emptyDir:
-                # sized for: calibre-web config (~2.1Gi), zitadel pg_dump,
-                # vault data/audit (<1MiB), gotify (<1MiB) plus headroom
-                sizeLimit: 8Gi
+                # 仅暂存 zitadel pg_dump（custom + compress=9，量小）。文件级源
+                # (vault/calibre/gotify) 改为由主容器直接快照其 RO 挂载的 PVC，不再 cp
+                # 进 staging —— 故不会再撑爆 emptyDir（此前 8Gi 被 calibre 拷爆 → pod 被驱逐）。
+                sizeLimit: 2Gi
             # Vault data (mirrored NFS PV in kopia ns)
             - name: vault-data
               persistentVolumeClaim:
@@ -235,38 +236,9 @@ spec:
                 claimName: kopia-repository
 
           initContainers:
-            # Step 1: Vault file-level backup
-            - name: vault-backup
-              image: alpine:3.21
-              command:
-                - /bin/sh
-                - -c
-                - |
-                  set -e
-                  mkdir -p /staging/vault/data /staging/vault/audit
-                  echo "Backing up Vault data directory..."
-                  cp -r /vault-data/* /staging/vault/data/ 2>/dev/null || true
-                  echo "Backing up Vault audit logs..."
-                  cp -r /vault-audit/* /staging/vault/audit/ 2>/dev/null || true
-                  echo "Vault backup done: $(du -sh /staging/vault/ | cut -f1)"
-              volumeMounts:
-                - name: staging
-                  mountPath: /staging
-                - name: vault-data
-                  mountPath: /vault-data
-                  readOnly: true
-                - name: vault-audit
-                  mountPath: /vault-audit
-                  readOnly: true
-              resources:
-                requests:
-                  cpu: 50m
-                  memory: 32Mi
-                limits:
-                  cpu: 200m
-                  memory: 256Mi
-
-            # Step 2: ZITADEL PostgreSQL dump (cross-namespace via service DNS)
+            # 唯一需要 staging 的源：ZITADEL 逻辑库 dump（无可挂载 PVC）。
+            # vault / calibre / gotify 等文件级源不再 cp 进 staging，
+            # 而是由主容器直接快照其只读挂载的 PVC（见下方 volumeMounts /sources/*）。
             - name: zitadel-pg-dump
               image: postgres:15-alpine
               command:
@@ -306,58 +278,6 @@ spec:
                   cpu: 500m
                   memory: 256Mi
 
-            # Step 3: Calibre-Web config backup
-            - name: calibre-config-backup
-              image: alpine:3.21
-              command:
-                - /bin/sh
-                - -c
-                - |
-                  set -e
-                  mkdir -p /staging/calibre-web
-                  echo "Backing up Calibre-Web config..."
-                  cp -r /calibre-config/* /staging/calibre-web/ 2>/dev/null || true
-                  echo "Calibre-Web backup done: $(du -sh /staging/calibre-web/ | cut -f1)"
-              volumeMounts:
-                - name: staging
-                  mountPath: /staging
-                - name: calibre-config
-                  mountPath: /calibre-config
-                  readOnly: true
-              resources:
-                requests:
-                  cpu: 50m
-                  memory: 32Mi
-                limits:
-                  cpu: 200m
-                  memory: 128Mi
-
-            # Step 4: Gotify data backup
-            - name: gotify-backup
-              image: alpine:3.21
-              command:
-                - /bin/sh
-                - -c
-                - |
-                  set -e
-                  mkdir -p /staging/gotify
-                  echo "Backing up Gotify data..."
-                  cp -r /gotify-data/* /staging/gotify/ 2>/dev/null || true
-                  echo "Gotify backup done: $(du -sh /staging/gotify/ | cut -f1)"
-              volumeMounts:
-                - name: staging
-                  mountPath: /staging
-                - name: gotify-data
-                  mountPath: /gotify-data
-                  readOnly: true
-              resources:
-                requests:
-                  cpu: 50m
-                  memory: 32Mi
-                limits:
-                  cpu: 200m
-                  memory: 128Mi
-
           # Main container: kopia snapshot using local repo config
           containers:
             - name: kopia-snapshot
@@ -394,7 +314,7 @@ spec:
                   echo "=== Creating snapshots ==="
 
                   echo "Snapshot: Vault data..."
-                  kopia snapshot create /staging/vault \
+                  kopia snapshot create /sources/vault \
                     --tags="cluster:homelab" \
                     --tags="service:vault" \
                     --tags="priority:P0" || echo "WARNING: Vault snapshot failed"
@@ -408,13 +328,13 @@ spec:
                   fi
 
                   echo "Snapshot: Calibre-Web config..."
-                  kopia snapshot create /staging/calibre-web \
+                  kopia snapshot create /sources/calibre-web \
                     --tags="cluster:homelab" \
                     --tags="service:calibre-web" \
                     --tags="priority:P1" || echo "WARNING: Calibre-Web snapshot failed"
 
                   echo "Snapshot: Gotify data..."
-                  kopia snapshot create /staging/gotify \
+                  kopia snapshot create /sources/gotify \
                     --tags="cluster:homelab" \
                     --tags="service:gotify" \
                     --tags="priority:P1" || echo "WARNING: Gotify snapshot failed"
@@ -427,6 +347,19 @@ spec:
               volumeMounts:
                 - name: staging
                   mountPath: /staging
+                # 文件级源直接只读挂载，由 kopia 直接快照（不再经 emptyDir 暂存）
+                - name: vault-data
+                  mountPath: /sources/vault/data
+                  readOnly: true
+                - name: vault-audit
+                  mountPath: /sources/vault/audit
+                  readOnly: true
+                - name: calibre-config
+                  mountPath: /sources/calibre-web
+                  readOnly: true
+                - name: gotify-data
+                  mountPath: /sources/gotify
+                  readOnly: true
                 - name: kopia-config
                   mountPath: /app/config
                   readOnly: true
