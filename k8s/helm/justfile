@@ -12,6 +12,7 @@ add-repos:
     helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
     helm repo add cilium https://helm.cilium.io/
     helm repo add argo https://argoproj.github.io/argo-helm
+    helm repo add sloth https://slok.github.io/sloth
     helm repo update
 
 create-namespace:
@@ -52,6 +53,17 @@ deploy-loki:
         --values values/loki.yaml \
         --wait \
         --timeout 10m
+
+# 部署 Sloth（SLO 生成器：PrometheusServiceLevel CR → PrometheusRule）
+# SLO CR 见 manifests/slos.yaml（ArgoCD 管理）。生成的规则带 release=kube-prometheus-stack。
+deploy-sloth:
+    helm upgrade --install sloth sloth/sloth \
+        --namespace {{namespace}} \
+        --kube-context {{ctx}} \
+        --values values/sloth-values.yaml \
+        --version 0.16.0 \
+        --timeout 5m
+    @echo "✅ Sloth deployed. Check: kubectl --context {{ctx}} -n {{namespace}} get pods -l app.kubernetes.io/name=sloth"
 
 deploy-tempo:
     helm upgrade --install tempo grafana/tempo \

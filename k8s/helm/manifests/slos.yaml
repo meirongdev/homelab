@@ -1,0 +1,110 @@
+# SLO 定义（Sloth）。基于一手的 Cilium Gateway Envoy L7 指标（真实入口请求），
+# 为主要 homelab 用户服务定义"可用性 99% / 30d"SLO（error = 5xx）。
+# Sloth 控制器据此生成 PrometheusRule：
+#   - SLI 录制规则 slo:sli_error:ratio_rate{5m,30m,1h,2h,6h,1d,3d}
+#   - 多窗口多燃尽率告警（page→severity:critical / ticket→severity:warning → Gotify）
+#   - 元信息 slo:objective:ratio 等
+#
+# 指标来源：envoy_cluster_upstream_rq_xx{envoy_cluster_name="<gw>/<ns>_<svc>_<port>",
+#   envoy_response_code_class="2|3|4|5"}（见 cilium-envoy-servicemonitor.yaml）。
+# total = 全部响应类；error = 5xx（4xx 是客户端错误，计入分母不计入分子）。
+#
+# ⚠️ metadata.labels.release=kube-prometheus-stack：经 sloth.extraLabels 也会打到生成的
+#    PrometheusRule，确保被 operator 的 ruleSelector 选中。
+# defaultSloPeriod=30d 由 sloth-values.yaml 设定。
+apiVersion: sloth.slok.dev/v1
+kind: PrometheusServiceLevel
+metadata:
+  name: homelab-gateway-availability
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  service: "homelab-gateway"
+  labels:
+    cluster: homelab
+  slos:
+    - name: "calibre-web-availability"
+      objective: 99.0
+      description: "Calibre-Web (book.meirong.dev) 入口可用性，error=5xx"
+      sli:
+        events:
+          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/personal-services_calibre-web_.*", envoy_response_code_class="5"}[{{.window}}]))
+          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/personal-services_calibre-web_.*"}[{{.window}}]))
+      alerting:
+        name: CalibreWebGatewayHighErrorRate
+        labels: { slo_service: calibre-web }
+        pageAlert:
+          labels: { severity: critical }
+        ticketAlert:
+          labels: { severity: warning }
+    - name: "grafana-availability"
+      objective: 99.0
+      description: "Grafana (grafana.meirong.dev) 入口可用性，error=5xx"
+      sli:
+        events:
+          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/monitoring_kube-prometheus-stack-grafana_.*", envoy_response_code_class="5"}[{{.window}}]))
+          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/monitoring_kube-prometheus-stack-grafana_.*"}[{{.window}}]))
+      alerting:
+        name: GrafanaGatewayHighErrorRate
+        labels: { slo_service: grafana }
+        pageAlert:
+          labels: { severity: critical }
+        ticketAlert:
+          labels: { severity: warning }
+    - name: "argocd-availability"
+      objective: 99.0
+      description: "ArgoCD (argocd.meirong.dev) 入口可用性，error=5xx"
+      sli:
+        events:
+          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/argocd_argocd-server_.*", envoy_response_code_class="5"}[{{.window}}]))
+          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/argocd_argocd-server_.*"}[{{.window}}]))
+      alerting:
+        name: ArgoCDGatewayHighErrorRate
+        labels: { slo_service: argocd }
+        pageAlert:
+          labels: { severity: critical }
+        ticketAlert:
+          labels: { severity: warning }
+    - name: "vault-availability"
+      objective: 99.0
+      description: "Vault (vault.meirong.dev) 入口可用性，error=5xx"
+      sli:
+        events:
+          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/vault_vault_.*", envoy_response_code_class="5"}[{{.window}}]))
+          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/vault_vault_.*"}[{{.window}}]))
+      alerting:
+        name: VaultGatewayHighErrorRate
+        labels: { slo_service: vault }
+        pageAlert:
+          labels: { severity: critical }
+        ticketAlert:
+          labels: { severity: warning }
+    - name: "gotify-availability"
+      objective: 99.0
+      description: "Gotify (notify.meirong.dev) 入口可用性，error=5xx"
+      sli:
+        events:
+          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/personal-services_gotify_.*", envoy_response_code_class="5"}[{{.window}}]))
+          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/personal-services_gotify_.*"}[{{.window}}]))
+      alerting:
+        name: GotifyGatewayHighErrorRate
+        labels: { slo_service: gotify }
+        pageAlert:
+          labels: { severity: critical }
+        ticketAlert:
+          labels: { severity: warning }
+    - name: "zitadel-availability"
+      objective: 99.0
+      description: "ZITADEL (auth.meirong.dev) 入口可用性，error=5xx"
+      sli:
+        events:
+          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/zitadel_zitadel_.*", envoy_response_code_class="5"}[{{.window}}]))
+          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/zitadel_zitadel_.*"}[{{.window}}]))
+      alerting:
+        name: ZitadelGatewayHighErrorRate
+        labels: { slo_service: zitadel }
+        pageAlert:
+          labels: { severity: critical }
+        ticketAlert:
+          labels: { severity: warning }
