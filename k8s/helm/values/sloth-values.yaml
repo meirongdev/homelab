@@ -1,0 +1,28 @@
+# Sloth — SLO 生成器。监听 PrometheusServiceLevel CR，自动生成 PrometheusRule
+# (SLI 录制规则 + 多窗口燃尽率告警)。运行在 monitoring namespace。
+# 不改数据面，只生成规则，风险低。
+sloth:
+  defaultSloPeriod: "30d"
+  # 生成的规则/PrometheusRule 带此 label，否则 kube-prometheus-stack 的
+  # ruleSelector(默认 release=kube-prometheus-stack)会静默忽略，规则不会被加载。
+  extraLabels:
+    release: kube-prometheus-stack
+
+# 关掉 commonPlugins 的 git-sync sidecar：我们用 raw events 查询，不依赖外部
+# GitHub SLI 插件库，省一个 sidecar + 外部依赖。
+commonPlugins:
+  enabled: false
+
+# Sloth 自身运行指标的 ServiceMonitor 也带 release label 才会被抓取
+metrics:
+  enabled: true
+  prometheusLabels:
+    release: kube-prometheus-stack
+
+resources:
+  requests:
+    cpu: 5m
+    memory: 75Mi
+  limits:
+    cpu: 50m
+    memory: 150Mi
