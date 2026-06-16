@@ -536,7 +536,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum by (cluster, namespace, pod, phase) (kube_pod_status_phase{cluster=~\"$cluster\", namespace=~\"$namespace\", phase=~\"$phase\"})",
+              "expr": "sum by (cluster, namespace, pod, phase) (kube_pod_status_phase{cluster=~\"$cluster\", namespace=~\"$namespace\", phase=~\"$phase\"}) > 0",
               "format": "table",
               "instant": true,
               "legendFormat": "",
