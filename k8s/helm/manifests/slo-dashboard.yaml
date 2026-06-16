@@ -1,6 +1,7 @@
 # Grafana Dashboard: SLO / Service Availability
 # 展示 Sloth 生成的服务可用性 SLO（错误预算剩余 / 燃尽率 / SLI 错误率）。
 # 数据源: Prometheus（slo:* 录制规则，来自 manifests/slos.yaml + Cilium Envoy 一手指标）。
+# 无流量服务显示 "N/A 无流量"（NaN：rate() 无样本，SLI 无法计算，非故障）。
 # Auto-loaded via kube-prometheus-stack grafana-sc-dashboard sidecar。
 ---
 apiVersion: v1
@@ -39,7 +40,7 @@ data:
           "type": "bargauge",
           "id": 2,
           "title": "错误预算剩余 (30d)",
-          "description": "slo:period_error_budget_remaining:ratio。1=预算全满，0=耗尽，<0=已超支(违反 SLO)。闲置无流量服务可能为 N/A。",
+          "description": "slo:period_error_budget_remaining:ratio。1=预算全满，0=耗尽，<0=已超支(违反 SLO)。'N/A 无流量'=近期无请求，SLI 无法计算(非故障)。",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -55,7 +56,17 @@ data:
               "unit": "percentunit",
               "min": 0,
               "max": 1,
-              "noValue": "N/A",
+              "mappings": [
+                {
+                  "type": "special",
+                  "options": {
+                    "match": "null+nan",
+                    "result": {
+                      "text": "N/A 无流量"
+                    }
+                  }
+                }
+              ],
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
@@ -106,7 +117,7 @@ data:
           "type": "stat",
           "id": 3,
           "title": "当前燃尽率 (5m，>1=超速消耗预算)",
-          "description": "slo:current_burn_rate:ratio。>1 表示当前错误率正在比 SLO 允许的更快地消耗预算；0=无错误；N/A=无流量。",
+          "description": "slo:current_burn_rate:ratio。>1=正在比 SLO 允许的更快地烧预算；0=无错误；'N/A 无流量'=近期无请求。",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -121,7 +132,17 @@ data:
             "defaults": {
               "unit": "none",
               "decimals": 2,
-              "noValue": "N/A",
+              "mappings": [
+                {
+                  "type": "special",
+                  "options": {
+                    "match": "null+nan",
+                    "result": {
+                      "text": "N/A 无流量"
+                    }
+                  }
+                }
+              ],
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
@@ -174,7 +195,7 @@ data:
           "type": "timeseries",
           "id": 4,
           "title": "SLI 错误率 (rate1h) — 红线=错误预算 (1%)",
-          "description": "slo:sli_error:ratio_rate1h 各服务 1 小时错误率。持续高于 1%(=1-99%目标)就在烧预算。",
+          "description": "slo:sli_error:ratio_rate1h 各服务 1 小时错误率。持续高于 1%(=1-99%目标)就在烧预算。无流量服务无数据点(正常)。",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -311,6 +332,20 @@ data:
                     "value": "percentunit"
                   },
                   {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "special",
+                        "options": {
+                          "match": "null+nan",
+                          "result": {
+                            "text": "N/A 无流量"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
                     "id": "custom.cellOptions",
                     "value": {
                       "type": "color-background"
@@ -405,5 +440,5 @@ data:
       "timezone": "browser",
       "title": "SLO / Service Availability",
       "uid": "homelab-slo-overview",
-      "version": 1
+      "version": 2
     }
