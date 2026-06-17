@@ -111,14 +111,17 @@ applicationSet:
   enabled: false
 
 # --- 资源声明 ---
+# application-controller 内存：512Mi 在加入 Trivy(~18 大 CRD)+Kyverno(更大 CRD) 两个
+# Helm App 后被 dry-run/diff 峰值顶爆 OOMKilled(137)，全量 resync 时尤甚。抬到 1Gi limit
+# / 384Mi request 给 CRD diff 留头寸（节点 10GiB，其余组件占用小）。改后需 `just deploy-argocd`。
 controller:
   resources:
     requests:
       cpu: 100m
-      memory: 256Mi
+      memory: 384Mi
     limits:
       cpu: 1000m
-      memory: 512Mi
+      memory: 1Gi
 
 repoServer:
   resources:
