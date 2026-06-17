@@ -11,6 +11,9 @@ spec:
   sourceRepos:
     - https://github.com/meirongdev/homelab
     - https://argoproj.github.io/argo-helm
+    # 安全加固组件的 Helm chart 仓库（Kyverno 准入策略 / Trivy Operator 漏洞扫描）
+    - https://kyverno.github.io/kyverno
+    - https://aquasecurity.github.io/helm-charts
 
   destinations:
     - server: https://kubernetes.default.svc

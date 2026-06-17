@@ -1,0 +1,102 @@
+---
+# Grafana 看板：Trivy 镜像漏洞 / 暴露密钥 / 配置审计 概览。
+# 落到 Security 文件夹（sidecar 按 grafana_folder 注解归档）。
+# 由 ArgoCD `monitoring-dashboards` Application 同步、Grafana sidecar 热加载。
+# 约定：grafana_dashboard:"1" + grafana_folder + datasource 固定隐藏(uid=prometheus) + cluster 过滤。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trivy-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Security"
+data:
+  trivy-overview.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "graphTooltip": 0,
+      "schemaVersion": 39,
+      "tags": ["curated", "metrics", "security", "trivy"],
+      "title": "Security / Trivy 漏洞概览",
+      "uid": "trivy-overview",
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "constant",
+            "query": "prometheus",
+            "current": { "text": "prometheus", "value": "prometheus" },
+            "hide": 2
+          },
+          {
+            "name": "cluster",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "query": "label_values(trivy_image_vulnerabilities, cluster)",
+            "refresh": 2,
+            "includeAll": true,
+            "multi": true,
+            "current": { "text": "All", "value": "$__all" }
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1, "type": "stat", "title": "Critical 镜像漏洞",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }, "color": { "mode": "thresholds" } } },
+          "targets": [ { "expr": "sum(trivy_image_vulnerabilities{severity=\"Critical\", cluster=~\"$cluster\"})", "refId": "A" } ]
+        },
+        {
+          "id": 2, "type": "stat", "title": "High 镜像漏洞",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 1 } ] }, "color": { "mode": "thresholds" } } },
+          "targets": [ { "expr": "sum(trivy_image_vulnerabilities{severity=\"High\", cluster=~\"$cluster\"})", "refId": "A" } ]
+        },
+        {
+          "id": 3, "type": "stat", "title": "暴露密钥发现",
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }, "color": { "mode": "thresholds" } } },
+          "targets": [ { "expr": "sum(trivy_exposedsecrets_findings{cluster=~\"$cluster\"})", "refId": "A" } ]
+        },
+        {
+          "id": 4, "type": "stat", "title": "Critical 配置审计",
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }, "color": { "mode": "thresholds" } } },
+          "targets": [ { "expr": "sum(trivy_resource_configaudits{severity=\"Critical\", cluster=~\"$cluster\"})", "refId": "A" } ]
+        },
+        {
+          "id": 5, "type": "timeseries", "title": "镜像漏洞趋势（按严重级）",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            { "expr": "sum by (severity) (trivy_image_vulnerabilities{severity=~\"Critical|High\", cluster=~\"$cluster\"})", "legendFormat": "{{severity}}", "refId": "A" }
+          ]
+        },
+        {
+          "id": 6, "type": "table", "title": "Top 受影响镜像（Critical+High）",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            { "expr": "topk(20, sum by (image_repository, image_tag) (trivy_image_vulnerabilities{severity=~\"Critical|High\", cluster=~\"$cluster\"}))", "format": "table", "instant": true, "refId": "A" }
+          ],
+          "transformations": [ { "id": "organize", "options": { "excludeByName": { "Time": true } } } ]
+        },
+        {
+          "id": 7, "type": "table", "title": "配置审计问题（按 namespace / 严重级）",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            { "expr": "sum by (namespace, severity) (trivy_resource_configaudits{severity=~\"Critical|High\", cluster=~\"$cluster\"})", "format": "table", "instant": true, "refId": "A" }
+          ],
+          "transformations": [ { "id": "organize", "options": { "excludeByName": { "Time": true } } } ]
+        }
+      ]
+    }

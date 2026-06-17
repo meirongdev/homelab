@@ -1,0 +1,41 @@
+---
+# 镜像必须带显式 tag 且不得为 :latest。
+# 动机：:latest 不可复现、难追溯、绕过 ArgoCD Image Updater 的 newest-build 策略。
+#
+# ⚠️ 先 Audit；确认零违规后改 Enforce 并 git push。
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-latest-tag
+  annotations:
+    policies.kyverno.io/title: Disallow Latest Tag
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: medium
+spec:
+  failurePolicy: Ignore
+  background: true
+  rules:
+    - name: require-image-tag
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+      validate:
+        failureAction: Audit
+        message: "镜像必须带显式 tag（不可省略）。"
+        pattern:
+          spec:
+            containers:
+              - image: "*:*"
+    - name: validate-image-tag-not-latest
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+      validate:
+        failureAction: Audit
+        message: "禁止使用 :latest tag。"
+        pattern:
+          spec:
+            containers:
+              - image: "!*:latest"
