@@ -1,0 +1,32 @@
+---
+# 镜像必须来自可信仓库白名单（供应链控制）。
+#
+# ⚠️ 本策略最易产噪 / 最可能需调整，故长期保持 Audit：
+#    - 用裸镜像名（如 `nginx:1.25`，隐式 docker.io/library/nginx）会被标记——这正是
+#      "请显式写全 registry" 的善意提示，但意味着提升 Enforce 前要先把所有镜像写全限定名。
+#    - 提升 Enforce 前务必读 `kubectl get polr -A`，按需扩充下面的白名单。
+# 白名单按本仓库实际拉取来源给的宽松默认；新增可信源就往 `|` 列表里加。
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-image-registries
+  annotations:
+    policies.kyverno.io/title: Restrict Image Registries
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: medium
+spec:
+  failurePolicy: Ignore
+  background: true
+  rules:
+    - name: validate-registries
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+      validate:
+        failureAction: Audit
+        message: "镜像必须来自可信仓库白名单（docker.io/ghcr.io/quay.io/registry.k8s.io/gcr.io/public.ecr.aws/cgr.dev/mcr.microsoft.com）。"
+        pattern:
+          spec:
+            containers:
+              - image: "docker.io/* | ghcr.io/* | quay.io/* | registry.k8s.io/* | gcr.io/* | public.ecr.aws/* | cgr.dev/* | mcr.microsoft.com/*"

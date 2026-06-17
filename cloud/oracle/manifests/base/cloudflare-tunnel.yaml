@@ -4,6 +4,12 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: cloudflare
+  labels:
+    # Pod Security Admission — cloudflared 是 baseline 安全的
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: baseline
+    pod-security.kubernetes.io/audit: baseline
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret

@@ -1,0 +1,65 @@
+---
+# Trivy Operator 安全发现告警。
+#
+# 指标来自 Trivy Operator 控制器（/metrics :8080，operator.metricsFindingsEnabled=true）：
+#   - homelab: ServiceMonitor 由 chart 启用（values/trivy-operator.yaml，带 release 标签）
+#   覆盖单集群（Trivy 仅 homelab 先上；将来镜像到 oracle 时本规则自然适用，靠 cluster 标签区分）
+#
+# severity warning|critical → 经 Alertmanager→Gotify 桥路由（见 values/kube-prometheus-stack.yaml）。
+# `release: kube-prometheus-stack` 标签必需，否则 ruleSelector 不采纳本 PrometheusRule。
+# 经 ArgoCD `monitoring-dashboards` Application 同步（git push → 3 分钟内）。
+#
+# ⚠️ 指标名核对：首次部署后用 `kubectl -n trivy-system port-forward svc/trivy-operator 8080:8080`
+#    curl :8080/metrics 确认下列指标名（不同 chart 版本可能微调，如 exposedsecrets 系列）。
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: trivy-operator-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: trivy-operator
+      rules:
+        # 运行中的镜像存在 Critical CVE（可修复版本——values 里 ignoreUnfixed=true）。
+        # 这是标准的"安全态势"告警：会持续 firing 直到镜像被升级修复。
+        - alert: TrivyImageCriticalVulnerabilities
+          expr: sum by (cluster) (trivy_image_vulnerabilities{severity="Critical"}) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.cluster }} 存在 {{ $value }} 个 Critical 镜像漏洞"
+            description: "运行中工作负载的镜像含可修复的 Critical CVE。查看：`kubectl get vulnerabilityreports -A -o wide`，按 Critical 计数排序后升级对应镜像。"
+
+        # 镜像内硬编码密钥被扫出——最高信号，几乎总是配置事故。
+        - alert: TrivyExposedSecretFound
+          expr: sum by (cluster) (trivy_exposedsecrets_findings{severity=~"High|Critical"}) > 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.cluster }} 镜像中发现暴露密钥"
+            description: "Trivy 在运行镜像里扫出 High/Critical 暴露密钥。查看：`kubectl get exposedsecretreports -A`。立刻轮换该密钥并从镜像剔除。"
+
+        # 配置审计高危（特权容器、缺资源限制、危险挂载等）。
+        - alert: TrivyConfigAuditCritical
+          expr: sum by (cluster) (trivy_resource_configaudits{severity="Critical"}) > 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.cluster }} 存在 {{ $value }} 个 Critical 配置审计问题"
+            description: "工作负载配置存在 Critical 级问题。查看：`kubectl get configauditreports -A -o wide`。多数可由 Kyverno 策略在准入期拦截。"
+
+        # 元告警：findings 指标整体消失 = operator 挂了或抓取断了，会静默掩盖以上所有告警。
+        # for:2h 以越过首次扫描前的空窗（运行镜像总会被扫到，故此后该序列稳定存在）。
+        - alert: TrivyOperatorMetricsAbsent
+          expr: absent(trivy_image_vulnerabilities{cluster="homelab"})
+          for: 2h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Trivy Operator 指标在 homelab 缺失"
+            description: ">2h 无 trivy_image_vulnerabilities 序列——Trivy Operator 可能已宕或 ServiceMonitor 抓取中断，会掩盖所有漏洞/密钥告警。检查 `kubectl get pods -n trivy-system`。"

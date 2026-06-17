@@ -1,0 +1,91 @@
+---
+# CIS Kubernetes Benchmark 周期巡检 (kube-bench)
+#
+# 每周一次跑 Aqua kube-bench 对照 CIS 基准检查节点/控制面配置，结果打到 stdout
+# → 现有 OTel→Loki 管道收集 → 在 Grafana/Loki 里按 `namespace="kube-bench"` 查阅。
+#
+# ⚠️ 必须用 k3s 基准 (`--benchmark k3s-cis-*`)：k3s 控制面是单二进制、无
+#    /etc/kubernetes/manifests 静态 Pod，跑通用 cis 基准会满屏假 FAIL。
+#    若 Job 报 "unable to find config / benchmark"，把下面的 `--benchmark` 值改成
+#    镜像内 /opt/kube-bench/cfg/ 实际存在的 k3s 目录（或升级镜像 tag）：
+#       kubectl run kb --rm -it --image=docker.io/aquasec/kube-bench:v0.10.7 \
+#         --command -- ls /opt/kube-bench/cfg/
+#
+# 需 hostPID + 只读 host 挂载来检视节点配置 → 专用 namespace 标 PSA privileged。
+# Job 短暂运行（每周一次），对热节点几乎无常驻开销。
+# 由独立 ArgoCD App `kube-bench` 同步（见 argocd/applications/kube-bench.yaml）。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kube-bench
+  labels:
+    # kube-bench 需 hostPID + hostPath 检视节点 → 显式 privileged 豁免
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: privileged
+    pod-security.kubernetes.io/audit: privileged
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: kube-bench
+  namespace: kube-bench
+  labels:
+    app: kube-bench
+spec:
+  schedule: "0 5 * * 0"          # 每周日 05:00 UTC（错开 02:00 备份）
+  concurrencyPolicy: Forbid       # 不并发，避免热节点叠加扫描
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 604800   # 完成 7 天后清理 Job 对象
+      template:
+        metadata:
+          labels:
+            app: kube-bench
+        spec:
+          hostPID: true
+          restartPolicy: Never
+          # 单节点 homelab 控制面与工作节点同机；容忍可能存在的控制面污点
+          tolerations:
+            - operator: Exists
+          containers:
+            - name: kube-bench
+              image: docker.io/aquasec/kube-bench:v0.15.6
+              command: ["kube-bench"]
+              # k3s 基准；targets 覆盖控制面文件权限 + 节点 + 策略类检查
+              args:
+                - "run"
+                - "--targets"
+                - "master,etcd,controlplane,node,policies"
+                - "--benchmark"
+                - "k3s-cis-1.24"
+              securityContext:
+                runAsUser: 0
+                allowPrivilegeEscalation: true
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 300m
+                  memory: 256Mi
+              volumeMounts:
+                - { name: var-lib-kubelet,      mountPath: /var/lib/kubelet,        readOnly: true }
+                - { name: var-lib-etcd,         mountPath: /var/lib/etcd,           readOnly: true }
+                - { name: etc-systemd,          mountPath: /etc/systemd,            readOnly: true }
+                - { name: lib-systemd,          mountPath: /lib/systemd/,           readOnly: true }
+                - { name: etc-kubernetes,       mountPath: /etc/kubernetes,         readOnly: true }
+                # k3s 专属配置/数据目录（控制面与 kubelet 配置实际所在）
+                - { name: etc-rancher-k3s,      mountPath: /etc/rancher/k3s,        readOnly: true }
+                - { name: var-lib-rancher-k3s,  mountPath: /var/lib/rancher/k3s,    readOnly: true }
+          volumes:
+            - { name: var-lib-kubelet,      hostPath: { path: /var/lib/kubelet } }
+            - { name: var-lib-etcd,         hostPath: { path: /var/lib/etcd } }
+            - { name: etc-systemd,          hostPath: { path: /etc/systemd } }
+            - { name: lib-systemd,          hostPath: { path: /lib/systemd } }
+            - { name: etc-kubernetes,       hostPath: { path: /etc/kubernetes } }
+            - { name: etc-rancher-k3s,      hostPath: { path: /etc/rancher/k3s } }
+            - { name: var-lib-rancher-k3s,  hostPath: { path: /var/lib/rancher/k3s } }

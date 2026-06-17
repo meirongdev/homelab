@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: monitoring-dashboards
+  name: kube-bench
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
@@ -12,14 +12,14 @@ spec:
     targetRevision: main
     path: k8s/helm/manifests
     directory:
-      include: "{grafana-dashboards.yaml,multicluster-overview-dashboard.yaml,dgx-spark-node-dashboard.yaml,eso-alerts.yaml,cilium-envoy-servicemonitor.yaml,slos.yaml,slo-dashboard.yaml,trivy-alerts.yaml,trivy-dashboard.yaml}"
+      include: "kube-bench.yaml"
   destination:
     server: https://kubernetes.default.svc
-    namespace: monitoring
+    namespace: kube-bench
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
-      - CreateNamespace=false
+      - CreateNamespace=false   # Namespace 由 manifest 自身渲染
       - ServerSideApply=true

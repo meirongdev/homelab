@@ -1,0 +1,32 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: homelab
+  sources:
+    # Kyverno chart 版本 —— 部署前先 `helm search repo kyverno/kyverno --versions`
+    # 确认该版本存在并按需调整（chart 3.x ↔ app v1.12+）。
+    - repoURL: https://kyverno.github.io/kyverno
+      chart: kyverno
+      targetRevision: "3.8.1"
+      helm:
+        valueFiles:
+          - $values/k8s/helm/values/kyverno.yaml
+    - repoURL: https://github.com/meirongdev/homelab
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kyverno
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # Kyverno 的 report CRD 很大，必须用 SSA 避免 client-side apply 的 annotation 超长报错
+      - ServerSideApply=true
