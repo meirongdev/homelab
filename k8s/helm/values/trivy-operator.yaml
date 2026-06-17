@@ -1,0 +1,69 @@
+# Trivy Operator — 镜像 CVE / 配置审计 / RBAC / 暴露密钥 持续扫描
+# Chart: aqua/trivy-operator  (仓库 https://aquasecurity.github.io/helm-charts)
+# 由 ArgoCD Helm App 部署（argocd/applications/trivy-operator.yaml），dest ns: trivy-system
+#
+# 设计要点（单节点 5600H 笔记本，idle ~74°C，必须控 CPU）：
+#   - scanJobsConcurrentLimit=1：串行扫描，杜绝热节点上的"扫描器风暴"
+#   - ClientServer + builtInTrivyServer：内置长驻 Trivy server 持久化漏洞 DB（PVC），
+#     避免每个扫描 Job 重新下载 ~几百 MB 的 DB（网络 + CPU 反复开销）
+#   - severity=HIGH,CRITICAL + ignoreUnfixed：只报可修复的高危，降噪 + 省算力
+#   - clusterComplianceEnabled=false：CIS 节点合规交给 kube-bench，避免 Trivy 重复跑 node-collector
+#   - 排除系统 namespace，减少无意义扫描
+# 指标经 ServiceMonitor(带 release 标签)被 kube-prometheus-stack 抓取；
+# 告警在 manifests/trivy-alerts.yaml，看板在 manifests/trivy-dashboard.yaml。
+
+# 扫描范围：空 targetNamespaces = 全集群；排除系统 ns
+targetNamespaces: ""
+excludeNamespaces: "kube-system,kube-public,kube-node-lease,trivy-system"
+
+operator:
+  scanJobsConcurrentLimit: 1            # 串行扫描（热节点关键）
+  scanJobTTL: "1h"                      # 扫描 Job 完成 1h 后清理
+  metricsFindingsEnabled: true          # 暴露 trivy_image_vulnerabilities 等 findings 指标
+  vulnerabilityScannerEnabled: true
+  vulnerabilityScannerScanOnlyCurrentRevisions: true   # 只扫当前 ReplicaSet，省重复
+  configAuditScannerEnabled: true
+  configAuditScannerScanOnlyCurrentRevisions: true
+  rbacAssessmentScannerEnabled: true
+  exposedSecretScannerEnabled: true     # 镜像里硬编码密钥扫描（最高信号）
+  clusterComplianceEnabled: false       # CIS 节点合规交给 kube-bench
+  builtInTrivyServer: true              # 内置长驻 Trivy server（共享 DB 缓存）
+
+# operator 自身（控制器）资源
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+trivy:
+  mode: ClientServer                    # 配合 builtInTrivyServer
+  ignoreUnfixed: true                   # 只报有修复版本的 CVE
+  severity: "HIGH,CRITICAL"             # 只扫高危
+  # 扫描 Job（client）资源
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  # 内置 Trivy server：持久化漏洞 DB（NFS PVC），避免反复重下 DB
+  storageClassName: nfs-client
+  storageSize: 2Gi
+  server:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+# Prometheus 集成 —— ServiceMonitor 必须带 release 标签，否则被 operator 的 ruleSelector 忽略
+serviceMonitor:
+  enabled: true
+  labels:
+    release: kube-prometheus-stack

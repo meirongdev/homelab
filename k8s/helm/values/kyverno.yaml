@@ -1,0 +1,45 @@
+# Kyverno — 准入策略即代码（补 PSA 表达不了的规则）
+# Chart: kyverno/kyverno  (仓库 https://kyverno.github.io/kyverno)
+# 由 ArgoCD Helm App 部署（argocd/applications/kyverno.yaml），dest ns: kyverno
+# 策略 CR 单独由 kyverno-policies App 同步（便于逐条 Audit→Enforce）。
+#
+# 设计要点（单节点 5600H 笔记本，控 CPU + 不引入 fail-closed 可用性风险）：
+#   - 所有 controller replicas=1（admissionController 默认 3，必降）
+#   - backgroundScanInterval 拉到 24h：静态策略无需每小时重算
+#   - failurePolicy=Ignore 在每条 ClusterPolicy 里设（fail-open）——单节点上 fail-closed
+#     = Kyverno 没起来时全集群无法调度，与 homelab-recover 重启恢复路径冲突
+#   - 系统 namespace（kube-system/kube-public/kube-node-lease/kyverno）由 Kyverno 默认
+#     resourceFilters 已排除，无需额外配置（CNI/控制面绝不能被 gate）
+
+# 各拆分 controller 降到单副本（单节点无需高可用/反亲和）
+admissionController:
+  replicas: 1
+  antiAffinity:
+    enabled: false
+  container:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 384Mi
+
+backgroundController:
+  replicas: 1
+  antiAffinity:
+    enabled: false
+
+reportsController:
+  replicas: 1
+  antiAffinity:
+    enabled: false
+
+cleanupController:
+  replicas: 1
+  antiAffinity:
+    enabled: false
+
+# 后台扫描间隔拉长，降低热节点常驻 CPU（默认 1h）
+features:
+  backgroundScan:
+    backgroundScanInterval: 24h

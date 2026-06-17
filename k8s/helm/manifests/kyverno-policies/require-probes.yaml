@@ -1,0 +1,30 @@
+---
+# 要求容器配置 readinessProbe（健康检查，避免把流量打到未就绪/已僵死的 Pod）。
+#
+# ⚠️ 先 Audit；部分一次性 Job / sidecar 合理地无 probe，提升 Enforce 前先读
+#    `kubectl get polr -A` 评估影响。仅要求 readinessProbe（liveness 争议较大，可后补）。
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-probes
+  annotations:
+    policies.kyverno.io/title: Require Readiness Probe
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: low
+spec:
+  failurePolicy: Ignore
+  background: true
+  rules:
+    - name: validate-readiness-probe
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+      validate:
+        failureAction: Audit
+        message: "每个容器应配置 readinessProbe。"
+        pattern:
+          spec:
+            containers:
+              - readinessProbe:
+                  periodSeconds: ">0"

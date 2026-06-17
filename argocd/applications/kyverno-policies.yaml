@@ -1,21 +1,23 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: monitoring-dashboards
+  name: kyverno-policies
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: homelab
+  # 与 kyverno 安装分离，便于逐条把策略从 Audit 提升到 Enforce（改 git 即可）。
+  # 首次同步可能因 ClusterPolicy CRD 尚未就绪而短暂失败，待 kyverno App 装好 CRD 后自动重试通过。
   source:
     repoURL: https://github.com/meirongdev/homelab
     targetRevision: main
-    path: k8s/helm/manifests
+    path: k8s/helm/manifests/kyverno-policies
     directory:
-      include: "{grafana-dashboards.yaml,multicluster-overview-dashboard.yaml,dgx-spark-node-dashboard.yaml,eso-alerts.yaml,cilium-envoy-servicemonitor.yaml,slos.yaml,slo-dashboard.yaml,trivy-alerts.yaml,trivy-dashboard.yaml}"
+      recurse: false
   destination:
     server: https://kubernetes.default.svc
-    namespace: monitoring
+    namespace: kyverno
   syncPolicy:
     automated:
       prune: true

@@ -122,6 +122,18 @@ just apply   # Apply DNS/Tunnel changes
 - **Pro plan upgrade**: Managed Ruleset (SQLi/XSS/RCE) + OWASP CRS + Leaked Credentials Detection（见 `waf.tf` 注释段）
 - **API Token 权限**: Zone DNS Edit + Zone WAF Edit + Zone Settings Edit + Cloudflare Tunnel Edit
 
+### 集群内部安全 (Pod 基线 / 准入 / 扫描 / 节点 CIS)
+- **定位**: 上面的 WAF/Identity 是**南北向**边缘安全；这一层补**集群内部**（准入管控、镜像 CVE/配置扫描、Pod 安全基线、节点 CIS）。完整部署/验证/回滚见 `docs/runbooks/security-hardening.md`。设计与权衡见 `docs/plans/2026-06-16-k3s-security-hardening.md`。
+- **硬约束驱动选型**: homelab 单节点 5600H 笔记本（idle ~74°C、重启需 `just homelab-recover`），故全部 **fail-open + 控 CPU**：Kyverno `failurePolicy: Ignore`、Trivy 串行扫描、周期型工具优先。
+- **Pod Security Admission (PSA)**: 内置准入，**永远在线的基线地板**（Kyverno 挂了也生效）。homelab 经 **`just harden-psa`**（幂等 `kubectl label`，**刻意不走 ArgoCD**——渲染 Namespace 对象的 App 配 prune+selfHeal 会有"误同步 prune 删 ns + 级联删 PVC"的致命风险）；oracle 在 kustomize 树各 `*/namespace.yaml` 的 labels 里声明（那些 ns 本就被 kustomize 拥有，改现有资源无 prune 风险）。**等级**: 应用 ns `enforce=baseline`（实测零特权工作负载）；`kube-system`/`monitoring` `enforce=privileged`（cilium/node-exporter/otel/grafana 需特权）显式豁免，但仍打 `warn/audit=baseline` 留审计线索。**不做 `restricted`**（grafana 跑 root，属后续逐 ns 的活）。
+- **Kyverno**（准入策略即代码，仅 homelab）: Helm App `kyverno`（`values/kyverno.yaml`，所有 controller `replicas:1`、`backgroundScanInterval:24h`），策略 CR 单独由 `kyverno-policies` App 同步（`manifests/kyverno-policies/`，便于**逐条 Audit→Enforce**）。4 条策略全部 `validationFailureAction: Audit` + `failurePolicy: Ignore` 起步：require-requests-limits / disallow-latest-tag / restrict-image-registries（噪声最大，长期 Audit）/ require-probes。系统 ns 由 Kyverno 默认 resourceFilters 已排除。**Audit→Enforce**: 读 `kubectl get polr -A` 确认某策略零违规后，改对应文件的 action 为 `Enforce` 再 push。
+- **Trivy Operator**（镜像 CVE / 配置审计 / RBAC / 暴露密钥，仅 homelab）: Helm App，ns `trivy-system`，`values/trivy-operator.yaml`。热节点关键: `scanJobsConcurrentLimit:1` + `builtInTrivyServer`(ClientServer 模式 + NFS PVC 持久化漏洞 DB) + `severity:HIGH,CRITICAL` + `ignoreUnfixed` + 关 `clusterComplianceEnabled`（CIS 交给 kube-bench）。指标经 ServiceMonitor(**带 `release: kube-prometheus-stack`**)抓取；告警 `manifests/trivy-alerts.yaml`（critical CVE→warning、暴露密钥→critical、absent 元告警）；看板 `manifests/trivy-dashboard.yaml`（Grafana `Security` 文件夹）。后两者已并入 `monitoring-dashboards` App 的 include glob。
+- **kube-bench**（CIS 巡检）: `manifests/kube-bench.yaml`（专用 `kube-bench` ns 标 privileged + 每周 CronJob），独立 ArgoCD App。**必须用 k3s 基准**（`--benchmark k3s-cis-*`，否则满屏假 FAIL）；结果打 stdout→Loki（按 `{namespace="kube-bench"}` 查）。
+- **节点 CIS 加固**: `k8s/ansible/playbooks/setup-k3s.yaml` 加 `/etc/sysctl.d/31-k8s-protect-kernel.conf`(protect-kernel-defaults 所需 sysctl) + config.yaml `protect-kernel-defaults: true`。**顺序保障**: sysctl drop-in 先落盘持久化，故 k3s 重启时检查必过。**现有节点需维护窗口 `systemctl restart k3s`/重启才生效**。**API 审计日志刻意延后**（磁盘紧）。
+- **⚠️ chart 版本**: Kyverno/Trivy 的 `argocd/applications/*.yaml` pin 的 chart 版本**部署前须 `helm search repo ... --versions` 核对**（避免 sync 失败）。**AppProject** `argocd/projects/homelab.yaml` 的 `sourceRepos` 已加 kyverno+aquasecurity 仓库，但 AppProject 非 ArgoCD 自动同步，需 `kubectl apply` 一次。
+- **延后/门控**: **Cilium 网络默认拒绝**不在本批（DNS/ClusterMesh/Envoy/egress 链路复杂，单用户收益边际低）。Hubble 已启用做流量可见性，作为日后单命名空间灰度强制的前置（见 runbook）。
+- **运行时检测（Phase 2，未做）**: 规划按集群选型——homelab→**Tetragon**（Cilium 原生、内核态过滤省 CPU、不加热）、oracle→**Falco+Falcosidekick→Gotify**（规则开箱即用，CPU 余量大）。
+
 ### Identity
 - **Status**: ZITADEL remains available at `auth.meirong.dev`, but shared ingress-layer SSO has been removed.
 - **Current model**: services are either public, gated by **native ZITADEL OIDC** (see list below), or rely on their own built-in auth (for example Vault, Kopia, and Timeslot admin Basic Auth).

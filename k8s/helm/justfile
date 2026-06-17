@@ -659,3 +659,55 @@ homelab-recover:
     kubectl --context "$ctx" get applications -n {{argocd_ns}} 2>/dev/null
     echo ""
     echo "✅ homelab-recover done"
+
+# ⬇️ 安全加固 (Pod Security Admission) ⬇️
+#
+# 给 homelab 各 namespace 打 Pod Security Admission 标签 —— 内置准入，零运行时开销，
+# 即使 Kyverno 挂了也生效。这是 Pod 安全的"永远在线地板"。
+#
+# 为何用 just label 而不走 ArgoCD：本仓库 namespace 由 justfile/Helm/kustomize 混合创建，
+# 没有任何 namespace 归专门的 ArgoCD Application 拥有。若用渲染整个 Namespace 对象的
+# Application 来打标签，ArgoCD 会接管这些 namespace，配上普遍开启的 prune+selfHeal，
+# 一次误同步就会 prune 删除 namespace 并级联删光里面的 PVC（Vault/postgres/kopia 数据）。
+# kubectl label 纯元数据、幂等、不会删任何东西。oracle 侧的标签则在 kustomize 树的
+# */namespace.yaml 里声明（那些 ns 本就被 kustomize 拥有，改现有资源无 prune 风险）。
+#
+# 等级（经实测各 namespace 特权情况，见 docs/runbooks/security-hardening.md）：
+#   - baseline ns：实测零特权工作负载，安全 enforce
+#   - privileged ns：kube-system(cilium/coredns)、monitoring(node-exporter/otel/grafana) 需特权，
+#     显式标 privileged 文档化豁免；同时打 warn/audit=baseline 留审计线索（未来混入特权 Pod 可被发现）
+# 注：PSA 仅在 Pod 创建/更新时评估，不影响已运行的 Pod；不在本阶段尝试 restricted（grafana 跑 root）。
+psa_baseline_ns := "default vault zitadel kopia database bifrost personal-services cloudflare external-secrets argocd"
+psa_privileged_ns := "kube-system monitoring"
+
+harden-psa:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "▶ 应用 namespace → enforce=baseline (+ warn/audit=baseline)"
+    for ns in {{psa_baseline_ns}}; do
+        kubectl --context {{ctx}} label namespace "$ns" \
+            pod-security.kubernetes.io/enforce=baseline \
+            pod-security.kubernetes.io/enforce-version=latest \
+            pod-security.kubernetes.io/warn=baseline \
+            pod-security.kubernetes.io/warn-version=latest \
+            pod-security.kubernetes.io/audit=baseline \
+            pod-security.kubernetes.io/audit-version=latest \
+            --overwrite
+    done
+    echo "▶ 系统 namespace → enforce=privileged (显式豁免, warn/audit 仍记 baseline)"
+    for ns in {{psa_privileged_ns}}; do
+        kubectl --context {{ctx}} label namespace "$ns" \
+            pod-security.kubernetes.io/enforce=privileged \
+            pod-security.kubernetes.io/warn=baseline \
+            pod-security.kubernetes.io/warn-version=latest \
+            pod-security.kubernetes.io/audit=baseline \
+            pod-security.kubernetes.io/audit-version=latest \
+            --overwrite
+    done
+    echo ""
+    echo "✅ PSA 标签已应用。查看：kubectl --context {{ctx}} get ns -L pod-security.kubernetes.io/enforce"
+
+# 查看 PSA 标签现状
+psa-status:
+    @echo "=== Namespace PSA enforce/warn 等级 ==="
+    @kubectl --context {{ctx}} get ns -L pod-security.kubernetes.io/enforce,pod-security.kubernetes.io/warn
