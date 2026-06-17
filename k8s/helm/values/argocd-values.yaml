@@ -13,6 +13,13 @@ global:
 configs:
   params:
     server.insecure: "true"
+    # application-controller 限并发 —— 从源头压低内存峰值（单节点 10GiB 笔记本，且
+    # 已有 Trivy/Kyverno 大 CRD）。默认 status=20/operation=10/parallelism=16 会让所有
+    # App 的 CRD diff 同时算，叠出 OOM 峰值（512Mi 时曾把 controller 顶崩）。调小=同步略慢
+    # 但内存峰值可控，对单用户 ~15 App 足够。配合 controller limit 1Gi 双保险。
+    controller.status.processors: "8"
+    controller.operation.processors: "4"
+    controller.kubectl.parallelism.limit: "8"
   # Authz for SSO logins. policy.default grants every authenticated ZITADEL identity
   # full admin — acceptable here because ZITADEL is a single-user, locked-down IdP
   # (no self-registration; GitHub federation email-linked to one pre-existing user).
