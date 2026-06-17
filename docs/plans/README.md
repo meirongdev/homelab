@@ -15,6 +15,7 @@
 
 | Plan | Status |
 |------|--------|
+| [2026-06-16 K3s 集群内部安全加固（PSA/Kyverno/Trivy/kube-bench）](2026-06-16-k3s-security-hardening.md) | 🛠️ 已实现待部署 |
 | [2026-06-06 Backstage 开发者门户（RHDH）](2026-06-06-backstage-developer-portal-design.md) | 📐 Design |
 | [2026-06-04 oracle-k3s 纳入 ArgoCD GitOps](2026-06-04-oracle-k3s-argocd-gitops.md) | ✅ Complete |
 | [2026-03-07 架构优化方案](2026-03-07-homelab-oracle-architecture-optimization.md) | ✅ Approved |
