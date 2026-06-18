@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: falco
+  labels:
+    # Falco/falcosidekick 需 eBPF + hostPath → 显式 privileged（与 monitoring 同）
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: baseline
+    pod-security.kubernetes.io/audit: baseline

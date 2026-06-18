@@ -1,0 +1,45 @@
+# Falco — 运行时威胁检测（oracle-k3s）
+# Chart: falcosecurity/falco  (仓库 https://falcosecurity.github.io/charts)
+# 由 ArgoCD Helm App 部署到 **oracle 集群**（argocd/applications/falco.yaml），dest ns: falco
+#
+# 为何 oracle 选 Falco（而非 Tetragon）：规则库开箱即用、社区规则成熟；oracle VM CPU 余量大，
+# 能承受用户态逐 syscall 处理。homelab 则用更省 CPU 的 Tetragon（见 values/tetragon.yaml）。
+#
+# 检测事件双出口：
+#   1) Falco JSON → stdout → oracle OTel Collector → homelab Loki（always-on 取证线索，零依赖）
+#   2) Falcosidekick → Gotify（主动推送告警）—— 需先配 Gotify token（见下方 ⚠️ 与 runbook）
+#      token 未配好不影响 (1)；falcosidekick 仅 Gotify 推送失败，Falco 检测本身照常。
+
+# CO-RE modern eBPF 驱动：无需内核模块/头文件，适配托管 VM（recent kernel）。
+driver:
+  kind: modern_ebpf
+
+# Falco 引擎
+falco:
+  json_output: true          # 结构化告警（利于 Loki 查询）
+  json_include_output_property: true
+  priority: notice           # 上报 notice 及以上
+# Falco DaemonSet 资源（oracle 有余量，但仍设上限）
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+# Falcosidekick：把告警扇出到 Gotify
+falcosidekick:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 200m, memory: 128Mi }
+  config:
+    # 仅推 warning 及以上到 Gotify，降噪
+    gotify:
+      hostport: "https://notify.meirong.dev"
+      minimumpriority: "warning"
+      # ⚠️ token 不写明文；经 ESO 注入的 secret(falcosidekick-gotify) 的 GOTIFY_TOKEN 环境变量提供。
+    # existingSecret：其 key 作为大写环境变量被 falcosidekick 读取（GOTIFY_TOKEN）。
+    existingSecret: "falcosidekick-gotify"

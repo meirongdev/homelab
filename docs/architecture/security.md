@@ -26,7 +26,7 @@
 | 7 | CIS 合规 | kube-bench（周巡检） | ✅ 已装 | `manifests/kube-bench.yaml` | homelab |
 | 8 | 节点加固 | k3s `protect-kernel-defaults` + sysctl | ⏳ 待重启生效 | `k8s/ansible/playbooks/setup-k3s.yaml` | homelab |
 | 9 | 网络 | Cilium NetworkPolicy + Hubble 可见性 | 🟡 仅可见性 | Cilium（默认拒绝刻意延后） | 双 |
-| 10 | 运行时检测 | Tetragon(homelab) / Falco(oracle) | ❌ Phase 2 未做 | — | — |
+| 10 | 运行时检测 | Tetragon(homelab) / Falco+Falcosidekick(oracle) | ✅ 已实现（Falco→Gotify 待 token） | `values/{tetragon,falco}.yaml` | 双（分别选型） |
 | 11 | 备份/恢复 | Kopia（NFS 1Ti） | ✅ 生产（无离站副本） | `manifests/kopia*.yaml` | 双 |
 | 12 | 安全可观测 | Prometheus/Loki → Alertmanager → Gotify | ✅ 生产 | `kube-prometheus-stack.yaml`, 各 `*-alerts.yaml` | 双 |
 
@@ -102,6 +102,15 @@
 - **当前态：默认放行 + Hubble 可见性**。Hubble 已启用（relay 开），可 `hubble observe` 回答"谁在跟谁通信"——这是日后做默认拒绝的安全前置。
 - **默认拒绝刻意延后**：见 §11。已有的 argocd chart 自带 NetworkPolicy 提供部分隔离。
 
+## 8.5 运行时检测 (Runtime detection) — 按集群分别选型
+
+eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异常外联）。**按集群硬件选型**：
+
+- **homelab → Tetragon**（`values/tetragon.yaml`，ns `tetragon`，Helm App）。Cilium 原生、**内核态过滤**只上报命中事件 → 省 CPU，适配热笔记本。v1：默认进程 exec/exit 可见性 → `export-stdout` → 现有 OTel→Loki（按 pod=tetragon 查，可见容器内 shell/kubectl exec/异常进程）+ Prometheus 指标(ServiceMonitor 带 release 标签)。自定义 TracingPolicy（敏感文件/提权检测）+ 基于其指标的告警为后续调优。
+- **oracle → Falco + Falcosidekick → Gotify**（`values/falco.yaml`，ns `falco`，Helm App 部署到 oracle 集群）。规则库开箱即用；oracle VM CPU 余量大。`driver: modern_ebpf`(CO-RE 无需内核模块)。**双出口**：① Falco JSON→stdout→OTel→Loki（always-on，零依赖）；② Falcosidekick→Gotify(`notify.meirong.dev`，warning+)。
+  - **⚠️ Gotify 推送前置（手动一次性）**：Gotify 建 Application 取 token → `vault kv put secret/oracle-k3s/falco gotify_token=<token>` → ESO(`cloud/oracle/manifests/falco/falcosidekick-secret.yaml`)生成 `falcosidekick-gotify` secret(key `GOTIFY_TOKEN`)。未配前 ExternalSecret Ready=False（触发 ESO 告警提示），falcosidekick 待启动，但 Falco→Loki 检测照常。
+  - falco ns（含 PSA privileged 标签 + ESO secret）由 oracle-k3s kustomize App 拥有；Falco 工作负载由独立 `falco` Helm App 部署（`CreateNamespace=false`）。
+
 ## 9. 安全可观测与告警
 
 - **统一管道**：所有信号 → Prometheus(metrics)/Loki(logs) → Alertmanager → `alertmanager-gotify-bridge` → Gotify。`severity:warning|critical` 路由，`info/Watchdog` 丢弃。
@@ -122,13 +131,13 @@
 | 配置劣化（无 limits/probes/不可信仓库） | Kyverno（Audit）+ LimitRange 护栏（注入默认 requests/limits） | 🟡 Audit + 护栏 |
 | 镜像已知 CVE | Trivy（HIGH/CRITICAL）→ Gotify + 看板 | ✅ |
 | 节点/控制面配置不合规 | kube-bench 周巡检 + protect-kernel-defaults | 🟡 待重启 |
-| 容器内运行时入侵（起 shell/异常外联/提权） | Tetragon/Falco | ❌ Phase 2 |
+| 容器内运行时入侵（起 shell/异常外联/提权） | Tetragon(homelab,进程可见性→Loki) / Falco(oracle,规则→Loki+Gotify) | ✅ 已部署（v1 可见性；TracingPolicy/规则调优持续） |
 | 东西向横向移动 | 网络默认拒绝 | ❌ 延后（仅 Hubble 可见性） |
 | 数据丢失 | Kopia 自动备份（P0→P2） | 🟡 无离站副本 |
 
 ## 11. 已知缺口与路线图
 
-1. **运行时检测（Phase 2）**：按集群选型——homelab→**Tetragon**（Cilium 原生、内核态过滤省 CPU、不加热）、oracle→**Falco + Falcosidekick→Gotify**（规则开箱即用，CPU 余量大）。
+1. **运行时检测调优（Phase 2 已部署，见 §8.5）**：v1 已上 Tetragon(homelab,进程可见性)+Falco(oracle,规则)。后续：① Falco Gotify token（手动前置）；② Tetragon 写 TracingPolicy（敏感文件/提权/异常外联）+ 基于其指标的 Gotify 告警；③ Falco 噪声规则按环境裁剪。
 2. **网络默认拒绝（门控灰度）**：Hubble 基线流量 → Cilium 每端点 `PolicyAuditMode` 只记不拦 → 单无状态叶子 ns（personal-services/homepage）试点 CiliumNetworkPolicy（放行 DNS/Envoy/必要 egress）→ soak → 逐 ns 评估，**建议只对对外暴露 ns 做**。
 3. **节点 API 审计日志**：延后（磁盘紧）；如开启用 Metadata 级策略 + 严格 maxsize/maxbackup，先确认磁盘余量。
 4. **Kyverno Audit→Enforce**：逐条清理存量违规后提升；restrict-image-registries 最久保持 Audit。

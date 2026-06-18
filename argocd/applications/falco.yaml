@@ -1,0 +1,33 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: falco
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: homelab
+  sources:
+    # Falco chart 版本 —— 部署前 `helm search repo falcosecurity/falco --versions` 核对。
+    - repoURL: https://falcosecurity.github.io/charts
+      chart: falco
+      targetRevision: "9.1.0"
+      helm:
+        valueFiles:
+          - $values/k8s/helm/values/falco.yaml
+    - repoURL: https://github.com/meirongdev/homelab
+      targetRevision: main
+      ref: values
+  destination:
+    # oracle-k3s 外部集群（Tailscale 端点；与 oracle-k3s App 同）
+    server: https://100.107.166.37:6443
+    namespace: falco
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # falco ns 由 oracle-k3s kustomize App 拥有（含 PSA 标签 + falcosidekick ESO secret），
+      # 故此处不重复创建/管理 ns，避免双重所有权。
+      - CreateNamespace=false
+      - ServerSideApply=true
