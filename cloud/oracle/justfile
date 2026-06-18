@@ -143,11 +143,13 @@ deploy-timeslot:
     git -C "$TMPDIR" sparse-checkout set deploy/helm
     echo "🚀 Installing/upgrading timeslot Helm release..."
     # Note: --wait omitted intentionally; chart bugs are patched below before waiting
+    # image 用 digest 固定（原 :latest，供应链卫生/可复现）。部署新构建时：在 timeslot 仓库打
+    # 版本 tag 后用该 tag，或把下面 digest 换成新构建的 digest。
     helm upgrade --install timeslot "$TMPDIR/deploy/helm" \
       --kube-context {{ctx}} \
       --namespace personal-services \
       --create-namespace \
-      --set image=ghcr.io/meirongdev/timeslot/timeslot:latest \
+      --set image=ghcr.io/meirongdev/timeslot/timeslot@sha256:27c17dace6f713015f2f9df451a647e9c971daee7a22a444db6e0512e57f5230 \
       --set persistence.size=100Mi \
       --set persistence.storageClass=local-path \
       --set config.adminPassword="$ADMIN_PASSWORD"
