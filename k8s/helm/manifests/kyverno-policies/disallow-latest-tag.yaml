@@ -1,8 +1,15 @@
 ---
-# 镜像必须带显式 tag 且不得为 :latest。
-# 动机：:latest 不可复现、难追溯、绕过 ArgoCD Image Updater 的 newest-build 策略。
+# 禁止使用 :latest tag（不可复现、难追溯、绕过 ArgoCD Image Updater 的 newest-build）。
 #
-# ⚠️ 先 Audit；确认零违规后改 Enforce 并 git push。
+# ⚠️ digest-aware：本仓库工作负载普遍用 digest 固定（`repo@sha256:...`，比 tag 更不可变/更安全）。
+#    刻意 **不** 加 "必须有 tag"(`*:*`) 规则——那会把 digest 固定的镜像误判为缺 tag，
+#    Enforce 时反而拦掉最佳实践。digest 与正常 tag 均放行，只拦 `:latest`。
+#    (代价：裸浮动名如 `nginx`(无 tag 无 digest) 不会被本策略拦——本仓库无此用法；
+#     若日后要堵裸名，单独加一条 require-digest-or-tag 的 CEL 规则。)
+#
+# 现状：运行中工作负载零 :latest（历史 ReplicaSet 的 :latest 为 replicas=0 旧 revision，
+#       Enforce 仅作用于新建 Pod，不影响这些非活动 RS）→ 本策略可安全 Enforce。
+# Audit→Enforce：把下面 failureAction 改 Enforce 并 git push。
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -15,18 +22,6 @@ spec:
   failurePolicy: Ignore
   background: true
   rules:
-    - name: require-image-tag
-      match:
-        any:
-          - resources:
-              kinds: ["Pod"]
-      validate:
-        failureAction: Audit
-        message: "镜像必须带显式 tag（不可省略）。"
-        pattern:
-          spec:
-            containers:
-              - image: "*:*"
     - name: validate-image-tag-not-latest
       match:
         any:
@@ -34,7 +29,7 @@ spec:
               kinds: ["Pod"]
       validate:
         failureAction: Audit
-        message: "禁止使用 :latest tag。"
+        message: "禁止使用 :latest tag（请用固定 tag 或 digest @sha256: 固定）。"
         pattern:
           spec:
             containers:
