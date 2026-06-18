@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tetragon
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: homelab
+  sources:
+    # Tetragon chart 版本 —— 部署前 `helm search repo cilium/tetragon --versions` 核对。
+    - repoURL: https://helm.cilium.io/
+      chart: tetragon
+      targetRevision: "1.7.0"
+      helm:
+        valueFiles:
+          - $values/k8s/helm/values/tetragon.yaml
+    - repoURL: https://github.com/meirongdev/homelab
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tetragon
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

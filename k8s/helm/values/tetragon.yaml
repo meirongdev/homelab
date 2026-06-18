@@ -1,0 +1,40 @@
+# Tetragon — eBPF 运行时可见性/检测（homelab）
+# Chart: cilium/tetragon  (仓库 https://helm.cilium.io/)
+# 由 ArgoCD Helm App 部署（argocd/applications/tetragon.yaml），dest ns: tetragon
+#
+# 为何 homelab 选 Tetragon（而非 Falco）：Cilium 原生、**内核态(eBPF)过滤**只把命中事件上报用户态，
+# 远比 Falco 用户态逐 syscall 处理省 CPU —— 适配 5600H 热笔记本，不加热。
+#
+# 本期(v1)范围：开启**默认进程可见性**（process exec/exit 事件由 export-stdout 容器打到 stdout
+# → 现有 OTel→Loki 管道收集 → 按 pod=tetragon 查，可见容器内起 shell / kubectl exec / 异常进程）
+# + Prometheus 指标。自定义 TracingPolicy（敏感文件/提权/异常外联检测）与基于其指标的告警留作
+# 后续调优（避免一上来写错 kprobe 语法或加 CPU）。
+
+# --- agent DaemonSet 资源（热节点严格受限）---
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+# 进程事件已默认开启；保持精简，先不开 enableProcessCred/enableProcessNs（额外开销）。
+tetragon:
+  # Prometheus 指标（:2112）+ ServiceMonitor。labelsOverride 注入 release 让 kube-prometheus-stack 采纳。
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      labelsOverride:
+        release: kube-prometheus-stack
+
+# --- operator 资源 ---
+tetragonOperator:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi

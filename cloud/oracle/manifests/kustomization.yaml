@@ -26,6 +26,9 @@ resources:
   - monitoring/namespace.yaml
   - monitoring/otel-collector.yaml
   - monitoring/exporters.yaml
+  # Falco 运行时检测：namespace + falcosidekick→Gotify token（Falco 工作负载由独立 falco Helm App 部署）
+  - falco/namespace.yaml
+  - falco/falcosidekick-secret.yaml
   # Personal services (IT-Tools, Stirling-PDF, Squoosh, Timeslot, Trends)
   - personal-services/it-tools.yaml
   - personal-services/stirling-pdf.yaml

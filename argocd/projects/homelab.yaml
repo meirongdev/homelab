@@ -14,6 +14,9 @@ spec:
     # 安全加固组件的 Helm chart 仓库（Kyverno 准入策略 / Trivy Operator 漏洞扫描）
     - https://kyverno.github.io/kyverno
     - https://aquasecurity.github.io/helm-charts
+    # Phase 2 运行时检测：Tetragon(homelab) / Falco(oracle)
+    - https://helm.cilium.io/
+    - https://falcosecurity.github.io/charts
 
   destinations:
     - server: https://kubernetes.default.svc
