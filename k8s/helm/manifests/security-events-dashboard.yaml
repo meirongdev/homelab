@@ -1,0 +1,72 @@
+---
+# Grafana 看板：安全事件聚合（Loki）—— kube-bench CIS / Tetragon 进程事件 / Falco 告警。
+# Security 文件夹。数据源 Loki。
+# 注：面板在对应组件产出日志前为空 —— kube-bench 每周日跑(或手动触发)；
+#     Tetragon(homelab)/Falco(oracle) 部署后开始产出（Falco 经 oracle OTel 远写到本 Loki）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: security-events-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Security"
+data:
+  security-events.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "schemaVersion": 39,
+      "tags": ["curated", "logs", "security"],
+      "title": "Security / 运行时与审计事件",
+      "uid": "security-events",
+      "templating": {
+        "list": [
+          { "name": "datasource", "type": "constant", "query": "loki", "current": { "text": "loki", "value": "loki" }, "hide": 2 }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1, "type": "stat", "title": "Falco 告警数（近 24h）",
+          "gridPos": { "h": 4, "w": 8, "x": 0, "y": 0 },
+          "datasource": { "type": "loki", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 1 } ] }, "color": { "mode": "thresholds" } } },
+          "targets": [ { "expr": "sum(count_over_time({namespace=\"falco\"} != \"falcosidekick\" [24h]))", "refId": "A" } ]
+        },
+        {
+          "id": 2, "type": "stat", "title": "Tetragon 进程事件（近 1h）",
+          "gridPos": { "h": 4, "w": 8, "x": 8, "y": 0 },
+          "datasource": { "type": "loki", "uid": "${datasource}" },
+          "targets": [ { "expr": "sum(count_over_time({namespace=\"tetragon\"} |= \"process_exec\" [1h]))", "refId": "A" } ]
+        },
+        {
+          "id": 3, "type": "stat", "title": "kube-bench FAIL（最近一次）",
+          "gridPos": { "h": 4, "w": 8, "x": 16, "y": 0 },
+          "datasource": { "type": "loki", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 1 } ] }, "color": { "mode": "thresholds" } } },
+          "targets": [ { "expr": "sum(count_over_time({namespace=\"kube-bench\"} |= \"[FAIL]\" [7d]))", "refId": "A" } ]
+        },
+        {
+          "id": 4, "type": "logs", "title": "Falco 运行时告警（oracle）",
+          "gridPos": { "h": 9, "w": 24, "x": 0, "y": 4 },
+          "datasource": { "type": "loki", "uid": "${datasource}" },
+          "options": { "showTime": true, "wrapLogMessage": true, "dedupStrategy": "none", "enableLogDetails": true },
+          "targets": [ { "expr": "{namespace=\"falco\"} != \"falcosidekick\"", "refId": "A" } ]
+        },
+        {
+          "id": 5, "type": "logs", "title": "Tetragon 进程事件（homelab；起 shell / kubectl exec 等）",
+          "gridPos": { "h": 9, "w": 24, "x": 0, "y": 13 },
+          "datasource": { "type": "loki", "uid": "${datasource}" },
+          "options": { "showTime": true, "wrapLogMessage": true, "dedupStrategy": "none", "enableLogDetails": true },
+          "targets": [ { "expr": "{namespace=\"tetragon\"} |= \"process_exec\"", "refId": "A" } ]
+        },
+        {
+          "id": 6, "type": "logs", "title": "kube-bench CIS 巡检结果",
+          "gridPos": { "h": 9, "w": 24, "x": 0, "y": 22 },
+          "datasource": { "type": "loki", "uid": "${datasource}" },
+          "options": { "showTime": true, "wrapLogMessage": true, "dedupStrategy": "none", "enableLogDetails": true },
+          "targets": [ { "expr": "{namespace=\"kube-bench\"}", "refId": "A" } ]
+        }
+      ]
+    }

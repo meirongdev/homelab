@@ -23,16 +23,29 @@ admissionController:
         memory: 128Mi
       limits:
         memory: 384Mi
+  # 暴露 Prometheus 指标给 kube-prometheus-stack（additionalLabels.release 必需，否则 ruleSelector 忽略）
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      release: kube-prometheus-stack
 
 backgroundController:
   replicas: 1
   antiAffinity:
     enabled: false
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      release: kube-prometheus-stack
 
 reportsController:
   replicas: 1
   antiAffinity:
     enabled: false
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      release: kube-prometheus-stack
 
 cleanupController:
   replicas: 1
