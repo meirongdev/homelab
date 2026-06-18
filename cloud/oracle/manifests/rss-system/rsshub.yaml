@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: rsshub
-          image: diygod/rsshub:latest
+          image: diygod/rsshub@sha256:5bd342154cf936ee3123804ee105ec509402a73ec7e4fc0467c061a6a1c075bf  # 当前运行 digest 固定（原 :latest）
           ports:
             - containerPort: 1200
               name: http
@@ -128,7 +128,7 @@ spec:
     spec:
       containers:
         - name: browserless
-          image: browserless/chrome:latest
+          image: browserless/chrome@sha256:57d19e414d9fe4ae9d2ab12ba768c97f38d51246c5b31af55a009205c136012f  # 当前运行 digest 固定（原 :latest）
           ports:
             - containerPort: 3000
               name: http

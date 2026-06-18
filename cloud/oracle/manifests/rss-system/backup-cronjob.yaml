@@ -139,7 +139,7 @@ spec:
           # Main container: kopia snapshot to homelab server
           containers:
             - name: kopia-snapshot
-              image: kopia/kopia:latest
+              image: kopia/kopia@sha256:bd6a449c263465c388339c0637dcd25562e99dcdde286c9d51ade81e138bbf2c  # digest 固定（与 homelab kopia 一致，原 :latest）
               env:
                 - name: KOPIA_PASSWORD
                   valueFrom:
