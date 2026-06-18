@@ -1,0 +1,78 @@
+---
+# Grafana 看板：Kyverno 准入策略（评估结果 / Enforce 拦截 / 按策略违规 / webhook 延迟）。
+# Security 文件夹；指标来自 Kyverno 各 controller 的 ServiceMonitor（values/kyverno.yaml）。
+# 注：kyverno_policy_results_total 是 counter，看趋势/速率用 rate/increase；
+#     "当前存量违规"看 `kubectl get polr -A`（点状态，counter 不适合）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kyverno-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Security"
+data:
+  kyverno-overview.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "schemaVersion": 39,
+      "tags": ["curated", "metrics", "security", "kyverno"],
+      "title": "Security / Kyverno 准入策略",
+      "uid": "kyverno-overview",
+      "templating": {
+        "list": [
+          { "name": "datasource", "type": "constant", "query": "prometheus", "current": { "text": "prometheus", "value": "prometheus" }, "hide": 2 },
+          { "name": "cluster", "type": "query", "datasource": { "type": "prometheus", "uid": "${datasource}" }, "query": "label_values(kyverno_policy_results_total, cluster)", "refresh": 2, "includeAll": true, "multi": true, "current": { "text": "All", "value": "$__all" } }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1, "type": "stat", "title": "Enforce 拦截（近 24h）",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }, "color": { "mode": "thresholds" } } },
+          "targets": [ { "expr": "sum(increase(kyverno_policy_results_total{policy_validation_mode=\"enforce\", rule_result=\"fail\", cluster=~\"$cluster\"}[24h]))", "refId": "A" } ]
+        },
+        {
+          "id": 2, "type": "stat", "title": "Audit fail 评估（近 1h）",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 1 } ] }, "color": { "mode": "thresholds" } } },
+          "targets": [ { "expr": "sum(increase(kyverno_policy_results_total{policy_validation_mode=\"audit\", rule_result=\"fail\", cluster=~\"$cluster\"}[1h]))", "refId": "A" } ]
+        },
+        {
+          "id": 3, "type": "stat", "title": "准入请求速率 (req/s)",
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [ { "expr": "sum(rate(kyverno_admission_requests_total{cluster=~\"$cluster\"}[5m]))", "refId": "A" } ]
+        },
+        {
+          "id": 4, "type": "stat", "title": "准入审查 p99 延迟 (s)",
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 0.5 }, { "color": "red", "value": 1 } ] }, "color": { "mode": "thresholds" } } },
+          "targets": [ { "expr": "histogram_quantile(0.99, sum by (le) (rate(kyverno_admission_review_duration_seconds_bucket{cluster=~\"$cluster\"}[5m])))", "refId": "A" } ]
+        },
+        {
+          "id": 5, "type": "timeseries", "title": "策略评估结果速率（按 rule_result）",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [ { "expr": "sum by (rule_result) (rate(kyverno_policy_results_total{cluster=~\"$cluster\"}[5m]))", "legendFormat": "{{rule_result}}", "refId": "A" } ]
+        },
+        {
+          "id": 6, "type": "table", "title": "各策略 fail 评估（近 1h，按 policy/mode）",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [ { "expr": "sum by (policy_name, policy_validation_mode) (increase(kyverno_policy_results_total{rule_result=\"fail\", cluster=~\"$cluster\"}[1h]))", "format": "table", "instant": true, "refId": "A" } ],
+          "transformations": [ { "id": "organize", "options": { "excludeByName": { "Time": true } } } ]
+        },
+        {
+          "id": 7, "type": "timeseries", "title": "准入请求（按 allowed 结果）",
+          "gridPos": { "h": 7, "w": 24, "x": 0, "y": 12 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [ { "expr": "sum by (resource_kind) (rate(kyverno_admission_requests_total{cluster=~\"$cluster\"}[5m]))", "legendFormat": "{{resource_kind}}", "refId": "A" } ]
+        }
+      ]
+    }

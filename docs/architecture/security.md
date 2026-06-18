@@ -116,7 +116,8 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 - **统一管道**：所有信号 → Prometheus(metrics)/Loki(logs) → Alertmanager → `alertmanager-gotify-bridge` → Gotify。`severity:warning|critical` 路由，`info/Watchdog` 丢弃。
 - **新增 `PrometheusRule`/`ServiceMonitor` 必须带 `release:kube-prometheus-stack`** 否则 operator selector 忽略。
 - **安全相关规则**：ESO 健康（`eso-alerts.yaml`）、Trivy 发现（`trivy-alerts.yaml`）。多集群靠 `cluster` 标签区分。
-- **看板**：Grafana `Security` 文件夹（Trivy 漏洞概览）；Hubble CLI 看网络流。
+- **看板**：Grafana `Security` 文件夹 3 张——**Trivy 漏洞概览**（CVE/暴露密钥/配置审计，Prometheus）、**Kyverno 准入策略**（评估结果/Enforce 拦截/各策略 fail/webhook 延迟，Prometheus，Kyverno 各 controller ServiceMonitor）、**运行时与审计事件**（Falco 告警 + Tetragon 进程事件 + kube-bench CIS，Loki）。Hubble CLI 看网络流。
+- **散在别处的可见性**：Kyverno 当前存量违规 `kubectl get polr -A`（counter 指标只适合看趋势/速率）；PSA violation 在 `kubectl get events`；所有 warning|critical 告警 → Gotify。
 
 ## 10. 威胁模型与覆盖矩阵
 
