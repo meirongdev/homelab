@@ -22,6 +22,7 @@
 2. 架构索引: [architecture/README.md](architecture/README.md)
 3. 运维索引: [runbooks/README.md](runbooks/README.md)
 4. 计划索引: [plans/README.md](plans/README.md)
+5. 安全总览: [architecture/security.md](architecture/security.md) — 纵深防御 + 威胁覆盖矩阵
 
 ## 当前运行态摘要
 

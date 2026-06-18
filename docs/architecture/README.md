@@ -10,6 +10,7 @@
 3. [observability-otel-logging.md](observability-otel-logging.md) — OTel 日志管道细节
 4. [cloudflare-tunnel-observability.md](cloudflare-tunnel-observability.md) — Tunnel + Gateway 流量可观测
 5. [k8s-qos-resource-management.md](k8s-qos-resource-management.md) — 资源配额与 QoS 约定
+6. [security.md](security.md) — 集群安全纵深防御（边缘/身份/密钥/准入/扫描/网络/威胁矩阵）
 
 ## Design Notes
 
