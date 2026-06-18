@@ -132,7 +132,7 @@ spec:
       containers:
         # 管道 1: Miniflux Webhook → KaraKeep
         - name: webhook-to-karakeep
-          image: docker.redpanda.com/redpandadata/connect:latest
+          image: docker.redpanda.com/redpandadata/connect@sha256:d8c46bd81e483d3f08327d38f363b9bc54478a150611aaff0c905a3b977d7f6a  # 当前运行 digest 固定（原 :latest）
           args:
             - run
             - /config/connect.yaml
@@ -169,7 +169,7 @@ spec:
             periodSeconds: 10
         # 管道 2: KaraKeep 轮询 → Gotify
         - name: karakeep-to-gotify
-          image: docker.redpanda.com/redpandadata/connect:latest
+          image: docker.redpanda.com/redpandadata/connect@sha256:d8c46bd81e483d3f08327d38f363b9bc54478a150611aaff0c905a3b977d7f6a  # 当前运行 digest 固定（原 :latest）
           args:
             - run
             - /config/poll-karakeep.yaml
