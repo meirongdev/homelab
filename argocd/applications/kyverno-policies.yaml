@@ -18,6 +18,17 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: kyverno
+  # Kyverno admission webhook 会给 ClusterPolicy 回填一批服务端默认字段，git 清单里没有
+  # → ArgoCD 永远 OutOfSync（纯化妆性，策略本身 Ready 且在工作）。忽略这些默认字段。
+  ignoreDifferences:
+    - group: kyverno.io
+      kind: ClusterPolicy
+      jqPathExpressions:
+        - .spec.admission
+        - .spec.emitWarning
+        - .spec.validationFailureAction
+        - .spec.rules[].skipBackgroundRequests
+        - .spec.rules[].validate.allowExistingViolations
   syncPolicy:
     automated:
       prune: true
