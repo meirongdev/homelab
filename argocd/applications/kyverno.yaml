@@ -22,6 +22,13 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: kyverno
+  # chart 的 CRD 无 spec.conversion，但 API server 默认补 conversion:{strategy:None}
+  # → 11 个 policies.kyverno.io CRD 永远 OutOfSync（纯服务端默认，sync 改不掉）。忽略该字段。
+  ignoreDifferences:
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      jqPathExpressions:
+        - .spec.conversion
   syncPolicy:
     automated:
       prune: true
