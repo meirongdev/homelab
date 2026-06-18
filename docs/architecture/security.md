@@ -67,11 +67,23 @@
 
 - 不做 `restricted`（grafana 跑 root）；PSA 仅在 Pod 创建/更新时评估，不杀已运行 Pod。
 
-### 5.2 Kyverno（策略即代码，homelab，先 Audit）
+### 5.2 Kyverno（策略即代码，homelab）
 - 拆分 controller 各 `replicas:1`、`backgroundScanInterval:24h`、**所有策略 `failurePolicy:Ignore`（fail-open）** —— 单节点上 fail-closed = Kyverno 没起来时全集群无法调度，与恢复路径冲突。
-- **4 条 ClusterPolicy（全 per-rule `failureAction:Audit` 起步）**：require-requests-limits / disallow-latest-tag / restrict-image-registries / require-probes。
-- **Audit→Enforce 流程**：读 `kubectl get polr -A` 确认某策略零违规 → 改该文件 rule 的 `failureAction:Enforce` → push。当前存量违规（Audit 截图）：require-probes 106、restrict-registries 97（多为裸镜像名，**长期保持 Audit**）、require-limits 74、latest-tag 27。
+- **4 条 ClusterPolicy**（per-rule `failureAction`），**2026-06-18 audit 后的状态**：
+
+  | 策略 | Action | 说明 |
+  |------|--------|------|
+  | disallow-latest-tag | **Enforce** | digest-aware（只拦 `:latest`，放行 digest/正常 tag）；运行中工作负载全 digest 固定，零阻断 |
+  | require-requests-limits | Audit | 失败主要在 monitoring/kube-system(chart/系统)；应用 ns 经 LimitRange 护栏(§5.3)逐步达标后再考虑按 ns Enforce |
+  | restrict-image-registries | Audit（长期） | 失败多为裸镜像名(隐式 docker.io，可信源)，Enforce 需全限定名、churn 大收益低 |
+  | require-probes | Audit | 失败大头是 Job/CronJob(合理无 probe)+基础设施，Enforce 会误伤批处理 |
+
+- **Audit→Enforce 流程**：读 `kubectl get polr -A` 确认某策略零（活动）违规 → 改该文件 rule 的 `failureAction:Enforce` → push。注意 `polr` 含 replicas=0 历史 ReplicaSet 与一次性 Job，数字虚高；Enforce 只作用新建 Pod。
 - 系统 ns 由 Kyverno 默认 resourceFilters 排除（CNI/控制面绝不 gate）。ClusterPolicy 的服务端默认字段经 App `ignoreDifferences` 消除 OutOfSync。
+
+### 5.3 LimitRange 资源护栏
+- `manifests/namespace-guardrails.yaml`（ArgoCD `namespace-guardrails` App）给轻量应用 ns（external-secrets/zitadel/argocd/vault/default）注入默认 `requests`(cpu25m/mem64Mi) + `limits.memory`(宽松 1Gi，避免 request>limit 拒绝；不设 cpu limit 避免节流）。personal-services 用自带的 `personal-services-limits.yaml`。
+- 双重作用：① 节点保护（未声明资源的容器不再无界）；② LimitRanger 在 Kyverno 校验前注入默认值 → 新建 Pod 自动满足 require-requests-limits。**monitoring(重量级)/kube-system(系统) 刻意不加**，避免拒绝风险。
 
 ## 6. 供应链与漏洞扫描 (Supply chain / CVE) — Trivy Operator
 
@@ -106,7 +118,8 @@
 | 密钥泄漏（静态） | Vault + ESO；镜像内密钥由 Trivy exposed-secret 扫描 | ✅ |
 | 密钥静默陈旧 | ESO 健康告警 → Gotify | ✅ |
 | 不安全 Pod（特权/逃逸） | PSA baseline（双集群） | ✅ |
-| 配置劣化（无 limits/probes/latest/不可信仓库） | Kyverno（Audit；逐条转 Enforce） | 🟡 Audit |
+| 镜像用 :latest（不可复现） | Kyverno disallow-latest-tag（digest-aware） | ✅ Enforce |
+| 配置劣化（无 limits/probes/不可信仓库） | Kyverno（Audit）+ LimitRange 护栏（注入默认 requests/limits） | 🟡 Audit + 护栏 |
 | 镜像已知 CVE | Trivy（HIGH/CRITICAL）→ Gotify + 看板 | ✅ |
 | 节点/控制面配置不合规 | kube-bench 周巡检 + protect-kernel-defaults | 🟡 待重启 |
 | 容器内运行时入侵（起 shell/异常外联/提权） | Tetragon/Falco | ❌ Phase 2 |
