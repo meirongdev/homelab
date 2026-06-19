@@ -164,9 +164,16 @@ spec:
                 - |
                   set -e
                   echo "Connecting to kopia server at $KOPIA_SERVER_URL..."
+                  # scheme 自适应：仅 https 服务器才传 cert fingerprint。kopia 服务器现为 --insecure
+                  # (明文，oracle→homelab 经 Tailscale/WireGuard 已加密)，server-url=http:// 时不传 fingerprint
+                  # （kopia 对 http+fingerprint 组合会报错）。日后恢复 TLS 只需把 Vault server-url 改回 https://。
+                  FP_ARG=""
+                  case "$KOPIA_SERVER_URL" in
+                    https://*) FP_ARG="--server-cert-fingerprint=$KOPIA_SERVER_FINGERPRINT" ;;
+                  esac
                   kopia repository connect server \
                     --url="$KOPIA_SERVER_URL" \
-                    --server-cert-fingerprint="$KOPIA_SERVER_FINGERPRINT" \
+                    $FP_ARG \
                     --override-username=backup \
                     --override-hostname=oracle-k3s \
                     --config-file=/tmp/kopia.config \
