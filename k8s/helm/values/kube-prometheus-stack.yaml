@@ -246,6 +246,11 @@ alertmanager:
       routes:
         - matchers: [alertname = "Watchdog"]
           receiver: "null"
+        # KubeletDown 对 oracle-k3s 是误报：oracle 为外部集群、指标走 OTel remote-write，
+        # kube-prometheus-stack 的 KubeletDown 规则直抓不到 kubelet → 误触发。节点实测 Ready。
+        # 丢弃 oracle 的该告警（homelab 的 KubeletDown 仍正常路由）。
+        - matchers: [alertname = "KubeletDown", cluster = "oracle-k3s"]
+          receiver: "null"
         - matchers: [severity =~ "critical|warning"]
           receiver: gotify
     receivers:
