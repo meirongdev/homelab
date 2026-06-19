@@ -23,11 +23,13 @@
 
 ### Web UI
 
+经 **Tailscale NodePort 直连**（kopia 服务器为 TLS、自签 cert；**不再经 Cloudflare Tunnel/Gateway**
+——kopia 转 TLS 后 Cilium Gateway 无法对自签后端发起 TLS，故移除了 `backup.meirong.dev` 的 gateway 路由）：
 ```
-https://backup.meirong.dev
+https://100.94.186.7:31515
 ```
 
-SSO 保护。用于浏览快照、管理策略。
+浏览器会提示自签证书 → 继续访问；用 admin + Vault `secret/homelab/kopia` `password` 登录。用于浏览快照、管理策略。
 
 ### CLI
 
@@ -234,7 +236,8 @@ kubectl --context oracle-k3s -n personal-services delete secret kopia-backup-sec
 # 4) 验证 oracle 备份
 kubectl --context oracle-k3s -n rss-system create job --from=cronjob/kopia-backup kopia-verify
 sleep 40; kubectl --context oracle-k3s -n rss-system logs job/kopia-verify -c kopia-snapshot   # 应 Snapshot 成功
-# 5) 验证 web UI：浏览器开 https://backup.meirong.dev（应正常）。若断 → BackendTLSPolicy 或 git revert 回退。
+# 5) web UI 已改为经 Tailscale NodePort：浏览器开 https://100.94.186.7:31515（自签 cert→继续）。
+#    （kopia 转 TLS 后 Cilium Gateway 无法对自签后端发 TLS，已移除 backup.meirong.dev 的 gateway 路由。）
 ```
 > homelab 备份走 `connect from-config` 直连仓库、不经 server → **本改动不影响 homelab 备份**。
 

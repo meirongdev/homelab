@@ -105,7 +105,7 @@ just apply   # Apply DNS/Tunnel changes
 - **homelab K8s Node**: `10.10.10.10` / Tailscale `100.94.186.7` | **Proxmox host** (`pve`): `192.168.50.4` / Tailscale `100.118.193.51` (Ryzen 5600H laptop; runs the `k8s-node` VM)
 - **oracle-k3s Node**: `10.0.0.26` / Tailscale `100.107.166.37`
 - **Cross-cluster network**: Tailscale subnet routing (Pod CIDR only): homelab `10.42.0.0/16`; oracle-k3s `10.52.0.0/16`。Cilium ClusterMesh active (connected 2026-03-08 via `cilium clustermesh connect --source-endpoint 100.94.186.7:32379 --destination-endpoint 100.107.166.37:32379 --allow-mismatching-ca`). KVStoreMesh enabled on both sides. 见 `docs/architecture/tailscale-network.md`
-- **Exception — Kopia**: Exposed via NodePort (31515) instead of Cloudflare Tunnel. Kopia's gRPC-Go client uses bidirectional streaming that fails through Cloudflare Tunnel (524 timeout), even though regular HTTP/2 works. Connect directly: `kopia repository connect server --url=https://10.10.10.10:31515 --server-cert-fingerprint=<sha256> --override-username=admin`
+- **Exception — Kopia**: **Web UI + CLI 都经 NodePort 31515（Tailscale `100.94.186.7`），不经 Cloudflare Tunnel/Gateway**。两个原因叠加：(1) Kopia gRPC-Go client 的 bidirectional streaming 经 Tunnel 524 超时；(2) kopia 服务器为 TLS（自签），Cilium Gateway 无法对自签后端发起 TLS（移除了 `backup.meirong.dev` 路由）。直连：`kopia repository connect server --url=https://100.94.186.7:31515 --server-cert-fingerprint=<sha256> --override-username=admin`。详见 `docs/runbooks/backup-recovery.md`。
 
 ### Cloudflare WAF & Security
 - **Status**: ✅ 生产运行中（2026-02-28 上线）
@@ -252,7 +252,7 @@ just apply   # Apply DNS/Tunnel changes
 | ArgoCD | homelab | `argocd` | `argocd.meirong.dev` |
 | ZITADEL (SSO) | homelab | `zitadel` | `auth.meirong.dev` |
 | Bifrost (LLM gateway) | homelab | `bifrost` | `llm.meirong.dev` (inference API + ZITADEL-gated admin UI) |
-| Kopia Backup | homelab | `kopia` | `backup.meirong.dev` (Web) / `https://10.10.10.10:31515` (CLI) |
+| Kopia Backup | homelab | `kopia` | `https://100.94.186.7:31515` (Web + CLI, Tailscale NodePort, 自签 cert) |
 | PostgreSQL | oracle-k3s | `rss-system` | Internal only |
 
 ## Conventions
@@ -296,8 +296,12 @@ just apply   # Apply DNS/Tunnel changes
 
 ### Backup & Recovery
 - **Kopia**: Backup server in `kopia` namespace (homelab), NFS repository 1Ti
-- **Web UI**: `backup.meirong.dev` (SSO-protected, via Cloudflare Tunnel)
-- **CLI**: NodePort 31515 (gRPC direct, NOT via Tunnel due to bidirectional streaming 524 timeout)
+- **Web UI + CLI**: `https://100.94.186.7:31515` (Tailscale NodePort 31515, 自签 cert)。kopia 服务器为 TLS
+  (`--tls-generate-cert`, cert 在 config PVC 持久化 → fingerprint 稳定)。**不经 Cloudflare Tunnel/Gateway**
+  ——kopia 转 TLS 后 Cilium Gateway 无法对自签后端发起 TLS（`appProtocol: https` 不触发后端 TLS），故移除了
+  `backup.meirong.dev` 的 gateway 路由（A 方案；保住公网 SSO 入口的 B 方案=BackendTLSPolicy，单用户不值当）。
+- **CLI 连接**: `kopia repository connect server --url=https://100.94.186.7:31515 --server-cert-fingerprint=<sha256> --override-username=admin`（gRPC direct，NOT via Tunnel，bidirectional streaming 经 Tunnel 524 超时）。密码 Vault `secret/homelab/kopia` `password`。
+- **oracle 远程备份**: oracle 无 NFS、只能经此 kopia 服务器 gRPC（故服务器必须 TLS）；连接脚本 scheme 自适应（https 才传 fingerprint）。备份用户 `backup@oracle-k3s` 经 `just kopia-add-user` 注册。根因/修复见 `docs/runbooks/backup-recovery.md`。
 - **Secrets**: Vault `secret/homelab/kopia` (keys: `password`, `repo-password`)
 - **Data priority**: P0 (Vault, ZITADEL PG) → P1 (Calibre-Web, Miniflux PG, KaraKeep, Gotify) → P2 (monitoring data)
 - **Automated backups**: 
