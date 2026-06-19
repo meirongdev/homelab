@@ -210,7 +210,9 @@ kubectl --context k3s-homelab -n kopia get svc kopia                            
    ```bash
    ROOT=$(jq -r .root_token k8s/helm/vault-keys.json)
    kubectl --context k3s-homelab -n vault exec -i vault-0 -- \
-     env VAULT_TOKEN="$ROOT" vault kv patch secret/homelab/kopia server-url=http://100.94.186.7:31515
+     env VAULT_TOKEN="$ROOT" vault kv patch secret/homelab/kopia server_url=http://100.94.186.7:31515
+     # ⚠️ Vault key 是 server_url（下划线），不是 server-url —— ESO remoteRef.property 用的就是下划线名
+     #    （另两个：server_fingerprint、repo-password）。确认：kubectl get externalsecret kopia-backup-secret -o jsonpath='{.spec.data[*].remoteRef.property}'
    ```
 3. 安全性：oracle→homelab 全程经 **Tailscale（WireGuard 加密）**，明文 kopia 流量在隧道内已加密。
 4. 验证：`git push`（ArgoCD 同步 cronjob）+ ESO 刷新 secret 后，手动跑 debug job 应成功；之后每日 CronJob 转 `Complete`。
