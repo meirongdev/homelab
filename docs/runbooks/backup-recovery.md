@@ -211,29 +211,41 @@ kubectl --context k3s-homelab -n kopia get svc kopia                            
 TLS 在 Cloudflare 边缘终结）。**oracle 备份（CLI 客户端）要恢复，kopia 服务器必须提供 TLS。**
 （注：曾误试"把 server_url 改 http"——无效，已回退为 https。）
 
-**修复（= 给 kopia 服务器恢复 TLS；多步、待实施，见加固路线图 #0）**：
-1. `manifests/kopia.yaml`：`--insecure` → `--tls-generate-cert`（自签；cert 须落在 kopia 的持久化
-   config 目录/PVC，否则每次重启 fingerprint 变）或挂载固定 cert（`--tls-cert-file/--tls-key-file`）。
-2. 取新 cert SHA256 fingerprint，更新 Vault（ESO→`kopia-backup-secret`）：
-   ```bash
-   ROOT=$(jq -r .root_token k8s/helm/vault-keys.json)
-   kubectl --context k3s-homelab -n vault exec -i vault-0 -- env VAULT_TOKEN="$ROOT" \
-     vault kv patch secret/homelab/kopia server_url=https://100.94.186.7:31515 server_fingerprint=<新sha256>
-   # ⚠️ key 用下划线 server_url / server_fingerprint（ESO remoteRef.property 实名；另有 repo-password）。
-   ```
-3. **web UI 的 gateway HTTPRoute 后端改 HTTPS/h2c**：给 kopia Service 加 `appProtocol`（同 ZITADEL 套路，
-   见 `zitadel-console-grpc-404.md`），否则 kopia 转 TLS 后浏览器访问 `backup.meirong.dev` 会断。
-4. 连接脚本已是 scheme 自适应（仅 https 传 fingerprint）——恢复 TLS 后**无需再改 oracle 清单**。
-5. 验证：oracle 跑 debug job → `https://…` 带 fingerprint 连上 → `Snapshot status` 成功。
+**修复（git 已实现，待部署 + 运行时回填 fingerprint）**：
+
+git 改动（已提交）：
+- `manifests/kopia.yaml`：server `--insecure` → TLS。`/bin/sh -c` 包裹：仅当 `/app/config/tls.cert`
+  不存在才 `--tls-generate-cert`，cert 落在持久化 config PVC → 重启复用、**fingerprint 稳定**。
+- kopia Service 端口加 `appProtocol: https` → Cilium Gateway/Envoy 对后端发起 TLS（web UI 经 gateway
+  HTTP-in/TLS-out；Envoy 默认不校验上游自签证书）。
+- oracle 连接脚本已是 scheme 自适应（https 才传 fingerprint）——**无需再改 oracle 清单**。
+
+部署后运行时步骤（`git push` → ArgoCD 同步 `kopia` app → kopia 以 TLS 重启并首次生成 cert）：
+```bash
+# 1) 取新 cert 的 SHA256 fingerprint（现成 recipe，连 :31515 提取）
+cd k8s/helm && FP=$(just kopia-fingerprint); echo "$FP"
+# 2) 回填 Vault：server_url=https + 新 fingerprint（key 用下划线）
+ROOT=$(jq -r .root_token vault-keys.json)
+kubectl --context k3s-homelab -n vault exec -i vault-0 -- env VAULT_TOKEN="$ROOT" \
+  vault kv patch secret/homelab/kopia server_url=https://100.94.186.7:31515 server_fingerprint="$FP"
+# 3) 强制 oracle ESO 重建 secret（拉到新值）
+kubectl --context oracle-k3s -n rss-system delete secret kopia-backup-secret
+kubectl --context oracle-k3s -n personal-services delete secret kopia-backup-secret
+# 4) 验证 oracle 备份
+kubectl --context oracle-k3s -n rss-system create job --from=cronjob/kopia-backup kopia-verify
+sleep 40; kubectl --context oracle-k3s -n rss-system logs job/kopia-verify -c kopia-snapshot   # 应 Snapshot 成功
+# 5) 验证 web UI：浏览器开 https://backup.meirong.dev（应正常）。若断 → BackendTLSPolicy 或 git revert 回退。
+```
+> homelab 备份走 `connect from-config` 直连仓库、不经 server → **本改动不影响 homelab 备份**。
 
 ## 加固路线图 (Roadmap)
 
 按优先级：
 
-0. **🔴 恢复 kopia 服务器 TLS（解除 oracle 备份阻塞，最高优先）**：见上方故障排查"修复"。`--insecure`
-   服务器无法被 kopia CLI 连接 → oracle 的 Miniflux PG / KaraKeep / Uptime Kuma / Timeslot **当前未在备份**。
-   步骤：kopia 加 TLS(`--tls-generate-cert`，cert 持久化) → 更新 Vault server_url(https)+server_fingerprint →
-   gateway 后端改 h2c/appProtocol。**这是目前唯一的真实数据风险，应尽快做。**
+0. **🟠 恢复 kopia 服务器 TLS（解除 oracle 备份阻塞）— git 已实现，待部署+回填 fingerprint**：见上方
+   故障排查"修复"的部署后运行时步骤（取 fingerprint → 回填 Vault → 重建 oracle secret → 验证备份+web UI）。
+   `--insecure` 服务器无法被 kopia CLI 连接 → oracle 的 Miniflux PG / KaraKeep / Uptime Kuma / Timeslot
+   **在此完成前仍未备份**，仍是唯一真实数据风险，应尽快部署收尾。
 1. **备份成功监控**（高）：当前只有弱信号的 `KubeJobFailed`（且混在历史失败/误报里——oracle 失败多日才被发现）。增设"**备份新鲜度**"告警——基于 kopia 最近成功快照时间（或 CronJob `last successful` > 26h 告警），经现有 Alertmanager→Gotify。
 2. **离站副本**（高）：所有快照在同一 NFS 主机（`192.168.50.106`），主机/盘损即全失。规划一份异地副本（Kopia 支持多 repo / rclone 到对象存储 B2/R2/S3）。
 3. **完整恢复演练**（中）：至少演练一次 Vault + 一个 PG 的端到端恢复，验证 RTO/RPO 与本 runbook 步骤。

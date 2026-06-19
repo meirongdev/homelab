@@ -107,18 +107,29 @@ spec:
       containers:
         - name: kopia
           image: kopia/kopia@sha256:bd6a449c263465c388339c0637dcd25562e99dcdde286c9d51ade81e138bbf2c
+          # TLS（非 --insecure）：kopia CLI/备份客户端强制 https，故 gRPC 必须走 TLS（否则 oracle 备份连不上）。
+          # 自签 cert 落在持久化 config PVC：首次无 cert 才 --tls-generate-cert 生成，重启复用同一 cert
+          # → fingerprint 稳定（客户端 --server-cert-fingerprint 不会失效）。首次生成的 fingerprint 见
+          # 启动日志（kubectl logs deploy/kopia -n kopia | grep -i fingerprint），回填 Vault server_fingerprint。
           command:
-            - kopia
-            - server
-            - start
-            - --insecure
-            - --address=0.0.0.0:51515
-            - --config-file=/app/config/repository.config
-            - --cache-directory=/app/cache
-            - --server-username=admin
-            - --server-password=$(KOPIA_SERVER_PASSWORD)
-            - --server-control-username=admin
-            - --server-control-password=$(KOPIA_SERVER_PASSWORD)
+            - /bin/sh
+            - -c
+            - |
+              CERT=/app/config/tls.cert
+              KEY=/app/config/tls.key
+              GEN=""
+              if [ ! -f "$CERT" ]; then GEN="--tls-generate-cert"; fi
+              exec kopia server start \
+                $GEN \
+                --tls-cert-file="$CERT" \
+                --tls-key-file="$KEY" \
+                --address=0.0.0.0:51515 \
+                --config-file=/app/config/repository.config \
+                --cache-directory=/app/cache \
+                --server-username=admin \
+                --server-password="$KOPIA_SERVER_PASSWORD" \
+                --server-control-username=admin \
+                --server-control-password="$KOPIA_SERVER_PASSWORD"
           env:
             - name: KOPIA_SERVER_PASSWORD
               valueFrom:
@@ -171,11 +182,6 @@ kind: Service
 metadata:
   name: kopia
   namespace: kopia
-  annotations:
-    # no special annotations needed; backend speaks plain HTTP
-    # traefik.io/service.serverscheme: https
-    # traefik.ingress.kubernetes.io/service.serversscheme: https
-    # traefik.io/service.serverstransport: kopia-kopia-transport@kubernetescrd
 spec:
   type: NodePort
   selector:
@@ -184,3 +190,8 @@ spec:
     - port: 51515
       targetPort: 51515
       nodePort: 31515
+      # kopia 后端现为 TLS（见 Deployment）。appProtocol: https 让 Cilium Gateway/Envoy 对后端
+      # 发起 TLS（需 Cilium gatewayAPI.enableAppProtocol=true，已开）——web UI 经 gateway 走
+      # HTTP-in / TLS-out 到 kopia。自签 cert：Envoy 默认不校验上游证书（等价旧 Traefik 的
+      # insecureSkipVerify）。⚠️ 部署后务必验证 backup.meirong.dev 可访问；若断见 runbook 回退/BackendTLSPolicy。
+      appProtocol: https
