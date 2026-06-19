@@ -1,6 +1,6 @@
 # Backup & Recovery Runbook
 
-> Last updated: 2026-03-07
+> Last updated: 2026-06-19
 
 ## Overview
 
@@ -180,5 +180,48 @@ kubectl --context oracle-k3s -n personal-services get cronjob kopia-backup
 - ⚠️ 无离站副本 (所有备份在 NFS 后端同一主机)
 - ⚠️ 未做过完整恢复演练
 - ⚠️ ZITADEL pg_dump 需要 Vault 中有 `secret/homelab/zitadel` → `db-password`
+- ⚠️ **备份失败监控薄弱**：oracle 备份曾连续失败多日才被发现（见下方故障排查）。`KubeJobFailed` 告警虽会触发，但混在历史失败 Job/误报里、信号弱 → 需专门的"备份成功"信号（见加固路线图）。
 
 详见 [架构优化方案 - 备份策略](../plans/2026-03-07-homelab-oracle-architecture-optimization.md#2-应用数据分类与备份策略)
+
+## 故障排查 (Troubleshooting)
+
+### oracle 备份持续失败：`tls: first record does not look like a TLS handshake` (2026-06-19)
+
+**现象**：oracle-k3s 的 `rss-system` / `personal-services` kopia 备份 CronJob 每次 `Failed`（Miniflux PG / KaraKeep / Uptime Kuma / Timeslot 多日未成功备份）；homelab 备份正常。
+
+**根因**：
+- homelab 备份走 `kopia repository connect from-config`（挂载的 `repository.config` **直连 NFS 仓库**），不经服务器 gRPC → 不受影响。
+- oracle 是远程集群、无 NFS，**只能经 kopia 服务器 gRPC**（`$KOPIA_SERVER_URL`，NodePort `100.94.186.7:31515` → 容器 `51515`）。
+- kopia 服务器实际跑在 **`--insecure --address=0.0.0.0:51515`（明文，无 TLS、无 cert 挂载）**（为 web UI 经 Cloudflare Tunnel 走 HTTP gateway 后端）。
+- 而 oracle 的 `KOPIA_SERVER_URL` 仍是 **`https://…:31515`** + 传 `--server-cert-fingerprint` → 客户端发 TLS、服务器回明文 → 握手失败。
+
+**定位命令**：
+```bash
+kubectl --context oracle-k3s -n rss-system create job --from=cronjob/kopia-backup kopia-debug
+kubectl --context oracle-k3s -n rss-system logs job/kopia-debug -c kopia-snapshot   # 看 TLS 报错
+kubectl --context k3s-homelab -n kopia get deploy kopia -o jsonpath='{.spec.template.spec.containers[0].args}'  # 确认 --insecure
+kubectl --context k3s-homelab -n kopia get svc kopia                                # 51515:31515/TCP
+```
+
+**修复**（已实施）：
+1. 连接命令改为 **scheme 自适应**——仅当 `KOPIA_SERVER_URL` 以 `https://` 开头才传 `--server-cert-fingerprint`（`cloud/oracle/manifests/{rss-system,personal-services}/backup-cronjob.yaml`）。
+2. Vault `secret/homelab/kopia` 的 `server-url` 由 `https://` 改为 **`http://100.94.186.7:31515`**（ESO → `kopia-backup-secret`）：
+   ```bash
+   ROOT=$(jq -r .root_token k8s/helm/vault-keys.json)
+   kubectl --context k3s-homelab -n vault exec -i vault-0 -- \
+     env VAULT_TOKEN="$ROOT" vault kv patch secret/homelab/kopia server-url=http://100.94.186.7:31515
+   ```
+3. 安全性：oracle→homelab 全程经 **Tailscale（WireGuard 加密）**，明文 kopia 流量在隧道内已加密。
+4. 验证：`git push`（ArgoCD 同步 cronjob）+ ESO 刷新 secret 后，手动跑 debug job 应成功；之后每日 CronJob 转 `Complete`。
+
+> 切回 TLS（更"正"的做法）只需把 Vault `server-url` 改回 `https://` —— 连接脚本会自动重新带上 fingerprint（无需改清单）。但需同时给 kopia 服务器配 TLS（且 web UI 经 gateway 那条 HTTP 后端要改 h2c/HTTPS），见加固路线图。
+
+## 加固路线图 (Roadmap)
+
+按优先级：
+
+1. **备份成功监控**（高）：当前只有弱信号的 `KubeJobFailed`。增设"**备份新鲜度**"告警——基于 kopia 最近成功快照时间（或 CronJob `last successful` > 26h 告警），经现有 Alertmanager→Gotify。让"连续失败多日"无法再被忽略。
+2. **离站副本**（高）：所有快照在同一 NFS 主机（`192.168.50.106`），主机/盘损即全失。规划一份异地副本（Kopia 支持多 repo / rclone 到对象存储 B2/R2/S3）。
+3. **kopia 服务器恢复 TLS**（中）：现 `--insecure` 把明文 gRPC 暴露在 NodePort 31515（LAN 可达，仅 Tailscale 内才加密）。恢复 TLS 后 NodePort 直接走 TLS；代价是 web UI 经 gateway 的 HTTP 后端要改 h2c/HTTPS。
+4. **完整恢复演练**（中）：至少演练一次 Vault + 一个 PG 的端到端恢复，验证 RTO/RPO 与本 runbook 步骤。
