@@ -185,8 +185,8 @@ spec:
     spec:
       containers:
         - name: oauth2-proxy
-          # quay.io/oauth2-proxy/oauth2-proxy:v7.7.1
-          image: quay.io/oauth2-proxy/oauth2-proxy@sha256:f6a4aa83a27e316114bf79664302b1ffb2cc8ce697fb479273af4feb3fb16fe3
+          # quay.io/oauth2-proxy/oauth2-proxy:v7.15.2 (修 CVE-2026-34457 / CVE-2025-54576；amd64 digest)
+          image: quay.io/oauth2-proxy/oauth2-proxy@sha256:7c25fd50e1998798b79d051bd7d98ebac8dc4c6c1e54c99f4cb06f3e7d117dbd
           ports:
             - containerPort: 4180
               name: http
