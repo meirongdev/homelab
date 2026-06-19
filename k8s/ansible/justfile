@@ -6,6 +6,15 @@ cleanup-k8s:
 setup-k8s:
     ansible-playbook playbooks/setup-k3s.yaml
 
+# Setup K3s via Tailscale 直连（远程/不在家庭 LAN 时用；覆盖 inventory 的 LAN ProxyCommand，
+# 改连节点 Tailscale IP，user/key 仍取自 inventory: ubuntu / ~/.ssh/vgio）
+setup-k8s-remote:
+    ansible-playbook playbooks/setup-k3s.yaml -e ansible_host=100.94.186.7 -e "ansible_ssh_common_args="
+
+# 重启 k3s（配合 setup-k8s-remote，让 protect-kernel-defaults 生效）—— 同样 Tailscale 直连
+restart-k3s-remote:
+    ansible k8s_masters -m systemd -a "name=k3s state=restarted" --become -e ansible_host=100.94.186.7 -e "ansible_ssh_common_args="
+
 # Fetch kubeconfig from master node to local machine
 fetch-kubeconfig:
     ansible-playbook playbooks/fetch-kubeconfig.yaml
