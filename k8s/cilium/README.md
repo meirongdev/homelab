@@ -29,6 +29,10 @@ helm --kube-context k3s-homelab upgrade --install cilium cilium/cilium \
 kubectl --context k3s-homelab -n kube-system rollout restart deploy/cilium-operator
 ```
 
+> **Automated:** `cd k8s/helm && just deploy-cilium` runs exactly this — it restores the
+> live `cilium-ca` (or self-signs on a fresh install), pins `--version 1.19.1`, applies
+> this `values.yaml`, and refreshes the Hubble certs. Prefer it over the raw command above.
+
 After a config change that affects Gateway API translation, the operator regenerates
 the `CiliumEnvoyConfig`; Envoy picks it up via xDS (no envoy restart needed).
 

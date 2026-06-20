@@ -24,7 +24,7 @@ At the end of this runbook:
 - The repo's active Proxmox task runner is `proxmox/terraform/justfile`. The historical `Makefile` is currently empty.
 - Homelab no longer relies on `ufw`; Cilium owns the datapath and the node should keep host firewalling disabled to avoid reboot-time loss of SSH / kube-apiserver reachability.
 - `qemu-guest-agent` is part of the homelab baseline so Proxmox can inspect the guest even when SSH is unavailable.
-- Homelab Cilium values are intentionally rolled back in `k8s/helm/values/cilium-values.yaml`:
+- The Cilium config source of truth is `k8s/cilium/values.yaml` (applied by `just deploy-cilium`; see `k8s/cilium/README.md`). If the node is on an unstable kernel, temporarily run Cilium in conservative mode by setting in that file:
   - `kubeProxyReplacement: false`
   - `gatewayAPI.enabled: false`
 
@@ -128,7 +128,7 @@ kubectl --context k3s-homelab get pods -A
 
 ## Phase 4: Reinstall Cilium in Conservative Mode
 
-The homelab values file is already prepared to avoid the verifier bug on the unstable kernel combination.
+If the node is on an unstable kernel, first apply the conservative-mode settings above to `k8s/cilium/values.yaml` to avoid the verifier bug; otherwise deploy the standard config.
 
 Deploy Cilium:
 
@@ -186,7 +186,7 @@ Only resume after the rebuilt node is stable on Ubuntu 24.04 LTS.
 
 When ready:
 
-1. Re-enable `kubeProxyReplacement` in `k8s/helm/values/cilium-values.yaml`
+1. Re-enable `kubeProxyReplacement` in `k8s/cilium/values.yaml`
 2. Re-deploy Cilium and validate node stability
 3. Re-enable `gatewayAPI.enabled`
 4. Resume `docs/runbooks/cilium-gateway-cutover.md`
