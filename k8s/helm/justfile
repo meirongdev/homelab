@@ -226,30 +226,47 @@ deploy-all: add-repos create-namespace deploy-prometheus deploy-loki deploy-temp
 
 # ⬇️ Cilium CNI ⬇️
 
-# 部署 Cilium (替换 Flannel + kube-proxy)
+# 部署 Cilium（CNI + Gateway API + ClusterMesh 控制面）；唯一真源 ../cilium/values.yaml，见 k8s/cilium/README.md
 deploy-cilium: add-repos
-    # Reset release values so old manual --set flags cannot poison future upgrades, then
-    # drop stale Hubble cert secrets so certgen re-issues them for the current cluster name.
-    kubectl --context {{ctx}} -n kube-system delete secret hubble-server-certs hubble-relay-client-certs --ignore-not-found
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # 真源 ../cilium/values.yaml 含 gatewayAPI.enableAppProtocol（ZITADEL console 必需）；--version 对齐 v1.19.1 镜像。
+    # ClusterMesh CA 属密钥（不入库）：升级时从在集群恢复以保住 mesh 互信，全新安装让 Cilium 自签新 CA。
+    ctx="{{ctx}}"
+    # Drop stale Hubble cert secrets so certgen re-issues them for the current cluster name.
+    kubectl --context "$ctx" -n kube-system delete secret hubble-server-certs hubble-relay-client-certs --ignore-not-found
+    # Restore the live ClusterMesh CA on upgrade; on a fresh install let Cilium self-sign one.
+    if kubectl --context "$ctx" -n kube-system get secret cilium-ca >/dev/null 2>&1; then
+        kubectl --context "$ctx" -n kube-system get secret cilium-ca -o jsonpath='{.data.ca\.crt}' | base64 -d > /tmp/cilium-ca.crt
+        ca_args=(--set-file tls.caBundle.content=/tmp/cilium-ca.crt)
+        echo "restoring live cilium-ca → ClusterMesh trust preserved"
+    else
+        ca_args=(--set tls.caBundle.enabled=false)
+        echo "fresh install: Cilium will self-sign a CA — re-run 'just connect-clustermesh ...' afterwards"
+    fi
+    # --reset-values scrubs stale ad-hoc --set values from earlier manual installs.
     helm upgrade --install cilium cilium/cilium \
         --namespace kube-system \
-        --kube-context {{ctx}} \
-        --values values/cilium-values.yaml \
+        --kube-context "$ctx" \
+        --version 1.19.1 \
+        --values ../cilium/values.yaml \
+        "${ca_args[@]}" \
         --reset-values \
         --wait \
         --timeout 10m
-    bash -euc 'for _ in $(seq 1 24); do \
-        if kubectl --context {{ctx}} -n kube-system get job -l k8s-app=hubble-generate-certs -o name | grep -q .; then \
-            kubectl --context {{ctx}} -n kube-system wait --for=condition=complete job -l k8s-app=hubble-generate-certs --timeout=5m; \
-            exit 0; \
-        fi; \
-        sleep 5; \
-    done; \
-    echo "Timed out waiting for hubble-generate-certs job creation" >&2; \
-    exit 1'
-    kubectl --context {{ctx}} -n kube-system get secret hubble-server-certs hubble-relay-client-certs
-    kubectl --context {{ctx}} -n kube-system rollout status deployment/hubble-relay --timeout=5m
-    kubectl --context {{ctx}} exec -n kube-system ds/cilium -c cilium-agent -- cilium status --brief
+    found=""
+    for _ in $(seq 1 24); do
+        if kubectl --context "$ctx" -n kube-system get job -l k8s-app=hubble-generate-certs -o name | grep -q .; then
+            kubectl --context "$ctx" -n kube-system wait --for=condition=complete job -l k8s-app=hubble-generate-certs --timeout=5m
+            found=1; break
+        fi
+        sleep 5
+    done
+    [ -n "$found" ] || { echo "Timed out waiting for hubble-generate-certs job creation" >&2; exit 1; }
+    kubectl --context "$ctx" -n kube-system get secret hubble-server-certs hubble-relay-client-certs
+    kubectl --context "$ctx" -n kube-system rollout status deployment/hubble-relay --timeout=5m
+    kubectl --context "$ctx" -n kube-system rollout restart deploy/cilium-operator
+    kubectl --context "$ctx" exec -n kube-system ds/cilium -c cilium-agent -- cilium status --brief
 
 # Cilium 状态检查
 cilium-status:
