@@ -189,11 +189,6 @@ data:
             href: https://argocd.meirong.dev
             description: GitOps 持续部署 (Homelab)
 
-        - Kopia:
-            icon: kopia.png
-            href: https://backup.meirong.dev
-            description: 备份服务器 (Homelab)
-
         - ZITADEL:
             icon: zitadel.png
             href: https://auth.meirong.dev

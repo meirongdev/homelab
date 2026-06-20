@@ -41,7 +41,7 @@
 | Vault | homelab | vault.meirong.dev | 内置 |
 | ArgoCD | homelab | argocd.meirong.dev | 内置 |
 | ZITADEL | homelab | auth.meirong.dev | OIDC |
-| Kopia | homelab | backup.meirong.dev | Basic Auth |
+| Kopia | homelab | 100.94.186.7:31515（Tailscale NodePort，自签 cert） | Basic Auth |
 | Homepage | oracle-k3s | home.meirong.dev | 公开 |
 | IT-Tools | oracle-k3s | tool.meirong.dev | 公开 |
 | Stirling-PDF | oracle-k3s | pdf.meirong.dev | 公开 |
@@ -72,5 +72,5 @@ Oracle 集群工作负载的 Vault 路径约定：使用 `secret/oracle-k3s/<ser
 1. [architecture/tailscale-network.md](architecture/tailscale-network.md) — 跨集群网络
 2. [architecture/observability-multicluster.md](architecture/observability-multicluster.md) — 可观测方案
 3. [architecture/k8s-qos-resource-management.md](architecture/k8s-qos-resource-management.md) — 资源管理
-4. [runbooks/kopia-backup.md](runbooks/kopia-backup.md) — 备份操作
+4. [runbooks/backup-recovery.md](runbooks/backup-recovery.md) — 备份与恢复
 5. [plans/2026-03-07-homelab-oracle-architecture-optimization.md](plans/2026-03-07-homelab-oracle-architecture-optimization.md) — 架构优化方案
