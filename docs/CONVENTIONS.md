@@ -100,7 +100,7 @@ just apply   # Apply DNS/Tunnel changes
 - **Cloudflare Tunnel**: `cloudflared` pod in `cloudflare` namespace forwards to the Cilium-managed Gateway service (`cilium-gateway-<gateway-name>.kube-system.svc:80`). oracle-k3s uses `--protocol http2` (Oracle Cloud NSG blocks outbound UDP/QUIC).
 - **Ingress**: Cilium Gateway API is the only in-cluster HTTP entrypoint (`HTTPRoute` resources in `manifests/gateway.yaml`)
 - **CNI**: Both clusters use **Cilium** (eBPF + VXLAN); homelab deployed 2026-03-06, oracle-k3s migrated from Flannel 2026-03-07
-  - homelab Cilium is **Helm-managed but applied manually** (not ArgoCD); values codified in `k8s/cilium/values.yaml` (+ `README.md`). Pinned to v1.19.1 images.
+  - homelab Cilium is **Helm-managed via `just deploy-cilium`** (not ArgoCD); values codified in `k8s/cilium/values.yaml` (+ `README.md`). Pinned to v1.19.1 images. The recipe pins `--version 1.19.1`, applies that file, and restores the live `cilium-ca` for ClusterMesh (self-signs on a fresh install).
   - **`gatewayAPI.enableAppProtocol: true` is required** — without it, ZITADEL console v1 gRPC calls (auth.v1/admin.v1) 404 through the gateway because Envoy's grpc_web filter sends converted native-gRPC over HTTP/1.1 to a backend that needs h2c. Honouring Service `appProtocol` gives `zitadel:8080` an explicit h2c upstream. Runbook: `docs/runbooks/zitadel-console-grpc-404.md`
 - **homelab K8s Node**: `10.10.10.10` / Tailscale `100.94.186.7` | **Proxmox host** (`pve`): `192.168.50.4` / Tailscale `100.118.193.51` (Ryzen 5600H laptop; runs the `k8s-node` VM)
 - **oracle-k3s Node**: `10.0.0.26` / Tailscale `100.107.166.37`
@@ -132,7 +132,7 @@ just apply   # Apply DNS/Tunnel changes
 - **节点 CIS 加固**: `k8s/ansible/playbooks/setup-k3s.yaml` 加 `/etc/sysctl.d/31-k8s-protect-kernel.conf`(protect-kernel-defaults 所需 sysctl) + config.yaml `protect-kernel-defaults: true`。**顺序保障**: sysctl drop-in 先落盘持久化，故 k3s 重启时检查必过。**现有节点需维护窗口 `systemctl restart k3s`/重启才生效**。**API 审计日志刻意延后**（磁盘紧）。
 - **⚠️ chart 版本**: Kyverno/Trivy 的 `argocd/applications/*.yaml` pin 的 chart 版本**部署前须 `helm search repo ... --versions` 核对**（避免 sync 失败）。**AppProject** `argocd/projects/homelab.yaml` 的 `sourceRepos` 已加 kyverno+aquasecurity 仓库，但 AppProject 非 ArgoCD 自动同步，需 `kubectl apply` 一次。
 - **延后/门控**: **Cilium 网络默认拒绝**不在本批（DNS/ClusterMesh/Envoy/egress 链路复杂，单用户收益边际低）。Hubble 已启用做流量可见性，作为日后单命名空间灰度强制的前置（见 runbook）。
-- **运行时检测（Phase 2，未做）**: 规划按集群选型——homelab→**Tetragon**（Cilium 原生、内核态过滤省 CPU、不加热）、oracle→**Falco+Falcosidekick→Gotify**（规则开箱即用，CPU 余量大）。
+- **运行时检测（Phase 2，已部署）**: 按集群选型落地——homelab→**Tetragon**（Cilium 原生、内核态过滤省 CPU、不加热；Helm App `tetragon`，chart 1.7.0，in-cluster ns `tetragon`，`values/tetragon.yaml`）；oracle→**Falco + Falcosidekick→Gotify**（规则开箱即用，CPU 余量大；Helm App `falco`，chart 9.1.0，部署到 oracle 外部集群 ns `falco`，`values/falco.yaml`，falcosidekick→Gotify token 经 `cloud/oracle/manifests/falco/` 注入）。安全事件看板 `manifests/security-events-dashboard.yaml`（Grafana `Security` 文件夹）。
 
 ### Identity
 - **Status**: ZITADEL remains available at `auth.meirong.dev`, but shared ingress-layer SSO has been removed.
@@ -150,11 +150,11 @@ just apply   # Apply DNS/Tunnel changes
 
 ### GitOps (ArgoCD)
 - ArgoCD runs in the `argocd` namespace, UI at `argocd.meirong.dev`
-- **Install**: ArgoCD is **Helm-managed** — chart `argo/argo-cd` `9.4.9` (appVersion v3.3.2), release `argocd`, values in `k8s/helm/values/argocd-values.yaml`, deployed via `just deploy-argocd`. `argocd-values.yaml` is the source of truth (repo-server DNS-gate initContainer, Cilium Gateway health check, ESO ignoreDifferences, `server.insecure`, slim install with dex/notifications/CRDs disabled all live there). History: originally a stock-manifest kubectl install; an in-place Helm adoption was impossible (immutable `.spec.selector` label differences between stock and chart), so it was migrated via a maintenance-window reinstall (delete chart-managed workloads, keep CRDs + Application CRs + `argocd-secret`/`argocd-redis`, then `helm upgrade --install`). Applications survived untouched (they're CRs); ArgoCD downtime ~4 min, managed services unaffected.
+- **Install**: ArgoCD is **Helm-managed** — chart `argo/argo-cd` `9.5.11` (appVersion v3.3.9), release `argocd`, values in `k8s/helm/values/argocd-values.yaml`, deployed via `just deploy-argocd`. `argocd-values.yaml` is the source of truth (repo-server DNS-gate initContainer, Cilium Gateway health check, ESO ignoreDifferences, `server.insecure`, slim install with dex/notifications/CRDs disabled all live there). History: originally a stock-manifest kubectl install; an in-place Helm adoption was impossible (immutable `.spec.selector` label differences between stock and chart), so it was migrated via a maintenance-window reinstall (delete chart-managed workloads, keep CRDs + Application CRs + `argocd-secret`/`argocd-redis`, then `helm upgrade --install`). Applications survived untouched (they're CRs); ArgoCD downtime ~4 min, managed services unaffected.
 - **Sync poll interval**: 3 minutes (auto-syncs after every `git push`)
 - **Managed by ArgoCD** (auto-sync + selfHeal; homelab in-cluster, plus oracle-k3s as an external cluster):
   - `root` App → `argocd/applications/` (App-of-Apps; manages all child Applications below)
-  - `personal-services` App → `manifests/{calibre-web.yaml,calibre-ebook-sync.yaml,gotify.yaml}` (homelab)
+  - `personal-services` App → `manifests/{calibre-web.yaml,calibre-ebook-sync.yaml,gotify.yaml,personal-services-limits.yaml}` (homelab)
   - `gateway` App → `manifests/gateway.yaml` (homelab Cilium Gateway)
   - `cloudflare` App → `manifests/cloudflare-tunnel.yaml` (homelab)
   - `vault-eso` App → `manifests/{vault-eso-config,*-external-secret}.yaml` (homelab)
@@ -162,8 +162,15 @@ just apply   # Apply DNS/Tunnel changes
   - `zitadel` App → `manifests/zitadel.yaml` (homelab)
   - `calibre-metadata` App → `k8s/helm/manifests/calibre-metadata/` (Kustomize)
   - `monitoring-dashboards` App → `k8s/helm/manifests/grafana-dashboards.yaml` 等 ConfigMap
-  - `argocd-image-updater` App → Helm chart `argo/argocd-image-updater` v1.1.0
+  - `argocd-image-updater` App → Helm chart `argo/argocd-image-updater` v1.1.1
   - `oracle-k3s` App → `cloud/oracle/manifests/` (Kustomize) on the **oracle-k3s external cluster** via Tailscale (`https://100.107.166.37:6443`); cluster cred from Vault→ESO secret `oracle-k3s-cluster` (Task: `docs/plans/2026-06-04-oracle-k3s-argocd-gitops.md`). Added 2026-06-04.
+  - `bifrost` App → `manifests/bifrost.yaml` (homelab LLM gateway + oauth2-proxy)
+  - `kyverno` App (Helm chart) + `kyverno-policies` App → `manifests/kyverno-policies/` (homelab admission policies)
+  - `trivy-operator` App (Helm chart, `trivy-system` ns) — image CVE / config scanning (homelab)
+  - `kube-bench` App → `manifests/kube-bench.yaml` (homelab CIS CronJob)
+  - `namespace-guardrails` App → `manifests/namespace-guardrails.yaml` (homelab LimitRange guardrails)
+  - `tetragon` App (Helm chart, `tetragon` ns) — runtime detection (homelab)
+  - `falco` App (Helm chart, `falco` ns) — runtime detection on the **oracle-k3s external cluster**
 - **NOT managed by ArgoCD** (manual `just` commands):
   - HashiCorp Vault — requires manual init/unseal (see `just homelab-recover` for restart recovery)
   - External Secrets Operator — depends on Vault
@@ -240,6 +247,7 @@ just apply   # Apply DNS/Tunnel changes
 | IT-Tools | oracle-k3s | `personal-services` | `tool.meirong.dev` |
 | Stirling-PDF | oracle-k3s | `personal-services` | `pdf.meirong.dev` |
 | Squoosh | oracle-k3s | `personal-services` | `squoosh.meirong.dev` |
+| Trends | oracle-k3s | `personal-services` | `trends.meirong.dev` |
 | Timeslot | oracle-k3s | `personal-services` | `slot.meirong.dev` |
 | Uptime Kuma | oracle-k3s | `personal-services` | `status.meirong.dev` |
 | Miniflux | oracle-k3s | `rss-system` | `rss.meirong.dev` |
@@ -287,7 +295,7 @@ just apply   # Apply DNS/Tunnel changes
   - 详见 Observability › **Dashboards 组织**。
 - **Homepage config updates**: ArgoCD auto-syncs the ConfigMap on `git push`, but `subPath` volume mounts require a pod restart to reload — run `just update-homepage` (does `apply` + `rollout restart` in one step). Do NOT use `kubectl delete configmap` as ArgoCD will conflict.
 - **HTTPRoute template**: Always include explicit `group`/`kind` in `parentRefs` and `group`/`kind`/`weight` in `backendRefs` to prevent ArgoCD OutOfSync drift caused by Gateway controller defaults.
-- **ArgoCD Image Updater** (v1.1.0): Uses CRD model — create an `ImageUpdater` CR (not just annotations). Set `useAnnotations: true` in the CR to read image config from Application annotations. Use strategy `newest-build` (not `latest`, deprecated).
+- **ArgoCD Image Updater** (v1.1.1): Uses CRD model — create an `ImageUpdater` CR (not just annotations). Set `useAnnotations: true` in the CR to read image config from Application annotations. Use strategy `newest-build` (not `latest`, deprecated).
 - **ArgoCD Application definitions** (`argocd/applications/*.yaml`): The `root` Application (App-of-Apps) watches this directory recursively, so editing any `*.yaml` here and pushing is enough — ArgoCD will reconcile within the 3-min poll. Manual `kubectl apply` is only needed for the initial `root.yaml` bootstrap, or if `root` itself is missing.
 - **ArgoCD self-heal caveat**: Resources already managed by an Application (for example `gateway` managing `manifests/gateway.yaml`) must be changed in Git first. Ad-hoc `kubectl patch/apply` fixes on live resources will be reconciled away on the next sync.
 - **Kustomize namespace caveat**: The global `namespace:` field in `kustomization.yaml` runs as a transformer after JSON patches, overriding them. Declare namespace explicitly in each manifest instead when resources span multiple namespaces.
