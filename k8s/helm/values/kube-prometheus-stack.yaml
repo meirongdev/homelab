@@ -206,6 +206,20 @@ prometheus:
               cluster: dgx-spark
               nodename: dgx-spark-2
 
+      # MacBook Pro (Apple Silicon) — personal laptop host metrics via node_exporter,
+      # installed as a LaunchAgent (~/Library/LaunchAgents/com.prometheus.node_exporter.plist,
+      # binary ~/.local/bin/node_exporter, :9100), scraped over Tailscale. Same verbatim-inject
+      # pattern as dgx-spark, so cluster/nodename are set per target here.
+      # NOTE: it's a laptop — the target (and a TargetDown warning) is expected to flap on sleep/logout.
+      - job_name: 'node-exporter-macbook'
+        scrape_interval: 15s
+        static_configs:
+          - targets:
+              - 100.89.15.120:9100   # Matthews-MacBook-Pro (Tailscale)
+            labels:
+              cluster: macbook
+              nodename: macbook-pro
+
       # oracle-k3s 指标均为 push 模式（OTel Collector → prometheusremotewrite）
       # 包含: node-exporter, kube-state-metrics, cloudflared, traefik
       # See: cloud/oracle/manifests/monitoring/otel-collector.yaml

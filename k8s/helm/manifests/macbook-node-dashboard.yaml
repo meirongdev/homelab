@@ -1,0 +1,627 @@
+# Grafana Dashboard: MacBook / Node Exporter
+# Host metrics for the Apple Silicon MacBook Pro (cluster=macbook, nodename=macbook-pro),
+# scraped over Tailscale by homelab Prometheus (job node-exporter-macbook).
+# node_exporter is the prebuilt darwin-arm64 binary run by a LaunchAgent (:9100), no Homebrew.
+# NOTE: Darwin node_exporter exposes a DIFFERENT, smaller metric set than Linux —
+#   memory uses node_memory_{active,wired,compressed,inactive,free,total,swap_*}_bytes
+#   (no MemAvailable/MemTotal), and there are NO thermal/battery/powersupply collectors,
+#   so this dashboard has no temperature panel (unlike DGX Spark).
+# Auto-loaded via the kube-prometheus-stack grafana-sc-dashboard sidecar
+# (label grafana_dashboard: "1") and synced by the ArgoCD monitoring-dashboards App.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: macbook-node-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Hardware"
+data:
+  macbook-node.json: |-
+    {
+      "annotations": {"list": []},
+      "description": "MacBook Pro (Apple Silicon) 主机指标：CPU/负载、内存（active/wired/compressed）、Swap、磁盘、网络（含 Tailscale utun）。Darwin node_exporter 指标集与 Linux 不同，无温度/电池。",
+      "editable": true,
+      "graphTooltip": 1,
+      "links": [],
+      "panels": [
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+          "id": 100,
+          "title": "💻 概览 / Overview",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]},
+              "unit": "none",
+              "mappings": [{"type": "value", "options": {"0": {"text": "DOWN"}, "1": {"text": "UP"}}}]
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 0, "y": 1},
+          "id": 1,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "value"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "up{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}}",
+              "refId": "A"
+            }
+          ],
+          "title": "状态 / Status",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}, "unit": "s", "mappings": []},
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 4, "y": 1},
+          "id": 2,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "value"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "time() - node_boot_time_seconds{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}}",
+              "refId": "A"
+            }
+          ],
+          "title": "运行时长 / Uptime",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}, "unit": "none", "mappings": []},
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 8, "y": 1},
+          "id": 3,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "value"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "count by (nodename) (node_cpu_seconds_total{job=\"node-exporter-macbook\", nodename=~\"$nodename\", mode=\"idle\"})",
+              "legendFormat": "{{nodename}}",
+              "refId": "A"
+            }
+          ],
+          "title": "CPU 核心数 / Cores",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "purple", "value": null}]}, "unit": "decbytes", "mappings": []},
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 12, "y": 1},
+          "id": 4,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "value"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "node_memory_total_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}}",
+              "refId": "A"
+            }
+          ],
+          "title": "物理内存总量 / Total RAM",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "description": "已用 = (active + wired + compressed) / total。compressed 在内存压力大时会很高。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 80},
+                {"color": "red", "value": 90}
+              ]},
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 16, "y": 1},
+          "id": 5,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "value"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "(node_memory_active_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"} + node_memory_wired_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"} + node_memory_compressed_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}) / node_memory_total_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"} * 100",
+              "legendFormat": "{{nodename}}",
+              "refId": "A"
+            }
+          ],
+          "title": "内存使用率 / Mem Used %",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "description": "macOS 一定量的 swap 属正常；持续高 swap = 内存吃紧。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 1073741824},
+                {"color": "red", "value": 4294967296}
+              ]},
+              "unit": "decbytes",
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 20, "y": 1},
+          "id": 6,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "value"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "node_memory_swap_used_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Swap 已用 / Swap Used",
+          "type": "stat"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5},
+          "id": 101,
+          "title": "⚙️ CPU / 负载",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+          "id": 7,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "100 - (avg by (nodename) (rate(node_cpu_seconds_total{job=\"node-exporter-macbook\", nodename=~\"$nodename\", mode=\"idle\"}[$__rate_interval])) * 100)",
+              "legendFormat": "{{nodename}} busy %",
+              "refId": "A"
+            }
+          ],
+          "title": "CPU 使用率 %",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "description": "1m/5m/15m 负载。可与 CPU 核心数对比判断是否过载。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 0, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "unit": "none",
+              "min": 0,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+          "id": 8,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "node_load1{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}} 1m",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "node_load5{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}} 5m",
+              "refId": "B"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "node_load15{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}} 15m",
+              "refId": "C"
+            }
+          ],
+          "title": "负载均值 / Load Average",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 14},
+          "id": 102,
+          "title": "🧠 内存 / Memory",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 80}, {"color": "red", "value": 90}]}
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 15},
+          "id": 9,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "(node_memory_active_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"} + node_memory_wired_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"} + node_memory_compressed_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}) / node_memory_total_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"} * 100",
+              "legendFormat": "{{nodename}} used %",
+              "refId": "A"
+            }
+          ],
+          "title": "内存使用率 % (active+wired+compressed)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "description": "macOS 内存构成。各项之和约等于物理内存总量。inactive/free 可被回收。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 30, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "normal"}},
+              "unit": "decbytes",
+              "min": 0,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 15},
+          "id": 10,
+          "options": {
+            "legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "node_memory_wired_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "legendFormat": "wired",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "node_memory_active_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "legendFormat": "active",
+              "refId": "B"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "node_memory_compressed_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "legendFormat": "compressed",
+              "refId": "C"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "node_memory_inactive_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "legendFormat": "inactive",
+              "refId": "D"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "node_memory_free_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "legendFormat": "free",
+              "refId": "E"
+            }
+          ],
+          "title": "内存构成 / Memory Composition",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "unit": "decbytes",
+              "min": 0,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 7, "w": 12, "x": 0, "y": 23},
+          "id": 11,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "node_memory_swap_used_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}} swap used",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "node_memory_swap_total_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}} swap total",
+              "refId": "B"
+            }
+          ],
+          "title": "Swap used / total",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "description": "swap 换入/换出速率。持续非零说明在频繁换页，体感会卡。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "unit": "binBps",
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 7, "w": 12, "x": 12, "y": 23},
+          "id": 12,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "rate(node_memory_swapped_in_bytes_total{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}[$__rate_interval])",
+              "legendFormat": "{{nodename}} swap in",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "rate(node_memory_swapped_out_bytes_total{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}[$__rate_interval])",
+              "legendFormat": "{{nodename}} swap out",
+              "refId": "B"
+            }
+          ],
+          "title": "Swap I/O 速率",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 30},
+          "id": 103,
+          "title": "💾 磁盘 / Disk",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "description": "APFS 各卷共享同一容器空间；这里只显示 / 与数据卷。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 31},
+          "id": 13,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "100 - (node_filesystem_avail_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\", mountpoint=~\"/|/System/Volumes/Data\"} / node_filesystem_size_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\", mountpoint=~\"/|/System/Volumes/Data\"} * 100)",
+              "legendFormat": "{{mountpoint}}",
+              "refId": "A"
+            }
+          ],
+          "title": "磁盘使用率 %",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "unit": "binBps",
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 31},
+          "id": 14,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "rate(node_disk_read_bytes_total{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}[$__rate_interval])",
+              "legendFormat": "{{device}} read",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "rate(node_disk_written_bytes_total{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}[$__rate_interval])",
+              "legendFormat": "{{device}} write",
+              "refId": "B"
+            }
+          ],
+          "title": "磁盘 I/O",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 39},
+          "id": 104,
+          "title": "🌐 网络 / Network",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "description": "已过滤 lo0/awdl0/llw0/anpi*/gif0/stf0/bridge*。en0 通常为活动网卡；utun* 含 Tailscale 流量。单位 bit/s。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "unit": "bps",
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 40},
+          "id": 15,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "rate(node_network_receive_bytes_total{job=\"node-exporter-macbook\", nodename=~\"$nodename\", device!~\"lo0|awdl0|llw0|anpi.*|gif0|stf0|bridge.*\"}[$__rate_interval]) * 8",
+              "legendFormat": "{{device}} rx",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "rate(node_network_transmit_bytes_total{job=\"node-exporter-macbook\", nodename=~\"$nodename\", device!~\"lo0|awdl0|llw0|anpi.*|gif0|stf0|bridge.*\"}[$__rate_interval]) * 8",
+              "legendFormat": "{{device}} tx",
+              "refId": "B"
+            }
+          ],
+          "title": "网络吞吐 (rx / tx)",
+          "type": "timeseries"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 40,
+      "tags": ["node-exporter", "macbook", "prometheus", "hardware", "metrics", "curated"],
+      "templating": {
+        "list": [
+          {
+            "current": {"selected": true, "text": "Prometheus", "value": "prometheus"},
+            "hide": 2,
+            "includeAll": false,
+            "label": "Data Source",
+            "name": "datasource",
+            "options": [],
+            "query": "prometheus",
+            "refresh": 1,
+            "type": "datasource"
+          },
+          {
+            "current": {},
+            "datasource": {"type": "prometheus", "uid": "${datasource}"},
+            "definition": "label_values(up{job=\"node-exporter-macbook\"}, nodename)",
+            "hide": 0,
+            "includeAll": true,
+            "allValue": ".*",
+            "label": "Node",
+            "multi": true,
+            "name": "nodename",
+            "query": {
+              "query": "label_values(up{job=\"node-exporter-macbook\"}, nodename)",
+              "refId": "StandardVariableQuery"
+            },
+            "refresh": 2,
+            "sort": 1,
+            "type": "query"
+          }
+        ]
+      },
+      "time": {"from": "now-3h", "to": "now"},
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "MacBook / Node Exporter",
+      "uid": "macbook-nodes",
+      "version": 1
+    }

@@ -199,11 +199,12 @@ just apply   # Apply DNS/Tunnel changes
 - LGTM stack (Loki, Grafana, Tempo, Prometheus/Mimir) in `monitoring` namespace
 - Grafana accessible at `grafana.meirong.dev`
 - **Three signals**: Logs (Loki), Metrics (Prometheus), Traces (Tempo) — all collected via Otel Collector
-- **Multi-cluster monitoring**: All telemetry carries a `cluster` label (`homelab`, `oracle-k3s`, or `dgx-spark`)
+- **Multi-cluster monitoring**: All telemetry carries a `cluster` label (`homelab`, `oracle-k3s`, `dgx-spark`, or `macbook`)
   - homelab: Prometheus `scrapeClasses` default relabeling adds `cluster=homelab` to all local scrape targets
   - oracle-k3s: OTel Collector pushes all metrics (node-exporter, kube-state-metrics, cloudflared, external-secrets) via `prometheusremotewrite` with `cluster=oracle-k3s`
   - **No prometheus-agent on oracle-k3s** — the single OTel Collector handles both logs, metrics, and traces
   - **dgx-spark** (2× GB10, metrics-only — not a K8s cluster): homelab Prometheus pull-scrapes node_exporter on both DGX Spark servers over **Tailscale** (job `node-exporter-dgx-spark`, static targets `100.97.87.120:9100` / `100.67.164.92:9100`, `cluster=dgx-spark`). `additionalScrapeConfigs` are injected verbatim (scrapeClasses don't relabel them), so `cluster`/`nodename` are set per-target. node_exporter is deployed from the **`nv-dgx-spark` repo** (`make node-exporter-deploy`, docker `--net=host --pid=host`); Grafana dashboard **"DGX Spark / Node Exporter"** (`k8s/helm/manifests/dgx-spark-node-dashboard.yaml`). Tailnet ACL already allows `tag:homelab → *:*`.
+  - **macbook** (Apple Silicon laptop, metrics-only — not a K8s cluster): homelab Prometheus pull-scrapes node_exporter over **Tailscale** (job `node-exporter-macbook`, static target `100.89.15.120:9100`, `cluster=macbook`/`nodename=macbook-pro`). node_exporter is the prebuilt **`darwin-arm64` binary** (`~/.local/bin/node_exporter`, no Homebrew — the Mac can't reach GitHub, so the tarball was `scp`'d in) run by a **LaunchAgent** (`~/Library/LaunchAgents/com.prometheus.node_exporter.plist`, `--web.listen-address=:9100`, no sudo). SSH: `ssh -i ~/.ssh/vgio matthew@100.89.15.120`. Same verbatim-inject `additionalScrapeConfigs` pattern as dgx-spark. ⚠️ It's a laptop — the target flaps on sleep/logout, so expect intermittent `TargetDown` (severity `warning`) → Gotify noise; silence the `node-exporter-macbook` job in Alertmanager if it bites.
 - **Traces pipeline** (2026-03-01):
   - Apps send OTLP traces → OTel Collector (gRPC :4317 / HTTP :4318) → Tempo
   - homelab OTel Collector exports to `tempo.monitoring.svc.cluster.local:4317`
