@@ -1,0 +1,7 @@
+# The remote Apple Silicon MacBook Pro (M2), reached over Tailscale.
+# Monitored by homelab Prometheus as cluster=macbook (job node-exporter-macbook).
+# Login user + SSH key come from ansible.cfg (matthew + ~/.ssh/vgio).
+macbook:
+  hosts:
+    mbp-m2-pro:
+      ansible_host: 100.89.15.120   # Tailscale IP (stable per-node)

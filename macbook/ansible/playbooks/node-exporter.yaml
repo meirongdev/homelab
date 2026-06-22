@@ -1,0 +1,112 @@
+---
+# Install / upgrade Prometheus node_exporter on the MacBook as a per-user LaunchAgent.
+# - prebuilt darwin-arm64 binary (no Homebrew), pinned + sha256-verified
+# - runs on :9100, scraped over Tailscale by homelab Prometheus (job node-exporter-macbook)
+# - NO sudo required (user-domain LaunchAgent in ~/Library/LaunchAgents)
+# Idempotent: re-running with the same version is a no-op.
+- name: Deploy node_exporter (LaunchAgent)
+  hosts: macbook
+  gather_facts: true            # need ansible_user_dir
+  vars:
+    node_exporter_version: "1.11.1"
+    node_exporter_arch: darwin-arm64
+    node_exporter_sha256: e987428618362c2d2540a68b722bd982ef1486c9961631298f20ea8fd57d3be4
+    ne_label: com.prometheus.node_exporter
+    ne_listen: ":9100"
+    ne_bin: "{{ ansible_facts.user_dir }}/.local/bin/node_exporter"
+    ne_plist: "{{ ansible_facts.user_dir }}/Library/LaunchAgents/{{ ne_label }}.plist"
+    ne_tarball: "/tmp/node_exporter-{{ node_exporter_version }}.{{ node_exporter_arch }}.tar.gz"
+
+  tasks:
+    - name: Ensure directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ ansible_user_dir }}/.local/bin"
+        - "{{ ansible_user_dir }}/.local/var/log"
+        - "{{ ansible_user_dir }}/Library/LaunchAgents"
+
+    - name: Check installed node_exporter version
+      ansible.builtin.command: "{{ ne_bin }} --version"
+      register: ne_ver
+      changed_when: false
+      failed_when: false
+
+    - name: Install node_exporter binary (when missing or version mismatch)
+      when: node_exporter_version not in (ne_ver.stdout | default(''))
+      block:
+        - name: Download tarball (sha256-verified)
+          ansible.builtin.get_url:
+            url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.{{ node_exporter_arch }}.tar.gz"
+            dest: "{{ ne_tarball }}"
+            checksum: "sha256:{{ node_exporter_sha256 }}"
+            mode: "0644"
+
+        - name: Extract tarball
+          ansible.builtin.unarchive:
+            src: "{{ ne_tarball }}"
+            dest: /tmp
+            remote_src: true
+
+        - name: Install binary
+          ansible.builtin.copy:
+            src: "/tmp/node_exporter-{{ node_exporter_version }}.{{ node_exporter_arch }}/node_exporter"
+            dest: "{{ ne_bin }}"
+            mode: "0755"
+            remote_src: true
+          notify: reload node_exporter
+
+        - name: Strip Gatekeeper quarantine xattr (Apple Silicon)
+          ansible.builtin.command: "xattr -dr com.apple.quarantine {{ ne_bin }}"
+          changed_when: false
+          failed_when: false
+
+        - name: Clean up tarball + extracted dir
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "{{ ne_tarball }}"
+            - "/tmp/node_exporter-{{ node_exporter_version }}.{{ node_exporter_arch }}"
+
+    - name: Install LaunchAgent plist
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/com.prometheus.node_exporter.plist.j2"
+        dest: "{{ ne_plist }}"
+        mode: "0644"
+      notify: reload node_exporter
+
+    - name: Ensure LaunchAgent is loaded (bootstrap into the GUI domain)
+      ansible.builtin.shell: |
+        uid=$(id -u)
+        if ! launchctl print "gui/${uid}/{{ ne_label }}" >/dev/null 2>&1; then
+          launchctl bootstrap "gui/${uid}" "{{ ne_plist }}"
+          echo BOOTSTRAPPED
+        fi
+      register: ne_load
+      changed_when: "'BOOTSTRAPPED' in ne_load.stdout"
+
+    - name: Verify it is serving metrics
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9100/metrics"
+        return_content: false
+      register: ne_check
+      retries: 5
+      delay: 2
+      until: ne_check.status == 200
+
+  handlers:
+    # bootout is async — bootstrapping before it finishes fails with
+    # "Bootstrap failed: 5: Input/output error", so wait until it's gone first.
+    - name: reload node_exporter
+      ansible.builtin.shell: |
+        uid=$(id -u)
+        label="{{ ne_label }}"
+        launchctl bootout "gui/${uid}/${label}" 2>/dev/null || true
+        for _ in 1 2 3 4 5; do
+          launchctl print "gui/${uid}/${label}" >/dev/null 2>&1 || break
+          sleep 1
+        done
+        launchctl bootstrap "gui/${uid}" "{{ ne_plist }}"

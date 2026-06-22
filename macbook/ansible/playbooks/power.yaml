@@ -1,0 +1,26 @@
+---
+# Headless / clamshell power policy for the remote MacBook.
+#
+# Goal: keep the SYSTEM awake on AC power so the lid-closed Mac stays reachable over
+# Tailscale (this makes "stay awake" independent of the Amphetamine GUI app).
+#
+# NOTE: this does NOT stop the aerial-wallpaper CPU burn. That requires the DISPLAY to
+# sleep, which is gated by Amphetamine's "Allow display sleep" toggle — a GUI-only setting
+# Ansible cannot change. See README ("Manual / GUI-only steps").
+#
+# Needs root for pmset:  run via `just power`  (adds --ask-become-pass).
+- name: macOS headless power policy
+  hosts: macbook
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Read current SleepDisabled flag
+      ansible.builtin.shell: "set -o pipefail; pmset -g | awk '/SleepDisabled/{print $2}'"
+      args:
+        executable: /bin/bash
+      register: sleep_disabled
+      changed_when: false
+
+    - name: Keep the system awake on AC power (lid-closed clamshell stays reachable)
+      ansible.builtin.command: pmset -c disablesleep 1
+      when: (sleep_disabled.stdout | trim) != "1"
