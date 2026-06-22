@@ -6,6 +6,10 @@ help:
 ping:
     ansible-playbook playbooks/ping.yaml
 
+# 确保 Homebrew + CLI 包（tmux 等）就位（无需 sudo，幂等）
+packages:
+    ansible-playbook playbooks/packages.yaml
+
 # 部署/升级 node_exporter LaunchAgent（无需 sudo）
 node-exporter:
     ansible-playbook playbooks/node-exporter.yaml

@@ -1,0 +1,33 @@
+---
+# Ensure Homebrew + CLI packages on the MacBook.
+# Runs as the login user (matthew) — Homebrew refuses to run as root, so NO become here.
+# Idempotent: already-installed packages report ok (no change).
+- name: Homebrew + CLI packages
+  hosts: macbook
+  gather_facts: false
+  vars:
+    homebrew_prefix: /opt/homebrew          # Apple Silicon default prefix
+    homebrew_packages:
+      - tmux
+  tasks:
+    - name: Check whether Homebrew is installed
+      ansible.builtin.stat:
+        path: "{{ homebrew_prefix }}/bin/brew"
+      register: brew_bin
+
+    - name: Install Homebrew (only if missing)
+      ansible.builtin.shell: |
+        NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      when: not brew_bin.stat.exists
+      # NOTE: first-time bootstrap creates {{ homebrew_prefix }} and calls sudo internally,
+      # so on a fresh Mac run this once interactively (it prompts for the admin password).
+      # On this machine Homebrew already exists, so this task is skipped.
+
+    - name: Ensure CLI packages are present (idempotent)
+      community.general.homebrew:
+        name: "{{ homebrew_packages }}"
+        state: present
+        path: "{{ homebrew_prefix }}/bin"
+        update_homebrew: false
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
