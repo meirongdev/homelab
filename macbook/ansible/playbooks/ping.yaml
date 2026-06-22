@@ -1,0 +1,8 @@
+---
+# Connectivity check: confirms the MacBook is reachable over Tailscale + the SSH key works.
+- name: Ping the MacBook
+  hosts: macbook
+  gather_facts: false
+  tasks:
+    - name: Ping
+      ansible.builtin.ping:

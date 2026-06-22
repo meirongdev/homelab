@@ -1,0 +1,5 @@
+---
+# Everything Ansible can configure on the MacBook, in order.
+# Run with: just site   (prompts for the sudo password, needed by power.yaml)
+- import_playbook: node-exporter.yaml
+- import_playbook: power.yaml

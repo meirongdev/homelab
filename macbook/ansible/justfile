@@ -1,0 +1,19 @@
+# Show help
+help:
+    @just --list --unsorted
+
+# 连通性检查（经 Tailscale ping 这台 MacBook）
+ping:
+    ansible-playbook playbooks/ping.yaml
+
+# 部署/升级 node_exporter LaunchAgent（无需 sudo）
+node-exporter:
+    ansible-playbook playbooks/node-exporter.yaml
+
+# 应用 headless/clamshell 电源策略（保持远程可达；需 sudo 密码）
+power:
+    ansible-playbook playbooks/power.yaml --ask-become-pass
+
+# 一次跑全部 Ansible 能做的（node_exporter + 电源）
+site:
+    ansible-playbook playbooks/site.yaml --ask-become-pass
