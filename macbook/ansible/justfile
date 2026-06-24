@@ -10,6 +10,10 @@ ping:
 packages:
     ansible-playbook playbooks/packages.yaml
 
+# 安装/确认 AI CLI 工具（claude/qwen/codex/hermes，无需 sudo，幂等）
+ai-clis:
+    ansible-playbook playbooks/ai-clis.yaml
+
 # 部署/升级 node_exporter LaunchAgent（无需 sudo）
 node-exporter:
     ansible-playbook playbooks/node-exporter.yaml
