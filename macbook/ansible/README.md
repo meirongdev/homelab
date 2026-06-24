@@ -10,6 +10,7 @@
 ```bash
 just ping            # 连通性检查
 just packages        # 确保 Homebrew + CLI 包（tmux 等）就位（无需 sudo，幂等）
+just ai-clis         # 安装 AI CLI 工具（claude/qwen/codex/hermes，无需 sudo，幂等）
 just node-exporter   # 装/升级 node_exporter LaunchAgent（无需 sudo，幂等）
 just power           # headless 电源策略（pmset disablesleep，需 sudo 密码 -K）
 just site            # 上面几个一起跑（会问 sudo 密码）
@@ -20,6 +21,7 @@ just site            # 上面几个一起跑（会问 sudo 密码）
 | Playbook | 内容 | sudo |
 |---|---|---|
 | `packages.yaml` | 确保 Homebrew(`/opt/homebrew`)+ CLI 包(`homebrew_packages`,默认 `tmux`)就位;以 matthew 身份跑(brew 不能 root)。Homebrew 缺失才跑官方安装器——**首次安装需交互式 admin 密码**,故重建机器时单独手动跑一次 | 否 |
+| `ai-clis.yaml` | 安装 AI CLI 工具: `claude`(`@anthropic-ai/claude-code` npm), `qwen`(`@qwen-code/qwen-code` npm), `codex`(brew cask, 自含 arm64 二进制), `hermes`(`hermes-agent` brew formula)。先通过 brew 装 `node`(带 npm), 再 `npm install -g`。幂等：已装的不重装 | 否 |
 | `node-exporter.yaml` | 下载校验 `darwin-arm64` 二进制 → `~/.local/bin/node_exporter`；写 LaunchAgent（`:9100`, KeepAlive, RunAtLoad）→ `~/Library/LaunchAgents/com.prometheus.node_exporter.plist`；`launchctl bootstrap` 到 GUI 域；校验 `/metrics` 200 | 否 |
 | `power.yaml` | `pmset -c disablesleep 1`——插电时保持**系统**唤醒，合盖也不睡，从而 Tailscale 远程常在线（让"保持唤醒"不依赖 Amphetamine GUI） | 是 |
 

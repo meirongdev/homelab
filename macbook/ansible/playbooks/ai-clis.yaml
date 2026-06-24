@@ -1,0 +1,51 @@
+---
+# Install AI CLI tools on the MacBook. Idempotent — safe to re-run.
+# Runs as the login user (matthew) — Homebrew + npm refuse to run as root, so NO become.
+#
+# Tool → method:
+#   claude (Claude Code)   npm @anthropic-ai/claude-code
+#   qwen   (Qwen Code)     npm @qwen-code/qwen-code
+#   codex  (OpenAI Codex)  brew cask codex           (self-contained arm64 binary)
+#   hermes (Hermes Agent)  brew formula hermes-agent
+#
+# Prerequisites: Homebrew must already be installed (packages.yaml handles that).
+- name: AI CLI tools
+  hosts: macbook
+  gather_facts: false
+  vars:
+    homebrew_prefix: /opt/homebrew
+    homebrew_formulas:
+      - node           # brings npm; required for claude + qwen
+      - hermes-agent
+    homebrew_casks:
+      - codex
+    npm_global_packages:
+      - "@anthropic-ai/claude-code"
+      - "@qwen-code/qwen-code"
+
+  tasks:
+    - name: Ensure AI CLI Homebrew formulas are present
+      community.general.homebrew:
+        name: "{{ homebrew_formulas }}"
+        state: present
+        path: "{{ homebrew_prefix }}/bin"
+        update_homebrew: false
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Ensure AI CLI Homebrew casks are present
+      community.general.homebrew_cask:
+        name: "{{ homebrew_casks }}"
+        state: present
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Install npm global AI CLIs
+      community.general.npm:
+        name: "{{ item }}"
+        global: true
+        state: present
+        executable: "{{ homebrew_prefix }}/bin/npm"
+      loop: "{{ npm_global_packages }}"
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
