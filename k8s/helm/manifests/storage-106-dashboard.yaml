@@ -1,0 +1,391 @@
+# Grafana Dashboard: Storage Server / Node 106
+# Host metrics for the NFS storage server at 192.168.50.106 (Debian 13 trixie),
+# scraped by homelab Prometheus via two jobs:
+#   - node-exporter-metal-nodes  (:9100)  — CPU/mem/disk/ZFS/network
+#   - smartctl-storage-106       (:9633)  — SMART disk health
+# Deployed via: cd proxmox/ansible && just node-exporter
+# Auto-loaded via grafana-sc-dashboard sidecar and synced by ArgoCD monitoring-dashboards App.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: storage-106-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Hardware"
+data:
+  storage-106-node.json: |-
+    {
+      "annotations": {"list": []},
+      "description": "Storage Server 106 (Debian 13) 主机指标：CPU/负载、内存、ZFS文件系统、磁盘IO、SMART硬盘健康（SSD磨损/温度/寿命）、NFS网络流量。",
+      "editable": true,
+      "graphTooltip": 1,
+      "links": [],
+      "panels": [
+
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+          "id": 100,
+          "title": "🗄️ 概览 / Overview",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]},
+              "mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}],
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 0, "y": 1},
+          "id": 1,
+          "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value"},
+          "title": "Node Status",
+          "type": "stat",
+          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "up{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}", "instant": true, "legendFormat": "node_exporter"}]
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "h"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 4, "y": 1},
+          "id": 2,
+          "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value"},
+          "title": "Uptime",
+          "type": "stat",
+          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "(time() - node_boot_time_seconds{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}) / 3600", "instant": true, "legendFormat": "uptime"}]
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 70}, {"color": "red", "value": 90}]},
+              "unit": "percent",
+              "min": 0,
+              "max": 100
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 8, "y": 1},
+          "id": 3,
+          "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
+          "title": "CPU Usage",
+          "type": "stat",
+          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\", job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}[5m])) * 100)", "instant": true, "legendFormat": "CPU %"}]
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 75}, {"color": "red", "value": 90}]},
+              "unit": "percent",
+              "min": 0,
+              "max": 100
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 12, "y": 1},
+          "id": 4,
+          "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
+          "title": "Memory Usage",
+          "type": "stat",
+          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "(1 - node_memory_MemAvailable_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"} / node_memory_MemTotal_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}) * 100", "instant": true, "legendFormat": "Mem %"}]
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 80}, {"color": "red", "value": 95}]},
+              "unit": "percent",
+              "min": 0,
+              "max": 100
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 16, "y": 1},
+          "id": 5,
+          "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
+          "title": "/storage Usage",
+          "type": "stat",
+          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "(1 - node_filesystem_avail_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", mountpoint=\"/storage\"} / node_filesystem_size_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", mountpoint=\"/storage\"}) * 100", "instant": true, "legendFormat": "/storage %"}]
+        },
+
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5},
+          "id": 200,
+          "title": "🖥️ CPU & Load",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "palette-classic"}, "unit": "percent", "min": 0, "custom": {"lineWidth": 1, "fillOpacity": 10}},
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+          "id": 6,
+          "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "list", "placement": "bottom"}},
+          "title": "CPU Usage by Mode",
+          "type": "timeseries",
+          "targets": [
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "avg(rate(node_cpu_seconds_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", mode=\"user\"}[5m])) * 100", "legendFormat": "user"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "avg(rate(node_cpu_seconds_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", mode=\"system\"}[5m])) * 100", "legendFormat": "system"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "avg(rate(node_cpu_seconds_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", mode=\"iowait\"}[5m])) * 100", "legendFormat": "iowait"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "avg(rate(node_cpu_seconds_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", mode=\"idle\"}[5m])) * 100", "legendFormat": "idle"}
+          ]
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "palette-classic"}, "unit": "none", "custom": {"lineWidth": 2, "fillOpacity": 5}},
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+          "id": 7,
+          "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "list", "placement": "bottom"}},
+          "title": "Load Average",
+          "type": "timeseries",
+          "targets": [
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_load1{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}", "legendFormat": "1m"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_load5{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}", "legendFormat": "5m"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_load15{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}", "legendFormat": "15m"}
+          ]
+        },
+
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 14},
+          "id": 300,
+          "title": "💾 Memory",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "palette-classic"}, "unit": "bytes", "custom": {"lineWidth": 1, "fillOpacity": 15, "stacking": {"mode": "normal"}}},
+            "overrides": [
+              {"matcher": {"id": "byName", "options": "available"}, "properties": [{"id": "color", "value": {"fixedColor": "green", "mode": "fixed"}}]},
+              {"matcher": {"id": "byName", "options": "used"}, "properties": [{"id": "color", "value": {"fixedColor": "blue", "mode": "fixed"}}]},
+              {"matcher": {"id": "byName", "options": "cached"}, "properties": [{"id": "color", "value": {"fixedColor": "purple", "mode": "fixed"}}]},
+              {"matcher": {"id": "byName", "options": "swap used"}, "properties": [{"id": "color", "value": {"fixedColor": "red", "mode": "fixed"}}]}
+            ]
+          },
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 15},
+          "id": 8,
+          "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "list", "placement": "bottom"}},
+          "title": "Memory Usage",
+          "type": "timeseries",
+          "targets": [
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_memory_MemTotal_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"} - node_memory_MemAvailable_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}", "legendFormat": "used"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_memory_Cached_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}", "legendFormat": "cached"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_memory_Buffers_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}", "legendFormat": "buffers"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_memory_MemAvailable_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}", "legendFormat": "available"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_memory_SwapTotal_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"} - node_memory_SwapFree_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}", "legendFormat": "swap used"}
+          ]
+        },
+
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 23},
+          "id": 400,
+          "title": "🗄️ Storage / Filesystem",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 75}, {"color": "red", "value": 90}]},
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 24},
+          "id": 9,
+          "options": {"displayMode": "gradient", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "showUnfilled": true},
+          "title": "Filesystem Usage",
+          "type": "bargauge",
+          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "1 - (node_filesystem_avail_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", fstype!~\"tmpfs|devtmpfs|overlay\"} / node_filesystem_size_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", fstype!~\"tmpfs|devtmpfs|overlay\"})", "instant": true, "legendFormat": "{{mountpoint}}"}]
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "palette-classic"}, "unit": "Bps", "custom": {"lineWidth": 1, "fillOpacity": 10}},
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 16, "x": 8, "y": 24},
+          "id": 10,
+          "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "list", "placement": "bottom"}},
+          "title": "Disk I/O (read / write)",
+          "type": "timeseries",
+          "targets": [
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_disk_read_bytes_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", device=~\"sd.\"}[5m])", "legendFormat": "{{device}} read"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "-rate(node_disk_written_bytes_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", device=~\"sd.\"}[5m])", "legendFormat": "{{device}} write"}
+          ]
+        },
+
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 32},
+          "id": 500,
+          "title": "🔬 SMART / Disk Health",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]},
+              "mappings": [{"type": "value", "options": {"0": {"text": "FAILED", "color": "red"}, "1": {"text": "PASSED", "color": "green"}}}],
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 5, "w": 8, "x": 0, "y": 33},
+          "id": 11,
+          "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
+          "title": "SMART Health Status",
+          "type": "stat",
+          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "smartctl_device_smart_status{job=\"smartctl-storage-106\"}", "instant": true, "legendFormat": "{{device}}"}]
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 40}, {"color": "red", "value": 55}]},
+              "unit": "celsius"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 5, "w": 8, "x": 8, "y": 33},
+          "id": 12,
+          "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
+          "title": "Disk Temperatures",
+          "type": "stat",
+          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "smartctl_device_temperature_celsius{job=\"smartctl-storage-106\"}", "instant": true, "legendFormat": "{{device}}"}]
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "h"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 5, "w": 8, "x": 16, "y": 33},
+          "id": 13,
+          "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
+          "title": "Power-On Hours",
+          "type": "stat",
+          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "smartctl_device_power_on_seconds{job=\"smartctl-storage-106\"} / 3600", "instant": true, "legendFormat": "{{device}}"}]
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "palette-classic"}, "unit": "celsius", "custom": {"lineWidth": 1, "fillOpacity": 5}},
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 38},
+          "id": 14,
+          "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "list", "placement": "bottom"}},
+          "title": "Disk Temperature Trend",
+          "type": "timeseries",
+          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "smartctl_device_temperature_celsius{job=\"smartctl-storage-106\"}", "legendFormat": "{{device}}"}]
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 50}, {"color": "green", "value": 80}]},
+              "unit": "none",
+              "min": 0,
+              "max": 100,
+              "displayName": "${__field.labels.device}"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 38},
+          "id": 15,
+          "options": {"displayMode": "gradient", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "showUnfilled": true},
+          "title": "SSD Life Remaining (normalized, 100=new)",
+          "type": "bargauge",
+          "targets": [
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "smartctl_attr_normalized_value{job=\"smartctl-storage-106\", attribute_name=~\"Media_Wearout_Indicator|Wear_Leveling_Count|SSD_Life_Left|Percent_Lifetime_Remain\"}", "instant": true, "legendFormat": "{{device}} ({{attribute_name}})"}
+          ]
+        },
+
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 46},
+          "id": 600,
+          "title": "🌐 Network / NFS",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "palette-classic"}, "unit": "Bps", "custom": {"lineWidth": 1, "fillOpacity": 10}},
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 47},
+          "id": 16,
+          "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "list", "placement": "bottom"}},
+          "title": "Network I/O (receive / transmit)",
+          "type": "timeseries",
+          "targets": [
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_network_receive_bytes_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", device!~\"lo\"}[5m])", "legendFormat": "{{device}} rx"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "-rate(node_network_transmit_bytes_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", device!~\"lo\"}[5m])", "legendFormat": "{{device}} tx"}
+          ]
+        }
+
+      ],
+      "schemaVersion": 39,
+      "tags": ["curated", "metrics", "storage"],
+      "templating": {
+        "list": [
+          {
+            "current": {"selected": false, "text": "prometheus", "value": "prometheus"},
+            "hide": 2,
+            "name": "datasource",
+            "query": "prometheus",
+            "type": "datasource"
+          }
+        ]
+      },
+      "time": {"from": "now-3h", "to": "now"},
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "Storage Server / Node 106",
+      "uid": "storage-106-node",
+      "version": 1
+    }

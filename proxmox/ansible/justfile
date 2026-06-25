@@ -17,3 +17,7 @@ download-cloud-image:
 # 优化电源和散热（禁用 turbo boost、ASPM 省电、powertop 自动调优）
 power-optimize:
     ansible-playbook playbooks/power-optimize.yaml
+
+# 部署 node_exporter + smartctl_exporter 到 storage 节点（106）
+node-exporter:
+    ansible-playbook playbooks/node-exporter-deploy.yaml --limit storage
