@@ -12,7 +12,7 @@ spec:
     targetRevision: main
     path: k8s/helm/manifests
     directory:
-      include: "{grafana-dashboards.yaml,multicluster-overview-dashboard.yaml,dgx-spark-node-dashboard.yaml,macbook-node-dashboard.yaml,storage-106-dashboard.yaml,eso-alerts.yaml,cilium-envoy-servicemonitor.yaml,slos.yaml,slo-dashboard.yaml,trivy-alerts.yaml,trivy-dashboard.yaml,kyverno-dashboard.yaml,security-events-dashboard.yaml}"
+      include: "{grafana-dashboards.yaml,multicluster-overview-dashboard.yaml,dgx-spark-node-dashboard.yaml,macbook-node-dashboard.yaml,storage-106-dashboard.yaml,power-overview-dashboard.yaml,eso-alerts.yaml,cilium-envoy-servicemonitor.yaml,slos.yaml,slo-dashboard.yaml,trivy-alerts.yaml,trivy-dashboard.yaml,kyverno-dashboard.yaml,security-events-dashboard.yaml}"
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring

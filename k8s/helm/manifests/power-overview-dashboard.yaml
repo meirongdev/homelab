@@ -1,0 +1,230 @@
+# Grafana Dashboard: Hardware Power Overview
+# Cross-machine CPU power consumption via RAPL (intel-rapl powercap interface).
+# Available on Linux hosts: storage-106 (Intel) and proxmox-pve (Ryzen 5600H via intel-rapl).
+# MacBook (Darwin) and oracle-k3s (cloud VM) do not expose hardware power metrics.
+# node_exporter must be started with --collector.rapl on each host.
+# Auto-loaded via grafana-sc-dashboard sidecar and synced by ArgoCD monitoring-dashboards App.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: power-overview-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Hardware"
+data:
+  power-overview.json: |-
+    {
+      "annotations": {"list": []},
+      "description": "各裸金属机器 CPU 功耗总览（RAPL）：storage-106（Intel）、proxmox-pve（Ryzen 5600H）。macOS 和云虚机无硬件功耗指标。",
+      "editable": true,
+      "graphTooltip": 1,
+      "links": [],
+      "panels": [
+
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+          "id": 100,
+          "title": "⚡ 当前功耗 / Current Power",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 35},
+                {"color": "red", "value": 65}
+              ]},
+              "unit": "watt",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 5, "w": 24, "x": 0, "y": 1},
+          "id": 1,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "value_and_name"
+          },
+          "title": "CPU Package Power (Watts)",
+          "type": "stat",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "rate(node_rapl_package_joules_total{job=\"node-exporter-metal-nodes\"}[2m])",
+              "instant": true,
+              "legendFormat": "{{nodename}}"
+            }
+          ]
+        },
+
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 6},
+          "id": 200,
+          "title": "📈 功耗趋势 / Power Trend",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "unit": "watt",
+              "custom": {"lineWidth": 2, "fillOpacity": 8}
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 10, "w": 12, "x": 0, "y": 7},
+          "id": 2,
+          "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "list", "placement": "bottom"}},
+          "title": "CPU Package Power — All Hosts",
+          "type": "timeseries",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "rate(node_rapl_package_joules_total{job=\"node-exporter-metal-nodes\"}[2m])",
+              "legendFormat": "{{nodename}}"
+            }
+          ]
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "unit": "watt",
+              "custom": {"lineWidth": 1, "fillOpacity": 5}
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 10, "w": 12, "x": 12, "y": 7},
+          "id": 3,
+          "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "list", "placement": "bottom"}},
+          "title": "RAPL Domain Breakdown — storage-106",
+          "type": "timeseries",
+          "targets": [
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_package_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}[2m])", "legendFormat": "106 Package"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_core_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}[2m])", "legendFormat": "106 Core"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_dram_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}[2m])", "legendFormat": "106 DRAM"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_package_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}[2m])", "legendFormat": "pve Package"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_core_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}[2m])", "legendFormat": "pve Core"}
+          ]
+        },
+
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 17},
+          "id": 300,
+          "title": "🌡️ CPU 温度 / Temperature",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 70},
+                {"color": "red", "value": 85}
+              ]},
+              "unit": "celsius"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 5, "w": 24, "x": 0, "y": 18},
+          "id": 4,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "value_and_name"
+          },
+          "title": "CPU Temperature (hwmon)",
+          "type": "stat",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "node_hwmon_temp_celsius{job=\"node-exporter-metal-nodes\", sensor=~\"Tctl|Package.*|k10temp.*|coretemp.*\"}",
+              "instant": true,
+              "legendFormat": "{{nodename}} {{chip}} {{sensor}}"
+            }
+          ]
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "unit": "celsius",
+              "custom": {"lineWidth": 1, "fillOpacity": 5}
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 23},
+          "id": 5,
+          "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "list", "placement": "bottom"}},
+          "title": "CPU Temperature Trend",
+          "type": "timeseries",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "node_hwmon_temp_celsius{job=\"node-exporter-metal-nodes\", sensor=~\"Tctl|Package.*|k10temp.*|coretemp.*\"}",
+              "legendFormat": "{{nodename}} {{sensor}}"
+            }
+          ]
+        },
+
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 31},
+          "id": 400,
+          "title": "ℹ️ 说明 / Notes",
+          "type": "row"
+        },
+        {
+          "datasource": null,
+          "gridPos": {"h": 5, "w": 24, "x": 0, "y": 32},
+          "id": 6,
+          "options": {
+            "content": "## 功耗数据来源\n- **storage-106** (Intel CPU)：RAPL via `--collector.rapl`，可读 Package / Core / Uncore / DRAM\n- **proxmox-pve** (Ryzen 5600H)：AMD RAPL 通过 `intel-rapl` powercap 接口暴露，可读 Package / Core\n- **MacBook** (Darwin)：macOS 不暴露 RAPL，无功耗指标\n- **oracle-k3s** (云虚机)：无物理硬件访问\n- **DGX Spark**：GPU 功耗需 DCGM exporter（待配置）\n\n> RAPL 测量 CPU 封装功耗，不含整机（电源、硬盘、风扇）。整机功耗需智能插座（如 SNMP PDU）。",
+            "mode": "markdown"
+          },
+          "title": "",
+          "type": "text"
+        }
+
+      ],
+      "schemaVersion": 39,
+      "tags": ["curated", "metrics", "power"],
+      "templating": {
+        "list": [
+          {
+            "current": {"selected": false, "text": "prometheus", "value": "prometheus"},
+            "hide": 2,
+            "name": "datasource",
+            "query": "prometheus",
+            "type": "datasource"
+          }
+        ]
+      },
+      "time": {"from": "now-3h", "to": "now"},
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "Hardware Power Overview",
+      "uid": "hardware-power-overview",
+      "version": 1
+    }

@@ -18,6 +18,10 @@ download-cloud-image:
 power-optimize:
     ansible-playbook playbooks/power-optimize.yaml
 
-# 部署 node_exporter + smartctl_exporter 到 storage 节点（106）
+# 部署 node_exporter (+ smartctl_exporter on storage) 到所有裸金属节点（106 + pve-1）
 node-exporter:
+    ansible-playbook playbooks/node-exporter-deploy.yaml
+
+# 仅更新 storage 节点（106）的 exporter
+node-exporter-storage:
     ansible-playbook playbooks/node-exporter-deploy.yaml --limit storage

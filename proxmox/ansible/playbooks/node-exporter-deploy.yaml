@@ -1,4 +1,5 @@
 ---
+# Play 1: storage server (106) — node_exporter + smartctl_exporter + RAPL
 - name: Deploy node_exporter and smartctl_exporter on storage server
   hosts: storage
   gather_facts: true
@@ -38,7 +39,7 @@
         group: root
         mode: "0755"
 
-    - name: Create node_exporter systemd service
+    - name: Create node_exporter systemd service (with RAPL + ZFS)
       ansible.builtin.copy:
         dest: /etc/systemd/system/node_exporter.service
         mode: "0644"
@@ -52,6 +53,7 @@
           ExecStart=/usr/local/bin/node_exporter \
             --web.listen-address=:{{ node_exporter_port }} \
             --collector.zfs \
+            --collector.rapl \
             --collector.systemd \
             --collector.processes
           Restart=always
@@ -59,13 +61,14 @@
 
           [Install]
           WantedBy=multi-user.target
+      notify: restart node_exporter
 
     - name: Enable and start node_exporter
       ansible.builtin.systemd:
         name: node_exporter
         daemon_reload: true
         enabled: true
-        state: restarted
+        state: started
 
     # ── smartctl_exporter ──────────────────────────────────────────────────────
     # Remove Proxmox Enterprise repo files left from previous OS install
@@ -158,5 +161,91 @@
     - name: Report endpoints
       ansible.builtin.debug:
         msg:
-          - "node_exporter  → http://192.168.50.106:{{ node_exporter_port }}/metrics"
+          - "node_exporter    → http://192.168.50.106:{{ node_exporter_port }}/metrics"
           - "smartctl_exporter → http://192.168.50.106:{{ smartctl_exporter_port }}/metrics"
+
+  handlers:
+    - name: restart node_exporter
+      ansible.builtin.systemd:
+        name: node_exporter
+        daemon_reload: true
+        state: restarted
+
+# Play 2: Proxmox host (pve-1) — node_exporter only (with RAPL)
+- name: Deploy node_exporter on Proxmox host
+  hosts: pve-1
+  gather_facts: true
+  vars:
+    node_exporter_version: "1.11.1"
+    node_exporter_port: 9100
+
+  tasks:
+    - name: Create node_exporter system user
+      ansible.builtin.user:
+        name: node_exporter
+        system: true
+        shell: /bin/false
+        create_home: false
+
+    - name: Download node_exporter archive
+      ansible.builtin.get_url:
+        url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+        dest: /tmp/node_exporter.tar.gz
+        mode: "0644"
+
+    - name: Extract node_exporter
+      ansible.builtin.unarchive:
+        src: /tmp/node_exporter.tar.gz
+        dest: /tmp/
+        remote_src: true
+
+    - name: Install node_exporter binary
+      ansible.builtin.copy:
+        src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+        dest: /usr/local/bin/node_exporter
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Create node_exporter systemd service (with RAPL)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/node_exporter.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Prometheus Node Exporter
+          After=network.target
+
+          [Service]
+          User=node_exporter
+          ExecStart=/usr/local/bin/node_exporter \
+            --web.listen-address=:{{ node_exporter_port }} \
+            --collector.rapl \
+            --collector.systemd \
+            --collector.processes
+          Restart=always
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start node_exporter
+      ansible.builtin.systemd:
+        name: node_exporter
+        daemon_reload: true
+        enabled: true
+        state: restarted
+
+    - name: Wait for node_exporter to be ready
+      ansible.builtin.uri:
+        url: "http://localhost:{{ node_exporter_port }}/metrics"
+        return_content: false
+      register: ne_check
+      until: ne_check.status == 200
+      retries: 6
+      delay: 5
+
+    - name: Report endpoint
+      ansible.builtin.debug:
+        msg: "node_exporter → http://192.168.50.4:{{ node_exporter_port }}/metrics"

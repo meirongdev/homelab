@@ -347,6 +347,52 @@ data:
         {
           "collapsed": false,
           "gridPos": {"h": 1, "w": 24, "x": 0, "y": 46},
+          "id": 700,
+          "title": "⚡ Power Consumption (RAPL)",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 30}, {"color": "red", "value": 60}]},
+              "unit": "watt"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 12, "x": 0, "y": 47},
+          "id": 17,
+          "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
+          "title": "CPU Power Now (RAPL)",
+          "type": "stat",
+          "targets": [
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_package_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}[2m])", "instant": true, "legendFormat": "Package"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_core_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}[2m])", "instant": true, "legendFormat": "Core"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_dram_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}[2m])", "instant": true, "legendFormat": "DRAM"}
+          ]
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "palette-classic"}, "unit": "watt", "custom": {"lineWidth": 2, "fillOpacity": 10}},
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 47},
+          "id": 18,
+          "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "list", "placement": "bottom"}},
+          "title": "CPU Power Trend (RAPL)",
+          "type": "timeseries",
+          "targets": [
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_package_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}[2m])", "legendFormat": "Package"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_core_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}[2m])", "legendFormat": "Core"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_dram_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}[2m])", "legendFormat": "DRAM"}
+          ]
+        },
+
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 55},
           "id": 600,
           "title": "🌐 Network / NFS",
           "type": "row"
