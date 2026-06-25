@@ -182,9 +182,25 @@ prometheus:
         static_configs:
           - targets:
               - 192.168.50.106:9100  # storage-node-1
+            labels:
+              cluster: homelab
+              nodename: storage-106
+          - targets:
               - 192.168.50.4:9100    # proxmox-node-1
             labels:
               cluster: homelab
+              nodename: proxmox-pve
+
+      # Storage server (106) SMART disk health — smartctl_exporter (:9633, root).
+      # Deployed via: cd proxmox/ansible && just node-exporter
+      - job_name: 'smartctl-storage-106'
+        scrape_interval: 120s
+        static_configs:
+          - targets:
+              - 192.168.50.106:9633
+            labels:
+              cluster: homelab
+              nodename: storage-106
 
       # DGX Spark cluster (2× GB10) — host metrics via node_exporter (docker, :9100),
       # scraped over Tailscale. node_exporter deployed from the nv-dgx-spark repo:
