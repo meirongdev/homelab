@@ -1,7 +1,7 @@
 # Hermes Agent — Profile 管理与 MCP 集成
 
 > Last updated: 2026-06-26
-> 适用版本：Hermes Agent v0.17.x（macbook，`matthew@100.89.15.120`，Homebrew 安装）
+> 适用版本：Hermes Agent v0.17.x（macbook，Homebrew 安装）
 
 ---
 
@@ -17,10 +17,10 @@ hermes profile list
 
 ```
  Profile          Model                        Gateway      Alias
- ◆default         deepseek-v4-flash            running      —
-  fortress        deepseek-v4-flash            stopped      fortress
-  homelab         deepseek-v4-flash            stopped      homelab
-  oneapi          deepseek-v4-flash            stopped      oneapi
+ ◆default         <model>                      running      —
+  profile-a       <model>                      stopped      profile-a
+  profile-b       <model>                      stopped      profile-b
+  profile-c       <model>                      stopped      profile-c
 ```
 
 `◆` 标记表示当前 sticky 默认 profile。`Gateway` 列显示该 profile 的后台 gateway 服务状态。
@@ -35,8 +35,8 @@ hermes profile list
 # 1. 停止当前正在运行的 gateway（属于当前活跃 profile）
 hermes gateway stop
 
-# 2. 切换 sticky 默认到目标 profile（例如 oneapi）
-hermes profile use oneapi
+# 2. 切换 sticky 默认到目标 profile（例如 profile-b）
+hermes profile use <target-profile>
 
 # 3. 为新 profile 启动 gateway
 hermes gateway start
