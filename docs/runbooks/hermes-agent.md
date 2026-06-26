@@ -51,6 +51,8 @@ hermes profile list     # ◆ 应出现在目标 profile 前
 
 > **注意**：`profile list` 的 Gateway 列存在轻微刷新延迟，以 `hermes gateway status` 的 PID 为准。
 
+> **限制**：同一时间只能运行一个 profile 的 gateway。启动新 profile 的 gateway 会导致旧的停止或异常退出，不支持并行。
+
 ---
 
 ## MCP 集成
