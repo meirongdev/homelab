@@ -66,20 +66,11 @@ hermes profile list     # ◆ 应出现在目标 profile 前
 **一次性依赖安装**（每台机器只需安装一次）：
 
 ```bash
-# 在 Hermes 自带的 Python 环境中安装 mcp-atlassian
+# 在 Hermes 自带的 Python 环境中安装依赖
+# 注意：不要用 "hermes-agent[mcp]"，会触发 hermes-agent 重装并覆盖 locale 文件
 HERMES_PY=$(ls -d /opt/homebrew/Cellar/hermes-agent/*/libexec/bin/python | tail -1)
-$HERMES_PY -m pip install "hermes-agent[mcp]" mcp-atlassian
+$HERMES_PY -m pip install mcp mcp-atlassian
 ```
-
-> **⚠️ 安装后必须修复 locale 文件**：pip 会把 `hermes-agent` 从 PyPI 重装进 virtualenv，
-> 覆盖 Homebrew 原本放在 `site-packages/locales/` 的翻译文件，导致 `/profile` 等内置命令
-> 显示原始 key（如 `gateway.profile.header`）。安装完后执行一次修复：
->
-> ```bash
-> HERMES_BASE=$(ls -d /opt/homebrew/Cellar/hermes-agent/*/libexec | tail -1)
-> cp -r $HERMES_BASE/locales $HERMES_BASE/lib/python*/site-packages/locales
-> hermes gateway restart
-> ```
 
 **添加 Jira MCP 到指定 profile**：
 
