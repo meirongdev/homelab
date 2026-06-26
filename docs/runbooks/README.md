@@ -9,6 +9,7 @@
 2. [backup-recovery.md](backup-recovery.md): 备份与灾难恢复 SOP（数据分级、恢复流程、检查清单）
 3. [cilium-gateway-cutover.md](cilium-gateway-cutover.md): Cilium Gateway / Cloudflare Tunnel 切换执行手册
 4. [homelab-rebuild-ubuntu-24-04.md](homelab-rebuild-ubuntu-24-04.md): homelab 节点重建与 Ubuntu 24.04 LTS 回退手册
+5. [hermes-agent.md](hermes-agent.md): Hermes Agent — Profile 切换与 MCP 集成（Jira Cloud）
 
 ## Runbook Standard
 
