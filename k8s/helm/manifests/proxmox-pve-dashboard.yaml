@@ -1,25 +1,25 @@
-# Grafana Dashboard: Storage Server / Node 106
-# Host metrics for the NFS storage server at 192.168.50.106 (Debian 13 trixie),
+# Grafana Dashboard: Proxmox Host / PVE (Ryzen 5600H laptop)
+# Host metrics for the Proxmox VE host at 192.168.50.4 (Ryzen 5600H laptop, runs hot),
 # scraped by homelab Prometheus via two jobs:
-#   - node-exporter-metal-nodes  (:9100)  — CPU/mem/disk/ZFS/network
-#   - smartctl-storage-106       (:9633)  — SMART disk health
-# Deployed via: cd proxmox/ansible && just node-exporter
+#   - node-exporter-metal-nodes  (:9100)  — CPU/mem/disk/network/RAPL
+#   - smartctl-proxmox-pve       (:9633)  — SMART disk health
+# Deployed via: cd proxmox/ansible && just node-exporter (Play 2, pve-1).
 # Auto-loaded via grafana-sc-dashboard sidecar and synced by ArgoCD monitoring-dashboards App.
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: storage-106-dashboard
+  name: proxmox-pve-dashboard
   namespace: monitoring
   labels:
     grafana_dashboard: "1"
   annotations:
     grafana_folder: "Hardware"
 data:
-  storage-106-node.json: |-
+  proxmox-pve-node.json: |-
     {
       "annotations": {"list": []},
-      "description": "Storage Server 106 (Debian 13) 主机指标：CPU/负载、内存、ZFS文件系统、磁盘IO、SMART硬盘健康（SSD磨损/温度/寿命）、NFS网络流量。",
+      "description": "Proxmox host (Ryzen 5600H 笔记本) 主机指标：CPU/负载、内存、文件系统、磁盘IO、SMART硬盘健康（NVMe/SSD 磨损/温度/寿命）、CPU功耗(RAPL)、网络流量。该主机散热受限(idle ~74°C)，关注温度与功耗。",
       "editable": true,
       "graphTooltip": 1,
       "links": [],
@@ -29,7 +29,7 @@ data:
           "collapsed": false,
           "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
           "id": 100,
-          "title": "🗄️ 概览 / Overview",
+          "title": "🖥️ 概览 / Overview",
           "type": "row"
         },
         {
@@ -51,7 +51,7 @@ data:
           "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value"},
           "title": "Node Status",
           "type": "stat",
-          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "up{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}", "instant": true, "legendFormat": "node_exporter"}]
+          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "up{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}", "instant": true, "legendFormat": "node_exporter"}]
         },
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
@@ -68,7 +68,7 @@ data:
           "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value"},
           "title": "Uptime",
           "type": "stat",
-          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "(time() - node_boot_time_seconds{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}) / 3600", "instant": true, "legendFormat": "uptime"}]
+          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "(time() - node_boot_time_seconds{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}) / 3600", "instant": true, "legendFormat": "uptime"}]
         },
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
@@ -87,7 +87,7 @@ data:
           "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
           "title": "CPU Usage",
           "type": "stat",
-          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\", job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}[5m])) * 100)", "instant": true, "legendFormat": "CPU %"}]
+          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\", job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}[5m])) * 100)", "instant": true, "legendFormat": "CPU %"}]
         },
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
@@ -106,7 +106,7 @@ data:
           "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
           "title": "Memory Usage",
           "type": "stat",
-          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "(1 - node_memory_MemAvailable_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"} / node_memory_MemTotal_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}) * 100", "instant": true, "legendFormat": "Mem %"}]
+          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "(1 - node_memory_MemAvailable_bytes{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"} / node_memory_MemTotal_bytes{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}) * 100", "instant": true, "legendFormat": "Mem %"}]
         },
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
@@ -123,9 +123,9 @@ data:
           "gridPos": {"h": 4, "w": 4, "x": 16, "y": 1},
           "id": 5,
           "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
-          "title": "/storage Usage",
+          "title": "/ (root) Usage",
           "type": "stat",
-          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "(1 - node_filesystem_avail_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", mountpoint=\"/storage\"} / node_filesystem_size_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", mountpoint=\"/storage\"}) * 100", "instant": true, "legendFormat": "/storage %"}]
+          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "(1 - node_filesystem_avail_bytes{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\", mountpoint=\"/\"} / node_filesystem_size_bytes{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\", mountpoint=\"/\"}) * 100", "instant": true, "legendFormat": "/ %"}]
         },
 
         {
@@ -147,10 +147,10 @@ data:
           "title": "CPU Usage by Mode",
           "type": "timeseries",
           "targets": [
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "avg(rate(node_cpu_seconds_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", mode=\"user\"}[5m])) * 100", "legendFormat": "user"},
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "avg(rate(node_cpu_seconds_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", mode=\"system\"}[5m])) * 100", "legendFormat": "system"},
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "avg(rate(node_cpu_seconds_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", mode=\"iowait\"}[5m])) * 100", "legendFormat": "iowait"},
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "avg(rate(node_cpu_seconds_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", mode=\"idle\"}[5m])) * 100", "legendFormat": "idle"}
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "avg(rate(node_cpu_seconds_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\", mode=\"user\"}[5m])) * 100", "legendFormat": "user"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "avg(rate(node_cpu_seconds_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\", mode=\"system\"}[5m])) * 100", "legendFormat": "system"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "avg(rate(node_cpu_seconds_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\", mode=\"iowait\"}[5m])) * 100", "legendFormat": "iowait"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "avg(rate(node_cpu_seconds_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\", mode=\"idle\"}[5m])) * 100", "legendFormat": "idle"}
           ]
         },
         {
@@ -165,9 +165,9 @@ data:
           "title": "Load Average",
           "type": "timeseries",
           "targets": [
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_load1{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}", "legendFormat": "1m"},
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_load5{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}", "legendFormat": "5m"},
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_load15{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}", "legendFormat": "15m"}
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_load1{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}", "legendFormat": "1m"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_load5{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}", "legendFormat": "5m"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_load15{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}", "legendFormat": "15m"}
           ]
         },
 
@@ -195,11 +195,11 @@ data:
           "title": "Memory Usage",
           "type": "timeseries",
           "targets": [
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_memory_MemTotal_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"} - node_memory_MemAvailable_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}", "legendFormat": "used"},
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_memory_Cached_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}", "legendFormat": "cached"},
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_memory_Buffers_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}", "legendFormat": "buffers"},
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_memory_MemAvailable_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}", "legendFormat": "available"},
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_memory_SwapTotal_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"} - node_memory_SwapFree_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}", "legendFormat": "swap used"}
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_memory_MemTotal_bytes{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"} - node_memory_MemAvailable_bytes{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}", "legendFormat": "used"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_memory_Cached_bytes{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}", "legendFormat": "cached"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_memory_Buffers_bytes{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}", "legendFormat": "buffers"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_memory_MemAvailable_bytes{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}", "legendFormat": "available"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "node_memory_SwapTotal_bytes{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"} - node_memory_SwapFree_bytes{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}", "legendFormat": "swap used"}
           ]
         },
 
@@ -227,7 +227,7 @@ data:
           "options": {"displayMode": "gradient", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "showUnfilled": true},
           "title": "Filesystem Usage",
           "type": "bargauge",
-          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "1 - (node_filesystem_avail_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", fstype!~\"tmpfs|devtmpfs|overlay\"} / node_filesystem_size_bytes{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", fstype!~\"tmpfs|devtmpfs|overlay\"})", "instant": true, "legendFormat": "{{mountpoint}}"}]
+          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "1 - (node_filesystem_avail_bytes{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\", fstype!~\"tmpfs|devtmpfs|overlay|squashfs\"} / node_filesystem_size_bytes{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\", fstype!~\"tmpfs|devtmpfs|overlay|squashfs\"})", "instant": true, "legendFormat": "{{mountpoint}}"}]
         },
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
@@ -241,8 +241,8 @@ data:
           "title": "Disk I/O (read / write)",
           "type": "timeseries",
           "targets": [
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_disk_read_bytes_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", device=~\"sd.\"}[5m])", "legendFormat": "{{device}} read"},
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "-rate(node_disk_written_bytes_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", device=~\"sd.\"}[5m])", "legendFormat": "{{device}} write"}
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_disk_read_bytes_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\", device=~\"nvme[0-9]+n[0-9]+|sd[a-z]+\"}[5m])", "legendFormat": "{{device}} read"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "-rate(node_disk_written_bytes_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\", device=~\"nvme[0-9]+n[0-9]+|sd[a-z]+\"}[5m])", "legendFormat": "{{device}} write"}
           ]
         },
 
@@ -272,14 +272,14 @@ data:
           "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
           "title": "SMART Health Status",
           "type": "stat",
-          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "smartctl_device_smart_status{job=\"smartctl-storage-106\"}", "instant": true, "legendFormat": "{{device}}"}]
+          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "smartctl_device_smart_status{job=\"smartctl-proxmox-pve\"}", "instant": true, "legendFormat": "{{device}}"}]
         },
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "fieldConfig": {
             "defaults": {
               "color": {"mode": "thresholds"},
-              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 40}, {"color": "red", "value": 55}]},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 50}, {"color": "red", "value": 65}]},
               "unit": "celsius"
             },
             "overrides": []
@@ -289,7 +289,7 @@ data:
           "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
           "title": "Disk Temperatures",
           "type": "stat",
-          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "smartctl_device_temperature{job=\"smartctl-storage-106\", temperature_type=\"current\"}", "instant": true, "legendFormat": "{{device}}"}]
+          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "smartctl_device_temperature{job=\"smartctl-proxmox-pve\", temperature_type=\"current\"}", "instant": true, "legendFormat": "{{device}}"}]
         },
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
@@ -306,7 +306,7 @@ data:
           "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
           "title": "Power-On Hours",
           "type": "stat",
-          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "smartctl_device_power_on_seconds{job=\"smartctl-storage-106\"} / 3600", "instant": true, "legendFormat": "{{device}}"}]
+          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "smartctl_device_power_on_seconds{job=\"smartctl-proxmox-pve\"} / 3600", "instant": true, "legendFormat": "{{device}}"}]
         },
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
@@ -319,7 +319,7 @@ data:
           "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "list", "placement": "bottom"}},
           "title": "Disk Temperature Trend",
           "type": "timeseries",
-          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "smartctl_device_temperature{job=\"smartctl-storage-106\", temperature_type=\"current\"}", "legendFormat": "{{device}}"}]
+          "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "smartctl_device_temperature{job=\"smartctl-proxmox-pve\", temperature_type=\"current\"}", "legendFormat": "{{device}}"}]
         },
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
@@ -329,18 +329,18 @@ data:
               "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 50}, {"color": "green", "value": 80}]},
               "unit": "none",
               "min": 0,
-              "max": 100,
-              "displayName": "${__field.labels.device}"
+              "max": 100
             },
             "overrides": []
           },
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 38},
           "id": 15,
           "options": {"displayMode": "gradient", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "showUnfilled": true},
-          "title": "SSD Life Remaining (normalized, 100=new)",
+          "title": "SSD Life Remaining (100=new)",
           "type": "bargauge",
           "targets": [
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "smartctl_attr_normalized_value{job=\"smartctl-storage-106\", attribute_name=~\"Media_Wearout_Indicator|Wear_Leveling_Count|SSD_Life_Left|Percent_Lifetime_Remain\"}", "instant": true, "legendFormat": "{{device}} ({{attribute_name}})"}
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "smartctl_attr_normalized_value{job=\"smartctl-proxmox-pve\", attribute_name=~\"Media_Wearout_Indicator|Wear_Leveling_Count|SSD_Life_Left|Percent_Lifetime_Remain\"}", "instant": true, "legendFormat": "{{device}} ({{attribute_name}})"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "100 - smartctl_device_percentage_used{job=\"smartctl-proxmox-pve\"}", "instant": true, "legendFormat": "{{device}} (NVMe life left)"}
           ]
         },
 
@@ -356,20 +356,20 @@ data:
           "fieldConfig": {
             "defaults": {
               "color": {"mode": "thresholds"},
-              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 30}, {"color": "red", "value": 60}]},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 25}, {"color": "red", "value": 45}]},
               "unit": "watt"
             },
             "overrides": []
           },
-          "gridPos": {"h": 4, "w": 12, "x": 0, "y": 47},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 47},
           "id": 17,
           "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
           "title": "CPU Power Now (RAPL)",
           "type": "stat",
           "targets": [
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_package_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}[2m])", "instant": true, "legendFormat": "Package"},
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_core_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}[2m])", "instant": true, "legendFormat": "Core"},
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_dram_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}[2m])", "instant": true, "legendFormat": "DRAM"}
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_package_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}[2m])", "instant": true, "legendFormat": "Package"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_core_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}[2m])", "instant": true, "legendFormat": "Core"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_dram_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}[2m])", "instant": true, "legendFormat": "DRAM"}
           ]
         },
         {
@@ -384,9 +384,9 @@ data:
           "title": "CPU Power Trend (RAPL)",
           "type": "timeseries",
           "targets": [
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_package_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}[2m])", "legendFormat": "Package"},
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_core_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}[2m])", "legendFormat": "Core"},
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_dram_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\"}[2m])", "legendFormat": "DRAM"}
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_package_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}[2m])", "legendFormat": "Package"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_core_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}[2m])", "legendFormat": "Core"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_dram_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}[2m])", "legendFormat": "DRAM"}
           ]
         },
 
@@ -394,7 +394,7 @@ data:
           "collapsed": false,
           "gridPos": {"h": 1, "w": 24, "x": 0, "y": 55},
           "id": 600,
-          "title": "🌐 Network / NFS",
+          "title": "🌐 Network",
           "type": "row"
         },
         {
@@ -403,20 +403,20 @@ data:
             "defaults": {"color": {"mode": "palette-classic"}, "unit": "Bps", "custom": {"lineWidth": 1, "fillOpacity": 10}},
             "overrides": []
           },
-          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 47},
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 56},
           "id": 16,
           "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "list", "placement": "bottom"}},
           "title": "Network I/O (receive / transmit)",
           "type": "timeseries",
           "targets": [
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_network_receive_bytes_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", device!~\"lo\"}[5m])", "legendFormat": "{{device}} rx"},
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "-rate(node_network_transmit_bytes_total{job=\"node-exporter-metal-nodes\", nodename=\"storage-106\", device!~\"lo\"}[5m])", "legendFormat": "{{device}} tx"}
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_network_receive_bytes_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\", device!~\"lo|veth.*|tap.*|fwbr.*|fwln.*|fwpr.*\"}[5m])", "legendFormat": "{{device}} rx"},
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "-rate(node_network_transmit_bytes_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\", device!~\"lo|veth.*|tap.*|fwbr.*|fwln.*|fwpr.*\"}[5m])", "legendFormat": "{{device}} tx"}
           ]
         }
 
       ],
       "schemaVersion": 39,
-      "tags": ["curated", "metrics", "storage"],
+      "tags": ["curated", "metrics", "proxmox"],
       "templating": {
         "list": [
           {
@@ -431,7 +431,7 @@ data:
       "time": {"from": "now-3h", "to": "now"},
       "timepicker": {},
       "timezone": "browser",
-      "title": "Storage Server / Node 106",
-      "uid": "storage-106-node",
+      "title": "Proxmox Host / PVE (5600H)",
+      "uid": "proxmox-pve-node",
       "version": 1
     }

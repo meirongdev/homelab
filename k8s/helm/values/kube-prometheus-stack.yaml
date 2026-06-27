@@ -202,6 +202,17 @@ prometheus:
               cluster: homelab
               nodename: storage-106
 
+      # Proxmox host (pve) SMART disk health — smartctl_exporter (:9633, root).
+      # Deployed via: cd proxmox/ansible && just node-exporter (Play 2, pve-1).
+      - job_name: 'smartctl-proxmox-pve'
+        scrape_interval: 120s
+        static_configs:
+          - targets:
+              - 192.168.50.4:9633
+            labels:
+              cluster: homelab
+              nodename: proxmox-pve
+
       # DGX Spark cluster (2× GB10) — host metrics via node_exporter (docker, :9100),
       # scraped over Tailscale. node_exporter deployed from the nv-dgx-spark repo:
       #   make node-exporter-deploy  (playbooks/node-exporter-deploy.yml)
@@ -218,6 +229,25 @@ prometheus:
               nodename: dgx-spark-1
           - targets:
               - 100.67.164.92:9100   # dgx-spark-2 (V4-Flash TP worker)
+            labels:
+              cluster: dgx-spark
+              nodename: dgx-spark-2
+
+      # DGX Spark SMART disk health — smartctl_exporter (host systemd service, :9633,
+      # arm64 binary — quay image is amd64-only), scraped over Tailscale. Deployed from
+      # the nv-dgx-spark repo: make smartctl-exporter-deploy
+      # nodename labels match the node-exporter-dgx-spark targets so the dashboard's
+      # $nodename dropdown selects both node + SMART metrics for the same host.
+      - job_name: 'smartctl-dgx-spark'
+        scrape_interval: 120s
+        static_configs:
+          - targets:
+              - 100.97.87.120:9633   # dgx-spark-1
+            labels:
+              cluster: dgx-spark
+              nodename: dgx-spark-1
+          - targets:
+              - 100.67.164.92:9633   # dgx-spark-2
             labels:
               cluster: dgx-spark
               nodename: dgx-spark-2
