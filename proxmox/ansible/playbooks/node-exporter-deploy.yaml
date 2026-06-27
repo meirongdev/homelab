@@ -171,13 +171,15 @@
         daemon_reload: true
         state: restarted
 
-# Play 2: Proxmox host (pve-1) — node_exporter only (with RAPL)
-- name: Deploy node_exporter on Proxmox host
+# Play 2: Proxmox host (pve-1) — node_exporter (with RAPL) + smartctl_exporter
+- name: Deploy node_exporter and smartctl_exporter on Proxmox host
   hosts: pve-1
   gather_facts: true
   vars:
     node_exporter_version: "1.11.1"
+    smartctl_exporter_version: "0.14.0"
     node_exporter_port: 9100
+    smartctl_exporter_port: 9633
 
   tasks:
     - name: Create node_exporter system user
@@ -237,6 +239,75 @@
         enabled: true
         state: restarted
 
+    # ── smartctl_exporter ──────────────────────────────────────────────────────
+    # Remove Proxmox Enterprise repo files (no subscription on this host → apt 401s)
+    - name: Remove Proxmox Enterprise apt sources
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/apt/sources.list.d/pve-enterprise.list
+        - /etc/apt/sources.list.d/ceph.list
+        - /etc/apt/sources.list.d/pve-enterprise.sources
+        - /etc/apt/sources.list.d/ceph.sources
+
+    - name: Ensure smartmontools is installed
+      ansible.builtin.apt:
+        name: smartmontools
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Download smartctl_exporter archive
+      ansible.builtin.get_url:
+        url: "https://github.com/prometheus-community/smartctl_exporter/releases/download/v{{ smartctl_exporter_version }}/smartctl_exporter-{{ smartctl_exporter_version }}.linux-amd64.tar.gz"
+        dest: /tmp/smartctl_exporter.tar.gz
+        mode: "0644"
+
+    - name: Extract smartctl_exporter
+      ansible.builtin.unarchive:
+        src: /tmp/smartctl_exporter.tar.gz
+        dest: /tmp/
+        remote_src: true
+
+    - name: Install smartctl_exporter binary
+      ansible.builtin.copy:
+        src: "/tmp/smartctl_exporter-{{ smartctl_exporter_version }}.linux-amd64/smartctl_exporter"
+        dest: /usr/local/bin/smartctl_exporter
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Create smartctl_exporter systemd service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/smartctl_exporter.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Prometheus smartctl Exporter
+          After=network.target
+
+          [Service]
+          User=root
+          ExecStart=/usr/local/bin/smartctl_exporter \
+            --web.listen-address=:{{ smartctl_exporter_port }} \
+            --smartctl.path=/usr/sbin/smartctl \
+            --smartctl.interval=120s
+          Restart=always
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start smartctl_exporter
+      ansible.builtin.systemd:
+        name: smartctl_exporter
+        daemon_reload: true
+        enabled: true
+        state: restarted
+
+    # ── verify ─────────────────────────────────────────────────────────────────
     - name: Wait for node_exporter to be ready
       ansible.builtin.uri:
         url: "http://localhost:{{ node_exporter_port }}/metrics"
@@ -246,6 +317,17 @@
       retries: 6
       delay: 5
 
-    - name: Report endpoint
+    - name: Wait for smartctl_exporter to be ready
+      ansible.builtin.uri:
+        url: "http://localhost:{{ smartctl_exporter_port }}/metrics"
+        return_content: false
+      register: se_check
+      until: se_check.status == 200
+      retries: 6
+      delay: 5
+
+    - name: Report endpoints
       ansible.builtin.debug:
-        msg: "node_exporter → http://192.168.50.4:{{ node_exporter_port }}/metrics"
+        msg:
+          - "node_exporter    → http://192.168.50.4:{{ node_exporter_port }}/metrics"
+          - "smartctl_exporter → http://192.168.50.4:{{ smartctl_exporter_port }}/metrics"
