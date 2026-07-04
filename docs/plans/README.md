@@ -1,7 +1,7 @@
 # Plans And Records
 
 > Time-ordered implementation plans, migrations, and incident retrospectives.
-> Last updated: 2026-06-05
+> Last updated: 2026-07-04
 
 ## How To Use This Folder
 
@@ -15,6 +15,7 @@
 
 | Plan | Status |
 |------|--------|
+| [2026-07-04 storage-106 充分利用 + 备份工具简化](2026-07-04-storage-106-utilization-and-backup-simplification.md) | 📋 待执行 |
 | [2026-06-18 运行时检测（Tetragon + Falco）](2026-06-18-runtime-detection.md) | 🛠️ 已实现待部署 |
 | [2026-06-16 K3s 集群内部安全加固（PSA/Kyverno/Trivy/kube-bench）](2026-06-16-k3s-security-hardening.md) | 🛠️ 已实现待部署 |
 | [2026-06-06 Backstage 开发者门户（RHDH）](2026-06-06-backstage-developer-portal-design.md) | 📐 Design |
