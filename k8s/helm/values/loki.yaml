@@ -42,7 +42,12 @@ singleBinary:
   
   persistence:
     enabled: true
-    storageClass: nfs-client
+    # ⚠️ local-path（节点本地盘），不用 nfs-client：SingleBinary + filesystem 存储把 chunks/
+    #   index/WAL 全写在此 PVC 上；在 NFS 上 ingester 写路径会超时（实测 POST /push 500
+    #   DeadlineExceeded、/ready 持续超时、pod 长期 1/2），同 grafana/prometheus 的 sqlite/
+    #   TSDB 之痛（NFS 小文件写+fsync）。本地盘根治。日志为 P2 可丢数据。2026-07-04 迁移。
+    #   ⚠️ 改此字段需删旧 STS+PVC 让 helm 以新 SC 重建（volumeClaimTemplate 不可变）。
+    storageClass: local-path
     size: 5Gi
   
   resources:

@@ -42,6 +42,16 @@ grafana:
         key: oauth-client-secret
 
   grafana.ini:
+    # 启动稳定性（2026-07-04 修 CrashLoop）：关闭启动期对 grafana.com 的联网调用。
+    #   现象：grafana 容器每次启动卡在 "Loading plugins..." ~159s（零日志），之后被
+    #   liveness 探针 kill，形成自维持 CrashLoop（持续 8 天）。plugins 目录里的 4 个 app
+    #   插件（lokiexplore/exploretraces/metricsdrilldown/pyroscope）已随镜像装在 NFS PVC
+    #   上，本地加载即可；Grafana 13 默认在启动时对它们做 preinstall + 更新检查（联网
+    #   grafana.com）。Pod 内 grafana.com 只解析到 IPv6、集群无 IPv6 出网 → dial 长挂起，
+    #   拖过 liveness 死线。关掉这两项后走纯本地插件，启动不再联网。
+    plugins:
+      check_for_plugin_updates: false
+      preinstall_disabled: true
     dashboards:
       # 登录后默认落到多集群总览（sidecar 把该 ConfigMap 写入 Platform 文件夹）
       default_home_dashboard_path: /tmp/dashboards/Platform/multicluster-overview.json
@@ -67,10 +77,33 @@ grafana:
       role_attribute_path: "'Admin'"
       role_attribute_strict: false
 
+  # 启动宽限窗口（2026-07-04）：本 chart 的 grafana 主容器模板不暴露 startupProbe，
+  #   故用 livenessProbe 的 initialDelaySeconds 给启动留足宽限。被热节流的 5600H 笔记本
+  #   + NFS home 上，Grafana 13 unified-storage/插件加载启动本就偏慢；默认 liveness
+  #   (initialDelay 60 + failureThreshold 10 × period 10 = 160s) 会在启动完成前把它 kill。
+  #   放宽到 initialDelay 120 + 30 × period 15 ≈ 570s 宽限；首次就绪后仍做存活检测。
+  #   （与上面关闭启动联网互补：联网关闭后启动应很快，此探针为安全网。）
+  livenessProbe:
+    httpGet:
+      path: /api/health
+      port: 3000
+    initialDelaySeconds: 120
+    periodSeconds: 15
+    timeoutSeconds: 30
+    failureThreshold: 30
+    successThreshold: 1
+
   # 持久化存储
+  # ⚠️ 必须用 local-path（节点本地盘），不能用 nfs-client：Grafana 的 sqlite DB 走
+  #   POSIX 字节锁(fcntl)+ 同步小写，NFS 锁(NLM)对这种模式病态地慢/挂起（实测一条 DB
+  #   迁移 3m48s、下一步再挂 9+ 分钟）。2026-07-04 曾因此 CrashLoop 8 天：每次启动到
+  #   "Loading plugins"（写插件状态到 DB）就卡在 NFS 上的 DB 写，被 liveness 探针 kill。
+  #   （prometheus/loki 是大块顺序写，同一 NFS 上无碍，故只有 grafana 受影响。）
+  #   sqlite-on-NFS 是教科书级反模式——DB 放本地盘即根治。dashboards/datasources 全部由
+  #   GitOps（ConfigMap + values）声明重建，本地盘丢数据风险可接受。
   persistence:
     enabled: true
-    storageClassName: nfs-client
+    storageClassName: local-path
     size: 1Gi
 
   # 资源限制
@@ -141,6 +174,10 @@ grafana:
 prometheus:
   prometheusSpec:
     retention: 7d
+    # 启动宽限安全网（2026-07-04）：TSDB 已迁到 local-path（见下 storageSpec），启动重放走
+    #   本地盘、很快，operator 默认 ~900s 窗口本已够用；保留 1800s 仅作 WAL 增大后的余量。
+    #   历史（NFS 上曾因 head/WAL 读被慢 NFS 拖过 900s 死线 → CrashLoop，故迁 local-path）。
+    maximumStartupDurationSeconds: 1800
     externalLabels:
       cluster: homelab
 
@@ -156,23 +193,29 @@ prometheus:
             action: replace
     
     # 持久化存储
+    # ⚠️ local-path（节点本地盘），不用 nfs-client：TSDB 在 NFS 上时，重启的 head/WAL 读会
+    #   卡在慢/wedge 的 NFS 客户端上（线程 D 状态、进程零进展），拖过启动探针 → CrashLoop
+    #   （2026-07-04 事故）。本地盘无此问题、秒起。metrics 是 P2 数据、可重建，本地盘丢数据
+    #   风险可接受。⚠️ 改此字段需删旧 STS+PVC 让 operator 以新 SC 重建（volumeClaimTemplate 不可变）。
     storageSpec:
       volumeClaimTemplate:
         spec:
-          storageClassName: nfs-client
+          storageClassName: local-path
           accessModes: ["ReadWriteOnce"]
           resources:
             requests:
               storage: 5Gi
     
     # 资源限制
+    # memory limit 1Gi→1.5Gi（2026-07-04）：head/WAL 回放峰值内存曾逼近 1Gi（实测 694Mi 仍在涨）
+    #   有 OOM 风险；节点约 2.3Gi 余量，limit 抬到 1.5Gi 给回放留头（request 不变，调度无碍）。
     resources:
       requests:
         cpu: 200m
         memory: 512Mi
       limits:
         cpu: 1000m
-        memory: 1Gi
+        memory: 1536Mi
 
 
     # 添加额外的抓取配置
