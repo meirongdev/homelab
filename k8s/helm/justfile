@@ -27,6 +27,11 @@ create-cloudflare-secret:
     @kubectl --context {{ctx}} create namespace cloudflare --dry-run=client -o yaml | kubectl --context {{ctx}} apply -f -
     @kubectl --context {{ctx}} get secret cloudflare-tunnel-token -n cloudflare > /dev/null 2>&1 || (echo "❌ Error: cloudflare-tunnel-token secret not found. Check Vault/ESO sync." && exit 1)
 
+# chart 版本必须 pin：不 pin 时 `helm repo update` 后本配方会顺带把整个 stack 升到
+# 最新版（2026-07-04 曾因此从 86.3.2 意外升到 87.6.0，operator 滚动了 prometheus/alertmanager）。
+# 升级请显式改这里的值。
+kube_prometheus_stack_version := "87.6.0"
+
 # 部署 Prometheus + Grafana
 deploy-prometheus: create-grafana-secret
     @echo "⏳ Deploying Prometheus stack (this may take 5-10 minutes)..."
@@ -34,6 +39,7 @@ deploy-prometheus: create-grafana-secret
         --namespace {{namespace}} \
         --kube-context {{ctx}} \
         --values values/kube-prometheus-stack.yaml \
+        --version {{kube_prometheus_stack_version}} \
         --wait \
         --timeout 15m \
         --debug
@@ -43,6 +49,7 @@ deploy-prometheus-nowait: create-grafana-secret
         --namespace {{namespace}} \
         --kube-context {{ctx}} \
         --values values/kube-prometheus-stack.yaml \
+        --version {{kube_prometheus_stack_version}} \
         --timeout 15m
     @echo "✅ Helm release created. Check status with: just status"
 
@@ -375,6 +382,7 @@ update-prometheus:
     helm upgrade kube-prometheus-stack prometheus-community/kube-prometheus-stack \
       -n monitoring \
       --kube-context {{ctx}} \
+      --version {{kube_prometheus_stack_version}} \
       -f values/kube-prometheus-stack.yaml
 
 # setup postgres
