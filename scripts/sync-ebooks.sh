@@ -1,589 +1,628 @@
 #!/bin/bash
-
-# 电子书同步脚本
-# 功能: 从 ~/Downloads/books 同步电子书到 calibre-web
-# 使用: ./sync-ebooks.sh [--dry-run] [--backup] [--cleanup]
-
+################################################################################
+# sync-ebooks.sh — calibre-web 电子书同步脚本
+#
+# 将本地电子书同步到 calibre-web 的 ingest 目录。
+# 支持 NFS 直传（主路径）和 kubectl cp（回退路径），
+# 传输后校验和验证 + 数据库层面确认入库。
+#
+# 使用:
+#   ./sync-ebooks.sh --check           # 仅检查
+#   ./sync-ebooks.sh --upload          # 检查 + 上传
+#   ./sync-ebooks.sh --upload --cleanup  # 上传成功后删除本地文件
+################################################################################
 set -euo pipefail
 
+# ============================================================================
 # 配置
+# ============================================================================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_FILE="${SCRIPT_DIR}/sync-ebooks.conf"
+
+# --- 本地 ---
 LOCAL_BOOKS_DIR="${HOME}/Downloads/books"
 BACKUP_DIR="${HOME}/.local/share/calibre-web-sync-backup"
-INGEST_POD_NAMESPACE="personal-services"
-INGEST_POD_SELECTOR="app=calibre-web"
-INGEST_PATH="/cwa-book-ingest"
-LOG_FILE="${HOME}/.local/share/calibre-web-sync.log"
+MANIFEST_DIR="${HOME}/.local/share/calibre-web-sync"
+LOG_FILE="${MANIFEST_DIR}/sync.log"
+
+# --- 传输目标 —— NFS 直传（主路径）---
+NFS_HOST="192.168.50.106"
+NFS_USER="mr"
+NFS_INGEST="/storage/calibre/ingest"
+SSH_KEY="${HOME}/.ssh/vgio"
+
+# --- 传输目标 —— kubectl 回退路径 ---
 KUBE_CONTEXT="${KUBE_CONTEXT:-k3s-homelab}"
+NAMESPACE="personal-services"
+POD_SELECTOR="app=calibre-web"
+INGEST_PATH="/cwa-book-ingest"
 
-# 支持的电子书格式
-SUPPORTED_FORMATS=("pdf" "epub" "mobi" "azw" "azw3")
-
-# 标志
+# --- 行为 ---
+SUPPORTED_FORMATS=("pdf" "epub" "mobi" "azw" "azw3" "txt" "djvu")
+MODE="check"          # check | upload
 DRY_RUN=false
 BACKUP=true
 CLEANUP=false
 VERBOSE=false
-SKIP_VALIDATION=false
+RETRY_COUNT=3
+LOCK_FILE="/tmp/ebook-sync.lock"
 
-# 颜色输出
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# ============================================================================
+# 颜色
+# ============================================================================
+RED='\033[0;31m'    GREEN='\033[0;32m'    YELLOW='\033[1;33m'
+BLUE='\033[0;34m'   CYAN='\033[0;36m'     NC='\033[0m'
 
-# 日志函数
-log() {
-    local level=$1
-    shift
-    local message="$@"
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo "[$timestamp] [$level] $message" | tee -a "$LOG_FILE"
+# ============================================================================
+# 日志 / 输出
+# ============================================================================
+log()    { echo -e "${BLUE}[$(date '+%H:%M:%S')]${NC} $*" | tee -a "$LOG_FILE"; }
+success(){ echo -e "${GREEN}✅ $*${NC}" | tee -a "$LOG_FILE"; }
+warn()   { echo -e "${YELLOW}⚠️  $*${NC}" | tee -a "$LOG_FILE"; }
+error()  { echo -e "${RED}❌ $*${NC}" | tee -a "$LOG_FILE"; }
+
+# ============================================================================
+# 辅助函数
+# ============================================================================
+load_config() {
+  [[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
 }
 
-info() {
-    echo -e "${BLUE}ℹ${NC} $@" >&2
-    log "INFO" "$@"
+acquire_lock() {
+  if [[ -f "$LOCK_FILE" ]]; then
+    local pid
+    pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      error "另一个同步进程 (PID $pid) 正在运行，退出"
+      exit 1
+    fi
+    warn "发现过期锁文件，移除"
+  fi
+  echo "$$" > "$LOCK_FILE"
+  trap 'rm -f "$LOCK_FILE"' EXIT
 }
 
-success() {
-    echo -e "${GREEN}✓${NC} $@" >&2
-    log "SUCCESS" "$@"
+normalize_title() {
+  local t="$1"
+  t="${t%.*}"                                # 移除扩展名
+  t=$(echo "$t" | sed -E '
+    s/ \([^)]*\)//g;                         # 移除 (Author)
+    s/ \[[^]]*\]//g;                         # 移除 [Z-Library]
+    s/ - [^-]*$//;                           # 尾部 - something
+    s/[[:punct:]]/ /g;                       # 标点变空格
+    s/[[:space:]]+/ /g;                      # 合并空格
+  ')
+  echo "${t,,}" | xargs                       # 小写 + trim
 }
 
-warn() {
-    echo -e "${YELLOW}⚠${NC} $@" >&2
-    log "WARN" "$@"
+is_ebook() {
+  local ext="${1##*.}"; ext="${ext,,}"
+  for f in "${SUPPORTED_FORMATS[@]}"; do
+    [[ "$ext" == "$f" ]] && return 0
+  done
+  return 1
 }
 
-error() {
-    echo -e "${RED}✗${NC} $@" >&2
-    log "ERROR" "$@"
+is_non_ebook() {
+  local fn="$1"
+  # 简历
+  [[ "$fn" =~ ^(BE|SRE|PM|QA)_ ]] && return 0
+  [[ "$fn" =~ ^(LinkedIn|Resume|CV|简历|履历) ]] && return 0
+  # Confluence 导出
+  [[ "$fn" =~ -[0-9]{6}-[0-9]{6}\. ]] && return 0
+  [[ "$fn" =~ confluence ]] && return 0
+  # 工作文档
+  [[ "$fn" =~ ^(fee|endpoint|finance|invoice) ]] && return 0
+  return 1
 }
 
-# 帮助信息
+checksum()  { sha256sum "$1" 2>/dev/null | awk '{print $1}'; }
+
+# ============================================================================
+# 文件完整性验证
+# ============================================================================
+validate_epub() {
+  local f="$1"
+  python3 -c "
+import zipfile, sys
+try:
+    z=zipfile.ZipFile(sys.argv[1])
+    if 'mimetype' not in z.namelist(): sys.exit(1)
+    if z.read('mimetype').decode()!='application/epub+zip': sys.exit(1)
+    z.close()
+    sys.exit(0)
+except: sys.exit(1)
+" "$f" 2>/dev/null
+}
+
+validate_pdf() {
+  local f="$1"
+  local magic
+  magic=$(xxd -l 5 -p "$f" 2>/dev/null)
+  [[ "$magic" == "255044462d" ]]  # 头部 %PDF-
+}
+
+validate_file() {
+  local f="$1"
+  local ext="${f##*.}"; ext="${ext,,}"
+  case "$ext" in
+    epub) validate_epub "$f";;
+    pdf)  validate_pdf "$f";;
+    *)    return 0;;  # 其他格式跳过验证
+  esac
+}
+
+detect_epub_drm() {
+  python3 -c "
+import zipfile, sys
+try:
+    z=zipfile.ZipFile(sys.argv[1])
+    files=z.namelist()
+    if 'META-INF/encryption.xml' in files:
+        print('ADOBE_DRM'); sys.exit(2)
+    z.close()
+    sys.exit(0)
+except: sys.exit(1)
+" "$1" 2>/dev/null
+}
+
+# ============================================================================
+# 扫描本地文件
+# ============================================================================
+scan_local() {
+  local find_expr=()
+  for fmt in "${SUPPORTED_FORMATS[@]}"; do
+    find_expr+=(-o -iname "*.$fmt")
+  done
+  find_expr=("${find_expr[@]:1}")  # 去掉首个 -o
+  find "$LOCAL_BOOKS_DIR" -maxdepth 1 -type f \( "${find_expr[@]}" \) 2>/dev/null | sort
+}
+
+# ============================================================================
+# 传输层
+# ============================================================================
+
+# --- 检测可用的传输通道 ---
+check_nfs_reachable() {
+  ssh -i "$SSH_KEY" -o ConnectTimeout=5 -o StrictHostKeyChecking=no \
+    "${NFS_USER}@${NFS_HOST}" "test -d ${NFS_INGEST}" 2>/dev/null
+}
+
+check_kubectl_ready() {
+  command -v kubectl &>/dev/null || return 1
+  kubectl --context "$KUBE_CONTEXT" cluster-info &>/dev/null || return 1
+  local pod
+  pod=$(kubectl --context "$KUBE_CONTEXT" get pod -n "$NAMESPACE" \
+    -l "$POD_SELECTOR" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  [[ -n "$pod" ]]
+}
+
+get_pod_name() {
+  kubectl --context "$KUBE_CONTEXT" get pod -n "$NAMESPACE" \
+    -l "$POD_SELECTOR" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null
+}
+
+# --- rsync 到 NFS（主路径）---
+upload_nfs() {
+  local file="$1" dest="$2"
+  rsync --inplace --no-delay-updates --chmod=666 \
+    -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" \
+    "$file" "${NFS_USER}@${NFS_HOST}:${dest}/" 2>/dev/null
+}
+
+# --- kubectl cp 到 pod（回退路径）---
+upload_kubectl() {
+  local file="$1" dest_dir="$2"
+  local pod
+  pod=$(get_pod_name) || return 1
+  local filename; filename=$(basename "$file")
+  local tar_file="/tmp/ebook_${RANDOM}.tar"
+  (
+    cd "$(dirname "$file")" && tar -cf "$tar_file" "$filename" 2>/dev/null
+  ) || return 1
+  kubectl --context "$KUBE_CONTEXT" exec -i -n "$NAMESPACE" "$pod" -- \
+    sh -c "cd ${dest_dir} && tar xf -" < "$tar_file" 2>/dev/null
+  local rc=$?; rm -f "$tar_file"; return $rc
+}
+
+# --- 带重试的上传 ---
+upload_file() {
+  local file="$1" dest="$2"
+  local filename; filename=$(basename "$file")
+  local attempt=0 rc=1
+
+  while (( attempt < RETRY_COUNT )); do
+    ((attempt++))
+    if [[ "$TRANSPORT" == "nfs" ]]; then
+      upload_nfs "$file" "$dest"
+    else
+      upload_kubectl "$file" "$dest"
+    fi
+    rc=$?
+    [[ $rc -eq 0 ]] && break
+    [[ $attempt -lt $RETRY_COUNT ]] && sleep $(( attempt * 3 ))
+  done
+  return $rc
+}
+
+# --- 传输后校验 ---
+verify_transfer() {
+  local file="$1" dest="$2"
+  local filename; filename=$(basename "$file")
+  local src_cksum; src_cksum=$(checksum "$file")
+
+  if [[ "$TRANSPORT" == "nfs" ]]; then
+    local remote_cksum
+    remote_cksum=$(ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no \
+      "${NFS_USER}@${NFS_HOST}" "sha256sum ${dest}/${filename}" 2>/dev/null | awk '{print $1}')
+    [[ "$src_cksum" == "$remote_cksum" ]]
+  else
+    local pod; pod=$(get_pod_name) || return 1
+    local remote_cksum
+    remote_cksum=$(kubectl --context "$KUBE_CONTEXT" exec -n "$NAMESPACE" "$pod" -- \
+      sha256sum "${dest}/${filename}" 2>/dev/null | awk '{print $1}')
+    [[ "$src_cksum" == "$remote_cksum" ]]
+  fi
+}
+
+# ============================================================================
+# 数据库查询（通过 calibre-web pod）
+# ============================================================================
+query_db() {
+  local sql="$1"
+  local pod; pod=$(get_pod_name) || return 1
+  kubectl --context "$KUBE_CONTEXT" exec -n "$NAMESPACE" "$pod" -- \
+    sqlite3 /calibre-library/metadata.db "$sql" 2>/dev/null
+}
+
+get_existing_titles() {
+  query_db "SELECT title FROM books ORDER BY title" 2>/dev/null || true
+}
+
+get_db_book_count() {
+  query_db "SELECT COUNT(*) FROM books" 2>/dev/null || echo "0"
+}
+
+# ============================================================================
+# 检查重复
+# ============================================================================
+is_already_imported() {
+  local filename="$1"; shift
+  local titles=("$@")
+  local norm; norm=$(normalize_title "$filename")
+  [[ -z "$norm" ]] && return 1
+  local t
+  for t in "${titles[@]}"; do
+    local norm_t; norm_t=$(normalize_title "$t")
+    [[ "$norm" == "$norm_t" ]] && return 0
+  done
+  return 1
+}
+
+# ============================================================================
+# 检查流程
+# ============================================================================
+do_check() {
+  echo ""; echo "╔════════════════════════════════════════════════════╗"
+  echo "║       calibre-web 电子书同步 — 检查模式             ║"
+  echo "╚════════════════════════════════════════════════════╝"; echo ""
+
+  mkdir -p "$MANIFEST_DIR"
+
+  # 1. 扫描本地
+  log "扫描本地目录: $LOCAL_BOOKS_DIR"
+  IFS=$'\n' read -r -d '' -a all_files < <( scan_local && printf '\0' )
+  local total=${#all_files[@]}
+
+  if [[ $total -eq 0 ]]; then
+    warn "未找到电子书文件"
+    return 0
+  fi
+  success "本地找到 $total 本电子书"
+
+  # 2. 连接目标
+  TRANSPORT=""
+  if check_nfs_reachable; then
+    TRANSPORT="nfs"
+    log "传输通道: NFS 直连 ($NFS_HOST)"
+  elif check_kubectl_ready; then
+    TRANSPORT="kubectl"
+    log "传输通道: kubectl cp (回退)"
+  else
+    warn "NFS 和 kubectl 均不可用，仅做文件检查"
+  fi
+
+  # 3. 获取数据库标题列表
+  if [[ "$TRANSPORT" == "kubectl" ]] || check_kubectl_ready; then
+    log "获取 calibre 数据库书籍列表..."
+    IFS=$'\n' read -r -d '' -a db_titles < <( get_existing_titles && printf '\0' ) || true
+    success "数据库现有 ${#db_titles[@]} 本书"
+  else
+    db_titles=()
+    warn "跳过数据库查询（kubectl 不可用）"
+  fi
+
+  # 4. 检查 ingest 目录已有文件
+  ingest_files=()
+  if [[ "$TRANSPORT" == "nfs" ]]; then
+    IFS=$'\n' read -r -d '' -a ingest_files < <(
+      ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no \
+        "${NFS_USER}@${NFS_HOST}" "ls -1 ${NFS_INGEST}" 2>/dev/null && printf '\0'
+    ) || true
+  elif check_kubectl_ready; then
+    local pod; pod=$(get_pod_name)
+    IFS=$'\n' read -r -d '' -a ingest_files < <(
+      kubectl --context "$KUBE_CONTEXT" exec -n "$NAMESPACE" "$pod" -- \
+        sh -c "ls -1 ${INGEST_PATH} 2>/dev/null" && printf '\0'
+    ) || true
+  fi
+
+  # 5. 分类
+  to_upload=();  already_imported=(); in_ingest=(); corrupted=()
+  local f fn
+  for f in "${all_files[@]}"; do
+    fn=$(basename "$f")
+    is_non_ebook "$fn" && continue
+    is_ebook "$fn" || continue
+
+    # 文件完整性
+    if ! validate_file "$f"; then
+      corrupted+=("$f")
+      continue
+    fi
+
+    # 在 ingest 中?
+    local found_ingest=false
+    local ifn
+    for ifn in "${ingest_files[@]}"; do
+      [[ "$fn" == "$ifn" ]] && { found_ingest=true; break; }
+    done
+    $found_ingest && { in_ingest+=("$f"); continue; }
+
+    # 在数据库?
+    if [[ ${#db_titles[@]} -gt 0 ]]; then
+      is_already_imported "$fn" "${db_titles[@]}" && { already_imported+=("$f"); continue; }
+    fi
+
+    to_upload+=("$f")
+  done
+
+  # 6. 输出
+  echo ""; echo "════════════════════════════════════════════════════"
+  echo "  检查结果"
+  echo "════════════════════════════════════════════════════"
+  echo "  总计扫描:        $total"
+  echo "  ✅ 已入库:        ${#already_imported[@]}"
+  echo "  ⏳ 处理中 (ingest): ${#in_ingest[@]}"
+  echo "  📤 待上传:        ${#to_upload[@]}"
+  echo "  ❌ 文件损坏:      ${#corrupted[@]}"
+  echo ""
+
+  [[ $VERBOSE == true ]] && show_verbose_list to_upload in_ingest already_imported corrupted
+
+  # 保存状态供 upload 阶段使用
+  echo "${#to_upload[@]}" > "${MANIFEST_DIR}/pending.count"
+  printf '%s\n' "${to_upload[@]}" > "${MANIFEST_DIR}/pending.txt"
+  printf '%s\n' "${corrupted[@]}" > "${MANIFEST_DIR}/corrupted.txt"
+}
+
+show_verbose_list() {
+  local -n arr=$1
+  local label="待上传"
+  case $1 in
+    to_upload) label="待上传";;
+    in_ingest) label="Ingest 中";;
+    already_imported) label="已导入";;
+    corrupted) label="损坏";;
+  esac
+  echo "--- $label (${#arr[@]}) ---"
+  local item
+  for item in "${arr[@]}"; do
+    echo "  $(basename "$item")"
+  done
+  echo ""
+}
+
+# ============================================================================
+# 上传流程
+# ============================================================================
+do_upload() {
+  echo ""; echo "╔════════════════════════════════════════════════════╗"
+  echo "║       calibre-web 电子书同步 — 上传模式             ║"
+  echo "╚════════════════════════════════════════════════════╝"; echo ""
+
+  # 如果没跑过 check，先跑
+  if [[ ! -f "${MANIFEST_DIR}/pending.txt" ]]; then
+    do_check
+  fi
+
+  mapfile -t pending < "${MANIFEST_DIR}/pending.txt" 2>/dev/null || true
+  local total=${#pending[@]}
+  if [[ $total -eq 0 ]]; then
+    success "没有待上传的文件"
+    rm -f "${MANIFEST_DIR}/pending.txt"
+    return 0
+  fi
+
+  # 选择传输通道
+  if check_nfs_reachable; then
+    TRANSPORT="nfs"
+    DEST_DIR="$NFS_INGEST"
+    log "传输通道: NFS 直连 ($NFS_HOST)"
+  elif check_kubectl_ready; then
+    TRANSPORT="kubectl"
+    DEST_DIR="$INGEST_PATH"
+    log "传输通道: kubectl cp (回退)"
+  else
+    error "NFS 和 kubectl 均不可用，无法上传"
+    return 1
+  fi
+
+  # 获取上传前的数据库书籍数
+  local pre_count=0
+  check_kubectl_ready && pre_count=$(get_db_book_count)
+
+  # 确认
+  echo ""
+  warn "即将上传 $total 本电子书 → $TRANSPORT:$DEST_DIR"
+  [[ $BACKUP == true ]] && echo "  备份目录: $BACKUP_DIR"
+  [[ $CLEANUP == true ]] && echo "  导入后删除本地文件: 是"
+  echo ""
+  [[ $DRY_RUN == false ]] && { read -p "确认执行? (y/N): " -r; echo; [[ ! $REPLY =~ ^[Yy]$ ]] && { warn "已取消"; return 0; } }
+
+  # 备份
+  if [[ $BACKUP == true && $DRY_RUN == false ]]; then
+    mkdir -p "$BACKUP_DIR"
+  fi
+
+  # 批量上传
+  local success_count=0 fail_count=0 skip_count=0
+  local cksum_fail=0
+  local idx=0
+
+  for file in "${pending[@]}"; do
+    ((idx++))
+    local fn; fn=$(basename "$file")
+    local filesize; filesize=$(du -h "$file" | awk '{print $1}')
+    printf "  [%d/%d] %s ... " "$idx" "$total" "${fn:0:60}"
+
+    if [[ $DRY_RUN == true ]]; then
+      echo -e "${YELLOW}🟡 dry-run${NC}"
+      continue
+    fi
+
+    # 上传 + 重试
+    if upload_file "$file" "$DEST_DIR"; then
+      # 校验和验证
+      if verify_transfer "$file" "$DEST_DIR"; then
+        echo -e "${GREEN}✅  ${filesize}${NC}"
+        ((success_count++))
+        # 备份
+        [[ $BACKUP == true ]] && cp "$file" "$BACKUP_DIR/" 2>/dev/null
+        # 可选 cleanup
+        [[ $CLEANUP == true ]] && rm -f "$file"
+      else
+        echo -e "${RED}❌ checksum 不匹配${NC}"
+        ((cksum_fail++))
+        ((fail_count++))
+      fi
+    else
+      echo -e "${RED}❌ 上传失败${NC}"
+      ((fail_count++))
+    fi
+  done
+
+  # 上报统计
+  echo ""; success "上传完成"
+  echo "  ✅ 成功: $success_count"
+  echo "  ❌ 失败: $fail_count"
+  [[ $cksum_fail -gt 0 ]] && warn "  校验和失败: $cksum_fail"
+
+  # 验证导入
+  echo ""; echo "════════════════════════════════════════════════════"
+  echo "  导入验证"
+  echo "════════════════════════════════════════════════════"
+  if check_kubectl_ready; then
+    local post_count; post_count=$(get_db_book_count)
+    local diff=$(( post_count - pre_count ))
+    log "数据库: 上传前 ${pre_count} 本 → 当前 ${post_count} 本 (新增 ${diff})"
+
+    # 查询新入库的书名
+    if [[ $diff -gt 0 ]]; then
+      local new_titles
+      new_titles=$(query_db "SELECT title FROM books ORDER BY id DESC LIMIT ${diff}" 2>/dev/null)
+      echo "  最近入库:"
+      echo "$new_titles" | head -10 | while IFS= read -r line; do
+        [[ -n "$line" ]] && echo "    · $line"
+      done
+      [[ $(echo "$new_titles" | wc -l) -gt 10 ]] && echo "    ... 还有更多"
+    fi
+  else
+    warn "kubectl 不可用，跳过数据库验证"
+    local ingest_count
+    if [[ "$TRANSPORT" == "nfs" ]]; then
+      ingest_count=$(ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no \
+        "${NFS_USER}@${NFS_HOST}" "find ${NFS_INGEST} -maxdepth 1 -type f | wc -l" 2>/dev/null || echo "?")
+    else
+      ingest_count="?"
+    fi
+    log "Ingest 目录文件数: $ingest_count"
+  fi
+
+  rm -f "${MANIFEST_DIR}/pending.txt"
+}
+
+# ============================================================================
+# CLI
+# ============================================================================
 usage() {
-    cat << EOF
-电子书同步脚本
+  cat << EOF
+使用方法: $(basename "$0") [选项]
 
-用法: $(basename "$0") [选项]
+模式:
+  --check                   仅检查（默认）
+  --upload                  检查 + 上传
 
 选项:
-  -n, --dry-run       显示会做什么，但不实际执行
-  -b, --backup        备份已导入的电子书 (默认: 启用)
-  --no-backup         禁用备份
-  -c, --cleanup       导入后删除本地文件
-  --skip-validation   跳过文件完整性验证（不推荐）
-  -v, --verbose       详细输出
-  -h, --help          显示帮助信息
+  --source DIR              源目录（默认: ~/Downloads/books）
+  --context NAME            K8s context（默认: k3s-homelab）
+  --dry-run                 模拟运行
+  --backup                  备份已导入文件（默认启用）
+  --no-backup               禁用备份
+  --cleanup                 导入后删除本地文件
+  --verbose                 详细输出
+  --help                    显示帮助
 
 示例:
-  # 查看会导入的文件
-  $(basename "$0") --dry-run
-
-  # 导入并备份（包含验证）
-  $(basename "$0") --backup
-
-  # 导入、备份并删除本地文件（包含验证）
-  $(basename "$0") --backup --cleanup
-
-  # 不备份直接导入
-  $(basename "$0") --no-backup
-
-  # 跳过文件验证（快速模式）
-  $(basename "$0") --skip-validation
-
+  $(basename "$0") --check
+  $(basename "$0") --upload
+  $(basename "$0") --upload --backup --cleanup --verbose
 EOF
-    exit 0
+  exit 0
 }
 
-# 解析参数
 parse_args() {
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            -n|--dry-run)
-                DRY_RUN=true
-                shift
-                ;;
-            -b|--backup)
-                BACKUP=true
-                shift
-                ;;
-            --no-backup)
-                BACKUP=false
-                shift
-                ;;
-            -c|--cleanup)
-                CLEANUP=true
-                shift
-                ;;
-            --skip-validation)
-                SKIP_VALIDATION=true
-                shift
-                ;;
-            -v|--verbose)
-                VERBOSE=true
-                shift
-                ;;
-            -h|--help)
-                usage
-                ;;
-            *)
-                error "未知选项: $1"
-                usage
-                ;;
-        esac
-    done
-}
-
-# 初始化
-init() {
-    mkdir -p "$(dirname "$LOG_FILE")"
-    mkdir -p "$BACKUP_DIR"
-    
-    info "电子书同步脚本启动"
-    info "本地目录: $LOCAL_BOOKS_DIR"
-    info "备份目录: $BACKUP_DIR"
-    [ "$DRY_RUN" = true ] && info "测试模式: 仅显示操作"
-    [ "$CLEANUP" = true ] && info "清理模式: 导入后删除本地文件"
-    [ "$SKIP_VALIDATION" = true ] && warn "跳过验证模式: 不检查文件完整性"
-    return 0
-}
-
-# 验证环境
-check_env() {
-    # 检查 kubectl
-    if ! command -v kubectl &> /dev/null; then
-        error "kubectl 未安装"
-        return 1
-    fi
-    
-    # 检查 kubernetes 连接
-    if ! kubectl --context "$KUBE_CONTEXT" cluster-info &> /dev/null; then
-        error "无法连接到 Kubernetes 集群 ($KUBE_CONTEXT)"
-        return 1
-    fi
-    
-    # 检查本地目录
-    if [ ! -d "$LOCAL_BOOKS_DIR" ]; then
-        warn "本地目录不存在: $LOCAL_BOOKS_DIR"
-        return 1
-    fi
-    
-    # 检查 Python（用于验证）
-    if [ "$SKIP_VALIDATION" = false ]; then
-        if ! command -v python3 &> /dev/null; then
-            warn "Python3 未安装，将跳过文件验证"
-            SKIP_VALIDATION=true
-        fi
-    fi
-    
-    success "环境检查完成"
-    return 0
-}
-
-# 获取 calibre-web pod
-get_calibre_pod() {
-    local pod=$(kubectl --context "$KUBE_CONTEXT" get pods -n "$INGEST_POD_NAMESPACE" \
-        -l "$INGEST_POD_SELECTOR" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
-    
-    if [ -z "$pod" ]; then
-        error "找不到 calibre-web pod (context: $KUBE_CONTEXT)"
-        return 1
-    fi
-    
-    echo "$pod"
-}
-
-# 检测 EPUB 文件中的 DRM 保护
-detect_epub_drm() {
-    local filepath="$1"
-
-    python3 - "$filepath" << 'PYTHON_EOF'
-import zipfile
-import sys
-
-filepath = sys.argv[1]
-
-try:
-    with zipfile.ZipFile(filepath, 'r') as zf:
-        files = zf.namelist()
-
-        # Adobe DRM 标记
-        if 'META-INF/encryption.xml' in files:
-            print("ADOBE_DRM")
-            sys.exit(2)
-
-        # Apple DRM 标记
-        if 'META-INF/rights.xml' in files:
-            print("APPLE_DRM")
-            sys.exit(2)
-
-        # 数字签名
-        if 'META-INF/signatures.xml' in files:
-            print("SIGNED")
-            sys.exit(2)
-
-        # 检查 OPF 中的加密声明
-        opf_files = [f for f in files if f.endswith('.opf')]
-        if opf_files:
-            try:
-                with zf.open(opf_files[0]) as f:
-                    content = f.read().decode('utf-8', errors='ignore')
-                    if 'encryption' in content.lower():
-                        print("DRM_MARKED")
-                        sys.exit(2)
-            except:
-                pass
-
-        print("NO_DRM")
-        sys.exit(0)
-
-except zipfile.BadZipFile:
-    print("NOT_ZIP")
-    sys.exit(1)
-except Exception:
-    print("ERROR")
-    sys.exit(1)
-PYTHON_EOF
-
-    return $?
-}
-validate_epub() {
-    local filepath="$1"
-
-    # 使用 Python 验证 EPUB 是否为有效的 ZIP 文件并包含必要的 EPUB 结构
-    python3 - "$filepath" << 'PYTHON_EOF'
-import sys
-import zipfile
-import os
-
-filepath = sys.argv[1]
-
-try:
-    # 检查文件是否存在
-    if not os.path.exists(filepath):
-        sys.exit(1)
-
-    # 检查文件大小
-    file_size = os.path.getsize(filepath)
-    if file_size == 0:
-        sys.exit(1)
-
-    # 尝试打开为 ZIP
-    with zipfile.ZipFile(filepath, 'r') as zf:
-        # 测试 ZIP 完整性
-        result = zf.testzip()
-        if result is not None:
-            sys.exit(1)
-
-        # 检查 EPUB 必要文件
-        file_list = zf.namelist()
-
-        # EPUB 必须至少有 mimetype 文件
-        if 'mimetype' not in file_list:
-            sys.exit(1)
-
-        # 检查 META-INF/container.xml（EPUB2/3 标准要求）
-        has_container = any('META-INF/container.xml' in f or 'container.xml' in f for f in file_list)
-        if not has_container:
-            sys.exit(1)
-
-        sys.exit(0)
-
-except zipfile.BadZipFile:
-    sys.exit(1)
-except Exception as e:
-    sys.exit(1)
-PYTHON_EOF
-
-    # 检查 Python 脚本的返回值
-    local result=$?
-    return $result
-}
-
-# 验证 PDF 文件完整性
-validate_pdf() {
-    local filepath="$1"
-    
-    # 检查 PDF 魔数（PDF 文件应该以 %PDF 开头）
-    local magic=$(head -c 4 "$filepath" 2>/dev/null)
-    if [ "$magic" != "%PDF" ]; then
-        return 1
-    fi
-    
-    # 基本验证：检查 %%EOF 标记
-    if ! tail -c 100 "$filepath" 2>/dev/null | grep -q "%%EOF"; then
-        # 有些 PDF 没有完整的 EOF 标记，但仍然有效，所以不是硬错误
-        return 0
-    fi
-    
-    return 0
-}
-
-# 验证电子书文件
-validate_ebook() {
-    local filepath="$1"
-    local filename=$(basename "$filepath")
-    local extension="${filename##*.}"
-    extension="${extension,,}"  # 转换为小写
-    
-    # 如果跳过验证，直接返回成功
-    if [ "$SKIP_VALIDATION" = true ]; then
-        return 0
-    fi
-    
-    case "$extension" in
-        epub)
-            validate_epub "$filepath"
-            return $?
-            ;;
-        pdf)
-            validate_pdf "$filepath"
-            return $?
-            ;;
-        *)
-            # 其他格式暂不进行验证
-            return 0
-            ;;
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --check)          MODE="check"; shift;;
+      --upload)         MODE="upload"; shift;;
+      --source)         LOCAL_BOOKS_DIR="$2"; shift 2;;
+      --context)        KUBE_CONTEXT="$2"; shift 2;;
+      --dry-run)        DRY_RUN=true; shift;;
+      --backup)         BACKUP=true; shift;;
+      --no-backup)      BACKUP=false; shift;;
+      --cleanup)        CLEANUP=true; shift;;
+      --verbose)        VERBOSE=true; shift;;
+      -h|--help)        usage;;
+      *)                error "未知选项: $1"; usage;;
     esac
+  done
 }
 
-# 获取验证错误描述
-get_validation_error() {
-    local filepath="$1"
-
-    python3 - "$filepath" 2>/dev/null << 'PYTHON_EOF' || echo "验证过程出错"
-import sys
-import zipfile
-import os
-
-filepath = sys.argv[1]
-
-try:
-    if not os.path.exists(filepath):
-        print("文件不存在")
-    elif os.path.getsize(filepath) == 0:
-        print("文件为空")
-    else:
-        try:
-            with zipfile.ZipFile(filepath, 'r') as zf:
-                result = zf.testzip()
-                if result is not None:
-                    print(f"ZIP损坏")
-                else:
-                    file_list = zf.namelist()
-                    if 'mimetype' not in file_list:
-                        print("缺少mimetype文件")
-                    else:
-                        print("文件结构不完整")
-        except zipfile.BadZipFile:
-            print("不是有效的ZIP文件")
-        except Exception as e:
-            print(f"验证失败: {str(e)}")
-except:
-    print("验证过程出错")
-PYTHON_EOF
-}
-
-# 检查书籍是否已存在于 calibre 数据库
-check_book_exists() {
-    local filename="$1"
-    local pod=$(get_calibre_pod) || return 1
-    
-    # 提取文件名（不含路径）
-    local basename=$(basename "$filename")
-    
-    # 移除文件扩展名
-    local book_title="${basename%.*}"
-    
-    # 移除常见的元信息后缀（如 (Author Name), [Z-Library] 等）
-    book_title=$(echo "$book_title" | sed -E 's/ \([^)]*\)$//; s/ \[[^]]*\]$//; s/ - [^-]*$//')
-    
-    # 在数据库中查询相同标题的书籍
-    local count=$(kubectl --context "$KUBE_CONTEXT" exec -n "$INGEST_POD_NAMESPACE" "$pod" -- \
-        sqlite3 /calibre-library/metadata.db \
-        "SELECT COUNT(*) FROM books WHERE title = '$book_title' ESCAPE '\\\\';" 2>/dev/null || echo "0")
-    
-    # 如果找到相同标题的书籍，返回已存在
-    if [ "$count" -gt 0 ]; then
-        return 0
-    else
-        return 1
-    fi
-}
-
-# 批量查询已存在的书籍
-get_existing_books() {
-    local pod=$(get_calibre_pod) || return 1
-    
-    # 获取数据库中所有书籍的标题
-    kubectl --context "$KUBE_CONTEXT" exec -n "$INGEST_POD_NAMESPACE" "$pod" -- \
-        sqlite3 /calibre-library/metadata.db \
-        "SELECT DISTINCT title FROM books;" 2>/dev/null || true
-}
-
-# 扫描电子书
-scan_ebooks() {
-    # 构建查找条件
-    local find_expr=()
-    for fmt in "${SUPPORTED_FORMATS[@]}"; do
-        find_expr+=(-o -name "*.$fmt")
-    done
-    
-    # 删除第一个 -o
-    if [ ${#find_expr[@]} -gt 0 ]; then
-        find_expr=("${find_expr[@]:1}")
-    fi
-    
-    # 使用 find 查找所有支持的格式
-    find "$LOCAL_BOOKS_DIR" -maxdepth 1 -type f \( "${find_expr[@]}" \) 2>/dev/null | sort
-}
-
-# 同步电子书
-sync_ebooks() {
-    local pod=$(get_calibre_pod) || return 1
-    
-    # 保存当前 IFS 并在完成后恢复
-    local OLDIFS="$IFS"
-    IFS=$'\n'
-    local files=($(scan_ebooks))
-    IFS="$OLDIFS"
-    
-    local total=${#files[@]}
-    
-    if [ $total -eq 0 ]; then
-        info "未找到电子书文件"
-        return 0
-    fi
-    
-    info "找到 $total 本电子书"
-    
-    # 加载已存在的书籍列表以加快查询
-    info "加载已存在的书籍列表..."
-    local existing_books=$(get_existing_books)
-    
-    echo ""
-    
-    # 统计
-    local success_count=0
-    local failed_count=0
-    local skipped_count=0
-    local duplicate_count=0
-    local corrupted_count=0
-    
-    # 处理每个文件
-    for file in "${files[@]}"; do
-        local filename=$(basename "$file")
-        local filesize=$(du -h "$file" | awk '{print $1}')
-        
-        # 移除文件扩展名获取标题
-        local book_title="${filename%.*}"
-        # 移除常见的元信息后缀（如 (Author Name), [Z-Library] 等）
-        book_title=$(echo "$book_title" | sed -E 's/ \([^)]*\)$//; s/ \[[^]]*\]$//; s/ - [^-]*$//')
-        
-        # 检查是否已存在于 ingest 目录
-        if kubectl --context "$KUBE_CONTEXT" exec -n "$INGEST_POD_NAMESPACE" "$pod" -- \
-            test -f "${INGEST_PATH}/${filename}" 2>/dev/null; then
-            warn "  ⊘ $filename (已在 ingest 目录中)"
-            ((skipped_count++))
-            continue
-        fi
-        
-        # 检查是否在数据库中已存在
-        if echo "$existing_books" | grep -F -q "$book_title"; then
-            warn "  ⊘ $filename (已存在于 calibre 数据库)"
-            ((duplicate_count++))
-            continue
-        fi
-        
-        # 验证文件完整性
-        local extension="${filename##*.}"
-        extension="${extension,,}"
-        if [[ "$extension" == "epub" || "$extension" == "pdf" ]]; then
-            if ! validate_ebook "$file" &>/dev/null; then
-                local error_msg=$(get_validation_error "$file")
-                error "  ✗ $filename (文件损坏或无效: $error_msg)"
-                log "ERROR" "CORRUPTED_FILE: $filename ($error_msg)"
-                ((corrupted_count++))
-                continue
-            fi
-            
-            # 如果是EPUB，检查DRM保护
-            if [[ "$extension" == "epub" ]]; then
-                local drm_result=$(detect_epub_drm "$file" 2>&1)
-                if [ $? -eq 2 ]; then
-                    warn "  ⚠ $filename (DRM保护: $drm_result - 可能无法打开)"
-                    log "WARN" "DRM_PROTECTED: $filename ($drm_result)"
-                fi
-            fi
-        fi
-        
-        if [ "$DRY_RUN" = true ]; then
-            info "  ▶ $filename ($filesize)"
-        else
-            # 复制文件到 pod
-            if kubectl --context "$KUBE_CONTEXT" cp "$file" "$INGEST_POD_NAMESPACE/$pod:${INGEST_PATH}/${filename}" 2>/dev/null; then
-                # 备份文件
-                if [ "$BACKUP" = true ]; then
-                    cp "$file" "$BACKUP_DIR/" 2>/dev/null
-                fi
-                
-                success "  ✓ $filename ($filesize)"
-                ((success_count++))
-                
-                # 清理本地文件
-                if [ "$CLEANUP" = true ]; then
-                    rm -f "$file"
-                fi
-            else
-                error "  ✗ $filename (导入失败)"
-                ((failed_count++))
-            fi
-        fi
-    done
-    
-    echo ""
-    info "同步统计:"
-    info "  成功: $success_count"
-    info "  失败: $failed_count"
-    [ $corrupted_count -gt 0 ] && warn "  损坏: $corrupted_count"
-    info "  跳过 (ingest): $skipped_count"
-    info "  重复 (数据库): $duplicate_count"
-    
-    return 0
-}
-
-# 验证导入
-verify_import() {
-    local pod=$(get_calibre_pod) || return 1
-    
-    info "验证导入..."
-    
-    # 获取 ingest 目录中的文件数
-    local ingest_count=$(kubectl --context "$KUBE_CONTEXT" exec -n "$INGEST_POD_NAMESPACE" "$pod" -- \
-        find "${INGEST_PATH}" -maxdepth 1 -type f 2>/dev/null | wc -l)
-    
-    info "Ingest 目录中的文件: $ingest_count"
-}
-
-# 主函数
+# ============================================================================
+# 主入口
+# ============================================================================
 main() {
-    parse_args "$@"
-    
-    init
-    check_env || exit 1
-    
-    sync_ebooks || exit 1
-    
-    if [ "$DRY_RUN" = false ]; then
-        verify_import
-    fi
-    
-    success "完成"
+  parse_args "$@"
+  load_config
+  acquire_lock
+
+  mkdir -p "$MANIFEST_DIR"
+  mkdir -p "$(dirname "$LOG_FILE")"
+  [[ $BACKUP == true ]] && mkdir -p "$BACKUP_DIR"
+
+  if [[ ! -d "$LOCAL_BOOKS_DIR" ]]; then
+    error "源目录不存在: $LOCAL_BOOKS_DIR"
+    exit 1
+  fi
+
+  do_check
+
+  if [[ "$MODE" == "upload" ]]; then
+    do_upload
+  fi
+
+  success "完成"
 }
 
-# 仅当脚本被直接执行（而非源引入）时运行 main 函数
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
-fi
+main "$@"

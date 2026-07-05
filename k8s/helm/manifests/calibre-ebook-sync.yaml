@@ -6,64 +6,85 @@ metadata:
 data:
   sync-ebooks.sh: |
     #!/bin/bash
-    
-    # 电子书自动同步脚本（在 K8s 中运行）
-    # 功能: 监视本地电子书目录并自动导入到 calibre-web
-    
+    # 在 K8s pod 内运行的 calibre-web 健康检查与 ingest 监控脚本
+    # CronJob 每 6h 触发一次
     set -euo pipefail
-    
+
     CALIBRE_LIBRARY="/calibre-library"
     INGEST_DIR="/cwa-book-ingest"
     LOCK_FILE="/tmp/ebook-sync.lock"
     LOG_FILE="/tmp/ebook-sync.log"
-    BOOKS_IMPORTED_FILE="/tmp/ebook-sync-imported.txt"
-    
-    # 支持的格式
-    FORMATS="pdf epub mobi azw azw3"
-    
-    log() {
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] $@" | tee -a "$LOG_FILE"
-    }
-    
-    log "=== 电子书自动同步开始 ==="
-    
-    # 防止并发执行
+
+    log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $@" | tee -a "$LOG_FILE"; }
+
+    log "=== ebook-sync 开始 ==="
+
+    # 锁 — 防止并发
     if [ -f "$LOCK_FILE" ]; then
-        log "另一个同步进程正在运行，退出"
-        exit 0
+        pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            log "另一个进程 (PID $pid) 正在运行，退出"; exit 0
+        fi
+        log "移除过期锁"; rm -f "$LOCK_FILE"
     fi
-    
-    touch "$LOCK_FILE"
-    trap "rm -f $LOCK_FILE" EXIT
-    
-    # 初始化已导入列表
-    if [ ! -f "$BOOKS_IMPORTED_FILE" ]; then
-        touch "$BOOKS_IMPORTED_FILE"
-    fi
-    
-    # 检查 ingest 目录是否存在
+    echo "$$" > "$LOCK_FILE"
+    trap 'rm -f "$LOCK_FILE"' EXIT
+
+    # 1. 检查 ingest 目录
     if [ ! -d "$INGEST_DIR" ]; then
-        log "错误: Ingest 目录不存在: $INGEST_DIR"
+        log "错误: Ingest 目录不存在: $INGEST_DIR"; exit 1
+    fi
+    PENDING=$(find "$INGEST_DIR" -maxdepth 1 -type f 2>/dev/null | wc -l)
+
+    # 2. 检查数据库
+    if [ ! -f "$CALIBRE_LIBRARY/metadata.db" ]; then
+        log "错误: 元数据库不存在: $CALIBRE_LIBRARY/metadata.db"; exit 1
+    fi
+
+    TOTAL=$(sqlite3 "$CALIBRE_LIBRARY/metadata.db" "SELECT COUNT(*) FROM books;" 2>/dev/null || echo "0")
+    PREV_TOTAL_FILE="/tmp/ebook-sync-prev-total"
+
+    # 3. 计算新增
+    NEW_BOOKS=0
+    if [ -f "$PREV_TOTAL_FILE" ]; then
+        PREV=$(cat "$PREV_TOTAL_FILE")
+        NEW_BOOKS=$(( TOTAL - PREV ))
+    fi
+    echo "$TOTAL" > "$PREV_TOTAL_FILE"
+
+    # 4. 最近 5 本入库的书
+    RECENT=$(sqlite3 "$CALIBRE_LIBRARY/metadata.db" \
+      "SELECT title || ' — ' || author_sort FROM books ORDER BY id DESC LIMIT 5;" 2>/dev/null || true)
+
+    # 5. 磁盘用量
+    LIB_SIZE=$(du -sh "$CALIBRE_LIBRARY" 2>/dev/null | awk '{print $1}')
+    INGEST_SIZE=$(du -sh "$INGEST_DIR" 2>/dev/null | awk '{print $1}')
+
+    # 6. 输出报告
+    echo "============================================"
+    echo "  calibre-web 同步报告"
+    echo "============================================"
+    echo "  📚 书库总计:     $TOTAL 本"
+    echo "  📤 待导入 (ingest): $PENDING 个"
+    echo "  ✨ 本轮新增:    $NEW_BOOKS 本"
+    echo "  💾 书库大小:    $LIB_SIZE"
+    echo "  📥 Ingest 大小: $INGEST_SIZE"
+    echo "============================================"
+    echo "  最近入库:"
+    echo "$RECENT" | while IFS= read -r line; do
+        [ -n "$line" ] && echo "    · $line"
+    done
+    echo "============================================"
+
+    # 7. 健康判定
+    if [ "$PENDING" -gt 50 ]; then
+        log "警告: ingest 队列堆积 ($PENDING 个)，calibre-web 可能未正常消费"
+        [ -f "$PREV_TOTAL_FILE" ] && echo "" > "$PREV_TOTAL_FILE"
         exit 1
     fi
-    
-    # 扫描电子书（这个脚本在 pod 内运行，所以目录是 pod 内的）
-    # 但实际上 ingest 目录会自动被 calibre-web 处理
-    # 所以这个脚本主要是用于监控和报告
-    
-    # 统计 ingest 目录中的文件
-    PENDING_COUNT=$(find "$INGEST_DIR" -maxdepth 1 -type f 2>/dev/null | wc -l)
-    
-    log "待导入的电子书: $PENDING_COUNT 本"
-    log "元数据库位置: $CALIBRE_LIBRARY/metadata.db"
-    
-    # 获取当前数据库中的书籍数
-    if [ -f "$CALIBRE_LIBRARY/metadata.db" ]; then
-        TOTAL_BOOKS=$(sqlite3 "$CALIBRE_LIBRARY/metadata.db" "SELECT COUNT(*) FROM books;" 2>/dev/null || echo "0")
-        log "calibre-web 中的书籍总数: $TOTAL_BOOKS"
-    fi
-    
-    log "=== 电子书自动同步结束 ==="
+
+    log "=== ebook-sync 完成 (总计 $TOTAL 本) ==="
+    exit 0
 
 ---
 apiVersion: batch/v1
@@ -72,9 +93,6 @@ metadata:
   name: ebook-sync-monitor
   namespace: personal-services
 spec:
-  # 每6小时执行一次 (0 */6 * * *)
-  # 每4小时执行一次 (0 */4 * * *)
-  # 每日两次: 02:00 和 14:00 (0 2,14 * * *)
   schedule: "0 */6 * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
@@ -94,7 +112,6 @@ spec:
                 - /bin/bash
                 - -c
                 - |
-                  #!/bin/bash
                   source /scripts/sync-ebooks.sh
               env:
                 - name: TZ
