@@ -13,7 +13,6 @@ resources:
   - rss-system/rsshub.yaml
   - rss-system/karakeep.yaml
   - rss-system/redpanda-connect.yaml
-  - rss-system/backup-cronjob.yaml
   # Homepage
   - homepage/namespace.yaml
   - homepage/homepage.yaml
@@ -35,4 +34,3 @@ resources:
   - personal-services/squoosh.yaml
   - personal-services/timeslot.yaml
   - personal-services/trends.yaml
-  - personal-services/backup-cronjob.yaml

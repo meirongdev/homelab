@@ -33,7 +33,7 @@ data:
         {"name": "HashiCorp Vault","url": "https://vault.meirong.dev/",         "accepted_statuscodes": ["300-399"], "maxredirects": 0},
         {"name": "Calibre-Web",    "url": "https://book.meirong.dev/",          "accepted_statuscodes": ["300-399"], "maxredirects": 0},
         {"name": "ArgoCD",         "url": "https://argocd.meirong.dev/",        "accepted_statuscodes": ["200-299", "300-399"]},
-        # Kopia 备份服务器现仅经 Tailscale NodePort（https://100.94.186.7:31515，自签 cert），不再有公网入口，故不在此处探测。
+        # 备份服务（原 Kopia）现已迁移 Tailscale NodePort（https://100.94.186.7:31515，自签 cert），不再有公网入口，故不在此处探测。
         # --- new info pipeline services ---
         # KaraKeep: root / redirects 307 to /signin; monitor /signin directly (returns 200)
         {"name": "KaraKeep",       "url": "http://karakeep.rss-system.svc:3000/signin"},

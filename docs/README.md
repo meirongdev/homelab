@@ -41,7 +41,6 @@
 | Vault | homelab | vault.meirong.dev | 内置 |
 | ArgoCD | homelab | argocd.meirong.dev | 内置 |
 | ZITADEL | homelab | auth.meirong.dev | OIDC |
-| Kopia | homelab | 100.94.186.7:31515（Tailscale NodePort，自签 cert） | Basic Auth |
 | Homepage | oracle-k3s | home.meirong.dev | 公开 |
 | IT-Tools | oracle-k3s | tool.meirong.dev | 公开 |
 | Stirling-PDF | oracle-k3s | pdf.meirong.dev | 公开 |
@@ -58,14 +57,9 @@ Oracle 集群工作负载的 Vault 路径约定：使用 `secret/oracle-k3s/<ser
 
 ### 备份状态
 
-| 数据 | 备份方式 | 状态 |
-|------|---------|------|
-| Vault PVC | Kopia CronJob | ✅ 每日自动快照 |
-| ZITADEL PostgreSQL | Kopia CronJob | ✅ 每日自动快照 |
-| Calibre-Web / Gotify | Kopia CronJob | ✅ 周期快照 |
-| oracle-k3s 应用数据 | pg_dump + Kopia CronJob | ✅ 已接入 |
-
-详见 [备份与恢复方案](plans/2026-03-07-homelab-oracle-architecture-optimization.md#2-应用数据分类与备份策略)
+| 数据 | 状态 |
+|------|------|
+| 所有服务 | ❌ Kopia 已移除 (2026-07-05)，备份待重新设计 |
 
 ## 推荐阅读顺序
 
