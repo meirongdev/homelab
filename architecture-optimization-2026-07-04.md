@@ -10,11 +10,11 @@
 
 软件层已相当完整（GitOps 双集群、LGTM 全信号、SLO、准入/扫描/运行时检测、WAF）。短板不在"再加组件"，而在**物理层的两个结构性错配**：
 
-1. **算力倒挂**：最关键的负载（Vault、ZITADEL、ArgoCD hub、可观测中枢、Kopia）全部跑在舰队里**最弱的机器**上——13GB 内存、idle ~74°C 的 5600H 笔记本（VM 独占 12GB，宿主仅 ~1GB headroom）。而 Oracle 免费节点有 24GB（两倍），两台 DGX Spark 各 128GB 基本闲置（仅接了 node_exporter / smartctl_exporter）。
+1. **算力倒挂**：最关键的负载（Vault、ZITADEL、ArgoCD hub、可观测中枢）——Kopia 已于 2026-07-05 移除全部跑在舰队里**最弱的机器**上——13GB 内存、idle ~74°C 的 5600H 笔记本（VM 独占 12GB，宿主仅 ~1GB headroom）。而 Oracle 免费节点有 24GB（两倍），两台 DGX Spark 各 128GB 基本闲置（仅接了 node_exporter / smartctl_exporter）。
 
-2. **故障域集中**：身份（ZITADEL）、密钥（Vault）、GitOps（管两个集群）、告警出口（Alertmanager → gotify-bridge → Gotify）、备份服务器（Kopia）——五种"救命能力"住在同一台笔记本的同一个 VM 里。**homelab 整机挂掉时，指标告警链全哑**（Watchdog 被 drop，没有 dead-man's switch），只能靠人工发现。
+2. **故障域集中**：身份（ZITADEL）、密钥（Vault）、GitOps（管两个集群）、告警出口（Alertmanager → gotify-bridge → Gotify）——五种"救命能力"住在同一台笔记本的同一个 VM 里。**homelab 整机挂掉时，指标告警链全哑**（Watchdog 被 drop，没有 dead-man's switch），只能靠人工发现。
 
-3. **数据单点**：Kopia repo 与主数据在同一屋、备份失效域与主存储失效域重叠。`docs/architecture/TODO.md` Phase 5 的"离站备份"一直未做，是全系统唯一**不可逆**的风险。
+3. **数据单点**：Kopia 已于 2026-07-05 移除，当前全系统无任何备份。`docs/architecture/TODO.md` Phase 5 的"离站备份"一直未做，是全系统唯一**不可逆**的风险。
 
 优化按"数据不可再生 > 告警可达 > 容量 > 质量"排序，分三级。
 
@@ -26,11 +26,11 @@
 
 唯一能造成**永久损失**的场景是 storage-106 磁盘 + 屋内事故。方案：
 
-- `kopia repository sync-to b2/s3` 每周 CronJob（Kopia 原生支持，repo 已加密，云端只存密文）。
+- Kopia 已移除，离站备份待重新设计（可选 restic 或更简单的方案）。
 - 目标存储二选一：
   - **Backblaze B2**（~$6/TB/月，适合全量 repo）；或
   - 分层——**P0 小数据（Vault + ZITADEL pg_dump，通常 <1GB）放 OCI Object Storage always-free 20GB（$0）**，P1 大块（Calibre 书库）进 B2，或接受只有本地副本。
-- 凭据放 Vault `secret/homelab/kopia-offsite` → ESO；CronJob 失败靠现有 `KubeJobFailed` 告警兜住。
+- # Kopia 已移除，凭据方案待重新设计。
 - 顺手把 `TODO.md` Phase 4 里 unchecked 的**恢复演练**做掉一次（验证 Vault 恢复 SOP），否则备份只是薛定谔的备份。
 
 ### 2. 告警链路脱离 homelab 故障域
@@ -138,4 +138,4 @@
 
 **对症方案**：想增内存 → 给 pve 加内存条（P1-4）；想要真·第二计算节点 → 加一台 N100 级迷你 PC 当 worker，勿复用存储机。
 
-**106 的正确用法（不是加计算，而是升级存储层）**：抬 ARC 读缓存 + ZFS 快照 + 云端离站,把它从"单点裸盘"变成三层受保护存储——同时落地本文档 P0-1 的离站备份。执行细节（含 Kopia vs rclone/restic 决策）见 **`docs/plans/2026-07-04-storage-106-utilization-and-backup-simplification.md`**。
+**106 的正确用法（不是加计算，而是升级存储层）**：抬 ARC 读缓存 + ZFS 快照 + 云端离站,把它从"单点裸盘"变成三层受保护存储——同时落地本文档 P0-1 的离站备份。执行细节（备份方案待重新设计）见 **`docs/plans/2026-07-04-storage-106-utilization-and-backup-simplification.md`**。

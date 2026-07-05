@@ -1,8 +1,8 @@
 # storage-106 充分利用 + 备份简化 — 完整执行计划（Agent 可执行）
 
 > 日期: 2026-07-04
-> 状态: 📋 待执行（Planned）
-> 执行方式: **供后续 agent 按 Task 顺序执行**。每个 Task 自带 前置条件 / 精确命令 / 预期结果 / 验证 / 回滚 / 风险等级 / 是否需人工门。
+> 状态: 🔴 Kopia 已移除（2026-07-05），备份方案待重新设计。详见 docs/runbooks/backup-recovery.md。
+> ⚠️ Kopia 已于 2026-07-05 彻底移除（含 server + backup CronJob + PVC 数据 + Vault secret）。Tasks 4-6（备份路线选择、离站、恢复演练）已不适用，待后续备份方案重新设计后再更新。
 > 关联: `../../architecture-optimization-2026-07-04.md`（战略母文档）、`../runbooks/backup-recovery.md`（现有 Kopia 备份运维）
 > 结论: 把 106 从"单点裸盘"升级为**带 ARC 读缓存 + ZFS 快照 + 云端离站**的三层受保护存储；**不加计算**。备份层默认**保留 Kopia + 用 rclone 只做离站**（最小改动）；若要根治 Kopia server 复杂度则迁 **restic**（需用户确认）。
 

@@ -282,5 +282,5 @@ spec:
           name: gotify
           port: 80
           weight: 1
-# kopia web UI 不再经 gateway（kopia 已转 TLS，Cilium Gateway 无法对自签后端发起 TLS）。
+# Kopia 已于 2026-07-05 移除，不再需要 gateway 路由。
 # 改为经 Tailscale NodePort 直连：https://100.94.186.7:31515（自签 cert）。见 docs/runbooks/backup-recovery.md。
