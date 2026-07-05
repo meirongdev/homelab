@@ -1,0 +1,46 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: calibre-metadata-enrich
+  namespace: personal-services
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 604800  # 7天后自动清理
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: metadata-enrich
+          image: crocodilestick/calibre-web-automated@sha256:c31a738b6d5ec6982c050063dd3f063b6943eb1051fc81144789f840d9093a8d
+          command:
+            - python3
+            - /scripts/enrich_metadata.py
+          env:
+            - name: LD_LIBRARY_PATH
+              value: "/app/calibre/lib"
+            - name: TZ
+              value: "Asia/Shanghai"
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+          volumeMounts:
+            - name: calibre-library
+              mountPath: /calibre-library
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: calibre-library
+          persistentVolumeClaim:
+            claimName: calibre-books
+        - name: scripts
+          configMap:
+            name: metadata-enrich-script
+            defaultMode: 0755
