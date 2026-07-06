@@ -7,17 +7,19 @@ metadata:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: calibre-web-automated-config
+  # migrated NFS→local-path 2026-07-06 (sqlite app.db/cwa.db fsync; Phase 2).
+  # processed_books(11G) 一并迁；thumbnails(12k 小文件,可重建)未迁,calibre 会按需重建。
+  name: calibre-web-automated-config-local
   namespace: personal-services
   annotations:
     argocd.argoproj.io/sync-options: Prune=false
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: nfs-client
+  storageClassName: local-path
   resources:
     requests:
-      storage: 1Gi
+      storage: 20Gi
 ---
 apiVersion: v1
 kind: PersistentVolume
@@ -235,7 +237,7 @@ spec:
       volumes:
         - name: config
           persistentVolumeClaim:
-            claimName: calibre-web-automated-config
+            claimName: calibre-web-automated-config-local
         - name: books
           persistentVolumeClaim:
             claimName: calibre-books
