@@ -24,22 +24,23 @@
 
 ### 1. 离站备份（roadmap 已有，提为第一优先）
 
-唯一能造成**永久损失**的场景是 storage-106 磁盘 + 屋内事故。方案：
+唯一能造成**永久损失**的场景是 storage-106 磁盘 + 屋内事故。
 
-- Kopia 已移除，离站备份待重新设计（可选 restic 或更简单的方案）。
-- 目标存储二选一：
-  - **Backblaze B2**（~$6/TB/月，适合全量 repo）；或
-  - 分层——**P0 小数据（Vault + ZITADEL pg_dump，通常 <1GB）放 OCI Object Storage always-free 20GB（$0）**，P1 大块（Calibre 书库）进 B2，或接受只有本地副本。
-- # Kopia 已移除，凭据方案待重新设计。
-- 顺手把 `TODO.md` Phase 4 里 unchecked 的**恢复演练**做掉一次（验证 Vault 恢复 SOP），否则备份只是薛定谔的备份。
+> ✅ **已定方案（2026-07-06）**：serverless **restic**，每集群 CronJob 逻辑 dump（Vault raft snapshot / pg_dump / sqlite `.backup`）→ **106 ZFS 加密仓库**（`mrstorage/restic`，raidz1 + sanoid 保护）。**先本地仓库、离站 later**（后续 rclone/`restic copy` → OCI always-free 20GB 或 B2）。完整执行计划见 **`docs/plans/2026-07-06-storage-local-migration-and-backup-redesign.md`**。
+
+- 分层：**P0 小数据（Vault + 各 PG + sqlite，总量 <2GB）** 进 restic；**Calibre 书库（100Gi）** 不进 restic，靠 ZFS raidz1 + sanoid（书可再下载，用户已确认不离站）。
+- 凭据：restic repo 密码 + 专用 SSH key 入 Vault `secret/homelab/restic` → ESO。
+- **恢复演练**并入 restic 计划 Phase 1 DoD（从仓库真恢复 Vault+PG+sqlite），否则备份只是薛定谔的备份。
 
 ### 2. 告警链路脱离 homelab 故障域
 
 原则：**报告 homelab 死讯的组件不能住在 homelab。**
 
-- **Dead-man's switch（一小时的活，收益最大）**：把 Alertmanager 的 Watchdog 从 drop 改为路由到外部心跳——最顺手是 oracle 上 Uptime Kuma 的 **Push monitor**（Alertmanager webhook 每分钟打一次 push URL，5 分钟无心跳即告警），或 healthchecks.io 免费版。homelab Prometheus/Alertmanager 停跳 → oracle 侧立刻知道。
-- **Gotify 从 homelab 迁到 oracle-k3s**：它是 SQLite + 1Gi PVC，迁移成本低（manifest 挪到 `cloud/oracle/manifests/`、tunnel ingress 规则换集群、备份挪进 oracle 03:30 CronJob），URL 不变（`notify.meirong.dev`），KaraKeep → Gotify → Telegram 管道无感。迁完后 homelab 全灭时 Uptime Kuma 仍能经 Gotify → Telegram 发出消息。
-  - ⚠️ **先确认 Uptime Kuma 当前的通知渠道**：provisioner 里目前只见 monitor 列表；若其通知也走 Gotify，则现状是"探测在 oracle、喇叭在 homelab"的半残状态，迁移正好修复。
+> ✅ **已定方案（2026-07-06）**：**Gotify + ZITADEL 都迁 oracle-k3s**（用户确认）；dead-man's switch 一并落地。执行见 2026-07-06 计划 Phase 3+4。
+
+- **Dead-man's switch**：把 Alertmanager 的 Watchdog 从 `receiver:"null"` 改为路由到外部心跳——oracle 上 Uptime Kuma 的 **Push monitor**（Alertmanager webhook 每分钟打一次 push URL，5 分钟无心跳即告警）。homelab Prometheus/Alertmanager 停跳 → oracle 侧立刻知道。
+- **Gotify 迁 oracle-k3s**：SQLite + 1Gi PVC（迁 local-path），manifest 挪 `cloud/oracle/manifests/gotify/`、tunnel ingress + DNS 换集群，URL 不变（`notify.meirong.dev`），KaraKeep → Gotify 管道无感。**这一步是 dead-man's switch 真正生效的前提**：Gotify 到了 oracle 后，Uptime Kuma → Gotify(oracle) → Telegram 在 homelab 全灭时仍畅通。
+  - ⚠️ Uptime Kuma provisioner 目前只建 monitor、**无通知渠道**——Task 9 需补配其 Gotify(oracle)→Telegram 通知渠道，否则 push monitor 触发也发不出。
 
 ### 3. storage-106 的 ZFS 冗余（已确认，2026-07-04）
 
@@ -81,9 +82,9 @@
 
 ### 6. Oracle 24GB 余量的用法
 
-个人服务很轻，24GB 用不满。除接收 Gotify（P0）外，留一个**中期预案**：
+个人服务很轻，24GB 用不满。除接收 Gotify（P0）外：
 
-- 若 homelab 稳定性反复出问题，**ZITADEL 是下一个值得迁去 oracle 的**（全家 SSO 可用性 > 家里笔记本；`auth.meirong.dev` 走 tunnel，在哪个集群对外无感；PG 用现成 pg_dump/restore SOP）。现在不动，记为预案。
+- ✅ **ZITADEL 迁 oracle 已决（2026-07-06）**：不再只是预案——全家 SSO 可用性 > 家里笔记本；`auth.meirong.dev` 走 tunnel、在哪个集群对外无感；PG 迁 oracle local-path，用现成 pg_dump/restore SOP。执行见 2026-07-06 计划 Phase 3 Task 8（纳入 `docs/plans/2026-07-04-zitadel-to-oracle-k3s.md`）。
 
 ---
 

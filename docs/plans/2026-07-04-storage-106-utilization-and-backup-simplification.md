@@ -1,8 +1,9 @@
 # storage-106 充分利用 + 备份简化 — 完整执行计划（Agent 可执行）
 
 > 日期: 2026-07-04
-> 状态: 🔴 Kopia 已移除（2026-07-05），备份方案待重新设计。详见 docs/runbooks/backup-recovery.md。
-> ⚠️ Kopia 已于 2026-07-05 彻底移除（含 server + backup CronJob + PVC 数据 + Vault secret）。Tasks 4-6（备份路线选择、离站、恢复演练）已不适用，待后续备份方案重新设计后再更新。
+> 状态: ⚠️ **部分完成 / 被取代**。
+> - ✅ **Task 1（ARC→4GB）+ Task 2（sanoid，31 快照）已完成**（2026-07-06 实测）；Task 3（ARC 重启持久化）待核 `/etc/modprobe.d/zfs.conf`。
+> - ➡️ **Task 4-6（备份路线/离站/恢复演练）由 [2026-07-06 存储本地化迁移 + 备份体系重建](2026-07-06-storage-local-migration-and-backup-redesign.md) 取代** —— Kopia 已于 2026-07-05 移除，新方案定为 serverless **restic → 106 ZFS 仓库，离站 later**。本文档保留作 ARC/sanoid 与决策依据的历史记录。
 > 关联: `../../architecture-optimization-2026-07-04.md`（战略母文档）、`../runbooks/backup-recovery.md`（现有 Kopia 备份运维）
 > 结论: 把 106 从"单点裸盘"升级为**带 ARC 读缓存 + ZFS 快照 + 云端离站**的三层受保护存储；**不加计算**。备份层默认**保留 Kopia + 用 rclone 只做离站**（最小改动）；若要根治 Kopia server 复杂度则迁 **restic**（需用户确认）。
 
@@ -33,12 +34,12 @@
 ### 0.4 Task 状态清单（执行者随进度勾选）
 | Task | 名称 | 自动/人工门 | 需维护窗口 | 状态 |
 |------|------|-------------|-----------|------|
-| 1 | A1a 在线抬 ARC | 自动 | 否 | ⬜ |
-| 2 | A2 sanoid ZFS 快照 | 自动 | 否 | ⬜ |
-| 3 | A1b ARC 落盘 + 重启 | 门 G1 | **是** | ⬜ |
-| 4 | Part B 备份路线落地（默认 C）| 门 G2 | 否 | ⬜ |
-| 5 | A3 离站推送（Option C 路径）| 门 G3 | 否 | ⬜ |
-| 6 | 恢复演练（DoD）| 自动 | 否 | ⬜ |
+| 1 | A1a 在线抬 ARC | 自动 | 否 | ✅ 已完成（arc_c_max=4GB）|
+| 2 | A2 sanoid ZFS 快照 | 自动 | 否 | ✅ 已完成（31 快照）|
+| 3 | A1b ARC 落盘 + 重启 | 门 G1 | **是** | ⬜ 待核持久化 |
+| 4 | Part B 备份路线落地（默认 C）| 门 G2 | 否 | ➡️ 取代（2026-07-06 计划：restic）|
+| 5 | A3 离站推送（Option C 路径）| 门 G3 | 否 | ➡️ 取代（2026-07-06 计划 Phase 5）|
+| 6 | 恢复演练（DoD）| 自动 | 否 | ➡️ 取代（2026-07-06 计划 Phase 1）|
 
 ---
 

@@ -1,8 +1,9 @@
 # ZITADEL 迁移至 oracle-k3s 计划
 
 > 日期: 2026-07-04
-> 状态: Pending（等待 106 恢复后执行）
-> 背景: 106 服务器 (192.168.50.106) 暂时不可用，暴露 homelab NFS 单点依赖风险
+> 状态: 🟢 已批准（2026-07-06）——并入 [2026-07-06 存储本地化迁移 + 备份体系重建](2026-07-06-storage-local-migration-and-backup-redesign.md) 计划 Phase 3 Task 8 执行。
+> 动机已从"106 不可用"升级为**故障域分离**：SSO 可用性 > 家里笔记本，homelab 整机故障时 OIDC 仍在线。ZITADEL PG 落 oracle **local-path**（比 NFS 更适合 PG 同步写）。
+> 背景: homelab NFS 单点依赖 + 单故障域集中（Vault/身份/GitOps/告警同住一台笔记本）
 
 ## 1. 迁移动机
 

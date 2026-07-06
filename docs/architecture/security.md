@@ -1,6 +1,6 @@
 # K3s 集群安全架构 (Security Architecture)
 
-> Last updated: 2026-06-18
+> Last updated: 2026-07-06
 > Scope: 双集群（homelab + oracle-k3s）的纵深防御模型 —— source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
 > 实施决策与权衡见 [../plans/2026-06-16-k3s-security-hardening.md](../plans/2026-06-16-k3s-security-hardening.md)。
@@ -27,7 +27,7 @@
 | 8 | 节点加固 | k3s `protect-kernel-defaults` + sysctl | ⏳ 待重启生效 | `k8s/ansible/playbooks/setup-k3s.yaml` | homelab |
 | 9 | 网络 | Cilium NetworkPolicy + Hubble 可见性 | 🟡 仅可见性 | Cilium（默认拒绝刻意延后） | 双 |
 | 10 | 运行时检测 | Tetragon(homelab) / Falco+Falcosidekick(oracle) | ✅ 已实现（Falco→Gotify 待 token） | `values/{tetragon,falco}.yaml` | 双（分别选型） |
-| 11 | 备份/恢复 | Kopia（NFS 1Ti） | ✅ 生产（无离站副本） | `manifests/kopia*.yaml` | 双 |
+| 11 | 备份/恢复 | restic（106 ZFS 加密仓库）| 🟡 Phase1 上线（双集群每夜备份 + 恢复演练通过；**离站副本待做**）| `runbooks/backup-recovery.md` | 双 |
 | 12 | 安全可观测 | Prometheus/Loki → Alertmanager → Gotify | ✅ 生产 | `kube-prometheus-stack.yaml`, 各 `*-alerts.yaml` | 双 |
 
 ---
