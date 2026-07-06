@@ -28,7 +28,7 @@ spec:
               command: ["sh", "/scripts/backup.sh"]
               resources:
                 requests: { cpu: "50m", memory: "128Mi" }
-                limits:   { cpu: "500m", memory: "512Mi" }   # 控 CPU（热节点）
+                limits:   { cpu: "200m", memory: "256Mi" }   # 控 CPU（热节点）
               volumeMounts:
                 - { name: script,   mountPath: /scripts, readOnly: true }
                 - { name: creds,    mountPath: /creds,   readOnly: true }

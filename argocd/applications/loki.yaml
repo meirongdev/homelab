@@ -1,0 +1,37 @@
+---
+# Loki — 日志聚合（SingleBinary 模式）
+# Chart: grafana/loki
+# Values: k8s/helm/values/loki.yaml
+# 2026-07-06: 从 Helm 直接管理迁入 ArgoCD（参照 falco.yaml 的 multi-source 模式）
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loki
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: homelab
+
+  sources:
+    - repoURL: https://grafana.github.io/helm-charts
+      chart: loki
+      targetRevision: "7.0.0"
+      helm:
+        valueFiles:
+          - $values/k8s/helm/values/loki.yaml
+    - repoURL: https://github.com/meirongdev/homelab
+      targetRevision: main
+      ref: values
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

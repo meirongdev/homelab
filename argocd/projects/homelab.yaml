@@ -17,6 +17,10 @@ spec:
     # Phase 2 运行时检测：Tetragon(homelab) / Falco(oracle)
     - https://helm.cilium.io/
     - https://falcosecurity.github.io/charts
+    # 可观测性: Loki(日志) / Tempo(追踪)
+    - https://grafana.github.io/helm-charts
+    # SLO 生成器
+    - https://slok.github.io/sloth
 
   destinations:
     - server: https://kubernetes.default.svc
