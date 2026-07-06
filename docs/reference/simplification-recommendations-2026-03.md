@@ -1,7 +1,7 @@
 # Architecture Simplification Recommendations (2026-03)
 
 > **Deprecated (2026-06-05):** Some recommendations in this document have been superseded by subsequent decisions.
-> - **Recommendation #5** ("keep oracle-k3s outside ArgoCD") was overtaken by the [oracle-k3s GitOps migration](../plans/2026-06-04-oracle-k3s-argocd-gitops.md) completed on 2026-06-04.
+> - **Recommendation #5** ("keep oracle-k3s outside ArgoCD") was overtaken by the [oracle-k3s GitOps migration](../plans/networking/2026-06-04-oracle-k3s-argocd-gitops.md) completed on 2026-06-04.
 > - Other recommendations remain valid as design guidance. See the plan record for the actual implementation decisions.
 
 > Context: oracle-k3s has completed the Cilium migration. Both clusters now run Cilium + Cilium Gateway API + Cloudflare Tunnel, with Tailscale still carrying cross-cluster pod routing and operational access. ClusterMesh prerequisites are configured, but the mesh is not connected yet.

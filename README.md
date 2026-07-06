@@ -6,13 +6,14 @@ Network note: both clusters now use Cilium for the local data plane and Gateway 
 
 ## Documentation Index
 
-- **[Project Conventions & AI Guide](docs/CONVENTIONS.md)**: System design, tech stack, and development rules.
+- **[Project Conventions & AI Guide](docs/AGENTS.md)**: Project context for AI assistants (Codex, Claude).
+  - Full conventions: [docs/CONVENTIONS.md](docs/CONVENTIONS.md)
 - **[Infrastructure (Proxmox/Terraform)](proxmox/README.md)**: VM provisioning and host preparation.
 - **[Kubernetes (K3s/Ansible)](k8s/README.md)**: Cluster setup and node configuration.
 - **[Applications (Helm/Manifests)](k8s/helm/README.md)**: Deploying the monitoring stack, databases, and personal services.
 - **[External Access (Cloudflare/Terraform)](cloudflare/terraform/README.md)**: Tunnel and DNS management.
 - **[GitOps (ArgoCD)](argocd/)**: Application manifests and AppProject definitions.
-- **[Project Roadmap](docs/architecture/TODO.md)**: Current status and future plans.
+- **[Project Roadmap](docs/plans/ROADMAP.md)**: Current status and future plans.
 
 ## Quick Start Summary
 
