@@ -74,6 +74,9 @@ ui:
   nodePort: 30820
 
 injector:
+  # 单节点：清空 chart 默认的硬 podAntiAffinity（否则滚动更新时新副本无法与旧副本同节点共存 → Pending 死锁）。
+  # 与上面 server.affinity:"" 一致。webhook failurePolicy=Ignore，滚动期间不阻塞 Pod 创建。
+  affinity: ""
   resources:
     requests:
       cpu: 25m
