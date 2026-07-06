@@ -1,8 +1,9 @@
 # 存储本地化迁移 + 备份体系重建 — 完整执行计划（Agent 可执行）
 
 > 日期: 2026-07-06
-> 状态: 🟡 **Phase 0-1 已完成并验证（2026-07-06）**；Phase 2+（存储迁移 / 服务重定位 / 韧性 / 离站）待执行。
+> 状态: 🟢 **Phase 0-2 已完成并验证（2026-07-06）**；Phase 3+（Gotify/ZITADEL→oracle / 韧性 / 离站）待执行。
 > - ✅ Phase 0-1: serverless restic 备份**双集群上线**，恢复演练通过（详见 §Phase 1 末与 §DoD）。仓库 `881fb124bf` @ 106 `mrstorage/restic`。
+> - ✅ Phase 2: homelab sqlite/fsync PVC（**Vault raft / bifrost / calibre-config**）迁 local-path；alertmanager/audit/trivy 按设计留 NFS。详见 §Phase 2 表。
 > 结论: 把 homelab 上所有 **fsync/sqlite/PG 类** 有状态 PVC 从 `nfs-client` 迁到 `local-path`（性能 + 脱离 NFS 启动依赖），大件顺序数据（Calibre 书库）留在 NFS/ZFS。因 `local-path` 无冗余无快照，**先重建一套 serverless restic 备份**（逻辑 dump → 106 ZFS 上的加密仓库）再做迁移。同步把 **Gotify + ZITADEL 迁到 oracle-k3s**（脱离 homelab 故障域），并补上 **dead-man's switch** 与 **zpool/SMART 告警**。
 > 关联: `../../architecture-optimization-2026-07-04.md`（战略母文档）、`2026-07-04-storage-106-utilization-and-backup-simplification.md`（本计划取代其 Task 4-6 备份部分）、`2026-07-04-zitadel-to-oracle-k3s.md`（本计划纳入并执行）、`../runbooks/backup-recovery.md`（运维手册，随本计划回写）
 
@@ -194,16 +195,19 @@ restic -r <repo> restore latest --target /tmp/verify --host homelab
 > 通用法（StatefulSet `volumeClaimTemplate` 的 SC 不可变，参照 CLAUDE.md 里 Prometheus 迁移先例）：
 > 备份验证 → 停 workload → 删 STS（留旧 PVC）→ 新建同名 PVC on local-path → helper pod `cp -a` 旧→新（或从 restic 恢复）→ 改 values SC=local-path → 重建 → 校验 → 删旧 NFS PVC。
 
-| PVC | 方式 | 备注 |
-|-----|------|------|
-| `data-vault-0`(raft) | **门 G1**，维护窗口 | 停 Vault→搬 raft 数据目录到 local-path 新 PVC→改 `vault-values.yaml` raft SC→起→**用旧 unseal keys 解封**；restic snapshot 作兜底。**单步最高风险**。 |
-| `bifrost-data`(sqlite) | 在线/低峰 | Deployment；停 Pod→`cp -a`→改 `manifests/bifrost.yaml` SC→起 |
-| `calibre-web-automated-config` | 在线/低峰 | 同上，改 `manifests/calibre-web.yaml`；books PVC 不动 |
-| `alertmanager-…-db` | 在线 | operator 管；silence/nflog 可再生，直接换 SC 重建即可（可不恢复数据）|
-| `audit-vault-0` | 在线 | 审计日志可再生；换 SC 重建，不必恢复 |
-| `data-trivy-server-0` | 在线 | 漏洞 DB 缓存可重建；换 SC 重建，不备份 |
+**范围收敛（实测后判定，2026-07-06）**：只迁 sqlite/fsync 真受害者，把纯缓存/追加日志/tolerant 的留 NFS（churn > 收益）。
 
-- **迁移后 homelab NFS 仅剩 `calibre-books`**（+ 若 ZITADEL/Gotify 尚未迁走则暂留其 PVC，Phase 3 处理）。
+| PVC | 决策 | 状态 | 备注 |
+|-----|------|------|------|
+| `bifrost-data`(sqlite) | ✅ 迁 | **✅ 已完成 2026-07-06** | Deployment；停 Pod→新建 `bifrost-data-local`(local-path)→`cp -a`→patch claim→起→验证→删旧。⚠️ 重启 ArgoCD auto-sync 前须先 push+`refresh=hard`，否则会 sync 到旧 revision 把 claim 还原成 NFS（本次踩到，已修）。json-patch by index 改 volume claim（strategic-merge 对 volumes 列表没生效）。 |
+| `data-vault-0`(raft) | ✅ 迁 | **✅ 已完成 2026-07-06** | STS 停→双 local PVC 中转拷贝(vault ns baseline PSA 无 hostPath)→删旧 PVC+STS→helm 重建 STS 纳管 populated local `data-vault-0`→postStart auto-unseal 自动解封。审计留 NFS。验证: raft leader、12 secret、ESO Ready。**踩坑**: ①旧 NFS PVC 删除卡 Terminating(NFS reclaim)→清 finalizer；②helm upgrade 拉新 chart(0.33.0)滚动 injector，其硬 podAntiAffinity 单节点死锁→`injector.affinity:""`+scale 0/1；③ESO 在 Vault 重启窗口短暂 `EPERM`(Cilium 端点重编程)→重启 ESO controller 恢复。restic 快照 `fd32aa48` 兜底(未用上)。 |
+| `calibre-web-automated-config` | ✅ 迁(除 thumbnails) | **✅ 已完成 2026-07-06** | Deployment；停→拷贝(除 thumbnails)→patch config claim→起→验证→删旧。⚠️ **thumbnails 12252 个小文件(488M)未迁**：NFS 逐文件延迟使整目录拷贝 ~2MB/s(90min);它可由 calibre 按需重建,故排除,只迁 processed_books(133 大文件,11G)+ DB/config → ~2-3min。books(100Gi NFS)不动。 |
+| `alertmanager-…-db` | ❌ 留 NFS | — | operator 管的 bolt db，非 sqlite 锁敏感；silence 可再生。收益低。 |
+| `audit-vault-0` | ❌ 留 NFS | — | 追加型审计日志，NFS 顺序写无碍。 |
+| `data-trivy-server-0` | ❌ 留 NFS | — | 漏洞 DB 缓存可重建。 |
+
+- **✅ Phase 2 完成后实测 homelab nfs-client 仅剩**：`alertmanager-db`/`audit-vault-0`/`data-trivy-server-0`(设计保留) + `gotify-data`/`data-zitadel-db-postgresql-0`(待 Phase 3 迁 oracle) + `calibre-books`(100Gi RWX 静态,留)。所有 sqlite/fsync 受害者(Vault/bifrost/calibre-config)已在 local-path。
+- **通用迁移法(已跑通 3 次)**：停 workload → 建 `<pvc>-local`(local-path) → helper `cp -a`(大量小文件改按需排除) → `kubectl patch ... volumes/<idx>/persistentVolumeClaim/claimName`(**json-patch by index**,strategic-merge 对 volumes 列表不生效) → 起→验证 → **push git + `refresh=hard` 再开 auto-sync**(否则 ArgoCD sync 到旧 revision 把 claim 还原) → 删旧 PVC(NFS reclaim 慢/卡 Terminating 时清 finalizer)。
 
 ### Phase 3 — 服务重定位到 oracle-k3s
 
@@ -258,7 +262,7 @@ Phase 5(离站) / Phase 6(演练自动化) 随后，Phase 5 需 G3 云凭据
 ## 5. 完成定义（DoD）
 - [x] restic 仓库在 106 ZFS，两集群每夜自动备份、`restic snapshots` 可见。✅ 2026-07-06
 - [x] **从仓库成功恢复 Vault snapshot + 1 个 PG + 1 个 sqlite**（Phase 1 Task 6）。✅ 2026-07-06
-- [ ] homelab `nfs-client` PVC 仅剩 `calibre-books`；其余在 local-path 且启动不再依赖 NFS。
+- [x] homelab sqlite/fsync PVC（Vault/bifrost/calibre-config）在 local-path、启动不再依赖 NFS ✅ 2026-07-06；alertmanager/audit/trivy 按设计留 NFS；gotify/zitadel-PG 待 Phase 3 迁 oracle；calibre-books 静态 RWX 留 NFS。
 - [ ] Gotify + ZITADEL 在 oracle-k3s，`notify/auth.meirong.dev` 正常，OIDC 登录通。
 - [ ] Watchdog → oracle Uptime Kuma push；模拟 homelab 停跳能经 Telegram 收到。
 - [ ] zpool/SMART PrometheusRule 生效。
