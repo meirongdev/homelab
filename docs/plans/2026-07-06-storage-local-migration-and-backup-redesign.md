@@ -1,9 +1,10 @@
 # 存储本地化迁移 + 备份体系重建 — 完整执行计划（Agent 可执行）
 
 > 日期: 2026-07-06
-> 状态: 🟢 **Phase 0-2 已完成并验证（2026-07-06）**；Phase 3+（Gotify/ZITADEL→oracle / 韧性 / 离站）待执行。
+> 状态: 🟢 **Phase 0-2 + Phase 3a(Gotify) 已完成（2026-07-06）**；Phase 3b(ZITADEL) + Phase 4-5 待执行。
 > - ✅ Phase 0-1: serverless restic 备份**双集群上线**，恢复演练通过（详见 §Phase 1 末与 §DoD）。仓库 `881fb124bf` @ 106 `mrstorage/restic`。
 > - ✅ Phase 2: homelab sqlite/fsync PVC（**Vault raft / bifrost / calibre-config**）迁 local-path；alertmanager/audit/trivy 按设计留 NFS。详见 §Phase 2 表。
+> - ✅ Phase 3a: **Gotify → oracle-k3s**（数据迁移 + `notify.meirong.dev` DNS 切换完成，homelab gotify 已删）。ZITADEL(3b) 待专门做。
 > 结论: 把 homelab 上所有 **fsync/sqlite/PG 类** 有状态 PVC 从 `nfs-client` 迁到 `local-path`（性能 + 脱离 NFS 启动依赖），大件顺序数据（Calibre 书库）留在 NFS/ZFS。因 `local-path` 无冗余无快照，**先重建一套 serverless restic 备份**（逻辑 dump → 106 ZFS 上的加密仓库）再做迁移。同步把 **Gotify + ZITADEL 迁到 oracle-k3s**（脱离 homelab 故障域），并补上 **dead-man's switch** 与 **zpool/SMART 告警**。
 > 关联: `../../architecture-optimization-2026-07-04.md`（战略母文档）、`2026-07-04-storage-106-utilization-and-backup-simplification.md`（本计划取代其 Task 4-6 备份部分）、`2026-07-04-zitadel-to-oracle-k3s.md`（本计划纳入并执行）、`../runbooks/backup-recovery.md`（运维手册，随本计划回写）
 
@@ -211,13 +212,14 @@ restic -r <repo> restore latest --target /tmp/verify --host homelab
 
 ### Phase 3 — 服务重定位到 oracle-k3s
 
-#### Task 7 — Gotify → oracle（门 G2）
-- 参照 `cloud/oracle/manifests/` 现有模式：新增 `cloud/oracle/manifests/gotify/`（Deployment + Service + **local-path** PVC 带 `Prune=false` + ExternalSecret）；`base/gateway.yaml` 加 HTTPRoute `notify.meirong.dev`；oracle tunnel ingress + DNS CNAME 切 oracle（G2）。
-- 数据：从 restic 恢复 gotify sqlite（或 KaraKeep→Gotify 管道容忍重建，历史消息非关键）。
-- **告警桥**：`alertmanager-gotify-bridge` 保留在 homelab（与 Alertmanager 同域），其 webhook 指向 Gotify 新地址（`notify.meirong.dev`，DNS 不变，走 tunnel 无感）。
-- 删 homelab `manifests/gotify.yaml` + PVC；加进 oracle 备份 CronJob（Task 5）。
+#### Task 7 — Gotify → oracle（门 G2）— ✅ 已完成 2026-07-06
+- `cloud/oracle/manifests/gotify/gotify.yaml`（Deployment + Service + **local-path** PVC `Prune=false` + ExternalSecret 读 `secret/homelab/gotify`）；`base/gateway.yaml` 加 HTTPRoute `notify.meirong.dev`；加进 oracle 备份 CronJob。
+- **数据**：`kubectl exec cat` 抓 homelab 活库 gotify.db(5.8M，2 apps) → transfer pod `kubectl cp` 进 oracle PVC（先于 gotify 起，避免空库初始化）→ 验证 2 apps + DB green。
+- **告警桥**：`alertmanager-gotify-bridge` 留 homelab（monitoring），其 `GOTIFY_ENDPOINT` 本就是 `https://notify.meirong.dev/message` → **零改动**（DNS 切 oracle 后自动打到新 gotify；app token 在迁移的 DB 里，天然匹配）。
+- **DNS/tunnel 切换（G2）**：`notify` 从 homelab tfvars 移到 oracle tfvars → `just apply` 两侧（先 homelab 删、后 oracle 建，避免 CNAME 冲突；短暂 NXDOMAIN）。验证 `curl notify.meirong.dev/health`=green。删 homelab gotify（ArgoCD prune）+ PVC。
+- **⚠️ CF token 陷阱**：CF terraform 的 `terraform.tfvars` 里 `cloudflare_api_token` 是 **cloudflared tunnel token**（JWT），provider 5.19 **拒绝**。真实 API token 在各 CF 目录的 **`.env`**（gitignore），`just apply`（`set dotenv-load` + `-var`）用它覆盖 tfvars。**必须用 `just`，不能裸 `terraform apply`**。
 
-#### Task 8 — ZITADEL → oracle（门 G2，纳入并执行 `2026-07-04-zitadel-to-oracle-k3s.md`）
+#### Task 8 — ZITADEL → oracle（门 G2，纳入并执行 `2026-07-04-zitadel-to-oracle-k3s.md`）— ⏳ 待做（用户定：Gotify 验证后专门做）
 - 按该计划：oracle 建 `zitadel/`（PG on **local-path** 8Gi、ZITADEL、ESO→homelab Vault、HTTPRoute），`secret/oracle-k3s/zitadel` 同值 masterkey/db-password。
 - **数据**：homelab `pg_dump` → oracle 导入；确认 masterkey 一致（签发 key 不变，已登录用户不掉线）。
 - DNS：`auth.meirong.dev` CNAME 切 oracle tunnel（G2，先加 ingress 再切）。
