@@ -59,7 +59,7 @@ data:
 
     wait_ready()
 
-    from uptime_kuma_api import UptimeKumaApi, MonitorType
+    from uptime_kuma_api import UptimeKumaApi, MonitorType, NotificationType
     api = UptimeKumaApi(UPTIME_KUMA_URL)
 
     try:
@@ -73,6 +73,33 @@ data:
     STATUS_PAGE_SLUG   = "homelab"
     STATUS_PAGE_TITLE  = "Homelab Status"
     STATUS_PAGE_DOMAIN = "status.meirong.dev"
+
+    # --- Notification (Gotify) = dead-man's switch ---
+    # oracle Uptime Kuma pings homelab public services (Grafana/Vault/ArgoCD/Calibre) + oracle
+    # services. Attaching a Gotify notification to ALL monitors means: homelab down → its services
+    # unreachable → Uptime Kuma → Gotify(oracle) → phone, with NO dependency on homelab. Gotify lives
+    # on oracle too, so the whole alert path survives a full homelab outage.
+    GOTIFY_TOKEN = os.environ.get("GOTIFY_TOKEN")
+    GOTIFY_URL   = os.environ.get("GOTIFY_URL", "http://gotify.personal-services.svc")
+    NOTIF_NAME   = "Gotify (dead-man)"
+    if GOTIFY_TOKEN:
+        # delete+recreate so the token/URL always reflect the current secret (idempotent refresh)
+        for n in api.get_notifications():
+            if n["name"] == NOTIF_NAME:
+                api.delete_notification(n["id"])
+                print(f"Removed stale notification '{NOTIF_NAME}' (will recreate with current token).")
+        api.add_notification(
+            name=NOTIF_NAME,
+            type=NotificationType.GOTIFY,
+            isDefault=True,        # auto-attach to future monitors
+            applyExisting=True,    # attach to all existing monitors now
+            gotifyserverurl=GOTIFY_URL,
+            gotifyapplicationToken=GOTIFY_TOKEN,
+            gotifyPriority=8,
+        )
+        print(f"Gotify notification '{NOTIF_NAME}' created + applied to all monitors.")
+    else:
+        print("WARNING: GOTIFY_TOKEN not set — no notification channel (dead-man's switch inactive).")
 
     # --- Monitors ---
     existing = {m["name"]: m for m in api.get_monitors()}
@@ -163,6 +190,13 @@ spec:
                 secretKeyRef:
                   name: uptime-kuma-admin
                   key: password
+            - name: GOTIFY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: uptime-kuma-admin
+                  key: gotify_token
+            - name: GOTIFY_URL
+              value: "http://gotify.personal-services.svc"
           volumeMounts:
             - name: scripts
               mountPath: /scripts
