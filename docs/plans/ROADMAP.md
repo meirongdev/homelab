@@ -1,7 +1,7 @@
 # Homelab Project TODO
 
 > Last updated: 2026-07-06
-> 当前主线: [2026-07-06 存储本地化迁移 + 备份体系重建](../plans/2026-07-06-storage-local-migration-and-backup-redesign.md)
+> 当前主线: [2026-07-06 存储本地化迁移 + 备份体系重建](../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md)
 
 ## Phase 1: Foundation ✅
 

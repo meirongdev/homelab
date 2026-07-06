@@ -1,7 +1,7 @@
 # ZITADEL 迁移至 oracle-k3s 计划
 
 > 日期: 2026-07-04
-> 状态: ✅ 已迁移并验证（2026-07-06）——oracle ZITADEL serving `auth.meirong.dev`（OIDC + console 全通）。**仅剩 homelab 退役**（保留作回滚，待真实浏览器登录确认后删）。执行记录见 [2026-07-06 计划](2026-07-06-storage-local-migration-and-backup-redesign.md) §Phase 3b Task 8。
+> 状态: ✅ 已迁移并验证（2026-07-06）——oracle ZITADEL serving `auth.meirong.dev`（OIDC + console 全通）。**仅剩 homelab 退役**（保留作回滚，待真实浏览器登录确认后删）。执行记录见 [2026-07-06 计划](../storage/2026-07-06-storage-local-migration-and-backup-redesign.md) §Phase 3b Task 8。
 > 动机已从"106 不可用"升级为**故障域分离**：SSO 可用性 > 家里笔记本，homelab 整机故障时 OIDC 仍在线。ZITADEL PG 落 oracle **local-path**（比 NFS 更适合 PG 同步写）。
 > 背景: homelab NFS 单点依赖 + 单故障域集中（Vault/身份/GitOps/告警同住一台笔记本）
 

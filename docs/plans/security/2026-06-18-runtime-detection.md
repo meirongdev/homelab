@@ -2,7 +2,7 @@
 
 > 状态: ✅ 已部署（2026-06 起；`tetragon` ns 运行中、`falco` App Synced/Healthy）。唯一残留：**Falco→Gotify 推送 token 待写入 Vault**（未配前 Falco→Loki 检测照常，见末节）。
 > 结论: 按集群硬件分别选型——homelab 用内核态过滤省 CPU 的 Tetragon，oracle 用规则开箱即用的 Falco+Falcosidekick→Gotify。
-> 架构总览见 [../architecture/security.md](../architecture/security.md) §8.5。
+> 架构总览见 [../../reference/security.md](../../reference/security.md) §8.5。
 
 ## Context
 

@@ -3,7 +3,7 @@
 > Last updated: 2026-07-06
 > Scope: 双集群（homelab + oracle-k3s）的纵深防御模型 —— source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
-> 实施决策与权衡见 [../plans/2026-06-16-k3s-security-hardening.md](../plans/2026-06-16-k3s-security-hardening.md)。
+> 实施决策与权衡见 [../plans/security/2026-06-16-k3s-security-hardening.md](../plans/security/2026-06-16-k3s-security-hardening.md)。
 
 ## 0. 设计原则（硬约束驱动）
 
@@ -149,7 +149,7 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 | 需求 | 入口 |
 |------|------|
 | 部署/验证/回滚（Phase 0+1） | [../runbooks/security-hardening.md](../runbooks/security-hardening.md) |
-| 实施决策与权衡 | [../plans/2026-06-16-k3s-security-hardening.md](../plans/2026-06-16-k3s-security-hardening.md) |
+| 实施决策与权衡 | [../plans/security/2026-06-16-k3s-security-hardening.md](../plans/security/2026-06-16-k3s-security-hardening.md) |
 | 约定速查 | CONVENTIONS.md › *集群内部安全* |
 | 备份恢复 | [../runbooks/backup-recovery.md](../runbooks/backup-recovery.md) |
 | 重启后恢复 | `just homelab-recover`（k8s/helm） |
