@@ -1,0 +1,59 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: storage-health-alerts
+  namespace: monitoring
+  labels:
+    # 必须带此 label 才会被 kube-prometheus-stack operator 的 ruleSelector 选中
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: smart-disk-health
+      rules:
+        # SMART 整体健康失败（device_smart_status: 1=passed, 0=failed）
+        - alert: SmartHealthFailed
+          expr: smartctl_device_smart_status == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "SMART 整体健康失败: {{ $labels.device }} @ {{ $labels.nodename }}"
+            description: "smartctl_device_smart_status=0（磁盘自检报告失败）—— 尽快更换。instance={{ $labels.instance }}"
+        # 介质错误（坏块）出现
+        - alert: SmartMediaErrors
+          expr: smartctl_device_media_errors > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "SMART 介质错误: {{ $labels.device }} @ {{ $labels.nodename }}"
+            description: "smartctl_device_media_errors={{ $value }} —— 磁盘出现坏块/介质错误，关注趋势。"
+        # NVMe 寿命接近耗尽（percentage_used 越接近 100 越坏）
+        - alert: NvmeWearHigh
+          expr: smartctl_device_percentage_used > 90
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "NVMe 寿命告急: {{ $labels.device }} @ {{ $labels.nodename }}"
+            description: "percentage_used={{ $value }}%（>90% 表示写入寿命接近耗尽）—— 计划更换。"
+        # NVMe 可用备用块偏低
+        - alert: NvmeSpareLow
+          expr: smartctl_device_available_spare < 10 and smartctl_device_available_spare > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "NVMe 备用块偏低: {{ $labels.device }} @ {{ $labels.nodename }}"
+            description: "available_spare={{ $value }}%（<10%）—— 备用块耗尽前更换。"
+    - name: zfs-pool-health
+      rules:
+        # zpool 非 online（degraded/faulted/unavail/…）。node_zfs_zpool_state{state="online"}=0 即异常
+        - alert: ZpoolNotOnline
+          expr: node_zfs_zpool_state{state="online"} == 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "ZFS 池非 ONLINE: {{ $labels.zpool }} @ {{ $labels.instance }}"
+            description: "node_zfs_zpool_state{state=online}=0 —— 池处于 degraded/faulted 等状态。raidz1 仅容 1 盘，resilver 期第二盘故障会毁池；离站备份是最终安全网（见 backup-recovery runbook）。"
