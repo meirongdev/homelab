@@ -150,11 +150,11 @@ spec:
               value: "poll"
           resources:
             requests:
-              cpu: 200m
-              memory: 512Mi
+              cpu: 100m
+              memory: 256Mi
             limits:
-              cpu: 2000m
-              memory: 2Gi
+              cpu: 1000m
+              memory: 1Gi
           # startupProbe gates liveness/readiness until the app finishes its
           # slow NFS-backed cold start (~50s); allows up to 30×10s = 5min.
           startupProbe:

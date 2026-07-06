@@ -56,7 +56,7 @@ singleBinary:
       memory: 128Mi
     limits:
       cpu: 500m
-      memory: 512Mi
+      memory: 384Mi
 
 # ✅ 禁用 chunks cache（节省 9.6GB 内存！）
 chunksCache:

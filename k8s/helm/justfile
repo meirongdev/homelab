@@ -53,6 +53,9 @@ deploy-prometheus-nowait: create-grafana-secret
         --timeout 15m
     @echo "✅ Helm release created. Check status with: just status"
 
+# ⚠️ LEGACY -- 2026-07-06 已迁 ArgoCD (argocd/applications/loki.yaml)
+# 改 values/loki.yaml -> commit -> ArgoCD auto-sync
+# 如需紧急回滚: helm -n monitoring rollback loki <revision>
 deploy-loki:
     helm upgrade --install loki grafana/loki \
         --namespace {{namespace}} \
@@ -61,8 +64,8 @@ deploy-loki:
         --wait \
         --timeout 10m
 
-# 部署 Sloth（SLO 生成器：PrometheusServiceLevel CR → PrometheusRule）
-# SLO CR 见 manifests/slos.yaml（ArgoCD 管理）。生成的规则带 release=kube-prometheus-stack。
+# ⚠️ LEGACY — 2026-07-06 已迁 ArgoCD (argocd/applications/sloth.yaml)
+# 改 values/sloth-values.yaml → commit → ArgoCD auto-sync。
 deploy-sloth:
     helm upgrade --install sloth sloth/sloth \
         --namespace {{namespace}} \
@@ -72,6 +75,9 @@ deploy-sloth:
         --timeout 5m
     @echo "✅ Sloth deployed. Check: kubectl --context {{ctx}} -n {{namespace}} get pods -l app.kubernetes.io/name=sloth"
 
+# ⚠️ LEGACY -- 2026-07-06 已迁 ArgoCD (argocd/applications/tempo.yaml)
+# 改 values/tempo.yaml -> commit -> ArgoCD auto-sync
+# 如需紧急回滚: helm -n monitoring rollback tempo <revision>
 deploy-tempo:
     helm upgrade --install tempo grafana/tempo \
         --namespace {{namespace}} \
@@ -110,6 +116,8 @@ delete-calibre:
 #   Vault 写 secret/homelab/restic (repo_password / ssh_private_key_b64 / vault_token) + backup policy。
 
 # 部署 homelab 备份 CronJob (Vault raft snapshot + zitadel pg_dump + sqlite → 106)
+# ⚠️ LEGACY — 2026-07-06 已迁 ArgoCD (argocd/applications/backup.yaml)
+# 请直接改 manifests + commit, ArgoCD auto-sync。
 deploy-backup:
     kubectl --context {{ctx}} apply -f manifests/backup/
 
@@ -246,7 +254,7 @@ homepage:
     @echo "Homepage is available at http://localhost:8080"
     kubectl --context {{ctx}} port-forward -n homepage svc/homepage 8080:3000
 
-deploy-all: add-repos create-namespace deploy-prometheus deploy-loki deploy-tempo
+deploy-all: add-repos create-namespace deploy-prometheus
     @echo "✅ All monitoring components deployed successfully!"
 
 # ⬇️ Cilium CNI ⬇️

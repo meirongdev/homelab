@@ -99,7 +99,7 @@ metadata:
   name: calibre-metadata-updater
   namespace: personal-services
 spec:
-  schedule: "0 2 * * *"  # 每天凌晨 2:00 UTC 执行
+  schedule: "0 4 * * *"  # 每天凌晨 4:00 UTC 执行（错开 restic backup 03:00）
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
@@ -124,11 +124,11 @@ spec:
               readOnly: true
             resources:
               requests:
-                cpu: 500m
-                memory: 512Mi
+                cpu: 200m
+                memory: 256Mi
               limits:
-                cpu: 2000m
-                memory: 2Gi
+                cpu: 1000m
+                memory: 1Gi
           volumes:
           - name: calibre-library
             persistentVolumeClaim:

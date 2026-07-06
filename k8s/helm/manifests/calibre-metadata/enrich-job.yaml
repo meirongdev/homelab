@@ -25,11 +25,11 @@ spec:
               value: "Asia/Shanghai"
           resources:
             requests:
-              cpu: 500m
-              memory: 512Mi
+              cpu: 200m
+              memory: 256Mi
             limits:
-              cpu: 2000m
-              memory: 2Gi
+              cpu: 1000m
+              memory: 1Gi
           volumeMounts:
             - name: calibre-library
               mountPath: /calibre-library

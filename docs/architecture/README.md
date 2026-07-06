@@ -9,7 +9,7 @@
 2. [observability-multicluster.md](observability-multicluster.md) — 日志/指标/链路追踪统一架构
 3. [observability-otel-logging.md](observability-otel-logging.md) — OTel 日志管道细节
 4. [cloudflare-tunnel-observability.md](cloudflare-tunnel-observability.md) — Tunnel + Gateway 流量可观测
-5. [k8s-qos-resource-management.md](k8s-qos-resource-management.md) — 资源配额与 QoS 约定
+5. [k8s-qos-resource-management.md](k8s-qos-resource-management.md) — 资源配额与 QoS 约定（当前值详见 resource-optimization-2026-07-06.md）
 6. [security.md](security.md) — 集群安全纵深防御（边缘/身份/密钥/准入/扫描/网络/威胁矩阵）
 
 ## Design Notes
@@ -21,6 +21,8 @@
 ## Roadmap
 
 - [TODO.md](TODO.md) — 路线图与待办
+- [resource-optimization-2026-07-06.md](resource-optimization-2026-07-06.md) — 2026-07 资源分配优化明细
+- [architecture-optimization-2026-07-04.md](architecture-optimization-2026-07-04.md) — 物理层架构与机器角色分配建议
 
 ## Lifecycle Rules
 
