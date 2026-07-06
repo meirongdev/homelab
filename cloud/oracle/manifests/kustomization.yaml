@@ -35,6 +35,10 @@ resources:
   - backup/cronjob.yaml
   # Gotify: 迁自 homelab 2026-07-06（脱离 homelab 故障域）。notify.meirong.dev tunnel/DNS 切换待 CF apply
   - gotify/gotify.yaml
+  # ZITADEL (SSO): 迁自 homelab 2026-07-06。auth.meirong.dev 已切 oracle tunnel。
+  # ⚠️ bootstrap 依赖（不入 git）: Secret `login-client`(zitadel ns，Login V2 PAT，从 homelab 拷入，
+  #   因 setup job 在已恢复的 DB 上跳过创建它)；masterkey/db-password 经 ESO 读 secret/homelab/zitadel。
+  - zitadel/zitadel.yaml
   # Personal services (IT-Tools, Stirling-PDF, Squoosh, Timeslot, Trends)
   - personal-services/it-tools.yaml
   - personal-services/stirling-pdf.yaml

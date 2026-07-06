@@ -48,6 +48,10 @@ hubble:
 # --- Gateway API: Cilium-managed ingress ---
 gatewayAPI:
   enabled: true
+  # 2026-07-06: ZITADEL 迁 oracle 后，console v1 gRPC(auth.v1/admin.v1) 需 Cilium honour
+  # Service appProtocol(zitadel:8080→h2c)，否则 gRPC-web 转原生 gRPC 走 HTTP/1.1 → 404。
+  # 与 homelab k8s/cilium/values.yaml 一致。见 runbooks/zitadel-console-grpc-404.md
+  enableAppProtocol: true
 
 # --- ClusterMesh: deploy the control-plane pieces, then connect clusters with cilium CLI ---
 clustermesh:
