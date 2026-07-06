@@ -51,7 +51,8 @@ data:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: bifrost-data
+  # migrated NFS→local-path 2026-07-06 (sqlite config.db fsync; see plans/2026-07-06-…backup-redesign.md Phase 2)
+  name: bifrost-data-local
   namespace: bifrost
   annotations:
     # config + governance (virtual keys) DB lives here — never auto-prune
@@ -59,7 +60,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: nfs-client
+  storageClassName: local-path
   resources:
     requests:
       storage: 2Gi
@@ -117,7 +118,7 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: bifrost-data
+            claimName: bifrost-data-local
         - name: config
           configMap:
             name: bifrost-config
