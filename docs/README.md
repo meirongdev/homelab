@@ -59,7 +59,8 @@ Oracle 集群工作负载的 Vault 路径约定：使用 `secret/oracle-k3s/<ser
 
 | 数据 | 状态 |
 |------|------|
-| 所有服务 | ❌ Kopia 已移除 (2026-07-05)，备份待重新设计 |
+| Vault / 各 PG / sqlite | 🟢 restic 每夜备份 → 106 ZFS 仓库（2026-07-06 上线，演练通过）。离站待做 → [runbooks/backup-recovery.md](runbooks/backup-recovery.md) |
+| Calibre 书库 | 🟢 ZFS raidz1 + sanoid 快照（不入 restic，见计划） |
 
 ## 推荐阅读顺序
 

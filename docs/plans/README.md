@@ -1,7 +1,7 @@
 # Plans And Records
 
 > Time-ordered implementation plans, migrations, and incident retrospectives.
-> Last updated: 2026-07-04
+> Last updated: 2026-07-06
 
 ## How To Use This Folder
 
@@ -15,10 +15,12 @@
 
 | Plan | Status |
 |------|--------|
-| [2026-07-04 storage-106 充分利用 + 备份工具简化](2026-07-04-storage-106-utilization-and-backup-simplification.md) | 📋 待执行 |
-| [2026-06-18 运行时检测（Tetragon + Falco）](2026-06-18-runtime-detection.md) | 🛠️ 已实现待部署 |
-| [2026-06-16 K3s 集群内部安全加固（PSA/Kyverno/Trivy/kube-bench）](2026-06-16-k3s-security-hardening.md) | 🛠️ 已实现待部署 |
-| [2026-06-06 Backstage 开发者门户（RHDH）](2026-06-06-backstage-developer-portal-design.md) | 📐 Design |
+| [2026-07-06 存储本地化迁移 + 备份体系重建](2026-07-06-storage-local-migration-and-backup-redesign.md) | 📋 待执行（当前主线）|
+| [2026-07-04 storage-106 充分利用 + 备份工具简化](2026-07-04-storage-106-utilization-and-backup-simplification.md) | ⚠️ 部分完成（T1/2 ARC+sanoid 已做；T4-6 备份被 2026-07-06 计划取代）|
+| [2026-07-04 ZITADEL 迁移至 oracle-k3s](2026-07-04-zitadel-to-oracle-k3s.md) | 🟢 已批准（并入 2026-07-06 计划 Phase 3 执行）|
+| [2026-06-18 运行时检测（Tetragon + Falco）](2026-06-18-runtime-detection.md) | ✅ 已部署（Falco→Gotify token 待配）|
+| [2026-06-16 K3s 集群内部安全加固（PSA/Kyverno/Trivy/kube-bench）](2026-06-16-k3s-security-hardening.md) | ✅ 已部署（节点 CIS 待重启生效）|
+| [2026-06-06 Backstage 开发者门户（RHDH）](2026-06-06-backstage-developer-portal-design.md) | 📐 Design（未实现）|
 | [2026-06-04 oracle-k3s 纳入 ArgoCD GitOps](2026-06-04-oracle-k3s-argocd-gitops.md) | ✅ Complete |
 | [2026-03-07 架构优化方案](2026-03-07-homelab-oracle-architecture-optimization.md) | ✅ Approved |
 | [2026-03-07 Cilium 迁移修复](2026-03-07-post-cilium-fix-plan.md) | ✅ Complete |

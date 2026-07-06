@@ -1,6 +1,6 @@
 # K3s 集群内部安全加固 — Phase 0 + Phase 1
 
-> 状态: 🛠️ 已实现待部署（GitOps 清单已落库；按 runbook 部署/验证）
+> 状态: ✅ 已部署（2026-06 起生产；`kyverno`/`trivy-system`/`kube-bench` ns 运行中，ArgoCD Synced/Healthy）。唯一残留：**节点 CIS `protect-kernel-defaults` 待现有节点重启生效**（下次维护窗口 `systemctl restart k3s`）。
 > 结论: 以 PSA（永远在线基线）+ Kyverno（先 Audit）+ Trivy（CVE/密钥）+ kube-bench（CIS）+ 节点 protect-kernel-defaults 五层补集群内部安全；网络默认拒绝刻意延后。
 > 部署/验证/回滚: `docs/runbooks/security-hardening.md`
 

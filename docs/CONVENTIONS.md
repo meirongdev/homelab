@@ -135,6 +135,7 @@ just apply   # Apply DNS/Tunnel changes
 
 ### Identity
 - **Status**: ZITADEL remains available at `auth.meirong.dev`, but shared ingress-layer SSO has been removed.
+- **📋 Planned move → oracle-k3s** (approved 2026-07-06, see `docs/plans/2026-07-04-zitadel-to-oracle-k3s.md` + `2026-07-06-…backup-redesign.md` Phase 3): ZITADEL + its PG relocate to oracle-k3s (`local-path`) for fault-domain separation — SSO survives a full homelab outage. `auth.meirong.dev` unchanged (tunnel cutover to oracle); OIDC clients unaffected as long as the masterkey/PG are carried over identically.
 - **Current model**: services are either public, gated by **native ZITADEL OIDC** (see list below), or rely on their own built-in auth (for example Vault and Timeslot admin Basic Auth).
 - **Reason**: removing the Traefik ForwardAuth / oauth2-proxy chain simplifies ingress and avoids a second auth hop on every request.
 - **Recommended direction**: keep `HTTPRoute` resources controller-neutral and add auth at the app layer. Prefer native OIDC with ZITADEL first; use a per-app `oauth2-proxy` reverse-proxy only for apps that cannot speak OIDC directly.
@@ -175,11 +176,12 @@ just apply   # Apply DNS/Tunnel changes
   - kube-prometheus-stack / Loki / Tempo — Helm releases
   - PostgreSQL — stateful, avoid auto-prune
   - NFS Provisioner — infrastructure layer
+  - **restic 备份 (homelab `backup` ns)** — `just deploy-backup`（infra 层，privileged hostPath；oracle 侧备份则在 kustomize 树、由 `oracle-k3s` App 同步）
   - Cloudflare Terraform — non-K8s resources
 - **oracle-k3s manifests** (`cloud/oracle/manifests/`): **under GitOps as of 2026-06-04** — managed by the homelab ArgoCD `oracle-k3s` Application over Tailscale (oracle registered as an external cluster, `https://100.107.166.37:6443`, bearer-token cred from Vault `secret/homelab/argocd-oracle-cluster` materialised by ESO into the `oracle-k3s-cluster` cluster Secret). Auto-sync + selfHeal + **prune** are on; stateful PVCs (`miniflux-db-pvc`, `karakeep-data`, `meilisearch-data`, `uptime-kuma-data`, `stirling-pdf-configs`) carry `argocd.argoproj.io/sync-options: Prune=false`. `git push` → reconciles within 3 min, same as homelab. Bootstrap RBAC (`argocd-manager` SA + cluster-admin) is in `cloud/oracle/bootstrap/argocd-manager.yaml` — applied manually once, kept **out** of the kustomize tree. The `vault-token` Secret (rss-system) remains a manual bootstrap dependency (not pruned, see `base/vault-store.yaml`). Migration record + caveats: `docs/plans/2026-06-04-oracle-k3s-argocd-gitops.md`.
 
 ### Storage
-- **NFS host**: `192.168.50.106` (PVE node, `storage` group in `proxmox/ansible/inventory.yaml`). Data lives on a **ZFS pool `mrstorage` mounted at `/storage`** (separate from the OS disk), provisioned by `proxmox/ansible/storage-playbook.yaml`.
+- **NFS host**: `192.168.50.106` / **Tailscale `100.110.27.111`** (hostname `storage`, `tag:homelab`, joined 2026-07-06) (PVE node, `storage` group in `proxmox/ansible/inventory.yaml`). Data lives on a **ZFS pool `mrstorage` mounted at `/storage`** (separate from the OS disk), provisioned by `proxmox/ansible/storage-playbook.yaml`. ARC read-cache raised to 4GB + **sanoid** hourly/daily ZFS snapshots active (see `docs/plans/2026-07-04-storage-106-utilization-and-backup-simplification.md`).
 - **Two NFS exports** (`/etc/exports`, Ansible-managed):
   - `/storage` (`192.168.50.0/24` + Tailscale `100.89.15.120`) — backs the `nfs-client` dynamic provisioner (`nfs-subdir-external-provisioner`), which creates per-PVC subdirs under `/storage/nfs/k8s/` (see `k8s/helm/values/nfs-values.yaml`).
   - `/storage/calibre` (`*`, `all_squash` anon uid/gid 1000) — static RWX PV for the Calibre book library (`calibre-books-pv`).
@@ -187,6 +189,11 @@ just apply   # Apply DNS/Tunnel changes
 - **⚠️ sqlite-backed apps must NOT use `nfs-client` — use `local-path` (node-local, k3s built-in default SC).** sqlite relies on POSIX byte-range locks (`fcntl`) + synchronous small writes; NFS locking (NLM) makes that pathologically slow/hangy on this setup — a single DB write/lock can block for minutes. **Grafana** hit this: its sqlite on an NFS PVC made startup hang at "Loading plugins" (writes plugin state to the DB) past the 160s liveness deadline → **8-day CrashLoop** (fixed 2026-07-04 by moving `grafana.persistence.storageClassName: local-path` + relaxed liveness + disabled boot-time grafana.com plugin calls). On local disk the same migrations run in ms (were 3m48s each on NFS). Grafana state is reproducible (dashboards = ConfigMaps, datasources = values), so a fresh local DB is safe. (Large sequential-write workloads like Loki chunks tolerate NFS better than sqlite — it's specifically the lock+fsync pattern that dies. **Prometheus TSDB was also moved to `local-path`** the same day: on `nfs-client` its head/WAL reads on restart hung on a wedged NFS client (thread stuck in `D` state, zero progress) and raced the operator's ~900s startup probe → CrashLoop. History was discarded (P2, disposable). Migrating an operator-managed StatefulSet's storageClass = `spec.storage.volumeClaimTemplate` is immutable, so: set `spec.paused: true` on the Prometheus CR, force-delete the stuck pod, delete the STS + old PVC, then unpause → operator recreates the STS with the new SC + a fresh PVC. `prometheusSpec.maximumStartupDurationSeconds: 1800` kept as a harmless startup safety-net.)
 - **OS reinstall is data-safe**: the OS is on the boot disk; all data is on the `mrstorage` ZFS pool. After a host rebuild, re-running `storage-playbook.yaml` does `zpool import -f mrstorage` + rebuilds `/etc/exports` + `exportfs -ra`. Because the ZFS dataset is unchanged, existing NFS PVs keep the same file handles (no `ESTALE`) and pods re-mount transparently. Expect a brief node wedge while NFS is down — the classic containerd `failed to reserve container name` symptom — which self-heals once NFS returns. (Verified 2026-06-13 reinstall: pods restarted/recovered, no data loss.)
 - PVCs for stateful services (e.g. Calibre-Web) carry `argocd.argoproj.io/sync-options: Prune=false` to prevent accidental deletion
+- **Storage tiering (target state, 迁移中 — see `docs/plans/2026-07-06-storage-local-migration-and-backup-redesign.md`)**: generalising the Grafana/Prometheus/Loki move above to **all** fsync/sqlite/PG PVCs.
+  - **Tier A — hot stateful → `local-path`** (node-local, fast fsync, boot-independent of NFS/Tailscale): Vault (raft), all PGs, all sqlite/config. **No redundancy, no ZFS snapshots** on this tier → **backup is mandatory** (restic, below). Migrating homelab off `nfs-client`: `data-vault-0`, `bifrost-data`, `calibre-web-automated-config`, `alertmanager-*-db`, `audit-vault-0`, `data-trivy-server-0` (ZITADEL-PG + Gotify leave homelab entirely — → oracle, see Identity/Services).
+  - **Tier B — large sequential → NFS/ZFS** (raidz1 + sanoid): `calibre-books` (100Gi RWX) stays. Books are not in restic (re-downloadable; user opted for ZFS-only, no offsite).
+  - **Tier C — backup repo → `mrstorage/restic`** (`/storage/restic`, dedicated ZFS dataset, 50G quota): the encrypted restic store; see Backup & Recovery.
+  - ⚠️ **Ordering**: a PVC's restic backup must exist + be restore-verified **before** its NFS→local-path migration (local-path loses the underlying raidz1/snapshot safety net).
 
 ### Secrets Management
 - **HashiCorp Vault**: Primary source of truth for all app secrets (running in `vault` namespace)
@@ -261,11 +268,11 @@ just apply   # Apply DNS/Tunnel changes
 | KaraKeep | oracle-k3s | `rss-system` | `keep.meirong.dev` |
 | Redpanda Connect | oracle-k3s | `rss-system` | Internal only |
 | Calibre-Web | homelab | `personal-services` | `book.meirong.dev` |
-| Gotify | homelab | `personal-services` | `notify.meirong.dev` |
+| Gotify | homelab → 📋 oracle-k3s | `personal-services` | `notify.meirong.dev` |
 | Grafana | homelab | `monitoring` | `grafana.meirong.dev` |
 | HashiCorp Vault | homelab | `vault` | `vault.meirong.dev` |
 | ArgoCD | homelab | `argocd` | `argocd.meirong.dev` |
-| ZITADEL (SSO) | homelab | `zitadel` | `auth.meirong.dev` |
+| ZITADEL (SSO) | homelab → 📋 oracle-k3s | `zitadel` | `auth.meirong.dev` |
 | Bifrost (LLM gateway) | homelab | `bifrost` | `llm.meirong.dev` (inference API + ZITADEL-gated admin UI) |
 | PostgreSQL | oracle-k3s | `rss-system` | Internal only |
 
@@ -309,8 +316,9 @@ just apply   # Apply DNS/Tunnel changes
 - **SSH**: User `root`, Key `~/.ssh/vgio`.
 
 ### Backup & Recovery
-- **Status**: ❌ Kopia 已移除 (2026-07-05)。所有备份数据已清理，备份方案待重新设计。
-- **History**: Kopia server (homelab `kopia` namespace), homelab + oracle-k3s 备份 CronJob, NFS PVC 数据 (~20GB), Vault secret 已全部删除。
-- **Design doc**: `docs/runbooks/backup-recovery.md`, `docs/plans/2026-07-04-storage-106-utilization-and-backup-simplification.md`
-- **Runbook**: `docs/runbooks/backup-recovery.md`
-- **Runbook**: `docs/runbooks/backup-recovery.md`
+- **Status**: 🟢 **restic 备份已上线（2026-07-06，Phase 1）**，双集群每夜 → 106 ZFS 加密仓库 `881fb124bf`，恢复演练通过。**离站副本仍待做**（Phase 5）。Kopia 已于 2026-07-05 移除。主计划 `docs/plans/2026-07-06-storage-local-migration-and-backup-redesign.md`；运维 `docs/runbooks/backup-recovery.md`。
+  - 部署: homelab `just deploy-backup`（`backup` ns，手动 infra 层，同 ESO/Vault）；oracle `cloud/oracle/manifests/backup/`（kustomize 树，ArgoCD 同步）。手动触发 `just backup-run`。凭据 `secret/homelab/restic`（bootstrap 写入，含 base64 SSH key + 周期 Vault token）。
+- **设计（restic，取代 Kopia）**: 无 server；**每集群一个 CronJob 直推**到 **106 ZFS 上的单一加密仓库** `mrstorage/restic`（`sftp:root@…:/storage/restic`；homelab 走 LAN `192.168.50.106`，oracle 走 Tailscale `100.110.27.111`）。逻辑 dump 保证一致性：Vault=`raft snapshot save`、PG=`pg_dump`、sqlite=特权 CronJob hostPath 读 `local-path` 根 + `sqlite3 ".backup"`（RWO 卷旁路 Pod 挂不上，故 hostPath）。保留 `--keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune`。凭据 Vault `secret/homelab/restic` → ESO。
+- **为什么弃 Kopia**: 其复杂度几乎全来自 server 模式（TLS/gRPC/NodePort/524），只为让无 NFS 的 oracle 经 gRPC 推备份；restic 无 server、oracle 经 Tailscale 直连 106 仓库。
+- **保护层次**: ZFS raidz1（容 1 盘）→ sanoid 快照（秒级回滚、含 restic dataset）→ restic 仓库（护 local-path 关键数据）→ **离站 later**（rclone/`restic copy` → OCI always-free/B2，需人工开云桶）。书库仅前两层（不进 restic）。
+- **Runbook**: `docs/runbooks/backup-recovery.md`（含 restore SOP）。历史 ARC/sanoid 决策见 `docs/plans/2026-07-04-storage-106-utilization-and-backup-simplification.md`。
