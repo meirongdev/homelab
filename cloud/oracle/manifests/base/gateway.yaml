@@ -219,6 +219,7 @@ spec:
           kind: Service
           name: zitadel-login
           port: 3000
+          weight: 1
     - matches:
         - path:
             type: PathPrefix
@@ -228,3 +229,4 @@ spec:
           kind: Service
           name: zitadel
           port: 8080
+          weight: 1
