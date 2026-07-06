@@ -82,3 +82,40 @@
           #!/bin/bash
           # Add route to oracle-k3s pod CIDR via Tailscale
           ip route replace 10.52.0.0/16 dev tailscale0 2>/dev/null || true
+
+    # --- NFS LAN-route fix (2026-07-06) ---
+    # The MacBook `mbpm5` advertises 192.168.50.0/24 over Tailscale. With
+    # `--accept-routes`, this node (and pve) route the NFS server 192.168.50.106
+    # THROUGH that laptop, whose SNAT remaps NFS source ports to non-privileged
+    # ports (breaks the exports' `secure` flag) and adds ~19ms latency (kills
+    # SQLite-on-NFS workloads like calibre-web / zitadel-db on boot).
+    # This rule forces 192.168.50.0/24 back onto the native LAN path
+    # (node -> default gw pve -> vmbr0 -> storage-106), which is <1ms.
+    # The SAME unit must exist on the pve host (192.168.50.4) — it is applied
+    # there manually (no pve host playbook). Root cause to fix upstream: stop
+    # mbpm5 from advertising 192.168.50.0/24. See git log 2026-07-06.
+    - name: Install nfs-lan-route systemd unit (bypass Tailscale for LAN NFS)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/nfs-lan-route.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Route 192.168.50.0/24 (NFS server storage-106) via LAN, bypass Tailscale subnet route (mbpm5)
+          After=tailscaled.service network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/bin/sh -c "ip rule del to 192.168.50.0/24 lookup main priority 5260 2>/dev/null; ip rule add to 192.168.50.0/24 lookup main priority 5260"
+          ExecStop=/bin/sh -c "ip rule del to 192.168.50.0/24 lookup main priority 5260 2>/dev/null || true"
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start nfs-lan-route unit
+      ansible.builtin.systemd:
+        name: nfs-lan-route.service
+        enabled: true
+        state: started
+        daemon_reload: true
