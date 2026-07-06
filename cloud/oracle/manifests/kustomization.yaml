@@ -33,6 +33,8 @@ resources:
   - backup/external-secret.yaml
   - backup/backup-script.yaml
   - backup/cronjob.yaml
+  # Gotify: 迁自 homelab 2026-07-06（脱离 homelab 故障域）。notify.meirong.dev tunnel/DNS 切换待 CF apply
+  - gotify/gotify.yaml
   # Personal services (IT-Tools, Stirling-PDF, Squoosh, Timeslot, Trends)
   - personal-services/it-tools.yaml
   - personal-services/stirling-pdf.yaml
