@@ -6,13 +6,19 @@
     zfs_pool_name: mrstorage
     zfs_mountpoint: /storage
     nfs_exports:
+      # `insecure` allows non-privileged (>1024) source ports. Required because the
+      # k8s node has no LAN interface and reaches this server only through NAT
+      # (pve masquerade / Tailscale subnet-router SNAT), which can remap NFS client
+      # source ports out of the privileged (<1024) range that the default `secure`
+      # flag demands — otherwise fresh mounts fail with "Operation not permitted".
+      # See docs/runbooks + git log 2026-07-06.
       - path: /storage
         clients:
-          - "192.168.50.0/24(rw,sync,no_subtree_check,no_root_squash)"
-          - "100.89.15.120(rw,sync,no_subtree_check,no_root_squash)"
+          - "192.168.50.0/24(rw,insecure,sync,no_subtree_check,no_root_squash)"
+          - "100.89.15.120(rw,insecure,sync,no_subtree_check,no_root_squash)"
       - path: /storage/calibre
         clients:
-          - "*(rw,sync,no_subtree_check,all_squash,anonuid=1000,anongid=1000)"
+          - "*(rw,insecure,sync,no_subtree_check,all_squash,anonuid=1000,anongid=1000)"
     # mr_user_password is in vars/vault.yaml (ansible-vault encrypted)
   vars_files:
     - vars/vault.yaml
