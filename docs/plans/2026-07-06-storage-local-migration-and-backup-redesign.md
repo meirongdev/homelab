@@ -5,6 +5,7 @@
 > - ✅ Phase 0-1: serverless restic 备份**双集群上线**，恢复演练通过（详见 §Phase 1 末与 §DoD）。仓库 `881fb124bf` @ 106 `mrstorage/restic`。
 > - ✅ Phase 2: homelab sqlite/fsync PVC（**Vault raft / bifrost / calibre-config**）迁 local-path；alertmanager/audit/trivy 按设计留 NFS。详见 §Phase 2 表。
 > - ✅ Phase 3a: **Gotify → oracle-k3s**（数据迁移 + `notify.meirong.dev` DNS 切换完成，homelab gotify 已删）。ZITADEL(3b) 待专门做（发现前置：oracle Cilium `enable-gateway-api-app-protocol=false` 需开、Bitnami PG chart 12.10.0 可能已下架）。
+> - ✅ Phase 3b: **ZITADEL → oracle-k3s**（数据迁移 + masterkey 同源 + `auth.meirong.dev` 切换 + console gRPC 修复，全验证）。**仅剩 homelab 退役**——待用户真实登录确认后执行。
 > - ✅ Phase 4 Task 10: **SMART + zpool 健康告警**（PrometheusRule 已加载）。Task 9（dead-man's switch）待做——需扩展 uptime-kuma provisioner 支持 push monitor + 通知渠道。
 > 结论: 把 homelab 上所有 **fsync/sqlite/PG 类** 有状态 PVC 从 `nfs-client` 迁到 `local-path`（性能 + 脱离 NFS 启动依赖），大件顺序数据（Calibre 书库）留在 NFS/ZFS。因 `local-path` 无冗余无快照，**先重建一套 serverless restic 备份**（逻辑 dump → 106 ZFS 上的加密仓库）再做迁移。同步把 **Gotify + ZITADEL 迁到 oracle-k3s**（脱离 homelab 故障域），并补上 **dead-man's switch** 与 **zpool/SMART 告警**。
 > 关联: `../../architecture-optimization-2026-07-04.md`（战略母文档）、`2026-07-04-storage-106-utilization-and-backup-simplification.md`（本计划取代其 Task 4-6 备份部分）、`2026-07-04-zitadel-to-oracle-k3s.md`（本计划纳入并执行）、`../runbooks/backup-recovery.md`（运维手册，随本计划回写）
@@ -220,7 +221,12 @@ restic -r <repo> restore latest --target /tmp/verify --host homelab
 - **DNS/tunnel 切换（G2）**：`notify` 从 homelab tfvars 移到 oracle tfvars → `just apply` 两侧（先 homelab 删、后 oracle 建，避免 CNAME 冲突；短暂 NXDOMAIN）。验证 `curl notify.meirong.dev/health`=green。删 homelab gotify（ArgoCD prune）+ PVC。
 - **⚠️ CF token 陷阱**：CF terraform 的 `terraform.tfvars` 里 `cloudflare_api_token` 是 **cloudflared tunnel token**（JWT），provider 5.19 **拒绝**。真实 API token 在各 CF 目录的 **`.env`**（gitignore），`just apply`（`set dotenv-load` + `-var`）用它覆盖 tfvars。**必须用 `just`，不能裸 `terraform apply`**。
 
-#### Task 8 — ZITADEL → oracle（门 G2，纳入并执行 `2026-07-04-zitadel-to-oracle-k3s.md`）— ⏳ 待做（用户定：Gotify 验证后专门做）
+#### Task 8 — ZITADEL → oracle（门 G2）— ✅ 已迁移并验证 2026-07-06（仅剩 homelab 退役，待真实登录确认）
+- oracle 建 `cloud/oracle/manifests/zitadel/zitadel.yaml`（镜像 homelab，PG→local-path，ExternalSecrets 读 `secret/homelab/zitadel` 同源 masterkey）。分阶段: 先起 PG(空) → 恢复 homelab `pg_dump`(作为 **zitadel 用户**，因 `--no-privileges` 剥了 grant，靠 ownership) → 再起 ZITADEL HelmChart。
+- **Login V2 坑**: `login-client` Secret（Login UI 的 PAT）——setup job 在**已恢复的 DB** 上跳过创建它 → login pod `FailedMount` 卡 Init。修复: 从 homelab 拷贝该 Secret（同 DB → PAT 有效）。**是 oracle 的 bootstrap 依赖（不入 git）**。
+- **console gRPC**: 需 oracle Cilium `enable-gateway-api-app-protocol=true`（否则 admin.v1 404）。**外科式**开启: patch `cilium-config` CM + `rollout restart deploy/cilium-operator`（重生成 Gateway Envoy 配置）——**零数据面中断**（仅 operator 重启；实测 rss/notify/auth 全程 200）。values 已回写 `cloud/oracle/values/cilium-values.yaml`。
+- **验证**: healthz 200 / OIDC discovery+JWKS(2 keys, masterkey 正确解密) / grafana authorize→302 login / Login V2 UI / 全 OIDC app 保留(argocd/grafana/karakeep/miniflux/stirling/bifrost) / console gRPC 200。`auth.meirong.dev` 已切 oracle tunnel（CF `just apply` 两侧）。ZITADEL PG 已入 oracle 备份。
+- **⏳ 剩余**: homelab ZITADEL 保留作回滚（dormant，DNS 已切走）。**用户做一次真实浏览器登录**（Grafana/ArgoCD SSO）确认后 → 退役 homelab（删 `manifests/zitadel.yaml`+PG PVC、`argocd/applications/zitadel.yaml`、`gateway.yaml` auth 路由）。
 - 按该计划：oracle 建 `zitadel/`（PG on **local-path** 8Gi、ZITADEL、ESO→homelab Vault、HTTPRoute），`secret/oracle-k3s/zitadel` 同值 masterkey/db-password。
 - **数据**：homelab `pg_dump` → oracle 导入；确认 masterkey 一致（签发 key 不变，已登录用户不掉线）。
 - DNS：`auth.meirong.dev` CNAME 切 oracle tunnel（G2，先加 ingress 再切）。
