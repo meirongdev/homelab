@@ -55,12 +55,14 @@ server:
     - type: secret
       name: vault-auto-unseal
 
-  # 使用 NFS 存储 Raft 数据
+  # Raft 数据迁 local-path（2026-07-06 Phase 2）：raft fsync + 启动不再依赖 NFS/Tailscale
+  # （曾需 240s 重试等 NFS Raft bind）。restic 每夜 raft snapshot 备份兜底。
   dataStorage:
     enabled: true
     size: 10Gi
-    storageClass: nfs-client
+    storageClass: local-path
 
+  # 审计日志留 NFS（追加型顺序写，NFS 无碍；ZFS raidz1 + sanoid 保护）
   auditStorage:
     enabled: true
     size: 10Gi
