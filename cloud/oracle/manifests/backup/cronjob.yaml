@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: restic-backup
+  namespace: backup
+spec:
+  schedule: "30 3 * * *"          # 03:30（错峰 homelab 03:00）
+  timeZone: "Asia/Shanghai"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 3600
+      backoffLimit: 1
+      template:
+        metadata:
+          labels: { app: restic-backup }
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsUser: 0
+          containers:
+            - name: backup
+              image: alpine:3.20
+              command: ["sh", "/scripts/backup.sh"]
+              resources:
+                requests: { cpu: "50m", memory: "128Mi" }
+                limits:   { cpu: "1", memory: "512Mi" }   # oracle CPU 余量大
+              volumeMounts:
+                - { name: script,    mountPath: /scripts,   readOnly: true }
+                - { name: creds,     mountPath: /creds,     readOnly: true }
+                - { name: work,      mountPath: /work }
+                - { name: localpath, mountPath: /localpath, readOnly: true }
+          volumes:
+            - name: script
+              configMap: { name: restic-backup-script }
+            - name: creds
+              secret: { secretName: restic-backup, defaultMode: 0400 }
+            - name: work
+              emptyDir: {}
+            - name: localpath
+              hostPath: { path: /var/lib/rancher/k3s/storage, type: Directory }

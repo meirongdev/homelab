@@ -1,0 +1,64 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: restic-backup-script
+  namespace: backup
+data:
+  backup.sh: |
+    #!/bin/sh
+    # oracle-k3s nightly backup → restic 仓库 (106 ZFS, sftp over Tailscale)
+    # PG=pg_dumpall(miniflux+karakeep+postgres+roles)；sqlite=local-path hostPath 原样拷贝。
+    # meilisearch 索引(可由 karakeep 重建)不备份。
+    set -eu
+    echo "[backup] installing tools..."
+    apk add --no-cache restic openssh-client postgresql-client findutils >/dev/null
+
+    install -d -m 700 /root/.ssh
+    base64 -d /creds/SSH_KEY_B64 > /root/.ssh/id_ed25519
+    chmod 600 /root/.ssh/id_ed25519
+    cat > /root/.ssh/config <<EOF
+    Host 100.110.27.111
+      User root
+      IdentityFile /root/.ssh/id_ed25519
+      StrictHostKeyChecking accept-new
+      UserKnownHostsFile /root/.ssh/known_hosts
+    EOF
+    chmod 600 /root/.ssh/config
+
+    export RESTIC_PASSWORD="$(cat /creds/RESTIC_PASSWORD)"
+    export RESTIC_REPOSITORY="sftp:root@100.110.27.111:/storage/restic"
+    rm -rf /work/* 2>/dev/null || true
+    mkdir -p /work/pvc
+
+    # --- 1) PG pg_dumpall（共享实例的全部 DB + roles）---
+    echo "[backup] pg_dumpall (rss-postgres)..."
+    PGPASSWORD="$(cat /creds/PG_PASSWORD)" pg_dumpall \
+      -h rss-postgres.rss-system.svc -p 5432 -U miniflux -f /work/pg_all.sql
+    echo "[backup]   pg_all.sql = $(wc -c < /work/pg_all.sql) bytes"
+
+    # --- 2) sqlite/config from local-path（meilisearch/cache 不含）---
+    echo "[backup] copy sqlite/config files..."
+    for pat in karakeep-data uptime-kuma-data timeslot-pvc stirling-pdf-configs; do
+      for d in /localpath/*"$pat"*; do
+        [ -d "$d" ] || continue
+        dest="/work/pvc/$(basename "$d")"
+        find "$d" -maxdepth 3 \
+          \( -name cache -o -name meili_data -o -name data.ms \) -prune -o \
+          -type f \( -name '*.db' -o -name '*.db-wal' -o -name '*.db-shm' -o -name '*.sqlite*' -o -name '*.json' \) -size -512M -print 2>/dev/null | \
+        while IFS= read -r f; do
+          rel="${f#"$d"/}"
+          mkdir -p "$dest/$(dirname "$rel")"
+          cp -a "$f" "$dest/$rel" 2>/dev/null || true
+        done
+      done
+    done
+    echo "[backup]   pvc files = $(find /work/pvc -type f 2>/dev/null | wc -l), size = $(du -sh /work/pvc 2>/dev/null | cut -f1)"
+
+    # --- 3) restic ---
+    echo "[backup] restic backup..."
+    restic cat config >/dev/null 2>&1 || restic init
+    restic backup /work --host oracle-k3s --tag nightly --cleanup-cache
+    echo "[backup] forget/prune..."
+    restic forget --host oracle-k3s --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune
+    restic snapshots --host oracle-k3s --latest 2
+    echo "[backup] DONE"
