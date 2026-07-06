@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: backup
+  labels:
+    # 特权豁免：备份 Job 需 hostPath 读节点 local-path、以 root 读各 uid 的数据文件。
+    # 该 ns 无 PVC，故 PSA privileged 不放大存储爆炸半径（对比 vault/monitoring）。
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: baseline
+    pod-security.kubernetes.io/audit: baseline

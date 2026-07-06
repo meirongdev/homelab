@@ -28,6 +28,11 @@ resources:
   # Falco 运行时检测：namespace + falcosidekick→Gotify token（Falco 工作负载由独立 falco Helm App 部署）
   - falco/namespace.yaml
   - falco/falcosidekick-secret.yaml
+  # Backup: serverless restic → 106 ZFS 仓库（Tailscale sftp）。见 plans/2026-07-06-…backup-redesign.md
+  - backup/namespace.yaml
+  - backup/external-secret.yaml
+  - backup/backup-script.yaml
+  - backup/cronjob.yaml
   # Personal services (IT-Tools, Stirling-PDF, Squoosh, Timeslot, Trends)
   - personal-services/it-tools.yaml
   - personal-services/stirling-pdf.yaml

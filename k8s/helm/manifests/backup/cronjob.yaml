@@ -1,0 +1,48 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: restic-backup
+  namespace: backup
+spec:
+  schedule: "0 3 * * *"           # 03:00 本地时区（错峰；oracle 用 03:30）
+  timeZone: "Asia/Shanghai"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 3600   # 超 1h 视为卡住（如 NFS hang）→ 失败告警而非常驻
+      backoffLimit: 1
+      template:
+        metadata:
+          labels: { app: restic-backup }
+        spec:
+          restartPolicy: Never
+          # 单节点集群；hostPath 只在 k8s-node 有意义（本就只有它）
+          securityContext:
+            runAsUser: 0             # 需 root 读 hostPath 各 uid 文件 + 写 /root/.ssh
+          containers:
+            - name: backup
+              image: alpine:3.20
+              command: ["sh", "/scripts/backup.sh"]
+              resources:
+                requests: { cpu: "50m", memory: "128Mi" }
+                limits:   { cpu: "500m", memory: "512Mi" }   # 控 CPU（热节点）
+              volumeMounts:
+                - { name: script,   mountPath: /scripts, readOnly: true }
+                - { name: creds,    mountPath: /creds,   readOnly: true }
+                - { name: work,     mountPath: /work }
+                - { name: nfsdata,  mountPath: /nfsdata, readOnly: true }   # 迁移前 sqlite 在 NFS
+                - { name: localpath, mountPath: /localpath, readOnly: true } # 迁移后 sqlite 在 local-path
+          volumes:
+            - name: script
+              configMap: { name: restic-backup-script }
+            - name: creds
+              secret: { secretName: restic-backup, defaultMode: 0400 }
+            - name: work
+              emptyDir: {}
+            - name: nfsdata
+              nfs: { server: "192.168.50.106", path: /storage/nfs/k8s, readOnly: true }
+            - name: localpath
+              hostPath: { path: /var/lib/rancher/k3s/storage, type: Directory }

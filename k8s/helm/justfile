@@ -104,6 +104,24 @@ deploy-calibre:
 delete-calibre:
     kubectl --context {{ctx}} delete -f manifests/calibre-web.yaml
 
+# ⬇️ 备份 (serverless restic → storage-106 ZFS 仓库) ⬇️
+# 设计/运维见 docs/plans/2026-07-06-storage-local-migration-and-backup-redesign.md + docs/runbooks/backup-recovery.md
+# 前置(一次性 bootstrap，不在 git): 106 建 mrstorage/restic dataset + restic init + 授权 restic SSH key；
+#   Vault 写 secret/homelab/restic (repo_password / ssh_private_key_b64 / vault_token) + backup policy。
+
+# 部署 homelab 备份 CronJob (Vault raft snapshot + zitadel pg_dump + sqlite → 106)
+deploy-backup:
+    kubectl --context {{ctx}} apply -f manifests/backup/
+
+# 立即手动触发一次备份
+backup-run:
+    kubectl --context {{ctx}} -n backup create job --from=cronjob/restic-backup restic-manual-`date +%s`
+
+# 备份状态 (CronJob/Job/Pod；仓库快照在 106 上跑 `restic -r /storage/restic snapshots`)
+backup-status:
+    kubectl --context {{ctx}} -n backup get cronjob,jobs,pods
+    kubectl --context {{ctx}} -n backup logs -l app=restic-backup --tail=20 --prefix 2>/dev/null || true
+
 # ⬇️ 电子书同步 ⬇️
 
 # 部署电子书同步 CronJob 和监控
