@@ -193,3 +193,38 @@ spec:
           name: gotify
           port: 80
           weight: 1
+---
+# HTTPRoute: auth.meirong.dev -> zitadel + zitadel-login (migrated from homelab 2026-07-06)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: zitadel
+  namespace: zitadel
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: oracle-gateway
+      namespace: kube-system
+      port: 80
+  hostnames:
+    - "auth.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /ui/v2/login
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: zitadel-login
+          port: 3000
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: zitadel
+          port: 8080

@@ -1,0 +1,191 @@
+---
+# ZITADEL (SSO) — migrated from homelab 2026-07-06 (fault-domain separation).
+# Mirror of k8s/helm/manifests/zitadel.yaml; ONLY diff = PG storageClass nfs-client→local-path.
+# ExternalSecrets read secret/homelab/zitadel (SAME source → byte-identical masterkey; a copy
+# would risk making every DB-encrypted key undecryptable → total SSO break). ExternalDomain
+# stays auth.meirong.dev; PG data migrated via pg_dump so instance/keys/apps preserved.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: zitadel
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: zitadel-masterkey
+  namespace: zitadel
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: zitadel-masterkey
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      engineVersion: v2
+      mergePolicy: Replace
+      type: Opaque
+      data:
+        masterkey: "{{ .masterkey }}"
+  data:
+    - secretKey: masterkey
+      remoteRef:
+        key: secret/homelab/zitadel
+        property: master-key
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: zitadel-postgres-auth
+  namespace: zitadel
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: zitadel-postgres-auth
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      engineVersion: v2
+      mergePolicy: Replace
+      type: Opaque
+      data:
+        postgres-password: "{{ .db_password }}"
+        password: "{{ .db_password }}"
+  data:
+    - secretKey: db_password
+      remoteRef:
+        key: secret/homelab/zitadel
+        property: db-password
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: zitadel-config
+  namespace: zitadel
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: zitadel-config
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      engineVersion: v2
+      mergePolicy: Replace
+      type: Opaque
+      data:
+        config-yaml: |
+          Database:
+            Postgres:
+              User:
+                Password: "{{ .db_password }}"
+              Admin:
+                Password: "{{ .db_password }}"
+  data:
+    - secretKey: db_password
+      remoteRef:
+        key: secret/homelab/zitadel
+        property: db-password
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: zitadel-db
+  namespace: kube-system
+spec:
+  repo: https://charts.bitnami.com/bitnami
+  chart: postgresql
+  version: 12.10.0
+  targetNamespace: zitadel
+  createNamespace: true
+  valuesContent: |-
+    image:
+      repository: bitnamilegacy/postgresql
+    architecture: standalone
+    auth:
+      enablePostgresUser: true
+      username: zitadel
+      database: zitadel
+      existingSecret: zitadel-postgres-auth
+      secretKeys:
+        adminPasswordKey: postgres-password
+        userPasswordKey: password
+    primary:
+      persistence:
+        enabled: true
+        storageClass: local-path
+        size: 8Gi
+      resources:
+        requests:
+          cpu: 50m
+          memory: 192Mi
+        limits:
+          cpu: "1"
+          memory: 512Mi
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: zitadel
+  namespace: kube-system
+spec:
+  repo: https://charts.zitadel.com
+  chart: zitadel
+  version: 9.24.0
+  targetNamespace: zitadel
+  createNamespace: true
+  valuesContent: |-
+    zitadel:
+      masterkeySecretName: zitadel-masterkey
+      configSecretName: zitadel-config
+      configmapConfig:
+        ExternalSecure: true
+        ExternalDomain: auth.meirong.dev
+        ExternalPort: 443
+        TLS:
+          Enabled: false
+        Database:
+          Postgres:
+            Host: zitadel-db-postgresql
+            Port: 5432
+            Database: zitadel
+            MaxOpenConns: 20
+            MaxIdleConns: 10
+            MaxConnLifetime: 30m
+            MaxConnIdleTime: 5m
+            User:
+              Username: zitadel
+              SSL:
+                Mode: disable
+            Admin:
+              Username: postgres
+              SSL:
+                Mode: disable
+    resources:
+      requests:
+        cpu: 100m
+        memory: 192Mi
+      limits:
+        cpu: 500m
+        memory: 384Mi
+    ingress:
+      enabled: false
+    login:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 96Mi
+        limits:
+          cpu: 250m
+          memory: 192Mi
+      ingress:
+        enabled: false
+      service:
+        appProtocol: ""
