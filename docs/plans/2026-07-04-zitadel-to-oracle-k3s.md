@@ -5,6 +5,16 @@
 > 动机已从"106 不可用"升级为**故障域分离**：SSO 可用性 > 家里笔记本，homelab 整机故障时 OIDC 仍在线。ZITADEL PG 落 oracle **local-path**（比 NFS 更适合 PG 同步写）。
 > 背景: homelab NFS 单点依赖 + 单故障域集中（Vault/身份/GitOps/告警同住一台笔记本）
 
+## 🔎 执行前发现（2026-07-06，做前必读）
+
+实测当前部署，比原计划复杂，**前置条件**如下（这也是它值得单独专门做的原因）：
+- **ZITADEL v4.10.1 + Login V2**：`zitadel` + `zitadel-login` 两个 Deployment + init/setup Job，经 **k3s HelmChart CRD**（`helm.cattle.io/v1`，chart `zitadel` 9.24.0）部署。auth 路由分流：`/ui/v2/login`→`zitadel-login:3000`，`/`→`zitadel:8080`（见 homelab `gateway.yaml`）。
+- **⚠️ 前置1 — oracle Cilium**：`enable-gateway-api-app-protocol=false`（homelab=true）。不开则 ZITADEL **console v1 gRPC 404**（OIDC 登录不受影响，仅管理台）。需 helm upgrade oracle cilium 开启（`gatewayAPI.enableAppProtocol=true`）+ 重启 Cilium——**集群级变更**。可在 OIDC 验证通过后再做（console 非关键路径）。
+- **⚠️ 前置2 — PG chart**：homelab PG 用 **Bitnami `postgresql` 12.10.0**（`bitnamilegacy/postgresql:15.4` 镜像）。Bitnami 在清退旧 chart，oracle 可能拉不到 12.10.0 → 建议 oracle 改用**纯 `postgres:15` Deployment**（复刻 rss-postgres 模式）承接 pg_dump，避开 chart 依赖。
+- **masterkey 完整性（关键）**：oracle 的 ExternalSecrets 直接读 **`secret/homelab/zitadel`**（同源，masterkey/db-password 字节一致）——**切勿复制**（masterkey 差一字节则 DB 内所有加密密钥不可解 → 全 SSO 崩）。同源读零风险。
+- **数据**：homelab zitadel DB = 16MB / 147 表 / 8 schema（adminapi/auth/cache/eventstore/logstore/projections/queue/system）；`pg_dump --no-owner --no-privileges` = 807KB / 9642 行（已实测可导）。PG 现在 NFS 上 **OOM/liveness 反复重启（exitCode 137，22 次）**——迁 local-path + 加内存即修复，也是迁移动机。
+- **去风险顺序**：oracle 部署 PG(纯 Deployment)+ZITADEL(dormant) → 恢复 pg_dump → 内部验证(health + OIDC discovery, port-forward) → CF `auth` 切 oracle（同 Gotify 模式，`just apply` 两侧）→ **验证真实 OIDC 登录**(ArgoCD/Grafana) → 开 oracle Cilium app-protocol(console) → 退役 homelab。homelab 全程保留作回滚（DNS 切回）。CF token 见记忆 [[cloudflare-terraform-token-in-env]]。
+
 ## 1. 迁移动机
 
 - 消除 ZITADEL 对 106 NFS 的单点依赖（当前 PostgreSQL 8Gi PVC 使用 `nfs-client` StorageClass）

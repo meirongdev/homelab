@@ -4,7 +4,8 @@
 > 状态: 🟢 **Phase 0-2 + Phase 3a(Gotify) 已完成（2026-07-06）**；Phase 3b(ZITADEL) + Phase 4-5 待执行。
 > - ✅ Phase 0-1: serverless restic 备份**双集群上线**，恢复演练通过（详见 §Phase 1 末与 §DoD）。仓库 `881fb124bf` @ 106 `mrstorage/restic`。
 > - ✅ Phase 2: homelab sqlite/fsync PVC（**Vault raft / bifrost / calibre-config**）迁 local-path；alertmanager/audit/trivy 按设计留 NFS。详见 §Phase 2 表。
-> - ✅ Phase 3a: **Gotify → oracle-k3s**（数据迁移 + `notify.meirong.dev` DNS 切换完成，homelab gotify 已删）。ZITADEL(3b) 待专门做。
+> - ✅ Phase 3a: **Gotify → oracle-k3s**（数据迁移 + `notify.meirong.dev` DNS 切换完成，homelab gotify 已删）。ZITADEL(3b) 待专门做（发现前置：oracle Cilium `enable-gateway-api-app-protocol=false` 需开、Bitnami PG chart 12.10.0 可能已下架）。
+> - ✅ Phase 4 Task 10: **SMART + zpool 健康告警**（PrometheusRule 已加载）。Task 9（dead-man's switch）待做——需扩展 uptime-kuma provisioner 支持 push monitor + 通知渠道。
 > 结论: 把 homelab 上所有 **fsync/sqlite/PG 类** 有状态 PVC 从 `nfs-client` 迁到 `local-path`（性能 + 脱离 NFS 启动依赖），大件顺序数据（Calibre 书库）留在 NFS/ZFS。因 `local-path` 无冗余无快照，**先重建一套 serverless restic 备份**（逻辑 dump → 106 ZFS 上的加密仓库）再做迁移。同步把 **Gotify + ZITADEL 迁到 oracle-k3s**（脱离 homelab 故障域），并补上 **dead-man's switch** 与 **zpool/SMART 告警**。
 > 关联: `../../architecture-optimization-2026-07-04.md`（战略母文档）、`2026-07-04-storage-106-utilization-and-backup-simplification.md`（本计划取代其 Task 4-6 备份部分）、`2026-07-04-zitadel-to-oracle-k3s.md`（本计划纳入并执行）、`../runbooks/backup-recovery.md`（运维手册，随本计划回写）
 
@@ -236,11 +237,11 @@ restic -r <repo> restore latest --target /tmp/verify --host homelab
 - Uptime Kuma 通知渠道 → **Gotify(oracle)→Telegram**（Gotify 已迁 oracle，homelab 全灭时该链路不依赖 homelab）。⚠️ 先在 Uptime Kuma 配好该通知渠道（当前 provisioner 只建 monitor，无通知渠道）。
 - **效果**：homelab 整机死 → Prometheus/Alertmanager 停跳 → oracle 侧 5 分钟内知道并经 Telegram 报警（补掉唯一的"静默死亡"缺口）。
 
-#### Task 10 — zpool scrub + SMART 告警（PrometheusRule）
-- 新增 `k8s/helm/manifests/storage-alerts.yaml`（label `release: kube-prometheus-stack`）：
-  - `smartctl_device_media_errors > 0` / 温度过高 / SSD 寿命低 → warning；
-  - zpool degraded（若有导出指标；否则加一条 106 侧 scrub 结果 textfile→node_exporter）→ critical。
-- 并入 `argocd/applications/monitoring-dashboards.yaml` 的 include。
+#### Task 10 — zpool + SMART 告警（PrometheusRule）— ✅ 已完成 2026-07-06
+- `k8s/helm/manifests/storage-alerts.yaml`（label `release: kube-prometheus-stack`，并入 `monitoring-dashboards` App include）：
+  - SMART: `smartctl_device_smart_status==0`→critical、`media_errors>0`→warning、NVMe `percentage_used>90`/`available_spare<10`→warning。
+  - ZFS: `node_zfs_zpool_state{state="online"}==0`→critical（node_exporter 已导出 zpool state，无需 106 textfile collector）。
+  - 5 条规则已实测被 Prometheus operator 加载。经现有 Alertmanager→Gotify 路由。
 
 ### Phase 5 — 离站（later，门 G3）
 - 人工开通云对象存储（OCI always-free 20GB 或 B2），密钥入 Vault `secret/homelab/restic-offsite`。
