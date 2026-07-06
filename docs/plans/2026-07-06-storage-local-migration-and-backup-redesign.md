@@ -6,7 +6,7 @@
 > - ✅ Phase 2: homelab sqlite/fsync PVC（**Vault raft / bifrost / calibre-config**）迁 local-path；alertmanager/audit/trivy 按设计留 NFS。详见 §Phase 2 表。
 > - ✅ Phase 3a: **Gotify → oracle-k3s**（数据迁移 + `notify.meirong.dev` DNS 切换完成，homelab gotify 已删）。ZITADEL(3b) 待专门做（发现前置：oracle Cilium `enable-gateway-api-app-protocol=false` 需开、Bitnami PG chart 12.10.0 可能已下架）。
 > - ✅ Phase 3b: **ZITADEL → oracle-k3s 完成**（数据迁移 + masterkey 同源 + `auth.meirong.dev` 切换 + console gRPC 修复 + **homelab 退役**，全验证）。homelab NFS 现仅剩 alertmanager/audit/trivy（设计）+ calibre-books。
-> - ✅ Phase 4 Task 10: **SMART + zpool 健康告警**（PrometheusRule 已加载）。Task 9（dead-man's switch）待做——需扩展 uptime-kuma provisioner 支持 push monitor + 通知渠道。
+> - ✅ Phase 4 完成: Task 10 **SMART + zpool 健康告警** + Task 9 **dead-man's switch**（Uptime Kuma 全 monitor 挂 Gotify(oracle) 通知，homelab down → 手机报警，零 homelab 依赖）。
 > 结论: 把 homelab 上所有 **fsync/sqlite/PG 类** 有状态 PVC 从 `nfs-client` 迁到 `local-path`（性能 + 脱离 NFS 启动依赖），大件顺序数据（Calibre 书库）留在 NFS/ZFS。因 `local-path` 无冗余无快照，**先重建一套 serverless restic 备份**（逻辑 dump → 106 ZFS 上的加密仓库）再做迁移。同步把 **Gotify + ZITADEL 迁到 oracle-k3s**（脱离 homelab 故障域），并补上 **dead-man's switch** 与 **zpool/SMART 告警**。
 > 关联: `../../architecture-optimization-2026-07-04.md`（战略母文档）、`2026-07-04-storage-106-utilization-and-backup-simplification.md`（本计划取代其 Task 4-6 备份部分）、`2026-07-04-zitadel-to-oracle-k3s.md`（本计划纳入并执行）、`../runbooks/backup-recovery.md`（运维手册，随本计划回写）
 
@@ -237,11 +237,11 @@ restic -r <repo> restore latest --target /tmp/verify --host homelab
 
 ### Phase 4 — 韧性补齐
 
-#### Task 9 — dead-man's switch（Watchdog → 外部心跳）
-- oracle Uptime Kuma 建 **Push monitor**，取 push URL。
-- homelab Alertmanager 把 `Watchdog` 从 `receiver:"null"` 改为 webhook 每分钟打该 push URL（`kube-prometheus-stack.yaml` route）；5 分钟无心跳 → Uptime Kuma 触发。
-- Uptime Kuma 通知渠道 → **Gotify(oracle)→Telegram**（Gotify 已迁 oracle，homelab 全灭时该链路不依赖 homelab）。⚠️ 先在 Uptime Kuma 配好该通知渠道（当前 provisioner 只建 monitor，无通知渠道）。
-- **效果**：homelab 整机死 → Prometheus/Alertmanager 停跳 → oracle 侧 5 分钟内知道并经 Telegram 报警（补掉唯一的"静默死亡"缺口）。
+#### Task 9 — dead-man's switch — ✅ 已完成 2026-07-06（服务监控法，比 Watchdog-push 更简单）
+- **实现**: oracle Uptime Kuma **已在**探测 homelab 公网服务（Grafana/Vault/ArgoCD/Calibre-Web via CF）。给**所有 monitor** 挂一个 **Gotify(oracle) 通知**（provisioner 加 `add_notification(GOTIFY, isDefault+applyExisting)`）→ homelab 整机死 → 其服务不可达 → Uptime Kuma → Gotify(oracle) → 手机。**全链路在 oracle，零 homelab 依赖**，补掉"静默死亡"缺口。
+- **Token**: 用 Gotify `alertmanager_app` app token（`secret/homelab/gotify.alertmanager_app_token`，即 AM bridge 的"告警"应用；实测 200；redpanda 的 token 不在迁移后的 gotify.db 里→401）。provisioner 每次 delete+recreate 通知以保证 token 最新。实测 14/14 monitor 已挂通知 + 测试推送送达。
+- **落地**: `cloud/oracle/manifests/uptime-kuma/{secrets.yaml(+gotify_token),provisioner.yaml}`。
+- **对比原 Watchdog-push 设计**: 本法覆盖**homelab 整机 down**（主要缺口）。若还要覆盖"节点在、但 Prometheus/AM 挂了"这类窄场景，可另加 Watchdog→push heartbeat（需 push-token 交换，较复杂）——作为可选增强，非必需。
 
 #### Task 10 — zpool + SMART 告警（PrometheusRule）— ✅ 已完成 2026-07-06
 - `k8s/helm/manifests/storage-alerts.yaml`（label `release: kube-prometheus-stack`，并入 `monitoring-dashboards` App include）：
