@@ -1,0 +1,25 @@
+---
+# tailscale_node role 默认值 —— 集群差异全部走这些变量，
+# 调用方见 k8s/ansible/playbooks/setup-tailscale.yaml 与
+# cloud/oracle/ansible/playbooks/setup-tailscale.yaml。
+
+# 本机作为子网路由器要广播的 CIDR（必填，由 playbook 提供）
+tailscale_advertise_routes: ""
+
+# 对端集群 Pod CIDR 列表：Tailscale 路由表(52)不含 pod CIDR 明细，
+# 需加静态路由固定走 tailscale0；firewalld 开启时同时加入 trusted zone
+tailscale_peer_routes: []
+
+# 追加到 tailscale up 的额外参数（如 homelab 的 SNAT/netfilter 修复）
+tailscale_up_extra_args: ""
+
+# 云上虚拟网卡 UDP GRO 转发修复（Oracle A1 需要，提升吞吐）
+tailscale_fix_udp_gro: false
+tailscale_gro_iface: enp0s3
+
+# firewalld 信任 tailscale0 + 对端 CIDR（Oracle Ubuntu 镜像默认启用 firewalld，
+# 不加 trusted 会拦掉转发的 Tailscale 流量）
+tailscale_firewalld_trusted: false
+
+# 节点曾注册过导致 tailscale up 挂起时，置 true 清状态重注册
+tailscale_force_reregister: false

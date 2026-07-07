@@ -87,6 +87,9 @@ ACL policy (`tailscale/terraform/main.tf`): `tag:homelab` and `tag:oracle` can r
 | `k8s/ansible/playbooks/setup-tailscale.yaml` | Homelab | 10.42/16 |
 | `cloud/oracle/ansible/playbooks/setup-tailscale.yaml` | Oracle | 10.52/16 |
 
+两个 playbook 是共享 role `tailscale/ansible/roles/tailscale_node` 的薄封装（2026-07-07 合并），
+集群差异（up 参数、firewalld、UDP GRO、对端 CIDR）走 playbook vars；roles_path 见各自 ansible.cfg。
+
 ## Initial Setup
 
 ```bash
