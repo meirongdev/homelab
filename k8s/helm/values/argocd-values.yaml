@@ -51,11 +51,13 @@ configs:
     # ESO 的 ExternalSecret CRD 给 remoteRef 自动填默认值，ArgoCD 的 SSA diff 会
     # 把这视作 drift。这里忽略掉 ESO 自己默认的字段，避免每次写新 ExternalSecret
     # 都得手动复制 conversionStrategy/decodingStrategy/metadataPolicy。
+    # nullBytePolicy 是新版 ESO 加的默认字段（2026-07 发现全量 ES OutOfSync）。
     resource.customizations.ignoreDifferences.external-secrets.io_ExternalSecret: |
       jqPathExpressions:
         - .spec.data[].remoteRef.conversionStrategy
         - .spec.data[].remoteRef.decodingStrategy
         - .spec.data[].remoteRef.metadataPolicy
+        - .spec.data[].remoteRef.nullBytePolicy
     # Cilium Gateway API health: a Gateway is Healthy once Programmed (or
     # Accepted on the cilium / cilium-nodeport classes — neither homelab nor
     # oracle-k3s has an external LB, so Programmed stays False / AddressNotAssigned
