@@ -5,9 +5,18 @@
   hosts: k8s_masters
   become: true
   vars:
-    tailscale_advertise_routes: "10.42.0.0/16"
-    tailscale_peer_routes:
-      - 10.52.0.0/16 # oracle-k3s pod CIDR
+    # ⚠️ This node must advertise NOTHING (2026-07-07). In particular NEVER advertise
+    # its own IP 10.10.10.10/32: pve (a tailnet subnet router that TRANSITS this
+    # segment's traffic) learns the route into table 52, which outranks its main table,
+    # and hijacks all return traffic to this node into the tailnet — that killed the
+    # node's entire v4 internet egress on 2026-07-07. The ClusterMesh underlay for
+    # oracle→homelab rides pve's existing 10.10.10.0/24 advertisement instead.
+    # Pod-CIDR advertisement also removed: cross-cluster pod traffic rides Cilium
+    # ClusterMesh VXLAN, not Tailscale subnet routes. See docs/reference/tailscale-network.md.
+    tailscale_advertise_routes: ""
+    # No static peer-CIDR routes: once the peer stops advertising the CIDR they blackhole
+    # host traffic (packets leave via tailscale0 but match no peer's AllowedIPs).
+    tailscale_peer_routes: []
     # netfilter/SNAT 关闭：Tailscale SNAT 会重映射 NFS 源端口、破坏 exports 的 secure 标志
     # （见 git log 2026-06/07 tailscale snat breakage for nfs）
     tailscale_up_extra_args: "--accept-dns=false --netfilter-mode=off --snat-subnet-routes=false"
@@ -47,6 +56,38 @@
     - name: Enable and start nfs-lan-route unit
       ansible.builtin.systemd:
         name: nfs-lan-route.service
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    # --- Tailscale/CNI recursion guard (2026-07-07) ---
+    # tailscaled advertises ALL local addresses as candidate WireGuard endpoints,
+    # including Cilium's cilium_host IP. The peer cluster's node can then "reach"
+    # us via ClusterMesh VXLAN (which itself rides Tailscale) and picks that as its
+    # endpoint: WireGuard-over-VXLAN-over-WireGuard. Blocking 41641 to/from the CNI
+    # ranges makes those candidates never validate, so the real public path wins.
+    # Same guard exists on node0 via firewalld direct rules (oracle playbook).
+    - name: Install tailscale-no-cni-endpoint recursion guard unit
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/tailscale-no-cni-endpoint.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Prevent Tailscale from using CNI addresses as WireGuard endpoints (recursion guard)
+          After=network-online.target
+
+          [Service]
+          Type=oneshot
+          ExecStart=/bin/sh -c "/usr/sbin/iptables -C INPUT -p udp --dport 41641 -d 10.42.0.0/16 -j DROP 2>/dev/null || /usr/sbin/iptables -I INPUT 1 -p udp --dport 41641 -d 10.42.0.0/16 -j DROP"
+          ExecStart=/bin/sh -c "/usr/sbin/iptables -C OUTPUT -p udp --dport 41641 -d 10.52.0.0/16 -j DROP 2>/dev/null || /usr/sbin/iptables -I OUTPUT 1 -p udp --dport 41641 -d 10.52.0.0/16 -j DROP"
+          RemainAfterExit=yes
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start recursion guard unit
+      ansible.builtin.systemd:
+        name: tailscale-no-cni-endpoint.service
         enabled: true
         state: started
         daemon_reload: true

@@ -8,9 +8,17 @@ resource "tailscale_acl" "main" {
       { action = "accept", src = ["autogroup:member", "tag:homelab", "tag:oracle"], dst = ["*:*"] }
     ]
     autoApprovers = {
+      # ClusterMesh VXLAN underlay routes (pod-CIDR subnet routes 10.42/10.52 were
+      # removed 2026-07-07: cross-cluster pod traffic rides Cilium ClusterMesh VXLAN):
+      #   - oracle→homelab outer packets ride pve's existing 10.10.10.0/24 route;
+      #   - homelab→oracle outer packets ride node0's self-advertised 10.0.0.26/32.
+      # ⚠️ NEVER approve/advertise 10.10.10.10/32 (k8s-node's own IP): pve — a transit
+      # router for that segment — learns it into table 52, which outranks its main
+      # table, and hijacks ALL return traffic to the node into the tailnet. This took
+      # homelab's entire v4 internet egress down on 2026-07-07. Advertising node0's
+      # own /32 is safe because nothing in the tailnet transits traffic to the OCI VCN.
       routes = {
-        "10.42.0.0/16" = ["tag:homelab"]
-        "10.52.0.0/16" = ["tag:oracle"]
+        "10.0.0.26/32" = ["tag:oracle", "meirongdev@gmail.com"] # node0 (oracle VCN IP)
       }
     }
   })

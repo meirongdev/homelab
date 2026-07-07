@@ -17,6 +17,19 @@ kubeProxyReplacement: true
 routingMode: tunnel
 tunnelProtocol: vxlan
 
+# MTU: deliberately NOT set (auto-detect). Cilium detects the lowest underlay device
+# (tailscale0 = 1280) and, in tunnel mode, automatically gives pods 1280-50=1230 so
+# VXLAN-encapsulated cross-cluster packets exactly fit the Tailscale MTU.
+# ⚠️ Do NOT set an explicit MTU here: for explicit values Cilium does NOT subtract the
+# tunnel overhead — pods and the vxlan device get the same number and every packet in
+# the top 50 bytes of the range is silently blackholed (bit us 2026-07-07 with MTU=1200:
+# inner >1150 dropped before even reaching tailscale0).
+# Cross-cluster underlay: oracle→homelab rides pve's 10.10.10.0/24 subnet route;
+# homelab→oracle rides node0's self-advertised 10.0.0.26/32. k8s-node must NEVER
+# advertise its own 10.10.10.10/32 — pve (a transit router for this segment) would
+# learn it into table 52 and hijack ALL return traffic to the node into the tailnet
+# (took homelab's entire v4 internet egress down on 2026-07-07).
+
 ipam:
   operator:
     clusterPoolIPv4PodCIDRList:

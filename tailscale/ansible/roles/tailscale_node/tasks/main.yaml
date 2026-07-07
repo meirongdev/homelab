@@ -91,6 +91,17 @@
   loop: "{{ tailscale_peer_routes }}"
   when: tailscale_firewalld_trusted | bool
 
+# Without this the node cannot receive NAT-traversal packets and every tailnet
+# path to it degrades to a DERP relay (bit us 2026-07-07: telemetry + ClusterMesh
+# rode relay "sin"). Must be open in the cloud security list too (OCI: 41641/udp).
+- name: Allow Tailscale WireGuard port in public zone (direct path, not DERP)
+  ansible.posix.firewalld:
+    port: 41641/udp
+    zone: public
+    permanent: true
+    state: enabled
+  when: tailscale_firewalld_trusted | bool
+
 - name: Reload firewalld
   ansible.builtin.service:
     name: firewalld

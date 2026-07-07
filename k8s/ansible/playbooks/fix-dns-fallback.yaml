@@ -1,12 +1,30 @@
 ---
-# Ensure systemd-resolved has 8.8.8.8/1.1.1.1 as fallback DNS
-# Prevents DNS failure when Tailscale MagicDNS is unavailable after network interruption
+# Node + pod DNS for the homelab K3s node (redesigned 2026-07-07).
+#
+# Network reality of the 10.10.10.0/24 segment (VM subnet behind pve):
+#   - Public resolvers on port 53 (UDP *and* TCP) are unreachable: the home router
+#     drops/hijacks the return leg for this segment. 8.8.8.8/1.1.1.1 time out.
+#   - The ONLY reliable upstream is the ISP's IPv6 resolvers, learned on eth0 via
+#     RA/DHCPv6 (2400:79e0:...). Pods are IPv4-only and cannot use them directly.
+#   - Tailscale MagicDNS (100.100.100.100) has no listener here (accept-dns=false).
+#
+# Design: systemd-resolved is the single DNS brain on the node. It owns upstream
+# selection (per-link ISP v6), health tracking and caching, and exposes an extra
+# stub listener on the node IP so IPv4-only pods can use it:
+#
+#   pods -> CoreDNS (forward . /etc/resolv.conf) -> 10.10.10.10:53 (resolved stub)
+#        -> ISP IPv6 resolvers
+#
+# CoreDNS's /etc/resolv.conf comes from kubelet's --resolv-conf, which points at
+# /etc/rancher/k3s/resolv.conf (see /etc/rancher/k3s/config.yaml kubelet-arg).
+# Do NOT patch public forwarders into the CoreDNS Corefile: k3s's addon controller
+# reverts it, and public resolvers don't work from this segment anyway (an older
+# version of this playbook did exactly that — removed 2026-07-07).
+#
 # Run: just fix-dns  (or: ansible-playbook -i inventory playbooks/fix-dns-fallback.yaml)
-- name: Configure DNS fallback on K3s nodes
+- name: Configure node-bridged DNS on K3s nodes
   hosts: k8s_masters
   become: true
-  vars:
-    coredns_public_forwarders: "forward . 1.1.1.1 8.8.8.8"
   tasks:
     - name: Create K3s config directory
       file:
@@ -14,28 +32,22 @@
         state: directory
         mode: "0755"
 
-    - name: Write clean resolv.conf for kubelet (pods' upstream DNS, no MagicDNS)
+    - name: Point pods' upstream DNS at the node-local resolved stub
       copy:
         dest: /etc/rancher/k3s/resolv.conf
         content: |
-          nameserver 8.8.8.8
-          nameserver 1.1.1.1
+          # Managed by ansible (fix-dns-fallback.yaml). Pods resolve via the node's
+          # systemd-resolved stub — public resolvers are unreachable on port 53 from
+          # this segment; only the ISP IPv6 resolvers work and pods have no IPv6.
+          nameserver 10.10.10.10
         mode: "0644"
 
-    # Point kubelet at the clean static file rather than systemd-resolved's flat
-    # resolv.conf — the flat file carries Tailscale MagicDNS (100.100.100.100),
-    # which can't resolve public names, so CoreDNS's default forward breaks.
-    # With a clean file, the default `forward . /etc/resolv.conf` is correct and
-    # self-heals across reboots (no CoreDNS override needed).
-    - name: Point K3s kubelet at the clean resolv.conf
-      blockinfile:
-        path: /etc/rancher/k3s/config.yaml
-        create: true
-        marker: "# {mark} ANSIBLE MANAGED DNS"
-        block: |
-          kubelet-arg:
-            - resolv-conf=/etc/rancher/k3s/resolv.conf
-      notify: restart k3s
+    # kubelet-arg resolv-conf=/etc/rancher/k3s/resolv.conf is managed as part of the
+    # full /etc/rancher/k3s/config.yaml (hand-maintained). Assert it instead of using
+    # blockinfile: a second kubelet-arg key would silently shadow the existing list.
+    - name: Assert kubelet resolv-conf arg is present in k3s config.yaml
+      command: grep -q "resolv-conf=/etc/rancher/k3s/resolv.conf" /etc/rancher/k3s/config.yaml
+      changed_when: false
 
     - name: Create systemd-resolved drop-in directory
       file:
@@ -43,14 +55,26 @@
         state: directory
         mode: "0755"
 
-    - name: Write DNS fallback config
+    - name: Configure resolved (clear dead globals, expose stub on node IP)
       copy:
         dest: /etc/systemd/resolved.conf.d/fallback.conf
         content: |
+          # Managed by ansible (fix-dns-fallback.yaml), 2026-07-07 redesign.
+          # DNS= (empty) clears any global servers (incl. from resolved.conf) so the
+          # per-link ISP IPv6 resolvers on eth0 are the effective upstream — public
+          # v4 resolvers are unreachable on port 53 from this segment.
+          # DNSStubListenerExtra exposes resolved on the node IP for CoreDNS/pods.
           [Resolve]
-          DNS=8.8.8.8 1.1.1.1
+          DNS=
           FallbackDNS=8.8.4.4
+          DNSStubListenerExtra=10.10.10.10
         mode: "0644"
+      notify: restart systemd-resolved
+
+    - name: Remove superseded interim drop-in (10-homelab-stub.conf)
+      file:
+        path: /etc/systemd/resolved.conf.d/10-homelab-stub.conf
+        state: absent
       notify: restart systemd-resolved
 
     - name: Ensure systemd-resolved is running
@@ -59,42 +83,19 @@
         state: started
         enabled: true
 
-    - name: Apply pending DNS service restarts before patching CoreDNS
+    - name: Apply pending DNS service restarts
       meta: flush_handlers
 
-    - name: Wait for K3s API to be ready after DNS changes
-      command: k3s kubectl get nodes
-      register: k3s_ready
-      until: k3s_ready.rc == 0
-      retries: 30
-      delay: 10
+    - name: Verify the stub answers external queries
+      command: dig @10.10.10.10 +time=4 +tries=2 +short cloudflare.com
+      register: stub_check
+      until: stub_check.stdout != ""
+      retries: 3
+      delay: 3
       changed_when: false
-
-    - name: Read current CoreDNS Corefile
-      command: >-
-        k3s kubectl -n kube-system get configmap coredns
-        -o go-template={{ "{{ index .data \"Corefile\" }}" }}
-      register: coredns_corefile
-      changed_when: false
-
-    - name: Reapply public forwarders to CoreDNS
-      shell: |
-        cat > /tmp/coredns-patch.yaml <<'EOF'
-        data:
-          Corefile: |
-        {{ coredns_corefile.stdout | regex_replace('forward \\. .*', coredns_public_forwarders) | indent(12, true) }}
-        EOF
-        k3s kubectl patch configmap coredns -n kube-system --type merge --patch-file /tmp/coredns-patch.yaml
-      register: coredns_patch
-      changed_when: "'(no change)' not in coredns_patch.stdout"
 
   handlers:
     - name: restart systemd-resolved
       systemd:
         name: systemd-resolved
-        state: restarted
-
-    - name: restart k3s
-      systemd:
-        name: k3s
         state: restarted

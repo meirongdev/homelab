@@ -282,7 +282,10 @@ deploy-cilium: add-repos
     # ClusterMesh CA 属密钥（不入库）：升级时从在集群恢复以保住 mesh 互信，全新安装让 Cilium 自签新 CA。
     ctx="{{ctx}}"
     # Drop stale Hubble cert secrets so certgen re-issues them for the current cluster name.
+    # Also drop OLD certgen jobs: the wait below selects by label and would match a
+    # stale completed job, then fail on the missing secrets (bit us 2026-07-07).
     kubectl --context "$ctx" -n kube-system delete secret hubble-server-certs hubble-relay-client-certs --ignore-not-found
+    kubectl --context "$ctx" -n kube-system delete job -l k8s-app=hubble-generate-certs --ignore-not-found
     # Restore the live ClusterMesh CA on upgrade; on a fresh install let Cilium self-sign one.
     if kubectl --context "$ctx" -n kube-system get secret cilium-ca >/dev/null 2>&1; then
         kubectl --context "$ctx" -n kube-system get secret cilium-ca -o jsonpath='{.data.ca\.crt}' | base64 -d > /tmp/cilium-ca.crt
@@ -302,6 +305,9 @@ deploy-cilium: add-repos
         --reset-values \
         --wait \
         --timeout 10m
+    # helm's post-upgrade hook does not reliably fire a fresh certgen job on every
+    # upgrade — trigger one from the cronjob so the wait below has something real.
+    kubectl --context "$ctx" -n kube-system create job --from=cronjob/hubble-generate-certs "hubble-certs-manual-$(date +%s)" || true
     found=""
     for _ in $(seq 1 24); do
         if kubectl --context "$ctx" -n kube-system get job -l k8s-app=hubble-generate-certs -o name | grep -q .; then
