@@ -5,11 +5,39 @@
   hosts: oracle_masters
   become: true
   vars:
-    # Oracle cluster uses non-default CIDRs to avoid conflict with homelab
-    tailscale_advertise_routes: "10.52.0.0/16"
-    tailscale_peer_routes:
-      - 10.42.0.0/16 # homelab pod CIDR
+    # ClusterMesh underlay (2026-07-07): advertise only this node's OWN VCN IP as /32 so
+    # the peer cluster routes VXLAN(8472/udp) to it over Tailscale. Pod-CIDR advertisement
+    # removed — cross-cluster pod traffic rides Cilium ClusterMesh VXLAN, not Tailscale
+    # subnet routes. See docs/reference/tailscale-network.md.
+    tailscale_advertise_routes: "10.0.0.26/32"
+    # No static peer-CIDR routes (they blackhole host traffic when the peer stops
+    # advertising); firewalld keeps trusting tailscale0 itself via the role.
+    tailscale_peer_routes: []
     tailscale_fix_udp_gro: true # A1 虚拟网卡 UDP GRO 转发修复
     tailscale_firewalld_trusted: true # Oracle 镜像默认启用 firewalld，需信任 tailscale0
   roles:
     - tailscale_node
+  tasks:
+    # --- Tailscale/CNI recursion guard (2026-07-07) ---
+    # tailscaled advertises cilium_host (10.52.0.x) as a candidate WireGuard endpoint;
+    # the homelab node can "reach" it through ClusterMesh VXLAN (which rides Tailscale)
+    # and would select it: WireGuard-over-VXLAN-over-WireGuard. Drop 41641 to/from the
+    # CNI ranges so those candidates never validate and the public path wins.
+    # Mirrors k8s-node's tailscale-no-cni-endpoint.service (homelab playbook).
+    - name: Recursion guard — drop 41641 to own CNI range (INPUT)
+      ansible.builtin.command:
+        cmd: firewall-cmd --permanent --direct --add-rule ipv4 filter INPUT 0 -p udp --dport 41641 -d 10.52.0.0/16 -j DROP
+      register: fw_in
+      changed_when: "'ALREADY_ENABLED' not in fw_in.stderr"
+
+    - name: Recursion guard — drop 41641 to peer CNI range (OUTPUT)
+      ansible.builtin.command:
+        cmd: firewall-cmd --permanent --direct --add-rule ipv4 filter OUTPUT 0 -p udp --dport 41641 -d 10.42.0.0/16 -j DROP
+      register: fw_out
+      changed_when: "'ALREADY_ENABLED' not in fw_out.stderr"
+
+    - name: Reload firewalld to apply recursion guard
+      ansible.builtin.service:
+        name: firewalld
+        state: reloaded
+      when: fw_in.changed or fw_out.changed

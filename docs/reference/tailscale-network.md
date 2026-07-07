@@ -1,71 +1,121 @@
 # Tailscale Cross-Cluster Networking
 
+> Rewritten 2026-07-07 after the topology review. The original design (each K3s node
+> advertises its Pod CIDR as a Tailscale subnet route) is GONE — cross-cluster pod
+> traffic now rides **Cilium ClusterMesh VXLAN**, with Tailscale as the node-level
+> underlay only.
+
 ## Overview
 
-Two K3s clusters are connected via Tailscale subnet routing. Each cluster's K3s node acts as a subnet router, advertising its Pod CIDR into the shared tailnet. This lets pods in either cluster reach pods in the other cluster directly by IP, without dragging cross-cluster Service CIDRs into the critical path.
+Three cooperating layers:
 
-After the gateway cutover, ingress no longer depends on any cross-cluster auth hop. Cloudflare Tunnel now targets the local Cilium Gateway service in each cluster, while Tailscale remains the underlay for pod routing, Vault access, observability export, and future ClusterMesh control-plane connectivity.
+1. **Tailscale (underlay)** — node-to-node reachability. Every production east-west
+   flow uses `节点 Tailscale IP + NodePort`: oracle→homelab Loki `:31080` /
+   Prometheus `:31090` / Tempo `:31317` / Vault `:31952`; homelab→oracle ArgoCD
+   `:6443`; ClusterMesh control plane `:32379` both ways.
+2. **Cilium ClusterMesh (pod dataplane)** — pod↔pod across clusters is VXLAN
+   (udp/8472) between the two node IPs, carried over Tailscale. Verified 2026-07-07:
+   bidirectional, all inner packet sizes ≤1230 (= tailscale0 MTU 1280 − 50 VXLAN).
+3. **Cloudflare Tunnel (north-south)** — per-cluster cloudflared → local Cilium
+   Gateway. Tailscale is NOT in the HTTP request path.
 
-**Status**: Active as of 2026-03-08. Both nodes connected, bidirectional pod routing verified. Cilium ClusterMesh also active over Tailscale (port 32379).
+**Status (2026-07-07)**: node0↔k8s-node is a **direct** WireGuard connection
+(~75-87ms) after opening UDP 41641 on OCI + firewalld. Both k8s nodes advertise
+almost nothing — see the underlay route table below.
 
-## CIDR Allocation
+## Underlay routes (who advertises what)
 
-| Cluster | Advertised Pod CIDR | Local Service CIDR | Node (LAN) IP | Tailscale IP |
-|---------|----------------------|--------------------|---------------|--------------|
-| Homelab K3s | 10.42.0.0/16 | 10.43.0.0/16 | 10.10.10.10 | 100.94.186.7 |
-| Oracle K3s | 10.52.0.0/16 | 10.53.0.0/16 | 10.0.0.26 | 100.107.166.37 |
+| Node | Advertises | Why |
+|------|-----------|-----|
+| `pve` (100.118.193.51) | `10.10.10.0/24`, `192.168.50.0/24` | LAN access for ops; **also carries oracle→homelab VXLAN outer packets** |
+| `node0` (100.107.166.37) | `10.0.0.26/32` (its own VCN IP) | homelab→oracle VXLAN outer packets |
+| `k8s-node` (100.94.186.7) | **nothing** | ⚠️ see the poisoning gotcha below |
 
-Oracle K3s uses non-default CIDRs to avoid collision with homelab defaults.
-Set in `/etc/rancher/k3s/config.yaml` via `cloud/oracle/ansible/playbooks/setup-k3s.yaml`.
+Pod/Service CIDRs (10.42/10.43/10.52/10.53) are **not** advertised anymore.
+
+⚠️ **Route-poisoning gotcha (cost us all homelab v4 egress on 2026-07-07)**:
+`k8s-node` must NEVER advertise its own IP `10.10.10.10/32`. `pve` is a
+subnet router that **transits** this segment's traffic (home router → pve →
+10.10.10.0/24); with `--accept-routes` pve learns the /32 into routing table 52,
+which outranks its main table, and hijacks ALL return traffic destined to the
+node into the tailnet — every inbound v4 packet (TCP handshakes, DNS answers,
+WireGuard disco replies) blackholes. Advertising node0's own /32 is safe only
+because nothing in the tailnet transits traffic toward the OCI VCN.
+Rule of thumb: **never advertise an IP that another tailnet subnet router is
+responsible for delivering to you.**
 
 ## How It Works
 
-### Packet path: homelab pod → Oracle pod
+### Packet path: homelab pod → oracle pod (and reverse)
 
 ```
-[Homelab Pod 10.42.x.x]
-        │  (standard pod routing via cni0)
+[Homelab Pod 10.42.x.x]  (veth, MTU 1280)
+        │ Cilium BPF: dst belongs to remote cluster (ClusterMesh endpoint sync)
         ▼
-[Homelab K3s Node 10.10.10.10]
-        │  k8s-node is a Tailscale subnet router
-        │  routing table 52: 10.52.0.0/16 dev tailscale0
+[VXLAN encap]  outer: 10.10.10.10 → 10.0.0.26, udp/8472, ≤1280 bytes
+        │ table 52: 10.0.0.26 dev tailscale0  (node0's self-advertised /32)
         ▼
-[Tailscale DERP/direct relay]  ~80ms RTT
-        │
+[WireGuard, direct]  ~75ms
         ▼
-[Oracle K3s Node 10.0.0.26]
-        │  Oracle node receives packet via tailscale0
-        │  firewalld trusted zone: tailscale0 + 10.42.0.0/16 allowed
-        │  kernel routes: 10.52.0.0/24 dev cni0
-        ▼
-[Oracle Pod 10.52.x.x]
+[node0]  firewalld: tailscale0 trusted, 8472/udp open → VXLAN decap → pod
 ```
 
-The reverse path (Oracle → homelab) is symmetric.
+Reverse path: node0's VXLAN outer targets `10.10.10.10`, which rides **pve's**
+`10.10.10.0/24` route (WG → pve → vmbr0 → k8s-node; pve SNATs the outer to
+10.10.10.1 — harmless, VXLAN is stateless). Slightly asymmetric, works fine.
 
-### Key mechanisms
+### MTU — do NOT set it explicitly
 
-- **Subnet routing**: `tailscale up --advertise-routes=<CIDRs>` tells the Tailscale control plane to route traffic for those CIDRs through this node.
-- **Route acceptance**: `tailscale up --accept-routes` installs peer routes into kernel routing table 52 (`ip route show table 52`). These are separate from the main table.
-- **Auto-approval**: The Tailscale ACL `autoApprovers` block in `tailscale/terraform/main.tf` automatically approves advertised routes from tagged nodes without manual admin approval.
-- **Tailscale tags**: Both nodes use pre-auth keys with tags (`tag:homelab`, `tag:oracle`), which the ACL uses to grant subnet routing permissions.
+Cilium auto-detects MTU (lowest device = tailscale0 = 1280). Max usable inner
+packet cross-cluster = **1230** (1280 − 50 VXLAN). ICMP/UDP in the 1231–1280
+window silently drop (BPF drop, no ICMP Frag-Needed); TCP is unaffected in
+practice (verified with bulk transfers). **Never set an explicit `MTU:` in the
+Cilium values**: for explicit values Cilium does NOT subtract tunnel overhead —
+pods and the vxlan device get the same number and the top 50 bytes of the range
+blackhole (bit us 2026-07-07 with MTU=1200 → inner >1150 dropped).
 
-## Simplified Critical Path
+### Recursion guard (WireGuard-over-VXLAN-over-WireGuard)
 
-- **Keep**: Tailscale as the inter-cluster underlay for Pod/Service reachability and operational access.
-- **Keep**: Cilium as the in-cluster CNI, Gateway API controller, and future ClusterMesh substrate on both clusters.
-- **Simplify**: Cloudflare Tunnel now terminates into the local Cilium Gateway service instead of a separate Traefik controller.
-- **Benefit**: ingress is fully local to each cluster, and Tailscale is no longer in the HTTP request path.
-- **GitOps rule**: because `gateway` is ArgoCD-managed, gateway changes must live in `k8s/helm/manifests/gateway.yaml`, not as a live patch.
+tailscaled advertises ALL local addresses as candidate WG endpoints — including
+Cilium's `cilium_host` IP (10.42.0.x / 10.52.0.x). Once the mesh works, the peer
+can "reach" that address through the mesh itself and will happily select it as
+the endpoint → WG rides VXLAN rides WG, with the real public path never winning.
+Both nodes therefore DROP udp/41641 to/from the CNI ranges:
+
+- k8s-node: `tailscale-no-cni-endpoint.service` (iptables, see `k8s/ansible/playbooks/setup-tailscale.yaml`)
+- node0: firewalld direct rules (see `cloud/oracle/ansible/playbooks/setup-tailscale.yaml`)
+
+### Direct connection requirements
+
+- OCI security list + firewalld public zone must allow **udp/41641**
+  (`cloud/oracle/terraform/main.tf`) — without it every path to node0 rides a
+  DERP relay (observed: telemetry + mesh over relay "sin", GB/day).
+- k8s-node cannot receive unsolicited inbound UDP (double NAT via pve + home
+  router with no port-forward), so the direct connection is established by
+  k8s-node's outbound probes to node0's public 41641. Good enough.
 
 ## Tailscale Tags and ACL
 
-| Tag | Node | Auto-approved routes |
-|-----|------|---------------------|
-| `tag:homelab` | k8s-node (homelab) | 10.42.0.0/16 |
-| `tag:oracle` | node0 (oracle) | 10.52.0.0/16 |
+| Tag / owner | Node | Auto-approved routes |
+|-------------|------|---------------------|
+| `tag:oracle` + meirongdev@gmail.com | node0 | 10.0.0.26/32 |
+| meirongdev@gmail.com (untagged!) | k8s-node | — (must not advertise) |
+| meirongdev@gmail.com | pve | 10.10.10.0/24, 192.168.50.0/24 (console-approved) |
 
-ACL policy (`tailscale/terraform/main.tf`): `tag:homelab` and `tag:oracle` can reach any destination (`*:*`).
+⚠️ `k8s-node` re-registered at some point WITHOUT `tag:homelab` (it shows as a
+user device). Tag-based autoApprovers therefore don't match it — the ACL keeps
+the user account in `autoApprovers` for node0's route instead.
+
+ACL policy (`tailscale/terraform/main.tf`): members and both tags can reach any
+destination (`*:*`).
+
+## Cluster DNS on the homelab node (related, bit us 2026-07-07)
+
+The 10.10.10.0/24 segment cannot reach ANY public resolver on port 53 — only the
+ISP's IPv6 resolvers (eth0 RA/DHCPv6) work, and pods have no IPv6. Design:
+`pods → CoreDNS → 10.10.10.10:53 (systemd-resolved DNSStubListenerExtra) → ISP v6`.
+Managed by `k8s/ansible/playbooks/fix-dns-fallback.yaml`. Public resolvers in
+`/etc/rancher/k3s/resolv.conf` caused 16 hours of cloudflared CrashLoopBackOff.
 
 ## File Map
 
@@ -121,22 +171,25 @@ just setup-tailscale $(cd ../../tailscale/terraform && just homelab-authkey)
 ## Verification
 
 ```bash
-# Both nodes visible in tailnet
+# Both nodes visible in tailnet; the k8s-node line should say "direct", not "relay"
 tailscale status
 
-# Routes installed in table 52 (not main table)
-ip route show table 52 | grep -E "10\.42|10\.52"
+# Underlay routes in table 52 (NOT pod CIDRs — those are gone):
+# homelab node must see node0's /32; oracle node must see pve's 10.10.10.0/24
+ssh ubuntu@100.94.186.7    'ip route show table 52 | grep 10.0.0.26'
+ssh ubuntu@152.69.195.151  'ip route show table 52 | grep 10.10.10.0/24'
 
-# Cross-cluster pod ping
-ping 10.52.0.2   # from homelab: Oracle CoreDNS pod
-ping 10.42.0.1   # from Oracle: homelab pod gateway
+# ClusterMesh dataplane: pod→pod both directions, incl. max-size inner packet.
+# Get LIVE CoreDNS pod IPs first — hardcoded IPs go stale on pod restart and a dead
+# target shows up as Cilium "Stale or unroutable IP" drops (bit us 2026-07-07).
+HL=$(kubectl --context k3s-homelab get pod -n kube-system -l k8s-app=kube-dns -o jsonpath='{.items[0].status.podIP}')
+OR=$(kubectl --context oracle-k3s  get pod -n kube-system -l k8s-app=kube-dns -o jsonpath='{.items[0].status.podIP}')
+kubectl --context k3s-homelab run t1 --rm -i --restart=Never --image=busybox:1.36 -- ping -c3 -s 1202 $OR
+kubectl --context oracle-k3s  run t2 --rm -i --restart=Never --image=busybox:1.36 -- ping -c3 -s 1202 $HL
 
-# Cross-cluster K3s API access
-nc -z 100.107.166.37 6443   # homelab → Oracle K3s API
-nc -z 100.94.186.7 6443  # Oracle → homelab K3s API
-
-# Cross-cluster DNS query (homelab node querying Oracle CoreDNS)
-nslookup kubernetes.default.svc.cluster.local 10.52.0.2
+# Node-IP + NodePort production paths
+nc -z 100.107.166.37 6443    # homelab → oracle K3s API (ArgoCD)
+nc -z 100.94.186.7  31090    # oracle → homelab Prometheus remote-write
 ```
 
 ## ClusterMesh Reconnect After Rebuild

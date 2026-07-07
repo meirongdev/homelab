@@ -88,6 +88,20 @@ resource "oci_core_security_list" "main" {
     }
   }
 
+  # Tailscale WireGuard (UDP 41641). Without this node0 never receives NAT-traversal
+  # packets, so every tailnet path to it rides a DERP relay (observed 2026-07-07:
+  # telemetry push + ClusterMesh VXLAN over relay "sin", 4GB+). WireGuard is
+  # authenticated end-to-end; exposing the port is standard practice.
+  ingress_security_rules {
+    protocol  = "17"
+    source    = "0.0.0.0/0"
+    stateless = false
+    udp_options {
+      min = 41641
+      max = 41641
+    }
+  }
+
   # ICMP type 3 code 4 — Path MTU Discovery (required for OCI)
   ingress_security_rules {
     protocol  = "1"
