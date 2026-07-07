@@ -139,7 +139,9 @@ repoServer:
       memory: 128Mi
     limits:
       cpu: 500m
-      memory: 256Mi
+      # 512Mi: 256Mi 在集中 refresh(21 app 并发 helm/kustomize 渲染)时 OOMKilled
+      # (2026-07-07 观察到 exit 137)。request 不变，仅放宽突发上限。
+      memory: 512Mi
   # Gate startup on real DNS resolution of the git host. On a fresh pod,
   # Cilium needs a moment to program the endpoint's eBPF datapath; ArgoCD
   # otherwise fires its first git fetch inside that sub-second window and the
