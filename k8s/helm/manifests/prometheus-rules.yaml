@@ -126,3 +126,22 @@ spec:
             description: |
               No cloudflared replicas are available. All `*.meirong.dev` services are inaccessible
               from the internet.
+
+    - name: multicluster-telemetry
+      rules:
+        - alert: OracleTelemetryAbsent
+          expr: absent(up{cluster="oracle-k3s"}) == 1
+          for: 15m
+          labels:
+            severity: critical
+            component: observability
+          annotations:
+            summary: "oracle-k3s telemetry stopped arriving at homelab Prometheus"
+            description: |
+              No metrics with cluster=oracle-k3s for 15+ minutes. The OTel push path from oracle
+              (prometheusremotewrite → 100.94.186.7:31090; logs 31080 and traces 31317 likely
+              share the fate) is broken — oracle data is being dropped, not queued.
+              Check: `kubectl --context k3s-homelab get svc -n monitoring | grep external`
+              (NodePort svcs from monitoring-external.yaml), then Tailscale reachability.
+              Bit us 2026-07-07: monitoring-external.yaml fell out of every App's include glob
+              and ArgoCD pruned the NodePort services — silent telemetry blackout for ~1 day.
