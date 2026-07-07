@@ -8,8 +8,9 @@
 **🟢 restic 备份已上线并验证（2026-07-06，Phase 1）。** 双集群每夜逻辑 dump → 106 ZFS 加密仓库 `881fb124bf`。恢复演练通过（Vault snapshot + 两 PG dump + sqlite integrity_check 全 OK）。
 **离站（Phase 5）仍待做** —— 当前仅本地仓库（raidz1 + sanoid 保护），无异地副本；屋内灾难仍是敞口，属计划 Phase 5。
 
-- homelab: `just deploy-backup`（`backup` ns CronJob 03:00）— Vault raft snapshot + zitadel `pg_dump` + sqlite。
-- oracle-k3s: kustomize 树 `cloud/oracle/manifests/backup/`（ArgoCD 同步，CronJob 03:30）— `pg_dumpall`(miniflux+karakeep) + sqlite。
+- 清单：kustomize base+overlay `backup/`（2026-07-07 双集群合并；共用骨架在 `backup/base`）。
+- homelab: `backup/overlays/homelab`（ArgoCD `backup` App，CronJob 03:00）— Vault raft snapshot + zitadel `pg_dump` + sqlite。
+- oracle-k3s: `backup/overlays/oracle`（随 ArgoCD `oracle-k3s` App 同步，CronJob 03:30）— `pg_dumpall`(miniflux+karakeep) + sqlite。
 - 手动触发：`just backup-run`（homelab）/ `kubectl --context oracle-k3s -n backup create job --from=cronjob/restic-backup <name>`。
 - 查快照（在 106）：`RESTIC_PASSWORD=… restic -r /storage/restic snapshots`。
 

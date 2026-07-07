@@ -29,10 +29,8 @@ resources:
   - falco/namespace.yaml
   - falco/falcosidekick-secret.yaml
   # Backup: serverless restic → 106 ZFS 仓库（Tailscale sftp）。见 plans/2026-07-06-…backup-redesign.md
-  - backup/namespace.yaml
-  - backup/external-secret.yaml
-  - backup/backup-script.yaml
-  - backup/cronjob.yaml
+  # 2026-07-07 与 homelab 合并为 kustomize base+overlay（repo 根 backup/）
+  - ../../../backup/overlays/oracle
   # Gotify: 迁自 homelab 2026-07-06（脱离 homelab 故障域）。notify.meirong.dev tunnel/DNS 切换待 CF apply
   - gotify/gotify.yaml
   # ZITADEL (SSO): 迁自 homelab 2026-07-06。auth.meirong.dev 已切 oracle tunnel。

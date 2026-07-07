@@ -1,0 +1,10 @@
+# homelab 备份 overlay — 由 ArgoCD app `backup` 部署（argocd/applications/backup.yaml）。
+# 备份对象：Vault raft snapshot、ZITADEL pg_dump(遗留库)、sqlite/config PVC(NFS+local-path)。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - external-secret.yaml
+  - backup-script.yaml
+patches:
+  - path: cronjob-patch.yaml

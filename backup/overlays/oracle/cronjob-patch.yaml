@@ -1,0 +1,15 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: restic-backup
+  namespace: backup
+spec:
+  schedule: "30 3 * * *"          # 03:30（错峰 homelab 03:00）
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: backup
+              resources:
+                limits: { cpu: "1", memory: "512Mi" }   # oracle CPU 余量大

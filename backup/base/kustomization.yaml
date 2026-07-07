@@ -1,0 +1,7 @@
+# restic 离站备份共用骨架（namespace + CronJob）。
+# 集群差异（备份脚本、ExternalSecret、schedule/limits/额外卷）在 overlays/{homelab,oracle}。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - cronjob.yaml
