@@ -7,7 +7,7 @@ data:
   backup.sh: |
     #!/bin/sh
     # homelab nightly backup → restic 仓库 (106 ZFS, sftp)
-    # 逻辑 dump 保证一致性：Vault=raft snapshot API、PG=pg_dump；
+    # 逻辑 dump 保证一致性：Vault=raft snapshot API；
     # sqlite/文件 PVC=从 NFS(迁移前)或 local-path(迁移后)原样拷贝（restic 读原始文件，restore 时 sqlite 由 WAL 自恢复）。
     set -eu
 
@@ -40,19 +40,16 @@ data:
     curl -sf -H "X-Vault-Token: $VT" http://vault.vault.svc:8200/v1/sys/storage/raft/snapshot -o /work/vault.snap
     echo "[backup]   vault.snap = $(wc -c < /work/vault.snap) bytes"
 
-    # --- 2) ZITADEL pg_dump ---
-    echo "[backup] zitadel pg_dump..."
-    PGPASSWORD="$(cat /creds/ZITADEL_DB_PASSWORD)" pg_dump \
-      -h zitadel-db-postgresql.zitadel.svc -p 5432 -U zitadel -d zitadel -f /work/zitadel.sql
-    echo "[backup]   zitadel.sql = $(wc -c < /work/zitadel.sql) bytes"
+    # （ZITADEL pg_dump 与 gotify 已于 2026-07-06 迁 oracle，改由 oracle 侧脚本备份；
+    #   2026-07-07 从本脚本移除 —— homelab 的 zitadel ns 已删，遗留 dump 步骤导致夜备失败。）
 
-    # --- 3) sqlite/config PVC（NFS 迁移前 / local-path 迁移后，两处都扫）---
+    # --- 2) sqlite/config PVC（NFS 迁移前 / local-path 迁移后，两处都扫）---
     # 只取 sqlite DB(+WAL/SHM) 与小 json 配置；剪掉 processed_books/thumbnails 等
     # 可重建缓存（calibre config PVC 里这类缓存达 12G，不能整目录备份）。
     echo "[backup] copy sqlite/config files (*.db*/small *.json, prune cache)..."
     for base in /nfsdata /localpath; do
       [ -d "$base" ] || continue
-      for pat in bifrost-data gotify-data calibre-web-automated-config; do
+      for pat in bifrost-data calibre-web-automated-config; do
         for d in "$base"/*"$pat"*; do
           [ -d "$d" ] || continue
           dest="/work/pvc/$(basename "$d")"
@@ -69,7 +66,7 @@ data:
     done
     echo "[backup]   pvc files = $(find /work/pvc -type f 2>/dev/null | wc -l), size = $(du -sh /work/pvc 2>/dev/null | cut -f1)"
 
-    # --- 4) restic backup + 保留策略 ---
+    # --- 3) restic backup + 保留策略 ---
     echo "[backup] restic backup..."
     restic cat config >/dev/null 2>&1 || restic init
     restic backup /work --host homelab --tag nightly --cleanup-cache
