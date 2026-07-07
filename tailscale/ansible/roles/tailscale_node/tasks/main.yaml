@@ -1,0 +1,125 @@
+---
+# 安装 Tailscale、加入 tailnet 并广播子网路由（homelab / oracle 共用，差异走 defaults/main.yaml 的变量）。
+- name: Create keyrings directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Download Tailscale signing key
+  ansible.builtin.get_url:
+    url: https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg
+    dest: /etc/apt/keyrings/tailscale-archive-keyring.gpg
+    mode: "0644"
+
+# 清理旧的无 signed-by 源条目（oracle 曾用已废弃的 apt_key 方式），避免 apt 重复源告警
+- name: Remove legacy Tailscale apt repository entry
+  ansible.builtin.apt_repository:
+    repo: "deb https://pkgs.tailscale.com/stable/ubuntu noble main"
+    state: absent
+
+- name: Add Tailscale apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu noble main"
+    state: present
+
+- name: Install tailscale
+  ansible.builtin.apt:
+    name: tailscale
+    state: present
+    update_cache: true
+
+- name: Enable IP forwarding (required for subnet routing)
+  ansible.posix.sysctl:
+    name: "{{ item }}"
+    value: "1"
+    state: present
+    sysctl_file: /etc/sysctl.d/99-tailscale.conf
+    reload: true
+  loop:
+    - net.ipv4.ip_forward
+    - net.ipv6.conf.all.forwarding
+
+- name: Fix UDP GRO forwarding for better Tailscale throughput
+  ansible.builtin.command: >
+    ethtool -K {{ tailscale_gro_iface }} rx-udp-gro-forwarding on rx-gro-list off
+  changed_when: true
+  failed_when: false  # non-fatal if NIC name differs
+  when: tailscale_fix_udp_gro | bool
+
+- name: Persist UDP GRO fix via networkd-dispatcher
+  ansible.builtin.copy:
+    dest: /etc/networkd-dispatcher/routable.d/50-tailscale-ethtool
+    mode: "0755"
+    content: |
+      #!/bin/sh
+      /usr/sbin/ethtool -K {{ tailscale_gro_iface }} rx-udp-gro-forwarding on rx-gro-list off
+  when: tailscale_fix_udp_gro | bool
+
+- name: Enable and start tailscaled
+  ansible.builtin.systemd:
+    name: tailscaled
+    enabled: true
+    state: started
+
+- name: Clear stale Tailscale state if node was previously registered
+  ansible.builtin.file:
+    path: /var/lib/tailscale
+    state: absent
+  when: tailscale_force_reregister | default(false) | bool
+
+- name: Restart tailscaled after state clear
+  ansible.builtin.systemd:
+    name: tailscaled
+    state: restarted
+  when: tailscale_force_reregister | default(false) | bool
+
+- name: Add tailscale0 interface to trusted firewalld zone
+  ansible.posix.firewalld:
+    zone: trusted
+    interface: tailscale0
+    permanent: true
+    state: enabled
+  when: tailscale_firewalld_trusted | bool
+
+- name: Allow peer pod CIDRs in trusted zone (enables cross-cluster forwarding)
+  ansible.posix.firewalld:
+    zone: trusted
+    source: "{{ item }}"
+    permanent: true
+    state: enabled
+  loop: "{{ tailscale_peer_routes }}"
+  when: tailscale_firewalld_trusted | bool
+
+- name: Reload firewalld
+  ansible.builtin.service:
+    name: firewalld
+    state: reloaded
+  when: tailscale_firewalld_trusted | bool
+
+- name: Join tailnet with subnet routes
+  ansible.builtin.command: >
+    tailscale up
+    --advertise-routes={{ tailscale_advertise_routes }}
+    --accept-routes
+    {{ tailscale_up_extra_args }}
+    --authkey={{ tailscale_authkey }}
+  changed_when: true
+
+- name: Add static routes for peer cluster pod CIDRs via Tailscale
+  ansible.builtin.command: >
+    ip route replace {{ item }} dev tailscale0
+  loop: "{{ tailscale_peer_routes }}"
+  changed_when: true
+
+- name: Persist peer cluster routes across reboots
+  ansible.builtin.copy:
+    dest: /etc/networkd-dispatcher/routable.d/50-tailscale-routes.sh
+    mode: "0755"
+    content: |
+      #!/bin/bash
+      # Add routes to peer cluster pod CIDRs via Tailscale
+      {% for route in tailscale_peer_routes %}
+      ip route replace {{ route }} dev tailscale0 2>/dev/null || true
+      {% endfor %}
+  when: tailscale_peer_routes | length > 0

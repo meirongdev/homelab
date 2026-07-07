@@ -1,88 +1,19 @@
+---
+# 共用逻辑在 tailscale/ansible/roles/tailscale_node（roles_path 见 ansible.cfg）。
+# 本文件只保留 homelab 差异：tailscale up 的 SNAT/netfilter 参数 + NFS LAN 路由 workaround。
 - name: Setup Tailscale on homelab K3s node
   hosts: k8s_masters
   become: true
   vars:
-    advertise_routes: "10.42.0.0/16"
+    tailscale_advertise_routes: "10.42.0.0/16"
+    tailscale_peer_routes:
+      - 10.52.0.0/16 # oracle-k3s pod CIDR
+    # netfilter/SNAT 关闭：Tailscale SNAT 会重映射 NFS 源端口、破坏 exports 的 secure 标志
+    # （见 git log 2026-06/07 tailscale snat breakage for nfs）
+    tailscale_up_extra_args: "--accept-dns=false --netfilter-mode=off --snat-subnet-routes=false"
+  roles:
+    - tailscale_node
   tasks:
-    - name: Create keyrings directory
-      ansible.builtin.file:
-        path: /etc/apt/keyrings
-        state: directory
-        mode: "0755"
-
-    - name: Download Tailscale signing key
-      ansible.builtin.get_url:
-        url: https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg
-        dest: /etc/apt/keyrings/tailscale-archive-keyring.gpg
-        mode: "0644"
-
-    - name: Add Tailscale apt repository
-      ansible.builtin.apt_repository:
-        repo: "deb [signed-by=/etc/apt/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu noble main"
-        state: present
-
-    - name: Install tailscale
-      ansible.builtin.apt:
-        name: tailscale
-        state: present
-        update_cache: true
-
-    - name: Enable IP forwarding (required for subnet routing)
-      ansible.posix.sysctl:
-        name: "{{ item }}"
-        value: "1"
-        state: present
-        sysctl_file: /etc/sysctl.d/99-tailscale.conf
-        reload: true
-      loop:
-        - net.ipv4.ip_forward
-        - net.ipv6.conf.all.forwarding
-
-    - name: Enable and start tailscaled
-      ansible.builtin.systemd:
-        name: tailscaled
-        enabled: true
-        state: started
-
-    - name: Clear stale Tailscale state if node was previously registered
-      ansible.builtin.file:
-        path: /var/lib/tailscale
-        state: absent
-      when: tailscale_force_reregister | default(false) | bool
-
-    - name: Restart tailscaled after state clear
-      ansible.builtin.systemd:
-        name: tailscaled
-        state: restarted
-      when: tailscale_force_reregister | default(false) | bool
-
-    - name: Join tailnet with subnet routes
-      ansible.builtin.command: >
-        tailscale up
-        --advertise-routes={{ advertise_routes }}
-        --accept-routes
-        --accept-dns=false
-        --netfilter-mode=off
-        --snat-subnet-routes=false
-        --authkey={{ tailscale_authkey }}
-      changed_when: true
-
-    - name: Add static route for oracle-k3s pod CIDR via Tailscale
-      ansible.builtin.command: >
-        ip route replace {{ item }} dev tailscale0
-      loop:
-        - 10.52.0.0/16
-      changed_when: true
-
-    - name: Persist oracle-k3s pod CIDR route across reboots
-      ansible.builtin.copy:
-        dest: /etc/networkd-dispatcher/routable.d/50-tailscale-routes.sh
-        mode: "0755"
-        content: |
-          #!/bin/bash
-          # Add route to oracle-k3s pod CIDR via Tailscale
-          ip route replace 10.52.0.0/16 dev tailscale0 2>/dev/null || true
-
     # --- NFS LAN-route fix (2026-07-06) ---
     # The MacBook `mbpm5` advertises 192.168.50.0/24 over Tailscale. With
     # `--accept-routes`, this node (and pve) route the NFS server 192.168.50.106

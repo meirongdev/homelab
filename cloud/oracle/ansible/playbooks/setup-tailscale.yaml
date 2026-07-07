@@ -1,110 +1,15 @@
+---
+# 共用逻辑在 tailscale/ansible/roles/tailscale_node（roles_path 见 ansible.cfg）。
+# 本文件只保留 oracle 差异：非默认 CIDR、UDP GRO 修复、firewalld trusted。
 - name: Setup Tailscale on Oracle K3s node
   hosts: oracle_masters
   become: true
   vars:
     # Oracle cluster uses non-default CIDRs to avoid conflict with homelab
-    advertise_routes: "10.52.0.0/16"
-  tasks:
-    - name: Add Tailscale apt signing key
-      ansible.builtin.apt_key:
-        url: https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg
-        state: present
-
-    - name: Add Tailscale apt repository
-      ansible.builtin.apt_repository:
-        repo: "deb https://pkgs.tailscale.com/stable/ubuntu noble main"
-        state: present
-
-    - name: Install tailscale
-      ansible.builtin.apt:
-        name: tailscale
-        state: present
-        update_cache: true
-
-    - name: Enable IP forwarding (required for subnet routing)
-      ansible.posix.sysctl:
-        name: "{{ item }}"
-        value: "1"
-        state: present
-        sysctl_file: /etc/sysctl.d/99-tailscale.conf
-        reload: true
-      loop:
-        - net.ipv4.ip_forward
-        - net.ipv6.conf.all.forwarding
-
-    - name: Fix UDP GRO forwarding for better Tailscale throughput
-      ansible.builtin.command: >
-        ethtool -K enp0s3 rx-udp-gro-forwarding on rx-gro-list off
-      changed_when: true
-      failed_when: false  # non-fatal if NIC name differs
-
-    - name: Persist UDP GRO fix via networkd-dispatcher
-      ansible.builtin.copy:
-        dest: /etc/networkd-dispatcher/routable.d/50-tailscale-ethtool
-        mode: '0755'
-        content: |
-          #!/bin/sh
-          /usr/sbin/ethtool -K enp0s3 rx-udp-gro-forwarding on rx-gro-list off
-
-    - name: Enable and start tailscaled
-      ansible.builtin.systemd:
-        name: tailscaled
-        enabled: true
-        state: started
-
-    - name: Clear stale Tailscale state if node was previously registered
-      ansible.builtin.file:
-        path: /var/lib/tailscale
-        state: absent
-      when: tailscale_force_reregister | default(false) | bool
-
-    - name: Restart tailscaled after state clear
-      ansible.builtin.systemd:
-        name: tailscaled
-        state: restarted
-      when: tailscale_force_reregister | default(false) | bool
-
-    - name: Add tailscale0 interface to trusted firewalld zone
-      ansible.posix.firewalld:
-        zone: trusted
-        interface: tailscale0
-        permanent: true
-        state: enabled
-
-    - name: Allow homelab pod CIDR in trusted zone (enables cross-cluster forwarding)
-      ansible.posix.firewalld:
-        zone: trusted
-        source: "{{ item }}"
-        permanent: true
-        state: enabled
-      loop:
-        - 10.42.0.0/16
-
-    - name: Reload firewalld
-      ansible.builtin.service:
-        name: firewalld
-        state: reloaded
-
-    - name: Join tailnet with subnet routes
-      ansible.builtin.command: >
-        tailscale up
-        --advertise-routes={{ advertise_routes }}
-        --accept-routes
-        --authkey={{ tailscale_authkey }}
-      changed_when: true
-
-    - name: Add static route for homelab pod CIDR via Tailscale
-      ansible.builtin.command: >
-        ip route replace {{ item }} dev tailscale0
-      loop:
-        - 10.42.0.0/16
-      changed_when: true
-
-    - name: Persist homelab pod CIDR route across reboots
-      ansible.builtin.copy:
-        dest: /etc/networkd-dispatcher/routable.d/50-tailscale-routes.sh
-        mode: "0755"
-        content: |
-          #!/bin/bash
-          # Add route to homelab pod CIDR via Tailscale
-          ip route replace 10.42.0.0/16 dev tailscale0 2>/dev/null || true
+    tailscale_advertise_routes: "10.52.0.0/16"
+    tailscale_peer_routes:
+      - 10.42.0.0/16 # homelab pod CIDR
+    tailscale_fix_udp_gro: true # A1 虚拟网卡 UDP GRO 转发修复
+    tailscale_firewalld_trusted: true # Oracle 镜像默认启用 firewalld，需信任 tailscale0
+  roles:
+    - tailscale_node
