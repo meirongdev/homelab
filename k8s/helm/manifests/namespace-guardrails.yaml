@@ -9,7 +9,7 @@
 #   - default.memory 取**宽松 1Gi**：LimitRange 规则要求 limits.memory >= requests.memory，
 #     若默认上限低于某容器已声明的 request 会**直接拒绝 Pod**。这些轻量应用 ns 无容器 request 近 1Gi，
 #     故 1Gi 既给出上限又零拒绝风险。**不设 cpu limit** 以避免 CPU 节流。
-#   - 仅作用于"未自带 resources"的容器；自带的(如 vault/zitadel 主体、argocd 各组件)不受影响。
+#   - 仅作用于"未自带 resources"的容器；自带的(如 vault 主体、argocd 各组件)不受影响。
 #   - 仅覆盖**有 require-limits 违规的轻量应用 ns**；monitoring(重量级 prometheus/loki，交 chart values)、
 #     kube-system(系统组件)**刻意不加**，避免上述拒绝风险。
 #   - personal-services 已有自己的 LimitRange(personal-services-limits.yaml)，不在此重复。
@@ -21,17 +21,6 @@ kind: LimitRange
 metadata:
   name: default-resource-guardrail
   namespace: external-secrets
-spec:
-  limits:
-    - type: Container
-      defaultRequest: { cpu: 25m, memory: 64Mi }
-      default: { memory: 1Gi }
----
-apiVersion: v1
-kind: LimitRange
-metadata:
-  name: default-resource-guardrail
-  namespace: zitadel
 spec:
   limits:
     - type: Container
