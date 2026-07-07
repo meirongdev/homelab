@@ -127,7 +127,7 @@ spec:
                 cpu: 200m
                 memory: 256Mi
               limits:
-                cpu: 1000m
+                cpu: "1" # 与 enrich-job 一致: 避免 1000m↔1 的 SSA 规范化 diff
                 memory: 1Gi
           volumes:
           - name: calibre-library

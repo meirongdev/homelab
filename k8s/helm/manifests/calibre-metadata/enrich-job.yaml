@@ -28,7 +28,9 @@ spec:
               cpu: 200m
               memory: 256Mi
             limits:
-              cpu: 1000m
+              # 写 "1" 而非 1000m: API server 会把 1000m 规范化为 1，Job template 不可变，
+              # 二者不一致会让 SSA diff 永久 OutOfSync 且无法 apply（field is immutable）。
+              cpu: "1"
               memory: 1Gi
           volumeMounts:
             - name: calibre-library
