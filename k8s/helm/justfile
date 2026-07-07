@@ -117,9 +117,9 @@ delete-calibre:
 
 # 部署 homelab 备份 CronJob (Vault raft snapshot + zitadel pg_dump + sqlite → 106)
 # ⚠️ LEGACY — 2026-07-06 已迁 ArgoCD (argocd/applications/backup.yaml)
-# 请直接改 manifests + commit, ArgoCD auto-sync。
+# 请直接改 backup/overlays/homelab + commit, ArgoCD auto-sync。
 deploy-backup:
-    kubectl --context {{ctx}} apply -f manifests/backup/
+    kubectl --context {{ctx}} apply -k ../../backup/overlays/homelab
 
 # 立即手动触发一次备份
 backup-run:

@@ -1,0 +1,10 @@
+# oracle-k3s 备份 overlay — 经 cloud/oracle/manifests/kustomization.yaml 引入（ArgoCD app `oracle-k3s`）。
+# 备份对象：rss-postgres pg_dumpall、ZITADEL pg_dump、sqlite/config PVC(local-path)。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - external-secret.yaml
+  - backup-script.yaml
+patches:
+  - path: cronjob-patch.yaml

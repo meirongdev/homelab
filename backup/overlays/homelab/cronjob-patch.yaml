@@ -1,0 +1,20 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: restic-backup
+  namespace: backup
+spec:
+  schedule: "0 3 * * *"           # 03:00 本地时区（错峰；oracle 用 03:30）
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: backup
+              resources:
+                limits: { cpu: "200m", memory: "256Mi" }   # 控 CPU（热节点）
+              volumeMounts:
+                - { name: nfsdata, mountPath: /nfsdata, readOnly: true }   # 迁移前 sqlite 在 NFS
+          volumes:
+            - name: nfsdata
+              nfs: { server: "192.168.50.106", path: /storage/nfs/k8s, readOnly: true }

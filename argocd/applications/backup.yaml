@@ -2,6 +2,7 @@
 # restic-backup — 离站备份 CronJob + ExternalSecret
 # 原为 kubectl apply 管理（just deploy-backup），
 # 2026-07-06 迁入 ArgoCD 以实现 GitOps 自动同步。
+# 2026-07-07 与 oracle 备份合并为 kustomize base+overlay（backup/）。
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -15,7 +16,7 @@ spec:
   source:
     repoURL: https://github.com/meirongdev/homelab
     targetRevision: main
-    path: k8s/helm/manifests/backup
+    path: backup/overlays/homelab
 
   destination:
     server: https://kubernetes.default.svc

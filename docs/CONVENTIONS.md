@@ -158,7 +158,6 @@ just apply   # Apply DNS/Tunnel changes
   - `gateway` App → `manifests/gateway.yaml` (homelab Cilium Gateway)
   - `cloudflare` App → `manifests/cloudflare-tunnel.yaml` (homelab)
   - `vault-eso` App → `manifests/{vault-eso-config,*-external-secret}.yaml` (homelab)
-  - `zitadel` App → `manifests/zitadel.yaml` (homelab)
   - `calibre-metadata` App → `k8s/helm/manifests/calibre-metadata/` (Kustomize)
   - `monitoring-dashboards` App → `k8s/helm/manifests/grafana-dashboards.yaml` 等 ConfigMap
   - `argocd-image-updater` App → Helm chart `argo/argocd-image-updater` v1.1.1
@@ -170,13 +169,14 @@ just apply   # Apply DNS/Tunnel changes
   - `namespace-guardrails` App → `manifests/namespace-guardrails.yaml` (homelab LimitRange guardrails)
   - `tetragon` App (Helm chart, `tetragon` ns) — runtime detection (homelab)
   - `falco` App (Helm chart, `falco` ns) — runtime detection on the **oracle-k3s external cluster**
+  - `loki` / `tempo` / `sloth` Apps (Helm charts, `monitoring` ns) — 2026-07-06 迁入 ArgoCD (homelab)
+  - `backup` App → `backup/overlays/homelab` — homelab restic CronJob（2026-07-06 迁入；2026-07-07 与 oracle 合并为 kustomize base+overlay，oracle 侧经 `oracle-k3s` App 引 `backup/overlays/oracle`）
 - **NOT managed by ArgoCD** (manual `just` commands):
   - HashiCorp Vault — requires manual init/unseal (see `just homelab-recover` for restart recovery)
   - External Secrets Operator — depends on Vault
-  - kube-prometheus-stack / Loki / Tempo — Helm releases
+  - kube-prometheus-stack — Helm release（Loki/Tempo/sloth 已于 2026-07-06 迁 ArgoCD）
   - PostgreSQL — stateful, avoid auto-prune
   - NFS Provisioner — infrastructure layer
-  - **restic 备份 (homelab `backup` ns)** — `just deploy-backup`（infra 层，privileged hostPath；oracle 侧备份则在 kustomize 树、由 `oracle-k3s` App 同步）
   - Cloudflare Terraform — non-K8s resources
 - **oracle-k3s manifests** (`cloud/oracle/manifests/`): **under GitOps as of 2026-06-04** — managed by the homelab ArgoCD `oracle-k3s` Application over Tailscale (oracle registered as an external cluster, `https://100.107.166.37:6443`, bearer-token cred from Vault `secret/homelab/argocd-oracle-cluster` materialised by ESO into the `oracle-k3s-cluster` cluster Secret). Auto-sync + selfHeal + **prune** are on; stateful PVCs (`miniflux-db-pvc`, `karakeep-data`, `meilisearch-data`, `uptime-kuma-data`, `stirling-pdf-configs`) carry `argocd.argoproj.io/sync-options: Prune=false`. `git push` → reconciles within 3 min, same as homelab. Bootstrap RBAC (`argocd-manager` SA + cluster-admin) is in `cloud/oracle/bootstrap/argocd-manager.yaml` — applied manually once, kept **out** of the kustomize tree. The `vault-token` Secret (rss-system) remains a manual bootstrap dependency (not pruned, see `base/vault-store.yaml`). Migration record + caveats: `docs/plans/networking/2026-06-04-oracle-k3s-argocd-gitops.md`.
 
@@ -318,7 +318,7 @@ just apply   # Apply DNS/Tunnel changes
 
 ### Backup & Recovery
 - **Status**: 🟢 **restic 备份已上线（2026-07-06，Phase 1）**，双集群每夜 → 106 ZFS 加密仓库 `881fb124bf`，恢复演练通过。**离站副本仍待做**（Phase 5）。Kopia 已于 2026-07-05 移除。主计划 `docs/plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md`；运维 `docs/runbooks/backup-recovery.md`。
-  - 部署: homelab `just deploy-backup`（`backup` ns，手动 infra 层，同 ESO/Vault）；oracle `cloud/oracle/manifests/backup/`（kustomize 树，ArgoCD 同步）。手动触发 `just backup-run`。凭据 `secret/homelab/restic`（bootstrap 写入，含 base64 SSH key + 周期 Vault token）。
+  - 部署: 双集群共用 kustomize base+overlay `backup/`（2026-07-07 合并）；homelab 走 ArgoCD `backup` App（`backup/overlays/homelab`），oracle 随 `oracle-k3s` App（`backup/overlays/oracle`）。手动触发 `just backup-run`。凭据 `secret/homelab/restic`（bootstrap 写入，含 base64 SSH key + 周期 Vault token）。
 - **设计（restic，取代 Kopia）**: 无 server；**每集群一个 CronJob 直推**到 **106 ZFS 上的单一加密仓库** `mrstorage/restic`（`sftp:root@…:/storage/restic`；homelab 走 LAN `192.168.50.106`，oracle 走 Tailscale `100.110.27.111`）。逻辑 dump 保证一致性：Vault=`raft snapshot save`、PG=`pg_dump`、sqlite=特权 CronJob hostPath 读 `local-path` 根 + `sqlite3 ".backup"`（RWO 卷旁路 Pod 挂不上，故 hostPath）。保留 `--keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune`。凭据 Vault `secret/homelab/restic` → ESO。
 - **为什么弃 Kopia**: 其复杂度几乎全来自 server 模式（TLS/gRPC/NodePort/524），只为让无 NFS 的 oracle 经 gRPC 推备份；restic 无 server、oracle 经 Tailscale 直连 106 仓库。
 - **保护层次**: ZFS raidz1（容 1 盘）→ sanoid 快照（秒级回滚、含 restic dataset）→ restic 仓库（护 local-path 关键数据）→ **离站 later**（rclone/`restic copy` → OCI always-free/B2，需人工开云桶）。书库仅前两层（不进 restic）。
