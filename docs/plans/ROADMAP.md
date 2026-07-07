@@ -1,7 +1,8 @@
 # Homelab Project TODO
 
-> Last updated: 2026-07-06
+> Last updated: 2026-07-07
 > 当前主线: [2026-07-06 存储本地化迁移 + 备份体系重建](../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md)
+> 演进路线（技术债盘点 + 2026 工具链选型，含 Crossplane 不引入结论）: [evolution-roadmap-2026-07-07](../reference/evolution-roadmap-2026-07-07.md)
 
 ## Phase 1: Foundation ✅
 
@@ -58,7 +59,11 @@
 - [x] Gateway 标准化: 当前架构以 Cilium Gateway API 为统一入口
 - [x] **集群内部安全加固** ✅ 2026-06 已部署: PSA + Kyverno(Audit) + Trivy + kube-bench + 节点 CIS(待重启)
 - [x] **运行时检测** ✅ 2026-06 已部署: Tetragon(homelab) + Falco(oracle)
-- [ ] **服务重定位（脱离 homelab 故障域）**: Gotify + ZITADEL → oracle-k3s。见 2026-07-06 计划 Phase 3
+- [x] **服务重定位（脱离 homelab 故障域）**: Gotify + ZITADEL → oracle-k3s ✅ 2026-07-06 迁移并验证（见 [apps/2026-07-04-zitadel-to-oracle-k3s](apps/2026-07-04-zitadel-to-oracle-k3s.md)）
+- [ ] **homelab 旧 ZITADEL 退役**: 迁移后保留作回滚，真实浏览器登录确认后删（zitadel 计划遗留尾巴）
+- [ ] **ZITADEL DB 迁 CloudNativePG**: `bitnamilegacy/postgresql:15.4.0`（2023-08 冻结镜像，无 CVE 补丁，存全部 SSO 凭据）→ CNPG + 官方 PG 镜像。见 [演进路线 Phase C](../reference/evolution-roadmap-2026-07-07.md)
+- [ ] **Terraform state → R2 backend**: 5 个 root 全本地 state（笔记本单点、无锁、含明文密钥）。见演进路线 Phase A
+- [ ] **external-dns (Gateway API source)**: 子域名 "tfvars + gateway.yaml 两步走" → HTTPRoute 单文件。见演进路线 Phase D
 - [ ] **离站备份 (OCI always-free / B2)**: restic 仓库 → 云（rclone/`restic copy`）。见 2026-07-06 计划 Phase 5（later）
 - [ ] **DGX Spark 入编**: 推理服务 IaC + GPU 指标(dcgm) + Bifrost 双机 fallback + SLO。见母文档 P1-5
 - [ ] **恢复演练自动化**: 月度 CronJob 校验 restic restore。见母文档 P2-8
@@ -69,6 +74,8 @@
 ### ❌ 已划掉（防过度工程，见母文档"明确不建议做的"）
 - ~~Cert-Manager (Let's Encrypt + DNS-01)~~ — TLS 在 Cloudflare 边缘终结、集群内 HTTP，无内网直连 TLS 需求 → 纯负担
 - ~~Vault HA / auto-unseal~~ — 单节点无 HA 意义；sealed 已被 ESO 告警覆盖 + 恢复路径已文档化，transit auto-unseal 要再养一个 Vault，不值
+- ~~Crossplane~~ — 2026-07-07 评估否决：CF provider 已死 2 年、问题规模不匹配（单人静态云面）、控制面鸡生蛋、单节点内存开销。重评条件与替代方案见 [演进路线 §三](../reference/evolution-roadmap-2026-07-07.md)
+- ~~Talos 迁移~~ — 2026-03 刚重建 Ubuntu 24.04 且流程已顺，单节点收益不抵成本；加第二台 worker 时重评（演进路线 §五）
 
 ---
 
@@ -79,12 +86,16 @@
 - [x] Uptime Kuma SSO 监控修复 (maxredirects config)
 - [x] Loki retention 配置 (values.yaml update) ✅ 2026-03-19
 - [x] Grafana 旧 dashboard 清理 ✅ 2026-03-19 禁用 AIX/Darwin/proxy dashboard
+- [x] repo↔集群一致性清零（helm pin 对齐、homelab postgres 残留移除、ReferenceGrant v1beta1、gotify-bridge 双 App 争抢去重）✅ 2026-07-07
+- [ ] justfile 卫生: `deploy-prometheus` 双 `--version` / `prometheus_stack_version` 死变量; Vault 孤儿 `secret/homelab/postgres` 清理
 
 ### 🟡 Medium Effort
 
 - [x] restic 备份 CronJob（双集群，取代已移除的 Kopia）✅ 2026-07-06
 - [ ] 存储本地化迁移（nfs-client → local-path，备份就绪后）
 - [ ] dead-man's switch（Watchdog → oracle Uptime Kuma push）
+- [ ] Terraform state → R2 backend + `use_lockfile`（5 root；可顺带评估 OpenTofu）
+- [ ] external-dns 上线（`--source=gateway-httproute` + cloudflare-proxied）
 - [x] Alertmanager → Gotify 通知模板 ✅
 - [x] oracle-k3s Cilium 迁移
 
@@ -92,7 +103,8 @@
 
 - [x] Cilium ClusterMesh connect + failover validation ✅ 2026-03-08
 - [x] homelab Cilium Gateway 恢复后双集群统一 cutover 验证 ✅ 2026-03-08
-- [ ] Gotify + ZITADEL 迁 oracle-k3s（脱离 homelab 故障域）
+- [x] Gotify + ZITADEL 迁 oracle-k3s（脱离 homelab 故障域）✅ 2026-07-06
+- [ ] ZITADEL DB → CloudNativePG（15–30 分钟停机窗口，pg_dump/restore。演进路线 Phase C）
 - [ ] DGX Spark 入编（IaC + GPU 指标 + Bifrost fallback + SLO）
 
 ### ❌ 已取消
