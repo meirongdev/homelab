@@ -19,8 +19,9 @@
 
 ## Resource Planning
 
-1. [resource-optimization-2026-07-06.md](resource-optimization-2026-07-06.md) — 资源分配优化明细
-2. [architecture-optimization-2026-07-04.md](architecture-optimization-2026-07-04.md) — 物理层架构与机器角色建议
-3. [simplification-recommendations-2026-03.md](simplification-recommendations-2026-03.md) — Oracle Cilium 迁移后简化建议
+1. [evolution-roadmap-2026-07-07.md](evolution-roadmap-2026-07-07.md) — 技术债盘点 + 工具链演进路线（含 Crossplane 不引入结论）
+2. [resource-optimization-2026-07-06.md](resource-optimization-2026-07-06.md) — 资源分配优化明细
+3. [architecture-optimization-2026-07-04.md](architecture-optimization-2026-07-04.md) — 物理层架构与机器角色建议
+4. [simplification-recommendations-2026-03.md](simplification-recommendations-2026-03.md) — Oracle Cilium 迁移后简化建议
 
 > 所有文档中的命令必须注明执行上下文 (cluster/path)。
