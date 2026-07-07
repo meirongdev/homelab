@@ -24,11 +24,15 @@ spec:
     namespace: kyverno
   # chart 的 CRD 无 spec.conversion，但 API server 默认补 conversion:{strategy:None}
   # → 11 个 policies.kyverno.io CRD 永远 OutOfSync（纯服务端默认，sync 改不掉）。忽略该字段。
+  # labels/annotations: chart 3.8 的 kyverno-api 子 chart 渲染出空 map `{}`，而 API server
+  # 会剥掉空 map → 同样永久 diff。select(length==0) 只在为空时忽略，不影响真实 labels。
   ignoreDifferences:
     - group: apiextensions.k8s.io
       kind: CustomResourceDefinition
       jqPathExpressions:
         - .spec.conversion
+        - .metadata.labels | select(length == 0)
+        - .metadata.annotations | select(length == 0)
   syncPolicy:
     automated:
       prune: true

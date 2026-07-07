@@ -13,8 +13,8 @@ spec:
     repoURL: https://github.com/meirongdev/homelab
     targetRevision: main
     path: k8s/helm/manifests/kyverno-policies
-    directory:
-      recurse: false
+    # 不写 directory.recurse=false: 它是默认值，ArgoCD 会从 live 对象规范化删除，
+    # 写上反而让 root App 对本 Application 永久 OutOfSync。
   destination:
     server: https://kubernetes.default.svc
     namespace: kyverno
