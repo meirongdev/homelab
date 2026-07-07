@@ -17,6 +17,16 @@ spec:
     server: https://kubernetes.default.svc
     namespace: personal-services
 
+  # 一次性 Job (enrich) 创建后由 job-controller 注入 suspend/selector/template labels，
+  # git 清单没有这些字段 → 完成的 Job 永久 OutOfSync。忽略这三个 server 端字段。
+  ignoreDifferences:
+    - group: batch
+      kind: Job
+      jqPathExpressions:
+        - .spec.suspend
+        - .spec.selector
+        - .spec.template.metadata.labels
+
   syncPolicy:
     automated:
       prune: true
