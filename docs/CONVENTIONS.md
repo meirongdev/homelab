@@ -69,7 +69,6 @@ Run from `k8s/helm/`:
 just init                  # Initialize .env from .env.example
 just deploy-all            # Deploy full observability stack (LGTM)
 just setup-nfs-provisioner # Install NFS storage provisioner
-just setup-postgres        # Deploy PostgreSQL
 just deploy-homepage       # First-time deploy Homepage dashboard
 just update-homepage       # Update Homepage config + restart pod (apply + rollout restart)
 just status                # Check monitoring namespace state
@@ -175,7 +174,6 @@ just apply   # Apply DNS/Tunnel changes
   - HashiCorp Vault — requires manual init/unseal (see `just homelab-recover` for restart recovery)
   - External Secrets Operator — depends on Vault
   - kube-prometheus-stack — Helm release（Loki/Tempo/sloth 已于 2026-07-06 迁 ArgoCD）
-  - PostgreSQL — stateful, avoid auto-prune
   - NFS Provisioner — infrastructure layer
   - Cloudflare Terraform — non-K8s resources
 - **oracle-k3s manifests** (`cloud/oracle/manifests/`): **under GitOps as of 2026-06-04** — managed by the homelab ArgoCD `oracle-k3s` Application over Tailscale (oracle registered as an external cluster, `https://100.107.166.37:6443`, bearer-token cred from Vault `secret/homelab/argocd-oracle-cluster` materialised by ESO into the `oracle-k3s-cluster` cluster Secret). Auto-sync + selfHeal + **prune** are on; stateful PVCs (`miniflux-db-pvc`, `karakeep-data`, `meilisearch-data`, `uptime-kuma-data`, `stirling-pdf-configs`) carry `argocd.argoproj.io/sync-options: Prune=false`. `git push` → reconciles within 3 min, same as homelab. Bootstrap RBAC (`argocd-manager` SA + cluster-admin) is in `cloud/oracle/bootstrap/argocd-manager.yaml` — applied manually once, kept **out** of the kustomize tree. The `vault-token` Secret (rss-system) remains a manual bootstrap dependency (not pruned, see `base/vault-store.yaml`). Migration record + caveats: `docs/plans/networking/2026-06-04-oracle-k3s-argocd-gitops.md`.
