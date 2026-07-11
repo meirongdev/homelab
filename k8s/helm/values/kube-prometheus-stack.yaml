@@ -375,7 +375,9 @@ alertmanager:
     storage:
       volumeClaimTemplate:
         spec:
-          storageClassName: nfs-client
+          # local-path（2026-07-11 从 nfs-client 迁移）：只存静默/通知去重记录，
+          # 可丢数据，不值得为它保留对 106 的 NFS 运行时依赖
+          storageClassName: local-path
           accessModes: ["ReadWriteOnce"]
           resources:
             requests:

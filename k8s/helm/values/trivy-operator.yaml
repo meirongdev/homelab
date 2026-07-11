@@ -50,8 +50,9 @@ trivy:
     limits:
       cpu: 500m
       memory: 512Mi
-  # 内置 Trivy server：持久化漏洞 DB（NFS PVC），避免反复重下 DB
-  storageClassName: nfs-client
+  # 内置 Trivy server：持久化漏洞 DB（local-path，2026-07-11 从 nfs-client 迁移，
+  # 消除对 106 的运行时依赖）；DB 可丢可重建，重下一次即可
+  storageClassName: local-path
   storageSize: 2Gi
   server:
     resources:
