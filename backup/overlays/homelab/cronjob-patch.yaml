@@ -7,11 +7,15 @@ spec:
   schedule: "0 3 * * *"           # 03:00 本地时区（错峰；oracle 用 03:30）
   jobTemplate:
     spec:
+      # 书库(24G)纳入后放宽:restic 哈希/分块是 CPU 密集,200m 时首传 >1h 撞
+      # base 的 3600s deadline 被杀(2026-07-11 实测)。1 核 + 2h:首传 ~15-20min,
+      # 之后每晚增量几分钟;deadline 仍能兜住真正卡死的情况
+      activeDeadlineSeconds: 7200
       template:
         spec:
           containers:
             - name: backup
               resources:
-                limits: { cpu: "200m", memory: "256Mi" }   # 控 CPU（热节点）
+                limits: { cpu: "1", memory: "512Mi" }   # 03:00 夜间窗口,1 核短时突发可接受
           # nfsdata 挂载已移除（2026-07-11）：全部 PVC 已迁 local-path，
           # 备份 Job 不再依赖 106 的 NFS 在线（106 只作为 sftp 备份目标）
