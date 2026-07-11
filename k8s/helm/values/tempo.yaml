@@ -14,8 +14,9 @@ tempo:
         path: /var/tempo/traces
   
   persistence:
+    # local-path（2026-07-11 从 nfs-client 迁移）：trace 数据 7 天保留期，可丢
     enabled: true
-    storageClassName: nfs-client
+    storageClassName: local-path
     size: 5Gi
   
   # 资源限制

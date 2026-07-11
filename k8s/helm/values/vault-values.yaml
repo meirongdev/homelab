@@ -62,11 +62,13 @@ server:
     size: 10Gi
     storageClass: local-path
 
-  # 审计日志留 NFS（追加型顺序写，NFS 无碍；ZFS raidz1 + sanoid 保护）
+  # 审计卷迁 local-path（2026-07-11）：原 NFS 卷实测仅 512B（审计设备从未启用），
+  # 却让 vault-0 重启时硬依赖 106 在线——106 宕机 3 天事故后决定消除该依赖。
+  # 若将来启用审计设备，restic 夜备的 raft snapshot 不含审计日志，需另行纳入备份。
   auditStorage:
     enabled: true
-    size: 10Gi
-    storageClass: nfs-client
+    size: 2Gi
+    storageClass: local-path
 
 ui:
   enabled: true
