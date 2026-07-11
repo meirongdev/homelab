@@ -22,37 +22,24 @@ spec:
       storage: 20Gi
 ---
 apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: calibre-books-pv
-  annotations:
-    argocd.argoproj.io/sync-options: Prune=false
-spec:
-  capacity:
-    storage: 100Gi
-  accessModes:
-    - ReadWriteMany
-  persistentVolumeReclaimPolicy: Retain
-  storageClassName: ""
-  nfs:
-    server: 192.168.50.106
-    path: /storage/calibre
----
-apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: calibre-books
+  # 书库迁 local-path（2026-07-11）：实际数据 24G，原静态 NFS PV 使 calibre 全家
+  # 硬依赖 106 在线（07-08 106 宕机 3 天 → calibre-web Error / cronjob 卡死）。
+  # RWO 在单节点集群上多 pod 共挂没有问题（RWO 是节点级语义）。
+  # 冷备份：restic 夜备直接纳入书库目录 + vzdump 周备整 VM。
+  # 迁移前快照保留于 192.168.50.106:/storage/calibre（未删）。
+  name: calibre-books-local
   namespace: personal-services
   annotations:
     argocd.argoproj.io/sync-options: Prune=false
 spec:
   accessModes:
-    - ReadWriteMany
-  storageClassName: ""
-  volumeName: calibre-books-pv
+    - ReadWriteOnce
+  storageClassName: local-path
   resources:
     requests:
-      storage: 100Gi
+      storage: 50Gi
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -240,7 +227,7 @@ spec:
             claimName: calibre-web-automated-config-local
         - name: books
           persistentVolumeClaim:
-            claimName: calibre-books
+            claimName: calibre-books-local
 ---
 apiVersion: v1
 kind: Service
