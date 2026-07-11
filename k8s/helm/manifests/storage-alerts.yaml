@@ -57,3 +57,18 @@ spec:
           annotations:
             summary: "ZFS 池非 ONLINE: {{ $labels.zpool }} @ {{ $labels.instance }}"
             description: "node_zfs_zpool_state{state=online}=0 —— 池处于 degraded/faulted 等状态。raidz1 仅容 1 盘，resilver 期第二盘故障会毁池；离站备份是最终安全网（见 backup-recovery runbook）。"
+
+    - name: zfs-scrub-overdue
+      rules:
+        # 记录距离上次 scrub 的天数，供看板和告警使用
+        - record: zpool_scrub_age_days
+          expr: (time() - node_zfs_zpool_scrub_last_scrub_timestamp_seconds) / 86400
+        # zpool 超过 35 天未 scrub（正常每月一次，35 天阈值留了 3-5 天余量）
+        - alert: ZpoolScrubOverdue
+          expr: (time() - node_zfs_zpool_scrub_last_scrub_timestamp_seconds) / 86400 > 35
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "ZFS 池 {{ $labels.zpool }} 已 {{ $value | humanize }} 天未 scrub @ {{ $labels.instance }}"
+            description: "上次 scrub 距今 >35 天。zfsutils-linux timer 可能被禁用、卸载或重启后未恢复。运行 `systemctl status zfs-scrub.timer` 检查。"
