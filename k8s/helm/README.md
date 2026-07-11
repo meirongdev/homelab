@@ -161,8 +161,11 @@ spec:
 
 ## Persistent Storage
 
-All observability services (Grafana, Prometheus, Loki, Tempo, Alertmanager) use NFS-backed PersistentVolumeClaims for data storage.  
-Make sure your NFS server is available and properly configured before deploying the stack.
+All services use the node-local `local-path` StorageClass (k3s built-in). NFS (`nfs-client`)
+was fully retired on 2026-07-11 after the 106 storage-host outage — the NFS server is now
+only a **cold backup target** (restic nightly via sftp + vzdump weekly), never a runtime
+dependency.
 
-- StorageClass used: `nfs-client`
-- Data is **not stored on local disks**; if NFS is unavailable, pods may fail to start or lose access to data.
+- StorageClass used: `local-path`
+- Data lives on the k8s node's local disk; off-host copies are produced by the backup
+  CronJob (`backup/overlays/homelab`) and the PVE-level weekly vzdump job.

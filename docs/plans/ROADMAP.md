@@ -41,7 +41,7 @@
 - [x] ~~**Kopia 自动快照**~~: ❌ Kopia 已于 2026-07-05 整体移除（server + CronJob + PVC + Vault secret），全系统当前**零备份**
 - [x] **备份体系重建（restic）**: ✅ 2026-07-06 双集群 CronJob 逻辑 dump（Vault raft snapshot / pg_dump(all) / sqlite）→ 106 ZFS 加密仓库 `881fb124bf`，上线
 - [x] **恢复演练**: ✅ 2026-07-06 从仓库恢复 Vault snapshot + 两 PG dump + sqlite integrity_check 全通过（2026-07-06 计划 Phase 1 DoD）
-- [ ] **存储本地化迁移**: homelab fsync/sqlite/PG 类 PVC 从 `nfs-client` 迁 `local-path`（备份已就绪）。见 2026-07-06 计划 Phase 2
+- [x] **存储本地化迁移**: ✅ 2026-07-11 全部完成 — 106 宕机 3 天事故后，剩余 PVC（alertmanager/audit-vault-0/trivy）+ **Calibre 书库 24G**（超出原计划范围，原定留 NFS）全迁 `local-path`；nfs-client provisioner 卸载；书库纳入 restic 夜备 + 新增 PVE 每周 vzdump（VM 100 → 106 `backups`，keep-last=3）。106 降级为纯冷备份目标
 - [ ] **离站备份**: restic 仓库 → 云（OCI always-free/B2），当前仅本地副本。见 2026-07-06 计划 Phase 5
 - [ ] **dead-man's switch**: Alertmanager Watchdog（当前 `receiver:"null"`）→ oracle Uptime Kuma push monitor → Gotify(oracle)→Telegram
 - [ ] **zpool/SMART 告警**: 补 PrometheusRule（当前仅有看板，无告警）
@@ -92,7 +92,7 @@
 ### 🟡 Medium Effort
 
 - [x] restic 备份 CronJob（双集群，取代已移除的 Kopia）✅ 2026-07-06
-- [ ] 存储本地化迁移（nfs-client → local-path，备份就绪后）
+- [x] 存储本地化迁移（nfs-client → local-path）✅ 2026-07-11 全部完成（含书库，见上方详情）
 - [ ] dead-man's switch（Watchdog → oracle Uptime Kuma push）
 - [ ] Terraform state → R2 backend + `use_lockfile`（5 root；可顺带评估 OpenTofu）
 - [ ] external-dns 上线（`--source=gateway-httproute` + cloudflare-proxied）
