@@ -62,11 +62,13 @@
       debug:
         var: aspm_current.stdout
 
+    # 注意:参数必须是 pcie_aspm.policy=,裸 pcie_aspm= 只接受 off/force,
+    # 其他值内核静默忽略(2026-07-12 发现 pve-1 因此 ASPM 从未生效)
     - name: Set ASPM to powersupersave in GRUB
       lineinfile:
         path: /etc/default/grub
         regexp: '^GRUB_CMDLINE_LINUX_DEFAULT='
-        line: 'GRUB_CMDLINE_LINUX_DEFAULT="quiet pcie_aspm=powersupersave"'
+        line: 'GRUB_CMDLINE_LINUX_DEFAULT="quiet pcie_aspm.policy=powersupersave"'
         backup: true
       register: grub_updated
 

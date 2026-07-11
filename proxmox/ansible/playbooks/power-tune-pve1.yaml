@@ -1,0 +1,153 @@
+---
+# pve-1(小新 Pro 14 笔记本)专属电源微调,三件事:
+#
+# 1. PCIe ASPM powersupersave
+#    power-optimize.yaml 曾写入 `pcie_aspm=powersupersave`,但该参数只接受
+#    off/force,内核静默忽略 → policy 一直是 default。正确写法是
+#    `pcie_aspm.policy=powersupersave`。本 playbook 修正 GRUB 并通过 sysfs
+#    运行时立即生效,无需重启。
+#
+# 2. Realtek USB 上行网卡(0bda:8153)禁用 USB autosuspend
+#    powertop-autotune.service 开机把所有 USB 翻成 auto,包括唯一的上行网卡;
+#    链路闪断时网卡被挂起 = 整机失联。udev 规则管热插拔,powertop 服务
+#    drop-in 管开机顺序(udev 先设 on 会被 powertop 翻回去),双保险。
+#
+# 3. ideapad conservation_mode=1(电池限充 ~60%)
+#    常年插电 + 100% 满充对电池寿命/鼓包风险不利。设置存在 EC 里可跨重启,
+#    oneshot 服务兜底。
+- name: pve-1 power fine-tuning (ASPM / USB NIC autosuspend / battery conservation)
+  hosts: pve-1
+  gather_facts: false
+  tasks:
+    # ── 1. PCIe ASPM powersupersave ──
+    - name: Fix ASPM kernel param in GRUB (pcie_aspm.policy=, not pcie_aspm=)
+      lineinfile:
+        path: /etc/default/grub
+        regexp: '^GRUB_CMDLINE_LINUX_DEFAULT='
+        line: 'GRUB_CMDLINE_LINUX_DEFAULT="quiet pcie_aspm.policy=powersupersave"'
+        backup: true
+      register: grub_updated
+
+    - name: Update GRUB
+      command: update-grub
+      when: grub_updated.changed
+
+    - name: Apply ASPM powersupersave at runtime
+      shell: echo powersupersave > /sys/module/pcie_aspm/parameters/policy
+      changed_when: true
+
+    # ── 2. USB 上行网卡禁 autosuspend ──
+    - name: Udev rule to keep USB NIC power/control=on (hotplug path)
+      copy:
+        dest: /etc/udev/rules.d/50-usb-nic-no-autosuspend.rules
+        content: |
+          # Realtek RTL8153 USB 上行网卡:禁止 autosuspend(挂起 = 整机失联)
+          ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0bda", ATTR{idProduct}=="8153", TEST=="power/control", ATTR{power/control}="on"
+        mode: "0644"
+
+    - name: Drop-in so powertop-autotune cannot flip USB NIC back to auto (boot path)
+      block:
+        - name: Create drop-in directory
+          file:
+            path: /etc/systemd/system/powertop-autotune.service.d
+            state: directory
+            mode: "0755"
+
+        - name: Write drop-in
+          copy:
+            dest: /etc/systemd/system/powertop-autotune.service.d/usb-nic-keep-on.conf
+            content: |
+              [Service]
+              ExecStartPost=/bin/sh -c 'for d in /sys/bus/usb/devices/*; do [ -f "$$d/idVendor" ] || continue; if [ "$$(cat $$d/idVendor)$$(cat $$d/idProduct)" = "0bda8153" ]; then echo on > "$$d/power/control"; fi; done'
+            mode: "0644"
+          notify: Reload systemd
+
+    - name: Set USB NIC power/control=on right now
+      shell: |
+        for d in /sys/bus/usb/devices/*; do
+          [ -f "$d/idVendor" ] || continue
+          if [ "$(cat $d/idVendor)$(cat $d/idProduct)" = "0bda8153" ]; then
+            echo on > "$d/power/control"
+          fi
+        done
+      changed_when: true
+
+    # ── 3. 电池 conservation_mode ──
+    - name: Enable battery conservation mode right now
+      shell: echo 1 > /sys/bus/platform/devices/VPC2004:00/conservation_mode
+      changed_when: true
+
+    - name: Persist conservation mode via oneshot service
+      copy:
+        dest: /etc/systemd/system/battery-conservation.service
+        content: |
+          [Unit]
+          Description=Enable ideapad battery conservation mode (limit charge ~60%)
+          After=multi-user.target
+
+          [Service]
+          Type=oneshot
+          ExecStart=/bin/sh -c 'echo 1 > /sys/bus/platform/devices/VPC2004:00/conservation_mode'
+          RemainAfterExit=yes
+
+          [Install]
+          WantedBy=multi-user.target
+        mode: "0644"
+
+    - name: Enable battery-conservation service
+      systemd:
+        name: battery-conservation
+        enabled: true
+        daemon_reload: true
+
+    # ── 验证 ──
+    - name: Verify ASPM policy
+      command: cat /sys/module/pcie_aspm/parameters/policy
+      register: aspm_now
+      changed_when: false
+
+    - name: Verify USB NIC power control
+      shell: |
+        for d in /sys/bus/usb/devices/*; do
+          [ -f "$d/idVendor" ] || continue
+          if [ "$(cat $d/idVendor)$(cat $d/idProduct)" = "0bda8153" ]; then
+            cat "$d/power/control"
+          fi
+        done
+      register: nic_control
+      changed_when: false
+
+    - name: Verify conservation mode and battery status
+      shell: |
+        echo "conservation_mode=$(cat /sys/bus/platform/devices/VPC2004:00/conservation_mode)"
+        echo "battery=$(cat /sys/class/power_supply/BAT0/capacity)% $(cat /sys/class/power_supply/BAT0/status)"
+      register: battery_now
+      changed_when: false
+
+    - name: Check kernel log for PCIe/NVMe errors after ASPM switch
+      shell: journalctl -k --since "5 minutes ago" --no-pager | grep -iE "nvme|pcie.*(error|fail)|aspm" || echo "no errors"
+      register: kernel_errors
+      changed_when: false
+
+    - name: Sample CPU package power over 5s (RAPL)
+      shell: |
+        a=$(cat /sys/class/powercap/intel-rapl:0/energy_uj)
+        sleep 5
+        b=$(cat /sys/class/powercap/intel-rapl:0/energy_uj)
+        awk -v d=$((b - a)) 'BEGIN { printf "%.2f W", d / 5 / 1000000 }'
+      register: package_power
+      changed_when: false
+
+    - name: "=== Results ==="
+      debug:
+        msg:
+          - "ASPM policy: {{ aspm_now.stdout }}"
+          - "USB NIC power/control: {{ nic_control.stdout }}"
+          - "{{ battery_now.stdout_lines }}"
+          - "Kernel log check: {{ kernel_errors.stdout_lines }}"
+          - "CPU package power (5s sample): {{ package_power.stdout }}"
+
+  handlers:
+    - name: Reload systemd
+      systemd:
+        daemon_reload: true
