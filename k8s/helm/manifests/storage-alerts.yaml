@@ -58,6 +58,27 @@ spec:
             summary: "ZFS 池非 ONLINE: {{ $labels.zpool }} @ {{ $labels.instance }}"
             description: "node_zfs_zpool_state{state=online}=0 —— 池处于 degraded/faulted 等状态。raidz1 仅容 1 盘，resilver 期第二盘故障会毁池；离站备份是最终安全网（见 backup-recovery runbook）。"
 
+    - name: nvme-wear-trend
+      rules:
+        # 14 日窗口的每日磨损增量（percentage_used/天）。低写入负载下可能为 0。
+        - record: nvme_wear_daily_rate
+          expr: clamp_min(deriv(smartctl_device_percentage_used[14d]) * 86400, 0)
+        # 基于 30 天线性趋势预测 90 天后的 percentage_used
+        - record: nvme_predicted_wear_90d
+          expr: predict_linear(smartctl_device_percentage_used[30d], 90 * 86400)
+        # 趋势报警：90 天内预测 wear > 85%（写入加速时比静态阈值 NvmeWearHigh 更早预警）
+        - alert: NvmeWearAccelerating
+          expr: predict_linear(smartctl_device_percentage_used[30d], 90 * 86400) > 85
+          for: 6h
+          labels:
+            severity: warning
+          annotations:
+            summary: "NVMe {{ $labels.device }} @ {{ $labels.nodename }} 磨损加速，90 天预测 >85%"
+            description: |
+              基于 30 天线性趋势，预测 90 天后 percentage_used ≈ {{ $value | humanize }}%。
+              当前磨损值与日增速率见 smartctl_device_percentage_used / nvme_wear_daily_rate。
+              如写入量持续，需计划换盘；NvmeWearHigh（静态 >90%）为最终确认。
+
     - name: zfs-scrub-overdue
       rules:
         # 记录距离上次 scrub 的天数，供看板和告警使用
