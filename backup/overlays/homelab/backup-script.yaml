@@ -8,7 +8,8 @@ data:
     #!/bin/sh
     # homelab nightly backup → restic 仓库 (106 ZFS, sftp)
     # 逻辑 dump 保证一致性：Vault=raft snapshot API；
-    # sqlite/文件 PVC=从 NFS(迁移前)或 local-path(迁移后)原样拷贝（restic 读原始文件，restore 时 sqlite 由 WAL 自恢复）。
+    # sqlite/文件 PVC=从 local-path 原样拷贝（restic 读原始文件，restore 时 sqlite 由 WAL 自恢复）；
+    # calibre 书库（calibre-books-local，~24G）以目录整体纳入 restic（增量去重，首晚全量后每晚近零成本）。
     set -eu
 
     echo "[backup] installing tools (restic/openssh/pg/curl/findutils)..."
@@ -43,11 +44,11 @@ data:
     # （ZITADEL pg_dump 与 gotify 已于 2026-07-06 迁 oracle，改由 oracle 侧脚本备份；
     #   2026-07-07 从本脚本移除 —— homelab 的 zitadel ns 已删，遗留 dump 步骤导致夜备失败。）
 
-    # --- 2) sqlite/config PVC（NFS 迁移前 / local-path 迁移后，两处都扫）---
+    # --- 2) sqlite/config PVC（local-path；2026-07-11 起全部 PVC 已迁离 NFS）---
     # 只取 sqlite DB(+WAL/SHM) 与小 json 配置；剪掉 processed_books/thumbnails 等
     # 可重建缓存（calibre config PVC 里这类缓存达 12G，不能整目录备份）。
     echo "[backup] copy sqlite/config files (*.db*/small *.json, prune cache)..."
-    for base in /nfsdata /localpath; do
+    for base in /localpath; do
       [ -d "$base" ] || continue
       for pat in bifrost-data calibre-web-automated-config; do
         for d in "$base"/*"$pat"*; do
@@ -67,9 +68,13 @@ data:
     echo "[backup]   pvc files = $(find /work/pvc -type f 2>/dev/null | wc -l), size = $(du -sh /work/pvc 2>/dev/null | cut -f1)"
 
     # --- 3) restic backup + 保留策略 ---
-    echo "[backup] restic backup..."
+    # 书库目录直接纳入（不经 /work 中转，避免每晚 24G 拷贝）；
+    # PVC 重建会改变 pvc-<uid> 路径前缀 → restic 视为新路径重传一次，属预期。
+    BOOKS_DIR="$(ls -d /localpath/*calibre-books-local* 2>/dev/null | head -1 || true)"
+    [ -n "$BOOKS_DIR" ] || echo "[warn] calibre-books-local not found under /localpath — books NOT in this backup!"
+    echo "[backup] restic backup (work + books)..."
     restic cat config >/dev/null 2>&1 || restic init
-    restic backup /work --host homelab --tag nightly --cleanup-cache
+    restic backup /work ${BOOKS_DIR:+"$BOOKS_DIR"} --host homelab --tag nightly --cleanup-cache
     echo "[backup] forget/prune..."
     restic forget --host homelab --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune
     restic snapshots --host homelab --latest 2

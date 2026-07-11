@@ -41,7 +41,7 @@ spec:
       volumes:
         - name: calibre-library
           persistentVolumeClaim:
-            claimName: calibre-books
+            claimName: calibre-books-local
         - name: scripts
           configMap:
             name: metadata-enrich-script

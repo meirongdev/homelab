@@ -139,7 +139,7 @@ spec:
                 defaultMode: 0755
             - name: books
               persistentVolumeClaim:
-                claimName: calibre-books
+                claimName: calibre-books-local
           restartPolicy: OnFailure
 
 ---
