@@ -1,0 +1,69 @@
+---
+# pve-1(小新 Pro 14 笔记本)内置屏幕:10 分钟无键盘/控制台活动后真正断电(DPMS off)
+#
+# 原理:内核 console blanking(consoleblank=600)+ VESA powerdown 模式。
+# blank 触发时 fbcon 走 FB_BLANK_POWERDOWN → amdgpu 关闭 CRTC → eDP 面板+背光断电。
+#
+# ☠️ 教训(2026-07-12):setterm 的 --blank 通过写 tty 的转义序列生效,
+# 但 --powersave 是对 **stdin** 的 TIOCLINUX ioctl。旧的 setterm-config.service
+# 只配了 StandardOutput=tty(stdin 是 /dev/null),powerdown 模式静默失败——
+# 结果几个月来屏幕只是像素变黑,背光常亮。必须把 stdin 也重定向到 /dev/tty1。
+# 验证面板是否真断电看 /sys/kernel/debug/dri/*/state 里 crtc 的 active=0,
+# 连接器的 sysfs dpms 属性在 fbcon 路径下不可靠。
+- name: Console screen auto power-off (pve-1 laptop panel)
+  hosts: pve-1
+  tasks:
+    - name: Deploy setterm-config service (blank 10 min + DPMS powerdown)
+      copy:
+        dest: /etc/systemd/system/setterm-config.service
+        content: |
+          [Unit]
+          Description=Console screen auto power-off after 10 min idle
+          After=getty@tty1.service
+
+          [Service]
+          Type=oneshot
+          Environment=TERM=linux
+          # --powersave 是 stdin 上的 ioctl,stdin/stdout 都必须指向 tty1
+          ExecStart=/bin/sh -c 'setterm --blank 10 --powersave powerdown < /dev/tty1 > /dev/tty1'
+          RemainAfterExit=yes
+
+          [Install]
+          WantedBy=multi-user.target
+        mode: "0644"
+
+    - name: Enable and (re)start setterm-config service
+      systemd:
+        name: setterm-config
+        enabled: true
+        state: restarted
+        daemon_reload: true
+
+    # restart 时 setterm 的转义序列输出会唤醒屏幕并重置 10 分钟计时;
+    # 这里立即强制 blank,让屏幕马上断电而不是再亮 10 分钟。
+    # 注意顺序:先 poke 唤醒再 force,内核对"已 blank"状态的重复 blank 是 no-op,
+    # 不 poke 的话新设的 powerdown 模式不会应用到当前这次 blank。
+    - name: Force screen off immediately
+      shell: |
+        TERM=linux setterm --blank poke < /dev/tty1 > /dev/tty1
+        sleep 1
+        TERM=linux setterm --blank force < /dev/tty1 > /dev/tty1
+      changed_when: true
+
+    # ── 验证 ──
+    - name: Verify kernel consoleblank timeout is 600s
+      command: cat /sys/module/kernel/parameters/consoleblank
+      register: consoleblank
+      changed_when: false
+      failed_when: consoleblank.stdout != "600"
+
+    - name: Check panel CRTC actually powered down
+      shell: sleep 3; grep -A2 'crtc\[' /sys/kernel/debug/dri/*/state | grep -m1 'active='
+      register: crtc_state
+      changed_when: false
+
+    - name: "=== Screen power-off results ==="
+      debug:
+        msg:
+          - "consoleblank: {{ consoleblank.stdout }}s"
+          - "panel CRTC (active=0 表示已断电): {{ crtc_state.stdout | trim }}"

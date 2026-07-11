@@ -18,6 +18,10 @@ download-cloud-image:
 power-optimize:
     ansible-playbook playbooks/power-optimize.yaml
 
+# pve-1 内置屏幕 10 分钟无操作后自动断电（console blank + DPMS powerdown）
+console-screen-off:
+    ansible-playbook playbooks/console-screen-off.yaml
+
 # 部署 node_exporter (+ smartctl_exporter on storage) 到所有裸金属节点（106 + pve-1）
 node-exporter:
     ansible-playbook playbooks/node-exporter-deploy.yaml
