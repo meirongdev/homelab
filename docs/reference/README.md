@@ -24,4 +24,9 @@
 3. [architecture-optimization-2026-07-04.md](architecture-optimization-2026-07-04.md) — 物理层架构与机器角色建议
 4. [simplification-recommendations-2026-03.md](simplification-recommendations-2026-03.md) — Oracle Cilium 迁移后简化建议
 
+
+## GitOps
+
+1. [argocd-app-patterns.md](argocd-app-patterns.md) — ArgoCD 管理模式分析、可选 pattern 对比与取舍建议
+
 > 所有文档中的命令必须注明执行上下文 (cluster/path)。
