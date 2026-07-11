@@ -74,7 +74,7 @@ homelab/
 
 ## Storage Notes
 
-- **NFS**: homelab 的 `nfs-client` SC 用 106 ZFS raidz1; oracle 无 NFS
+- **NFS 已退役 (2026-07-11)**: 全部 PVC 用 `local-path`; 106 只做冷备份目标, 不再是运行时依赖
 - **sqlite 应用必须用 `local-path`**, 不用 NFS (fcntl 锁在 NFS 上极慢)
-- **备份**: restic CronJob 直推 106 ZFS 加密仓库 (sftp), 双集群每夜
+- **备份**: restic CronJob 直推 106 ZFS 加密仓库 (sftp), 双集群每夜; homelab 另有 PVE 每周 vzdump 整 VM → 106 `backups`
 - **恢复验证**: 2026-07-06 演练通过 (Vault raft + 2 PG + sqlite)
