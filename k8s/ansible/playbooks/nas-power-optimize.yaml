@@ -97,6 +97,16 @@
         purge: true
       when: snapd_status.stdout == "installed"
 
+    # ── 优化4：启用 SSD fstrim timer（OS 盘通常是 SSD/eMMC）──
+    # fstrim.service + fstrim.timer 由 util-linux 提供（默认已安装）。
+    # ZFS 池的磁盘通过 zpool trim 独立管理，fstrim -a 会自动跳过 ZFS 数据集。
+    - name: Enable weekly fstrim timer for OS disk SSD
+      systemd:
+        name: fstrim.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+
     # ── 验证 ──
     - name: Read temperatures after optimization
       command: sensors

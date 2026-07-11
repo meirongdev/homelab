@@ -134,6 +134,16 @@
         enabled: true
         daemon_reload: true
 
+    # ── 优化5：启用 SSD/NVMe fstrim timer ──
+    # fstrim.service + fstrim.timer 由 util-linux 提供（Proxmox 默认已安装）。
+    # host 的 NVMe + storage-106 的 OS SSD 都在 proxmox 组中，统一启用。
+    - name: Enable weekly fstrim timer for SSD/NVMe OS disks
+      systemd:
+        name: fstrim.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+
     # ── 验证 ──
     - name: Verify turbo boost disabled
       command: cat /sys/devices/system/cpu/cpufreq/boost
