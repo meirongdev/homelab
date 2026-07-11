@@ -55,18 +55,24 @@
         daemon_reload: true
 
     # ── 优化2：限制 ZFS ARC 内存（默认最多吃 50% RAM = 1.8GB）──
-    # 限制为 512MB，减少内存压力（NFS 用途不需要太大缓存）
-    - name: Set ZFS ARC max to 512MB
+    # NFS 背靠 Storage-106 的 raidz1 3×4TB, 4GB ARC 可在 ZFS 读缓存与
+    # 宿主机可用内存之间取得良好平衡（实测 7.6GB 总内存, ARC 4GB 后仍有 3GB+ 余量）。
+    # 注: 2026-07-06 从 512MB 抬到 4GB, 全集群 NFS 读命中率显著提升。
+    #     原 512MB 设于 2026-07-04, 当时 ARC 保守是因 NFS 仅服务 K3s 小 PVC,
+    #     书库迁入后读流量增大, 4GB 更合理。若运行此 playbook 时 ARC 已设为
+    #     更大值（例如 >4GB）, 请手动调高此值或跳过此 task。
+    - name: Set ZFS ARC max to 4GB
       copy:
         dest: /etc/modprobe.d/zfs.conf
         content: |
-          # Limit ZFS ARC to 512MB (default: up to 50% of RAM)
-          # NAS NFS use case doesn't need a large ARC
-          options zfs zfs_arc_max=536870912
+          # ZFS ARC limit — set to 4GB for read cache (raidz1 3×4TB pool)
+          # Increased from 512MB on 2026-07-06. If the pool grows or read
+          # workload increases, bump this value (max safe: total_RAM - 2GB).
+          options zfs zfs_arc_max=4294967296
         mode: "0644"
 
     - name: Apply ZFS ARC limit immediately
-      shell: echo 536870912 > /sys/module/zfs/parameters/zfs_arc_max
+      shell: echo 4294967296 > /sys/module/zfs/parameters/zfs_arc_max
       changed_when: true
 
     - name: Check current ARC usage
