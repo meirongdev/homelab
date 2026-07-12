@@ -50,7 +50,7 @@ Keep using Tailscale for:
 1. SSH and operator access.
 2. Vault access from oracle-k3s to homelab.
 3. OTel export to homelab NodePorts.
-4. Backup traffic to Kopia.
+4. Backup traffic to the restic repository (106) — replaced Kopia 2026-07-05.
 
 Avoid introducing new dependencies on:
 
@@ -87,7 +87,7 @@ Recommendation: treat dated `docs/plans/` files as history, not living truth.
 Operational facts should live in:
 
 1. `docs/README.md`
-2. `docs/architecture/*.md`
+2. `docs/reference/*.md`
 3. `docs/runbooks/*.md`
 4. cluster-local READMEs such as `cloud/oracle/README.md`
 

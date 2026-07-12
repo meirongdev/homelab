@@ -1,7 +1,7 @@
 # Tailscale 跨集群网络互通设计文档
 
 **日期**: 2026-02-21
-**状态**: 实施中
+**状态**: ✅ 完成（见 ROADMAP.md Phase 3；后续演进见 `docs/reference/tailscale-network.md`）
 
 ## 背景
 

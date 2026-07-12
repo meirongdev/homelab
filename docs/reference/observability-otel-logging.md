@@ -53,7 +53,7 @@
 │  Loki Gateway           │  │  Tempo 2.8.2           │
 │  (loki-gateway svc)     │  │  (tempo svc :4317)     │
 │         │               │  │  OTLP gRPC receiver    │
-│         ▼               │  │  5Gi NFS storage       │
+│         ▼               │  │  5Gi local-path storage       │
 │  Loki 3.x SingleBinary  │  └─────────────────────────┘
 │  (loki-0 pod)           │            │
 │  OTLP 原生支持           │            ▼ TraceQL
@@ -228,7 +228,7 @@ ENV JAVA_TOOL_OPTIONS="-javaagent:/otel/opentelemetry-javaagent.jar"
 > - homelab: App → OTel Collector (ClusterIP :4317) → Tempo
 > - oracle-k3s: App → OTel Collector (ClusterIP :4317) → Tempo NodePort :31317 (via Tailscale)
 > - Grafana 已配置 tracesToLogs / tracesToMetrics / nodeGraph / serviceMap
-> - 详见 `docs/architecture/observability-multicluster.md` ⇢ Traces Pipeline 章节
+> - 详见 `docs/reference/observability-multicluster.md` ⇢ Traces Pipeline 章节
 
 ---
 

@@ -2,7 +2,7 @@
 
 > 日期: 2026-07-04
 > 范围: 全舰队（homelab / oracle-k3s / storage-106 / DGX Spark ×2 / MacBook）机器角色与集群架构
-> 定位: 承接 `docs/plans/2026-03-07-homelab-oracle-architecture-optimization.md` 与 `docs/architecture/simplification-recommendations-2026-03.md`，聚焦**物理层错配**而非新增组件
+> 定位: 承接 `docs/plans/networking/2026-03-07-homelab-oracle-architecture-optimization.md` 与 `docs/reference/simplification-recommendations-2026-03.md`，聚焦**物理层错配**而非新增组件
 
 ---
 
@@ -10,11 +10,11 @@
 
 软件层已相当完整（GitOps 双集群、LGTM 全信号、SLO、准入/扫描/运行时检测、WAF）。短板不在"再加组件"，而在**物理层的两个结构性错配**：
 
-1. **算力倒挂**：最关键的负载（Vault、ZITADEL、ArgoCD hub、可观测中枢）——Kopia 已于 2026-07-05 移除全部跑在舰队里**最弱的机器**上——13GB 内存、idle ~74°C 的 5600H 笔记本（VM 独占 12GB，宿主仅 ~1GB headroom）。而 Oracle 免费节点有 24GB（两倍），两台 DGX Spark 各 128GB 基本闲置（仅接了 node_exporter / smartctl_exporter）。
+1. **算力倒挂**：最关键的负载（Vault、ArgoCD hub、可观测中枢；ZITADEL 已于 2026-07-06 迁 oracle-k3s，不再算在内）全部跑在舰队里**最弱的机器**上——16GB 物理内存、idle ~74°C 的 5600H 笔记本（VM 硬分配 12GB 无 balloon，宿主实测仅 ~987Mi available；见 §4 2026-07-12 实测）。而 Oracle 免费节点有 24GB（两倍），两台 DGX Spark 各 128GB 基本闲置（仅接了 node_exporter / smartctl_exporter）。
 
 2. **故障域集中**：身份（ZITADEL）、密钥（Vault）、GitOps（管两个集群）、告警出口（Alertmanager → gotify-bridge → Gotify）——五种"救命能力"住在同一台笔记本的同一个 VM 里。**homelab 整机挂掉时，指标告警链全哑**（Watchdog 被 drop，没有 dead-man's switch），只能靠人工发现。
 
-3. **数据单点**：Kopia 已于 2026-07-05 移除，当前全系统无任何备份。`docs/architecture/TODO.md` Phase 5 的"离站备份"一直未做，是全系统唯一**不可逆**的风险。
+3. **数据单点**：Kopia 已于 2026-07-05 移除，~~当前全系统无任何备份~~ **已由 restic 取代**（2026-07-06 上线 + 恢复演练通过，见下方 P0-1）。`docs/plans/ROADMAP.md` Phase 4 的"离站备份"仍未做，是当前唯一**不可逆**的残余风险。
 
 优化按"数据不可再生 > 告警可达 > 容量 > 质量"排序，分三级。
 
@@ -59,18 +59,29 @@
 
 | 机器 | 现状 | 目标角色 |
 |---|---|---|
-| pve（5600H, 13GB） | 全家核心混载 | **数据面/有状态核心**（Vault、ZITADEL、ArgoCD、LGTM、Kopia）——但升内存 |
+| pve（5600H, 16GB 物理/13.5GB OS 可见） | 全家核心混载 | **数据面/有状态核心**（Vault、ArgoCD、LGTM）——先收核显 UMA 显存，加内存待核实可行性（见 §4） |
 | storage-106 | NFS + ZFS | 不变：**纯存储，保持 boring**，永不进集群 |
-| oracle-k3s（4C/24G） | 公网无状态服务 | 公网服务 + **告警面/状态面**（Uptime Kuma + Gotify + dead-man's switch） |
+| oracle-k3s（4C/24G） | 公网无状态服务 | 公网服务 + **身份面 + 告警面/状态面**（✅ ZITADEL 已迁入 2026-07-06 + Uptime Kuma + Gotify + dead-man's switch） |
 | DGX Spark ×2（128G） | 仅指标 | **裸金属推理层**，纳入 IaC + GPU 观测 + Bifrost 双机容错 |
 | MacBook | 仅指标 | 不变（roaming，不承担服务） |
 
-### 4. 给 pve 加内存——性价比最高的一步硬件投资
+### 4. pve 内存——2026-07-12 实测 + 加内存性价比重新评估
 
-12GB VM 里 LGTM + Kyverno/Trivy/Tetragon + Vault/ZITADEL/ArgoCD 已贴着天花板跑，这也是安全组件被迫 fail-open、串行扫描的间接原因之一。5600H 笔记本通常 2×SODIMM，升到 32GB 约几百元，之后 VM 可给到 24–28GB。
+12GB VM 里 LGTM + Kyverno/Trivy/Tetragon + Vault/ArgoCD 已贴着天花板跑（ZITADEL 已于 2026-07-06 迁出，不再占这台机器的内存），这也是安全组件被迫 fail-open、串行扫描的间接原因之一。
 
-- **热约束（74°C 是散热物理极限）不受影响**，但内存不再是每次加组件时的第一顾虑。
-- 相比之下"把 LGTM 搬去别的机器"复杂度高得多、收益反而低——**不建议搬**（见下）。
+**2026-07-12 实测**（`ssh root@192.168.50.4`，只读排查，未做任何变更）：
+
+- 物理内存 2×8GB SO-DIMM = 16GB，但 OS 仅见 13.5GB（`MemTotal` 14169656 kB）。差额中 **2GB 被核显（AMD Cezanne/Vega）的 UMA 显存占用**——`/proc/iomem` 有一段专属 reserved 区间，`amdgpu` debugfs 确认 `size: 2147483648`（2048MiB）。这台机器是无头 Proxmox 服务器，核显显存纯属浪费。
+- VM（`k8s-node`, vmid 100）`memory: 12288`、`balloon: 0`——硬分配，host 无法动态回收；qemu 进程实际 RSS ~11GB。
+- host 侧：`free -h` 为 199Mi free / 987Mi available；swap 2.1GB/8GB 已用，但连续 `vmstat` 采样 si/so 均为 0（当前是静态残留，非活跃换页）；`journalctl` 近 30 天无 OOM-kill 记录——**没有火烧眉毛的危机，但余量确实很薄**。
+
+**⚠️ "升到 32GB" 这条旧建议存疑，已核实为错误/未验证假设**：`dmidecode -t 16` 显示这块板子 `Maximum Capacity: 16 GB`，且两条插槽已用 2×8GB 插满——这台具体机器可能已经到内存天花板，"5600H 笔记本通常 2×SODIMM 可升 32GB"只是未针对这台机型验证的泛化说法。真要扩容前必须先核实 Lenovo（BIOS `GZCN14WW`, 2021-02-03）该型号的官方最大内存规格，不能按"笔记本通常能上 32GB"直接下单。
+
+**建议顺序**：
+1. **免费、无风险**：下次维护窗口去 BIOS 收回核显 UMA 显存（~1.5-2GB），不影响 VM 配额，也不用买硬件。
+2. 核实该型号官方最大内存规格后，再决定是否值得为潜在的主板/插槽限制冒险买内存。
+3. 加内存到手前，**热约束（74°C 是散热物理极限）不受影响**，但内存仍是加组件时的第一顾虑。
+4. 相比之下"把 LGTM 搬去别的机器"复杂度高得多、收益反而低——**不建议搬**（见下）。
 
 ### 5. DGX Spark 正式入编（最大的闲置资产）
 
@@ -92,7 +103,7 @@
 
 7. **Renovate**（GitHub App，免费）：仓库在 GitHub，接上后自动 PR chart/image 版本 bump。直接消灭 CLAUDE.md 里"chart 版本 pin 部署前须 `helm search repo` 人肉核对"这一环，regex manager 可覆盖 `argocd/applications/*.yaml` 的 `targetRevision`。
 
-8. **恢复演练自动化**：每月 CronJob 从 Kopia restore 最新 Vault/PG 快照到临时目录做校验（`pg_restore --list`、文件 checksum），失败告警。把一次性"演练"变成持续验证。
+8. **恢复演练自动化**：每月 CronJob 从 restic restore 最新 Vault/PG 快照到临时目录做校验（`pg_restore --list`、文件 checksum），失败告警。把一次性"演练"变成持续验证。
 
 9. **告警噪声治理**：MacBook 睡眠导致的 `TargetDown` 已知会烦人，提前加 Alertmanager 静默/inhibit 规则（CLAUDE.md 里自己标了 "if it bites"）。
 
@@ -103,8 +114,8 @@
 - **homelab 多节点 HA / etcd 三节点**——硬件不支持，单用户收益为零；单节点 + 快速重建（`just homelab-recover` + 本方案备份体系）就是正确形态。
 - **storage-106 加入 K8s 集群**——NFS hang 会 wedge 节点是亲测过的，存储主机混入计算只放大爆炸半径。
 - **LGTM 整体搬迁 / Thanos·Mimir·对象存储长期化**——搬迁窗口长、双写复杂；加内存 + retention 控制就够。
-- **CNPG 之类 Postgres operator**——pg_dump + Kopia 对这个规模已够，别为运维一个 operator 而运维。
-- **Cert-Manager**（roadmap Phase 5）——建议**降级/划掉**：TLS 在 Cloudflare 边缘终结、集群内 HTTP，唯一自签的 Kopia 是刻意设计。没有内网直连 TLS 需求前它是纯负担。
+- **CNPG 之类 Postgres operator**——pg_dump + restic 对这个规模已够，别为运维一个 operator 而运维。
+- **Cert-Manager**（roadmap Phase 5）——建议**降级/划掉**：TLS 在 Cloudflare 边缘终结、集群内走 HTTP，没有内网直连 TLS 的实际需求前它是纯负担（结论已在 ROADMAP 执行，见"❌ 已划掉"一节）。
 - **Vault auto-unseal**（roadmap High Effort）——单用户下 sealed 已被 ESO 告警覆盖、恢复路径已文档化；transit auto-unseal 要再养一个 Vault，不值。保持手动，优先级排在以上所有事之后。
 - **ClusterMesh / Cilium 网络策略扩大用途**——维持现状，与 2026-03 简化建议方向一致。
 
@@ -117,7 +128,7 @@
 3. **一个月内**：pve 内存升级（下单即可）、Renovate 接入。
 4. **随后**：DGX 入编三件套（IaC + GPU 指标 + Bifrost fallback/SLO）。
 
-其中第 1、2、8 项本质是把 `docs/architecture/TODO.md` 里躺了三个月的 unchecked 项提到最前——方向早已判断正确，缺的只是排期。
+其中第 1、2、8 项本质是把 `docs/plans/ROADMAP.md` 里躺了三个月的 unchecked 项提到最前——方向早已判断正确，缺的只是排期。
 
 ---
 

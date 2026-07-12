@@ -1,7 +1,7 @@
 # Cloudflare AI Gateway 配置设计文档
 
 **日期**: 2026-05-31  
-**状态**: 已批准  
+**状态**: 已批准 → **❌ Deprecated（已退役）**: 落地后 `cloudflare_ai_gateway` Terraform 资源已整体移除（`terraform state rm`），AI 网关需求改由自建 **Bifrost** 满足，见 [2026-06-07-bifrost-llm-gateway.md](2026-06-07-bifrost-llm-gateway.md)。本仓库当前不存在任何 Cloudflare AI Gateway 资源。  
 **目标**: 在 `cloudflare/terraform/` 中引入 Cloudflare AI Gateway 的基础 Terraform 配置，为后续接入自建模型与多集群 AI 应用提供统一出口。
 
 ---

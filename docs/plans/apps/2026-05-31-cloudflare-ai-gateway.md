@@ -1,5 +1,7 @@
 # Cloudflare AI Gateway Implementation Plan
 
+> **❌ Deprecated（已退役）**: 落地后 `cloudflare_ai_gateway` Terraform 资源已整体移除（`terraform state rm`），AI 网关需求改由自建 **Bifrost** 满足，见 [2026-06-07-bifrost-llm-gateway.md](2026-06-07-bifrost-llm-gateway.md)。本仓库当前不存在任何 Cloudflare AI Gateway 资源。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a shared Cloudflare AI Gateway to `cloudflare/terraform/` so homelab services can start using a single account-level AI egress point, without wiring any self-hosted model providers yet.

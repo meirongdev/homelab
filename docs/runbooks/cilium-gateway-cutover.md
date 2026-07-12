@@ -308,6 +308,6 @@ curl -I https://home.meirong.dev
 
 ## Post-Cutover Checks
 
-1. Confirm `docs/architecture/cloudflare-tunnel-observability.md` still matches live behavior.
-2. Confirm `docs/architecture/tailscale-network.md` still reflects the underlay role only.
+1. Confirm `docs/reference/cloudflare-tunnel-observability.md` still matches live behavior.
+2. Confirm `docs/reference/tailscale-network.md` still reflects the underlay role only.
 3. If the cutover succeeded, record timestamps and anomalies in the relevant `docs/plans/` note.

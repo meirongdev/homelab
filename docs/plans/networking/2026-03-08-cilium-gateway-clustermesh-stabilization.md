@@ -130,3 +130,5 @@ After homelab recovery, update this record with:
 
 - service validation result
 - date of ClusterMesh connect
+
+> **✅ Resolved (2026-03-08, same day)**: ClusterMesh connected via `cilium clustermesh connect --source-endpoint 100.94.186.7:32379 --destination-endpoint 100.107.166.37:32379 --allow-mismatching-ca`; KVStoreMesh enabled both sides. Services validated post-recovery. See `ROADMAP.md` Phase 5 (✅ 2026-03-08).

@@ -1,7 +1,7 @@
 # 信息管道：Miniflux → Redpanda Connect → KaraKeep → Gotify → Telegram
 
 **日期**: 2026-02-28
-**状态**: 实施中
+**状态**: ✅ 完成（见 ROADMAP.md Phase 3）
 
 ## 概览
 

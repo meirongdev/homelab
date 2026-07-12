@@ -16,6 +16,8 @@ When uploading books or performing automated ingest in Calibre-Web-Automated, ne
 - **Reasoning**: This ensures all files, including those created by background automated processes, are consistently owned by UID 1000, regardless of the container's internal UID transitions.
 - **Manual Cleanup**: Permissions were manually normalized on the NFS host using `chown -R 1000:1000 /storage/calibre`.
 
+> **⚠️ 2026-07-11 更新**: Calibre 书库已从 NFS 迁移至 `local-path`（见 [2026-07-06-storage-local-migration-and-backup-redesign.md](../storage/2026-07-06-storage-local-migration-and-backup-redesign.md)），上述 NFS `all_squash` 配置对当前运行时已不再适用，仅保留作历史记录。
+
 ## Original Proposed Solution (Retained for history)
 ... (rest of the original content) ...
 Add an `initContainer` to the `calibre-web` deployment that explicitly sets ownership of the library and config directories to `1000:1000`. This ensures that even if the NFS server or provisioner created them as root, they are corrected before the app starts.
