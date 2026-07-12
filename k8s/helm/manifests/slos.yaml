@@ -8,6 +8,9 @@
 # 指标来源：envoy_cluster_upstream_rq_xx{envoy_cluster_name="<gw>/<ns>_<svc>_<port>",
 #   envoy_response_code_class="2|3|4|5"}（见 cilium-envoy-servicemonitor.yaml）。
 # total = 全部响应类；error = 5xx（4xx 是客户端错误，计入分母不计入分子）。
+# ⚠️ errorQuery 末尾必须 OR on() vector(0)：envoy 按响应码类惰性创建序列，服务从未
+#    返回过 5xx（或 envoy 重启计数器重置后）时 errorQuery 为空集，除法结果整个消失
+#    → SLO 序列/告警静默失效（2026-07-12 oracle 侧首次部署时踩到）。
 #
 # ⚠️ metadata.labels.release=kube-prometheus-stack：经 sloth.extraLabels 也会打到生成的
 #    PrometheusRule，确保被 operator 的 ruleSelector 选中。
@@ -29,7 +32,7 @@ spec:
       description: "Calibre-Web (book.meirong.dev) 入口可用性，error=5xx"
       sli:
         events:
-          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/personal-services_calibre-web_.*", envoy_response_code_class="5"}[{{.window}}]))
+          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/personal-services_calibre-web_.*", envoy_response_code_class="5"}[{{.window}}])) OR on() vector(0)
           totalQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/personal-services_calibre-web_.*"}[{{.window}}]))
       alerting:
         name: CalibreWebGatewayHighErrorRate
@@ -43,7 +46,7 @@ spec:
       description: "Grafana (grafana.meirong.dev) 入口可用性，error=5xx"
       sli:
         events:
-          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/monitoring_kube-prometheus-stack-grafana_.*", envoy_response_code_class="5"}[{{.window}}]))
+          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/monitoring_kube-prometheus-stack-grafana_.*", envoy_response_code_class="5"}[{{.window}}])) OR on() vector(0)
           totalQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/monitoring_kube-prometheus-stack-grafana_.*"}[{{.window}}]))
       alerting:
         name: GrafanaGatewayHighErrorRate
@@ -57,7 +60,7 @@ spec:
       description: "ArgoCD (argocd.meirong.dev) 入口可用性，error=5xx"
       sli:
         events:
-          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/argocd_argocd-server_.*", envoy_response_code_class="5"}[{{.window}}]))
+          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/argocd_argocd-server_.*", envoy_response_code_class="5"}[{{.window}}])) OR on() vector(0)
           totalQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/argocd_argocd-server_.*"}[{{.window}}]))
       alerting:
         name: ArgoCDGatewayHighErrorRate
@@ -71,7 +74,7 @@ spec:
       description: "Vault (vault.meirong.dev) 入口可用性，error=5xx"
       sli:
         events:
-          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/vault_vault_.*", envoy_response_code_class="5"}[{{.window}}]))
+          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/vault_vault_.*", envoy_response_code_class="5"}[{{.window}}])) OR on() vector(0)
           totalQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/vault_vault_.*"}[{{.window}}]))
       alerting:
         name: VaultGatewayHighErrorRate
@@ -105,7 +108,7 @@ spec:
       description: "ZITADEL (auth.meirong.dev) 入口可用性，error=5xx"
       sli:
         events:
-          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/zitadel_zitadel_.*", envoy_response_code_class="5"}[{{.window}}]))
+          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/zitadel_zitadel_.*", envoy_response_code_class="5"}[{{.window}}])) OR on() vector(0)
           totalQuery: sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/zitadel_zitadel_.*"}[{{.window}}]))
       alerting:
         name: ZitadelGatewayHighErrorRate
@@ -119,7 +122,7 @@ spec:
       description: "Gotify (notify.meirong.dev) 入口可用性，error=5xx"
       sli:
         events:
-          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/personal-services_gotify_.*", envoy_response_code_class="5"}[{{.window}}]))
+          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/personal-services_gotify_.*", envoy_response_code_class="5"}[{{.window}}])) OR on() vector(0)
           totalQuery: sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/personal-services_gotify_.*"}[{{.window}}]))
       alerting:
         name: GotifyGatewayHighErrorRate
