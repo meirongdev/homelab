@@ -32,8 +32,11 @@ just download-cloud-image
 pve-1(笔记本)内置屏幕 10 分钟无键盘/控制台活动后自动断电(内核 console blanking + DPMS powerdown),playbook 跑完立即熄屏。
 
 ```bash
-just console-screen-off
+just console-screen-off    # 部署/修复 service + 立即熄屏
+just console-screen-check  # 只读健康检查（service / consoleblank / CRTC）
 ```
+
+看到屏幕亮着先跑 check——唤醒事件(键盘/触摸板/控制台输出)后要重新等 10 分钟才断电,`active=1` 不一定是坏了。
 
 背景与坑点(setterm `--powersave` 需要 stdin 指向 tty)见复盘:[docs/records/2026-07-12-pve-screen-backlight-always-on.md](../../docs/records/2026-07-12-pve-screen-backlight-always-on.md)
 
