@@ -5,7 +5,6 @@ terraform.plan
 
 # Terraform working directory
 .terraform/
-.terraform.lock.hcl
 
 # Actual tfvars (contains OCIDs, API keys, SSH keys)
 terraform.tfvars
