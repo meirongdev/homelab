@@ -1,6 +1,6 @@
 # Homelab Project TODO
 
-> Last updated: 2026-07-07
+> Last updated: 2026-07-12
 > 当前主线: [2026-07-06 存储本地化迁移 + 备份体系重建](../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md)
 > 演进路线（技术债盘点 + 2026 工具链选型，含 Crossplane 不引入结论）: [evolution-roadmap-2026-07-07](../reference/evolution-roadmap-2026-07-07.md)
 
@@ -87,7 +87,18 @@
 - [x] Loki retention 配置 (values.yaml update) ✅ 2026-03-19
 - [x] Grafana 旧 dashboard 清理 ✅ 2026-03-19 禁用 AIX/Darwin/proxy dashboard
 - [x] repo↔集群一致性清零（helm pin 对齐、homelab postgres 残留移除、ReferenceGrant v1beta1、gotify-bridge 双 App 争抢去重）✅ 2026-07-07
-- [ ] justfile 卫生: `deploy-prometheus` 双 `--version` / `prometheus_stack_version` 死变量; Vault 孤儿 `secret/homelab/postgres` 清理
+- [x] 双集群清理审计 ✅ 2026-07-12（孤儿 Job×7 / 0 副本 RS×97 / 未用镜像≈19G；falco inotify 根因修复 + ansible 固化；zitadel/gotify SLO 迁 oracle 指标 + 7 条 SLO errorQuery 空集加固 + 补 bifrost SLO；NFSStorageNodeDown→BackupTargetNodeDown；zitadel 迁移残留注释清零）
+- [ ] justfile 卫生: `deploy-prometheus` 双 `--version` / `prometheus_stack_version` 死变量
+- [ ] **Vault 孤儿 secret 清理**（2026-07-12 审计确认，阻塞于过期 token）：
+  - 前置：换发 VAULT_TOKEN 并更新 `cloud/oracle/.env`（现存 token 2026-02 签发，已失效）
+  - 删除 `secret/homelab/postgres`（bitnami PG 退役遗物）与 `secret/homelab/zitadel-oidc`（旧 SSO 共享 OIDC client；两集群 ExternalSecret 与仓库均无引用，仅 2026-02-25 SSO 计划文档提及）：
+    `kubectl --context k3s-homelab exec -n vault vault-0 -- sh -c "VAULT_TOKEN=$VAULT_TOKEN vault kv delete secret/homelab/<name>"`
+    （`kv delete` 软删除可 `undelete` 恢复；观察无碍后再 `kv metadata delete` 彻底清除）
+  - 顺带核查 `secret/oracle-k3s/oauth2-proxy` 是否同为孤儿（client-id 与 zitadel-oidc 相同、无 ExternalSecret 引用，疑似同批遗留）
+  - **⚠️ `secret/homelab/zitadel` 是活的，别删**——oracle zitadel ns 的 3 个 ExternalSecret（config/masterkey/postgres-auth）+ oracle backup 跨集群读它
+  - 删除后同步更新本地 `k8s/helm/values/vault_values.md`（gitignored 的 Vault 内容清单，含明文值——确认过未进 git 历史，保持 gitignore）
+- [ ] PSA: 实测 `backup` ns 后决定是否纳入 `psa_baseline_ns`（`k8s/helm/justfile` 注释有标记；注意 sqlite 备份 CronJob 用特权 hostPath 读 local-path 根，大概率要走 privileged/豁免路线）
+- [ ] Tailscale 根因修复: 让 mbpm5 **停止广播** `192.168.50.0/24`（`nfs-lan-route` systemd unit 只是绕行 workaround——laptop 休眠时该 Tailscale 路由会黑洞 106，影响 restic/vzdump 备份路径；见 `k8s/ansible/playbooks/setup-tailscale.yaml` 注释。修复后可移除 k8s-node 与 pve 两处的 unit）
 
 ### 🟡 Medium Effort
 
