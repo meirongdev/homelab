@@ -38,7 +38,7 @@
   hosts: k8s_masters
   become: true
   tasks:
-    # K3s + Cilium + workloads (kopia, fluent-bit, kubelet, containerd, ...)
+    # K3s + Cilium + workloads (otel-collector, tetragon, kubelet, containerd, ...)
     # all create inotify watchers under uid=0. Ubuntu's default
     # max_user_instances=128 is exhausted in practice, surfacing as
     # "failed to create fsnotify watcher: too many open files".

@@ -4,8 +4,7 @@ set dotenv-load
 
 # Pinned Helm chart versions — bump deliberately after reviewing release notes.
 # Match what is currently deployed on the cluster (see `helm list -A`).
-prometheus_stack_version := "82.10.1"
-loki_version             := "6.53.0"
+loki_version             := "7.0.0"   # ArgoCD-managed (argocd/applications/loki.yaml); keep in sync
 tempo_version            := "1.24.4"
 otel_collector_version   := "0.147.1"
 cilium_version           := "1.19.1"
@@ -46,7 +45,6 @@ deploy-prometheus: create-grafana-secret
     helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
         --namespace {{namespace}} \
         --kube-context {{ctx}} \
-        --version {{prometheus_stack_version}} \
         --values values/kube-prometheus-stack.yaml \
         --version {{kube_prometheus_stack_version}} \
         --wait \
@@ -57,7 +55,6 @@ deploy-prometheus-nowait: create-grafana-secret
     helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
         --namespace {{namespace}} \
         --kube-context {{ctx}} \
-        --version {{prometheus_stack_version}} \
         --values values/kube-prometheus-stack.yaml \
         --version {{kube_prometheus_stack_version}} \
         --timeout 15m
@@ -532,45 +529,6 @@ argocd-status:
     @echo "=== ArgoCD Pods ==="
     kubectl --context {{ctx}} get pods -n {{argocd_ns}}
 
-# ⬇️ Kopia Backup Server ⬇️
-kopia_ns := "kopia"
-
-# 添加 Kopia 服务器用户（格式: username@hostname）
-kopia-add-user user:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    pod=$(kubectl --context {{ctx}} get pod -n {{kopia_ns}} -l app=kopia -o jsonpath='{.items[0].metadata.name}')
-    password=$(kubectl --context {{ctx}} get secret -n {{kopia_ns}} kopia-secret -o jsonpath='{.data.password}' | base64 -d)
-    kubectl --context {{ctx}} exec -n {{kopia_ns}} "$pod" -c kopia -- kopia server user add "{{user}}" --user-password="$password"
-    kubectl --context {{ctx}} rollout restart deployment/kopia -n {{kopia_ns}}
-    kubectl --context {{ctx}} rollout status deployment/kopia -n {{kopia_ns}} --timeout=90s
-    echo "✅ User '{{user}}' added. Connect with:"
-    echo "   kopia repository connect server \\"
-    echo "     --url=https://10.10.10.10:31515 \\"
-    echo "     --server-cert-fingerprint=$(just kopia-fingerprint) \\"
-    echo "     --override-username=$(echo '{{user}}' | cut -d@ -f1)"
-
-# 列出 Kopia 服务器用户
-kopia-list-users:
-    #!/usr/bin/env bash
-    pod=$(kubectl --context {{ctx}} get pod -n {{kopia_ns}} -l app=kopia -o jsonpath='{.items[0].metadata.name}')
-    kubectl --context {{ctx}} exec -n {{kopia_ns}} "$pod" -c kopia -- kopia server user list
-
-# 获取 Kopia TLS 证书指纹
-kopia-fingerprint:
-    @openssl s_client -connect 10.10.10.10:31515 </dev/null 2>/dev/null | openssl x509 -fingerprint -sha256 -noout | sed 's/://g' | cut -d= -f2 | tr '[:upper:]' '[:lower:]'
-
-# 查看 Kopia 服务器状态
-kopia-status:
-    @echo "=== Kopia Pods ==="
-    @kubectl --context {{ctx}} get pods -n {{kopia_ns}}
-    @echo ""
-    @echo "=== Kopia PVCs ==="
-    @kubectl --context {{ctx}} get pvc -n {{kopia_ns}}
-    @echo ""
-    @echo "=== Registered Users ==="
-    @just kopia-list-users
-
 # 配置 Vault 自动解锁（仅需运行一次）
 # 从 vault-backup-keys 提取解锁密钥，创建 vault-auto-unseal secret
 # 然后升级 Vault Helm Chart 以启用 postStart 自动解锁
@@ -724,7 +682,7 @@ homelab-recover:
 # 为何用 just label 而不走 ArgoCD：本仓库 namespace 由 justfile/Helm/kustomize 混合创建，
 # 没有任何 namespace 归专门的 ArgoCD Application 拥有。若用渲染整个 Namespace 对象的
 # Application 来打标签，ArgoCD 会接管这些 namespace，配上普遍开启的 prune+selfHeal，
-# 一次误同步就会 prune 删除 namespace 并级联删光里面的 PVC（Vault/kopia 数据）。
+# 一次误同步就会 prune 删除 namespace 并级联删光里面的 PVC（如 Vault raft、monitoring TSDB 数据）。
 # kubectl label 纯元数据、幂等、不会删任何东西。oracle 侧的标签则在 kustomize 树的
 # */namespace.yaml 里声明（那些 ns 本就被 kustomize 拥有，改现有资源无 prune 风险）。
 #
