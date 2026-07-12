@@ -9,4 +9,11 @@ ingress_rules = {
   "tool"    = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }
   "pdf"     = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }
   "squoosh" = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }
+  "keep"    = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }
+  "slot"    = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }
+  "trends"  = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }
+  "notify"  = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }  # Gotify 迁自 homelab 2026-07-06
+  "auth"    = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }  # ZITADEL 迁自 homelab 2026-07-06
+  # rsshub is intentionally NOT exposed externally; only accessible within the cluster
+  # by miniflux via http://rsshub.rss-system.svc:1200
 }

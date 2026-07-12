@@ -3,12 +3,10 @@ cloudflare_account_id = "c49b6c6407adb48905eb6f932cd4e972"
 tunnel_id             = "ce9fd9fe-1dc4-430a-b797-b3b3fc931978"
 
 ingress_rules = {
-  "home"    = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
-  "llm"     = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
+  "argocd"  = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
   "book"    = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
   "grafana" = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
+  "llm"     = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
   "vault"   = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
-  "tool"    = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
-  "pdf"     = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
-  "squoosh" = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
+  # notify → 迁 oracle tunnel (2026-07-06, Gotify 迁 oracle)；auth 待 ZITADEL 迁移(Phase 3 后半)
 }
