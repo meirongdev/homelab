@@ -3,6 +3,7 @@
 # Collects:
 #   - container logs        → homelab Loki via Tailscale (otlphttp)
 #   - cloudflared metrics   → homelab Prometheus via Tailscale (prometheusremotewrite)
+#   - cilium-envoy metrics  → homelab Prometheus（网关 L7 RED 指标，oracle 网关 SLO 数据源）
 #   - application traces    → homelab Tempo via Tailscale (otlp grpc)
 # Architecture: apps/filelog/prometheus -> memory_limiter/k8sattributes/resource/batch -> otlphttp / prometheusremotewrite / otlp
 ---
@@ -276,6 +277,25 @@ data:
                   labels:
                     cluster: oracle-k3s
 
+      # Cilium Gateway Envoy L7 指标 —— zitadel/gotify 等 oracle 入口可用性 SLO
+      # (k8s/helm/manifests/slos.yaml › oracle-gateway-availability) 的数据源。
+      # 对应 homelab 侧的 cilium-envoy ServiceMonitor；oracle 无 Prometheus Operator，
+      # 由 otel-collector 直接抓取 headless Service cilium-envoy(:9964)。
+      # keep 正则与 homelab 一致：只保留 RED SLI 所需请求指标，丢弃其余 ~5000 条 Envoy 内部指标。
+      prometheus/cilium-envoy:
+        config:
+          scrape_configs:
+            - job_name: 'cilium-envoy'
+              scrape_interval: 30s
+              static_configs:
+                - targets: ['cilium-envoy.kube-system.svc.cluster.local:9964']
+                  labels:
+                    cluster: oracle-k3s
+              metric_relabel_configs:
+                - source_labels: [__name__]
+                  regex: 'envoy_cluster_upstream_rq(_xx|_total|_time_(bucket|sum|count))?|envoy_http_downstream_rq(_xx|_time_(bucket|sum|count))?'
+                  action: keep
+
       # External Secrets Operator metrics → homelab Prometheus (cluster=oracle-k3s).
       # Surfaces ExternalSecret/SecretStore Ready=False so a stale/expired
       # vault-token (silent secret-sync failure) trips the shared PrometheusRule.
@@ -374,5 +394,9 @@ data:
           exporters: [prometheusremotewrite]
         metrics/external-secrets:
           receivers: [prometheus/external-secrets]
+          processors: [memory_limiter, resource, batch]
+          exporters: [prometheusremotewrite]
+        metrics/cilium-envoy:
+          receivers: [prometheus/cilium-envoy]
           processors: [memory_limiter, resource, batch]
           exporters: [prometheusremotewrite]

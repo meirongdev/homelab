@@ -128,7 +128,7 @@ delete-calibre:
 # 前置(一次性 bootstrap，不在 git): 106 建 mrstorage/restic dataset + restic init + 授权 restic SSH key；
 #   Vault 写 secret/homelab/restic (repo_password / ssh_private_key_b64 / vault_token) + backup policy。
 
-# 部署 homelab 备份 CronJob (Vault raft snapshot + zitadel pg_dump + sqlite → 106)
+# 部署 homelab 备份 CronJob (Vault raft snapshot + sqlite/config + calibre books → 106)
 # ⚠️ LEGACY — 2026-07-06 已迁 ArgoCD (argocd/applications/backup.yaml)
 # 请直接改 backup/overlays/homelab + commit, ArgoCD auto-sync。
 deploy-backup:
@@ -733,7 +733,8 @@ homelab-recover:
 #   - privileged ns：kube-system(cilium/coredns)、monitoring(node-exporter/otel/grafana) 需特权，
 #     显式标 privileged 文档化豁免；同时打 warn/audit=baseline 留审计线索（未来混入特权 Pod 可被发现）
 # 注：PSA 仅在 Pod 创建/更新时评估，不影响已运行的 Pod；不在本阶段尝试 restricted（grafana 跑 root）。
-psa_baseline_ns := "default vault zitadel kopia bifrost personal-services cloudflare external-secrets argocd kyverno"
+# （zitadel/kopia ns 已随迁移/退役删除，2026-07-12 从名单移除；backup ns 未实测特权情况，暂未纳入）
+psa_baseline_ns := "default vault bifrost personal-services cloudflare external-secrets argocd kyverno"
 # trivy-system 保守标 privileged：扫描 Job 的 securityContext 由 operator 动态生成、不完全可控，
 # 先不冒险 enforce baseline；warn/audit=baseline 会显示它是否其实合规，确认后可改 baseline。
 psa_privileged_ns := "kube-system monitoring trivy-system tetragon"
