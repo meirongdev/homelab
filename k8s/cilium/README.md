@@ -38,11 +38,11 @@ the `CiliumEnvoyConfig`; Envoy picks it up via xDS (no envoy restart needed).
 
 ## Notable settings
 
-- **`gatewayAPI.enableAppProtocol: true`** — required for the ZITADEL console. Makes
-  Cilium honour Service `appProtocol`, so `zitadel:8080` (`kubernetes.io/h2c`) gets an
-  explicit h2c upstream and its v1 gRPC services work through the gateway. Turning this
-  off resurfaces the console `/ui/console/*` 404s. Full story:
-  `docs/runbooks/zitadel-console-grpc-404.md`.
+- **`gatewayAPI.enableAppProtocol: true`** — makes Cilium honour Service `appProtocol`
+  (`kubernetes.io/h2c` → explicit h2c upstream)，任何 gRPC/h2c 后端过网关都依赖它。
+  历史上为 ZITADEL console 引入（关掉会复现 `/ui/console/*` 404，全程见
+  `docs/runbooks/zitadel-console-grpc-404.md`）。ZITADEL 已于 2026-07 迁至
+  oracle-k3s，homelab 当前无 h2c 后端——设置无害，刻意保留以备未来 gRPC 服务。
 - **ClusterMesh** to oracle-k3s (`100.107.166.37:32379`, KVStoreMesh). The shared CA
   (`cilium-ca` secret) must be preserved/restored on reinstall or clustermesh trust breaks.
 
@@ -50,7 +50,9 @@ the `CiliumEnvoyConfig`; Envoy picks it up via xDS (no envoy restart needed).
 
 ```bash
 kubectl --context k3s-homelab -n kube-system exec ds/cilium -c cilium-agent -- cilium status
-# Gateway API h2c honoured? zitadel cluster should show explicitHttpConfig.http2ProtocolOptions:
+# Gateway API h2c honoured?（仅当网关后面有 appProtocol=kubernetes.io/h2c 的后端时适用；
+# 该后端的 envoy cluster 应显示 explicitHttpConfig.http2ProtocolOptions。
+# 示例为迁移前的 zitadel，当前 homelab 无 h2c 后端，grep 会为空）
 kubectl --context k3s-homelab -n kube-system get ciliumenvoyconfig cilium-gateway-homelab-gateway -o yaml \
-  | grep -A2 'zitadel:zitadel:8080'
+  | grep -B1 -A2 'http2ProtocolOptions'
 ```

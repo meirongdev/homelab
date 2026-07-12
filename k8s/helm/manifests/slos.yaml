@@ -83,6 +83,20 @@ spec:
           labels: { severity: critical }
         ticketAlert:
           labels: { severity: warning }
+    - name: "bifrost-availability"
+      objective: 99.0
+      description: "Bifrost (llm.meirong.dev) 入口可用性，error=5xx；含 bifrost 与 oauth2-proxy 两个后端"
+      sli:
+        events:
+          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/bifrost_.*", envoy_response_code_class="5"}[{{.window}}])) OR on() vector(0)
+          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/bifrost_.*"}[{{.window}}]))
+      alerting:
+        name: BifrostGatewayHighErrorRate
+        labels: { slo_service: bifrost }
+        pageAlert:
+          labels: { severity: critical }
+        ticketAlert:
+          labels: { severity: warning }
 ---
 # oracle-k3s 网关 SLO（ZITADEL/Gotify 2026-07 迁移后入口在 oracle）。
 # 指标来源：oracle otel-collector 抓取 cilium-envoy(:9964) 后 remote-write 到

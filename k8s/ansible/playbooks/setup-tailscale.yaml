@@ -23,12 +23,12 @@
   roles:
     - tailscale_node
   tasks:
-    # --- NFS LAN-route fix (2026-07-06) ---
+    # --- LAN-route fix (2026-07-06，历史名 NFS LAN-route) ---
     # The MacBook `mbpm5` advertises 192.168.50.0/24 over Tailscale. With
-    # `--accept-routes`, this node (and pve) route the NFS server 192.168.50.106
-    # THROUGH that laptop, whose SNAT remaps NFS source ports to non-privileged
-    # ports (breaks the exports' `secure` flag) and adds ~19ms latency (kills
-    # SQLite-on-NFS workloads like calibre-web / zitadel-db on boot).
+    # `--accept-routes`, this node (and pve) route 192.168.50.106 THROUGH that
+    # laptop — SNAT 换源端口、+~19ms，且笔记本休眠时直接黑洞。
+    # 当年受害者是 SQLite-on-NFS 工作负载；2026-07-11 起 106 已无 NFS 运行时
+    # 依赖，此规则现在保障的是 restic 夜备（SSH→106）与 vzdump 的路径可靠性。
     # This rule forces 192.168.50.0/24 back onto the native LAN path
     # (node -> default gw pve -> vmbr0 -> storage-106), which is <1ms.
     # The SAME unit must exist on the pve host (192.168.50.4) — it is applied

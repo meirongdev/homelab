@@ -40,12 +40,12 @@ cgroup:
     enabled: false
   hostRoot: /sys/fs/cgroup
 
-# Gateway API. enableAppProtocol=true is REQUIRED for the ZITADEL console:
-# it makes Cilium honour Service appProtocol (zitadel:8080 -> kubernetes.io/h2c),
-# giving that backend an explicit h2c upstream cluster. Without it, Envoy's grpc_web
-# filter converts grpc-web -> native grpc but sends it over HTTP/1.1, and ZITADEL's
-# v1 gRPC services (auth.v1/admin.v1) return 404 -> the /ui/console/* pages break.
-# See docs/runbooks/zitadel-console-grpc-404.md.
+# Gateway API. enableAppProtocol=true 让 Cilium 尊重 Service appProtocol
+# (kubernetes.io/h2c -> 显式 h2c upstream cluster)，任何 gRPC/h2c 后端过网关都需要。
+# 历史：为 ZITADEL console 引入（无此设置时 grpc-web -> native grpc 走 HTTP/1.1，
+# v1 gRPC 服务 404，见 docs/runbooks/zitadel-console-grpc-404.md）。ZITADEL 已于
+# 2026-07 迁至 oracle-k3s，homelab 当前无 h2c 后端；设置无害且改动 CNI 需滚动，
+# 刻意保留。
 gatewayAPI:
   enabled: true
   enableAppProtocol: true
