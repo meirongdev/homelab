@@ -80,30 +80,48 @@ spec:
           labels: { severity: critical }
         ticketAlert:
           labels: { severity: warning }
-    - name: "gotify-availability"
-      objective: 99.0
-      description: "Gotify (notify.meirong.dev) 入口可用性，error=5xx"
-      sli:
-        events:
-          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/personal-services_gotify_.*", envoy_response_code_class="5"}[{{.window}}]))
-          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/personal-services_gotify_.*"}[{{.window}}]))
-      alerting:
-        name: GotifyGatewayHighErrorRate
-        labels: { slo_service: gotify }
-        pageAlert:
-          labels: { severity: critical }
-        ticketAlert:
-          labels: { severity: warning }
+---
+# oracle-k3s 网关 SLO（ZITADEL/Gotify 2026-07 迁移后入口在 oracle）。
+# 指标来源：oracle otel-collector 抓取 cilium-envoy(:9964) 后 remote-write 到
+# homelab Prometheus，带 cluster="oracle-k3s" 标签——见
+# cloud/oracle/manifests/monitoring/otel-collector.yaml (prometheus/cilium-envoy)。
+# Sloth 与规则评估都在 homelab 侧，与上面共用一套告警链路。
+apiVersion: sloth.slok.dev/v1
+kind: PrometheusServiceLevel
+metadata:
+  name: oracle-gateway-availability
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  service: "oracle-gateway"
+  labels:
+    cluster: oracle-k3s
+  slos:
     - name: "zitadel-availability"
       objective: 99.0
       description: "ZITADEL (auth.meirong.dev) 入口可用性，error=5xx"
       sli:
         events:
-          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/zitadel_zitadel_.*", envoy_response_code_class="5"}[{{.window}}]))
-          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/zitadel_zitadel_.*"}[{{.window}}]))
+          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{cluster="oracle-k3s", envoy_cluster_name=~".*/zitadel_zitadel_.*", envoy_response_code_class="5"}[{{.window}}]))
+          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx{cluster="oracle-k3s", envoy_cluster_name=~".*/zitadel_zitadel_.*"}[{{.window}}]))
       alerting:
         name: ZitadelGatewayHighErrorRate
         labels: { slo_service: zitadel }
+        pageAlert:
+          labels: { severity: critical }
+        ticketAlert:
+          labels: { severity: warning }
+    - name: "gotify-availability"
+      objective: 99.0
+      description: "Gotify (notify.meirong.dev) 入口可用性，error=5xx"
+      sli:
+        events:
+          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{cluster="oracle-k3s", envoy_cluster_name=~".*/personal-services_gotify_.*", envoy_response_code_class="5"}[{{.window}}]))
+          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx{cluster="oracle-k3s", envoy_cluster_name=~".*/personal-services_gotify_.*"}[{{.window}}]))
+      alerting:
+        name: GotifyGatewayHighErrorRate
+        labels: { slo_service: gotify }
         pageAlert:
           labels: { severity: critical }
         ticketAlert:

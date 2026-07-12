@@ -1,5 +1,6 @@
 # homelab 备份 overlay — 由 ArgoCD app `backup` 部署（argocd/applications/backup.yaml）。
-# 备份对象：Vault raft snapshot、ZITADEL pg_dump(遗留库)、sqlite/config PVC(NFS+local-path)。
+# 备份对象：Vault raft snapshot、sqlite/config + calibre books PVC（均 local-path）。
+# ZITADEL pg_dump 与 gotify 已随迁移改由 oracle 侧备份（见 backup-script.yaml 内注释）。
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:

@@ -1,7 +1,7 @@
 ---
 # Supplementary PrometheusRules for homelab-specific alerts.
 # kube-prometheus-stack ships 150+ default alerts; these cover gaps:
-#   - NFS storage node specifically (not just kubelet-level PVC Pending)
+#   - Cold-backup target 106 (restic 夜备 + vzdump 周备的目标机)
 #   - Vault sealed state (blocks ESO → blocks secret sync → cascades)
 #   - Backup CronJobs not running on schedule
 # Label release=kube-prometheus-stack required for Prometheus Operator to pick up.
@@ -16,19 +16,21 @@ spec:
   groups:
     - name: storage-nodes
       rules:
-        - alert: NFSStorageNodeDown
+        # 2026-07-11 起 106 降级为纯冷备份目标（restic 夜备 + vzdump 周备），
+        # 无运行时依赖（NFS PVC 已全部迁 local-path）——宕机不影响在线服务，
+        # 只影响备份窗口，故 warning + for 15m（原 NFSStorageNodeDown critical/2m）。
+        - alert: BackupTargetNodeDown
           expr: up{job="node-exporter-metal-nodes", instance="192.168.50.106:9100"} == 0
-          for: 2m
+          for: 15m
           labels:
-            severity: critical
-            component: storage
+            severity: warning
+            component: backup
           annotations:
-            summary: "NFS storage node 192.168.50.106 is unreachable"
+            summary: "Backup target 192.168.50.106 is unreachable"
             description: |
-              node-exporter on storage-node-1 (192.168.50.106) has been down for more than 2 minutes.
-              Every PVC using nfs-client StorageClass is at risk: Vault, Kopia, Grafana, Loki, Prometheus,
-              Zitadel DB, Calibre-Web, Gotify.
-              Check: `ping 192.168.50.106` from k8s-node, then NFS service on the NAS.
+              node-exporter on storage-node-1 (192.168.50.106) has been down for more than 15 minutes.
+              该机仅作冷备份目标：homelab/oracle restic 夜备与 pve vzdump 周备会失败，在线服务不受影响。
+              Check: `ping 192.168.50.106` from k8s-node, then SSH and ZFS pool on the storage host.
 
         - alert: ProxmoxHostDown
           expr: up{job="node-exporter-metal-nodes", instance="192.168.50.4:9100"} == 0

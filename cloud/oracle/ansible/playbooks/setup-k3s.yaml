@@ -134,6 +134,18 @@
         iptables-save > /etc/iptables/rules.v4
       changed_when: true
 
+    # Ubuntu 默认 fs.inotify.max_user_instances=128，root 进程（k3s/containerd/
+    # 各 pod）会将其占满，导致依赖 inotify 的 pod 起不来——falco 曾因此
+    # "could not initialize inotify handler" CrashLoop 23 天。homelab 节点为
+    # 8192，此处保持一致。
+    - name: Raise inotify instance limit (falco etc. need inotify handles)
+      ansible.posix.sysctl:
+        name: fs.inotify.max_user_instances
+        value: '8192'
+        sysctl_file: /etc/sysctl.d/99-inotify.conf
+        state: present
+        reload: true
+
 - name: Write K3s config file
   hosts: oracle_masters
   become: true
