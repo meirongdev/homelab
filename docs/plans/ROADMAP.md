@@ -88,7 +88,7 @@
 - [x] Grafana 旧 dashboard 清理 ✅ 2026-03-19 禁用 AIX/Darwin/proxy dashboard
 - [x] repo↔集群一致性清零（helm pin 对齐、homelab postgres 残留移除、ReferenceGrant v1beta1、gotify-bridge 双 App 争抢去重）✅ 2026-07-07
 - [x] 双集群清理审计 ✅ 2026-07-12（孤儿 Job×7 / 0 副本 RS×97 / 未用镜像≈19G；falco inotify 根因修复 + ansible 固化；zitadel/gotify SLO 迁 oracle 指标 + 7 条 SLO errorQuery 空集加固 + 补 bifrost SLO；NFSStorageNodeDown→BackupTargetNodeDown；zitadel 迁移残留注释清零）
-- [ ] justfile 卫生: `deploy-prometheus` 双 `--version` / `prometheus_stack_version` 死变量
+- [x] justfile 卫生 ✅ 2026-07-12: `deploy-prometheus`/`-nowait` 双 `--version` 去重（删死变量 `prometheus_stack_version=82.10.1`，实际生效的一直是 `kube_prometheus_stack_version=87.6.0`）；`loki_version` 6.53.0→7.0.0 对齐 ArgoCD 实际部署（防 `just deploy-loki` 意外降级）；顺带清理 Kopia 退役残留——justfile `kopia-*` 配方块删除、`KopiaBackupNotRunning` 告警改名 `BackupNotRunning` 并修正幽灵 `02:00/UTC` → 实际 `03:00/03:30 Asia/Shanghai`、kube-bench/setup-k3s/prune 警告的陈旧注释校正
 - [ ] **Vault 孤儿 secret 清理**（2026-07-12 审计确认，阻塞于过期 token）：
   - 前置：换发 VAULT_TOKEN 并更新 `cloud/oracle/.env`（现存 token 2026-02 签发，已失效）
   - 删除 `secret/homelab/postgres`（bitnami PG 退役遗物）与 `secret/homelab/zitadel-oidc`（旧 SSO 共享 OIDC client；两集群 ExternalSecret 与仓库均无引用，仅 2026-02-25 SSO 计划文档提及）：

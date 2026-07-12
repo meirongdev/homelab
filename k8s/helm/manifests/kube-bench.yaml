@@ -32,7 +32,7 @@ metadata:
   labels:
     app: kube-bench
 spec:
-  schedule: "0 5 * * 0"          # 每周日 05:00 UTC（错开 02:00 备份）
+  schedule: "0 5 * * 0"          # 每周日 05:00 UTC（错开 03:00/03:30 restic 备份）
   concurrencyPolicy: Forbid       # 不并发，避免热节点叠加扫描
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

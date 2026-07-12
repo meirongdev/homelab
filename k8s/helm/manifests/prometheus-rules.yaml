@@ -70,7 +70,7 @@ spec:
 
     - name: backups
       rules:
-        - alert: KopiaBackupNotRunning
+        - alert: BackupNotRunning
           expr: |
             (time() - kube_cronjob_status_last_schedule_time{cronjob=~".*backup.*"}) > 32 * 3600
           for: 1h
@@ -80,8 +80,9 @@ spec:
           annotations:
             summary: "Backup CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} has not run in 32h"
             description: |
-              Expected daily backups (02:00/03:00/03:30 UTC). If this fires, the scheduler missed runs
-              or the CronJob is suspended. Check: `kubectl get cronjob -A` and recent Job status.
+              Expected daily restic backups (homelab 03:00 / oracle 03:30, Asia/Shanghai). If this fires,
+              the scheduler missed runs or the CronJob is suspended. Check: `kubectl get cronjob -A` and
+              recent Job status.
 
         - alert: BackupJobFailed
           expr: kube_job_failed{job_name=~".*backup.*"} > 0
