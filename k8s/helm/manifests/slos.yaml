@@ -86,6 +86,8 @@ spec:
 # homelab Prometheus，带 cluster="oracle-k3s" 标签——见
 # cloud/oracle/manifests/monitoring/otel-collector.yaml (prometheus/cilium-envoy)。
 # Sloth 与规则评估都在 homelab 侧，与上面共用一套告警链路。
+# ⚠️ 指标名带 _total 后缀：otel prometheus receiver→remote-write 链路按 OpenMetrics
+#    规范给 counter 补 _total（homelab 直连抓取无此转换，故上面不带）。
 apiVersion: sloth.slok.dev/v1
 kind: PrometheusServiceLevel
 metadata:
@@ -103,8 +105,8 @@ spec:
       description: "ZITADEL (auth.meirong.dev) 入口可用性，error=5xx"
       sli:
         events:
-          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{cluster="oracle-k3s", envoy_cluster_name=~".*/zitadel_zitadel_.*", envoy_response_code_class="5"}[{{.window}}]))
-          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx{cluster="oracle-k3s", envoy_cluster_name=~".*/zitadel_zitadel_.*"}[{{.window}}]))
+          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/zitadel_zitadel_.*", envoy_response_code_class="5"}[{{.window}}]))
+          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/zitadel_zitadel_.*"}[{{.window}}]))
       alerting:
         name: ZitadelGatewayHighErrorRate
         labels: { slo_service: zitadel }
@@ -117,8 +119,8 @@ spec:
       description: "Gotify (notify.meirong.dev) 入口可用性，error=5xx"
       sli:
         events:
-          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{cluster="oracle-k3s", envoy_cluster_name=~".*/personal-services_gotify_.*", envoy_response_code_class="5"}[{{.window}}]))
-          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx{cluster="oracle-k3s", envoy_cluster_name=~".*/personal-services_gotify_.*"}[{{.window}}]))
+          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/personal-services_gotify_.*", envoy_response_code_class="5"}[{{.window}}]))
+          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/personal-services_gotify_.*"}[{{.window}}]))
       alerting:
         name: GotifyGatewayHighErrorRate
         labels: { slo_service: gotify }
