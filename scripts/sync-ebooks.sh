@@ -2,8 +2,10 @@
 ################################################################################
 # sync-ebooks.sh — calibre-web 电子书同步脚本
 #
-# 将本地电子书同步到 calibre-web 的 ingest 目录。
-# 支持 NFS 直传（主路径）和 kubectl cp（回退路径），
+# 将本地电子书同步到 calibre-web 的 ingest 目录（kubectl cp）。
+# calibre 书库 2026-07-11 迁 local-path（原 NFS 直传路径已失效——
+# storage-106 上保留的迁移前快照与 pod 实际挂载的 local-path PVC
+# 早已脱钩，rsync 进去会"成功"但书永远进不了 calibre-web）。
 # 传输后校验和验证 + 数据库层面确认入库。
 #
 # 使用:
@@ -25,13 +27,7 @@ BACKUP_DIR="${HOME}/.local/share/calibre-web-sync-backup"
 MANIFEST_DIR="${HOME}/.local/share/calibre-web-sync"
 LOG_FILE="${MANIFEST_DIR}/sync.log"
 
-# --- 传输目标 —— NFS 直传（主路径）---
-NFS_HOST="192.168.50.106"
-NFS_USER="mr"
-NFS_INGEST="/storage/calibre/ingest"
-SSH_KEY="${HOME}/.ssh/vgio"
-
-# --- 传输目标 —— kubectl 回退路径 ---
+# --- 传输目标 —— kubectl ---
 KUBE_CONTEXT="${KUBE_CONTEXT:-k3s-homelab}"
 NAMESPACE="personal-services"
 POD_SELECTOR="app=calibre-web"
@@ -183,11 +179,6 @@ scan_local() {
 # ============================================================================
 
 # --- 检测可用的传输通道 ---
-check_nfs_reachable() {
-  ssh -i "$SSH_KEY" -o ConnectTimeout=5 -o StrictHostKeyChecking=no \
-    "${NFS_USER}@${NFS_HOST}" "test -d ${NFS_INGEST}" 2>/dev/null
-}
-
 check_kubectl_ready() {
   command -v kubectl &>/dev/null || return 1
   kubectl --context "$KUBE_CONTEXT" cluster-info &>/dev/null || return 1
@@ -202,15 +193,7 @@ get_pod_name() {
     -l "$POD_SELECTOR" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null
 }
 
-# --- rsync 到 NFS（主路径）---
-upload_nfs() {
-  local file="$1" dest="$2"
-  rsync --inplace --no-delay-updates --chmod=666 \
-    -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" \
-    "$file" "${NFS_USER}@${NFS_HOST}:${dest}/" 2>/dev/null
-}
-
-# --- kubectl cp 到 pod（回退路径）---
+# --- kubectl cp 到 pod ---
 upload_kubectl() {
   local file="$1" dest_dir="$2"
   local pod
@@ -228,16 +211,11 @@ upload_kubectl() {
 # --- 带重试的上传 ---
 upload_file() {
   local file="$1" dest="$2"
-  local filename; filename=$(basename "$file")
   local attempt=0 rc=1
 
   while (( attempt < RETRY_COUNT )); do
     ((attempt++))
-    if [[ "$TRANSPORT" == "nfs" ]]; then
-      upload_nfs "$file" "$dest"
-    else
-      upload_kubectl "$file" "$dest"
-    fi
+    upload_kubectl "$file" "$dest"
     rc=$?
     [[ $rc -eq 0 ]] && break
     [[ $attempt -lt $RETRY_COUNT ]] && sleep $(( attempt * 3 ))
@@ -251,18 +229,11 @@ verify_transfer() {
   local filename; filename=$(basename "$file")
   local src_cksum; src_cksum=$(checksum "$file")
 
-  if [[ "$TRANSPORT" == "nfs" ]]; then
-    local remote_cksum
-    remote_cksum=$(ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no \
-      "${NFS_USER}@${NFS_HOST}" "sha256sum ${dest}/${filename}" 2>/dev/null | awk '{print $1}')
-    [[ "$src_cksum" == "$remote_cksum" ]]
-  else
-    local pod; pod=$(get_pod_name) || return 1
-    local remote_cksum
-    remote_cksum=$(kubectl --context "$KUBE_CONTEXT" exec -n "$NAMESPACE" "$pod" -- \
-      sha256sum "${dest}/${filename}" 2>/dev/null | awk '{print $1}')
-    [[ "$src_cksum" == "$remote_cksum" ]]
-  fi
+  local pod; pod=$(get_pod_name) || return 1
+  local remote_cksum
+  remote_cksum=$(kubectl --context "$KUBE_CONTEXT" exec -n "$NAMESPACE" "$pod" -- \
+    sha256sum "${dest}/${filename}" 2>/dev/null | awk '{print $1}')
+  [[ "$src_cksum" == "$remote_cksum" ]]
 }
 
 # ============================================================================
@@ -322,18 +293,15 @@ do_check() {
 
   # 2. 连接目标
   TRANSPORT=""
-  if check_nfs_reachable; then
-    TRANSPORT="nfs"
-    log "传输通道: NFS 直连 ($NFS_HOST)"
-  elif check_kubectl_ready; then
+  if check_kubectl_ready; then
     TRANSPORT="kubectl"
-    log "传输通道: kubectl cp (回退)"
+    log "传输通道: kubectl cp"
   else
-    warn "NFS 和 kubectl 均不可用，仅做文件检查"
+    warn "kubectl 不可用，仅做文件检查"
   fi
 
   # 3. 获取数据库标题列表
-  if [[ "$TRANSPORT" == "kubectl" ]] || check_kubectl_ready; then
+  if [[ "$TRANSPORT" == "kubectl" ]]; then
     log "获取 calibre 数据库书籍列表..."
     IFS=$'\n' read -r -d '' -a db_titles < <( get_existing_titles && printf '\0' ) || true
     success "数据库现有 ${#db_titles[@]} 本书"
@@ -344,12 +312,7 @@ do_check() {
 
   # 4. 检查 ingest 目录已有文件
   ingest_files=()
-  if [[ "$TRANSPORT" == "nfs" ]]; then
-    IFS=$'\n' read -r -d '' -a ingest_files < <(
-      ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no \
-        "${NFS_USER}@${NFS_HOST}" "ls -1 ${NFS_INGEST}" 2>/dev/null && printf '\0'
-    ) || true
-  elif check_kubectl_ready; then
+  if [[ "$TRANSPORT" == "kubectl" ]]; then
     local pod; pod=$(get_pod_name)
     IFS=$'\n' read -r -d '' -a ingest_files < <(
       kubectl --context "$KUBE_CONTEXT" exec -n "$NAMESPACE" "$pod" -- \
@@ -445,22 +408,17 @@ do_upload() {
   fi
 
   # 选择传输通道
-  if check_nfs_reachable; then
-    TRANSPORT="nfs"
-    DEST_DIR="$NFS_INGEST"
-    log "传输通道: NFS 直连 ($NFS_HOST)"
-  elif check_kubectl_ready; then
+  if check_kubectl_ready; then
     TRANSPORT="kubectl"
     DEST_DIR="$INGEST_PATH"
-    log "传输通道: kubectl cp (回退)"
+    log "传输通道: kubectl cp"
   else
-    error "NFS 和 kubectl 均不可用，无法上传"
+    error "kubectl 不可用，无法上传"
     return 1
   fi
 
   # 获取上传前的数据库书籍数
-  local pre_count=0
-  check_kubectl_ready && pre_count=$(get_db_book_count)
+  local pre_count; pre_count=$(get_db_book_count)
 
   # 确认
   echo ""
@@ -522,31 +480,19 @@ do_upload() {
   echo ""; echo "════════════════════════════════════════════════════"
   echo "  导入验证"
   echo "════════════════════════════════════════════════════"
-  if check_kubectl_ready; then
-    local post_count; post_count=$(get_db_book_count)
-    local diff=$(( post_count - pre_count ))
-    log "数据库: 上传前 ${pre_count} 本 → 当前 ${post_count} 本 (新增 ${diff})"
+  local post_count; post_count=$(get_db_book_count)
+  local diff=$(( post_count - pre_count ))
+  log "数据库: 上传前 ${pre_count} 本 → 当前 ${post_count} 本 (新增 ${diff})"
 
-    # 查询新入库的书名
-    if [[ $diff -gt 0 ]]; then
-      local new_titles
-      new_titles=$(query_db "SELECT title FROM books ORDER BY id DESC LIMIT ${diff}" 2>/dev/null)
-      echo "  最近入库:"
-      echo "$new_titles" | head -10 | while IFS= read -r line; do
-        [[ -n "$line" ]] && echo "    · $line"
-      done
-      [[ $(echo "$new_titles" | wc -l) -gt 10 ]] && echo "    ... 还有更多"
-    fi
-  else
-    warn "kubectl 不可用，跳过数据库验证"
-    local ingest_count
-    if [[ "$TRANSPORT" == "nfs" ]]; then
-      ingest_count=$(ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no \
-        "${NFS_USER}@${NFS_HOST}" "find ${NFS_INGEST} -maxdepth 1 -type f | wc -l" 2>/dev/null || echo "?")
-    else
-      ingest_count="?"
-    fi
-    log "Ingest 目录文件数: $ingest_count"
+  # 查询新入库的书名
+  if [[ $diff -gt 0 ]]; then
+    local new_titles
+    new_titles=$(query_db "SELECT title FROM books ORDER BY id DESC LIMIT ${diff}" 2>/dev/null)
+    echo "  最近入库:"
+    echo "$new_titles" | head -10 | while IFS= read -r line; do
+      [[ -n "$line" ]] && echo "    · $line"
+    done
+    [[ $(echo "$new_titles" | wc -l) -gt 10 ]] && echo "    ... 还有更多"
   fi
 
   rm -f "${MANIFEST_DIR}/pending.txt"

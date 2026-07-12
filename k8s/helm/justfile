@@ -695,7 +695,7 @@ homelab-recover:
 psa_baseline_ns := "default vault bifrost personal-services cloudflare external-secrets argocd kyverno"
 # trivy-system 保守标 privileged：扫描 Job 的 securityContext 由 operator 动态生成、不完全可控，
 # 先不冒险 enforce baseline；warn/audit=baseline 会显示它是否其实合规，确认后可改 baseline。
-psa_privileged_ns := "kube-system monitoring trivy-system tetragon"
+psa_privileged_ns := "kube-system monitoring trivy-system tetragon kube-bench"
 
 harden-psa:
     #!/usr/bin/env bash

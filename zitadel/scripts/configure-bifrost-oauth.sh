@@ -7,7 +7,7 @@
 # Cloudflare edge ("server closed the stream without sending trailers"), and a
 # direct/bypass connection fails ZITADEL's instance-host check. REST is plain
 # HTTP/JSON — no trailers — and works through the gateway. Same reason SMTP is
-# done by configure-smtp.sh. See docs/runbooks/zitadel-console-grpc-404.md.
+# done by configure-smtp.sh. See docs/records/zitadel-console-grpc-404.md.
 #
 # Creates (idempotently): a project ("Homelab" by default) and a WEB OIDC app
 # ("bifrost-admin") whose redirect URI is the oauth2-proxy callback on

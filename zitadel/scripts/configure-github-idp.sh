@@ -7,7 +7,7 @@
 # direct/bypass connection fails ZITADEL's instance-host check. REST is plain
 # HTTP/JSON — no trailers — and works through the gateway. Same reason as
 # configure-smtp.sh and configure-bifrost-oauth.sh. See
-# docs/runbooks/zitadel-console-grpc-404.md.
+# docs/records/zitadel-console-grpc-404.md.
 #
 # Federates GitHub into ZITADEL so every OIDC / oauth2-proxy app (Bifrost admin,
 # etc.) gains a "Sign in with GitHub" button WITHOUT any app change — ZITADEL
@@ -103,15 +103,17 @@ fi
 # --- bind to the instance login policy (so the button shows) ----------------
 echo "==> ensuring IdP is on the instance login policy ..."
 LINK_BODY=$(python3 -c "import json,sys; print(json.dumps({'idpId': sys.argv[1], 'ownerType': 'IDP_OWNER_TYPE_SYSTEM'}))" "$IDP_ID")
-HTTP=$(curl -sS -o /tmp/zitadel-idp-link.out -w '%{http_code}' \
+LINK_OUT=$(mktemp)
+trap 'rm -f "$LINK_OUT"' EXIT
+HTTP=$(curl -sS -o "$LINK_OUT" -w '%{http_code}' \
   -X POST "${BASE}/policies/login/idps" "${AUTH[@]}" -d "$LINK_BODY")
 if [[ "$HTTP" == "200" ]]; then
   echo "    linked."
-elif grep -qiE 'already|exist' /tmp/zitadel-idp-link.out; then
+elif grep -qiE 'already|exist' "$LINK_OUT"; then
   echo "    already linked — ok."
 else
   echo "    !! login-policy link failed (HTTP $HTTP):" >&2
-  cat /tmp/zitadel-idp-link.out >&2; echo >&2
+  cat "$LINK_OUT" >&2; echo >&2
   exit 1
 fi
 

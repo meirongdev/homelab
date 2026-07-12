@@ -1,6 +1,6 @@
 # K3s 集群安全架构 (Security Architecture)
 
-> Last updated: 2026-07-06
+> Last updated: 2026-07-12
 > Scope: 双集群（homelab + oracle-k3s）的纵深防御模型 —— source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
 > 实施决策与权衡见 [../plans/security/2026-06-16-k3s-security-hardening.md](../plans/security/2026-06-16-k3s-security-hardening.md)。
@@ -62,8 +62,8 @@
 
   | enforce | namespace |
   |---------|-----------|
-  | `baseline` | default, vault, zitadel, kopia, database, bifrost, personal-services, cloudflare, external-secrets, argocd, kyverno（homelab）；rss-system, homepage, personal-services, cloudflare（oracle） |
-  | `privileged`（显式豁免, warn/audit 仍记 baseline） | kube-system, monitoring, kube-bench, trivy-system（homelab）；monitoring（oracle） |
+  | `baseline` | default, vault, bifrost, personal-services, cloudflare, external-secrets, argocd, kyverno（homelab）；rss-system, homepage, personal-services, cloudflare（oracle） |
+  | `privileged`（显式豁免, warn/audit 仍记 baseline） | kube-system, monitoring, trivy-system, tetragon, kube-bench（homelab）；monitoring（oracle） |
 
 - 不做 `restricted`（grafana 跑 root）；PSA 仅在 Pod 创建/更新时评估，不杀已运行 Pod。
 
@@ -134,7 +134,7 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 | 节点/控制面配置不合规 | kube-bench 周巡检 + protect-kernel-defaults | 🟡 待重启 |
 | 容器内运行时入侵（起 shell/异常外联/提权） | Tetragon(homelab,进程可见性→Loki) / Falco(oracle,规则→Loki+Gotify) | ✅ 已部署（v1 可见性；TracingPolicy/规则调优持续） |
 | 东西向横向移动 | 网络默认拒绝 | ❌ 延后（仅 Hubble 可见性） |
-| 数据丢失 | ❌ Kopia 已移除，无备份 | 🔴 无任何备份 |
+| 数据丢失 | restic 双集群 CronJob（Vault raft / pg_dump / sqlite）→ 106 ZFS 仓库 + 恢复演练通过 | 🟡 本地单副本，离站备份未上线 |
 
 ## 11. 已知缺口与路线图
 
@@ -142,7 +142,7 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 2. **网络默认拒绝（门控灰度）**：Hubble 基线流量 → Cilium 每端点 `PolicyAuditMode` 只记不拦 → 单无状态叶子 ns（personal-services/homepage）试点 CiliumNetworkPolicy（放行 DNS/Envoy/必要 egress）→ soak → 逐 ns 评估，**建议只对对外暴露 ns 做**。
 3. **节点 API 审计日志**：延后（磁盘紧）；如开启用 Metadata 级策略 + 严格 maxsize/maxbackup，先确认磁盘余量。
 4. **Kyverno Audit→Enforce**：逐条清理存量违规后提升；restrict-image-registries 最久保持 Audit。
-5. **备份（紧急缺口）**：Kopia 已移除，全部服务无备份。需尽快重建备份方案。详见 docs/runbooks/backup-recovery.md。
+5. **离站备份**：restic 仓库（Vault raft / pg_dump / sqlite，含恢复演练通过）目前仅 106 本地 ZFS 单副本，尚未同步到云端（OCI always-free / B2）。详见 docs/runbooks/backup-recovery.md 与 ROADMAP.md。
 
 ## 12. 运维入口
 

@@ -11,12 +11,12 @@ NC='\033[0m'
 
 echo -e "${BLUE}ℹ${NC} 扫描重复书籍..."
 
-POD=$(kubectl --context $CONTEXT get pod -n personal-services -l app=calibre-web -o jsonpath='{.items[0].metadata.name}')
+POD=$(kubectl --context "$CONTEXT" get pod -n personal-services -l app=calibre-web -o jsonpath='{.items[0].metadata.name}')
 
 # 获取重复的标题列表和对应的IDs
 # 使用临时文件避免管道问题
 TEMP_FILE="/tmp/dup-titles-$$.txt"
-kubectl --context $CONTEXT exec -n personal-services $POD -- bash -c '
+kubectl --context "$CONTEXT" exec -n personal-services "$POD" -- bash -c '
 sqlite3 /calibre-library/metadata.db << SQL
 SELECT title, GROUP_CONCAT(id, ",") as ids
 FROM books
@@ -78,19 +78,19 @@ fi
 # 备份
 echo -e "${BLUE}ℹ${NC} 备份数据库..."
 mkdir -p ~/.local/share/calibre-cleanup
-kubectl --context $CONTEXT cp personal-services/$POD:/calibre-library/metadata.db \
-  ~/.local/share/calibre-cleanup/metadata-$(date +%Y%m%d-%H%M%S).db 2>/dev/null || true
+kubectl --context "$CONTEXT" cp "personal-services/$POD:/calibre-library/metadata.db" \
+  ~/.local/share/calibre-cleanup/metadata-"$(date +%Y%m%d-%H%M%S)".db 2>/dev/null || true
 
 # 删除
 echo -e "${BLUE}ℹ${NC} 删除重复书籍..."
 for id in "${DELETE_IDS[@]}"; do
-  kubectl --context $CONTEXT exec -n personal-services $POD -- \
+  kubectl --context "$CONTEXT" exec -n personal-services "$POD" -- \
     sqlite3 /calibre-library/metadata.db "DELETE FROM books WHERE id = $id;" 2>/dev/null || true
 done
 
 # 重启
 echo -e "${BLUE}ℹ${NC} 重启 pod..."
-kubectl --context $CONTEXT rollout restart deployment/calibre-web -n personal-services 2>/dev/null || true
-kubectl --context $CONTEXT rollout status deployment/calibre-web -n personal-services --timeout=120s 2>/dev/null || true
+kubectl --context "$CONTEXT" rollout restart deployment/calibre-web -n personal-services 2>/dev/null || true
+kubectl --context "$CONTEXT" rollout status deployment/calibre-web -n personal-services --timeout=120s 2>/dev/null || true
 
 echo -e "${GREEN}✓${NC} 完成！已删除 $DELETE_COUNT 本重复书籍"

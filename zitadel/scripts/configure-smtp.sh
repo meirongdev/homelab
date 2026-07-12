@@ -6,7 +6,7 @@
 # Cloudflare edge ("server closed the stream without sending trailers"), and a
 # direct/bypass connection fails ZITADEL's instance-host check. REST is plain
 # HTTP/JSON — no trailers — and works through the gateway with the correct Host.
-# See docs/runbooks/zitadel-console-grpc-404.md.
+# See docs/records/zitadel-console-grpc-404.md.
 #
 # Config is read from zitadel/terraform/.env (ZITADEL_TOKEN = service-user PAT,
 # SMTP_USER, SMTP_PASSWORD, SMTP_FROM) or from the environment. Idempotent: skips
