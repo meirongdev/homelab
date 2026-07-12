@@ -54,6 +54,27 @@ grep -A2 'crtc\[' /sys/kernel/debug/dri/*/state | grep active=
 - playbook 末尾 poke + force,配置完立即断电,不等 10 分钟
 - 验证:`consoleblank=600` + CRTC `active=0`
 
+## 复验(2026-07-12 晚)
+
+主机 21:46 重启后屏幕又被观察到常亮,现场复验结论:**机制健康,不是回归**。
+
+- service 随开机自启,`consoleblank=600` 生效;
+- 强制路径:poke + force → CRTC `active=0` ✅
+- 定时器路径:临时 `--blank 1`,等 80 秒、全程键盘中断计数(IRQ1)不变,
+  自动断电 → `active=0` ✅(测完已恢复 `--blank 10`)
+- **屏幕亮着的原因**:任何唤醒事件(键盘/触摸板/电源键/控制台输出)会点亮屏幕
+  并重置 10 分钟计时,落在窗口内观察就是「常亮」。唤醒后 powerdown 模式保持
+  (全局 `vesa_blank_mode`),会自动再断电,不会退化成「黑而不断电」。
+  只有无人碰机器且持续 >10 分钟 `active=1` 才是真异常。
+
+只读诊断入口:`just console-screen-check`(service / consoleblank / CRTC 三项)。
+
+### 顺带发现:repo 里的固化丢过一次
+
+7d4aeae(02:26)写入的完整 playbook(部署 service + 验证)在 21 分钟后被
+e0729d4(02:47,本意是替换另一份 vbetool 旧逻辑)整体覆盖成只剩 poke+force,
+service 单元一度只存在于主机上——正是下面教训 1 的翻版。当晚已恢复完整固化。
+
 ## 经验
 
 1. **手工改的系统配置要当场进 repo**——旧 service 是 3 月手工配的,从未 codify,
@@ -62,3 +83,4 @@ grep -A2 'crtc\[' /sys/kernel/debug/dri/*/state | grep active=
    stdin/stdout 各自指向哪里。
 3. 屏幕/背光状态的 sysfs 属性(`dpms`、`bl_power`)在无 X 的 fbcon 场景下不可靠,
    以 debugfs atomic state 为准。
+4. 屏幕亮 ≠ 机制坏:先跑只读 check,分清「唤醒窗口内」和「真回归」再动手。

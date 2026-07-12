@@ -22,6 +22,10 @@ power-optimize:
 console-screen-off:
     ansible-playbook playbooks/console-screen-off.yaml
 
+# pve-1 屏幕断电健康检查（只读）：service / consoleblank / CRTC 状态
+console-screen-check:
+    ansible-playbook playbooks/console-screen-check.yaml
+
 # pve-1 电源微调：ASPM 运行时生效 + USB 上行网卡禁 autosuspend + 电池限充 60%
 power-tune-pve1:
     ansible-playbook playbooks/power-tune-pve1.yaml

@@ -1,0 +1,39 @@
+---
+# pve-1 屏幕自动断电健康检查(只读,不改任何状态)
+# 背景与坑点见 docs/records/2026-07-12-pve-screen-backlight-always-on.md
+#
+# 判读:
+# - service active + consoleblank=600 + CRTC active=0 → 正常,面板已断电
+# - service active + consoleblank=600 + CRTC active=1 → 大概率也正常:
+#   最近 10 分钟内有唤醒事件(键盘/触摸板/电源键/控制台输出),
+#   计时重置后会自动再断电;想立即熄屏跑 `just console-screen-off`。
+#   只有无人碰机器且持续 >10 分钟一直 active=1 才是真异常
+#   (2026-07-12 晚用临时 --blank 1 + 键盘 IRQ 计数实测过定时器路径正常)。
+- name: Check console screen auto power-off health (pve-1)
+  hosts: pve-1
+  gather_facts: false
+  tasks:
+    - name: setterm-config service is active
+      ansible.builtin.command: systemctl is-active setterm-config.service
+      register: svc
+      changed_when: false
+      failed_when: svc.stdout != "active"
+
+    - name: Kernel consoleblank timeout is 600s
+      ansible.builtin.command: cat /sys/module/kernel/parameters/consoleblank
+      register: consoleblank
+      changed_when: false
+      failed_when: consoleblank.stdout != "600"
+
+    - name: Read panel CRTC power state (DRM debugfs atomic state)
+      ansible.builtin.shell: grep -A2 'crtc\[' /sys/kernel/debug/dri/*/state | grep -m1 'active='
+      register: crtc_state
+      changed_when: false
+
+    - name: "=== Screen power-off health ==="
+      ansible.builtin.debug:
+        msg:
+          - "setterm-config: {{ svc.stdout }}"
+          - "consoleblank: {{ consoleblank.stdout }}s"
+          - "panel CRTC: {{ crtc_state.stdout | trim }}"
+          - "active=0 → 已断电;active=1 → 最近 10 分钟内被唤醒,等它自动再熄或跑 just console-screen-off"
