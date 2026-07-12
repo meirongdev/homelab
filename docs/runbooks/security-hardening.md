@@ -55,8 +55,8 @@ just psa-status                       # 看各 ns enforce/warn 等级
 git push                              # oracle：kustomize 树标签随 ArgoCD 同步
 ```
 
-- baseline ns（实测零特权工作负载）：`default vault zitadel kopia database bifrost personal-services cloudflare external-secrets argocd`
-- privileged ns（显式豁免，warn/audit 仍记 baseline）：`kube-system monitoring`
+- baseline ns（实测零特权工作负载）：`default vault bifrost personal-services cloudflare external-secrets argocd kyverno`
+- privileged ns（显式豁免，warn/audit 仍记 baseline）：`kube-system monitoring trivy-system tetragon kube-bench`
 - PSA 仅在 Pod **创建/更新**时评估，不杀已运行 Pod。
 
 **验证**：

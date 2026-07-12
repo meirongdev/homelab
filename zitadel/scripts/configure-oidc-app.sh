@@ -7,7 +7,7 @@
 # direct/bypass connection fails ZITADEL's instance-host check. REST is plain
 # HTTP/JSON — no trailers — and works through the gateway. Same reason SMTP and
 # the Bifrost client are done by their own scripts. See
-# docs/runbooks/zitadel-console-grpc-404.md.
+# docs/records/zitadel-console-grpc-404.md.
 #
 # Generalises configure-bifrost-oauth.sh: creates (idempotently) a WEB OIDC app
 # with BASIC client auth in a project (default "Homelab"). On first create it

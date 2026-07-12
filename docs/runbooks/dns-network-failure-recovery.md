@@ -145,7 +145,7 @@ systemctl restart k3s
 ### Step 4 — Force restart stuck pods
 
 ```bash
-for ns in argocd cloudflare homepage kopia personal-services; do
+for ns in argocd cloudflare personal-services; do
   kubectl --context k3s-homelab delete pods -n $ns --all --force
 done
 ```
