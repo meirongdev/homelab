@@ -105,7 +105,8 @@
   - **⚠️ `secret/homelab/zitadel` 是活的，别删**——oracle zitadel ns 的 3 个 ExternalSecret（config/masterkey/postgres-auth）+ oracle backup 跨集群读它
   - 删除后同步更新本地 `k8s/helm/values/vault_values.md`（gitignored 的 Vault 内容清单，含明文值——确认过未进 git 历史，保持 gitignore）
 - [ ] PSA: 实测 `backup` ns 后决定是否纳入 `psa_baseline_ns`（`k8s/helm/justfile` 注释有标记；注意 sqlite 备份 CronJob 用特权 hostPath 读 local-path 根，大概率要走 privileged/豁免路线）
-- [ ] Tailscale 根因修复: 让 mbpm5 **停止广播** `192.168.50.0/24`（`nfs-lan-route` systemd unit 只是绕行 workaround——laptop 休眠时该 Tailscale 路由会黑洞 106，影响 restic/vzdump 备份路径；见 `k8s/ansible/playbooks/setup-tailscale.yaml` 注释。修复后可移除 k8s-node 与 pve 两处的 unit）
+- [x] **Tailscale 根因修复** ✅ 2026-07-12: mbpm5 已 `tailscale set --advertise-routes=` 停止广播 `192.168.50.0/24`（`AdvertiseRoutes` 确认清空）。pve 自己仍在广播同一网段（合理——24/7 在线，不像笔记本会睡眠/离线，更适合当 subnet router），mbpm5 accept-routes 保持开启不变（kubectl 访问 k3s API 依赖它接受 pve 广播的 `10.10.10.0/24`，关掉会破功能）。**待办**：`k8s-node`/`pve` 上的 `nfs-lan-route` workaround unit 尚未移除，先观察一段时间再决定要不要退役。
+  - ⚠️ 排查中发现一个**未解之谜，和上面这条修复无关**：这台 Mac 上 `terraform plan/apply`（连 `192.168.50.4:8006` Proxmox API）100% 复现 `dial tcp ...: connect: no route to host`，但 `ping`/`curl`/`ssh` 到同一地址全部正常（curl 能拿到响应，只是偏慢 ~3s）。**已排除 Tailscale 路由是根因**——把 Tailscale 整个 `down` 掉复测，问题依旧 100% 复现。当前无阻塞（VM 内存等变更已改走 `qm`/SSH 绕过 terraform 执行），暂不深究；如果以后要用 terraform 管 Proxmox 且还是连不上，从这条线索继续查（怀疑是 terraform provider 的 HTTP client 行为或本机残留的 utun0-3/网络扩展相关，不是标准路由表问题）。
 
 ### 🟡 Medium Effort
 

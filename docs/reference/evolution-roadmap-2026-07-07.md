@@ -4,6 +4,7 @@
 > 范围: 仓库技术债 + IaC/GitOps 工具链 2026 选型（软件/工具链层）
 > 定位: 承接 [architecture-optimization-2026-07-04](architecture-optimization-2026-07-04.md)（物理层）。回答"是否引入 Crossplane"——**结论：不引入**（§三）。
 > 背景: 2026-07-07 已完成一轮 repo↔集群一致性清理（helm pin 对齐、homelab postgres 残留移除、ReferenceGrant v1beta1 回退、gotify-bridge 双 App 争抢去重，22 App 全 Synced/Healthy）。本文是清理后的存量盘点与后续顺序。
+> **2026-07-11 更新**: 本文列为"既列未做"/Phase E 的存储本地化迁移（nfs-client → local-path）已完成，见 `docs/plans/ROADMAP.md` Phase 4。
 
 ---
 

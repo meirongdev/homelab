@@ -29,7 +29,7 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 
 | 维度 | homelab | oracle-k3s |
 |------|---------|------------|
-| 硬件 | Ryzen 5600H 笔记本, 32GB | Oracle Cloud Free Tier (ARM, 24GB) |
+| 硬件 | Ryzen 5600H 笔记本, 16GB 物理（OS 实际可见 13.5GB，~2GB 被核显 UMA 显存占用；实测见 [architecture-optimization-2026-07-04.md §4](reference/architecture-optimization-2026-07-04.md)） | Oracle Cloud Free Tier (ARM, 24GB) |
 | 角色 | 主力集群 (observability/vault/calibre) | 轻量服务 (homepage/it-tools/uptime) |
 | 存储 | NFS (ZFS raidz1) + local-path | local-path only |
 | 备份 | restic CronJob → 106 sftp | restic CronJob → 106 sftp (via TS) |

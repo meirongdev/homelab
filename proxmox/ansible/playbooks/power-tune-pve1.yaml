@@ -1,5 +1,5 @@
 ---
-# pve-1(小新 Pro 14 笔记本)专属电源微调,三件事:
+# pve-1(小新 Pro 14 笔记本)专属电源微调,四件事:
 #
 # 1. PCIe ASPM powersupersave
 #    power-optimize.yaml 曾写入 `pcie_aspm=powersupersave`,但该参数只接受
@@ -15,7 +15,25 @@
 # 3. ideapad conservation_mode=1(电池限充 ~60%)
 #    常年插电 + 100% 满充对电池寿命/鼓包风险不利。设置存在 EC 里可跨重启,
 #    oneshot 服务兜底。
-- name: pve-1 power fine-tuning (ASPM / USB NIC autosuspend / battery conservation)
+#
+# 4. AMD 核显(amdgpu)DPM 强制 low
+#    2026-07-12 排查内存发现该核显 UMA 显存固定保留 2GB(BIOS 层面,需进
+#    BIOS 改 UMA Frame Buffer Size 才能真正回收,本 playbook 管不到)。这里
+#    只做能远程做的部分:power_dpm_force_performance_level 之前是 auto,
+#    实测 mclk 卡在最高档(1600MHz)常驻——host 无头跑、不需要图形性能,
+#    强制 low 把 sclk/mclk 钉在最低档降功耗/发热。**不整个禁用核显**:这是
+#    全舰队唯一一台物理机,核显是仅有的本地控制台/应急排障出口,禁用后出问题
+#    没法接显示器看 BIOS/启动日志。用户已在 BIOS 把 UMA Frame Buffer Size
+#    从 2GB 降到 512MB 并重启验证(2026-07-12),OS 可见内存 13.5GB→~15GB。
+#
+# 5. amd-pstate EPP=power + 最高频 2.8GHz 封顶(2026-06-15 曾手工设置,但从未
+#    真正被一次干净重启验证过——只做过"读配置文件确认会持久化"的检查)。
+#    2026-07-12 这次真重启才发现 cpu-epp-power.service 其实一直会启动失败:
+#    `tee: .../energy_performance_preference: Device or resource busy`——
+#    和 tuned(server-powersave profile)在开机时抢同一个 sysfs 属性,
+#    `After=tuned.service` 排序保证不了 tuned 真正写完。改成失败重试循环
+#    (最多 15 次、每次 sleep 1s)修复,而不是死磕更精确的启动顺序。
+- name: pve-1 power fine-tuning (ASPM / USB NIC autosuspend / battery conservation / EPP)
   hosts: pve-1
   gather_facts: false
   tasks:
@@ -100,6 +118,72 @@
         enabled: true
         daemon_reload: true
 
+    # ── 4. AMD 核显 DPM 强制 low(不禁用核显本身)──
+    - name: Force amdgpu DPM performance level to low right now
+      shell: |
+        for f in /sys/class/drm/card*/device/power_dpm_force_performance_level; do
+          [ -w "$f" ] && echo low > "$f"
+        done
+      changed_when: true
+
+    - name: Persist amdgpu DPM=low via oneshot service
+      copy:
+        dest: /etc/systemd/system/amdgpu-dpm-low.service
+        content: |
+          [Unit]
+          Description=Force amdgpu DPM performance level to low (headless host, no graphics workload)
+          After=multi-user.target
+
+          [Service]
+          Type=oneshot
+          ExecStart=/bin/sh -c 'for f in /sys/class/drm/card*/device/power_dpm_force_performance_level; do [ -w "$f" ] && echo low > "$f"; done'
+          RemainAfterExit=yes
+
+          [Install]
+          WantedBy=multi-user.target
+        mode: "0644"
+
+    - name: Enable amdgpu-dpm-low service
+      systemd:
+        name: amdgpu-dpm-low
+        enabled: true
+        daemon_reload: true
+
+    # ── 5. amd-pstate EPP=power + 最高频封顶(重试循环,躲开 tuned 开机抢属性)──
+    - name: Persist EPP=power + 2.8GHz cap via retrying oneshot service
+      copy:
+        dest: /etc/systemd/system/cpu-epp-power.service
+        content: |
+          [Unit]
+          Description=CPU power tuning (amd-pstate EPP=power + max freq cap 2.8GHz)
+          After=multi-user.target tuned.service
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/bin/sh -c 'for i in $(seq 1 15); do ok=1; for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do echo power > "$f" 2>/dev/null || ok=0; done; [ "$ok" = 1 ] && break; sleep 1; done'
+          ExecStart=/bin/sh -c 'for i in $(seq 1 15); do ok=1; for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq; do echo 2800000 > "$f" 2>/dev/null || ok=0; done; [ "$ok" = 1 ] && break; sleep 1; done'
+
+          [Install]
+          WantedBy=multi-user.target
+        mode: "0644"
+      register: epp_service_updated
+
+    - name: Reset any prior failed state and (re)start cpu-epp-power
+      systemd:
+        name: cpu-epp-power
+        enabled: true
+        state: restarted
+        daemon_reload: true
+      when: epp_service_updated.changed
+
+    - name: Enable cpu-epp-power service (idempotent path when unit unchanged)
+      systemd:
+        name: cpu-epp-power
+        enabled: true
+        state: started
+        daemon_reload: true
+
     # ── 验证 ──
     - name: Verify ASPM policy
       command: cat /sys/module/pcie_aspm/parameters/policy
@@ -138,6 +222,22 @@
       register: package_power
       changed_when: false
 
+    - name: Verify amdgpu DPM level and current clocks
+      shell: |
+        for f in /sys/class/drm/card*/device/power_dpm_force_performance_level; do echo "level=$(cat "$f")"; done
+        for f in /sys/class/drm/card*/device/pp_dpm_sclk; do echo "sclk:"; cat "$f"; done
+        for f in /sys/class/drm/card*/device/pp_dpm_mclk; do echo "mclk:"; cat "$f"; done
+      register: gpu_dpm_now
+      changed_when: false
+
+    - name: Verify EPP + max freq cap
+      shell: |
+        echo "epp=$(cat /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference)"
+        echo "max_freq=$(cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq | sort -u | tr '\n' ' ')"
+        systemctl is-active cpu-epp-power
+      register: epp_now
+      changed_when: false
+
     - name: "=== Results ==="
       debug:
         msg:
@@ -146,6 +246,8 @@
           - "{{ battery_now.stdout_lines }}"
           - "Kernel log check: {{ kernel_errors.stdout_lines }}"
           - "CPU package power (5s sample): {{ package_power.stdout }}"
+          - "{{ gpu_dpm_now.stdout_lines }}"
+          - "{{ epp_now.stdout_lines }}"
 
   handlers:
     - name: Reload systemd

@@ -1,5 +1,7 @@
 # Connect Debian NAS to Cilium Network via External Workload
 
+> **状态: ❌ 已取消 (2026-03-19)** — `CiliumExternalWorkload` CRD 及 `cilium external-workloads` CLI 已从 Cilium 1.15+ Helm chart 移除，本方案技术上不可行（Cilium 1.19.1 不支持）。若需限制 NFS 访问，改用 `CiliumNetworkPolicy` + `fromCIDR: 192.168.50.106/32` 的轻量方案，无需在 NAS 上装 Cilium agent。见 [ROADMAP.md](../ROADMAP.md) "❌ 已取消"一节。
+
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Join the Debian NAS (`192.168.50.106`) to the homelab Cilium network as a managed external workload, so the NAS can reach cluster Services and pods can reach the NAS over Cilium-controlled paths with policy support.

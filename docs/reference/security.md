@@ -18,7 +18,7 @@
 | # | 层 | 组件 | 状态 | 配置位置 | 集群 |
 |---|----|------|------|----------|------|
 | 1 | 边缘 | Cloudflare WAF + Tunnel + 限流 | ✅ 生产 | `cloudflare/terraform/waf.tf` | 双（zone 级） |
-| 2 | 身份 | ZITADEL OIDC + GitHub 联邦 | ✅ 生产 | `zitadel/`, 各 app values | homelab(IdP) |
+| 2 | 身份 | ZITADEL OIDC + GitHub 联邦 | ✅ 生产 | `zitadel/`, 各 app values | oracle-k3s(IdP，2026-07-06 迁自 homelab，见 [zitadel-to-oracle-k3s.md](../plans/apps/2026-07-04-zitadel-to-oracle-k3s.md)) |
 | 3 | 密钥 | Vault + ESO + 健康告警 | ✅ 生产 | `k8s/helm/values/vault-*`, `manifests/eso-alerts.yaml` | 双 |
 | 4 | 准入：Pod 基线 | Pod Security Admission | ✅ 生产 | `just harden-psa` / oracle ns 清单 | 双 |
 | 5 | 准入：策略即代码 | Kyverno（Audit） | ✅ 生产 | `values/kyverno.yaml`, `manifests/kyverno-policies/` | homelab |
@@ -88,7 +88,7 @@
 ## 6. 供应链与漏洞扫描 (Supply chain / CVE) — Trivy Operator
 
 - **扫描面**：镜像 CVE + 配置审计 + RBAC 评估 + **镜像内暴露密钥**（最高信号）。结果以 CR 落地（`vulnerabilityreports`/`configauditreports`/`exposedsecretreports`/`rbacassessmentreports`）。
-- **热节点调优**：`scanJobsConcurrentLimit:1`（串行，杜绝扫描器风暴）+ `builtInTrivyServer`(ClientServer + NFS PVC 持久化漏洞 DB，避免反复重下) + `severity:HIGH,CRITICAL` + `ignoreUnfixed` + 关 `clusterCompliance`（CIS 交给 kube-bench）。
+- **热节点调优**：`scanJobsConcurrentLimit:1`（串行，杜绝扫描器风暴）+ `builtInTrivyServer`(ClientServer + `local-path` PVC 持久化漏洞 DB，避免反复重下；2026-07-11 随存储本地化迁移离开 NFS) + `severity:HIGH,CRITICAL` + `ignoreUnfixed` + 关 `clusterCompliance`（CIS 交给 kube-bench）。
 - **接入可观测**：ServiceMonitor（带 `release:kube-prometheus-stack`）→ Prometheus 抓 `trivy_image_vulnerabilities` 等；告警 `manifests/trivy-alerts.yaml`（critical CVE→warning、暴露密钥 High/Critical→**critical**、absent 元告警）经 Gotify；看板 Grafana `Security` 文件夹。
 
 ## 7. CIS 合规与节点加固
