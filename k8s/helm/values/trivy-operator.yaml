@@ -30,13 +30,15 @@ operator:
   builtInTrivyServer: true              # 内置长驻 Trivy server（共享 DB 缓存）
 
 # operator 自身（控制器）资源
+# 2026-07-16 fix: 256Mi → 512Mi. 200 restart OOM (exit 137). Trivy plugin loading
+# + concurrent reconciliation on single-node homelab exceeds 256Mi.
 resources:
   requests:
     cpu: 50m
-    memory: 128Mi
+    memory: 256Mi
   limits:
     cpu: 250m
-    memory: 256Mi
+    memory: 512Mi
 
 trivy:
   mode: ClientServer                    # 配合 builtInTrivyServer

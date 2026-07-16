@@ -42,6 +42,15 @@ reportsController:
   replicas: 1
   antiAffinity:
     enabled: false
+  # 2026-07-16 fix: add explicit resources. 122 restarts on single-node homelab —
+  # report controller churn from 100s of policy reports overwhelms default limits.
+  container:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 512Mi
   serviceMonitor:
     enabled: true
     additionalLabels:

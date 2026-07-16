@@ -1,12 +1,14 @@
 server:
   affinity: ""
+  # 2026-07-16 fix: memory 256Mi→512Mi, CPU 500m→1. Vault tab 42.6% CPU throttling
+  # + 5 restarts (exit 255, OOM). Raft snapshot + TLS + audit device startup spike.
   resources:
     requests:
       cpu: 50m
-      memory: 128Mi
-    limits:
-      cpu: 500m
       memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
   ha:
     enabled: true
     replicas: 1

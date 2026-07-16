@@ -13,7 +13,7 @@ spec:
   jobTemplate:
     spec:
       activeDeadlineSeconds: 3600   # 超 1h 视为卡住（如 NFS hang）→ 失败告警而非常驻
-      backoffLimit: 1
+      backoffLimit: 2                 # 2026-07-16: 1→2 (transient SSH/Tailscale failures like 29732820)
       template:
         metadata:
           labels: { app: restic-backup }
