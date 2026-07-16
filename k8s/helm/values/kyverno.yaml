@@ -44,13 +44,14 @@ reportsController:
     enabled: false
   # 2026-07-16 fix: add explicit resources. 122 restarts on single-node homelab —
   # report controller churn from 100s of policy reports overwhelms default limits.
-  container:
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        memory: 512Mi
+  # ⚠️ 键名注意：reportsController 是 `resources:` 直挂（chart 3.8.1），没有
+  # admissionController 那样的 `container:` 包装层——套错层级会被静默忽略。
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
   serviceMonitor:
     enabled: true
     additionalLabels:

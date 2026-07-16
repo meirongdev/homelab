@@ -340,28 +340,21 @@ alertmanager:
         source_matchers: [alertname = InfoInhibitor]
         target_matchers: [severity = info]
       - target_matchers: [alertname = InfoInhibitor]
+    # Gotify 路由唯一来源是 AlertmanagerConfig CRD（manifests/alertmanager-config.yaml，
+    # 由下方 alertmanagerConfigSelector 注入，生成的路由 continue=true、先于本静态树求值）。
+    # 2026-07-17 修复：此前这里还有一条 severity=~critical|warning → gotify 的静态路由，
+    # 与 CRD 的 gotify-default 对同一告警双发（repeat 4h + 12h 两套节奏）→ 消息翻倍。
+    # 静态树现在只做兜底丢弃（Watchdog/none/未匹配告警 → null）。
+    # KubeletDown+cluster=oracle-k3s 误报的静默也在 CRD 里（oracle 走 remote-write,
+    # kubelet 无直采指标,规则必触发；homelab 自身的 KubeletDown 仍正常告警）。
     route:
       group_by: [namespace]
       group_wait: 30s
       group_interval: 5m
       repeat_interval: 12h
       receiver: "null"
-      routes:
-        - matchers: [alertname = "Watchdog"]
-          receiver: "null"
-        # KubeletDown 对 oracle-k3s 是误报：oracle 为外部集群、指标走 OTel remote-write，
-        # kube-prometheus-stack 的 KubeletDown 规则直抓不到 kubelet → 误触发。节点实测 Ready。
-        # 丢弃 oracle 的该告警（homelab 的 KubeletDown 仍正常路由）。
-        - matchers: [alertname = "KubeletDown", cluster = "oracle-k3s"]
-          receiver: "null"
-        - matchers: [severity =~ "critical|warning"]
-          receiver: gotify
     receivers:
       - name: "null"
-      - name: gotify
-        webhook_configs:
-          - url: "http://alertmanager-gotify-bridge.monitoring.svc:8080/gotify_webhook"
-            send_resolved: true
     templates:
       - /etc/alertmanager/config/*.tmpl
   alertmanagerSpec:
