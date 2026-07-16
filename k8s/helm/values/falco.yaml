@@ -19,6 +19,14 @@ falco:
   json_output: true          # 结构化告警（利于 Loki 查询）
   json_include_output_property: true
   priority: notice           # 上报 notice 及以上
+
+# 应用白名单例外：restic 备份容器需要 find/restic/ssh 但非 base image 部分。
+# 用法：同名 rule + append:true 附加排除条件，Falco 自动合并到原始 condition。
+customRules:
+  override-backup.yaml: |-
+    - rule: Drop and execute new binary in container
+      append: true
+      condition: and not (k8s.ns.name = "backup" and proc.name in (find, restic, ssh))
 # Falco DaemonSet 资源（oracle 有余量，但仍设上限）
 resources:
   requests:
