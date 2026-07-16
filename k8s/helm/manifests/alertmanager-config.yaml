@@ -17,6 +17,15 @@ spec:
     groupInterval: 5m
     repeatInterval: 4h
     routes:
+      # KubeletDown on oracle-k3s is a known false positive (external cluster,
+      # kubelet not scraped directly). Suppress both the default and critical path.
+      - receiver: "null"
+        matchers:
+          - name: alertname
+            value: KubeletDown
+          - name: cluster
+            value: oracle-k3s
+      # Critical alerts → higher priority Gotify push, repeat every 30m
       - receiver: gotify-critical
         matchers:
           - name: severity
@@ -25,6 +34,7 @@ spec:
         repeatInterval: 30m
         continue: true
   receivers:
+    - name: "null"
     - name: gotify-default
       webhookConfigs:
         - url: http://alertmanager-gotify-bridge.monitoring.svc.cluster.local:8080/gotify_webhook
