@@ -16,6 +16,13 @@ spec:
     groupWait: 30s
     groupInterval: 5m
     repeatInterval: 4h
+    # 只接 critical|warning。之前无过滤时本路由匹配一切告警（matcherStrategy=None
+    # + 顶层路由无 matcher）→ Watchdog/severity=none 每 4h 推一条 gotify。
+    # info 由 InfoInhibitor 抑制，none（Watchdog 等）落回静态配置的 null。
+    matchers:
+      - name: severity
+        matchType: "=~"
+        value: "critical|warning"
     routes:
       # KubeletDown on oracle-k3s is a known false positive (external cluster,
       # kubelet not scraped directly). Suppress both the default and critical path.
