@@ -44,6 +44,33 @@ trivy:
   mode: ClientServer                    # 配合 builtInTrivyServer
   ignoreUnfixed: true                   # 只报有修复版本的 CVE
   severity: "HIGH,CRITICAL"             # 只扫高危
+
+  # ---- Accepted-risk CVE 抑制(2026-07-17)----
+  # 这些 CVE 的"修复版本"是 Go/grpc 层面的,vendor 尚未发布重建镜像,我们无法升级修掉;
+  # 挂着只会让 TrivyImageCriticalVulnerabilities 永久 firing、淹没真正可行动的告警。
+  # ⚠️ 格式坑(改动前必读):
+  #   1. 必须用 .trivyignore.yaml(YAML)格式:chart 把 ignoreFile 列表渲染成
+  #      "- CVE-xxx" 行,纯文本解析器取行首 fields[0]("-")当 ID → 静默失效;
+  #   2. 不能用 expired_at 字段:helm values 的 YAML→JSON 往返会把日期变成带引号的
+  #      字符串,而 trivy(yaml.v3)只对不带引号的标量做 timestamp 解析 →
+  #      decode error → 所有扫描 Job FATAL。复审日期只能写在 statement 里。
+  ignoreFileName: ".trivyignore.yaml"
+  ignoreFile:
+    vulnerabilities:
+      # Go stdlib(修复需 vendor 用 Go 1.24.13/1.25.7+ 重建):argocd v3.4.5(已是
+      # 最新 stable)、alertmanager-gotify-bridge(无维护)、CWA 内置 kepubify
+      - id: CVE-2025-68121
+        statement: "Go stdlib, 等上游重建镜像; argocd v3.5 GA 约 2026-08-04, 2026-09 复审"
+      # grpc-go 1.79.3 才修复;argocd v3.4.5 仍带 1.72.1(tempo 已升 2.9.2 修掉)
+      - id: CVE-2026-33186
+        statement: "grpc-go, argocd v3.4.5 无可用修复版, 等 v3.4.6/v3.5, 2026-09 复审"
+      # calibre-web-automated 镜像内 kepubify 为 Go 1.17.8 构建,上游一直未重建
+      - id: CVE-2023-24538
+        statement: "CWA kepubify (Go 1.17.8), 上游未重建, 2026-11 复审"
+      - id: CVE-2023-24540
+        statement: "CWA kepubify (Go 1.17.8), 上游未重建, 2026-11 复审"
+      - id: CVE-2024-24790
+        statement: "CWA kepubify (Go 1.17.8), 上游未重建, 2026-11 复审"
   # 扫描 Job（client）资源
   resources:
     requests:
