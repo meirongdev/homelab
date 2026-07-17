@@ -118,7 +118,7 @@ spec:
               mountPath: /library
       containers:
         - name: calibre-web
-          image: crocodilestick/calibre-web-automated@sha256:c31a738b6d5ec6982c050063dd3f063b6943eb1051fc81144789f840d9093a8d
+          image: crocodilestick/calibre-web-automated@sha256:4ff5be5cd6f18d91cc72bf316260d8c34c980f09a862372bc77d25c9ddb0efef
           ports:
             - containerPort: 8083
               name: http
