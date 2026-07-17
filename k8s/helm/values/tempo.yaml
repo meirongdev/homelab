@@ -1,7 +1,11 @@
 tempo:
-  image:
-    repository: grafana/tempo
-    tag: 2.9.0
+  # ⚠️ chart(grafana/tempo)的镜像键是扁平的 tempo.repository/tempo.tag,没有
+  # image: 层级——旧写法 tempo.image.tag 是无效键,恰好与 chart 1.24.4 的
+  # appVersion(2.9.0)相同才看似生效。
+  # 2.9.2:Go 1.26.2 + grpc 1.79.3,修复 CVE-2025-68121 / CVE-2026-33186,
+  # 另含 Tempo 自身的 CVE-2026-21728(搜索结果集无上限)修复。
+  repository: grafana/tempo
+  tag: 2.9.2
   replicas: 1
   
   # 追踪数据保留期
@@ -28,9 +32,11 @@ tempo:
       cpu: 300m              
       memory: 384Mi
 
-# 启用查询前端
+# 启用查询前端(镜像键同样是扁平的 repository/tag,与 tempo 版本保持一致)
 tempoQuery:
   enabled: true
+  repository: grafana/tempo-query
+  tag: 2.9.2
   resources:
     requests:
       cpu: 50m
