@@ -45,6 +45,13 @@ trivy:
   ignoreUnfixed: true                   # 只报有修复版本的 CVE
   severity: "HIGH,CRITICAL"             # 只扫高危
 
+  # trivy ≥0.72.0 必须:0.71 的临时目录是 /tmp/trivy-<PID>,而扫描 pod 内所有
+  # 容器共享 /tmp emptyDir 且 trivy 的 PID 相同 → 多容器 workload(loki、tetragon)
+  # 扫描 100% 撞名,先扫完的容器清目录摧毁另一个 → Job 失败 + "Job failed to
+  # complete" 告警。0.72.0 改为随机后缀(trivy-operator#2859)。
+  image:
+    tag: "0.72.0"
+
   # ---- Accepted-risk CVE 抑制(2026-07-17)----
   # 这些 CVE 的"修复版本"是 Go/grpc 层面的,vendor 尚未发布重建镜像,我们无法升级修掉;
   # 挂着只会让 TrivyImageCriticalVulnerabilities 永久 firing、淹没真正可行动的告警。
