@@ -76,14 +76,16 @@ sidecar:
   image:
     tag: 2.8.1
 
-# ✅ 减少 canary 副本数
+# ✅ 禁用 self-monitoring (grafanaAgent operator etc.)
 monitoring:
   selfMonitoring:
     enabled: false
     grafanaAgent:
       installOperator: false
-  lokiCanary:
-    enabled: false # 禁用 canary, 节省资源
+
+# ✅ 禁用 canary — chart 7.1.0 把路径从 monitoring.lokiCanary 移到顶层
+lokiCanary:
+  enabled: false # 禁用 canary, 节省资源
 
 # ✅ 确保禁用其他模式的组件
 read:
