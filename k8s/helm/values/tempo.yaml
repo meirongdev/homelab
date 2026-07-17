@@ -1,7 +1,7 @@
 tempo:
   image:
     repository: grafana/tempo
-    tag: 2.8.2
+    tag: 2.9.0
   replicas: 1
   
   # 追踪数据保留期

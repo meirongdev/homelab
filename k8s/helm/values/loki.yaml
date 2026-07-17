@@ -71,6 +71,11 @@ resultsCache:
   # 或者：
   # allocatedMemory: 256  # MB
 
+# k8s-sidecar 版本 — 覆盖 chart 默认值 (2.5.0)，修复 CVE-2026-31789
+sidecar:
+  image:
+    tag: 2.8.1
+
 # ✅ 减少 canary 副本数
 monitoring:
   selfMonitoring:

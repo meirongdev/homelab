@@ -24,7 +24,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
       containers:
         - name: cloudflared
-          image: cloudflare/cloudflared@sha256:a5b5e6fd9a372f054b9a843c219bfbcdceb54691605312a8b1ee72978bdf1aa1
+          image: cloudflare/cloudflared@sha256:18626b1baac4450214535cd5bc40ef44c0635244d585ebf707749c22b6f3408f
           args:
             - tunnel
             - --no-autoupdate

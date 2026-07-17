@@ -479,9 +479,10 @@ vault-backup-keys:
 argocd_ns := "argocd"
 
 # Argo CD chart version — 调整前先 helm search repo argo/argo-cd 看最新
-# 9.5.11 = appVersion v3.3.9（修 CVE-2026-42880；同小版本补丁升，避开 v3.4 迁移风险）。
+# 10.1.4 = appVersion v3.4.5（从 v3.3.9 升级，修 CVE-2025-68121 / CVE-2026-33186 Go 运行时 CVE）。
+#   v3.3 已无后继补丁，v3.4 是唯一修复路径；迁移风险由 --force-conflicts 兜底（见 deploy-argocd）。
 # ⚠️ 这是 GitOps 控制器自升级：deploy-argocd 时若 gateway health 字段 SSA 冲突，加 --force-conflicts 重跑。
-argocd_chart_version := "9.5.11"
+argocd_chart_version := "10.1.4"
 
 # 一键安装 ArgoCD + 应用配置（幂等，可重复执行）
 # 改为官方 Helm chart 部署（k8s/helm/values/argocd-values.yaml）
