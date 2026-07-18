@@ -1,0 +1,32 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cnpg-operator
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: homelab
+  sources:
+    # CloudNativePG operator chart —— 部署前 `helm search repo cnpg/cloudnative-pg --versions` 核对。
+    - repoURL: https://cloudnative-pg.github.io/charts
+      chart: cloudnative-pg
+      targetRevision: "0.29.0"   # operator appVersion 1.30.0
+      helm:
+        valueFiles:
+          - $values/k8s/helm/values/cnpg-operator.yaml
+    - repoURL: https://github.com/meirongdev/homelab
+      targetRevision: main
+      ref: values
+  destination:
+    # oracle-k3s 外部集群（Tailscale 端点；与 falco/oracle-k3s App 同）
+    server: https://100.107.166.37:6443
+    namespace: cnpg-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # 大 CRD（CNPG Cluster CRD 很大）→ SSA 避免 client-side apply 的注解超长问题。
+      - ServerSideApply=true
