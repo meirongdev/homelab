@@ -2,14 +2,15 @@
 # 参考: https://argocd-image-updater.readthedocs.io/
 
 config:
+  # chart ≥1.2 把日志级别移到 ConfigMap 键 config.log.level(旧顶层 logLevel 已失效);
+  # 稳态用 info。
+  log.level: info
   registries:
     - name: GitHub Container Registry
       api_url: https://ghcr.io
       prefix: ghcr.io
       insecure: false
       credentials: pullsecret:argocd/argocd-image-updater-secret
-
-logLevel: debug   # 初次验证后改为 info
 
 resources:
   requests:
