@@ -45,7 +45,7 @@ GitOps 覆盖与安全纵深已成熟。剩余债务集中三处：
 
 ### D. 既列未做（ROADMAP 已跟踪，此处不展开）
 
-存储本地化迁移（nfs-client → local-path）、离站备份（restic → 云）、dead-man's switch、zpool/SMART 告警、DGX Spark 入编、恢复演练自动化、homelab 旧 ZITADEL 退役（迁移后保留回滚中）。
+存储本地化迁移（nfs-client → local-path）、离站备份（restic → 云）、dead-man's switch、zpool/SMART 告警、DGX Spark 入编、恢复演练自动化。
 
 ### E. 卫生项（半小时）
 
