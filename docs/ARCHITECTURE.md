@@ -71,5 +71,5 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 ## Current Active Work
 
 - **主线**: 存储本地化迁移 + 备份体系重建 → `plans/storage/2026-07-06-*.md`
-- **下一步**: 离站备份, dead-man's switch, Gotify/ZITADEL 迁 oracle-k3s
+- **下一步**: 离站备份, dead-man's switch, zpool/SMART 告警
 - **完整路线图**: `plans/ROADMAP.md`

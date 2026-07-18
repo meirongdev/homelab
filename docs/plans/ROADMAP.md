@@ -46,7 +46,7 @@
 - [ ] **dead-man's switch**: Alertmanager Watchdog（当前 `receiver:"null"`）→ oracle Uptime Kuma push monitor → Gotify(oracle)→Telegram
 - [ ] **zpool/SMART 告警**: 补 PrometheusRule（当前仅有看板，无告警）
 - [x] **Loki 日志保留**: ✅ 2026-03-19 compactor + retention 168h 已启用
-- [x] **Alertmanager**: ✅ severity=warning|critical → gotify-bridge → Gotify → Telegram（生产运行）
+- [x] **Alertmanager**: ✅ severity=warning|critical → 原生 telegramConfigs → Telegram（生产运行；2026-07-18 起，gotify-bridge 因 concurrent-map-write 崩溃 bug 下线，见 `decisions/alerting-telegram-migration.md`）
 - [x] **oracle-k3s Cilium**: 从 Flannel 迁移到 Cilium，统一双集群数据面
 - [x] **Uptime Kuma SSO 修复**: maxredirects=0 + accepted_statuscodes 300-399
 - [x] **homelab Ubuntu 24.04 重建**: ✅ 2026-03-08 重建完成，K3s v1.34.5+k3s1 + Cilium 1.19.1
@@ -115,7 +115,7 @@
 - [ ] dead-man's switch（Watchdog → oracle Uptime Kuma push）
 - [ ] Terraform state → R2 backend + `use_lockfile`（5 root；可顺带评估 OpenTofu）
 - [ ] external-dns 上线（`--source=gateway-httproute` + cloudflare-proxied）
-- [x] Alertmanager → Gotify 通知模板 ✅
+- [x] Alertmanager → Telegram 通知模板 ✅（2026-07-18 起原生 telegramConfigs，见上）
 - [x] oracle-k3s Cilium 迁移
 
 ### 🔴 High Effort

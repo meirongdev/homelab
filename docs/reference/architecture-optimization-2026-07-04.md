@@ -12,7 +12,7 @@
 
 1. **算力倒挂**：最关键的负载（Vault、ArgoCD hub、可观测中枢；ZITADEL 已于 2026-07-06 迁 oracle-k3s，不再算在内）全部跑在舰队里**最弱的机器**上——16GB 物理内存、idle ~74°C 的 5600H 笔记本（VM 硬分配 12GB 无 balloon，宿主实测仅 ~987Mi available；见 §4 2026-07-12 实测）。而 Oracle 免费节点有 24GB（两倍），两台 DGX Spark 各 128GB 基本闲置（仅接了 node_exporter / smartctl_exporter）。
 
-2. **故障域集中**：身份（ZITADEL）、密钥（Vault）、GitOps（管两个集群）、告警出口（Alertmanager → gotify-bridge → Gotify）——五种"救命能力"住在同一台笔记本的同一个 VM 里。**homelab 整机挂掉时，指标告警链全哑**（Watchdog 被 drop，没有 dead-man's switch），只能靠人工发现。
+2. **故障域集中**：~~身份（ZITADEL）、~~密钥（Vault）、GitOps（管两个集群）、告警出口（Alertmanager → ~~gotify-bridge → Gotify~~ **原生 telegramConfigs → Telegram，2026-07-18 起**）——三种"救命能力"住在同一台笔记本的同一个 VM 里（ZITADEL 已随 2026-07-06 迁移脱离，见上条）。**homelab 整机挂掉时，指标告警链全哑**（Watchdog 被 drop，没有 dead-man's switch），只能靠人工发现。
 
 3. **数据单点**：Kopia 已于 2026-07-05 移除，~~当前全系统无任何备份~~ **已由 restic 取代**（2026-07-06 上线 + 恢复演练通过，见下方 P0-1）。`docs/plans/ROADMAP.md` Phase 4 的"离站备份"仍未做，是当前唯一**不可逆**的残余风险。
 
