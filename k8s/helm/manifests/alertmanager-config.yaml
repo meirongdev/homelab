@@ -1,52 +1,66 @@
 ---
-# AlertManager → Gotify 路由。bridge 的 Deployment/Service/ExternalSecret 在
-# gotify.yaml（personal-services App 拥有）——不要在此重复定义，两个 App 会争抢同名资源。
+# AlertManager → Telegram 路由(homelab)。
+# 2026-07-18: 从 Gotify bridge(druggeri/alertmanager_gotify_bridge)换成 Alertmanager
+# 原生 telegramConfigs。原 bridge 有 `concurrent map writes` 崩溃 bug(全局无锁 metrics
+# map,两个并发 webhook 即 fatal),且上游无维护、无修复镜像。Telegram 原生投递 = 零中间
+# 桥、无并发崩溃、无版本绑定构建。
+# ⚠️ Gotify 本体不受影响:仍为 Falco 服务(falcosidekick 原生推送 app 2),此处只拿掉
+#    Alertmanager 那条坏 bridge(gotify app 1 = alertmanager_app 从此闲置,可后续在 Gotify 删)。
+# bot token: k8s Secret monitoring/alertmanager-telegram key=bot-token
+#   ⚠️ 暂为 imperative secret(改造时 Vault token 已过期)。TODO: 迁回 Vault
+#      secret/homelab/telegram + ExternalSecret(拿到有效 VAULT_TOKEN 后)。
+# chatID 1982853512 = 私聊 @matthew_daily_bot。
 ---
 apiVersion: monitoring.coreos.com/v1alpha1
 kind: AlertmanagerConfig
 metadata:
-  name: gotify
+  name: telegram
   namespace: monitoring
   labels:
     alertmanagerConfig: homelab
 spec:
   route:
-    receiver: gotify-default
+    receiver: telegram
     groupBy: ["alertname", "cluster", "severity"]
     groupWait: 30s
     groupInterval: 5m
     repeatInterval: 4h
-    # 只接 critical|warning。之前无过滤时本路由匹配一切告警（matcherStrategy=None
-    # + 顶层路由无 matcher）→ Watchdog/severity=none 每 4h 推一条 gotify。
-    # info 由 InfoInhibitor 抑制，none（Watchdog 等）落回静态配置的 null。
+    # 只接 critical|warning。info 由 InfoInhibitor 抑制,none(Watchdog 等)落回静态 null。
     matchers:
       - name: severity
         matchType: "=~"
         value: "critical|warning"
     routes:
-      # KubeletDown on oracle-k3s is a known false positive (external cluster,
-      # kubelet not scraped directly). Suppress both the default and critical path.
+      # KubeletDown on oracle-k3s 是已知误报(外部集群,kubelet 未被直抓)。丢弃。
       - receiver: "null"
         matchers:
           - name: alertname
             value: KubeletDown
           - name: cluster
             value: oracle-k3s
-      # Critical alerts → higher priority Gotify push, repeat every 30m
-      - receiver: gotify-critical
+      # Critical → 更快重复(30m vs 4h)。同一 telegram 接收器,模板按 severity 标记
+      # 🆘/⚠️(Telegram 无 Gotify 那种数字优先级,用 emoji + 更快 repeat 区分紧急度)。
+      - receiver: telegram
         matchers:
           - name: severity
             value: critical
         groupWait: 10s
         repeatInterval: 30m
-        continue: true
   receivers:
     - name: "null"
-    - name: gotify-default
-      webhookConfigs:
-        - url: http://alertmanager-gotify-bridge.monitoring.svc.cluster.local:8080/gotify_webhook
+    - name: telegram
+      telegramConfigs:
+        - botToken:
+            name: alertmanager-telegram
+            key: bot-token
+          chatID: 1982853512
+          parseMode: HTML
           sendResolved: true
-    - name: gotify-critical
-      webhookConfigs:
-        - url: http://alertmanager-gotify-bridge.monitoring.svc.cluster.local:8080/gotify_webhook?priority=8
-          sendResolved: true
+          # 标题行按状态/严重度标 emoji + 加粗;正文列出各 alert 的 summary/description。
+          # 本集群告警文本为中文散文 + 反引号,无 <>& → HTML 安全。
+          message: |-
+            {{ if eq .Status "resolved" }}✅ <b>RESOLVED</b>{{ else if eq .CommonLabels.severity "critical" }}🆘 <b>CRITICAL</b>{{ else }}⚠️ <b>WARNING</b>{{ end }} · <b>{{ .CommonLabels.alertname }}</b>{{ if .CommonLabels.cluster }} @ {{ .CommonLabels.cluster }}{{ end }}
+            {{ range .Alerts }}
+            ▸ {{ .Annotations.summary }}{{ if .Annotations.description }}
+            {{ .Annotations.description }}{{ end }}
+            {{ end }}
