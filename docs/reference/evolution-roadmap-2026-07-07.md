@@ -12,7 +12,7 @@
 
 GitOps 覆盖与安全纵深已成熟。剩余债务集中三处：
 
-1. **一个安全债**：ZITADEL 的数据库是 Bitnami 冻结镜像（§一 A）——全仓库唯一"不修会持续变糟"的项。
+1. ~~**一个安全债**：ZITADEL 的数据库是 Bitnami 冻结镜像（§一 A）——全仓库唯一"不修会持续变糟"的项。~~ ✅ 2026-07-18 已清偿（Phase C 完成，迁 CNPG PG17）。
 2. **一个结构性缺口**：5 个 Terraform root 的 state 全在笔记本本地（§一 B）——笔记本即全部 IaC 的单点。
 3. **一个自动化缺口**：无 Renovate，版本 pin 靠手（§一 C）——2026-07-07 发现的 vault/ESO pin 漂移即此后果，会复发。
 
@@ -22,9 +22,9 @@ GitOps 覆盖与安全纵深已成熟。剩余债务集中三处：
 
 ## 一、剩余问题清单
 
-### A. 安全债（唯一"必须做"）
+### A. 安全债（唯一"必须做"）— ✅ 2026-07-18 已解决
 
-**ZITADEL DB = `bitnamilegacy/postgresql:15.4.0-debian-11-r10`**（oracle `zitadel` ns，helm release `zitadel-db`，chart `postgresql-12.10.0`）。
+**ZITADEL DB ~~= `bitnamilegacy/postgresql:15.4.0-debian-11-r10`~~ → CNPG `zitadel-pg`（PG 17.6，operator 1.30.0）**。迁移按下方 Phase C 原计划执行，实际停机 ~4.5 分钟；旧 helm release `zitadel-db` + PVC + `zitadel-postgres-auth` ExternalSecret 已全部移除。以下为历史背景：
 
 - 2023-08 构建的镜像；Bitnami 2025-08 商业化后 `bitnamilegacy/` 通道**永久冻结、不再收 CVE 补丁**（`cloud/oracle/manifests/zitadel/zitadel.yaml` 注释已记录）。
 - 它存的是**全部 SSO 凭据**——安全债权重最高的一块。
@@ -114,7 +114,14 @@ GitOps 覆盖与安全纵深已成熟。剩余债务集中三处：
 
 离站备份（restic 仓库 → OCI always-free 20GB / B2）→ dead-man's switch（Watchdog → oracle Uptime Kuma push）→ zpool/SMART PrometheusRule。见 [2026-07-06 计划](../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md)。
 
-### Phase C — ZITADEL DB → CloudNativePG（一个周末；15–30 分钟停机窗口）
+### Phase C — ZITADEL DB → CloudNativePG ✅ 2026-07-18 完成（实际停机 ~4.5 分钟）
+
+按原计划 1-3 执行完毕：CNPG operator ArgoCD App(`cnpg-operator`,chart 0.29.0) + `Cluster` CR
+(`zitadel-pg`,PG 17.6,单实例,local-path 8Gi,凭据复用 Vault `secret/homelab/zitadel`) +
+pg_dump/restore 迁移(逐表行数核对) + OIDC/console 实测验证 + 旧 `zitadel-db` 退役。
+第 4 条可选项(miniflux 收编 / barman)均未做,维持原"不做也成立"判断。
+⚠️ 落地新增经验:备份容器需 `postgresql17-client`(pg_dump 16 拒绝 dump PG17,alpine 升 3.22)。
+原计划留档：
 
 1. CNPG operator 以 ArgoCD App 部署到 oracle-k3s（chart 版本 pin 进 Application）。
 2. 建 `Cluster` CR：官方 PG 镜像、storage 用 oracle **local-path**（与现 zitadel-db 一致，PG 同步写不走 NFS）、`instances: 1`（单节点集群无 HA 意义，不过度工程）。
