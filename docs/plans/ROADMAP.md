@@ -31,7 +31,7 @@
 
 - [x] Cross-Cluster Networking — Tailscale 双向 Pod CIDR 路由 (homelab ↔ oracle-k3s)
 - [x] Identity simplification — 保留 ZITADEL 身份服务，移除共享入口层 SSO
-- [x] 信息管道 — Miniflux → Redpanda Connect → KaraKeep → Gotify → Telegram
+- [x] 信息管道 — Miniflux → Redpanda Connect → KaraKeep（telegram 标签收藏，推送已于 2026-07 随 Gotify 下线砍掉未迁移——token 早已 401 失效，用得不多）
 - [x] Cloudflare WAF — Zone 级 WAF 防护 (自定义规则、速率限制、安全设置)
 - [x] Uptime Kuma — 外部健康监控 (status.meirong.dev)
 - [x] Cilium CNI — homelab K3s 集群从 Flannel 迁移到 Cilium
@@ -43,10 +43,11 @@
 - [x] **恢复演练**: ✅ 2026-07-06 从仓库恢复 Vault snapshot + 两 PG dump + sqlite integrity_check 全通过（2026-07-06 计划 Phase 1 DoD）
 - [x] **存储本地化迁移**: ✅ 2026-07-11 全部完成 — 106 宕机 3 天事故后，剩余 PVC（alertmanager/audit-vault-0/trivy）+ **Calibre 书库 24G**（超出原计划范围，原定留 NFS）全迁 `local-path`；nfs-client provisioner 卸载；书库纳入 restic 夜备 + 新增 PVE 每周 vzdump（VM 100 → 106 `backups`，keep-last=3）。106 降级为纯冷备份目标
 - [ ] **离站备份**: restic 仓库 → 云（OCI always-free/B2），当前仅本地副本。见 2026-07-06 计划 Phase 5
-- [ ] **dead-man's switch**: Alertmanager Watchdog（当前 `receiver:"null"`）→ oracle Uptime Kuma push monitor → Gotify(oracle)→Telegram
+- [ ] **dead-man's switch**: Alertmanager Watchdog（当前 `receiver:"null"`）→ oracle Uptime Kuma **push** monitor（尚未建）仍未做。但**已有的 pull 式等效机制**（oracle Uptime Kuma 直接探测 homelab 公网服务可达性）通知渠道已于 2026-07 从 Gotify 迁到 Telegram 原生通知（oracle 直连 api.telegram.org，独立于 homelab，同一个 bot/话题）。
 - [ ] **zpool/SMART 告警**: 补 PrometheusRule（当前仅有看板，无告警）
 - [x] **Loki 日志保留**: ✅ 2026-03-19 compactor + retention 168h 已启用
 - [x] **Alertmanager**: ✅ severity=warning|critical → 原生 telegramConfigs → Telegram（生产运行；2026-07-18 起，gotify-bridge 因 concurrent-map-write 崩溃 bug 下线，见 `decisions/alerting-telegram-migration.md`）
+- [x] **Gotify 彻底退役**: ✅ 2026-07——三个消费者（Falco/dead-man's switch 迁 Telegram 原生 output/通知；RSS 阅读推送直接砍掉未迁移）处理完后，Gotify 本体（Deployment/PVC/Service/ExternalSecret/notify.meirong.dev 网关路由/homepage 书签/gotify-availability SLO/backup 条目/相关 Vault secret）全部移除。Cloudflare tunnel ingress 条目待有效 API token 后 `terraform apply` 收尾。详见 `decisions/alerting-telegram-migration.md`
 - [x] **oracle-k3s Cilium**: 从 Flannel 迁移到 Cilium，统一双集群数据面
 - [x] **Uptime Kuma SSO 修复**: maxredirects=0 + accepted_statuscodes 300-399
 - [x] **homelab Ubuntu 24.04 重建**: ✅ 2026-03-08 重建完成，K3s v1.34.5+k3s1 + Cilium 1.19.1

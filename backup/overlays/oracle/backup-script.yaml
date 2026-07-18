@@ -43,7 +43,7 @@ data:
 
     # --- 2) sqlite/config from local-path（meilisearch/cache 不含）---
     echo "[backup] copy sqlite/config files..."
-    for pat in karakeep-data uptime-kuma-data timeslot-pvc stirling-pdf-configs gotify-data; do
+    for pat in karakeep-data uptime-kuma-data timeslot-pvc stirling-pdf-configs; do
       for d in /localpath/*"$pat"*; do
         [ -d "$d" ] || continue
         dest="/work/pvc/$(basename "$d")"

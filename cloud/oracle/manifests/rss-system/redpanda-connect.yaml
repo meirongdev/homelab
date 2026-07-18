@@ -1,7 +1,8 @@
 ---
 # Redpanda Connect — 信息管道
 # 管道 1: 接收 Miniflux Webhook → 保存到 KaraKeep
-# 管道 2: 定时轮询 KaraKeep tag=telegram → 推送到 Gotify
+# （原管道 2: 定时轮询 KaraKeep tag=telegram → 推送到 Gotify，2026-07 随 Gotify 下线一并砍掉，
+#  未迁移到 Telegram——该 token 当时已 401 失效，推送早已静默失败，用得也不多）
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -35,82 +36,6 @@ data:
           Content-Type: "application/json"
         retries: 3
         retry_period: "5s"
-
-  poll-karakeep.yaml: |
-    http:
-      enabled: false
-
-    input:
-      generate:
-        interval: "5m"
-        mapping: 'root = {}'
-
-    pipeline:
-      processors:
-        # 获取所有书签列表
-        - http:
-            url: "http://karakeep.rss-system.svc:3000/api/v1/bookmarks?favourited=false&archived=false&limit=50"
-            verb: GET
-            headers:
-              Authorization: "Bearer ${KARAKEEP_API_KEY}"
-              Accept: "application/json"
-        # 筛选带有 telegram tag 的书签
-        - mapping: |
-            root = this.bookmarks.filter(b -> b.tags.any(t -> t.name == "telegram"))
-        # 空数组则跳过
-        - mapping: |
-            if this.length() == 0 {
-              root = deleted()
-            }
-        # 展开数组为单独消息
-        - unarchive:
-            format: json_array
-        # 内存去重：已推送的 ID 跳过
-        - cache:
-            operator: get
-            resource: dedup_cache
-            key: '${! this.id}'
-        - catch:
-          # cache miss = 新条目，继续处理
-          - mapping: 'root = this'
-        - switch:
-          - check: 'content() == "seen"'
-            processors:
-              - mapping: 'root = deleted()'
-        # 标记为已推送
-        - cache:
-            operator: set
-            resource: dedup_cache
-            key: '${! this.id}'
-            value: "seen"
-        # 构造 Gotify 消息
-        - mapping: |
-            let title = this.content.title.or(this.title).or("New Bookmark")
-            let url = this.content.url.or("")
-            root.title = "📌 " + $title
-            root.message = $url
-            root.priority = 5
-            root.extras = {
-              "client::display": {
-                "contentType": "text/plain"
-              }
-            }
-
-    output:
-      http_client:
-        url: "${GOTIFY_URL}/message"
-        verb: POST
-        headers:
-          X-Gotify-Key: "${GOTIFY_TOKEN}"
-          Content-Type: "application/json"
-        retries: 3
-        retry_period: "5s"
-
-    cache_resources:
-      - label: dedup_cache
-        memory:
-          default_ttl: "24h"
-          compaction_interval: "1h"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -167,38 +92,6 @@ spec:
               port: 4195
             initialDelaySeconds: 5
             periodSeconds: 10
-        # 管道 2: KaraKeep 轮询 → Gotify
-        - name: karakeep-to-gotify
-          image: docker.redpanda.com/redpandadata/connect@sha256:d8c46bd81e483d3f08327d38f363b9bc54478a150611aaff0c905a3b977d7f6a  # 当前运行 digest 固定（原 :latest）
-          args:
-            - run
-            - /config/poll-karakeep.yaml
-          env:
-            - name: KARAKEEP_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: redpanda-connect-secret
-                  key: karakeep-api-key
-            - name: GOTIFY_URL
-              valueFrom:
-                secretKeyRef:
-                  name: redpanda-connect-secret
-                  key: gotify-url
-            - name: GOTIFY_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: redpanda-connect-secret
-                  key: gotify-token
-          resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
-            limits:
-              cpu: 200m
-              memory: 128Mi
-          volumeMounts:
-            - name: config
-              mountPath: /config
       volumes:
         - name: config
           configMap:
