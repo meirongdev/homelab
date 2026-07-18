@@ -84,7 +84,7 @@ spec:
   route:
     receiver: watchdog-webhook
     groupWait: 0s
-    groupInterval: 1m
+    groupInterval: 15s
     repeatInterval: 30s
     matchers:
       - name: alertname
