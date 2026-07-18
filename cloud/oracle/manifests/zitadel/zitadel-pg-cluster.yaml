@@ -1,0 +1,36 @@
+# CNPG Cluster —— 目标库,取代冻结的 bitnamilegacy/postgresql:15.4.0（evolution-roadmap Phase C）。
+# 2026-07-18 起并行部署验证；ZITADEL 仍指向旧库直到 cutover（单独一步，见 decisions/ 记录）。
+# 单实例：无 HA 意义（单人 homelab，母文档结论），不过度工程。
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: zitadel-pg
+  namespace: zitadel
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.6
+
+  bootstrap:
+    initdb:
+      database: zitadel
+      owner: zitadel
+      # 复用现有 zitadel-pg-app-secret（username=zitadel，密码=Vault secret/homelab/zitadel
+      # db-password）——cutover 后 ZITADEL 自己的 ExternalSecret 无需改密码，只改 Host。
+      secret:
+        name: zitadel-pg-app-secret
+
+  enableSuperuserAccess: true
+  superuserSecret:
+    name: zitadel-pg-superuser-secret
+
+  storage:
+    storageClass: local-path
+    size: 8Gi
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 192Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
