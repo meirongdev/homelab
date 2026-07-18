@@ -77,19 +77,18 @@ data:
     # oracle Uptime Kuma pings homelab public services (Grafana/Vault/ArgoCD/Calibre) + oracle
     # services. Attaching a Telegram notification to ALL monitors means: homelab down → its services
     # unreachable → Uptime Kuma → Telegram Bot API (oracle → internet direct), with NO dependency
-    # on homelab. 2026-07 起不再经 Gotify（已下线）；oracle 直连 api.telegram.org，独立性不变。
+    # on homelab. oracle直连 api.telegram.org，无需中间层。
     # Same bot/group/topic as homelab Alertmanager's telegramConfigs — 「🚨 Homelab 告警」话题。
     TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
     TELEGRAM_CHAT_ID = -1003981213530
     TELEGRAM_MESSAGE_THREAD_ID = 2
     NOTIF_NAME = "Telegram (dead-man)"
-    LEGACY_NAMES = {"Gotify (dead-man)"}  # pre-2026-07 name, from before the Telegram migration
     if TELEGRAM_BOT_TOKEN:
         # delete+recreate so the token always reflects the current secret (idempotent refresh);
-        # also sweep any legacy-named notification left over from before a provider migration —
+        # delete+recreate so the token always reflects the current secret (idempotent refresh).
         # otherwise it stays isDefault+attached and keeps firing (and failing) against monitors.
         for n in api.get_notifications():
-            if n["name"] == NOTIF_NAME or n["name"] in LEGACY_NAMES:
+            if n["name"] == NOTIF_NAME:
                 api.delete_notification(n["id"])
                 print(f"Removed stale notification '{n['name']}'.")
         api.add_notification(
