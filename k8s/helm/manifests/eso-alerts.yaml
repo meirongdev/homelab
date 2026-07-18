@@ -12,7 +12,7 @@
 #                 receiver) and remote-written with cluster=oracle-k3s
 # One rule therefore covers BOTH clusters; {{ $labels.cluster }} disambiguates.
 #
-# severity warning|critical → routed to Gotify by Alertmanager
+# severity warning|critical → routed to Telegram by Alertmanager
 # (see values/kube-prometheus-stack.yaml). The `release` label is REQUIRED so the
 # kube-prometheus-stack ruleSelector adopts this PrometheusRule.
 #

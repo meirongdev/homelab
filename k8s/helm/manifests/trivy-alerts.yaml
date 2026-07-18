@@ -5,7 +5,7 @@
 #   - homelab: ServiceMonitor 由 chart 启用（values/trivy-operator.yaml，带 release 标签）
 #   覆盖单集群（Trivy 仅 homelab 先上；将来镜像到 oracle 时本规则自然适用，靠 cluster 标签区分）
 #
-# severity warning|critical → 经 Alertmanager→Gotify 桥路由（见 values/kube-prometheus-stack.yaml）。
+# severity warning|critical → 经 Alertmanager 原生 telegramConfigs 路由到 Telegram（见 values/kube-prometheus-stack.yaml）。
 # `release: kube-prometheus-stack` 标签必需，否则 ruleSelector 不采纳本 PrometheusRule。
 # 经 ArgoCD `monitoring-dashboards` Application 同步（git push → 3 分钟内）。
 #

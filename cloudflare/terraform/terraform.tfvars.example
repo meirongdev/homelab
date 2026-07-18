@@ -8,5 +8,6 @@ ingress_rules = {
   "grafana" = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
   "llm"     = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
   "vault"   = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
-  # notify → 迁 oracle tunnel (2026-07-06, Gotify 迁 oracle)；auth 待 ZITADEL 迁移(Phase 3 后半)
+  # auth 已迁 oracle tunnel (2026-07-06, ZITADEL 迁 oracle-k3s)；notify 曾同期迁 oracle(Gotify)，
+  # 但 Gotify 已于 2026-07 彻底下线，两者均不再需要出现在任一集群的 ingress_rules 里
 }
