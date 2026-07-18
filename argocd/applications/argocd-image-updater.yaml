@@ -10,7 +10,10 @@ spec:
   sources:
     - repoURL: https://argoproj.github.io/argo-helm
       chart: argocd-image-updater
-      targetRevision: "1.1.1"
+      # 1.2.4 (appVersion v1.2.2): 修复 v1.1.0 (chart 1.1.1) 镜像的 7 个 Critical
+      # CVE——alpine 基础包(openssl/gnutls/py3-cryptography)+ argo-cd Go 模块。
+      # v1.2.2 镜像经集群内 trivy 实扫为 0 Critical。CRD group 不变、无既有 CR。
+      targetRevision: "1.2.4"
       helm:
         valueFiles:
           - $values/k8s/helm/values/argocd-image-updater.yaml
