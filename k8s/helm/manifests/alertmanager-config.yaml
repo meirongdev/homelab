@@ -67,3 +67,30 @@ spec:
             ▸ {{ .Annotations.summary }}{{ if .Annotations.description }}
             {{ .Annotations.description }}{{ end }}
             {{ end }}
+
+---
+# Dead-man's switch: routes the Watchdog alert to Uptime Kuma Push monitor on oracle-k3s.
+# Homelab Alertmanager fires Watchdog → webhook → status.meirong.dev/api/push/... → Uptime Kuma.
+# If homelab goes down, pushes stop → Uptime Kuma marks DOWN → Telegram fires (oracle side).
+# See cloud/oracle/manifests/uptime-kuma/provisioner.yaml Push monitor definition.
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: watchdog
+  namespace: monitoring
+  labels:
+    alertmanagerConfig: homelab
+spec:
+  route:
+    receiver: watchdog-webhook
+    groupWait: 0s
+    groupInterval: 1m
+    repeatInterval: 30s
+    matchers:
+      - name: alertname
+        value: Watchdog
+  receivers:
+    - name: watchdog-webhook
+      webhookConfigs:
+        # Push URL matching the token defined in the provisioner script.
+        - url: "https://status.meirong.dev/api/push/alertmanager-watchdog-homelab?status=up&msg=OK&ping="

@@ -104,6 +104,19 @@ data:
     else:
         print("WARNING: TELEGRAM_BOT_TOKEN not set — no notification channel (dead-man's switch inactive).")
 
+    # --- Push monitor for homelab Alertmanager Watchdog (dead-man's switch) ---
+    # Homelab Alertmanager fires Watchdog → webhook → status.meirong.dev/api/push/... → Uptime Kuma.
+    # If homelab goes down, pushes stop → Uptime Kuma marks DOWN → Telegram notification fires.
+    # Both clusters have internet via Cloudflare, so the webhook goes public-internet path.
+    PUSH_TOKEN = "alertmanager-watchdog-homelab"
+    PUSH_MONITOR_NAME = "Alertmanager Watchdog"
+    push_existing = {m["name"]: m for m in api.get_monitors()}
+    if PUSH_MONITOR_NAME in push_existing:
+        print(f"Push monitor '{PUSH_MONITOR_NAME}' already exists.")
+    else:
+        api.add_monitor(type=MonitorType.PUSH, name=PUSH_MONITOR_NAME, pushToken=PUSH_TOKEN, interval=60)
+        print(f"Push monitor '{PUSH_MONITOR_NAME}' created (push token: {PUSH_TOKEN}).")
+
     # --- Monitors ---
     existing = {m["name"]: m for m in api.get_monitors()}
     print(f"Existing monitors: {set(existing.keys()) or '(none)'}")
