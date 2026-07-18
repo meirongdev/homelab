@@ -152,13 +152,13 @@ just apply   # Apply DNS/Tunnel changes
 - **Sync poll interval**: 3 minutes (auto-syncs after every `git push`)
 - **Managed by ArgoCD** (auto-sync + selfHeal; homelab in-cluster, plus oracle-k3s as an external cluster):
   - `root` App → `argocd/applications/` (App-of-Apps; manages all child Applications below)
-  - `personal-services` App → `manifests/{calibre-web.yaml,calibre-ebook-sync.yaml,gotify.yaml,personal-services-limits.yaml}` (homelab)
+  - `personal-services` App → `manifests/{calibre-web.yaml,calibre-ebook-sync.yaml,personal-services-limits.yaml}` (homelab)
   - `gateway` App → `manifests/gateway.yaml` (homelab Cilium Gateway)
   - `cloudflare` App → `manifests/cloudflare-tunnel.yaml` (homelab)
   - `vault-eso` App → `manifests/{vault-eso-config,*-external-secret}.yaml` (homelab)
   - `calibre-metadata` App → `k8s/helm/manifests/calibre-metadata/` (Kustomize)
   - `monitoring-dashboards` App → `k8s/helm/manifests/grafana-dashboards.yaml` 等 ConfigMap
-  - `argocd-image-updater` App → Helm chart `argo/argocd-image-updater` v1.1.1
+  - `argocd-image-updater` App → Helm chart `argo/argocd-image-updater` 1.2.4（image v1.2.2）。⚠️ 当前空闲：`kubectl get imageupdater -A` 为 0 个 CR，只有 `oracle-k3s` App 带旧式注解但无对应 CR，实际未在更新任何镜像
   - `oracle-k3s` App → `cloud/oracle/manifests/` (Kustomize) on the **oracle-k3s external cluster** via Tailscale (`https://100.107.166.37:6443`); cluster cred from Vault→ESO secret `oracle-k3s-cluster` (Task: `docs/plans/networking/2026-06-04-oracle-k3s-argocd-gitops.md`). Added 2026-06-04.
   - `bifrost` App → `manifests/bifrost.yaml` (homelab LLM gateway + oauth2-proxy)
   - `kyverno` App (Helm chart) + `kyverno-policies` App → `manifests/kyverno-policies/` (homelab admission policies)
@@ -224,7 +224,7 @@ just apply   # Apply DNS/Tunnel changes
   OTEL_SERVICE_NAME=<service-name>
   OTEL_RESOURCE_ATTRIBUTES=cluster=<homelab|oracle-k3s>,k8s.namespace.name=<ns>
   ```
-- **Alerting** (Alertmanager → Gotify): `severity: warning|critical` rules route to Gotify (via `alertmanager-gotify-bridge`); `info`/`Watchdog` are dropped. **New `PrometheusRule`/`ServiceMonitor` resources MUST carry the label `release: kube-prometheus-stack`** or the operator's `ruleSelector`/`serviceMonitorSelector` ignores them silently. First rule: **ESO health** (`eso-alerts.yaml`, deployed via the ArgoCD `monitoring-dashboards` Application). A single rule covers both clusters since oracle ESO metrics arrive remote-written with `cluster=oracle-k3s`.
+- **Alerting** (Alertmanager → Telegram, 2026-07-18 起): `severity: warning|critical` rules route natively via Alertmanager `telegramConfigs`(零中间 bridge)到群 **MatthewDaily** 的「🚨 Homelab 告警」话题(`chatID: -1003981213530` + `messageThreadID: 2`); `info`/`Watchdog` are dropped. bot token: Vault `secret/homelab/telegram` → ESO(`alertmanager-telegram-secret.yaml`)。**New `PrometheusRule`/`ServiceMonitor` resources MUST carry the label `release: kube-prometheus-stack`** or the operator's `ruleSelector`/`serviceMonitorSelector` ignores them silently. First rule: **ESO health** (`eso-alerts.yaml`, deployed via the ArgoCD `monitoring-dashboards` Application). A single rule covers both clusters since oracle ESO metrics arrive remote-written with `cluster=oracle-k3s`. 旧的 `alertmanager-gotify-bridge`(druggeri/alertmanager_gotify_bridge)已下线——有 `concurrent map writes` fatal 崩溃 bug(全局无锁 metrics map，两个并发 webhook 即崩，50 天 66 次重启）且上游无维护。**Gotify 本体仍在跑**(oracle-k3s，`notify.meirong.dev`)，只服务 Falco(falcosidekick 原生推送，见 §8.5/security.md)，与本告警链路无关。详见 `decisions/alerting-telegram-migration.md`。
 - **Dashboards 组织** (2026-06-15 整改，治理面板平铺混乱 + 跨集群指标叠加): Grafana 面板按文件夹分组，核心配置在 `k8s/helm/values/kube-prometheus-stack.yaml` 的 `grafana.sidecar.dashboards`：
   - **文件夹**: `folderAnnotation: grafana_folder` + `provider.foldersFromFilesStructure: true`。每个 dashboard ConfigMap 用注解 `grafana_folder: <名称>` 指定文件夹。当前布局: `Platform`(多集群总览, Home) / `Logs`(Loki 日志) / `Hardware`(裸金属主机: Storage-106 / Proxmox-pve / DGX Spark / MacBook + 功耗概览, 含 SMART 硬盘健康) / `Kubernetes Built-in`(chart 自带 mixin 面板, 由 `sidecar.dashboards.annotations.grafana_folder` 统一归档, 不污染顶层)。
   - **多集群选择器**: `multicluster.global.enabled: true` 让 ~21 张内置 mixin 面板出现可见的 `cluster` 下拉(`hide:0`)。指标均带 `cluster` 标签(`homelab`/`oracle-k3s`/`dgx-spark`); 关闭时这些面板会把三集群指标求和叠加，无法分析。
@@ -242,7 +242,7 @@ just apply   # Apply DNS/Tunnel changes
   - **Sloth**: ArgoCD `sloth` App（Helm chart + `values/sloth-values.yaml`，2026-07-06 迁入 ArgoCD——旧文说 `just deploy-sloth` 非 ArgoCD 已过时）。`sloth.extraLabels.release=kube-prometheus-stack` 让生成的 PrometheusRule 被 operator 的 ruleSelector 选中; `defaultSloPeriod=30d`; 关掉 commonPlugins 的 git-sync sidecar。CRD `PrometheusServiceLevel` 由 chart 安装。Sloth 与规则评估都在 homelab 侧（oracle 指标已 remote-write 过来）。
   - **SLO 定义**: `manifests/slos.yaml`——**两个** `PrometheusServiceLevel`(ArgoCD `monitoring-dashboards` App 管理): `homelab-gateway-availability`(calibre-web/grafana/argocd/vault/bifrost) + `oracle-gateway-availability`(zitadel/gotify，2026-07 迁移后入口在 oracle)，共 7 个服务 99%/30d(error=5xx, total=全部类)。**新增/改服务或目标**: 在对应 `spec.slos[]` 追加一条(`errorQuery`/`totalQuery` 用 `envoy_cluster_name=~".*/<ns>_<svc>_.*"` 正则匹配路由；oracle 侧记得用 `_total` 指标名 + `cluster="oracle-k3s"`) + 改 `objective`，`git push` 即可。
   - **⚠️ errorQuery 末尾必须 `OR on() vector(0)` (2026-07-12 踩坑)**: envoy 按响应码类**惰性创建**序列——服务从未返回过 5xx(或 envoy 重启计数器重置)时 errorQuery 为空集，Sloth 生成的 SLI 除法整体消失 → **SLO 序列与燃尽率告警静默失效**。homelab 旧 SLO 一直有数只是因为各服务历史上恰好都出过 5xx。现有 7 条已统一加固，新增 SLO 必须沿用该模式(见 slos.yaml 头部注释)。
-  - **告警**: 每个 SLO 生成多窗口燃尽率告警，`pageAlert→severity:critical` / `ticketAlert→severity:warning`，经现有 Alertmanager(`severity=~"critical|warning"`)路由到 Gotify。
+  - **告警**: 每个 SLO 生成多窗口燃尽率告警，`pageAlert→severity:critical` / `ticketAlert→severity:warning`，经现有 Alertmanager(`severity=~"critical|warning"`)路由到 Telegram。
   - **看板**: Grafana `SLO` 文件夹 → "SLO / Service Availability"(`manifests/slo-dashboard.yaml`，错误预算剩余/燃尽率/SLI 错误率)。
   - **⚠️ 零流量盲区**: 真实流量 SLI 在服务**无人访问时为 NaN**(error=0/total=0；vector(0) 加固后序列恒存在，不再整个消失)。这是一手指标的固有特性，非故障; 燃尽率告警只在真出现 5xx 时触发。闲置服务若要稳定可用性信号，叠一层合成探测(Uptime Kuma/blackbox)兜底。
 - **Deployment summary**: Only two components to deploy for observability changes:
@@ -307,7 +307,7 @@ just apply   # Apply DNS/Tunnel changes
   - 详见 Observability › **Dashboards 组织**。
 - **Homepage config updates**: ArgoCD auto-syncs the ConfigMap on `git push`, but `subPath` volume mounts require a pod restart to reload — run `just update-homepage` (does `apply` + `rollout restart` in one step). Do NOT use `kubectl delete configmap` as ArgoCD will conflict.
 - **HTTPRoute template**: Always include explicit `group`/`kind` in `parentRefs` and `group`/`kind`/`weight` in `backendRefs` to prevent ArgoCD OutOfSync drift caused by Gateway controller defaults.
-- **ArgoCD Image Updater** (v1.1.1): Uses CRD model — create an `ImageUpdater` CR (not just annotations). Set `useAnnotations: true` in the CR to read image config from Application annotations. Use strategy `newest-build` (not `latest`, deprecated).
+- **ArgoCD Image Updater** (chart 1.2.4 / image v1.2.2): Uses CRD model — create an `ImageUpdater` CR (not just annotations). Set `useAnnotations: true` in the CR to read image config from Application annotations. Use strategy `newest-build` (not `latest`, deprecated). Chart ≥1.2 moved the log-level Helm key from top-level `logLevel` to `config.log.level` (old key silently ineffective). ⚠️ Currently idle — no `ImageUpdater` CRs exist in the cluster.
 - **ArgoCD Application definitions** (`argocd/applications/*.yaml`): The `root` Application (App-of-Apps) watches this directory recursively, so editing any `*.yaml` here and pushing is enough — ArgoCD will reconcile within the 3-min poll. Manual `kubectl apply` is only needed for the initial `root.yaml` bootstrap, or if `root` itself is missing.
 - **ArgoCD self-heal caveat**: Resources already managed by an Application (for example `gateway` managing `manifests/gateway.yaml`) must be changed in Git first. Ad-hoc `kubectl patch/apply` fixes on live resources will be reconciled away on the next sync.
 - **Kustomize namespace caveat**: The global `namespace:` field in `kustomization.yaml` runs as a transformer after JSON patches, overriding them. Declare namespace explicitly in each manifest instead when resources span multiple namespaces.
