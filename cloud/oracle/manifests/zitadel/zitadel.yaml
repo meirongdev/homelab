@@ -94,12 +94,14 @@ spec:
         key: secret/homelab/zitadel
         property: db-password
 ---
-# NOTE: Bitnami moved all free images to `bitnamilegacy/*` in 2025-08; original
-# `bitnami/*` images are now paywalled. `bitnamilegacy` images still pull but will
-# not get future CVE patches. Plan to migrate off Bitnami — options:
-#   1. CloudNativePG operator (better: backup, failover, PITR) — recommended
-#   2. Official `postgres:16-alpine` in a plain StatefulSet
-# Any migration needs a pg_dump/pg_restore cycle; not trivial — track in TODO.
+# ⚠️ DECOMMISSIONED 2026-07-18: ZITADEL now points at CNPG (zitadel-pg-rw, see
+# zitadel-pg-cluster.yaml), migrated off this frozen bitnamilegacy image via
+# pg_dump/pg_restore during a ~4.5min downtime window. This HelmChart is kept
+# running, untouched, purely as a rollback target during the soak period —
+# remove it (+ its PVC) once stable. See decisions/ for the full record.
+#
+# (Original note, now historical: Bitnami moved all free images to
+# `bitnamilegacy/*` in 2025-08 — no future CVE patches on that channel.)
 apiVersion: helm.cattle.io/v1
 kind: HelmChart
 metadata:
