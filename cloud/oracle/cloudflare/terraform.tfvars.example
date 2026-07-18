@@ -13,7 +13,7 @@ ingress_rules = {
   "slot"    = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }
   "trends"  = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }
   "auth"    = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }  # ZITADEL 迁自 homelab 2026-07-06
-  # notify (Gotify) 已于 2026-07 下线，不再有此条目
+  # notify (Gotify) 已于 2026-07 下线并 apply（DNS/tunnel ingress 已移除），不再有此条目
   # rsshub is intentionally NOT exposed externally; only accessible within the cluster
   # by miniflux via http://rsshub.rss-system.svc:1200
 }
