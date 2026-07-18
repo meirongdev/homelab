@@ -26,9 +26,9 @@
 | 7 | CIS 合规 | kube-bench（周巡检） | ✅ 已装 | `manifests/kube-bench.yaml` | homelab |
 | 8 | 节点加固 | k3s `protect-kernel-defaults` + sysctl | ⏳ 待重启生效 | `k8s/ansible/playbooks/setup-k3s.yaml` | homelab |
 | 9 | 网络 | Cilium NetworkPolicy + Hubble 可见性 | 🟡 仅可见性 | Cilium（默认拒绝刻意延后） | 双 |
-| 10 | 运行时检测 | Tetragon(homelab) / Falco+Falcosidekick(oracle) | ✅ 已实现（Falco→Gotify 待 token） | `values/{tetragon,falco}.yaml` | 双（分别选型） |
+| 10 | 运行时检测 | Tetragon(homelab) / Falco+Falcosidekick(oracle) | ✅ 已实现（Falco→Gotify 已接通） | `values/{tetragon,falco}.yaml` | 双（分别选型） |
 | 11 | 备份/恢复 | restic（106 ZFS 加密仓库）| 🟡 Phase1 上线（双集群每夜备份 + 恢复演练通过；**离站副本待做**）| `runbooks/backup-recovery.md` | 双 |
-| 12 | 安全可观测 | Prometheus/Loki → Alertmanager → Gotify | ✅ 生产 | `kube-prometheus-stack.yaml`, 各 `*-alerts.yaml` | 双 |
+| 12 | 安全可观测 | Prometheus/Loki → Alertmanager → Telegram（homelab）/ Gotify（Falco, oracle） | ✅ 生产 | `kube-prometheus-stack.yaml`, 各 `*-alerts.yaml` | 双 |
 
 ---
 
@@ -50,7 +50,7 @@
 
 - **Vault = 所有 app 密钥的唯一真相源**；ESO 自动同步 Vault → K8s Secret。
 - **路径约定**：homelab 用 `secret/homelab/<svc>`，oracle 用 `secret/oracle-k3s/<svc>`。
-- **静默陈旧防护**：ESO 健康告警（`externalsecret`/`(cluster)secretstore` `Ready=False`）经 Gotify 报警——堵住"Vault 封印/token 过期 → Secret 不再刷新但 app 仍用旧值"的盲区。规则 `manifests/eso-alerts.yaml`。
+- **静默陈旧防护**：ESO 健康告警（`externalsecret`/`(cluster)secretstore` `Ready=False`）经 Telegram 报警——堵住"Vault 封印/token 过期 → Secret 不再刷新但 app 仍用旧值"的盲区。规则 `manifests/eso-alerts.yaml`。
 - 本地 `.env` 仅用于 bootstrap token（gitignore）。
 
 ## 5. 准入管控 (Admission)
@@ -89,7 +89,7 @@
 
 - **扫描面**：镜像 CVE + 配置审计 + RBAC 评估 + **镜像内暴露密钥**（最高信号）。结果以 CR 落地（`vulnerabilityreports`/`configauditreports`/`exposedsecretreports`/`rbacassessmentreports`）。
 - **热节点调优**：`scanJobsConcurrentLimit:1`（串行，杜绝扫描器风暴）+ `builtInTrivyServer`(ClientServer + `local-path` PVC 持久化漏洞 DB，避免反复重下；2026-07-11 随存储本地化迁移离开 NFS) + `severity:HIGH,CRITICAL` + `ignoreUnfixed` + 关 `clusterCompliance`（CIS 交给 kube-bench）。
-- **接入可观测**：ServiceMonitor（带 `release:kube-prometheus-stack`）→ Prometheus 抓 `trivy_image_vulnerabilities` 等；告警 `manifests/trivy-alerts.yaml`（critical CVE→warning、暴露密钥 High/Critical→**critical**、absent 元告警）经 Gotify；看板 Grafana `Security` 文件夹。
+- **接入可观测**：ServiceMonitor（带 `release:kube-prometheus-stack`）→ Prometheus 抓 `trivy_image_vulnerabilities` 等；告警 `manifests/trivy-alerts.yaml`（critical CVE→warning、暴露密钥 High/Critical→**critical**、absent 元告警）经 Telegram；看板 Grafana `Security` 文件夹。
 
 ## 7. CIS 合规与节点加固
 
@@ -113,11 +113,11 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 
 ## 9. 安全可观测与告警
 
-- **统一管道**：所有信号 → Prometheus(metrics)/Loki(logs) → Alertmanager → `alertmanager-gotify-bridge` → Gotify。`severity:warning|critical` 路由，`info/Watchdog` 丢弃。
+- **统一管道**（2026-07-18 起）：homelab 侧 Prometheus(metrics)/Loki(logs) → Alertmanager → 原生 `telegramConfigs`(无 bridge) → Telegram 群 MatthewDaily 的「🚨 Homelab 告警」话题。`severity:warning|critical` 路由，`info/Watchdog` 丢弃。旧 `alertmanager-gotify-bridge` 因 `concurrent map writes` 崩溃 bug + 上游无维护已下线，详见 `decisions/alerting-telegram-migration.md`。oracle 侧 Falco 走独立的 Falcosidekick→Gotify 出口(§8.5)，与本链路无关、不受影响。
 - **新增 `PrometheusRule`/`ServiceMonitor` 必须带 `release:kube-prometheus-stack`** 否则 operator selector 忽略。
 - **安全相关规则**：ESO 健康（`eso-alerts.yaml`）、Trivy 发现（`trivy-alerts.yaml`）。多集群靠 `cluster` 标签区分。
 - **看板**：Grafana `Security` 文件夹 3 张——**Trivy 漏洞概览**（CVE/暴露密钥/配置审计，Prometheus）、**Kyverno 准入策略**（评估结果/Enforce 拦截/各策略 fail/webhook 延迟，Prometheus，Kyverno 各 controller ServiceMonitor）、**运行时与审计事件**（Falco 告警 + Tetragon 进程事件 + kube-bench CIS，Loki）。Hubble CLI 看网络流。
-- **散在别处的可见性**：Kyverno 当前存量违规 `kubectl get polr -A`（counter 指标只适合看趋势/速率）；PSA violation 在 `kubectl get events`；所有 warning|critical 告警 → Gotify。
+- **散在别处的可见性**：Kyverno 当前存量违规 `kubectl get polr -A`（counter 指标只适合看趋势/速率）；PSA violation 在 `kubectl get events`；所有 warning|critical 告警(homelab) → Telegram。
 
 ## 10. 威胁模型与覆盖矩阵
 
@@ -126,11 +126,11 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 | 外部漏洞利用 / 扫描 | Cloudflare WAF + 零暴露端口 + 限流 | ✅ |
 | 凭据窃取 / 未授权访问 | ZITADEL OIDC（锁定注册）+ 各 app 认证 | ✅ |
 | 密钥泄漏（静态） | Vault + ESO；镜像内密钥由 Trivy exposed-secret 扫描 | ✅ |
-| 密钥静默陈旧 | ESO 健康告警 → Gotify | ✅ |
+| 密钥静默陈旧 | ESO 健康告警 → Telegram | ✅ |
 | 不安全 Pod（特权/逃逸） | PSA baseline（双集群） | ✅ |
 | 镜像用 :latest（不可复现） | Kyverno disallow-latest-tag（digest-aware） | ✅ Enforce |
 | 配置劣化（无 limits/probes/不可信仓库） | Kyverno（Audit）+ LimitRange 护栏（注入默认 requests/limits） | 🟡 Audit + 护栏 |
-| 镜像已知 CVE | Trivy（HIGH/CRITICAL）→ Gotify + 看板 | ✅ |
+| 镜像已知 CVE | Trivy（HIGH/CRITICAL）→ Telegram + 看板 | ✅ |
 | 节点/控制面配置不合规 | kube-bench 周巡检 + protect-kernel-defaults | 🟡 待重启 |
 | 容器内运行时入侵（起 shell/异常外联/提权） | Tetragon(homelab,进程可见性→Loki) / Falco(oracle,规则→Loki+Gotify) | ✅ 已部署（v1 可见性；TracingPolicy/规则调优持续） |
 | 东西向横向移动 | 网络默认拒绝 | ❌ 延后（仅 Hubble 可见性） |
@@ -138,7 +138,7 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 
 ## 11. 已知缺口与路线图
 
-1. **运行时检测调优（Phase 2 已部署，见 §8.5）**：v1 已上 Tetragon(homelab,进程可见性)+Falco(oracle,规则)。后续：① Falco Gotify token（手动前置）；② Tetragon 写 TracingPolicy（敏感文件/提权/异常外联）+ 基于其指标的 Gotify 告警；③ Falco 噪声规则按环境裁剪。
+1. **运行时检测调优（Phase 2 已部署，见 §8.5）**：v1 已上 Tetragon(homelab,进程可见性)+Falco(oracle,规则，Gotify token 已配好)。后续：① Tetragon 写 TracingPolicy（敏感文件/提权/异常外联）+ 基于其指标的告警（Telegram）；② Falco 噪声规则按环境裁剪。
 2. **网络默认拒绝（门控灰度）**：Hubble 基线流量 → Cilium 每端点 `PolicyAuditMode` 只记不拦 → 单无状态叶子 ns（personal-services/homepage）试点 CiliumNetworkPolicy（放行 DNS/Envoy/必要 egress）→ soak → 逐 ns 评估，**建议只对对外暴露 ns 做**。
 3. **节点 API 审计日志**：延后（磁盘紧）；如开启用 Metadata 级策略 + 严格 maxsize/maxbackup，先确认磁盘余量。
 4. **Kyverno Audit→Enforce**：逐条清理存量违规后提升；restrict-image-registries 最久保持 Audit。

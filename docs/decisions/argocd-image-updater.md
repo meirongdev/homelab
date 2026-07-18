@@ -130,9 +130,9 @@ kubectl get application it-tools -n argocd \
   -o jsonpath='{.metadata.annotations.argocd-image-updater\.argoproj\.io/it-tools\.update-strategy}'
 ```
 
-### 症状：Pod 重启后日志 level 变回 info
+### 症状：Pod 重启后日志 level 变回 info（v1.1.0 已知问题，chart ≥1.2 已修复）
 
-v1.1.0 从 ConfigMap 中的 `log.level` 字段读取日志级别，但 Helm values 的 `logLevel` 键**未能正确映射**到该字段（已知问题）。临时调试方式：
+v1.1.0 从 ConfigMap 中的 `log.level` 字段读取日志级别，但 Helm values 的顶层 `logLevel` 键**未能正确映射**到该字段（已知问题）。**chart ≥1.2 把该键移到 `config.log.level`，正确渲染进 ConfigMap，此工作区已不再需要下面的 patch workaround**（2026-07-18 升级到 chart 1.2.4 后验证）。以下步骤仅供仍在 v1.1.x 的环境参考：临时调试方式：
 
 ```bash
 kubectl patch configmap argocd-image-updater-config -n argocd \
@@ -154,3 +154,11 @@ kubectl rollout restart deployment/argocd-image-updater-controller -n argocd
 | 兼容旧注解 | — | `useAnnotations: true` |
 | update-strategy 命名 | `latest` | `newest-build`（`latest` 已废弃） |
 | 日志配置 | Helm `logLevel` | ConfigMap `log.level` |
+
+## 2026-07-18 更新：升级到 chart 1.2.4（image v1.2.2）
+
+原因：CVE 修复——v1.1.0 镜像的 alpine 基础包（openssl/gnutls/py3-cryptography）+ argo-cd Go 模块共 7 个可修复 Critical CVE；升级前用集群内 trivy-server 实扫候选镜像 v1.2.2，确认 0 Critical 才升级。
+
+- **CRD group 不变**，无既有 `ImageUpdater` CR 会被破坏，升级零功能风险。
+- **日志级别 Helm 键变更**：chart ≥1.2 把 `logLevel`（顶层，v1.1.0 时映射就有 bug）移到 `config.log.level`，渲染正确。当前值设为稳态 `info`。
+- **⚠️ 运行状态：当前空闲**。`kubectl get imageupdater -A` 返回 0 个 CR，日志常驻 `No ImageUpdater CRs to process`——`oracle-k3s` App 上仍带着旧式 annotation（见文件头「工作原理」一节），但没有对应的 `ImageUpdater` CR 去读取它，因此**实际没有在更新任何镜像**。这套组件目前只是部署着、不做事；如果需要它真正工作，需要补一个 `ImageUpdater` CR（`useAnnotations: true`）。
