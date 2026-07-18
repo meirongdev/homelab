@@ -71,3 +71,35 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST \
 - Fixed 2026-06-07 (Cilium 1.19.1, Helm rev 11). The upgrade without `--version` bumped
   the chart to 1.19.3 while images stayed v1.19.1 (pinned by digest) — realign with
   `--version 1.19.1` if desired.
+
+## Recurrence: oracle-k3s, 2026-07-18
+
+Same symptom, same root cause — but on **oracle-k3s** after ZITADEL's 2026-07-06
+migration there. Coincidentally surfaced right after the ZITADEL DB → CNPG cutover
+(2026-07-18), which was **not** the cause (isolation re-run: direct-to-pod v1 = 200,
+via-Envoy = 404 `grpc-status: 12`, byte-identical to the original incident).
+
+Root cause of the recurrence: `cloud/oracle/values/cilium-values.yaml` had
+`gatewayAPI.enableAppProtocol: true` committed on 2026-07-06 (with a comment citing
+this very runbook), but the 2026-07-07/08 `just deploy-cilium` runs (Helm rev 13/14)
+were executed from a working tree without that line — the deployed release values
+carried `gatewayAPI: {enabled: true}` only, so `enable-gateway-api-app-protocol`
+stayed `false` in cilium-config. Classic 提交≠部署 drift, in the reverse direction
+(repo right, cluster wrong).
+
+Fix applied (mirrors the homelab fix, oracle context):
+
+```bash
+helm --kube-context oracle-k3s upgrade cilium cilium/cilium \
+  --namespace kube-system --version 1.19.1 --reuse-values \
+  --set gatewayAPI.enableAppProtocol=true
+kubectl --context oracle-k3s -n kube-system rollout restart deploy/cilium-operator
+```
+
+Verified: cilium-config `true`; v1 `GetMyUser`/`ListMyProjectOrgs` 200 at the Envoy
+hop and end-to-end via Cloudflare; all other oracle gateway services (login/rss/
+status/keep/home) unaffected.
+
+Prevention note: `cloud/oracle/justfile` `deploy-cilium` uses `--reset-values` +
+the values file (good — a future run now converges to the committed state) but has
+**no `--version` pin** — chart drift risk on every redeploy; pin it when next touched.
