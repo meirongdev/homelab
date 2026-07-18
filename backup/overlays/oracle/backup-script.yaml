@@ -35,10 +35,10 @@ data:
     PGPASSWORD="$(cat /creds/PG_PASSWORD)" pg_dumpall \
       -h rss-postgres.rss-system.svc -p 5432 -U miniflux -f /work/pg_all.sql
     echo "[backup]   pg_all.sql = $(wc -c < /work/pg_all.sql) bytes"
-    # ZITADEL PG（独立实例）
+    # ZITADEL PG（CNPG 集群 zitadel-pg，2026-07-18 起；旧 bitnami zitadel-db 已退役）
     echo "[backup] zitadel pg_dump..."
     PGPASSWORD="$(cat /creds/ZITADEL_PG_PASSWORD)" pg_dump \
-      -h zitadel-db-postgresql.zitadel.svc -p 5432 -U zitadel -d zitadel --no-owner --no-privileges -f /work/zitadel.sql
+      -h zitadel-pg-rw.zitadel.svc -p 5432 -U zitadel -d zitadel --no-owner --no-privileges -f /work/zitadel.sql
     echo "[backup]   zitadel.sql = $(wc -c < /work/zitadel.sql) bytes"
 
     # --- 2) sqlite/config from local-path（meilisearch/cache 不含）---

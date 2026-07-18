@@ -38,33 +38,6 @@ spec:
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  name: zitadel-postgres-auth
-  namespace: zitadel
-spec:
-  refreshInterval: 1h
-  secretStoreRef:
-    name: vault-backend
-    kind: ClusterSecretStore
-  target:
-    name: zitadel-postgres-auth
-    creationPolicy: Owner
-    deletionPolicy: Retain
-    template:
-      engineVersion: v2
-      mergePolicy: Replace
-      type: Opaque
-      data:
-        postgres-password: "{{ .db_password }}"
-        password: "{{ .db_password }}"
-  data:
-    - secretKey: db_password
-      remoteRef:
-        key: secret/homelab/zitadel
-        property: db-password
----
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
   name: zitadel-config
   namespace: zitadel
 spec:
@@ -94,50 +67,10 @@ spec:
         key: secret/homelab/zitadel
         property: db-password
 ---
-# ⚠️ DECOMMISSIONED 2026-07-18: ZITADEL now points at CNPG (zitadel-pg-rw, see
-# zitadel-pg-cluster.yaml), migrated off this frozen bitnamilegacy image via
-# pg_dump/pg_restore during a ~4.5min downtime window. This HelmChart is kept
-# running, untouched, purely as a rollback target during the soak period —
-# remove it (+ its PVC) once stable. See decisions/ for the full record.
-#
-# (Original note, now historical: Bitnami moved all free images to
-# `bitnamilegacy/*` in 2025-08 — no future CVE patches on that channel.)
-apiVersion: helm.cattle.io/v1
-kind: HelmChart
-metadata:
-  name: zitadel-db
-  namespace: kube-system
-spec:
-  repo: https://charts.bitnami.com/bitnami
-  chart: postgresql
-  version: 12.10.0
-  targetNamespace: zitadel
-  createNamespace: true
-  valuesContent: |-
-    image:
-      repository: bitnamilegacy/postgresql
-    architecture: standalone
-    auth:
-      enablePostgresUser: true
-      username: zitadel
-      database: zitadel
-      existingSecret: zitadel-postgres-auth
-      secretKeys:
-        adminPasswordKey: postgres-password
-        userPasswordKey: password
-    primary:
-      persistence:
-        enabled: true
-        storageClass: local-path
-        size: 8Gi
-      resources:
-        requests:
-          cpu: 50m
-          memory: 192Mi
-        limits:
-          cpu: "1"
-          memory: 512Mi
----
+# DB 历史:2026-07-06 迁来时用 bitnami PG(bitnamilegacy 冻结镜像,安全债);
+# 2026-07-18 经 pg_dump/pg_restore 迁至 CNPG 集群 zitadel-pg(见 zitadel-pg-cluster.yaml),
+# 旧 zitadel-db HelmChart + zitadel-postgres-auth ExternalSecret 同日退役移除。
+# 完整记录:decisions/ + docs/reference/evolution-roadmap-2026-07-07.md Phase C。
 apiVersion: helm.cattle.io/v1
 kind: HelmChart
 metadata:
