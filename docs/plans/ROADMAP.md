@@ -47,7 +47,7 @@
 - [ ] **zpool/SMART 告警**: 补 PrometheusRule（当前仅有看板，无告警）
 - [x] **Loki 日志保留**: ✅ 2026-03-19 compactor + retention 168h 已启用
 - [x] **Alertmanager**: ✅ severity=warning|critical → 原生 telegramConfigs → Telegram（生产运行；2026-07-18 起，gotify-bridge 因 concurrent-map-write 崩溃 bug 下线，见 `decisions/alerting-telegram-migration.md`）
-- [x] **Gotify 彻底退役**: ✅ 2026-07——三个消费者（Falco/dead-man's switch 迁 Telegram 原生 output/通知；RSS 阅读推送直接砍掉未迁移）处理完后，Gotify 本体（Deployment/PVC/Service/ExternalSecret/notify.meirong.dev 网关路由/homepage 书签/gotify-availability SLO/backup 条目/相关 Vault secret）全部移除。Cloudflare tunnel ingress 条目待有效 API token 后 `terraform apply` 收尾。详见 `decisions/alerting-telegram-migration.md`
+- [x] **Gotify 彻底退役**: ✅ 2026-07——三个消费者（Falco/dead-man's switch 迁 Telegram 原生 output/通知；RSS 阅读推送直接砍掉未迁移）处理完后，Gotify 本体（Deployment/PVC/Service/ExternalSecret/notify.meirong.dev 网关路由/homepage 书签/gotify-availability SLO/backup 条目/相关 Vault secret）全部移除。Cloudflare tunnel ingress 条目 + DNS record 已 `terraform apply` 摘除，`notify.meirong.dev` 确认不可达。详见 `decisions/alerting-telegram-migration.md`
 - [x] **oracle-k3s Cilium**: 从 Flannel 迁移到 Cilium，统一双集群数据面
 - [x] **Uptime Kuma SSO 修复**: maxredirects=0 + accepted_statuscodes 300-399
 - [x] **homelab Ubuntu 24.04 重建**: ✅ 2026-03-08 重建完成，K3s v1.34.5+k3s1 + Cilium 1.19.1
