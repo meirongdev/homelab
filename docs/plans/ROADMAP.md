@@ -1,6 +1,6 @@
 # Homelab Project TODO
 
-> Last updated: 2026-07-12
+> Last updated: 2026-07-19
 > 当前主线: [2026-07-06 存储本地化迁移 + 备份体系重建](../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md)
 > 演进路线（技术债盘点 + 2026 工具链选型，含 Crossplane 不引入结论）: [evolution-roadmap-2026-07-07](../reference/evolution-roadmap-2026-07-07.md)
 
@@ -43,8 +43,8 @@
 - [x] **恢复演练**: ✅ 2026-07-06 从仓库恢复 Vault snapshot + 两 PG dump + sqlite integrity_check 全通过（2026-07-06 计划 Phase 1 DoD）
 - [x] **存储本地化迁移**: ✅ 2026-07-11 全部完成 — 106 宕机 3 天事故后，剩余 PVC（alertmanager/audit-vault-0/trivy）+ **Calibre 书库 24G**（超出原计划范围，原定留 NFS）全迁 `local-path`；nfs-client provisioner 卸载；书库纳入 restic 夜备 + 新增 PVE 每周 vzdump（VM 100 → 106 `backups`，keep-last=3）。106 降级为纯冷备份目标
 - [ ] **离站备份**: restic 仓库 → 云（OCI always-free/B2），当前仅本地副本。见 2026-07-06 计划 Phase 5
-- [ ] **dead-man's switch**: Alertmanager Watchdog（当前 `receiver:"null"`）→ oracle Uptime Kuma **push** monitor（尚未建）仍未做。但**已有的 pull 式等效机制**（oracle Uptime Kuma 直接探测 homelab 公网服务可达性）通知渠道已于 2026-07 从 Gotify 迁到 Telegram 原生通知（oracle 直连 api.telegram.org，独立于 homelab，同一个 bot/话题）。
-- [ ] **zpool/SMART 告警**: 补 PrometheusRule（当前仅有看板，无告警）
+- [x] **dead-man's switch**: ✅ 2026-07-19 端到端打通——homelab Watchdog → AlertmanagerConfig `watchdog`(webhook, repeat 30s) → status.meirong.dev/api/push/... → oracle Uptime Kuma push monitor(60s 窗口) → Telegram。⚠️ 踩坑两个:① Kuma push 端点**只收 GET**而 Alertmanager webhook 只发 POST——加了 nginx `proxy_method GET` sidecar(`push-shim`:3002)+ HTTPRoute `/api/push` 分流才通(`77e0922`);② `uptime-kuma-api==1.2.1` 没有 `pushToken` 参数且服务端不会自动生成 token——provisioner 注入过库白名单修复
+- [x] **zpool/SMART 告警**: ✅ 其实 2026-07-06 就已随 `storage-alerts.yaml`(storage-health-alerts)上线——SmartHealthFailed/ZpoolNotOnline/介质错误/NVMe 磨损+备件/scrub 超期,指标名为 exporter 实际输出(`smartctl_device_smart_status`/`node_zfs_zpool_state`)。本条一直没打勾导致 2026-07-19 又按过时描述重复加了两条**指标名不存在的死规则**(`node_zfs_zpool_healthy`/`smartctl_device_smart_healthy`,查询返回空),已删
 - [x] **Loki 日志保留**: ✅ 2026-03-19 compactor + retention 168h 已启用
 - [x] **Alertmanager**: ✅ severity=warning|critical → 原生 telegramConfigs → Telegram（生产运行；2026-07-18 起，gotify-bridge 因 concurrent-map-write 崩溃 bug 下线，见 `decisions/alerting-telegram-migration.md`）
 - [x] **Gotify 彻底退役**: ✅ 2026-07——三个消费者（Falco/dead-man's switch 迁 Telegram 原生 output/通知；RSS 阅读推送直接砍掉未迁移）处理完后，Gotify 本体（Deployment/PVC/Service/ExternalSecret/notify.meirong.dev 网关路由/homepage 书签/gotify-availability SLO/backup 条目/相关 Vault secret）全部移除。Cloudflare tunnel ingress 条目 + DNS record 已 `terraform apply` 摘除，`notify.meirong.dev` 确认不可达。详见 `decisions/alerting-telegram-migration.md`
@@ -108,7 +108,7 @@
 
 - [x] restic 备份 CronJob（双集群，取代已移除的 Kopia）✅ 2026-07-06
 - [x] 存储本地化迁移（nfs-client → local-path）✅ 2026-07-11 全部完成（含书库，见上方详情）
-- [ ] dead-man's switch（Watchdog → oracle Uptime Kuma push）
+- [x] dead-man's switch（Watchdog → oracle Uptime Kuma push）✅ 2026-07-19,含 POST→GET shim,见 Phase 4 详情
 - [ ] Terraform state → R2 backend + `use_lockfile`（5 root；可顺带评估 OpenTofu）
 - [ ] external-dns 上线（`--source=gateway-httproute` + cloudflare-proxied）
 - [x] Alertmanager → Telegram 通知模板 ✅（2026-07-18 起原生 telegramConfigs，见上）
