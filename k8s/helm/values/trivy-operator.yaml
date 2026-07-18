@@ -65,7 +65,8 @@ trivy:
   ignoreFile:
     vulnerabilities:
       # Go stdlib(修复需 vendor 用 Go 1.24.13/1.25.7+ 重建):argocd v3.4.5(已是
-      # 最新 stable)、alertmanager-gotify-bridge(无维护)、CWA 内置 kepubify
+      # 最新 stable)、CWA 内置 kepubify(alertmanager-gotify-bridge 已随 Gotify 一并下线,
+      # 不再是需要豁免的对象)
       - id: CVE-2025-68121
         statement: "Go stdlib, 等上游重建镜像; argocd v3.5 GA 约 2026-08-04, 2026-09 复审"
       # grpc-go 1.79.3 才修复;argocd v3.4.5 仍带 1.72.1(tempo 已升 2.9.2 修掉)

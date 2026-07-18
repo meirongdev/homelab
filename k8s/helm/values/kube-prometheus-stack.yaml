@@ -340,10 +340,11 @@ alertmanager:
         source_matchers: [alertname = InfoInhibitor]
         target_matchers: [severity = info]
       - target_matchers: [alertname = InfoInhibitor]
-    # Gotify 路由唯一来源是 AlertmanagerConfig CRD（manifests/alertmanager-config.yaml，
+    # Telegram 路由唯一来源是 AlertmanagerConfig CRD（manifests/alertmanager-config.yaml，
     # 由下方 alertmanagerConfigSelector 注入，生成的路由 continue=true、先于本静态树求值）。
     # 2026-07-17 修复：此前这里还有一条 severity=~critical|warning → gotify 的静态路由，
-    # 与 CRD 的 gotify-default 对同一告警双发（repeat 4h + 12h 两套节奏）→ 消息翻倍。
+    # 与 CRD 的 gotify-default 对同一告警双发（repeat 4h + 12h 两套节奏）→ 消息翻倍
+    # （历史记录：当时 CRD 路由/receiver 还叫 gotify-default，2026-07-18 起改造成 Telegram 原生路由）。
     # 静态树现在只做兜底丢弃（Watchdog/none/未匹配告警 → null）。
     # KubeletDown+cluster=oracle-k3s 误报的静默也在 CRD 里（oracle 走 remote-write,
     # kubelet 无直采指标,规则必触发；homelab 自身的 KubeletDown 仍正常告警）。
