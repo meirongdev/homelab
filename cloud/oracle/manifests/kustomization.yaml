@@ -36,6 +36,10 @@ resources:
   # ⚠️ bootstrap 依赖（不入 git）: Secret `login-client`(zitadel ns，Login V2 PAT，从 homelab 拷入，
   #   因 setup job 在已恢复的 DB 上跳过创建它)；masterkey/db-password 经 ESO 读 secret/homelab/zitadel。
   - zitadel/zitadel.yaml
+  # ZITADEL DB 迁 CloudNativePG（Phase 0，并行部署验证；cutover 是单独一步，见
+  # decisions/ 记录）。cnpg-operator 本身是独立 ArgoCD App（argocd/applications/cnpg-operator.yaml）。
+  - zitadel/zitadel-pg-secrets.yaml
+  - zitadel/zitadel-pg-cluster.yaml
   # Personal services (IT-Tools, Stirling-PDF, Squoosh, Timeslot, Trends)
   - personal-services/it-tools.yaml
   - personal-services/stirling-pdf.yaml
