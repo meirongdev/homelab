@@ -62,7 +62,7 @@
 - [x] **运行时检测** ✅ 2026-06 已部署: Tetragon(homelab) + Falco(oracle)
 - [x] **服务重定位（脱离 homelab 故障域）**: Gotify + ZITADEL → oracle-k3s ✅ 2026-07-06 迁移并验证（见 [apps/2026-07-04-zitadel-to-oracle-k3s](apps/2026-07-04-zitadel-to-oracle-k3s.md)）
 - [ ] **homelab 旧 ZITADEL 退役**: 迁移后保留作回滚，真实浏览器登录确认后删（zitadel 计划遗留尾巴）
-- [ ] **ZITADEL DB 迁 CloudNativePG**: `bitnamilegacy/postgresql:15.4.0`（2023-08 冻结镜像，无 CVE 补丁，存全部 SSO 凭据）→ CNPG + 官方 PG 镜像。见 [演进路线 Phase C](../reference/evolution-roadmap-2026-07-07.md)
+- [x] **ZITADEL DB 迁 CloudNativePG**: ✅ 2026-07-18 完成——`bitnamilegacy/postgresql:15.4.0`(冻结镜像安全债) → CNPG 1.30.0 + 官方 PG **17.6**(`zitadel-pg`,单实例,local-path)。pg_dump/pg_restore 实际停机 **~4.5 分钟**;逐表行数核对通过;真实 OIDC 登录/console 验证通过;旧库/PVC/ExternalSecret 已删(最终态 dump 存本地 `~/backups/zitadel-migration/` + restic 历史)。backup 脚本已指向 `zitadel-pg-rw`——⚠️ 顺带踩坑:备份容器 pg_dump 16 拒绝 dump PG17 server,alpine 升 3.22 + `postgresql17-client` 修复(手动验证抓到,否则夜备静默丢 zitadel dump)。见 [演进路线 Phase C](../reference/evolution-roadmap-2026-07-07.md)
 - [ ] **Terraform state → R2 backend**: 5 个 root 全本地 state（笔记本单点、无锁、含明文密钥）。见演进路线 Phase A
 - [ ] **external-dns (Gateway API source)**: 子域名 "tfvars + gateway.yaml 两步走" → HTTPRoute 单文件。见演进路线 Phase D
 - [ ] **离站备份 (OCI always-free / B2)**: restic 仓库 → 云（rclone/`restic copy`）。见 2026-07-06 计划 Phase 5（later）
@@ -119,7 +119,7 @@
 - [x] Cilium ClusterMesh connect + failover validation ✅ 2026-03-08
 - [x] homelab Cilium Gateway 恢复后双集群统一 cutover 验证 ✅ 2026-03-08
 - [x] Gotify + ZITADEL 迁 oracle-k3s（脱离 homelab 故障域）✅ 2026-07-06
-- [ ] ZITADEL DB → CloudNativePG（15–30 分钟停机窗口，pg_dump/restore。演进路线 Phase C）
+- [x] ZITADEL DB → CloudNativePG ✅ 2026-07-18（实际停机 ~4.5 分钟,PG 17.6,见 Phase 4 详情）
 - [ ] DGX Spark 入编（IaC + GPU 指标 + Bifrost fallback + SLO）
 
 ### ❌ 已取消
