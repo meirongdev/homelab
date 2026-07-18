@@ -43,6 +43,31 @@ spec:
             description: |
               The Proxmox host hosting the homelab K3s VM has been down for 2+ minutes.
               The entire homelab cluster may be inaccessible.
+        - alert: ZpoolNotHealthy
+          expr: node_zfs_zpool_healthy{job="node-exporter-metal-nodes", nodename="storage-106", pool="mrstorage"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            component: storage
+          annotations:
+            summary: "ZFS pool mrstorage on 192.168.50.106 is NOT healthy ({{ $value }})"
+            description: |
+              node_exporter reports zpool mrstorage as unhealthy (node_zfs_zpool_healthy=0).
+              Possible causes: drive failure, checksum errors, vdev degradation.
+              Check: `ssh storage-106 zpool status mrstorage`
+
+        - alert: DiskSMARTFailed
+          expr: smartctl_device_smart_healthy{job="smartctl-storage-106", nodename="storage-106"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            component: storage
+          annotations:
+            summary: "SMART health check FAILED on 192.168.50.106 ({{ $labels.device }})"
+            description: |
+              smartctl reports device {{ $labels.device }} as unhealthy (smartctl_device_smart_healthy=0).
+              Drive may be at imminent risk of failure.
+              Check: `ssh storage-106 sudo smartctl -H /dev/{{ $labels.device }}`
 
     - name: vault
       rules:
