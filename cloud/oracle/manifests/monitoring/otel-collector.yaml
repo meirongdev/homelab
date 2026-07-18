@@ -277,7 +277,7 @@ data:
                   labels:
                     cluster: oracle-k3s
 
-      # Cilium Gateway Envoy L7 指标 —— zitadel/gotify 等 oracle 入口可用性 SLO
+      # Cilium Gateway Envoy L7 指标 —— zitadel 等 oracle 入口可用性 SLO
       # (k8s/helm/manifests/slos.yaml › oracle-gateway-availability) 的数据源。
       # 对应 homelab 侧的 cilium-envoy ServiceMonitor；oracle 无 Prometheus Operator，
       # 由 otel-collector 直接抓取 headless Service cilium-envoy(:9964)。

@@ -88,7 +88,7 @@ kubectl --context k3s-homelab get vulnerabilityreports,configauditreports,expose
 ```
 - 指标核对（首次扫描后）：`kubectl -n trivy-system port-forward svc/trivy-operator 8080:8080` 然后 `curl -s localhost:8080/metrics | grep trivy_`，确认 `trivy_image_vulnerabilities` / `trivy_exposedsecrets_findings` / `trivy_resource_configaudits` 名称与 `manifests/trivy-alerts.yaml` 一致（不同 chart 版本可能微调）。
 - 看板：Grafana → `Security` 文件夹 → "Security / Trivy 漏洞概览"。
-- 告警：critical CVE / 暴露密钥经 Alertmanager→Gotify。
+- 告警：critical CVE / 暴露密钥经 Alertmanager→Telegram。
 
 ### 4. Kyverno（Audit 起步）
 

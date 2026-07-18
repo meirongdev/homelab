@@ -3,13 +3,13 @@
 # 2026-07-18: 从 Gotify bridge(druggeri/alertmanager_gotify_bridge)换成 Alertmanager
 # 原生 telegramConfigs。原 bridge 有 `concurrent map writes` 崩溃 bug(全局无锁 metrics
 # map,两个并发 webhook 即 fatal),且上游无维护、无修复镜像。Telegram 原生投递 = 零中间
-# 桥、无并发崩溃、无版本绑定构建。
-# ⚠️ Gotify 本体不受影响:仍为 Falco 服务(falcosidekick 原生推送 app 2),此处只拿掉
-#    Alertmanager 那条坏 bridge(gotify app 1 = alertmanager_app 从此闲置,可后续在 Gotify 删)。
-# bot token: k8s Secret monitoring/alertmanager-telegram key=bot-token
-#   ⚠️ 暂为 imperative secret(改造时 Vault token 已过期)。TODO: 迁回 Vault
-#      secret/homelab/telegram + ExternalSecret(拿到有效 VAULT_TOKEN 后)。
-# chatID 1982853512 = 私聊 @matthew_daily_bot。
+# 桥、无并发崩溃、无版本绑定构建。详见 decisions/alerting-telegram-migration.md。
+# 投到群 MatthewDaily 的「🚨 Homelab 告警」forum topic(chatID -1003981213530 +
+# messageThreadID 2)。bot token: Vault secret/homelab/telegram → ESO
+# (k8s/helm/manifests/alertmanager-telegram-secret.yaml)→ k8s Secret
+# monitoring/alertmanager-telegram key=bot-token。
+# Gotify 本体已于 2026-07 彻底下线(不再是"仍服务 Falco"——Falco 也已迁到原生
+# Telegram output,见 falco.yaml + decisions/alerting-telegram-migration.md)。
 ---
 apiVersion: monitoring.coreos.com/v1alpha1
 kind: AlertmanagerConfig

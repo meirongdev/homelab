@@ -31,7 +31,7 @@
 | ZITADEL PG | oracle（迁移后）| `pg_dump`（network）|
 | Miniflux PG | oracle | `pg_dump`（network）|
 | sqlite: bifrost / calibre-config | homelab | 特权 CronJob hostPath 读 local-path + `sqlite3 ".backup"`（在线 API）|
-| sqlite: gotify / karakeep / uptime-kuma / timeslot | oracle | 同上 |
+| sqlite: karakeep / uptime-kuma / timeslot | oracle | 同上 |
 | meilisearch | oracle | dump / tar |
 | **Calibre 书库 (100Gi)** | homelab | **不进 restic** — 留 NFS/ZFS，靠 raidz1 + sanoid 快照（书可再下载）|
 
