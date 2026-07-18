@@ -41,7 +41,6 @@
 | 服务 | 集群 | URL | 认证 |
 |------|------|-----|------|
 | Calibre-Web | homelab | book.meirong.dev | 内置 |
-| Gotify | oracle-k3s | notify.meirong.dev | 内置 |
 | Grafana | homelab | grafana.meirong.dev | 内置 |
 | Vault | homelab | vault.meirong.dev | 内置 |
 | ArgoCD | homelab | argocd.meirong.dev | 内置 |

@@ -142,11 +142,6 @@ data:
               container: karakeep
               label_selector: app=karakeep
 
-        - Gotify:
-            icon: gotify.png
-            href: https://notify.meirong.dev
-            description: 消息推送 → Telegram
-
     - 监控:
         - Uptime Kuma:
             icon: uptime-kuma.png

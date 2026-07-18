@@ -25,14 +25,13 @@ resources:
   - monitoring/namespace.yaml
   - monitoring/otel-collector.yaml
   - monitoring/exporters.yaml
-  # Falco 运行时检测：namespace + falcosidekick→Gotify token（Falco 工作负载由独立 falco Helm App 部署）
+  # Falco 运行时检测：namespace + falcosidekick→Telegram token（Falco 工作负载由独立 falco Helm App 部署）
   - falco/namespace.yaml
   - falco/falcosidekick-secret.yaml
   # Backup: serverless restic → 106 ZFS 仓库（Tailscale sftp）。见 plans/2026-07-06-…backup-redesign.md
   # 2026-07-07 与 homelab 合并为 kustomize base+overlay（repo 根 backup/）
   - ../../../backup/overlays/oracle
-  # Gotify: 迁自 homelab 2026-07-06（脱离 homelab 故障域）。notify.meirong.dev tunnel/DNS 切换待 CF apply
-  - gotify/gotify.yaml
+  # Gotify 已于 2026-07 下线（Falco/dead-man's switch/RSS 推送均已迁 Telegram 或砍掉）
   # ZITADEL (SSO): 迁自 homelab 2026-07-06。auth.meirong.dev 已切 oracle tunnel。
   # ⚠️ bootstrap 依赖（不入 git）: Secret `login-client`(zitadel ns，Login V2 PAT，从 homelab 拷入，
   #   因 setup job 在已恢复的 DB 上跳过创建它)；masterkey/db-password 经 ESO 读 secret/homelab/zitadel。

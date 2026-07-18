@@ -2,7 +2,7 @@
 # 为主要 homelab 用户服务定义"可用性 99% / 30d"SLO（error = 5xx）。
 # Sloth 控制器据此生成 PrometheusRule：
 #   - SLI 录制规则 slo:sli_error:ratio_rate{5m,30m,1h,2h,6h,1d,3d}
-#   - 多窗口多燃尽率告警（page→severity:critical / ticket→severity:warning → Gotify）
+#   - 多窗口多燃尽率告警（page→severity:critical / ticket→severity:warning → Telegram）
 #   - 元信息 slo:objective:ratio 等
 #
 # 指标来源：envoy_cluster_upstream_rq_xx{envoy_cluster_name="<gw>/<ns>_<svc>_<port>",
@@ -98,7 +98,8 @@ spec:
         ticketAlert:
           labels: { severity: warning }
 ---
-# oracle-k3s 网关 SLO（ZITADEL/Gotify 2026-07 迁移后入口在 oracle）。
+# oracle-k3s 网关 SLO（ZITADEL，2026-07 迁移后入口在 oracle；原 Gotify SLO 已随
+# Gotify 下线一并移除，2026-07）。
 # 指标来源：oracle otel-collector 抓取 cilium-envoy(:9964) 后 remote-write 到
 # homelab Prometheus，带 cluster="oracle-k3s" 标签——见
 # cloud/oracle/manifests/monitoring/otel-collector.yaml (prometheus/cilium-envoy)。
@@ -127,20 +128,6 @@ spec:
       alerting:
         name: ZitadelGatewayHighErrorRate
         labels: { slo_service: zitadel }
-        pageAlert:
-          labels: { severity: critical }
-        ticketAlert:
-          labels: { severity: warning }
-    - name: "gotify-availability"
-      objective: 99.0
-      description: "Gotify (notify.meirong.dev) 入口可用性，error=5xx"
-      sli:
-        events:
-          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/personal-services_gotify_.*", envoy_response_code_class="5"}[{{.window}}])) OR on() vector(0)
-          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/personal-services_gotify_.*"}[{{.window}}]))
-      alerting:
-        name: GotifyGatewayHighErrorRate
-        labels: { slo_service: gotify }
         pageAlert:
           labels: { severity: critical }
         ticketAlert:

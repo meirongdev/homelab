@@ -26,9 +26,9 @@
 | 7 | CIS 合规 | kube-bench（周巡检） | ✅ 已装 | `manifests/kube-bench.yaml` | homelab |
 | 8 | 节点加固 | k3s `protect-kernel-defaults` + sysctl | ⏳ 待重启生效 | `k8s/ansible/playbooks/setup-k3s.yaml` | homelab |
 | 9 | 网络 | Cilium NetworkPolicy + Hubble 可见性 | 🟡 仅可见性 | Cilium（默认拒绝刻意延后） | 双 |
-| 10 | 运行时检测 | Tetragon(homelab) / Falco+Falcosidekick(oracle) | ✅ 已实现（Falco→Gotify 已接通） | `values/{tetragon,falco}.yaml` | 双（分别选型） |
+| 10 | 运行时检测 | Tetragon(homelab) / Falco+Falcosidekick(oracle) | ✅ 已实现（Falco→Telegram 已接通，2026-07 起原生 output，不再经 Gotify） | `values/{tetragon,falco}.yaml` | 双（分别选型） |
 | 11 | 备份/恢复 | restic（106 ZFS 加密仓库）| 🟡 Phase1 上线（双集群每夜备份 + 恢复演练通过；**离站副本待做**）| `runbooks/backup-recovery.md` | 双 |
-| 12 | 安全可观测 | Prometheus/Loki → Alertmanager → Telegram（homelab）/ Gotify（Falco, oracle） | ✅ 生产 | `kube-prometheus-stack.yaml`, 各 `*-alerts.yaml` | 双 |
+| 12 | 安全可观测 | Prometheus/Loki → Alertmanager → Telegram（homelab）/ Falcosidekick → Telegram 直推（oracle Falco） | ✅ 生产 | `kube-prometheus-stack.yaml`, 各 `*-alerts.yaml` | 双 |
 
 ---
 
@@ -107,13 +107,13 @@
 eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异常外联）。**按集群硬件选型**：
 
 - **homelab → Tetragon**（`values/tetragon.yaml`，ns `tetragon`，Helm App）。Cilium 原生、**内核态过滤**只上报命中事件 → 省 CPU，适配热笔记本。v1：默认进程 exec/exit 可见性 → `export-stdout` → 现有 OTel→Loki（按 pod=tetragon 查，可见容器内 shell/kubectl exec/异常进程）+ Prometheus 指标(ServiceMonitor 带 release 标签)。自定义 TracingPolicy（敏感文件/提权检测）+ 基于其指标的告警为后续调优。
-- **oracle → Falco + Falcosidekick → Gotify**（`values/falco.yaml`，ns `falco`，Helm App 部署到 oracle 集群）。规则库开箱即用；oracle VM CPU 余量大。`driver: modern_ebpf`(CO-RE 无需内核模块)。**双出口**：① Falco JSON→stdout→OTel→Loki（always-on，零依赖）；② Falcosidekick→Gotify(`notify.meirong.dev`，warning+)。
-  - **⚠️ Gotify 推送前置（手动一次性）**：Gotify 建 Application 取 token → `vault kv put secret/oracle-k3s/falco gotify_token=<token>` → ESO(`cloud/oracle/manifests/falco/falcosidekick-secret.yaml`)生成 `falcosidekick-gotify` secret(key `GOTIFY_TOKEN`)。未配前 ExternalSecret Ready=False（触发 ESO 告警提示），falcosidekick 待启动，但 Falco→Loki 检测照常。
+- **oracle → Falco + Falcosidekick → Telegram**（`values/falco.yaml`，ns `falco`，Helm App 部署到 oracle 集群）。规则库开箱即用；oracle VM CPU 余量大。`driver: modern_ebpf`(CO-RE 无需内核模块)。**双出口**：① Falco JSON→stdout→OTel→Loki（always-on，零依赖）；② Falcosidekick→Telegram（原生 output，warning+，併入群 MatthewDaily「🚨 Homelab 告警」话题——2026-07 前曾经 Gotify 转发，已随其下线迁移，见 `decisions/alerting-telegram-migration.md`）。
+  - **Telegram 推送前置（一次性）**：token 走 Vault `secret/homelab/telegram`（与 homelab Alertmanager 共用同一个 bot，跨集群读取）→ ESO(`cloud/oracle/manifests/falco/falcosidekick-secret.yaml`)生成 `falcosidekick-telegram` secret(key `TELEGRAM_TOKEN`)；chatid/messagethreadid 明文配在 `values/falco.yaml`。token 未配好不影响 Falco→Loki 检测，只是 falcosidekick 推送失败。
   - falco ns（含 PSA privileged 标签 + ESO secret）由 oracle-k3s kustomize App 拥有；Falco 工作负载由独立 `falco` Helm App 部署（`CreateNamespace=false`）。
 
 ## 9. 安全可观测与告警
 
-- **统一管道**（2026-07-18 起）：homelab 侧 Prometheus(metrics)/Loki(logs) → Alertmanager → 原生 `telegramConfigs`(无 bridge) → Telegram 群 MatthewDaily 的「🚨 Homelab 告警」话题。`severity:warning|critical` 路由，`info/Watchdog` 丢弃。旧 `alertmanager-gotify-bridge` 因 `concurrent map writes` 崩溃 bug + 上游无维护已下线，详见 `decisions/alerting-telegram-migration.md`。oracle 侧 Falco 走独立的 Falcosidekick→Gotify 出口(§8.5)，与本链路无关、不受影响。
+- **统一管道**（2026-07 起）：homelab 侧 Prometheus(metrics)/Loki(logs) → Alertmanager → 原生 `telegramConfigs`(无 bridge) → Telegram 群 MatthewDaily 的「🚨 Homelab 告警」话题。`severity:warning|critical` 路由，`info/Watchdog` 丢弃。旧 `alertmanager-gotify-bridge` 因 `concurrent map writes` 崩溃 bug + 上游无维护已下线。oracle 侧 Falco 走独立的 Falcosidekick 原生 Telegram output(§8.5)——两条链路各自直连 Telegram Bot API，同一个 bot/话题，但代码路径不同，互不依赖。Gotify 本体已随本次迁移彻底下线（Deployment/PVC/网关路由/DNS 全部移除），详见 `decisions/alerting-telegram-migration.md`。
 - **新增 `PrometheusRule`/`ServiceMonitor` 必须带 `release:kube-prometheus-stack`** 否则 operator selector 忽略。
 - **安全相关规则**：ESO 健康（`eso-alerts.yaml`）、Trivy 发现（`trivy-alerts.yaml`）。多集群靠 `cluster` 标签区分。
 - **看板**：Grafana `Security` 文件夹 3 张——**Trivy 漏洞概览**（CVE/暴露密钥/配置审计，Prometheus）、**Kyverno 准入策略**（评估结果/Enforce 拦截/各策略 fail/webhook 延迟，Prometheus，Kyverno 各 controller ServiceMonitor）、**运行时与审计事件**（Falco 告警 + Tetragon 进程事件 + kube-bench CIS，Loki）。Hubble CLI 看网络流。
@@ -132,13 +132,13 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 | 配置劣化（无 limits/probes/不可信仓库） | Kyverno（Audit）+ LimitRange 护栏（注入默认 requests/limits） | 🟡 Audit + 护栏 |
 | 镜像已知 CVE | Trivy（HIGH/CRITICAL）→ Telegram + 看板 | ✅ |
 | 节点/控制面配置不合规 | kube-bench 周巡检 + protect-kernel-defaults | 🟡 待重启 |
-| 容器内运行时入侵（起 shell/异常外联/提权） | Tetragon(homelab,进程可见性→Loki) / Falco(oracle,规则→Loki+Gotify) | ✅ 已部署（v1 可见性；TracingPolicy/规则调优持续） |
+| 容器内运行时入侵（起 shell/异常外联/提权） | Tetragon(homelab,进程可见性→Loki) / Falco(oracle,规则→Loki+Telegram) | ✅ 已部署（v1 可见性；TracingPolicy/规则调优持续） |
 | 东西向横向移动 | 网络默认拒绝 | ❌ 延后（仅 Hubble 可见性） |
 | 数据丢失 | restic 双集群 CronJob（Vault raft / pg_dump / sqlite）→ 106 ZFS 仓库 + 恢复演练通过 | 🟡 本地单副本，离站备份未上线 |
 
 ## 11. 已知缺口与路线图
 
-1. **运行时检测调优（Phase 2 已部署，见 §8.5）**：v1 已上 Tetragon(homelab,进程可见性)+Falco(oracle,规则，Gotify token 已配好)。后续：① Tetragon 写 TracingPolicy（敏感文件/提权/异常外联）+ 基于其指标的告警（Telegram）；② Falco 噪声规则按环境裁剪。
+1. **运行时检测调优（Phase 2 已部署，见 §8.5）**：v1 已上 Tetragon(homelab,进程可见性)+Falco(oracle,规则，Telegram token 已配好)。后续：① Tetragon 写 TracingPolicy（敏感文件/提权/异常外联）+ 基于其指标的告警（Telegram）；② Falco 噪声规则按环境裁剪。
 2. **网络默认拒绝（门控灰度）**：Hubble 基线流量 → Cilium 每端点 `PolicyAuditMode` 只记不拦 → 单无状态叶子 ns（personal-services/homepage）试点 CiliumNetworkPolicy（放行 DNS/Envoy/必要 egress）→ soak → 逐 ns 评估，**建议只对对外暴露 ns 做**。
 3. **节点 API 审计日志**：延后（磁盘紧）；如开启用 Metadata 级策略 + 严格 maxsize/maxbackup，先确认磁盘余量。
 4. **Kyverno Audit→Enforce**：逐条清理存量违规后提升；restrict-image-registries 最久保持 Audit。

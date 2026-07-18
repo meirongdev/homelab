@@ -7,8 +7,9 @@
 #
 # 检测事件双出口：
 #   1) Falco JSON → stdout → oracle OTel Collector → homelab Loki（always-on 取证线索，零依赖）
-#   2) Falcosidekick → Gotify（主动推送告警）—— 需先配 Gotify token（见下方 ⚠️ 与 runbook）
-#      token 未配好不影响 (1)；falcosidekick 仅 Gotify 推送失败，Falco 检测本身照常。
+#   2) Falcosidekick → Telegram（主动推送告警，2026-07 起原生 telegram output，
+#      不再经 Gotify——已下线）—— 併入群 MatthewDaily「🚨 Homelab 告警」话题
+#      token 未配好不影响 (1)；falcosidekick 仅 Telegram 推送失败，Falco 检测本身照常。
 
 # CO-RE modern eBPF 驱动：无需内核模块/头文件，适配托管 VM（recent kernel）。
 driver:
@@ -36,7 +37,10 @@ resources:
     cpu: "1"
     memory: 512Mi
 
-# Falcosidekick：把告警扇出到 Gotify
+# Falcosidekick：把告警扇出到 Telegram（原生 output，chatid/messagethreadid 走
+# 明文 values——非敏感；existingSecret 只覆盖 TELEGRAM_TOKEN 一个键，与其余
+# telegram.* 明文键叠加生效，机制同旧 gotify 配置，见 falcosidekick chart
+# secrets.yaml 模板：envFrom 两个 secretRef 叠加，后者覆盖同名键）
 falcosidekick:
   enabled: true
   replicaCount: 1
@@ -44,10 +48,11 @@ falcosidekick:
     requests: { cpu: 25m, memory: 64Mi }
     limits: { cpu: 200m, memory: 128Mi }
   config:
-    # 仅推 warning 及以上到 Gotify，降噪
-    gotify:
-      hostport: "https://notify.meirong.dev"
+    # 仅推 warning 及以上，降噪；併入 Telegram 群 MatthewDaily「🚨 Homelab 告警」话题
+    telegram:
+      chatid: "-1003981213530"
+      messagethreadid: "2"
       minimumpriority: "warning"
-      # ⚠️ token 不写明文；经 ESO 注入的 secret(falcosidekick-gotify) 的 GOTIFY_TOKEN 环境变量提供。
-    # existingSecret：其 key 作为大写环境变量被 falcosidekick 读取（GOTIFY_TOKEN）。
-    existingSecret: "falcosidekick-gotify"
+      # ⚠️ token 不写明文；经 ESO 注入的 secret(falcosidekick-telegram) 的 TELEGRAM_TOKEN 环境变量提供。
+    # existingSecret：其 key 作为大写环境变量被 falcosidekick 读取（TELEGRAM_TOKEN）。
+    existingSecret: "falcosidekick-telegram"

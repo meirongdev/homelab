@@ -37,7 +37,6 @@ data:
         # --- new info pipeline services ---
         # KaraKeep: root / redirects 307 to /signin; monitor /signin directly (returns 200)
         {"name": "KaraKeep",       "url": "http://karakeep.rss-system.svc:3000/signin"},
-        {"name": "Gotify",         "url": "https://notify.meirong.dev/",        "accepted_statuscodes": ["200-299", "300-399"], "maxredirects": 0},
         # Timeslot: oracle-k3s local service, direct ClusterDNS bypasses SSO
         {"name": "Timeslot",       "url": "http://timeslot.personal-services.svc:8080/api/slots"},
         # Trends: GitHub 趋势追踪, /healthz returns 200
@@ -74,32 +73,34 @@ data:
     STATUS_PAGE_TITLE  = "Homelab Status"
     STATUS_PAGE_DOMAIN = "status.meirong.dev"
 
-    # --- Notification (Gotify) = dead-man's switch ---
+    # --- Notification (Telegram) = dead-man's switch ---
     # oracle Uptime Kuma pings homelab public services (Grafana/Vault/ArgoCD/Calibre) + oracle
-    # services. Attaching a Gotify notification to ALL monitors means: homelab down → its services
-    # unreachable → Uptime Kuma → Gotify(oracle) → phone, with NO dependency on homelab. Gotify lives
-    # on oracle too, so the whole alert path survives a full homelab outage.
-    GOTIFY_TOKEN = os.environ.get("GOTIFY_TOKEN")
-    GOTIFY_URL   = os.environ.get("GOTIFY_URL", "http://gotify.personal-services.svc")
-    NOTIF_NAME   = "Gotify (dead-man)"
-    if GOTIFY_TOKEN:
-        # delete+recreate so the token/URL always reflect the current secret (idempotent refresh)
+    # services. Attaching a Telegram notification to ALL monitors means: homelab down → its services
+    # unreachable → Uptime Kuma → Telegram Bot API (oracle → internet direct), with NO dependency
+    # on homelab. 2026-07 起不再经 Gotify（已下线）；oracle 直连 api.telegram.org，独立性不变。
+    # Same bot/group/topic as homelab Alertmanager's telegramConfigs — 「🚨 Homelab 告警」话题。
+    TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+    TELEGRAM_CHAT_ID = -1003981213530
+    TELEGRAM_MESSAGE_THREAD_ID = 2
+    NOTIF_NAME = "Telegram (dead-man)"
+    if TELEGRAM_BOT_TOKEN:
+        # delete+recreate so the token always reflects the current secret (idempotent refresh)
         for n in api.get_notifications():
             if n["name"] == NOTIF_NAME:
                 api.delete_notification(n["id"])
                 print(f"Removed stale notification '{NOTIF_NAME}' (will recreate with current token).")
         api.add_notification(
             name=NOTIF_NAME,
-            type=NotificationType.GOTIFY,
+            type=NotificationType.TELEGRAM,
             isDefault=True,        # auto-attach to future monitors
             applyExisting=True,    # attach to all existing monitors now
-            gotifyserverurl=GOTIFY_URL,
-            gotifyapplicationToken=GOTIFY_TOKEN,
-            gotifyPriority=8,
+            telegramBotToken=TELEGRAM_BOT_TOKEN,
+            telegramChatID=str(TELEGRAM_CHAT_ID),
+            telegramMessageThreadID=str(TELEGRAM_MESSAGE_THREAD_ID),
         )
-        print(f"Gotify notification '{NOTIF_NAME}' created + applied to all monitors.")
+        print(f"Telegram notification '{NOTIF_NAME}' created + applied to all monitors.")
     else:
-        print("WARNING: GOTIFY_TOKEN not set — no notification channel (dead-man's switch inactive).")
+        print("WARNING: TELEGRAM_BOT_TOKEN not set — no notification channel (dead-man's switch inactive).")
 
     # --- Monitors ---
     existing = {m["name"]: m for m in api.get_monitors()}
@@ -190,13 +191,11 @@ spec:
                 secretKeyRef:
                   name: uptime-kuma-admin
                   key: password
-            - name: GOTIFY_TOKEN
+            - name: TELEGRAM_BOT_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: uptime-kuma-admin
-                  key: gotify_token
-            - name: GOTIFY_URL
-              value: "http://gotify.personal-services.svc"
+                  key: telegram_bot_token
           volumeMounts:
             - name: scripts
               mountPath: /scripts
