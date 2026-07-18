@@ -50,7 +50,7 @@ GitOps 覆盖与安全纵深已成熟。剩余债务集中三处：
 ### E. 卫生项（半小时）
 
 - `justfile` `deploy-prometheus`/`deploy-prometheus-nowait` 各传两次 `--version`（helm 取末位故实际生效 87.6.0，不坏但误导）；死变量 `prometheus_stack_version := "82.10.1"`。
-- Vault 孤儿 `secret/homelab/postgres`（2026-07-07 postgres 清理后无消费者）。
+- ~~Vault 孤儿 `secret/homelab/postgres`（2026-07-07 postgres 清理后无消费者）。~~ ✅ 2026-07-18 已删（连同 zitadel-oidc / oracle-k3s/oauth2-proxy / kopia，见 ROADMAP「Vault 孤儿 secret 清理」）。
 
 ---
 
