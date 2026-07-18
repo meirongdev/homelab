@@ -11,7 +11,8 @@ data:
     # meilisearch 索引(可由 karakeep 重建)不备份。
     set -eu
     echo "[backup] installing tools..."
-    apk add --no-cache restic openssh-client postgresql-client findutils >/dev/null
+    # postgresql17-client 显式钉版:zitadel DB 是 PG17(CNPG),pg_dump 必须 ≥17
+    apk add --no-cache restic openssh-client postgresql17-client findutils >/dev/null
 
     install -d -m 700 /root/.ssh
     base64 -d /creds/SSH_KEY_B64 > /root/.ssh/id_ed25519

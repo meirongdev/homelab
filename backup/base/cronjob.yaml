@@ -24,7 +24,9 @@ spec:
             runAsUser: 0             # 需 root 读 hostPath 各 uid 文件 + 写 /root/.ssh
           containers:
             - name: backup
-              image: alpine:3.20
+              # 3.22: 提供 postgresql17-client —— oracle 侧 zitadel DB 已是 CNPG PG17,
+              # pg_dump 16 会因 server version mismatch 拒绝 dump(2026-07-18 手动验证时抓到)。
+              image: alpine:3.22
               command: ["sh", "/scripts/backup.sh"]
               resources:
                 requests: { cpu: "50m", memory: "128Mi" }
