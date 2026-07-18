@@ -87,6 +87,14 @@ monitoring:
 lokiCanary:
   enabled: false # 禁用 canary, 节省资源
 
+# ✅ 禁用 helm test —— 必须与上面 lokiCanary 一起关。
+# chart 默认 test.enabled=true，其 templates/validate.yaml 硬性要求"跑 test 就得开 canary"，
+# 否则 helm template 直接 FATAL（`Helm test requires the Loki Canary to be enabled`）。
+# 之前只关了 canary 没关 test → ArgoCD 无法渲染 loki manifest → app 卡在 Unknown 同步态、
+# 脱离 GitOps 管理（推 values 改动不生效、selfHeal 失效）。我们本就不跑 canary test，直接关掉。
+test:
+  enabled: false
+
 # ✅ 确保禁用其他模式的组件
 read:
   replicas: 0
