@@ -108,6 +108,20 @@ data:
     # Homelab Alertmanager fires Watchdog → webhook → status.meirong.dev/api/push/... → Uptime Kuma.
     # If homelab goes down, pushes stop → Uptime Kuma marks DOWN → Telegram notification fires.
     # Both clusters have internet via Cloudflare, so the webhook goes public-internet path.
+    #
+    # uptime-kuma-api 1.2.1 (final release; project unmaintained) does not expose pushToken
+    # on add_monitor, but the Kuma server accepts it — the web UI generates the token
+    # client-side and sends it in the same payload. Without it the server stores a NULL
+    # token (it never generates one itself), which can never match the Alertmanager webhook
+    # URL. Inject it past the library's kwarg whitelist:
+    _orig_build_monitor_data = UptimeKumaApi._build_monitor_data
+    def _build_monitor_data_with_push_token(self, *args, pushToken=None, **kwargs):
+        data = _orig_build_monitor_data(self, *args, **kwargs)
+        if pushToken is not None:
+            data["pushToken"] = pushToken
+        return data
+    UptimeKumaApi._build_monitor_data = _build_monitor_data_with_push_token
+
     PUSH_TOKEN = "alertmanager-watchdog-homelab"
     PUSH_MONITOR_NAME = "Alertmanager Watchdog"
     push_existing = {m["name"]: m for m in api.get_monitors()}
@@ -139,6 +153,17 @@ data:
             continue
         api.add_monitor(type=MonitorType.HTTP, name=m["name"], url=m["url"], interval=60, **extra)
         print(f"  added {m['name']} -> {m['url']}")
+
+    # --- Prune stale monitors ---
+    # Declarative reconciliation: anything left in Kuma that isn't declared above (e.g. a
+    # decommissioned service's monitor, like the old Gotify check) gets removed, so retiring
+    # a service from MONITORS actually retires it here too instead of leaving a permanently-red
+    # orphan on the public status page.
+    keep_names = {m["name"] for m in MONITORS} | {PUSH_MONITOR_NAME}
+    for name, mon in existing.items():
+        if name not in keep_names:
+            api.delete_monitor(mon["id"])
+            print(f"  removed stale monitor '{name}' (id={mon['id']}, no longer declared)")
 
     # --- Public status page ---
     monitor_entries  = [{"id": m["id"], "sendUrl": False} for m in api.get_monitors()]
