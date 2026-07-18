@@ -81,3 +81,4 @@ openspec/
 .github/prompts/
 .github/skills/
 proxmox/ansible/.vault_pass
+.gstack/
