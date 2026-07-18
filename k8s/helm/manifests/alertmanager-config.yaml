@@ -53,7 +53,10 @@ spec:
         - botToken:
             name: alertmanager-telegram
             key: bot-token
-          chatID: 1982853512
+          # 群组 MatthewDaily(超级群/forum),告警投到「🚨 Homelab 告警」话题(thread 2)。
+          # 私聊 chatID(1982853512)已弃用;群 ID 为负 int64。
+          chatID: -1003981213530
+          messageThreadID: 2
           parseMode: HTML
           sendResolved: true
           # 标题行按状态/严重度标 emoji + 加粗;正文列出各 alert 的 summary/description。
