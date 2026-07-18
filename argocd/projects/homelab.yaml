@@ -21,6 +21,8 @@ spec:
     - https://grafana.github.io/helm-charts
     # SLO 生成器
     - https://slok.github.io/sloth
+    # CloudNativePG operator（ZITADEL DB 从冻结 bitnami 迁 CNPG，evolution-roadmap Phase C）
+    - https://cloudnative-pg.github.io/charts
 
   destinations:
     - server: https://kubernetes.default.svc

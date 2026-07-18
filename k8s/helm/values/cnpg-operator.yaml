@@ -1,0 +1,22 @@
+# CloudNativePG operator —— 部署到 oracle-k3s，管理 ZITADEL 的 PostgreSQL。
+# 取代 2023-08 冻结的 bitnamilegacy/postgresql:15.4.0（安全债，见
+# docs/reference/evolution-roadmap-2026-07-07.md Phase C）。
+# 由 ArgoCD App argocd/applications/cnpg-operator.yaml 部署，dest ns: cnpg-system。
+replicaCount: 1
+
+# chart 自带 CRD（Cluster/Pooler/Backup 等）；ArgoCD 用 ServerSideApply 处理大 CRD。
+crds:
+  create: true
+
+# oracle 无 prometheus-operator（用 otel-collector）——不建 PodMonitor（默认已关，显式重申避免踩坑）。
+monitoring:
+  podMonitorEnabled: false
+
+# operator 自身资源（oracle 余量大，但仍设上限；reconcile 峰值给到 256Mi）。
+resources:
+  requests:
+    cpu: 50m
+    memory: 100Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
