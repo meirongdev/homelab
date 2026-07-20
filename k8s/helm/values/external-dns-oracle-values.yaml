@@ -1,0 +1,40 @@
+# external-dns for oracle-k3s — the SECOND instance, sharing the same Cloudflare zone
+# (meirong.dev) with homelab's instance.
+#
+# ⚠️ DISTINCT txtOwnerId (oracle-externaldns vs homelab-externaldns). Both instances write the
+# same zone; a shared owner id would corrupt ownership arbitration (each would think it owns
+# the other's records). Each only watches its OWN cluster's HTTPRoutes, and the hostnames are
+# disjoint, so with distinct owners + upsert-only they coexist without touching each other.
+#
+# Deployed via manual helm (`just deploy-external-dns-oracle`), same convention as homelab's
+# instance. The Cloudflare token comes from the ExternalSecret in the oracle Kustomize tree
+# (cloud/oracle/manifests/base/external-dns.yaml), which reads the same Vault zone token.
+provider:
+  name: cloudflare
+
+env:
+  - name: CF_API_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: external-dns-cloudflare
+        key: api-token
+
+sources:
+  - gateway-httproute
+
+domainFilters:
+  - meirong.dev
+
+policy: upsert-only
+registry: txt
+txtOwnerId: oracle-externaldns
+
+interval: 1m
+
+extraArgs:
+  - --cloudflare-proxied
+# NOTE on the target: oracle-gateway is an addressless LoadBalancer, so external-dns gets the
+# tunnel CNAME target from the Gateway's external-dns.alpha.kubernetes.io/target annotation
+# (in cloud/oracle/manifests/base/gateway.yaml) — same as homelab. Verified that
+# --default-targets / --force-default-targets do NOT work for an addressless gateway source,
+# so the annotation is the required mechanism.

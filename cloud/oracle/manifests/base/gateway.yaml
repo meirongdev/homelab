@@ -4,6 +4,13 @@ kind: Gateway
 metadata:
   name: oracle-gateway
   namespace: kube-system
+  annotations:
+    # external-dns target for this cluster's subdomains. oracle-gateway is an addressless
+    # LoadBalancer (no readable address), so external-dns can't derive a target from its
+    # status — this annotation supplies the oracle tunnel CNAME explicitly (same approach as
+    # homelab-gateway). REQUIRED: without it external-dns produces no endpoints for oracle
+    # HTTPRoutes (--default-targets/--force-default-targets do NOT substitute for it here).
+    external-dns.alpha.kubernetes.io/target: bc630e77-867f-4716-a1d0-8721bf9880da.cfargotunnel.com
 spec:
   gatewayClassName: cilium
   listeners:

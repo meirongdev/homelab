@@ -6,6 +6,9 @@ resources:
   - base/vault-store.yaml
   - base/cloudflare-tunnel.yaml
   - base/gateway.yaml
+  # external-dns: ns + Cloudflare token ExternalSecret (chart is manual-helm, see
+  # k8s/helm/values/external-dns-oracle-values.yaml + `just deploy-external-dns-oracle`)
+  - base/external-dns.yaml
   # RSS system
   - rss-system/namespace.yaml
   - rss-system/secrets.yaml
