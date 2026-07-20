@@ -1,0 +1,30 @@
+# external-dns — Gateway API (HTTPRoute) source, Cloudflare provider.
+# Phase D of the evolution roadmap: HTTPRoute becomes the single source of truth for a
+# subdomain instead of the tfvars+gateway.yaml two-step. Starts in upsert-only (never
+# deletes) while proving the pipeline on a throwaway test hostname — existing
+# terraform-managed records (argocd/book/grafana/llm/vault) are untouched until a
+# deliberate follow-up migration.
+provider:
+  name: cloudflare
+
+env:
+  - name: CF_API_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: external-dns-cloudflare
+        key: api-token
+
+sources:
+  - gateway-httproute
+
+domainFilters:
+  - meirong.dev
+
+policy: upsert-only
+registry: txt
+txtOwnerId: homelab-externaldns
+
+interval: 1m
+
+extraArgs:
+  - --cloudflare-proxied

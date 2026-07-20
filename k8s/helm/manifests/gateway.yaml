@@ -28,6 +28,12 @@ kind: Gateway
 metadata:
   name: homelab-gateway
   namespace: kube-system
+  annotations:
+    # external-dns (gateway-httproute source) has no real LB address to read from this
+    # Gateway (Cilium NodePort behind a Cloudflare Tunnel) — force every managed HTTPRoute's
+    # CNAME target to the tunnel, matching what cloudflare_dns_record.subdomains creates in
+    # terraform (cloudflare/terraform/main.tf). tunnel_id from cloudflare/terraform/terraform.tfvars.
+    external-dns.alpha.kubernetes.io/target: ce9fd9fe-1dc4-430a-b797-b3b3fc931978.cfargotunnel.com
 spec:
   gatewayClassName: cilium-nodeport
   listeners:
