@@ -5,6 +5,7 @@
 1. [gateway-controller-evaluation.md](gateway-controller-evaluation.md) — Traefik vs Cilium Gateway 评估
 2. [argocd-image-updater.md](argocd-image-updater.md) — ArgoCD Image Updater CRD 模型与约束
 3. [alerting-telegram-migration.md](alerting-telegram-migration.md) — Gotify bridge 崩溃 bug → Alertmanager 原生 Telegram（含 Gotify 插件方案评估）
+4. [external-dns-adoption.md](external-dns-adoption.md) — 子域名 DNS 从 Terraform 手管 → HTTPRoute 声明式（含 Crossplane 否决、upsert-only 共存安全性）
 
 ## ADR Convention
 
