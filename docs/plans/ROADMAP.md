@@ -64,11 +64,12 @@
 - [ ] **homelab 旧 ZITADEL 退役**: 迁移后保留作回滚，真实浏览器登录确认后删（zitadel 计划遗留尾巴）
 - [x] **ZITADEL DB 迁 CloudNativePG**: ✅ 2026-07-18 完成——`bitnamilegacy/postgresql:15.4.0`(冻结镜像安全债) → CNPG 1.30.0 + 官方 PG **17.6**(`zitadel-pg`,单实例,local-path)。pg_dump/pg_restore 实际停机 **~4.5 分钟**;逐表行数核对通过;真实 OIDC 登录/console 验证通过;旧库/PVC/ExternalSecret 已删(最终态 dump 存本地 `~/backups/zitadel-migration/` + restic 历史)。backup 脚本已指向 `zitadel-pg-rw`——⚠️ 顺带踩坑:备份容器 pg_dump 16 拒绝 dump PG17 server,alpine 升 3.22 + `postgresql17-client` 修复(手动验证抓到,否则夜备静默丢 zitadel dump)。见 [演进路线 Phase C](../reference/evolution-roadmap-2026-07-07.md)
 - [ ] **Terraform state → R2 backend**: 5 个 root 全本地 state（笔记本单点、无锁、含明文密钥）。见演进路线 Phase A
-- [~] **external-dns (Gateway API source)**: ✅ 2026-07-19 homelab 上线并端到端验证（`external-dns` App，`gateway-httproute` source，`homelab-gateway` 打 tunnel target 注解，policy=upsert-only 安全默认）——新加子域名（homelab）现在只写一个 HTTPRoute 文件。采用理由/取舍见决策记录 [`decisions/external-dns-adoption.md`](../decisions/external-dns-adoption.md)，**完整剩余工作清单（含精确迁移步骤）也在该文档**，此处只列要点：
-  - 🔴 阻塞项：homelab `cloudflare/terraform/terraform.tfvars` 的 `cloudflare_api_token` 是无效值（tunnel token 格式），该 terraform 项目现在 `plan`/`state rm` 全部报错，得先修好
-  - 🟡 5 条既有记录（argocd/book/grafana/llm/vault）归属权未转给 external-dns、tfvars 未收缩，仍两套并存
-  - 🟡 **oracle-k3s 完全没做**——它的 Gateway 同样是 addressless LoadBalancer（`<pending>`），且现有子域名 **10 条**（homelab 的两倍），两步走的手工负担大头还在那边未动
-  - 🟢 external-dns 自身缺可观测性：pod 崩溃已被通用规则覆盖，但"pod 活着、reconcile 静默失败"（token 过期/限流）没人能发现，metrics 未接入 Prometheus
+- [x] **external-dns (Gateway API source)**: ✅ 2026-07-19 上线；2026-07-20 **两集群全量完成**。`gateway-httproute` source，policy=upsert-only。采用理由/取舍/完整过程与更正见决策记录 [`decisions/external-dns-adoption.md`](../decisions/external-dns-adoption.md)，此处只列要点：
+  - ✅ **homelab**：5 条既有记录（argocd/book/grafana/llm/vault）零停机迁移给 external-dns（owner=homelab-externaldns）、terraform 解耦 `state rm`；+ ServiceMonitor + `external-dns-alerts.yaml`（4 条告警）。
+  - ✅ **oracle-k3s**：第二实例（`txtOwnerId=oracle-externaldns`，手动 helm `just deploy-external-dns-oracle`），token 经 oracle `vault-backend` 读同一把 zone token；`oracle-gateway` 打 target 注解（addressless，`--default-targets` 实测无效，注解经 ArgoCD 施加）；10 条记录（含 auth/SSO）零停机迁移 + terraform 解耦；顺带清掉过期的 `notify`(Gotify)。
+  - ✅ **两集群隧道均改单条 `*.meirong.dev` 通配路由** → 加子域名从此**只写一个 HTTPRoute**（DNS 自动建 + 通配转发进 gateway），端到端实测通过。
+  - ✅ 澄清：所谓"🔴 无效 token 阻塞"是**误判**——有效 token 一直在 gitignored `.env`。
+  - 🟢 低优先增强（非阻塞）：oracle external-dns 尚无 observability（homelab 告警规则 `cluster="homelab"` 限定，未覆盖 oracle；需 oracle OTel 抓 `:7979`）；两实例可按需评估 `upsert-only`→`sync`。
 - [ ] **离站备份 (OCI always-free / B2)**: restic 仓库 → 云（rclone/`restic copy`）。见 2026-07-06 计划 Phase 5（later）
 - [ ] **DGX Spark 入编**: 推理服务 IaC + GPU 指标(dcgm) + Bifrost 双机 fallback + SLO。见母文档 P1-5
 - [ ] **恢复演练自动化**: 月度 CronJob 校验 restic restore。见母文档 P2-8
@@ -114,7 +115,7 @@
 - [x] 存储本地化迁移（nfs-client → local-path）✅ 2026-07-11 全部完成（含书库，见上方详情）
 - [x] dead-man's switch（Watchdog → oracle Uptime Kuma push）✅ 2026-07-19,含 POST→GET shim,见 Phase 4 详情
 - [ ] Terraform state → R2 backend + `use_lockfile`（5 root；可顺带评估 OpenTofu）
-- [~] external-dns 上线（`--source=gateway-httproute` + cloudflare-proxied）✅ 2026-07-19，5 条既有记录迁移未做，见 Phase 4 详情
+- [x] external-dns 上线（`--source=gateway-httproute` + cloudflare-proxied）✅ 2026-07-19；2026-07-20 两集群全量完成（homelab 5 条 + oracle 10 条零停机迁移、terraform 解耦、双集群隧道改 `*.meirong.dev` 通配、homelab observability），见上/决策记录
 - [x] Alertmanager → Telegram 通知模板 ✅（2026-07-18 起原生 telegramConfigs，见上）
 - [x] oracle-k3s Cilium 迁移
 
