@@ -2,12 +2,8 @@ cloudflare_api_token  = "your-cloudflare-api-token"
 cloudflare_account_id = "c49b6c6407adb48905eb6f932cd4e972"
 tunnel_id             = "ce9fd9fe-1dc4-430a-b797-b3b3fc931978"
 
-ingress_rules = {
-  "argocd"  = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
-  "book"    = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
-  "grafana" = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
-  "llm"     = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
-  "vault"   = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
-  # auth 已迁 oracle tunnel (2026-07-06, ZITADEL 迁 oracle-k3s)；notify 曾同期迁 oracle(Gotify)，
-  # 但 Gotify 已于 2026-07 彻底下线，两者均不再需要出现在任一集群的 ingress_rules 里
-}
+# 隧道用通配路由 *.meirong.dev -> cilium gateway（见 main.tf；服务地址是 var.gateway_service 默认值）。
+# 子域名 DNS 由 external-dns（gateway-httproute source）管理，加子域名只需写一个 HTTPRoute，
+# 无需在此登记 —— 故不再需要 ingress_rules。
+# terraform_managed_dns 默认空：仅当某子域名 DNS 必须由 terraform（而非 external-dns）管时才列出，如 ["foo"]。
+terraform_managed_dns = []

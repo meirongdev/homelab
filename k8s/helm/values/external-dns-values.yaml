@@ -28,3 +28,14 @@ interval: 1m
 
 extraArgs:
   - --cloudflare-proxied
+
+# Observability. Generic pod-level rules (KubePodCrashLooping/KubePodNotReady) already
+# catch a crashed controller; the blind spot they miss is a pod that stays Running/Ready
+# while silently failing to reconcile (revoked/expired token, rate limiting). Only
+# external-dns's own :7979 metrics surface that — scrape them and alert in
+# manifests/external-dns-alerts.yaml. `release` label is required for the
+# kube-prometheus-stack serviceMonitorSelector to adopt this ServiceMonitor.
+serviceMonitor:
+  enabled: true
+  additionalLabels:
+    release: kube-prometheus-stack
