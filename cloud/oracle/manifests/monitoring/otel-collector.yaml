@@ -311,6 +311,22 @@ data:
                   labels:
                     cluster: oracle-k3s
 
+      # external-dns metrics → homelab Prometheus (cluster=oracle-k3s). oracle-k3s has no
+      # Prometheus Operator, so (unlike homelab's ServiceMonitor) the controller's :7979
+      # metrics are scraped here and remote-written. Surfaces reconcile-stalled / registry &
+      # source errors so a silently-failing oracle external-dns (expired token, rate limit)
+      # trips the shared external-dns PrometheusRule. The chart exposes the metrics Service
+      # by default (no serviceMonitor needed).
+      prometheus/external-dns:
+        config:
+          scrape_configs:
+            - job_name: 'external-dns'
+              scrape_interval: 30s
+              static_configs:
+                - targets: ['external-dns.external-dns.svc.cluster.local:7979']
+                  labels:
+                    cluster: oracle-k3s
+
     processors:
       memory_limiter:
         limit_mib: 400
@@ -394,6 +410,10 @@ data:
           exporters: [prometheusremotewrite]
         metrics/external-secrets:
           receivers: [prometheus/external-secrets]
+          processors: [memory_limiter, resource, batch]
+          exporters: [prometheusremotewrite]
+        metrics/external-dns:
+          receivers: [prometheus/external-dns]
           processors: [memory_limiter, resource, batch]
           exporters: [prometheusremotewrite]
         metrics/cilium-envoy:
