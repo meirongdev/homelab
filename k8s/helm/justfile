@@ -465,6 +465,17 @@ deploy-external-dns:
         --version {{external_dns_version}} \
         --values values/external-dns-values.yaml
 
+# 部署 external-dns 到 oracle-k3s（第二个实例，txtOwnerId=oracle-externaldns，target 走 oracle tunnel）。
+# ns + Cloudflare token 的 ExternalSecret 由 oracle kustomize (cloud/oracle/manifests/base/external-dns.yaml)
+# 经 ArgoCD 提供；chart 本体在此手动部署（与 homelab 实例同约定）。
+deploy-external-dns-oracle:
+    helm upgrade --install external-dns external-dns/external-dns \
+        --namespace external-dns \
+        --create-namespace \
+        --kube-context oracle-k3s \
+        --version {{external_dns_version}} \
+        --values values/external-dns-oracle-values.yaml
+
 # 配置 Vault 与 ESO 的连接 (需要先 init)
 setup-vault-eso:
     #!/usr/bin/env bash
