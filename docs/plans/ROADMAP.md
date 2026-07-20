@@ -64,7 +64,7 @@
 - [ ] **homelab 旧 ZITADEL 退役**: 迁移后保留作回滚，真实浏览器登录确认后删（zitadel 计划遗留尾巴）
 - [x] **ZITADEL DB 迁 CloudNativePG**: ✅ 2026-07-18 完成——`bitnamilegacy/postgresql:15.4.0`(冻结镜像安全债) → CNPG 1.30.0 + 官方 PG **17.6**(`zitadel-pg`,单实例,local-path)。pg_dump/pg_restore 实际停机 **~4.5 分钟**;逐表行数核对通过;真实 OIDC 登录/console 验证通过;旧库/PVC/ExternalSecret 已删(最终态 dump 存本地 `~/backups/zitadel-migration/` + restic 历史)。backup 脚本已指向 `zitadel-pg-rw`——⚠️ 顺带踩坑:备份容器 pg_dump 16 拒绝 dump PG17 server,alpine 升 3.22 + `postgresql17-client` 修复(手动验证抓到,否则夜备静默丢 zitadel dump)。见 [演进路线 Phase C](../reference/evolution-roadmap-2026-07-07.md)
 - [ ] **Terraform state → R2 backend**: 5 个 root 全本地 state（笔记本单点、无锁、含明文密钥）。见演进路线 Phase A
-- [ ] **external-dns (Gateway API source)**: 子域名 "tfvars + gateway.yaml 两步走" → HTTPRoute 单文件。见演进路线 Phase D
+- [~] **external-dns (Gateway API source)**: ✅ 2026-07-19 上线并端到端验证（`external-dns` App，`gateway-httproute` source，`homelab-gateway` 打 tunnel target 注解，policy=upsert-only 安全默认）。**未完成部分**：`argocd`/`book`/`grafana`/`llm`/`vault` 这 5 条现有记录仍在 terraform 手管，尚未把归属权转给 external-dns、也未精简 `cloudflare/terraform/terraform.tfvars`——新加子域名目前仍可以走 HTTPRoute 单文件（有 external-dns 接管），但老的还是两步走并存。顺带发现 homelab 自己的 `cloudflare/terraform/terraform.tfvars` 的 `cloudflare_api_token` 是无效值（tunnel token 格式），该项目 `terraform plan` 现在直接报错，待修
 - [ ] **离站备份 (OCI always-free / B2)**: restic 仓库 → 云（rclone/`restic copy`）。见 2026-07-06 计划 Phase 5（later）
 - [ ] **DGX Spark 入编**: 推理服务 IaC + GPU 指标(dcgm) + Bifrost 双机 fallback + SLO。见母文档 P1-5
 - [ ] **恢复演练自动化**: 月度 CronJob 校验 restic restore。见母文档 P2-8
@@ -110,7 +110,7 @@
 - [x] 存储本地化迁移（nfs-client → local-path）✅ 2026-07-11 全部完成（含书库，见上方详情）
 - [x] dead-man's switch（Watchdog → oracle Uptime Kuma push）✅ 2026-07-19,含 POST→GET shim,见 Phase 4 详情
 - [ ] Terraform state → R2 backend + `use_lockfile`（5 root；可顺带评估 OpenTofu）
-- [ ] external-dns 上线（`--source=gateway-httproute` + cloudflare-proxied）
+- [~] external-dns 上线（`--source=gateway-httproute` + cloudflare-proxied）✅ 2026-07-19，5 条既有记录迁移未做，见 Phase 4 详情
 - [x] Alertmanager → Telegram 通知模板 ✅（2026-07-18 起原生 telegramConfigs，见上）
 - [x] oracle-k3s Cilium 迁移
 
