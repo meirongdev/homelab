@@ -1,7 +1,7 @@
 # external-dns 采用：子域名 DNS 从 Terraform 手管转向 HTTPRoute 声明式
 
-> Date: 2026-07-19
-> Decision status: Implemented（5 条既有记录迁移 + terraform 收缩为待办）
+> Date: 2026-07-19（2026-07-20 补：homelab 收尾 + observability + oracle-k3s 全量落地 + 双集群隧道通配）
+> Decision status: Implemented（**两集群全量完成**）— homelab + oracle-k3s 均已：既有记录零停机迁移给 external-dns、terraform DNS 解耦收缩、隧道改单条 `*.meirong.dev` 通配路由。homelab 另配 ServiceMonitor+告警。加子域名从此**只写一个 HTTPRoute**（两集群均已端到端验证）。
 > 关联：[演进路线 Phase D](../reference/evolution-roadmap-2026-07-07.md) · [gateway-controller-evaluation](gateway-controller-evaluation.md)
 
 ## Context（痛点）
@@ -37,7 +37,7 @@
 | Gateway 注解 | `external-dns.alpha.kubernetes.io/target: <tunnel-id>.cfargotunnel.com` | Cilium 是 NodePort Gateway，**没有可读的 LB 地址**；显式指定 CNAME 目标 = terraform 一直用的 tunnel 目标，保证格式一致 |
 
 **Cloudflare token**：复用 `cloud/oracle/cloudflare/terraform.tfvars` 里那份已验证有效的 Zone 级 API Token，经 Vault `secret/homelab/external-dns` → ESO 落地为 secret `external-dns/external-dns-cloudflare`（ExternalSecret 归 ArgoCD `external-dns` App；chart 本体是 manual-helm，同 Vault/ESO/kube-prometheus-stack）。
-> ⚠️ 之所以没用 homelab 自己 `cloudflare/terraform/terraform.tfvars` 的 token：那份 `cloudflare_api_token` 当前是**无效值**——格式其实是 Tunnel connector token（`eyJhIjoi...` base64 JSON），不是 API Token，导致该 terraform 项目 `plan` 直接报错。这是排查 external-dns 时顺带发现的既有问题，未在本次修复，待补一个真正的 `Zone:DNS:Edit` token。
+> 说明：external-dns 的 secret 复用 oracle 那份 token 只是图省事（一份已知可用的 Zone token）。**不是**因为 homelab 没有可用 token——homelab 真正有效的 Cloudflare API Token 一直在 gitignored 的 `cloudflare/terraform/.env` 里，`just plan/apply` 经 `-var` 注入使用，terraform 从未真的被卡住（详见下方 Remaining Work 第 1 项的更正）。曾经 `terraform.tfvars` 里塞的是一段 Tunnel connector token（`eyJhIjoi...`）的误值，但它被 `.env` 的值覆盖、从不生效；2026-07-20 已把本地 tfvars 的该值改回正确 token，消除误导。
 
 ## Verification（2026-07-19 端到端）
 
@@ -47,53 +47,72 @@
 
 ## Consequences
 
-- ✅ **加子域名（homelab）现在只写一个 HTTPRoute 文件**；DNS 自动建。
-- ⚠️ **未完成（待办）**：`argocd`/`book`/`grafana`/`llm`/`vault` 这 5 条仍由 terraform 管，归属权尚未转交 external-dns、`terraform.tfvars` 尚未收缩。迁移路径：让 external-dns 接管需它对记录施加一次变更（或强制），届时会补上 ownership TXT；在此之前两套并存，靠 `upsert-only` + txt 登记保证互不破坏。
-- ⚠️ **别把 `policy` 改成 `sync`** 除非确已完成上面迁移并接受 external-dns 全权删除——`sync` 下它会删掉自己认为"不该存在"的记录（仍受 txt 所有权保护，但风险面变大）。
-- ⚠️ external-dns 只 watch **它所在的 homelab 集群**的 HTTPRoute；oracle-k3s 的子域名（`auth`/`status`/`keep`/… 由 `cloud/oracle/cloudflare` terraform 管）不在其管辖内，各管各的。
-- 📌 遗留待办：homelab `cloudflare/terraform` 的无效 token 修复（见上）。
+- ✅ **加子域名（homelab）的 DNS 半步已消除**：写一个 HTTPRoute，external-dns 自动建 CNAME。⚠️ 但**隧道路由半步仍在**——cloudflared 无通配 ingress，新 hostname 仍需在 `cloudflare/terraform` 的 `ingress_rules` 里加一条才不 404（详见 Remaining Work 第 5 项）。所以现状是"两步变一步半"，不是"变一步"。
+- ✅ **5 条既有记录已迁移（2026-07-20，零停机验证通过）**：`argocd`/`book`/`grafana`/`llm`/`vault` 的 ownership TXT 已预埋、external-dns 已接管、5 条 CNAME 的 `modified_on` 全程未变；terraform 侧已 `state rm` 并把 DNS 与隧道路由**解耦**（见第 2 项）。归属权登记完成，两套不再并存。
+- ⚠️ **别把 `policy` 改成 `sync`** 除非接受 external-dns 全权删除——`sync` 下它会删掉自己认为"不该存在"的记录（仍受 txt 所有权保护，但风险面变大）。5 条已被正确接管，技术上可升，但 `upsert-only` 已够用、无必要冒险。
+- ⚠️ external-dns 只 watch **它所在的 homelab 集群**的 HTTPRoute；oracle-k3s 的子域名（`auth`/`status`/`keep`/… 由 `cloud/oracle/cloudflare` terraform 管）不在其管辖内，各管各的（第 3 项仍待办）。
 
-## Remaining Work（完成本次优化还需要做的）
+## Remaining Work / 完成记录
 
-按优先级排序；前两项是"把已开始的事做完"，后两项是"这次优化其实只覆盖了一半基础设施"。
+> **2026-07-20 更新**：第 1、2、4 项已完成（保留原委 + 标注实际做法与两处更正）；第 3 项（oracle-k3s）仍待办；核查中新发现第 5 项（隧道无通配路由），一并记录。
 
-### 1. 🔴 阻塞项：修复 homelab `cloudflare/terraform` 的无效 token
+### 1. ✅ 已澄清：terraform 从没被 token 卡住（原判"🔴 阻塞项"是误判）
 
-`cloudflare/terraform/terraform.tfvars` 的 `cloudflare_api_token` 是 Tunnel connector token（格式错），导致该项目 `terraform plan`/`apply`/**`state rm`** 全部直接报错（Terraform 在解析 provider 配置阶段就校验字符集，不等到发网络请求）。**这是下面第 2 项的硬前提**——不修好这个 token，5 条记录连从 state 里移除都做不到。需要去 Cloudflare Dashboard 建一个 `Zone:DNS:Edit`（scope 限 `meirong.dev`）的真 API Token 换掉它。
+原文把它列为第 2 项的"硬前提"，称 tfvars 的 token 是 Tunnel connector 格式、导致 `plan`/`apply`/`state rm` 全报错，需去 Dashboard 建新 token。复核推翻了这个判断：真正有效的 Zone token 一直在 gitignored 的 `cloudflare/terraform/.env`，`justfile` 用 `-var` 注入，`just plan/apply` 从来正常；`terraform.tfvars` 那段 `eyJhIjoi...` 误值被 `-var` 覆盖、从不生效。2026-07-20 已把本地 tfvars 的该值改回正确 token（与 `.env` 同值），`terraform state rm` 与 `just plan`（No changes）均实测通过。**无需再建 token**。（`.env`/`*.tfvars` 均 gitignored，误值从未进过 git。）
 
-### 2. 🟡 把 5 条既有记录的归属权转给 external-dns，收缩 terraform
+### 2. ✅ 已完成（2026-07-20）：5 条记录归属权转交 external-dns + terraform 解耦收缩
 
-**不要**直接从 terraform 里删这 5 条再等 external-dns 重建——proxied CNAME 被删掉到 external-dns 下一个 reconcile（最长 1 分钟）之间，`argocd`/`grafana`/`vault`/`book`/`llm` 会短暂 DNS 中断。更安全的路径是**先手工"预埋"ownership TXT 记录**（让 external-dns 认为自己已经拥有该记录、CNAME 内容又本就一致 → 它什么都不用改），再把 terraform 那边清掉，全程零停机：
+零停机路径按原计划执行并验证通过；**原计划第 3 步有一处会致公网 404 的错误，已更正**。
 
-1. 手工建 5 条 TXT 记录（`ttl=1`，不 proxied）。格式已用一次性测试 HTTPRoute 实测确认（2026-07-20），**不是猜的**：`<prefix>cname-<hostname>` / `"heritage=external-dns,external-dns/owner=<txtOwnerId>,external-dns/resource=httproute/<namespace>/<name>"`。5 条的精确内容：
+1. 手工预埋 5 条 ownership TXT（`ttl=1`，不 proxied）。格式用一次性 probe HTTPRoute 逐字节实测 external-dns v0.21.0 的真实产物确认——**含外层双引号**：POST content 带引号则读回带引号、raw 则都不带，external-dns 用的是带引号那种，必须一致否则它认不出自己的 owner 记录。5 条精确内容：
 
-   | TXT 记录名 | content | 对应 HTTPRoute |
+   | TXT 记录名 | content（含外层引号） | 对应 HTTPRoute |
    |---|---|---|
    | `cname-argocd.meirong.dev` | `"heritage=external-dns,external-dns/owner=homelab-externaldns,external-dns/resource=httproute/argocd/argocd"` | `argocd/argocd` |
-   | `cname-book.meirong.dev` | `"heritage=external-dns,external-dns/owner=homelab-externaldns,external-dns/resource=httproute/personal-services/calibre-web"` | `personal-services/calibre-web` |
-   | `cname-grafana.meirong.dev` | `"heritage=external-dns,external-dns/owner=homelab-externaldns,external-dns/resource=httproute/monitoring/grafana"` | `monitoring/grafana` |
-   | `cname-llm.meirong.dev` | `"heritage=external-dns,external-dns/owner=homelab-externaldns,external-dns/resource=httproute/bifrost/bifrost"` | `bifrost/bifrost` |
-   | `cname-vault.meirong.dev` | `"heritage=external-dns,external-dns/owner=homelab-externaldns,external-dns/resource=httproute/vault/vault"` | `vault/vault` |
+   | `cname-book.meirong.dev` | `"…owner=homelab-externaldns,…/resource=httproute/personal-services/calibre-web"` | `personal-services/calibre-web` |
+   | `cname-grafana.meirong.dev` | `"…owner=homelab-externaldns,…/resource=httproute/monitoring/grafana"` | `monitoring/grafana` |
+   | `cname-llm.meirong.dev` | `"…owner=homelab-externaldns,…/resource=httproute/bifrost/bifrost"` | `bifrost/bifrost` |
+   | `cname-vault.meirong.dev` | `"…owner=homelab-externaldns,…/resource=httproute/vault/vault"` | `vault/vault` |
 
-2. 等一个 external-dns reconcile 周期（`interval: 1m`），确认它的日志不再跳过这 5 条、且 Cloudflare 里 CNAME **没有被改动**（`modified_on` 不变 = 证明是零停机接管，不是删了重建）。
-3. `cd cloudflare/terraform && terraform state rm` 掉这 5 个 `cloudflare_dns_record.subdomains["..."]`（此时 token 已修好，见第 1 项），并从 `terraform.tfvars` 的 `ingress_rules` 里删掉这 5 条 key。`terraform plan` 应显示 no changes。
-4. 之后才考虑把 `policy` 从 `upsert-only` 升级成 `sync`（见 Consequences 里的警告——升级前确认所有该管的记录都已被 external-dns 正确接管，否则 `sync` 可能删掉它还没来得及认领的东西）。
+2. 等 reconcile，零停机验证通过：external-dns 连续多轮日志 `All records are already up to date`，5 条 CNAME 的 `modified_on` 与迁移前逐字节一致（证明是接管、非删重建）。
+3. **⚠️ 更正原计划**：原文第 3 步说"`state rm` 这 5 个 `cloudflare_dns_record.subdomains["…"]`，并从 `ingress_rules` 删掉这 5 条 key"。**后半句是错的、会致故障**——`main.tf` 里 `ingress_rules` 同时驱动两个资源：`cloudflare_dns_record.subdomains`（DNS，要交给 external-dns）**和** `cloudflare_zero_trust_tunnel_cloudflared_config`（cloudflared 隧道 ingress 路由）。external-dns 只管 DNS、**不管隧道 config**；隧道又无通配路由（见第 5 项），删掉 key 会连这 5 条隧道路由一起删掉 → 5 个服务公网直接 404。正确做法是**解耦**（本次实际所做）：
+   - `terraform state rm` 掉 5 个 `cloudflare_dns_record.subdomains["…"]`；
+   - 把 `cloudflare_dns_record.subdomains` 的 `for_each` 从 `var.ingress_rules` 改到新变量 `var.terraform_managed_dns`（`set(string)`，默认 `[]`）→ terraform 从此管 0 条子域名 CNAME；
+   - `ingress_rules` 当时保留全部 5 条继续驱动隧道路由（**后被第 5 项的通配路由取代、已删除**）；
+   - `just plan` = No changes（隧道 config 不变、DNS 资源空且 state 空）。✅ 实测通过。
+4. `policy` 暂不升 `sync`（见 Consequences）——`upsert-only` 已够用、无必要扩大删除风险面。
 
-### 3. 🟡 oracle-k3s 完全没做——而且它的子域名数是 homelab 的两倍
+### 3. ✅ 已完成（2026-07-20）：oracle-k3s 第二实例 + 10 条记录迁移
 
-这次优化**只覆盖了 homelab**。核查发现 oracle-k3s 处境和 homelab 当初一模一样，甚至更值得做：
+oracle-k3s 处境与 homelab 当初一致（`oracle-gateway` 也是 addressless LoadBalancer，`PROGRAMMED=False`），且子域名更多。本轮全量落地：
 
-- `cilium-gateway-oracle-gateway` 也是 `type: LoadBalancer` 但 `EXTERNAL-IP: <pending>`——同样没有可读地址，需要同款 `external-dns.alpha.kubernetes.io/target` 注解。
-- `cloud/oracle/cloudflare/terraform.tfvars` 现有 **10 条**子域名（`auth`/`status`/`keep`/`rss`/`slot`/`tool`/`pdf`/`trends`/`squoosh`/`home`），是 homelab 5 条的两倍——两步走的手工负担实际大头在 oracle 这边，这轮完全没碰。
-- 需要：oracle-k3s 里部署第二个 external-dns 实例（`txtOwnerId` 必须换成不同值，比如 `oracle-externaldns`——两个实例共享同一个 Cloudflare zone，owner id 撞了会互相干扰所有权判定）、oracle 那边的 Vault/ESO secret 管线、`oracle-gateway` 打 target 注解。这些还没有对应的 justfile/manifest，需要新写。
+- **第二个 external-dns 实例**（`just deploy-external-dns-oracle`，`values/external-dns-oracle-values.yaml`）。`txtOwnerId=oracle-externaldns`（**必须**与 homelab 的 `homelab-externaldns` 不同——共享同一 zone，owner id 撞了会互相误判所有权）。upsert-only / gateway-httproute / cloudflare-proxied。
+- **Secret 管线**：`cloud/oracle/manifests/base/external-dns.yaml`（ns + ExternalSecret）经 oracle 的 `vault-backend` ClusterSecretStore（走 Tailscale 连 homelab Vault）读**同一把** zone token（`secret/homelab/external-dns` `api_token`）——它是 zone 级 token，对 oracle 子域名同样有效。
+- **target**：`oracle-gateway` 无可读地址，故在 `base/gateway.yaml` 打 `external-dns.alpha.kubernetes.io/target=<oracle tunnel>` 注解（同 homelab）。⚠️ **实测 `--default-targets` / `--force-default-targets` 对 addressless gateway source 都不生效**，注解是唯一可行机制。⚠️ 该 gateway 归 oracle-k3s ArgoCD App（selfHeal）管，手动注解会被回滚，故注解必须进 git 由 ArgoCD 施加（本次经 push→ArgoCD 激活并验证）。
+- **迁移 10 条**（`rss`/`home`/`status`/`tool`/`pdf`/`squoosh`/`keep`/`slot`/`trends`/`auth`）：预埋 owner=oracle-externaldns 的 TXT → external-dns 零停机接管（连续 `All records are already up to date`，10 条 CNAME `modified_on` 全程未变，含 `auth`/SSO），再 `state rm` + terraform 解耦（同 homelab）。
+- **顺带清理**：`notify`（Gotify 已下线）在 oracle tfvars/state 里是过期条目（Cloudflare 已无该记录），随本次 `state rm` + 删 `ingress_rules` 一并清除。
 
-### 4. 🟢 external-dns 自身缺可观测性
+### 4. ✅ 已完成（2026-07-20）：external-dns observability
 
-部署时只启用了核心功能，没接监控——查过了，这**不是**"忘了"，是这类通用告警本来就不覆盖它这类故障:
-- **Pod 级故障已覆盖**：确认 `KubePodCrashLooping`/`KubePodNotReady` 是 kube-prometheus-stack 默认规则，全命名空间生效，external-dns pod 崩了会告警，不用重复造轮子。
-- **缺口在"pod 活着但 reconcile 静默失败"**：比如 Cloudflare token 过期/被吊销、API 限流——这种情况 pod 一直 Running/Ready，泛化告警抓不到，只有 external-dns 自己的 metrics（`:7979`，chart 里 `serviceMonitor.enabled` 默认关着，现在没在被 Prometheus 抓）才看得出来。真出问题的表现是:新增/改动的 HTTPRoute 迟迟不出现对应 DNS 记录，且没人知道。要补的话是开 `serviceMonitor.enabled: true` + 一条基于 `external_dns_*` 系列 metrics（如 sync 错误计数/最后成功同步时间）的 PrometheusRule，優先级不高但计入待办。
+补的正是"pod 活着但 reconcile 静默失败"这个缺口（token 过期/吊销、API 限流——`KubePodCrashLooping`/`KubePodNotReady` 抓不到）。做法：
+- `values/external-dns-values.yaml` 开 `serviceMonitor.enabled: true` + `additionalLabels.release: kube-prometheus-stack`（否则 kube-prometheus-stack 的 serviceMonitorSelector 不采纳）；`just deploy-external-dns` 已部署，实测被 Prometheus 抓到（target up，经 scrapeClasses relabel 带 `cluster=homelab`）。
+- 新增 `manifests/external-dns-alerts.yaml`（PrometheusRule，`monitoring` ns，`release` 标签；已加入 `argocd/applications/monitoring-dashboards.yaml` 的 `directory.include` 白名单，随 git push 由 ArgoCD 同步）。4 条告警实测已在 Prometheus 加载、health=ok：
+  - `ExternalDNSReconcileStalled`：`time() - external_dns_controller_last_sync_timestamp_seconds{cluster="homelab"} > 600`，for 10m —— 核心盲点（reconcile 静默停摆）。
+  - `ExternalDNSRegistryErrors` / `ExternalDNSSourceErrors`：Cloudflare API / HTTPRoute 源读取报错计数上升。
+  - `ExternalDNSMetricsAbsent`：metrics 整体消失（controller 挂或 scrape 断，否则会掩盖上面几条），仿照 `ExternalSecretsMetricsAbsent`。
+
+### 5. ✅ 已完成（2026-07-20）：隧道改通配路由，"加子域名只写一个 HTTPRoute" 现已完全成立
+
+原状况（迁移中发现）：cloudflared ingress 是**每个 hostname 一条显式规则** + `http_status:404` 兜底，**无通配**。所以全新子域名 external-dns 虽能自动建 CNAME，但进隧道后 cloudflared 匹配不到 → 落 404。即当初对 `edns-verify-test` 的"端到端"只验了 DNS 解析，没验 HTTP 真能通；"只写一个 HTTPRoute"当时只对 DNS 半步成立。
+
+修复（两集群均已做）：把隧道 ingress 改成单条 `*.meirong.dev -> <cilium gateway>` + `http_status:404` 兜底。gateway 对没有对应 HTTPRoute 的 host 本就返回 404，故通配到 gateway 安全。terraform 里 `ingress_rules` 整个删除，由 `var.gateway_service`（通配目标）取代。**零停机**：现有 hostname 迁移前后都指向同一 gateway，只是从显式规则改走通配匹配。
+
+- homelab：`ce9fd9fe…` tunnel，5 条既有 host 实测仍 200/302/307。
+- oracle：`bc630e77…` tunnel，10 条既有 host 实测仍 200/401/307/302（含 `auth`/SSO）。
+
+至此加子域名对两集群都是**只写一个 HTTPRoute**：external-dns 建 CNAME、通配路由转发进 gateway、gateway 按 HTTPRoute 分发。
 
 ## 重新评估 / 退出条件
 
-- 若要下线 external-dns：删 `external-dns` Helm release + ArgoCD App + Gateway 注解即可；因 `upsert-only` 从未删过记录，既有 DNS 不受影响，回退无损。
-- 上面 4 项均为独立后续工作，不阻塞当前"新子域名（homelab）单文件"能力已经生效这一事实。
+- 若要下线某集群的 external-dns：删该集群的 Helm release + Gateway target 注解 + 对应 ownership TXT（homelab 5 条 `cname-*` owner=homelab-externaldns / oracle 10 条 owner=oracle-externaldns）；因 `upsert-only` 从未删过 CNAME，既有 DNS 不受影响。若要把某条 DNS 交还 terraform：把 hostname 填回该集群 `var.terraform_managed_dns` 并 `terraform import` 回来即可。⚠️ 下线时若也想恢复"隧道显式路由"，需把 `main.tf` 的通配 ingress 改回按 hostname 列举。
+- 现状：**两集群全部收口**，无阻塞项。仅剩两条低优先增强（非阻塞）：(a) oracle external-dns 尚无 observability——homelab 的 `external-dns-alerts.yaml` 规则用 `cluster="homelab"` 限定，未覆盖 oracle；oracle metrics 需经其 OTel Collector 抓 `:7979` 并 remote-write 后才谈得上告警。(b) 两实例 `policy` 仍是 `upsert-only`，可按需评估升 `sync`（见上警告）。

@@ -2,18 +2,10 @@ cloudflare_api_token  = "your-cloudflare-api-token"
 cloudflare_account_id = "c49b6c6407adb48905eb6f932cd4e972"
 tunnel_id             = "bc630e77-867f-4716-a1d0-8721bf9880da"
 
-ingress_rules = {
-  "rss"     = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }
-  "home"    = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }
-  "status"  = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }
-  "tool"    = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }
-  "pdf"     = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }
-  "squoosh" = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }
-  "keep"    = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }
-  "slot"    = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }
-  "trends"  = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }
-  "auth"    = { service = "http://cilium-gateway-oracle-gateway.kube-system.svc:80" }  # ZITADEL 迁自 homelab 2026-07-06
-  # notify (Gotify) 已于 2026-07 下线并 apply（DNS/tunnel ingress 已移除），不再有此条目
-  # rsshub is intentionally NOT exposed externally; only accessible within the cluster
-  # by miniflux via http://rsshub.rss-system.svc:1200
-}
+# 隧道用通配路由 *.meirong.dev -> oracle cilium gateway（见 main.tf；服务地址是 var.gateway_service 默认值）。
+# 子域名 DNS 由 external-dns（gateway-httproute source, txtOwnerId=oracle-externaldns）管理，
+# 加子域名只需写一个 HTTPRoute，无需在此登记 —— 故不再需要 ingress_rules。
+# rsshub is intentionally NOT exposed externally; only accessible within the cluster
+# by miniflux via http://rsshub.rss-system.svc:1200
+# terraform_managed_dns 默认空：仅当某子域名 DNS 必须由 terraform（而非 external-dns）管时才列出，如 ["foo"]。
+terraform_managed_dns = []
