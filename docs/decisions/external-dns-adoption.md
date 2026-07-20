@@ -53,7 +53,47 @@
 - ⚠️ external-dns 只 watch **它所在的 homelab 集群**的 HTTPRoute；oracle-k3s 的子域名（`auth`/`status`/`keep`/… 由 `cloud/oracle/cloudflare` terraform 管）不在其管辖内，各管各的。
 - 📌 遗留待办：homelab `cloudflare/terraform` 的无效 token 修复（见上）。
 
+## Remaining Work（完成本次优化还需要做的）
+
+按优先级排序；前两项是"把已开始的事做完"，后两项是"这次优化其实只覆盖了一半基础设施"。
+
+### 1. 🔴 阻塞项：修复 homelab `cloudflare/terraform` 的无效 token
+
+`cloudflare/terraform/terraform.tfvars` 的 `cloudflare_api_token` 是 Tunnel connector token（格式错），导致该项目 `terraform plan`/`apply`/**`state rm`** 全部直接报错（Terraform 在解析 provider 配置阶段就校验字符集，不等到发网络请求）。**这是下面第 2 项的硬前提**——不修好这个 token，5 条记录连从 state 里移除都做不到。需要去 Cloudflare Dashboard 建一个 `Zone:DNS:Edit`（scope 限 `meirong.dev`）的真 API Token 换掉它。
+
+### 2. 🟡 把 5 条既有记录的归属权转给 external-dns，收缩 terraform
+
+**不要**直接从 terraform 里删这 5 条再等 external-dns 重建——proxied CNAME 被删掉到 external-dns 下一个 reconcile（最长 1 分钟）之间，`argocd`/`grafana`/`vault`/`book`/`llm` 会短暂 DNS 中断。更安全的路径是**先手工"预埋"ownership TXT 记录**（让 external-dns 认为自己已经拥有该记录、CNAME 内容又本就一致 → 它什么都不用改），再把 terraform 那边清掉，全程零停机：
+
+1. 手工建 5 条 TXT 记录（`ttl=1`，不 proxied）。格式已用一次性测试 HTTPRoute 实测确认（2026-07-20），**不是猜的**：`<prefix>cname-<hostname>` / `"heritage=external-dns,external-dns/owner=<txtOwnerId>,external-dns/resource=httproute/<namespace>/<name>"`。5 条的精确内容：
+
+   | TXT 记录名 | content | 对应 HTTPRoute |
+   |---|---|---|
+   | `cname-argocd.meirong.dev` | `"heritage=external-dns,external-dns/owner=homelab-externaldns,external-dns/resource=httproute/argocd/argocd"` | `argocd/argocd` |
+   | `cname-book.meirong.dev` | `"heritage=external-dns,external-dns/owner=homelab-externaldns,external-dns/resource=httproute/personal-services/calibre-web"` | `personal-services/calibre-web` |
+   | `cname-grafana.meirong.dev` | `"heritage=external-dns,external-dns/owner=homelab-externaldns,external-dns/resource=httproute/monitoring/grafana"` | `monitoring/grafana` |
+   | `cname-llm.meirong.dev` | `"heritage=external-dns,external-dns/owner=homelab-externaldns,external-dns/resource=httproute/bifrost/bifrost"` | `bifrost/bifrost` |
+   | `cname-vault.meirong.dev` | `"heritage=external-dns,external-dns/owner=homelab-externaldns,external-dns/resource=httproute/vault/vault"` | `vault/vault` |
+
+2. 等一个 external-dns reconcile 周期（`interval: 1m`），确认它的日志不再跳过这 5 条、且 Cloudflare 里 CNAME **没有被改动**（`modified_on` 不变 = 证明是零停机接管，不是删了重建）。
+3. `cd cloudflare/terraform && terraform state rm` 掉这 5 个 `cloudflare_dns_record.subdomains["..."]`（此时 token 已修好，见第 1 项），并从 `terraform.tfvars` 的 `ingress_rules` 里删掉这 5 条 key。`terraform plan` 应显示 no changes。
+4. 之后才考虑把 `policy` 从 `upsert-only` 升级成 `sync`（见 Consequences 里的警告——升级前确认所有该管的记录都已被 external-dns 正确接管，否则 `sync` 可能删掉它还没来得及认领的东西）。
+
+### 3. 🟡 oracle-k3s 完全没做——而且它的子域名数是 homelab 的两倍
+
+这次优化**只覆盖了 homelab**。核查发现 oracle-k3s 处境和 homelab 当初一模一样，甚至更值得做：
+
+- `cilium-gateway-oracle-gateway` 也是 `type: LoadBalancer` 但 `EXTERNAL-IP: <pending>`——同样没有可读地址，需要同款 `external-dns.alpha.kubernetes.io/target` 注解。
+- `cloud/oracle/cloudflare/terraform.tfvars` 现有 **10 条**子域名（`auth`/`status`/`keep`/`rss`/`slot`/`tool`/`pdf`/`trends`/`squoosh`/`home`），是 homelab 5 条的两倍——两步走的手工负担实际大头在 oracle 这边，这轮完全没碰。
+- 需要：oracle-k3s 里部署第二个 external-dns 实例（`txtOwnerId` 必须换成不同值，比如 `oracle-externaldns`——两个实例共享同一个 Cloudflare zone，owner id 撞了会互相干扰所有权判定）、oracle 那边的 Vault/ESO secret 管线、`oracle-gateway` 打 target 注解。这些还没有对应的 justfile/manifest，需要新写。
+
+### 4. 🟢 external-dns 自身缺可观测性
+
+部署时只启用了核心功能，没接监控——查过了，这**不是**"忘了"，是这类通用告警本来就不覆盖它这类故障:
+- **Pod 级故障已覆盖**：确认 `KubePodCrashLooping`/`KubePodNotReady` 是 kube-prometheus-stack 默认规则，全命名空间生效，external-dns pod 崩了会告警，不用重复造轮子。
+- **缺口在"pod 活着但 reconcile 静默失败"**：比如 Cloudflare token 过期/被吊销、API 限流——这种情况 pod 一直 Running/Ready，泛化告警抓不到，只有 external-dns 自己的 metrics（`:7979`，chart 里 `serviceMonitor.enabled` 默认关着，现在没在被 Prometheus 抓）才看得出来。真出问题的表现是:新增/改动的 HTTPRoute 迟迟不出现对应 DNS 记录，且没人知道。要补的话是开 `serviceMonitor.enabled: true` + 一条基于 `external_dns_*` 系列 metrics（如 sync 错误计数/最后成功同步时间）的 PrometheusRule，優先级不高但计入待办。
+
 ## 重新评估 / 退出条件
 
 - 若要下线 external-dns：删 `external-dns` Helm release + ArgoCD App + Gateway 注解即可；因 `upsert-only` 从未删过记录，既有 DNS 不受影响，回退无损。
-- 5 条既有记录的迁移与 terraform 收缩，作为独立后续决策推进（不阻塞当前"新子域名单文件"能力）。
+- 上面 4 项均为独立后续工作，不阻塞当前"新子域名（homelab）单文件"能力已经生效这一事实。
