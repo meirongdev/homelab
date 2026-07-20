@@ -1,0 +1,76 @@
+---
+# external-dns alerting.
+#
+# Closes the gap generic pod-level rules (KubePodCrashLooping/KubePodNotReady) leave open:
+# external-dns can stay Running/Ready while silently failing to reconcile — a revoked or
+# expired Cloudflare API token, API rate limiting, or an RBAC break on the HTTPRoute
+# source. In that state existing records keep resolving (policy=upsert-only never deletes),
+# but every newly-added/changed HTTPRoute never gets its DNS record and nobody is told.
+#
+# Metrics come from the external-dns controller (/metrics :7979), scraped via the
+# ServiceMonitor enabled in values/external-dns-values.yaml (gets cluster=homelab via the
+# Prometheus scrapeClasses relabel). external-dns runs only on homelab today, so every rule
+# is scoped cluster="homelab" — a future oracle-k3s instance gets its own txtOwnerId and
+# its own scrape, so it will not cross-fire here.
+#
+# severity warning → routed by Alertmanager (see values/kube-prometheus-stack.yaml). The
+# `release` label is REQUIRED so the kube-prometheus-stack ruleSelector adopts this rule.
+#
+# Deployed via the ArgoCD `monitoring-dashboards` Application (git push → 3-min sync).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: external-dns-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: external-dns
+      rules:
+        # The core blind spot: the controller keeps running but its last SUCCESSFUL sync
+        # stops advancing — Cloudflare token expired/revoked, or the API is rate-limiting.
+        # Existing records keep resolving, but new/changed HTTPRoutes silently fail to get a
+        # DNS record. Healthy reconcile interval is 1m, so >10m stale means it is stuck.
+        - alert: ExternalDNSReconcileStalled
+          expr: time() - external_dns_controller_last_sync_timestamp_seconds{cluster="homelab"} > 600
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "external-dns has not completed a successful sync in >10m on {{ $labels.cluster }}"
+            description: "external_dns_controller_last_sync_timestamp_seconds has not advanced for >10m though the pod is Running/Ready — usually a revoked/expired Cloudflare API token or API rate limiting. New HTTPRoutes will not get DNS records. Inspect with `kubectl logs -n external-dns deploy/external-dns`."
+
+        # The loop is running but each attempt to apply changes to Cloudflare is erroring
+        # (token scope/validity, rate limit, or provider outage).
+        - alert: ExternalDNSRegistryErrors
+          expr: increase(external_dns_registry_errors_total{cluster="homelab"}[15m]) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "external-dns registry (Cloudflare) errors on {{ $labels.cluster }}"
+            description: "external_dns_registry_errors_total increasing for >15m — external-dns cannot apply changes to Cloudflare (API token scope/validity, rate limiting, or a provider outage)."
+
+        # Errors reading the source (Gateway API HTTPRoutes) — usually an RBAC regression or
+        # the Gateway API CRDs / apiserver being unavailable. Desired state is then computed
+        # from stale or empty input.
+        - alert: ExternalDNSSourceErrors
+          expr: increase(external_dns_source_errors_total{cluster="homelab"}[15m]) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "external-dns source (HTTPRoute) errors on {{ $labels.cluster }}"
+            description: "external_dns_source_errors_total increasing for >15m — external-dns cannot read its HTTPRoute source (RBAC or Gateway API availability)."
+
+        # Meta-failure: if external-dns metrics vanish entirely the alerts above CAN'T fire
+        # (no data, no alert). Mirrors ExternalSecretsMetricsAbsent.
+        - alert: ExternalDNSMetricsAbsent
+          expr: absent(external_dns_controller_last_sync_timestamp_seconds{cluster="homelab"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "external-dns metrics absent on homelab"
+            description: "No external_dns_controller_last_sync_timestamp_seconds series for >15m — the controller is down or its ServiceMonitor scrape is broken, which would mask every other external-dns alert."
