@@ -7,11 +7,13 @@
 # source. In that state existing records keep resolving (policy=upsert-only never deletes),
 # but every newly-added/changed HTTPRoute never gets its DNS record and nobody is told.
 #
-# Metrics come from the external-dns controller (/metrics :7979), scraped via the
-# ServiceMonitor enabled in values/external-dns-values.yaml (gets cluster=homelab via the
-# Prometheus scrapeClasses relabel). external-dns runs only on homelab today, so every rule
-# is scoped cluster="homelab" — a future oracle-k3s instance gets its own txtOwnerId and
-# its own scrape, so it will not cross-fire here.
+# Metrics come from the external-dns controller (/metrics :7979) on BOTH clusters:
+#   - homelab:    ServiceMonitor in values/external-dns-values.yaml (gets cluster=homelab via
+#                 the Prometheus scrapeClasses relabel).
+#   - oracle-k3s: scraped by its OTel Collector (prometheus/external-dns receiver) and
+#                 remote-written with cluster=oracle-k3s.
+# The condition/error rules below therefore cover BOTH clusters; {{ $labels.cluster }}
+# disambiguates. (oracle runs a separate instance, txtOwnerId=oracle-externaldns.)
 #
 # severity warning → routed by Alertmanager (see values/kube-prometheus-stack.yaml). The
 # `release` label is REQUIRED so the kube-prometheus-stack ruleSelector adopts this rule.
@@ -33,7 +35,7 @@ spec:
         # Existing records keep resolving, but new/changed HTTPRoutes silently fail to get a
         # DNS record. Healthy reconcile interval is 1m, so >10m stale means it is stuck.
         - alert: ExternalDNSReconcileStalled
-          expr: time() - external_dns_controller_last_sync_timestamp_seconds{cluster="homelab"} > 600
+          expr: time() - external_dns_controller_last_sync_timestamp_seconds > 600
           for: 10m
           labels:
             severity: warning
@@ -44,7 +46,7 @@ spec:
         # The loop is running but each attempt to apply changes to Cloudflare is erroring
         # (token scope/validity, rate limit, or provider outage).
         - alert: ExternalDNSRegistryErrors
-          expr: increase(external_dns_registry_errors_total{cluster="homelab"}[15m]) > 0
+          expr: increase(external_dns_registry_errors_total[15m]) > 0
           for: 15m
           labels:
             severity: warning
@@ -56,7 +58,7 @@ spec:
         # the Gateway API CRDs / apiserver being unavailable. Desired state is then computed
         # from stale or empty input.
         - alert: ExternalDNSSourceErrors
-          expr: increase(external_dns_source_errors_total{cluster="homelab"}[15m]) > 0
+          expr: increase(external_dns_source_errors_total[15m]) > 0
           for: 15m
           labels:
             severity: warning
@@ -65,7 +67,12 @@ spec:
             description: "external_dns_source_errors_total increasing for >15m — external-dns cannot read its HTTPRoute source (RBAC or Gateway API availability)."
 
         # Meta-failure: if external-dns metrics vanish entirely the alerts above CAN'T fire
-        # (no data, no alert). Mirrors ExternalSecretsMetricsAbsent.
+        # (no data, no alert). Scoped to homelab, where the ServiceMonitor guarantees the
+        # series whenever external-dns is healthy. oracle-k3s metrics are best-effort via OTel
+        # remote-write, so an absent() there would false-positive on a scrape/remote-write gap;
+        # oracle external-dns being *down* is instead caught by the generic KubePodNotReady/
+        # CrashLooping rules (oracle kube-state-metrics is remote-written with cluster=oracle-k3s).
+        # Mirrors ExternalSecretsMetricsAbsent.
         - alert: ExternalDNSMetricsAbsent
           expr: absent(external_dns_controller_last_sync_timestamp_seconds{cluster="homelab"})
           for: 15m
