@@ -21,13 +21,21 @@ falco:
   json_include_output_property: true
   priority: notice           # 上报 notice 及以上
 
-# 应用白名单例外：restic 备份容器需要 find/restic/ssh 但非 base image 部分。
-# 用法：同名 rule + append:true 附加排除条件，Falco 自动合并到原始 condition。
+# 应用白名单例外：backup ns 的 restic 备份容器（alpine）运行时 apk 装 postgresql-client，
+# 再执行 pg_dump/pg_dumpall 备份 CNPG —— 触发 "Drop and execute new binary in container"；
+# 建 postgres 用户时 adduser 把 /etc/shadow 硬链到 /etc/shadow-（adduser 正常行为）——
+# 触发 "Create Hardlink Over Sensitive Files"。两者均为该 ns 的已知误报，按 ns + 进程名精确放行。
+# 用法：同名 rule + override.condition=append 附加排除条件（Falco 0.44 已弃用旧的 append:true）。
 customRules:
   override-backup.yaml: |-
     - rule: Drop and execute new binary in container
-      append: true
-      condition: and not (k8s.ns.name = "backup" and proc.name in (find, restic, ssh))
+      condition: and not (k8s.ns.name = "backup" and proc.name in (find, restic, ssh, pg_dump, pg_dumpall))
+      override:
+        condition: append
+    - rule: Create Hardlink Over Sensitive Files
+      condition: and not (k8s.ns.name = "backup" and proc.name = adduser)
+      override:
+        condition: append
 # Falco DaemonSet 资源（oracle 有余量，但仍设上限）
 resources:
   requests:
@@ -44,6 +52,11 @@ resources:
 falcosidekick:
   enabled: true
   replicaCount: 1
+  # chart 默认镜像 2.32.0 根本不支持 Telegram message_thread_id（config.go 未把该键
+  # 注册进 viper，无论环境变量叫什么都不会写进 payload，告警只能落到群"General"话题）。
+  # 2.33+ 才修好；锁到已发布版 2.34.1（已本地实测 payload 含 message_thread_id）。
+  image:
+    tag: "2.34.1"
   resources:
     requests: { cpu: 25m, memory: 64Mi }
     limits: { cpu: 200m, memory: 128Mi }
@@ -51,8 +64,16 @@ falcosidekick:
     # 仅推 warning 及以上，降噪；併入 Telegram 群 MatthewDaily「🚨 Homelab 告警」话题
     telegram:
       chatid: "-1003981213530"
+      # ⚠️ chart 把此键渲染成环境变量 TELEGRAM_MESSAGE_THREAD_ID（带下划线），但 falcosidekick
+      #    用 viper AutomaticEnv 读的是 TELEGRAM_MESSAGETHREADID（无下划线）—— chart 键名是
+      #    upstream bug，读不到。真正生效的话题 ID 由下方 extraEnv 注入；此行保留仅作意图记录。
       messagethreadid: "2"
       minimumpriority: "warning"
       # ⚠️ token 不写明文；经 ESO 注入的 secret(falcosidekick-telegram) 的 TELEGRAM_TOKEN 环境变量提供。
     # existingSecret：其 key 作为大写环境变量被 falcosidekick 读取（TELEGRAM_TOKEN）。
     existingSecret: "falcosidekick-telegram"
+    # 绕开上面的 chart 键名 bug：直接注入 falcosidekick 实际读取的 TELEGRAM_MESSAGETHREADID，
+    # 告警才会进「🚨 Homelab 告警」话题（thread_id=2）。extraEnv 走容器 env，优先级高于 envFrom。
+    extraEnv:
+      - name: TELEGRAM_MESSAGETHREADID
+        value: "2"
