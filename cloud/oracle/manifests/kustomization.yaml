@@ -43,9 +43,10 @@ resources:
   # decisions/ 记录）。cnpg-operator 本身是独立 ArgoCD App（argocd/applications/cnpg-operator.yaml）。
   - zitadel/zitadel-pg-secrets.yaml
   - zitadel/zitadel-pg-cluster.yaml
-  # Personal services (IT-Tools, Stirling-PDF, Squoosh, Timeslot, Trends)
+  # Personal services (IT-Tools, Stirling-PDF, Squoosh, Timeslot, Trends, Excalidraw)
   - personal-services/it-tools.yaml
   - personal-services/stirling-pdf.yaml
   - personal-services/squoosh.yaml
   - personal-services/timeslot.yaml
   - personal-services/trends.yaml
+  - personal-services/excalidraw.yaml
