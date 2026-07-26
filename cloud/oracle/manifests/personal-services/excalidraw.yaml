@@ -1,0 +1,229 @@
+# Excalidraw — 手绘风白板 (draw.meirong.dev)
+#
+# 纯静态 SPA:excalidraw/excalidraw 镜像只是个 nginx,画布数据存浏览器
+# localStorage(单人、按设备隔离,无服务端持久化,无实时协作房间)。镜像里的
+# "分享/实时协作" 按钮指向 Excalidraw 官方后端,自托管下不可用——要多人协作需
+# 另配 excalidraw-room + storage-backend,当前刻意不做。
+#
+# 认证:Excalidraw 自身零认证(不像 stirling-pdf/karakeep 有原生 OIDC),所以在
+# 网关前套一层 oauth2-proxy(反向代理模式)→ ZITADEL(auth.meirong.dev)。模式与
+# k8s/helm/manifests/bifrost.yaml 的 oauth2-proxy 一致;凭据经 ESO 读 Vault
+# secret/oracle-k3s/excalidraw-oauth2-proxy(client-id/client-secret/cookie-secret)。
+#
+# 暴露:draw.meirong.dev —— wildcard tunnel(*.meirong.dev → oracle-gateway)已在
+# cloud/oracle/cloudflare 就绪,external-dns(gateway-httproute source)从下面的
+# HTTPRoute 自动建 CNAME+TXT,无需改 terraform。HTTPRoute→Service 由 base/gateway.yaml
+# 的 ReferenceGrant allow-gateway-to-personal-services 放行。ns 复用 personal-services。
+#
+# ⚠️ 部署前置(不入 git):在 ZITADEL 建 OIDC client 并写 Vault——
+#   APP_NAME=excalidraw \
+#   REDIRECT_URIS=https://draw.meirong.dev/oauth2/callback \
+#   POST_LOGOUT_URIS=https://draw.meirong.dev/ \
+#   VAULT_PATH=secret/oracle-k3s/excalidraw-oauth2-proxy \
+#   zitadel/scripts/configure-oidc-app.sh
+#   然后把 client-id/client-secret 连同新生成的 cookie-secret 一起写 Vault(见该路径)。
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: excalidraw-oauth2-proxy
+  namespace: personal-services
+spec:
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: excalidraw-oauth2-proxy
+    creationPolicy: Owner
+  data:
+    - secretKey: client-id
+      remoteRef:
+        key: oracle-k3s/excalidraw-oauth2-proxy
+        property: client-id
+    - secretKey: client-secret
+      remoteRef:
+        key: oracle-k3s/excalidraw-oauth2-proxy
+        property: client-secret
+    - secretKey: cookie-secret
+      remoteRef:
+        key: oracle-k3s/excalidraw-oauth2-proxy
+        property: cookie-secret
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: excalidraw
+  namespace: personal-services
+  labels:
+    app: excalidraw
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: excalidraw
+  template:
+    metadata:
+      labels:
+        app: excalidraw
+    spec:
+      containers:
+        - name: excalidraw
+          # excalidraw/excalidraw:latest — multi-arch manifest-list digest (2026-07-26);
+          # 节点自动解析 arm64 子镜像(sha256:0faa2324e70d2331952550c0f29ea20af63ffcfd146fbb2ffd5bacdc7f8d8a6b)。
+          image: excalidraw/excalidraw@sha256:f7ee194addd607bf831d2af0f0a34463dd4225e426cf35199ef0b12a803398e9
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 20m
+              memory: 48Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: excalidraw
+  namespace: personal-services
+spec:
+  selector:
+    app: excalidraw
+  ports:
+    - port: 80
+      targetPort: 80
+---
+# oauth2-proxy — 用 ZITADEL OIDC 守 Excalidraw。反向代理(upstream)模式:
+# 认证通过的请求转发给 excalidraw。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: excalidraw-oauth2-proxy
+  namespace: personal-services
+  labels:
+    app: excalidraw-oauth2-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: excalidraw-oauth2-proxy
+  template:
+    metadata:
+      labels:
+        app: excalidraw-oauth2-proxy
+    spec:
+      containers:
+        - name: oauth2-proxy
+          # quay.io/oauth2-proxy/oauth2-proxy:v7.15.2 multi-arch manifest-list digest
+          # (2026-07-26;修 CVE-2026-34457 / CVE-2025-54576)。⚠️ oracle 是 arm64——不能复用
+          # bifrost 那个 amd64-only digest;节点自动解析 arm64 子镜像(sha256:db1aac7d…)。
+          image: quay.io/oauth2-proxy/oauth2-proxy@sha256:aa0bd8dd5ab0c78e4c91c92755ad573a5f92241f88138b4141b8ec803463b4fd
+          ports:
+            - containerPort: 4180
+              name: http
+          args:
+            - --provider=oidc
+            - --oidc-issuer-url=https://auth.meirong.dev
+            - --scope=openid profile email
+            - --email-domain=*
+            # reverse-proxy 到 excalidraw:认证通过后把请求转发给静态站点
+            - --upstream=http://excalidraw.personal-services.svc.cluster.local:80
+            - --http-address=0.0.0.0:4180
+            - --redirect-url=https://draw.meirong.dev/oauth2/callback
+            - --cookie-domain=draw.meirong.dev
+            - --cookie-secure=true
+            - --cookie-samesite=lax
+            - --cookie-expire=168h
+            - --skip-provider-button=true
+            # 信任 Cilium Gateway / Cloudflare Tunnel 传来的 X-Forwarded-*
+            - --reverse-proxy=true
+            - --whitelist-domain=.meirong.dev
+            - --silence-ping-logging=true
+          env:
+            - name: OAUTH2_PROXY_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: excalidraw-oauth2-proxy
+                  key: client-id
+            - name: OAUTH2_PROXY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: excalidraw-oauth2-proxy
+                  key: client-secret
+            - name: OAUTH2_PROXY_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: excalidraw-oauth2-proxy
+                  key: cookie-secret
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 4180
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 4180
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: excalidraw-oauth2-proxy
+  namespace: personal-services
+spec:
+  selector:
+    app: excalidraw-oauth2-proxy
+  ports:
+    - port: 4180
+      targetPort: 4180
+      name: http
+---
+# HTTPRoute: draw.meirong.dev -> excalidraw-oauth2-proxy -> (authed) excalidraw
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: excalidraw
+  namespace: personal-services
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: oracle-gateway
+      namespace: kube-system
+      port: 80
+  hostnames:
+    - "draw.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: excalidraw-oauth2-proxy
+          port: 4180
+          weight: 1
