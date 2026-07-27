@@ -139,8 +139,9 @@ spec:
     spec:
       containers:
         - name: excalidraw-room
-          # 自建多架构镜像(images/excalidraw-room)。首次构建后设包为 public;稳定后可 pin digest。
-          image: ghcr.io/meirongdev/excalidraw-room:03ff435
+          # 自建多架构镜像(images/excalidraw-room),arm64+amd64 manifest-list digest。
+          # 源 tag ghcr.io/meirongdev/excalidraw-room:03ff435(GH Actions 构建,包已设 public)。
+          image: ghcr.io/meirongdev/excalidraw-room@sha256:dba0901ceb97a0bfcff08764010a7b834339c42d80554e30df75f5da45a24d23
           ports:
             - containerPort: 80
               name: http
@@ -280,6 +281,10 @@ spec:
         - name: storage
           # ghcr.io/kitsteam/excalidraw-storage-backend — 多架构 digest(2026-07-26),含 arm64。
           image: ghcr.io/kitsteam/excalidraw-storage-backend@sha256:bb8cc6d653232796efecf03050b6f86b9407c7b4ac329a4282b8900be38fefc5
+          # ⚠️ 镜像默认 CMD(entrypoint.prod.sh)用 `pg_isready` 死等 PostgreSQL —— 只认 pg,
+          # 我们用 redis 会永远 "Waiting for database" 被 liveness 杀。绕过它直接启动:镜像
+          # ENTRYPOINT=tini 保留(args 即 tini 的参数),@keyv/redis 已内置,keyv 懒连接 redis。
+          args: ["node", "dist/main"]
           ports:
             - containerPort: 8080
           env:
