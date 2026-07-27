@@ -1,0 +1,47 @@
+# 构建 excalidraw-room 的多架构镜像(arm64 + amd64)并推到 ghcr。
+# 官方镜像只有 amd64,oracle-k3s 需要 arm64 —— 见 images/excalidraw-room/Dockerfile。
+#
+# 首次构建后,把 ghcr 包 meirongdev/excalidraw-room 的可见性设为 Public
+# (Packages → excalidraw-room → Package settings → Change visibility),
+# 否则 oracle 集群拉取需要 imagePullSecret(其它 meirongdev/* 镜像均为 public)。
+name: excalidraw-room image
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - images/excalidraw-room/**
+      - .github/workflows/excalidraw-room-image.yml
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: images/excalidraw-room
+          platforms: linux/amd64,linux/arm64
+          push: true
+          # 03ff435 = pin 的 upstream commit(与 Dockerfile 的 ROOM_REF 一致)。
+          tags: |
+            ghcr.io/meirongdev/excalidraw-room:latest
+            ghcr.io/meirongdev/excalidraw-room:03ff435
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

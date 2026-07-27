@@ -1,27 +1,26 @@
-# Excalidraw — 手绘风白板 (draw.meirong.dev)
+# Excalidraw — 手绘风白板 + 实时协作 + 持久化 (draw.meirong.dev)
 #
-# 纯静态 SPA:excalidraw/excalidraw 镜像只是个 nginx,画布数据存浏览器
-# localStorage(单人、按设备隔离,无服务端持久化,无实时协作房间)。镜像里的
-# "分享/实时协作" 按钮指向 Excalidraw 官方后端,自托管下不可用——要多人协作需
-# 另配 excalidraw-room + storage-backend,当前刻意不做。
+# 单一 origin draw.meirong.dev,全部走现有 oauth2-proxy(ZITADEL SSO),由 oauth2-proxy
+# 按路径分流到三个后端:
+#   /            → excalidraw 前端(官方静态镜像)
+#   /socket.io/  → excalidraw-room(实时协作 websocket 中继;自建 arm64 镜像)
+#   /api/v2/     → excalidraw-storage(持久化画布 / 分享链接;keyv→redis)
 #
-# 认证:Excalidraw 自身零认证(不像 stirling-pdf/karakeep 有原生 OIDC),所以在
-# 网关前套一层 oauth2-proxy(反向代理模式)→ ZITADEL(auth.meirong.dev)。模式与
-# k8s/helm/manifests/bifrost.yaml 的 oauth2-proxy 一致;凭据经 ESO 读 Vault
-# secret/oracle-k3s/excalidraw-oauth2-proxy(client-id/client-secret/cookie-secret)。
+# 官方前端把后端地址烤进 JS(build-time),自托管标准做法是覆盖 entrypoint,在运行时
+# sed 改写这两个硬编码 URL 指向本 origin(见下面 excalidraw Deployment 的 command):
+#   https://oss-collab.excalidraw.com → https://draw.meirong.dev  (协作 ws)
+#   https://json.excalidraw.com       → https://draw.meirong.dev  (存储 /api/v2)
+# 资产路径 /usr/share/nginx/html/assets 已实测(pod 内 grep 命中这两个 URL)。
 #
-# 暴露:draw.meirong.dev —— wildcard tunnel(*.meirong.dev → oracle-gateway)已在
-# cloud/oracle/cloudflare 就绪,external-dns(gateway-httproute source)从下面的
-# HTTPRoute 自动建 CNAME+TXT,无需改 terraform。HTTPRoute→Service 由 base/gateway.yaml
-# 的 ReferenceGrant allow-gateway-to-personal-services 放行。ns 复用 personal-services。
+# ⚠️ room 镜像:官方 excalidraw/excalidraw-room 只有 amd64,oracle 是 arm64 → 自建多架构
+#   ghcr.io/meirongdev/excalidraw-room(images/excalidraw-room/ + GH Actions)。首次需触发
+#   workflow 构建并把 ghcr 包设为 public,否则 room 会 ImagePullBackOff。
+# ⚠️ 局限:官方前端的“协作场景服务端持久化”走 Firebase(无法 sed 重指),故未接管;实时协作
+#   由 room 中继照常工作,分享链接/画布持久化由 storage 接管。要 Firebase 那份需 fork 前端
+#   (kitsteam/alswl,均 amd64-only,arm64 不可用),暂不做。
 #
-# ⚠️ 部署前置(不入 git):在 ZITADEL 建 OIDC client 并写 Vault——
-#   APP_NAME=excalidraw \
-#   REDIRECT_URIS=https://draw.meirong.dev/oauth2/callback \
-#   POST_LOGOUT_URIS=https://draw.meirong.dev/ \
-#   VAULT_PATH=secret/oracle-k3s/excalidraw-oauth2-proxy \
-#   zitadel/scripts/configure-oidc-app.sh
-#   然后把 client-id/client-secret 连同新生成的 cookie-secret 一起写 Vault(见该路径)。
+# 暴露:wildcard tunnel + external-dns(gateway-httproute)已就绪,HTTPRoute 一份即可。
+# ReferenceGrant allow-gateway-to-personal-services(base/gateway.yaml)已放行本 ns。
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -50,6 +49,7 @@ spec:
         key: oracle-k3s/excalidraw-oauth2-proxy
         property: cookie-secret
 ---
+# ---------- 前端(官方静态镜像 + 运行时改写后端 URL) ----------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -69,9 +69,22 @@ spec:
     spec:
       containers:
         - name: excalidraw
-          # excalidraw/excalidraw:latest — multi-arch manifest-list digest (2026-07-26);
-          # 节点自动解析 arm64 子镜像(sha256:0faa2324e70d2331952550c0f29ea20af63ffcfd146fbb2ffd5bacdc7f8d8a6b)。
+          # excalidraw/excalidraw:latest — 多架构 manifest-list digest(2026-07-26),节点解析 arm64。
           image: excalidraw/excalidraw@sha256:f7ee194addd607bf831d2af0f0a34463dd4225e426cf35199ef0b12a803398e9
+          # 覆盖 entrypoint:把 JS 里硬编码的官方后端 URL 改写成本 origin,再起 nginx。
+          # ${VAR} 是 shell 展开(k8s 只替换 $(VAR) 语法,不碰 ${VAR})。
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              echo "Repointing collab+storage backends to ${EXCALIDRAW_PUBLIC_ORIGIN}"
+              find /usr/share/nginx/html/assets -type f -name '*.js' -exec sed -i \
+                -e "s|https://oss-collab.excalidraw.com|${EXCALIDRAW_PUBLIC_ORIGIN}|g" \
+                -e "s|https://json.excalidraw.com|${EXCALIDRAW_PUBLIC_ORIGIN}|g" {} +
+              exec nginx -g 'daemon off;'
+          env:
+            - name: EXCALIDRAW_PUBLIC_ORIGIN
+              value: https://draw.meirong.dev
           ports:
             - containerPort: 80
           resources:
@@ -81,6 +94,63 @@ spec:
             limits:
               cpu: 200m
               memory: 128Mi
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 8
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: excalidraw
+  namespace: personal-services
+spec:
+  selector:
+    app: excalidraw
+  ports:
+    - port: 80
+      targetPort: 80
+---
+# ---------- 实时协作中继(自建 arm64 room) ----------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: excalidraw-room
+  namespace: personal-services
+  labels:
+    app: excalidraw-room
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: excalidraw-room
+  template:
+    metadata:
+      labels:
+        app: excalidraw-room
+    spec:
+      containers:
+        - name: excalidraw-room
+          # 自建多架构镜像(images/excalidraw-room)。首次构建后设包为 public;稳定后可 pin digest。
+          image: ghcr.io/meirongdev/excalidraw-room:03ff435
+          ports:
+            - containerPort: 80
+              name: http
+          resources:
+            requests:
+              cpu: 20m
+              memory: 48Mi
+            limits:
+              cpu: 200m
+              memory: 192Mi
           livenessProbe:
             httpGet:
               path: /
@@ -97,17 +167,163 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: excalidraw
+  name: excalidraw-room
   namespace: personal-services
 spec:
   selector:
-    app: excalidraw
+    app: excalidraw-room
   ports:
     - port: 80
       targetPort: 80
+      name: http
 ---
-# oauth2-proxy — 用 ZITADEL OIDC 守 Excalidraw。反向代理(upstream)模式:
-# 认证通过的请求转发给 excalidraw。
+# ---------- Redis(storage 的持久化后端) ----------
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: excalidraw-redis-data
+  namespace: personal-services
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: excalidraw-redis
+  namespace: personal-services
+  labels:
+    app: excalidraw-redis
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # 单 RWO 卷
+  selector:
+    matchLabels:
+      app: excalidraw-redis
+  template:
+    metadata:
+      labels:
+        app: excalidraw-redis
+    spec:
+      securityContext:
+        fsGroup: 999 # redis user,保证对 local-path 卷可写
+      containers:
+        - name: redis
+          # redis:7-alpine — 多架构 digest(2026-07-26),arm64/v8。
+          image: redis@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
+          args: ["redis-server", "--appendonly", "yes"]
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: excalidraw-redis-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: excalidraw-redis
+  namespace: personal-services
+spec:
+  selector:
+    app: excalidraw-redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+---
+# ---------- 存储后端(持久化画布 / 分享链接;excalidraw-json 的重实现) ----------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: excalidraw-storage
+  namespace: personal-services
+  labels:
+    app: excalidraw-storage
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: excalidraw-storage
+  template:
+    metadata:
+      labels:
+        app: excalidraw-storage
+    spec:
+      containers:
+        - name: storage
+          # ghcr.io/kitsteam/excalidraw-storage-backend — 多架构 digest(2026-07-26),含 arm64。
+          image: ghcr.io/kitsteam/excalidraw-storage-backend@sha256:bb8cc6d653232796efecf03050b6f86b9407c7b4ac329a4282b8900be38fefc5
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+            # 前端 sed 后请求 /api/v2/...,与 GLOBAL_PREFIX 对齐。
+            - name: GLOBAL_PREFIX
+              value: /api/v2
+            # keyv 连接串 → redis(持久化)。
+            - name: STORAGE_URI
+              value: redis://excalidraw-redis.personal-services.svc.cluster.local:6379
+            - name: LOG_LEVEL
+              value: warn
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: excalidraw-storage
+  namespace: personal-services
+spec:
+  selector:
+    app: excalidraw-storage
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+# ---------- oauth2-proxy — ZITADEL SSO + 按路径分流到三个后端 ----------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -127,9 +343,7 @@ spec:
     spec:
       containers:
         - name: oauth2-proxy
-          # quay.io/oauth2-proxy/oauth2-proxy:v7.15.2 multi-arch manifest-list digest
-          # (2026-07-26;修 CVE-2026-34457 / CVE-2025-54576)。⚠️ oracle 是 arm64——不能复用
-          # bifrost 那个 amd64-only digest;节点自动解析 arm64 子镜像(sha256:db1aac7d…)。
+          # quay.io/oauth2-proxy/oauth2-proxy:v7.15.2 多架构 manifest-list digest —— oracle arm64。
           image: quay.io/oauth2-proxy/oauth2-proxy@sha256:aa0bd8dd5ab0c78e4c91c92755ad573a5f92241f88138b4141b8ec803463b4fd
           ports:
             - containerPort: 4180
@@ -139,8 +353,12 @@ spec:
             - --oidc-issuer-url=https://auth.meirong.dev
             - --scope=openid profile email
             - --email-domain=*
-            # reverse-proxy 到 excalidraw:认证通过后把请求转发给静态站点
-            - --upstream=http://excalidraw.personal-services.svc.cluster.local:80
+            # 按路径分流(最长前缀优先):默认 → 前端;/socket.io/ → room;/api/v2/ → storage。
+            - --upstream=http://excalidraw.personal-services.svc.cluster.local:80/
+            - --upstream=http://excalidraw-room.personal-services.svc.cluster.local:80/socket.io/
+            - --upstream=http://excalidraw-storage.personal-services.svc.cluster.local:8080/api/v2/
+            # 协作是 websocket;显式开启 ws 代理。
+            - --proxy-websockets=true
             - --http-address=0.0.0.0:4180
             - --redirect-url=https://draw.meirong.dev/oauth2/callback
             - --cookie-domain=draw.meirong.dev
@@ -148,7 +366,6 @@ spec:
             - --cookie-samesite=lax
             - --cookie-expire=168h
             - --skip-provider-button=true
-            # 信任 Cilium Gateway / Cloudflare Tunnel 传来的 X-Forwarded-*
             - --reverse-proxy=true
             - --whitelist-domain=.meirong.dev
             - --silence-ping-logging=true
@@ -174,7 +391,7 @@ spec:
               memory: 32Mi
             limits:
               cpu: 100m
-              memory: 64Mi
+              memory: 96Mi
           livenessProbe:
             httpGet:
               path: /ping
@@ -201,7 +418,7 @@ spec:
       targetPort: 4180
       name: http
 ---
-# HTTPRoute: draw.meirong.dev -> excalidraw-oauth2-proxy -> (authed) excalidraw
+# HTTPRoute: draw.meirong.dev -> excalidraw-oauth2-proxy -> (authed) 三后端
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
