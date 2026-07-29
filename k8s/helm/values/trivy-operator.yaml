@@ -79,6 +79,11 @@ trivy:
         statement: "CWA kepubify (Go 1.17.8), 上游未重建, 2026-11 复审"
       - id: CVE-2024-24790
         statement: "CWA kepubify (Go 1.17.8), 上游未重建, 2026-11 复审"
+      # grafana 13.1.x 内置 kin-openapi v0.140.0(ValidationHandler fail-open 认证绕过, CVSS 9.1);
+      # 修复在 0.144.0,但 grafana v13.1.1(最新)go.mod 仍钉 0.140.0 → 无可升级到的已修镜像。
+      # grafana 自带认证栈,不走 kin-openapi 的 ValidationHandler 鉴权,实际不可利用。等上游 bump。
+      - id: GHSA-r277-6w6q-xmqw
+        statement: "grafana kin-openapi v0.140.0, 无已修镜像(v13.1.1 go.mod 仍 0.140.0), grafana 不走 kin-openapi 认证路径, 2026-09 复审"
   # 扫描 Job（client）资源
   resources:
     requests:
