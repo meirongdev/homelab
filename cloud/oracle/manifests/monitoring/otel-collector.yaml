@@ -21,6 +21,13 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "namespaces", "nodes"]
     verbs: ["get", "list", "watch"]
+  # nodes/metrics: 直连 kubelet :10250 抓 /metrics/cadvisor（KRR 依赖的容器用量指标）。
+  # kubelet 自己做 SubjectAccessReview，走 metrics 子资源——只给 "nodes" 不够
+  # （2026-07-30 实测：无此条时 HTTP 403）。homelab 侧 kube-prometheus-stack 的
+  # ClusterRole 同样含 nodes/metrics。
+  - apiGroups: [""]
+    resources: ["nodes/metrics"]
+    verbs: ["get"]
   - apiGroups: ["apps"]
     resources: ["replicasets"]
     verbs: ["get", "list", "watch"]
@@ -346,6 +353,42 @@ data:
                   labels:
                     cluster: oracle-k3s
 
+      # kubelet cAdvisor 容器用量 → homelab Prometheus (cluster=oracle-k3s)。
+      # 唯一消费者是 KRR（robusta-dev/krr），它只查这两个指标：
+      #   container_cpu_usage_seconds_total / container_memory_working_set_bytes
+      # 该端点共 ~9200 条 series，keep 正则只留 ~280 条（丢 97%），跨 Tailscale 增量可忽略
+      # ——做法同上面的 cilium-envoy job。
+      # 不加这条时 oracle 侧 KRR 只能看当前运行的 Pod、没有历史，推荐值无意义。
+      # 需 ClusterRole 含 nodes/metrics（见本文件顶部）。
+      # 见 docs/plans/observability/2026-07-30-krr-rightsizing.md
+      prometheus/cadvisor:
+        config:
+          scrape_configs:
+            - job_name: 'kubelet-cadvisor'
+              scheme: https
+              metrics_path: /metrics/cadvisor
+              scrape_interval: 60s
+              scrape_timeout: 15s
+              tls_config:
+                # k3s kubelet 服务证书自签，且 SAN 不含 10.0.0.26 → 跳过校验
+                # （同本文件其他 exporter 的 tls.insecure 取向；流量不出节点）
+                insecure_skip_verify: true
+              authorization:
+                type: Bearer
+                credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+              static_configs:
+                - targets: ['10.0.0.26:10250']
+                  labels:
+                    cluster: oracle-k3s
+              metric_relabel_configs:
+                - source_labels: [__name__]
+                  regex: 'container_(cpu_usage_seconds_total|memory_working_set_bytes)'
+                  action: keep
+                # cAdvisor 会为每个 Pod 额外吐一条 container="" 的汇总序列，KRR 用不到
+                - source_labels: [container]
+                  regex: ''
+                  action: drop
+
     processors:
       memory_limiter:
         limit_mib: 400
@@ -441,5 +484,9 @@ data:
           exporters: [prometheusremotewrite]
         metrics/opencost:
           receivers: [prometheus/opencost]
+          processors: [memory_limiter, resource, batch]
+          exporters: [prometheusremotewrite]
+        metrics/cadvisor:
+          receivers: [prometheus/cadvisor]
           processors: [memory_limiter, resource, batch]
           exporters: [prometheusremotewrite]

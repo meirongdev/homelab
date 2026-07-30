@@ -1,0 +1,153 @@
+# KRR (robusta-dev/krr) — 资源 requests/limits 右尺寸推荐（oracle-k3s）
+# 每周一 09:15 跑一次（homelab 侧 09:00，错峰），结果推到同一个 Telegram 话题。
+#
+# 与 homelab 版（k8s/helm/manifests/krr.yaml）的差异只有三处：
+#   ① Prometheus 指向中枢（oracle 本地没有 Prometheus），经 Tailscale NodePort 31090
+#   ② -l=oracle-k3s
+#   ③ bot token 需本集群自己的 ExternalSecret（跨集群读同一个 Vault 路径，同 falcosidekick）
+#
+# 前置：otel-collector 的 prometheus/cadvisor receiver 必须已在跑，否则中枢 Prometheus 里
+# 没有 oracle 的 container_cpu_usage_seconds_total / container_memory_working_set_bytes，
+# KRR 只能看当前运行的 Pod、没有历史，推荐值无意义。
+# 见 docs/plans/observability/2026-07-30-krr-rightsizing.md
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: krr-telegram
+  namespace: monitoring
+spec:
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: krr-telegram
+    creationPolicy: Owner
+  data:
+    - secretKey: bot-token
+      remoteRef:
+        key: homelab/telegram
+        property: bot_token
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: krr
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: krr
+rules:
+  # 全部只读：KRR 只做推荐，不改任何工作负载（enforcer 组件未部署）
+  - apiGroups: [""]
+    resources: ["configmaps", "namespaces", "nodes", "pods", "replicationcontrollers", "services"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["daemonsets", "deployments", "replicasets", "statefulsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs", "jobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: krr
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: krr
+subjects:
+  - kind: ServiceAccount
+    name: krr
+    namespace: monitoring
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: krr
+  namespace: monitoring
+spec:
+  schedule: "15 9 * * 1" # 每周一 09:15（homelab 09:00，错峰避免同时压中枢 Prometheus）
+  timeZone: "Asia/Shanghai"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 1800
+      backoffLimit: 1
+      template:
+        metadata:
+          labels: { app: krr }
+        spec:
+          restartPolicy: Never
+          serviceAccountName: krr
+          initContainers:
+            - name: krr
+              # v1.29.0 提供 linux/arm64（oracle 是 Ampere A1）；:latest 是单架构，别用
+              image: docker.io/robustadev/krr:v1.29.0
+              command: ["python", "krr.py", "simple"]
+              args:
+                # 中枢 Prometheus 的 Tailscale NodePort（与 otel remote-write 同一入口，
+                # 该端口暴露的是完整 Prometheus HTTP API，query 可用）
+                - --prometheus-url=http://100.94.186.7:31090
+                - --prometheus-label=cluster
+                - -l=oracle-k3s
+                - --history-duration=168
+                - --max-workers=3
+                - --width=180
+                - --formatter=table
+                - --fileoutput=/out/krr.txt
+                - --quiet
+              volumeMounts:
+                - { name: out, mountPath: /out }
+              resources:
+                requests: { cpu: "100m", memory: "256Mi" }
+                limits: { memory: "1Gi" }
+          containers:
+            - name: notify
+              image: docker.io/curlimages/curl:8.11.1
+              env:
+                - name: BOT_TOKEN
+                  valueFrom:
+                    secretKeyRef: { name: krr-telegram, key: bot-token }
+                - name: CLUSTER
+                  value: oracle-k3s
+                - name: CHAT_ID
+                  value: "-1003981213530"
+                - name: THREAD_ID
+                  value: "2"
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  F=/out/krr.txt
+                  if [ ! -s "$F" ]; then
+                    echo "KRR 输出为空/缺失，判为失败" >&2
+                    exit 1
+                  fi
+                  D=$(date +%F)
+                  curl -sS --fail-with-body -X POST \
+                    "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
+                    -F "chat_id=${CHAT_ID}" \
+                    -F "message_thread_id=${THREAD_ID}" \
+                    -F "caption=📊 KRR 资源推荐 · ${CLUSTER} · ${D}
+                  窗口 7d · strategy=simple（CPU p95 / 内存 max+15%）" \
+                    -F "document=@${F};filename=krr-${CLUSTER}-${D}.txt" \
+                    -o /dev/null -w "telegram HTTP %{http_code}\n"
+              volumeMounts:
+                - { name: out, mountPath: /out, readOnly: true }
+              resources:
+                requests: { cpu: "10m", memory: "32Mi" }
+                limits: { memory: "64Mi" }
+          volumes:
+            - name: out
+              emptyDir: {}

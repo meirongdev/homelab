@@ -28,6 +28,8 @@ resources:
   - monitoring/namespace.yaml
   - monitoring/otel-collector.yaml
   - monitoring/exporters.yaml
+  # KRR 右尺寸推荐周报（查中枢 Prometheus，结果推 Telegram）
+  - monitoring/krr.yaml
   # OpenCost 成本归因：仅 namespace（工作负载由独立 opencost-oracle Helm App 部署，同 falco 模式）
   # 见 docs/plans/observability/2026-07-30-opencost-multicluster.md
   - opencost/namespace.yaml

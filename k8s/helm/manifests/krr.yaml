@@ -1,0 +1,136 @@
+# KRR (robusta-dev/krr) — 资源 requests/limits 右尺寸推荐（homelab）
+# 每周一 09:00 跑一次，结果以文本附件推到 Telegram「🚨 Homelab 告警」话题。
+#
+# KRR 是 CLI 工具，不导出 Prometheus 指标（只有 table/json/yaml/csv/html），
+# 所以没有对应的 Grafana 面板 —— 报告即产物。
+#
+# 数据来源：本集群 kube-prometheus-stack（cAdvisor + KSM 均已就位）。
+# 窗口显式取 168h(7d) 而非 KRR 默认的 336h(14d)，因为 Prometheus retention 就是 7d；
+# 不传的话 KRR 不报错，只会静默用不足的数据。retention 提上去后这里同步改回 336。
+#
+# 对应的 oracle-k3s 侧在 cloud/oracle/manifests/monitoring/krr.yaml。
+# 见 docs/plans/observability/2026-07-30-krr-rightsizing.md
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: krr
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: krr
+rules:
+  # 全部只读：KRR 只做推荐，不改任何工作负载（enforcer 组件未部署）
+  - apiGroups: [""]
+    resources: ["configmaps", "namespaces", "nodes", "pods", "replicationcontrollers", "services"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["daemonsets", "deployments", "replicasets", "statefulsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs", "jobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: krr
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: krr
+subjects:
+  - kind: ServiceAccount
+    name: krr
+    namespace: monitoring
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: krr
+  namespace: monitoring
+spec:
+  schedule: "0 9 * * 1" # 每周一 09:00（oracle 侧错峰到 09:15）
+  timeZone: "Asia/Shanghai"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 1800
+      backoffLimit: 1
+      template:
+        metadata:
+          labels: { app: krr }
+        spec:
+          restartPolicy: Never
+          serviceAccountName: krr
+          # KRR 先跑完写文件，notify 再读 —— initContainer 保证顺序
+          # （同 Pod 的多个 containers 是并行的，不能用来做流水线）
+          initContainers:
+            - name: krr
+              image: docker.io/robustadev/krr:v1.29.0
+              command: ["python", "krr.py", "simple"]
+              args:
+                - --prometheus-url=http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+                # --prometheus-label 是标签「键」，-l 是标签「值」，别搞反
+                - --prometheus-label=cluster
+                - -l=homelab
+                - --history-duration=168
+                - --max-workers=3
+                - --width=180
+                - --formatter=table
+                - --fileoutput=/out/krr.txt
+                - --quiet
+              volumeMounts:
+                - { name: out, mountPath: /out }
+              resources:
+                requests: { cpu: "100m", memory: "256Mi" }
+                limits: { memory: "1Gi" }
+          containers:
+            - name: notify
+              image: docker.io/curlimages/curl:8.11.1
+              env:
+                # 与 Alertmanager 共用同一个 bot token（ESO ← Vault secret/homelab/telegram）
+                - name: BOT_TOKEN
+                  valueFrom:
+                    secretKeyRef: { name: alertmanager-telegram, key: bot-token }
+                - name: CLUSTER
+                  value: homelab
+                # 群 MatthewDaily（forum）→「🚨 Homelab 告警」话题(thread 2)，与 Alertmanager 一致
+                - name: CHAT_ID
+                  value: "-1003981213530"
+                - name: THREAD_ID
+                  value: "2"
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  F=/out/krr.txt
+                  if [ ! -s "$F" ]; then
+                    echo "KRR 输出为空/缺失，判为失败" >&2
+                    exit 1
+                  fi
+                  D=$(date +%F)
+                  curl -sS --fail-with-body -X POST \
+                    "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
+                    -F "chat_id=${CHAT_ID}" \
+                    -F "message_thread_id=${THREAD_ID}" \
+                    -F "caption=📊 KRR 资源推荐 · ${CLUSTER} · ${D}
+                  窗口 7d · strategy=simple（CPU p95 / 内存 max+15%）" \
+                    -F "document=@${F};filename=krr-${CLUSTER}-${D}.txt" \
+                    -o /dev/null -w "telegram HTTP %{http_code}\n"
+              volumeMounts:
+                - { name: out, mountPath: /out, readOnly: true }
+              resources:
+                requests: { cpu: "10m", memory: "32Mi" }
+                limits: { memory: "64Mi" }
+          volumes:
+            - name: out
+              emptyDir: {}
