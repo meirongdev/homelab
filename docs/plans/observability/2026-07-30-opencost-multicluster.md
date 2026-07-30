@@ -72,7 +72,7 @@ oracle OpenCost ──(otel prometheus/opencost receiver)───────�
 | arm64 支持 | **是**。`ghcr.io/opencost/opencost` manifest list 含 `linux/amd64` + `linux/arm64` |
 | homelab ServiceMonitor 选择器 | 实测 `serviceMonitorSelector={"matchLabels":{"release":"kube-prometheus-stack"}}`，namespaceSelector `{}` → 必须加 `release` 标签，跨 ns 可被发现 |
 
-### ⚠️ 两个必须处理的坑
+### ⚠️ 必须处理的坑
 
 **坑 1：导出的成本指标不带 `cluster` 标签。**
 `pkg/costmodel/metrics.go` 里 `node_total_hourly_cost` 的 label 集是
@@ -97,6 +97,14 @@ AI agent 访问成本数据的 HTTP 端点。本方案显式关掉（`opencost.m
 **坑 4（次要）：`GPU` / `spotCPU` / `spotRAM` 默认非零。**
 chart 默认 `GPU: 0.95`、`spotCPU: 0.006655`、`spotRAM: 0.000892`。两集群都无 GPU / spot，
 需显式覆盖，防止将来节点被打上 spot 标签后算出离谱数字。
+
+**坑 5：oracle 侧资源名会带 `-oracle` 后缀（部署后实测发现）。**
+ArgoCD 用 **Application 名**当 Helm release 名，而两个 App 同处 `argocd` ns 必须重名不冲突，
+于是 oracle 的 release 叫 `opencost-oracle`，渲染出的 Service 变成 `opencost-oracle`。
+这会让 otel 里写死的抓取目标 `opencost.opencost.svc.cluster.local:9003` **抓不到**。
+
+→ oracle values 顶层加 `fullnameOverride: opencost`，把资源名对齐回 homelab。
+副作用是 ArgoCD 会删旧建新（改名 = 重建），首次部署后立即修的话代价可忽略。
 
 ## 定价模型
 

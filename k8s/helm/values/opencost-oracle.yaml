@@ -11,6 +11,12 @@
 #
 # 方案见 docs/plans/observability/2026-07-30-opencost-multicluster.md
 
+# ArgoCD 用 Application 名当 Helm release 名，而两个 App 同处 argocd ns 必须重名不冲突，
+# 于是这边 release 叫 opencost-oracle，资源会被渲染成 opencost-oracle/opencost-oracle-pvc。
+# 覆盖回 opencost，与 homelab 侧资源名对齐 —— otel 的抓取目标
+# (opencost.opencost.svc.cluster.local:9003)、port-forward 命令、runbook 才能两集群通用。
+fullnameOverride: opencost
+
 opencost:
   exporter:
     defaultClusterId: oracle-k3s
