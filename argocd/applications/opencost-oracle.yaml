@@ -1,0 +1,43 @@
+---
+# OpenCost — oracle-k3s 集群成本归因（跨集群部署，模式同 falco.yaml）
+# Chart: opencost/opencost
+# Values: k8s/helm/values/opencost-oracle.yaml
+# 数据源为 collector（oracle 本地无 Prometheus，也不跨 Tailscale 查 homelab）。
+# 成本指标由 oracle otel-collector 抓 :9003 后 remote-write 到中枢 Prometheus。
+# 见 docs/plans/observability/2026-07-30-opencost-multicluster.md
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: opencost-oracle
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: homelab
+
+  sources:
+    # chart 版本 —— 与 homelab 侧 opencost.yaml 保持同版本，避免两集群指标语义漂移。
+    - repoURL: https://opencost.github.io/opencost-helm-chart
+      chart: opencost
+      targetRevision: "2.5.28"
+      helm:
+        valueFiles:
+          - $values/k8s/helm/values/opencost-oracle.yaml
+    - repoURL: https://github.com/meirongdev/homelab
+      targetRevision: main
+      ref: values
+
+  destination:
+    # oracle-k3s 外部集群（Tailscale 端点；与 oracle-k3s / falco App 同）
+    server: https://100.107.166.37:6443
+    namespace: opencost
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # opencost ns 由 oracle-k3s kustomize App 拥有（含 PSA 标签），
+      # 故此处不重复创建/管理 ns，避免双重所有权（同 falco）。
+      - CreateNamespace=false
+      - ServerSideApply=true

@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opencost
+  labels:
+    # OpenCost 只经 apiserver proxy 读 kubelet /stats/summary，无 hostNetwork/hostPID/hostPath 需求
+    # （chart 的 ClusterRole 已含 nodes/proxy），故可跑在 baseline 之下。
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
