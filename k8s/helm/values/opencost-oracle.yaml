@@ -1,0 +1,83 @@
+# OpenCost — 集群成本归因（oracle-k3s）
+# Chart: opencost/opencost  (仓库 https://opencost.github.io/opencost-helm-chart)
+# 由 homelab ArgoCD 经 Tailscale 部署到 **oracle 集群**（argocd/applications/opencost-oracle.yaml），
+# dest ns: opencost（ns 由 oracle-k3s kustomize App 拥有，见 cloud/oracle/manifests/opencost/）
+#
+# 与 homelab 版（values/opencost.yaml）的差异仅三处：
+#   ① defaultClusterId: oracle-k3s
+#   ② customPricing 用 OCI Ampere A1 牌价做影子定价
+#   ③ 无 ServiceMonitor —— oracle 没有 Prometheus Operator，改由 otel-collector 抓 :9003
+#      （cloud/oracle/manifests/monitoring/otel-collector.yaml › prometheus/opencost）
+#
+# 方案见 docs/plans/observability/2026-07-30-opencost-multicluster.md
+
+opencost:
+  exporter:
+    defaultClusterId: oracle-k3s
+
+    # 直采本地 kubelet，不查 Prometheus —— oracle 本地无 Prometheus，
+    # 也因此不必跨 Tailscale 依赖 homelab 存活（故障域自治）。
+    collectorDataSource:
+      enabled: true
+      scrapeInterval: 30s
+      retention10m: 36 # 6h
+      retention1h: 49 # ~2d
+      retention1d: 15 # 15d
+
+    persistence:
+      enabled: true
+      storageClass: local-path
+      accessMode: ReadWriteOnce
+      size: 2Gi
+
+    resources:
+      requests:
+        cpu: 20m
+        memory: 200Mi
+      limits:
+        memory: 1Gi
+
+  mcp:
+    enabled: false
+
+  customPricing:
+    enabled: true
+    provider: custom
+    createConfigmap: true
+    costModel:
+      description: "oracle-k3s Ampere A1 (Always Free) — OCI 牌价影子定价"
+      # 影子定价而非填 0：本看板的价值是"工作负载该放哪个集群"的比较决策，
+      # 填 0 会让 oracle 永远赢。另外 Oracle 2026-07 已把 Free Tier A1 配额砍半
+      # （当前 4 OCPU/24GB 是旧额度），影子定价正好量化这块暴露面。
+      #
+      # OCI Ampere A1 牌价：$0.01/OCPU-hr、$0.0015/GB-hr。
+      # A1 无 SMT，1 OCPU = 1 vCPU，可直接用作 OpenCost 的 CPU 单价。
+      # 本节点 4 OCPU / 23.4GB → 4×0.01 + 23.4×0.0015 = $0.0751/hr ≈ $54.8/月
+      CPU: "0.01"
+      RAM: "0.0015"
+      # ⚠️ 待核实：OCI Block Volume 牌价（$/GB-月 ÷ 730）。
+      # 实施时查 oracle.com/cloud/price-list 填入；本环境 storage 成本占比极小，先置 0 不阻塞。
+      storage: "0"
+      GPU: "0"
+      spotCPU: "0.01"
+      spotRAM: "0.0015"
+      zoneNetworkEgress: "0"
+      regionNetworkEgress: "0"
+      # 出网在 10TB/月免费额度内，暂不计价
+      internetNetworkEgress: "0"
+
+  prometheus:
+    internal:
+      enabled: false
+    external:
+      enabled: false
+
+  metrics:
+    serviceMonitor:
+      # oracle 无 Prometheus Operator（CRD 不存在，开启会同步失败）。
+      # 指标由 otel-collector 的 prometheus/opencost receiver 抓取后
+      # remote-write 到中枢 Prometheus，cluster 标签在那边打。
+      enabled: false
+
+  ui:
+    enabled: true

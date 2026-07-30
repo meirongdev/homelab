@@ -1,0 +1,39 @@
+---
+# OpenCost — homelab 集群成本归因
+# Chart: opencost/opencost
+# Values: k8s/helm/values/opencost.yaml
+# 数据源为 collector（不查 Prometheus），成本指标经 ServiceMonitor 汇入中枢 Prometheus。
+# 见 docs/plans/observability/2026-07-30-opencost-multicluster.md
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: opencost
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: homelab
+
+  sources:
+    # chart 版本 —— 升级前 `helm search repo opencost/opencost --versions` 核对。
+    - repoURL: https://opencost.github.io/opencost-helm-chart
+      chart: opencost
+      targetRevision: "2.5.28"
+      helm:
+        valueFiles:
+          - $values/k8s/helm/values/opencost.yaml
+    - repoURL: https://github.com/meirongdev/homelab
+      targetRevision: main
+      ref: values
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: opencost
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

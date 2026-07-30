@@ -327,6 +327,25 @@ data:
                   labels:
                     cluster: oracle-k3s
 
+      # OpenCost 成本指标 → homelab Prometheus (cluster=oracle-k3s)。oracle 无 Prometheus
+      # Operator，故（不同于 homelab 的 ServiceMonitor）在此直抓 :9003 再 remote-write。
+      # 注意 OpenCost 本身以 collector 数据源运行（直读 kubelet，不查 Prometheus）——
+      # 这里只是把它的**输出**接进中枢，不构成反向依赖。
+      # honor_labels 与上游 extraScrapeConfigs 一致；OpenCost 的成本指标自身不带 cluster
+      # 标签，故由此处 target label 补上（homelab 侧对应 ServiceMonitor 的 metricRelabelings）。
+      # 见 docs/plans/observability/2026-07-30-opencost-multicluster.md
+      prometheus/opencost:
+        config:
+          scrape_configs:
+            - job_name: 'opencost'
+              honor_labels: true
+              scrape_interval: 60s
+              scrape_timeout: 10s
+              static_configs:
+                - targets: ['opencost.opencost.svc.cluster.local:9003']
+                  labels:
+                    cluster: oracle-k3s
+
     processors:
       memory_limiter:
         limit_mib: 400
@@ -418,5 +437,9 @@ data:
           exporters: [prometheusremotewrite]
         metrics/cilium-envoy:
           receivers: [prometheus/cilium-envoy]
+          processors: [memory_limiter, resource, batch]
+          exporters: [prometheusremotewrite]
+        metrics/opencost:
+          receivers: [prometheus/opencost]
           processors: [memory_limiter, resource, batch]
           exporters: [prometheusremotewrite]

@@ -1,0 +1,105 @@
+# OpenCost — 集群成本归因（homelab）
+# Chart: opencost/opencost  (仓库 https://opencost.github.io/opencost-helm-chart)
+# 由 ArgoCD Helm App 部署到 **homelab 集群**（argocd/applications/opencost.yaml），dest ns: opencost
+#
+# 数据源选型：collector（**不查 Prometheus**）。理由见
+# docs/plans/observability/2026-07-30-opencost-multicluster.md
+#   - oracle 侧 otel 未采 cAdvisor，中枢 Prometheus 无 container_cpu_usage_seconds_total
+#   - homelab 自采指标无 cluster 标签（见 kube-prometheus-stack.yaml:185），
+#     OpenCost 的 CURRENT_CLUSTER_ID_FILTER_ENABLED 方案在本环境两侧都不成立
+#   - collector 直读 kubelet stats/summary（经 apiserver proxy，chart 已含 nodes/proxy RBAC），
+#     自带 15d 日粒度，不给 5Gi/7d 的 TSDB 加压
+#
+# 成本指标仍从 :9003 导出 → ServiceMonitor → 中枢 Prometheus → Grafana 按 cluster 聚合。
+
+opencost:
+  exporter:
+    defaultClusterId: homelab
+
+    # 不依赖 Prometheus 的数据源：直采 kubelet + K8s API，自持 10m/1h/1d 三级 rollup
+    collectorDataSource:
+      enabled: true
+      scrapeInterval: 30s
+      retention10m: 36 # 6h
+      retention1h: 49 # ~2d
+      retention1d: 15 # 15d
+
+    # collector 的 rollup 状态需跨 Pod 重启保留，否则每次重启丢历史
+    persistence:
+      enabled: true
+      storageClass: local-path
+      accessMode: ReadWriteOnce
+      size: 2Gi
+
+    # opencost ns 不在 namespace-guardrails 的 LimitRange 覆盖范围内（该 App 只管 4 个既有 ns），
+    # 故在此显式声明。
+    resources:
+      requests:
+        cpu: 20m
+        memory: 200Mi
+      limits:
+        memory: 1Gi
+
+  # chart 默认开启，会额外暴露一个供 AI agent 读成本数据的 HTTP 端点（:8081）。不需要。
+  mcp:
+    enabled: false
+
+  customPricing:
+    enabled: true
+    provider: custom
+    createConfigmap: true
+    costModel:
+      description: "homelab bare-metal (Ryzen 5600H) — 实测功耗 + 硬件摊销"
+      # ⚠️ 全部用字符串：YAML 数值会被渲染成科学计数法（0.0000018 → "1.8e-06"）写进 ConfigMap。
+      #
+      # 推导（占位值，上线跑满 24h 后用 RAPL 实测回推替换）：
+      #   整机 45W × 730h × ¥0.55/kWh = ¥18.1/月；硬件 ¥3500/48月 = ¥72.9/月
+      #   合计 ≈ ¥91/月 ≈ $12.6/月 → 节点小时成本 $0.01726/hr
+      #   CPU:RAM 按 AWS 默认单价对本规格反推 = 82.5 : 17.5
+      #   CPU = 0.01726 × 0.825 / 8      = 0.0018
+      #   RAM = 0.01726 × 0.175 / 12.66  = 0.00024
+      #   storage: 1TB ¥450 / 48月 / 1000GB / 730h ≈ 0.0000018
+      # 实测命令：avg_over_time(rate(node_rapl_package_joules_total{cluster="homelab"}[5m])[7d:])
+      # （RAPL 只覆盖 CPU package+DRAM，整机墙上功率再加 15–20W）
+      CPU: "0.0018"
+      RAM: "0.00024"
+      storage: "0.0000018"
+      # 无 GPU / 无 spot —— chart 默认值非零（GPU 0.95 / spotCPU 0.006655），必须覆盖，
+      # 否则将来节点被打上 spot 标签会算出离谱数字。
+      GPU: "0"
+      spotCPU: "0.0018"
+      spotRAM: "0.00024"
+      zoneNetworkEgress: "0"
+      regionNetworkEgress: "0"
+      internetNetworkEgress: "0"
+
+  # collector 模式下 PROMETHEUS_SERVER_ENDPOINT 完全惰性（router.go 在
+  # IsCollectorDataSourceEnabled() 时重新赋值数据源工厂，Prometheus 闭包永不执行），
+  # 此处显式关闭仅为避免误读成"连了 Prometheus"。
+  prometheus:
+    internal:
+      enabled: false
+    external:
+      enabled: false
+
+  metrics:
+    serviceMonitor:
+      enabled: true
+      scrapeInterval: 60s
+      honorLabels: true
+      additionalLabels:
+        # Prometheus serviceMonitorSelector = {release: kube-prometheus-stack}，不加则不被发现
+        release: kube-prometheus-stack
+      # ⚠️ OpenCost 导出的成本指标**自身不带 cluster 标签**
+      # （node_total_hourly_cost 的 label 集为 instance/node/instance_type/region/provider_id/arch/uid）。
+      # oracle 侧由 otel target label 补上；homelab 侧必须在此补，否则
+      # `sum by (cluster)` 会出现空标签序列。
+      # 用 metricRelabelings 而非 relabelings：honorLabels=true 下 metric 级 relabel 在抓取后执行，
+      # 不受 target/metric 标签合并规则影响。
+      metricRelabelings:
+        - action: replace
+          targetLabel: cluster
+          replacement: homelab
+
+  ui:
+    enabled: true

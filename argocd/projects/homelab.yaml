@@ -23,6 +23,8 @@ spec:
     - https://slok.github.io/sloth
     # CloudNativePG operator（ZITADEL DB 从冻结 bitnami 迁 CNPG，evolution-roadmap Phase C）
     - https://cloudnative-pg.github.io/charts
+    # OpenCost 双集群成本归因（homelab + oracle-k3s 各一份）
+    - https://opencost.github.io/opencost-helm-chart
 
   destinations:
     - server: https://kubernetes.default.svc

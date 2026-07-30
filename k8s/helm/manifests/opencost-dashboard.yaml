@@ -1,0 +1,1032 @@
+# Grafana Dashboard: OpenCost 双集群成本归因
+# 展示 homelab 与 oracle-k3s 的节点/命名空间成本与闲置率
+# 数据源: Prometheus ← OpenCost :9003
+#   - homelab   : ServiceMonitor（cluster 标签由 metricRelabelings 补，见 values/opencost.yaml）
+#   - oracle-k3s: otel-collector prometheus/opencost receiver → remote-write
+# 刻意只用 OpenCost 自身导出的指标（node_*_hourly_cost / container_*_allocation），
+# 不掺 kube-state-metrics —— homelab 的 KSM 指标没有 cluster 标签，掺进来会算错。
+# Auto-loaded via kube-prometheus-stack grafana-sc-dashboard sidecar
+# 见 docs/plans/observability/2026-07-30-opencost-multicluster.md
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opencost-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Platform"
+data:
+  opencost-overview.json: |-
+    {
+      "annotations": {
+        "list": []
+      },
+      "description": "双集群 Kubernetes 成本归因：homelab（裸金属实测功耗+摊销）与 oracle-k3s（OCI Ampere A1 牌价影子定价）。数据源 OpenCost，见 docs/plans/observability/2026-07-30-opencost-multicluster.md",
+      "editable": true,
+      "graphTooltip": 1,
+      "links": [
+        {
+          "asDropdown": true,
+          "icon": "external link",
+          "keepTime": true,
+          "tags": [
+            "curated"
+          ],
+          "title": "📊 其他自建面板",
+          "type": "dashboards"
+        },
+        {
+          "asDropdown": true,
+          "icon": "external link",
+          "keepTime": true,
+          "tags": [
+            "kubernetes-mixin"
+          ],
+          "title": "☸️ K8s 资源详情 (下钻)",
+          "type": "dashboards"
+        }
+      ],
+      "panels": [
+        {
+          "type": "row",
+          "title": "💰 成本总览（月度）",
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 0
+          },
+          "id": 100,
+          "collapsed": false,
+          "panels": []
+        },
+        {
+          "type": "stat",
+          "title": "全部集群 · 月度成本",
+          "description": "节点小时成本 × 730h。homelab 为实测功耗+硬件摊销，oracle-k3s 为 OCI 牌价影子定价。",
+          "id": 101,
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 0,
+            "y": 1
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(node_total_hourly_cost{cluster=~\"$cluster\"}) * 730",
+              "refId": "A",
+              "format": "time_series",
+              "instant": true,
+              "range": false,
+              "legendFormat": ""
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "unit": "currencyUSD",
+              "decimals": 2,
+              "custom": {},
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "type": "stat",
+          "title": "homelab · 月度成本",
+          "description": "裸金属实际支出（电费 + 硬件摊销）。",
+          "id": 102,
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 6,
+            "y": 1
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(node_total_hourly_cost{cluster=\"homelab\"}) * 730",
+              "refId": "A",
+              "format": "time_series",
+              "instant": true,
+              "range": false,
+              "legendFormat": ""
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "unit": "currencyUSD",
+              "decimals": 2,
+              "custom": {},
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "type": "stat",
+          "title": "oracle-k3s · 月度成本（影子）",
+          "description": "Always Free 实际支出为 $0；此处按 OCI Ampere A1 牌价计价，用于衡量免费额度的价值与暴露面。",
+          "id": 103,
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 12,
+            "y": 1
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(node_total_hourly_cost{cluster=\"oracle-k3s\"}) * 730",
+              "refId": "A",
+              "format": "time_series",
+              "instant": true,
+              "range": false,
+              "legendFormat": ""
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "unit": "currencyUSD",
+              "decimals": 2,
+              "custom": {},
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "type": "stat",
+          "title": "闲置成本占比",
+          "description": "1 - 已分配成本/节点总成本。单节点集群该值天然偏高（闲置容量确实在烧电/占额度），属真实情况而非归因失败。",
+          "id": 104,
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 18,
+            "y": 1
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "1 - ((sum (container_cpu_allocation{cluster=~\"$cluster\"} * on(cluster,node) group_left() node_cpu_hourly_cost{cluster=~\"$cluster\"}) + sum (container_memory_allocation_bytes{cluster=~\"$cluster\"} / 1073741824 * on(cluster,node) group_left() node_ram_hourly_cost{cluster=~\"$cluster\"})) / sum(node_total_hourly_cost{cluster=~\"$cluster\"}))",
+              "refId": "A",
+              "format": "time_series",
+              "instant": true,
+              "range": false,
+              "legendFormat": ""
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "unit": "percentunit",
+              "decimals": 1,
+              "custom": {},
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 0.6
+                  },
+                  {
+                    "color": "orange",
+                    "value": 0.8
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "type": "row",
+          "title": "🖥️ 节点成本",
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 6
+          },
+          "id": 200,
+          "collapsed": false,
+          "panels": []
+        },
+        {
+          "type": "timeseries",
+          "title": "各节点小时成本",
+          "description": "node_total_hourly_cost = CPU + 内存 + GPU 分项之和。",
+          "id": 201,
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 7
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (cluster, node) (node_total_hourly_cost{cluster=~\"$cluster\"})",
+              "refId": "A",
+              "format": "time_series",
+              "instant": false,
+              "range": true,
+              "legendFormat": "{{cluster}} / {{node}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "unit": "currencyUSD",
+              "decimals": 2,
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 12,
+                "showPoints": "never",
+                "spanNulls": true,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "axisLabel": "",
+                "gradientMode": "opacity"
+              },
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "showLegend": true,
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "已分配成本构成（CPU vs 内存，月度）",
+          "description": "把已分配成本拆成 CPU / 内存两部分。两者之和即「已分配」，与节点总成本的差为闲置。",
+          "id": 202,
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 7
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (cluster) (container_cpu_allocation{cluster=~\"$cluster\"} * on(cluster,node) group_left() node_cpu_hourly_cost{cluster=~\"$cluster\"}) * 730",
+              "refId": "A",
+              "format": "time_series",
+              "instant": false,
+              "range": true,
+              "legendFormat": "{{cluster}} · CPU"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (cluster) (container_memory_allocation_bytes{cluster=~\"$cluster\"} / 1073741824 * on(cluster,node) group_left() node_ram_hourly_cost{cluster=~\"$cluster\"}) * 730",
+              "refId": "B",
+              "format": "time_series",
+              "instant": false,
+              "range": true,
+              "legendFormat": "{{cluster}} · 内存"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "unit": "currencyUSD",
+              "decimals": 2,
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 40,
+                "showPoints": "never",
+                "spanNulls": true,
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                },
+                "axisLabel": "",
+                "gradientMode": "opacity"
+              },
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "showLegend": true,
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "type": "table",
+          "title": "节点成本与单价明细（定价校准用）",
+          "id": 203,
+          "gridPos": {
+            "h": 7,
+            "w": 24,
+            "x": 0,
+            "y": 15
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "arch 列区分 homelab(amd64) 与 oracle-k3s(arm64)。单价列应与 values/opencost*.yaml 的 customPricing 一致；不一致说明 ConfigMap 未被 OpenCost 读到。",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "node_total_hourly_cost{cluster=~\"$cluster\"}",
+              "refId": "A",
+              "format": "table",
+              "instant": true,
+              "range": false
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "node_cpu_hourly_cost{cluster=~\"$cluster\"}",
+              "refId": "B",
+              "format": "table",
+              "instant": true,
+              "range": false
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "node_ram_hourly_cost{cluster=~\"$cluster\"}",
+              "refId": "C",
+              "format": "table",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "unit": "currencyUSD",
+              "decimals": 6,
+              "custom": {},
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "transformations": [
+            {
+              "id": "merge",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "__name__": true,
+                  "job": true,
+                  "endpoint": true,
+                  "service": true,
+                  "container": true,
+                  "namespace": true,
+                  "pod": true,
+                  "uid": true,
+                  "provider_id": true,
+                  "region": true,
+                  "instance": true
+                },
+                "indexByName": {
+                  "cluster": 0,
+                  "node": 1,
+                  "arch": 2,
+                  "instance_type": 3,
+                  "Value #A": 4,
+                  "Value #B": 5,
+                  "Value #C": 6
+                },
+                "renameByName": {
+                  "cluster": "集群",
+                  "node": "节点",
+                  "arch": "架构",
+                  "instance_type": "机型",
+                  "Value #A": "节点 $/hr",
+                  "Value #B": "CPU $/vCPU-hr",
+                  "Value #C": "内存 $/GiB-hr"
+                }
+              }
+            },
+            {
+              "id": "sortBy",
+              "options": {
+                "fields": {},
+                "sort": [
+                  {
+                    "field": "节点 $/hr",
+                    "desc": true
+                  }
+                ]
+              }
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": true,
+              "reducer": [
+                "sum"
+              ],
+              "fields": [
+                "节点 $/hr"
+              ]
+            }
+          }
+        },
+        {
+          "type": "row",
+          "title": "📦 命名空间归因",
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 22
+          },
+          "id": 300,
+          "collapsed": false,
+          "panels": []
+        },
+        {
+          "type": "timeseries",
+          "title": "各命名空间月度成本（CPU + 内存分配）",
+          "description": "按容器 requests（container_*_allocation）分摊节点单价。未被任何容器分配的部分体现在「闲置成本占比」，不出现在此处。",
+          "id": 301,
+          "gridPos": {
+            "h": 9,
+            "w": 24,
+            "x": 0,
+            "y": 23
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "(sum by (cluster, namespace) (container_cpu_allocation{cluster=~\"$cluster\"} * on(cluster,node) group_left() node_cpu_hourly_cost{cluster=~\"$cluster\"}) + sum by (cluster, namespace) (container_memory_allocation_bytes{cluster=~\"$cluster\"} / 1073741824 * on(cluster,node) group_left() node_ram_hourly_cost{cluster=~\"$cluster\"})) * 730",
+              "refId": "A",
+              "format": "time_series",
+              "instant": false,
+              "range": true,
+              "legendFormat": "{{cluster}} / {{namespace}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "unit": "currencyUSD",
+              "decimals": 2,
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 40,
+                "showPoints": "never",
+                "spanNulls": true,
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                },
+                "axisLabel": "",
+                "gradientMode": "opacity"
+              },
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "showLegend": true,
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "type": "table",
+          "title": "命名空间成本排行（月度 Top 20）",
+          "id": 302,
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 32
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "topk(20, (sum by (cluster, namespace) (container_cpu_allocation{cluster=~\"$cluster\"} * on(cluster,node) group_left() node_cpu_hourly_cost{cluster=~\"$cluster\"}) + sum by (cluster, namespace) (container_memory_allocation_bytes{cluster=~\"$cluster\"} / 1073741824 * on(cluster,node) group_left() node_ram_hourly_cost{cluster=~\"$cluster\"})) * 730)",
+              "refId": "A",
+              "format": "table",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "unit": "currencyUSD",
+              "decimals": 2,
+              "custom": {},
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "renameByName": {
+                  "cluster": "集群",
+                  "namespace": "命名空间",
+                  "Value": "月度成本"
+                }
+              }
+            },
+            {
+              "id": "sortBy",
+              "options": {
+                "fields": {},
+                "sort": [
+                  {
+                    "field": "月度成本",
+                    "desc": true
+                  }
+                ]
+              }
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": true,
+              "reducer": [
+                "sum"
+              ],
+              "fields": [
+                "月度成本"
+              ]
+            }
+          }
+        },
+        {
+          "type": "row",
+          "title": "📈 分配率 / 闲置",
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 42
+          },
+          "id": 400,
+          "collapsed": false,
+          "panels": []
+        },
+        {
+          "type": "timeseries",
+          "title": "节点总成本 vs 已分配成本（月度）",
+          "description": "两线之间的缺口即闲置成本。",
+          "id": 401,
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 43
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (cluster) (node_total_hourly_cost{cluster=~\"$cluster\"}) * 730",
+              "refId": "A",
+              "format": "time_series",
+              "instant": false,
+              "range": true,
+              "legendFormat": "{{cluster}} · 节点总成本"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "(sum by (cluster) (container_cpu_allocation{cluster=~\"$cluster\"} * on(cluster,node) group_left() node_cpu_hourly_cost{cluster=~\"$cluster\"}) + sum by (cluster) (container_memory_allocation_bytes{cluster=~\"$cluster\"} / 1073741824 * on(cluster,node) group_left() node_ram_hourly_cost{cluster=~\"$cluster\"})) * 730",
+              "refId": "B",
+              "format": "time_series",
+              "instant": false,
+              "range": true,
+              "legendFormat": "{{cluster}} · 已分配"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "unit": "currencyUSD",
+              "decimals": 2,
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 12,
+                "showPoints": "never",
+                "spanNulls": true,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "axisLabel": "",
+                "gradientMode": "opacity"
+              },
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "showLegend": true,
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "闲置成本占比趋势",
+          "description": "持续接近 1 说明集群几乎空转；持续下降说明装箱率在改善。",
+          "id": 402,
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 43
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "1 - ((sum by (cluster) (container_cpu_allocation{cluster=~\"$cluster\"} * on(cluster,node) group_left() node_cpu_hourly_cost{cluster=~\"$cluster\"}) + sum by (cluster) (container_memory_allocation_bytes{cluster=~\"$cluster\"} / 1073741824 * on(cluster,node) group_left() node_ram_hourly_cost{cluster=~\"$cluster\"})) / sum by (cluster) (node_total_hourly_cost{cluster=~\"$cluster\"}))",
+              "refId": "A",
+              "format": "time_series",
+              "instant": false,
+              "range": true,
+              "legendFormat": "{{cluster}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "unit": "percentunit",
+              "decimals": 2,
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 12,
+                "showPoints": "never",
+                "spanNulls": true,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "axisLabel": "",
+                "gradientMode": "opacity"
+              },
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "showLegend": true,
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        }
+      ],
+      "refresh": "5m",
+      "schemaVersion": 40,
+      "tags": [
+        "opencost",
+        "cost",
+        "multi-cluster",
+        "prometheus",
+        "metrics",
+        "curated"
+      ],
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "label": "Data Source",
+            "hide": 2,
+            "query": "prometheus",
+            "refresh": 1,
+            "regex": "",
+            "current": {
+              "selected": true,
+              "text": "Prometheus",
+              "value": "prometheus"
+            },
+            "options": [],
+            "skipUrlSync": false
+          },
+          {
+            "name": "cluster",
+            "type": "query",
+            "label": "Cluster",
+            "hide": 0,
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "refresh": 2,
+            "sort": 1,
+            "query": {
+              "query": "label_values(node_total_hourly_cost, cluster)",
+              "refId": "StandardVariableQuery"
+            },
+            "current": {
+              "selected": true,
+              "text": [
+                "All"
+              ],
+              "value": [
+                "$__all"
+              ]
+            },
+            "includeAll": true,
+            "multi": true,
+            "options": [],
+            "skipUrlSync": false
+          }
+        ]
+      },
+      "time": {
+        "from": "now-24h",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "Cost / Multi-Cluster / OpenCost Overview",
+      "uid": "opencost-multicluster-overview",
+      "weekStart": ""
+    }
