@@ -100,10 +100,13 @@ spec:
                 # 该端口暴露的是完整 Prometheus HTTP API，query 可用）
                 - --prometheus-url=http://100.94.186.7:31090
                 - --prometheus-label=cluster
-                - -l=oracle-k3s
+                # 短选项不支持 `-l=value` 语法（会被当成值 "=oracle-k3s"），必须拆成两项
+                - -l
+                - oracle-k3s
                 - --history-duration=168
                 - --max-workers=3
-                - --width=180
+                # 输出是附件不是终端，放宽避免 namespace/容器名被截断成 "personal…"
+                - --width=300
                 - --formatter=table
                 - --fileoutput=/out/krr.txt
                 - --quiet

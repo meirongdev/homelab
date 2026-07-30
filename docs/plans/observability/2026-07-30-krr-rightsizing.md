@@ -1,7 +1,7 @@
 # KRR 双集群资源右尺寸周报
 
 **日期：** 2026-07-30
-**状态：** 🚧 待部署
+**状态：** ✅ 已部署（2026-07-30 双集群冒烟通过；oracle 推荐值需等约 7 天历史）
 **范围：** homelab + oracle-k3s，`robustadev/krr:v1.29.0`
 **结论：** 每集群一个 CronJob（周一 09:00 / 09:15），结果以文本附件推 Telegram；
 顺带给 oracle 补上 cAdvisor 采集（keep 正则只留 KRR 需要的 2 个指标）。
@@ -108,6 +108,23 @@ notify 走 Telegram `sendDocument`，把表格作为 `.txt` 附件发到「🚨 
 
 **oracle 的推荐值要等约 7 天才有意义** —— cAdvisor 从步骤 2 起才开始积累历史。
 在那之前 KRR 能跑通、但样本不足，别照着改 requests。
+
+## 部署实测（2026-07-30）
+
+| 验证 | 结果 |
+|---|---|
+| oracle cAdvisor 入库 | ✅ `container_cpu_usage_seconds_total{cluster="oracle-k3s"}` 51 条（homelab 144 条）；`container=""` 汇总已丢弃 0 条 |
+| homelab KRR 冒烟 | ✅ 53 个工作负载出推荐，`using 4 metrics` |
+| oracle KRR 冒烟 | ✅ 经 Tailscale 连中枢成功，44 个工作负载 |
+
+### 部署时踩到的两件事
+
+1. **`-l=homelab` 会被解析成值 `=homelab`。** 短选项不支持 `=` 语法，KRR 直接
+   `CRITICAL Label =homelab does not exist` 退出。必须拆成两个 args 项（`- -l` / `- homelab`）。
+   长选项（`--prometheus-label=cluster`）用 `=` 没问题。
+   —— 冒烟测试抓到的；纯 YAML/schema 校验发现不了。
+2. **`--width=180` 会把列截断**成 `personal…` / `kyverno-…`。输出是附件不是终端，
+   放宽到 300 后正常。
 
 ## 风险与注意事项
 

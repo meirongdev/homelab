@@ -81,10 +81,13 @@ spec:
                 - --prometheus-url=http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
                 # --prometheus-label 是标签「键」，-l 是标签「值」，别搞反
                 - --prometheus-label=cluster
-                - -l=homelab
+                # 短选项不支持 `-l=value` 语法（会被当成值 "=homelab"），必须拆成两项
+                - -l
+                - homelab
                 - --history-duration=168
                 - --max-workers=3
-                - --width=180
+                # 输出是附件不是终端，放宽避免 namespace/容器名被截断成 "personal…"
+                - --width=300
                 - --formatter=table
                 - --fileoutput=/out/krr.txt
                 - --quiet
