@@ -84,13 +84,30 @@ OTel resource attributes are converted to Loki stream labels (dots replaced with
 
 **Mechanism:** OTel Collector scrapes local exporters and pushes via `prometheusremotewrite` to homelab Prometheus over Tailscale. No prometheus-agent needed.
 
-| OTel Receiver | Target | Interval |
-|---------------|--------|----------|
-| `prometheus/node-exporter` | `10.0.0.26:9100` (hostNetwork) | 15s |
-| `prometheus/kube-state-metrics` | `kube-state-metrics.monitoring.svc:8080` | 30s |
-| `prometheus/cloudflared` | `cloudflared-metrics.cloudflare.svc:2000` | 30s |
+| OTel Receiver | Target | Interval | Notes |
+|---------------|--------|----------|-------|
+| `prometheus/node-exporter` | `10.0.0.26:9100` (hostNetwork) | 15s | |
+| `prometheus/kube-state-metrics` | `kube-state-metrics.monitoring.svc:8080` | 30s | |
+| `prometheus/cloudflared` | `cloudflared-metrics.cloudflare.svc:2000` | 30s | |
+| `prometheus/external-secrets` | `external-secrets-metrics.external-secrets.svc:8080` | 30s | |
+| `prometheus/external-dns` | `external-dns.external-dns.svc:7979` | 30s | |
+| `prometheus/cilium-envoy` | `cilium-envoy.kube-system.svc:9964` | 30s | keep 正则只留 RED SLI 指标 |
+| `prometheus/opencost` | `opencost.opencost.svc:9003` | 60s | `honor_labels: true`；成本指标 |
+| `prometheus/cadvisor` | `10.0.0.26:10250/metrics/cadvisor` | 60s | https + SA token；见下 |
 
 All metrics pass through `resource` processor (adds `cluster: oracle-k3s`) → `batch` → `prometheusremotewrite` exporter → `http://100.94.186.7:31090/api/v1/write`
+
+**`prometheus/cadvisor` 的特殊之处**（2026-07-30 为 KRR 新增）：
+
+- 直连 kubelet，ClusterRole 必须含 **`nodes/metrics`** —— 只给 `nodes` 会 403
+  （kubelet 走自己的 SubjectAccessReview，`kubectl auth can-i` 在此会误报 yes）
+- `tls_config.insecure_skip_verify: true` —— k3s kubelet 服务证书自签且 SAN 不含节点 IP
+- `metric_relabel_configs` 只 keep
+  `container_(cpu_usage_seconds_total|memory_working_set_bytes)`，
+  并 drop `container=""` 的 Pod 级汇总。端点原有 **9223** 条 series，落库仅 ~51 条/指标
+- 唯一消费者是 KRR，**不足以**支撑 OpenCost 的 Prometheus 数据源
+  （后者还需 `container_fs_*` / `container_network_*`），
+  详见 [cost-and-rightsizing.md](cost-and-rightsizing.md)
 
 ## Traces Pipeline
 
@@ -255,3 +272,38 @@ Oracle-k3s metrics are pushed (not scraped). Check the OTel Collector:
 **Cause:** Prometheus `externalLabels` only applies to remote_write/federation, not local queries.
 
 **Fix:** Ensure `prometheusSpec.scrapeClasses` has a default class with `relabelings` that sets `cluster: homelab`. See `k8s/helm/values/kube-prometheus-stack.yaml`.
+
+> 该默认类是 `default: true`，**对所有 ServiceMonitor 自动生效**，新增组件无需在自己的
+> ServiceMonitor 上重复配 `relabelings` / `metricRelabelings`。
+> 验证方式：chart 自带的 kube-state-metrics ServiceMonitor 没有任何 relabeling，
+> 其指标依然带 `cluster="homelab"`。
+> （2026-07-31：OpenCost 上线时曾误以为需要 per-ServiceMonitor 补标签，加了冗余配置后移除。）
+>
+> 例外：`additionalScrapeConfigs` 是原样注入的，**scrapeClasses 不作用于它们**，
+> 必须在每个 target 上显式写 `labels: {cluster: …}`（见 dgx-spark / macbook / storage-106 各 job）。
+
+### otel-collector 配置改了不生效
+
+**症状：** 改了 `cloud/oracle/manifests/monitoring/otel-collector.yaml` 的 ConfigMap 并推送，
+ArgoCD 显示 **Synced / Healthy**，但新的 receiver / pipeline 没有任何数据。
+
+**原因：** DaemonSet 的 pod template 没有 config checksum 注解，ConfigMap 内容变化
+**不会**触发滚动重启；Pod 继续挂载旧配置运行。ArgoCD 只比对对象本身，看不出这层。
+**这是静默失败** —— 2026-07 引入 OpenCost 和 KRR 时各踩了一次。
+
+**Fix:**
+
+```bash
+kubectl --context oracle-k3s rollout restart daemonset/otel-collector -n monitoring
+kubectl --context oracle-k3s rollout status  daemonset/otel-collector -n monitoring
+```
+
+**确认 Pod 确实换了**（不是看 ArgoCD）：
+
+```bash
+kubectl --context oracle-k3s get pods -n monitoring -l app=otel-collector
+# AGE 应当是秒级；若还是几天前的 Pod，说明没重启
+```
+
+**根治建议（未做）：** 给 DaemonSet pod template 加 config checksum 注解，
+让 ConfigMap 变更自动触发滚动。

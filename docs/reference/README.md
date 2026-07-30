@@ -19,14 +19,15 @@
 
 ## Resource Planning
 
-1. [evolution-roadmap-2026-07-07.md](evolution-roadmap-2026-07-07.md) — 技术债盘点 + 工具链演进路线（含 Crossplane 不引入结论）
-2. [resource-optimization-2026-07-06.md](resource-optimization-2026-07-06.md) — 资源分配优化明细
-3. [architecture-optimization-2026-07-04.md](architecture-optimization-2026-07-04.md) — 物理层架构与机器角色建议
-4. [simplification-recommendations-2026-03.md](simplification-recommendations-2026-03.md) — Oracle Cilium 迁移后简化建议
+1. [cost-and-rightsizing.md](cost-and-rightsizing.md) — OpenCost 成本归因 + KRR 资源右尺寸（定价模型、指标语义、运维操作）
+2. [evolution-roadmap-2026-07-07.md](evolution-roadmap-2026-07-07.md) — 技术债盘点 + 工具链演进路线（含 Crossplane 不引入结论）
+3. [resource-optimization-2026-07-06.md](resource-optimization-2026-07-06.md) — 资源分配优化明细
+4. [architecture-optimization-2026-07-04.md](architecture-optimization-2026-07-04.md) — 物理层架构与机器角色建议
+5. [simplification-recommendations-2026-03.md](simplification-recommendations-2026-03.md) — Oracle Cilium 迁移后简化建议
 
 
 ## GitOps
 
-1. [argocd-app-patterns.md](argocd-app-patterns.md) — ArgoCD 管理模式分析、可选 pattern 对比与取舍建议
+1. [argocd-app-patterns.md](argocd-app-patterns.md) — ArgoCD 管理模式分析、可选 pattern 对比与取舍建议（含新增 Application 的 3 个坑）
 
 > 所有文档中的命令必须注明执行上下文 (cluster/path)。

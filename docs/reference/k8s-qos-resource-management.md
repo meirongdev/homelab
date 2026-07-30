@@ -87,8 +87,25 @@ rate(container_cpu_cfs_throttled_seconds_total[5m])
 
 ---
 
+## requests/limits 该填多少？
+
+不靠拍脑袋 —— **KRR 每周一出推荐报告**推到 Telegram（CPU 取 p95，内存取窗口内 max + 15%）。
+双集群均已部署，见 [cost-and-rightsizing.md](cost-and-rightsizing.md#krr)。
+
+采纳流程：KRR **只读不改**（`krr-enforcer` 刻意未部署，会与 ArgoCD selfHeal 死循环），
+看完报告手工改 git 里的 `resources`。
+
+两个读数注意事项：
+
+- 标 `(No data)` / `(Not enough data)` 的是当前没有运行 Pod 的 Job/CronJob，忽略即可
+- 内存推荐取 **7 天**窗口内的 max（对齐 Prometheus retention），跨周尖峰
+  （如每周备份 CronJob）可能落在窗口外，这类工作负载要自行留余量
+
+---
+
 ## 相关文档
 
+- [cost-and-rightsizing.md](cost-and-rightsizing.md) — OpenCost 成本归因 + KRR 右尺寸
 - [resource-optimization-2026-07-06.md](resource-optimization-2026-07-06.md) — 最新资源优化明细
 - [observability-multicluster.md](observability-multicluster.md) — 多集群监控架构
 - [Kubernetes QoS 官方文档](https://kubernetes.io/docs/tasks/configure-pod-container/quality-service-pod/)
