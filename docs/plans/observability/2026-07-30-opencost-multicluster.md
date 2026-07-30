@@ -1,7 +1,7 @@
 # OpenCost 双集群成本可观测
 
 **日期：** 2026-07-30
-**状态：** 🚧 文件已就位，待部署（未 commit / 未 push；AppProject 需先手工 apply，见「实施」）
+**状态：** ✅ 已实施（2026-07-30 双集群上线并验证；定价仍为占位值，待步骤 2 校准）
 **范围：** homelab (amd64) + oracle-k3s (arm64)，chart `opencost-2.5.28`
 **结论：** 走 **collector 数据源**（不依赖 Prometheus 查询），两集群各跑一份 OpenCost，
 成本指标统一汇入 homelab Prometheus 按 `cluster` 聚合。
@@ -425,6 +425,31 @@ homelab 的 KSM 指标没有 `cluster` 标签（同「背景/问题」§2），�
 `prometheus/external-dns` 的同构复制，仅多 `honor_labels` / `scrape_timeout` 两个标准字段，
 风险低；如需可跑
 `docker run --rm -v <cfg>:/cfg/config.yaml otel/opentelemetry-collector-contrib:0.120.0 validate --config=/cfg/config.yaml`。
+
+## 上线实测（2026-07-30）
+
+两集群成本指标均已进中枢 Prometheus，`cluster` 标签两侧都正确：
+
+| | homelab | oracle-k3s |
+|---|---|---|
+| 月度成本 | $12.73（推导值 $12.6 ✅） | $54.84（推导值 $54.8 ✅） |
+| CPU / 内存单价 | 0.0018 / 0.00024 | 0.01 / 0.0015 |
+| 已归因容器数 | 56 | 50 |
+| 已分配成本（月） | $4.59 | $20.41 |
+| 闲置占比 | 64% | 63% |
+
+闲置约 2/3，与「风险与注意事项」里对单节点集群的预期一致。
+命名空间 Top：`oracle-k3s/rss-system` $7.33、`oracle-k3s/personal-services` $3.46、
+`oracle-k3s/kube-system` $3.09、`oracle-k3s/zitadel` $2.08、`homelab/monitoring` $1.44。
+
+### 部署时踩到的两件事
+
+1. **oracle 资源名带 `-oracle` 后缀** —— 见「坑 5」，已用 `fullnameOverride` 修掉（`72c0c8a`）。
+   pre-deploy 的 `helm template` 没复现，因为它只吃 values 文件，不模拟 ArgoCD 的 release 命名。
+2. **otel-collector 不会自动加载新 ConfigMap。** DaemonSet 的 pod template 没有 config
+   checksum 注解，改完 ConfigMap 后 ArgoCD 全程显示 Synced/Healthy，但采集器仍跑旧配置 ——
+   **静默失败**。本次靠 `kubectl rollout restart daemonset/otel-collector -n monitoring` 解决。
+   → 后续建议给 DaemonSet 加 config checksum 注解，避免每次改 otel 配置都要记得手工重启。
 
 ## 风险与注意事项
 
