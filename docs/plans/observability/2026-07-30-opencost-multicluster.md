@@ -18,18 +18,28 @@
    `container_memory_working_set_bytes`** —— 这两个是 OpenCost Prometheus 数据源的硬依赖
    （`modules/prometheus-source/pkg/prom/metricsquerier.go`）。
 
-2. **中枢 Prometheus 里两集群数据不对称。**
-   oracle 的数据经 remote-write 带 `cluster="oracle-k3s"`，而 homelab 自采指标**没有
-   `cluster` 标签** —— 即 `k8s/helm/values/kube-prometheus-stack.yaml:185` 那条注释
-   「externalLabels 仅在 remote_write/federation 时附加，本地查询不生效」。
+2. ~~**中枢 Prometheus 里两集群数据不对称。**~~ **（2026-07-31 更正：此论断错误）**
 
-   后果：OpenCost 的多集群方案（`CURRENT_CLUSTER_ID_FILTER_ENABLED` + `PROM_CLUSTER_ID_LABEL`）
-   在 homelab 侧会因查不到 `cluster="homelab"` 而返回空；若不开过滤，则会把 oracle 的 KSM
-   数据**重复计入 homelab 成本**。
+   > 原文称 homelab 自采指标没有 `cluster` 标签，据此推断 OpenCost 的
+   > `CURRENT_CLUSTER_ID_FILTER_ENABLED` 多集群方案在 homelab 侧会查空。
+   > **实际不成立**：`kube-prometheus-stack.yaml:187` 有 `scrapeClasses` 默认类
+   > （`default: true`），对所有 ServiceMonitor 统一打 `cluster=homelab`。
+   > 该文件 :185 的注释只针对 `externalLabels`，被我误读成整体结论。
+   >
+   > 反证：chart 自带的 kube-state-metrics ServiceMonitor 没有任何 relabeling，
+   > 其指标却带 `cluster="homelab"`（实测 216 条）。
+   >
+   > **对决策的影响：无。** collector 数据源的成立只依赖下面第 1 条（oracle 无 cAdvisor）
+   > 与 retention 差异；但据此在 opencost values 里加的 per-ServiceMonitor
+   > `metricRelabelings` 是冗余的，已于 2026-07-31 移除。
 
-补齐这两条的代价：给 oracle otel 加 cadvisor scrape job（高基数指标跨 Tailscale 灌进
-**5Gi / 7d** 的 TSDB），并给 homelab 的 kubelet / KSM / node-exporter 三个 ServiceMonitor
-加 relabeling（动正在跑的监控栈）。不划算。
+补齐第 1 条的代价：给 oracle otel 加 cadvisor scrape job，把高基数指标跨 Tailscale 灌进
+**5Gi / 7d** 的 TSDB。当时判断不划算。
+
+（后记：2026-07-30 晚为 KRR 还是加了 cadvisor job，但用 keep 正则只留 2 个指标、丢弃 97%，
+与这里设想的"全量 cadvisor"不是一回事，仍不足以支撑 OpenCost 的 Prometheus 数据源
+——后者还需要 `container_fs_*` / `container_network_*`。见
+[2026-07-30-krr-rightsizing.md](2026-07-30-krr-rightsizing.md)。）
 
 ## 方案
 
@@ -41,7 +51,6 @@ OpenCost 2.x 有独立的 `collector-source` 模块，直接读 kubelet stats/su
 | 问题 | Prometheus 数据源 | collector 数据源 |
 |------|------------------|-----------------|
 | oracle 无 cAdvisor | 需加 cadvisor scrape job → 高基数跨 Tailscale 灌 5Gi TSDB | 不需要，本地直采 kubelet |
-| homelab 缺 `cluster` 标签 | 需改 3 个 ServiceMonitor 的 relabeling | 无关，`CLUSTER_ID` 仅用于打标 |
 | 成本历史长度 | 受限于 Prometheus 7d | 自带 **15d** 日粒度 |
 | 故障域 | oracle 依赖 Tailscale + homelab 存活 | 各集群自治 |
 
@@ -50,12 +59,12 @@ OpenCost 2.x 有独立的 `collector-source` 模块，直接读 kubelet stats/su
 ### 架构
 
 ```
-homelab OpenCost ──(ServiceMonitor + metricRelabelings: cluster=homelab)──┐
-   ↑ 直采本地 kubelet                                                      │
-                                                                          ├─→ 中枢 Prometheus
-oracle OpenCost ──(otel prometheus/opencost receiver)────────────────────┘        │
-   ↑ 直采本地 kubelet          经 Tailscale remote-write，带 cluster=oracle-k3s     ↓
-                                                                            Grafana 按 cluster 聚合
+homelab OpenCost ──(ServiceMonitor；cluster 标签由 scrapeClasses 默认类补)──┐
+   ↑ 直采本地 kubelet                                                       │
+                                                                           ├─→ 中枢 Prometheus
+oracle OpenCost ──(otel prometheus/opencost receiver)─────────────────────┘        │
+   ↑ 直采本地 kubelet          经 Tailscale remote-write，带 cluster=oracle-k3s      ↓
+                                                                             Grafana 按 cluster 聚合
 ```
 
 两侧 OpenCost 仍在 `:9003` 导出 `node_total_hourly_cost`、`container_cpu_allocation`、
@@ -79,12 +88,14 @@ oracle OpenCost ──(otel prometheus/opencost receiver)───────�
 `{instance, node, instance_type, region, provider_id, arch, uid}`，
 `container_cpu_allocation` 是 `{namespace, pod, container, instance, node, uid}` —— **都没有 `cluster`**。
 
-oracle 侧靠 otel 的 target label + remote-write external_labels 会补上；
-**homelab 侧不会**，导致 `sum by (cluster)` 出现空标签序列。
+标签由采集侧补：oracle 靠 otel 的 target label + remote-write external_labels；
+homelab 靠 `prometheusSpec.scrapeClasses` 的默认类（`default: true`，全局对 ServiceMonitor
+打 `cluster=homelab`）。
 
-→ homelab ServiceMonitor 必须加 `metricRelabelings` 硬写 `cluster=homelab`。
-用 `metricRelabelings` 而非 `relabelings`：chart 默认 `honorLabels: true`，
-metric 级 relabel 在抓取后执行，不受 honor_labels 合并规则影响，更稳。
+> ⚠️ **2026-07-31 更正**：本条原写作「homelab 侧必须在 ServiceMonitor 上加
+> `metricRelabelings`，否则 `sum by (cluster)` 会出现空标签序列」—— **错的**，
+> scrapeClasses 早已覆盖。那段冗余配置已移除，详见「背景/问题」§2 的更正框。
+
 
 **坑 2：MCP server 默认开启。**
 渲染结果含 `MCP_SERVER_ENABLED=true` / `MCP_HTTP_PORT=8081`，会额外暴露一个

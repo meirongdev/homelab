@@ -4,11 +4,11 @@
 #
 # 数据源选型：collector（**不查 Prometheus**）。理由见
 # docs/plans/observability/2026-07-30-opencost-multicluster.md
-#   - oracle 侧 otel 未采 cAdvisor，中枢 Prometheus 无 container_cpu_usage_seconds_total
-#   - homelab 自采指标无 cluster 标签（见 kube-prometheus-stack.yaml:185），
-#     OpenCost 的 CURRENT_CLUSTER_ID_FILTER_ENABLED 方案在本环境两侧都不成立
+#   - oracle 侧 otel 未采 OpenCost 需要的 cAdvisor 指标（后来为 KRR 加的 cadvisor job
+#     只 keep 了 2 个指标，不含 container_fs_* / container_network_*），
+#     中枢 Prometheus 无法支撑 oracle 的 Prometheus 数据源
 #   - collector 直读 kubelet stats/summary（经 apiserver proxy，chart 已含 nodes/proxy RBAC），
-#     自带 15d 日粒度，不给 5Gi/7d 的 TSDB 加压
+#     自带 15d 日粒度，不给 5Gi/7d 的 TSDB 加压，且 oracle 不必依赖 homelab 存活
 #
 # 成本指标仍从 :9003 导出 → ServiceMonitor → 中枢 Prometheus → Grafana 按 cluster 聚合。
 
@@ -90,16 +90,10 @@ opencost:
       additionalLabels:
         # Prometheus serviceMonitorSelector = {release: kube-prometheus-stack}，不加则不被发现
         release: kube-prometheus-stack
-      # ⚠️ OpenCost 导出的成本指标**自身不带 cluster 标签**
-      # （node_total_hourly_cost 的 label 集为 instance/node/instance_type/region/provider_id/arch/uid）。
-      # oracle 侧由 otel target label 补上；homelab 侧必须在此补，否则
-      # `sum by (cluster)` 会出现空标签序列。
-      # 用 metricRelabelings 而非 relabelings：honorLabels=true 下 metric 级 relabel 在抓取后执行，
-      # 不受 target/metric 标签合并规则影响。
-      metricRelabelings:
-        - action: replace
-          targetLabel: cluster
-          replacement: homelab
+      # cluster 标签无需在此设置：prometheusSpec.scrapeClasses 有 default:true 的类，
+      # 对所有 ServiceMonitor 统一打 cluster=homelab（见 reference/observability-multicluster.md）。
+      # OpenCost 导出的指标自身确实不带 cluster 标签，但 oracle 侧由 otel target label 补、
+      # homelab 侧由 scrapeClasses 补，两边都不需要 per-ServiceMonitor 配置。
 
   ui:
     enabled: true

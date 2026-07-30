@@ -45,6 +45,49 @@ root (Application)
 
 一个 ArgoCD 实例管两个集群 —— `AppProject.destinations` 声明 `homelab` 和 `oracle-k3s` 端点（Tailscale），`Application.spec.destination.server` 选目标。
 
+## 新增 Application 的三个坑
+
+2026-07 引入 OpenCost / KRR 时逐一踩到，都会导致「push 了但不生效」。
+
+### 1. `AppProject.sourceRepos` 是白名单，且**不由 GitOps 托管**
+
+新 chart 仓库不加进 `argocd/projects/homelab.yaml` 的 `sourceRepos`，Application 会拒绝同步：
+
+```
+application repo https://xxx.github.io/chart is not permitted in project 'homelab'
+```
+
+更麻烦的是 **AppProject 不在 root App 的托管路径下**（root App 的 path 是
+`argocd/applications/`，AppProject 由 `just deploy-argocd` 第 3 步注册）——
+**`git push` 不会让它生效**，必须手工 apply：
+
+```bash
+kubectl --context k3s-homelab apply -f argocd/projects/homelab.yaml
+```
+
+（`just deploy-argocd` 也行，但会连带 `helm upgrade` 整个 ArgoCD，通常没必要。）
+
+### 2. Application 名 = Helm release 名 → 资源名会带后缀
+
+同一个 chart 部署到两个集群时，两个 Application 同处 `argocd` ns 不能重名，
+于是通常叫 `foo` / `foo-oracle`。**ArgoCD 用 Application 名当 Helm release 名**，
+所以 oracle 侧渲染出的 Service 会变成 `foo-oracle` —— 任何写死
+`foo.<ns>.svc.cluster.local` 的地方（otel 抓取目标、runbook、跨集群引用）都会失配。
+
+修法：在该集群的 values 顶层加
+
+```yaml
+fullnameOverride: foo
+```
+
+> 本地 `helm template -f values.yaml` **复现不出**这个问题（它不模拟 ArgoCD 的 release
+> 命名），只能在同步后查实际对象。改名会触发 ArgoCD 删旧建新。
+
+### 3. `directory.include` 是显式清单，新文件不会被自动捡起
+
+`monitoring-dashboards.yaml` 这类用 `directory.include: "{a.yaml,b.yaml,…}"` 的 App，
+往 `k8s/helm/manifests/` 放新文件后**必须同步把文件名加进 glob**，否则文件静静躺着不生效。
+
 ## Alternative Patterns
 
 ### Pattern A: ApplicationSet（推荐优先考虑）
