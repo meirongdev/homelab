@@ -1,7 +1,7 @@
 # Homelab Architecture
 
 > 单页架构总览，双集群 homelab（homelab + oracle-k3s）。
-> Last updated: 2026-07-06
+> Last updated: 2026-07-31
 
 ## Network Topology
 
@@ -20,7 +20,7 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
          ┌──────────▼───────────┐
          │  storage-106 (NAS)   │
          │  ZFS raidz1 + sanoid │
-         │  NFS + restic 仓库   │
+         │  ZFS + restic 仓库   │
          │  TS: 100.110.27.111  │
          └──────────────────────┘
 ```
@@ -31,7 +31,7 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 |------|---------|------------|
 | 硬件 | Ryzen 5600H 笔记本, 16GB 物理（OS 实际可见 13.5GB，~2GB 被核显 UMA 显存占用；实测见 [architecture-optimization-2026-07-04.md §4](reference/architecture-optimization-2026-07-04.md)） | Oracle Cloud Free Tier (ARM, 24GB) |
 | 角色 | 主力集群 (observability/vault/calibre) | 轻量服务 (homepage/it-tools/uptime) |
-| 存储 | NFS (ZFS raidz1) + local-path | local-path only |
+| 存储 | local-path (NFS retired 2026-07-11; 106 = cold backup target) | local-path only |
 | 备份 | restic CronJob → 106 sftp | restic CronJob → 106 sftp (via TS) |
 | 安全 | Tetragon + Kyverno + Trivy | Falco (oracle 无 Kyverno/Trivy) |
 | GitOps | ArgoCD hub (homelab 本地) | ArgoCD spoke (经 TS 纳管) |
@@ -69,6 +69,6 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 
 ## Current Active Work
 
-- **主线**: 存储本地化迁移 + 备份体系重建 → `plans/storage/2026-07-06-*.md`
-- **下一步**: 离站备份, dead-man's switch, zpool/SMART 告警
+- **主线**: 存储本地化迁移 + 备份体系重建 ✅（2026-07-11 完成）
+- **下一步**: 离站备份, Terraform state → R2, DGX Spark 入编
 - **完整路线图**: `plans/ROADMAP.md`
