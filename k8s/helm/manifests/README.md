@@ -13,7 +13,7 @@
 | `bifrost/` | `bifrost` | `bifrost` | LLM 网关 + oauth2-proxy（PVC 带 `Prune=false`） |
 | `calibre-metadata/` | `calibre-metadata` | `personal-services` | 元数据补全 Job/CronJob。⚠️ **kustomize**：新文件必须登记进 `kustomization.yaml` |
 | `cloudflare/` | `cloudflare` | `cloudflare` | Cloudflare Tunnel（cloudflared） |
-| `external-dns/` | `external-dns` | `external-dns` | Cloudflare token 的 ExternalSecret（chart 本体是 manual-helm：`just deploy-external-dns`） |
+| `external-dns/` | `external-dns` | `external-dns` | Cloudflare token 的 ExternalSecret（chart 本体 2026-07-31 采纳进 ArgoCD：multi-source chart + `values/external-dns.yaml` + 本目录 ExternalSecret） |
 | `gateway/` | `gateway` | `kube-system` | `gateway.yaml` = GatewayClass + Gateway 本体；每条对外路由一个 `route-<service>.yaml`（ReferenceGrant + HTTPRoute 成对）。**新子域名 = 新建一个 `route-*.yaml`**，DNS 由 external-dns 自动建 |
 | `kube-bench/` | `kube-bench` | `kube-bench` | CIS 周巡检 CronJob（ns 由 manifest 自身渲染） |
 | `kyverno-policies/` | `kyverno-policies` | `kyverno` | Kyverno ClusterPolicy（与 kyverno chart 安装分离，便于逐条 Audit→Enforce） |

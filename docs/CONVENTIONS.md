@@ -85,10 +85,10 @@ just cleanup-k8s      # Uninstall K3s
 ### Application Deployment
 Run from `k8s/helm/`:
 ```bash
-just init                  # Initialize .env from .env.example
-just deploy-all            # Deploy full observability stack (LGTM)
 just status                # Check monitoring namespace state
 ```
+> LGTM 栈（Loki/Grafana/Tempo/Sloth/otel-collector）已全部 GitOps：改 `values/*.yaml` 或 `argocd/applications/*.yaml` → `git push` → ArgoCD 3 分钟内自动同步。无手动 `just deploy-*` 配方（2026-07-31 裁剪）。
+>
 > ⚠️ homepage / it-tools / stirling-pdf **跑在 oracle-k3s**，由 ArgoCD `oracle-k3s` App 同步。
 > 手动部署走 `cd cloud/oracle && just deploy-homepage` / `just deploy-personal-services`
 > （`k8s/helm/justfile` 里对应的旧配方已删除）。
@@ -162,7 +162,7 @@ just apply   # Apply DNS/Tunnel changes
 - **Reason**: removing the Traefik ForwardAuth / oauth2-proxy chain simplifies ingress and avoids a second auth hop on every request.
 - **Recommended direction**: keep `HTTPRoute` resources controller-neutral and add auth at the app layer. Prefer native OIDC with ZITADEL first; use a per-app `oauth2-proxy` reverse-proxy only for apps that cannot speak OIDC directly.
 - **Native ZITADEL OIDC apps** (no oauth2-proxy): **Stirling-PDF** (`pdf`), **Grafana** (`grafana`), **Miniflux** (`rss`), **KaraKeep** (`keep`), and **ArgoCD** (`argocd`) speak OIDC directly. Each has a confidential WEB client provisioned (idempotently) by `zitadel/scripts/configure-oidc-app.sh` (REST, not Terraform — TF/gRPC writes break across the CF edge); creds live in Vault under the app's own path (`secret/homelab/{grafana,argocd-oidc}`, `secret/oracle-k3s/{stirling-pdf,miniflux,karakeep}`, keys `oauth_client_id`/`oauth_client_secret`) → ESO → the app's K8s Secret. **Local username/password login is kept enabled as a fallback on each** (no lockout). Redirect URIs: Grafana `…/login/generic_oauth`, Miniflux `…/oauth2/oidc/callback`, Stirling `…/login/oauth2/code/oidc`, KaraKeep `…/api/auth/callback/custom`, ArgoCD `…/auth/callback` (+ `http://localhost:8085/auth/callback` for CLI).
-  - **Deploy paths differ**: Grafana → `just deploy-prometheus`; ArgoCD → `just deploy-argocd` (both Helm, **not** ArgoCD-managed; run after the Vault write). Miniflux/Stirling/KaraKeep + ArgoCD's `argocd-oidc` ExternalSecret reconcile via ArgoCD on `git push` (oracle-k3s app, and `vault-eso` app for argocd-oidc).
+  - **Deploy paths differ**: Grafana → kube-prometheus-stack（ArgoCD `kube-prometheus-stack` App：改 `values/kube-prometheus-stack.yaml` → git push 生效）；ArgoCD → `just deploy-argocd`（Helm, 非 ArgoCD-managed; run after the Vault write）。 Miniflux/Stirling/KaraKeep + ArgoCD's `argocd-oidc` ExternalSecret reconcile via ArgoCD on `git push` (oracle-k3s app, and `vault-eso` app for argocd-oidc).
   - **Grafana**: `role_attribute_path: "'Admin'"` grants Admin to any ZITADEL-authenticated identity (safe for this single-user, locked-down IdP).
   - **Miniflux**: `OAUTH2_USER_CREATION=1` auto-provisions on first SSO login; to keep admin rights, log in as the local admin first and link the OIDC identity under Settings.
   - **KaraKeep**: NextAuth custom provider; `OAUTH_ALLOW_DANGEROUS_EMAIL_ACCOUNT_LINKING=true` links the ZITADEL identity to the existing account by verified email (ZITADEL verifies emails), so SSO logs into the current account while `DISABLE_SIGNUPS=true` still blocks self-registration.
@@ -206,7 +206,7 @@ just apply   # Apply DNS/Tunnel changes
   - External Secrets Operator — depends on Vault
   - Cilium — `just deploy-cilium`（`k8s/cilium/values.yaml`，pin v1.19.1）
   - Cloudflare Terraform — non-K8s resources
-  - ⚠️ `just deploy-prometheus` / `deploy-external-dns*` / `deploy-otel-collector` 是 **`⚠️ LEGACY` 逃生通道**——这三者已于 2026-07-31 迁入 ArgoCD（见上），**日常不要跑**（selfHeal 会与手动 helm 来回打架）；紧急回滚仍可 `helm -n <ns> rollback <release> <rev>`
+  - ⚠️ kube-prometheus-stack / otel-collector / external-dns×2 已于 2026-07-31 迁入 ArgoCD（见上），justfile 里的手动部署配方已随之移除——chart 版本唯一真源是 `argocd/applications/*.yaml` 的 `targetRevision`。紧急回滚仍可 `helm -n <ns> rollback <release> <rev>`；手动重部署模板见 `k8s/helm/justfile` 头部注释
   - **external-dns 配置参考**（chart `external-dns/external-dns` 1.21.1，现由 ArgoCD 管）— 采用理由/取舍/完整迁移过程见决策记录 `docs/decisions/external-dns-adoption.md`。配置：`sources: [gateway-httproute]`、`provider: cloudflare`、`domainFilters: [meirong.dev]`、`policy: upsert-only`（永不删除，安全默认）+ `registry: txt`（owner id `homelab-externaldns` / `oracle-externaldns`，两实例各自独立）。两集群的 Gateway（`manifests/gateway/gateway.yaml` / `cloud/oracle/manifests/base/gateway.yaml`）都打了 `external-dns.alpha.kubernetes.io/target` 注解指向各自的 tunnel CNAME 目标，因为 Cilium NodePort Gateway 本身没有可读的 LB 地址。
     - **✅ 2026-07-20 两集群全量完成**：homelab 5 条（argocd/book/grafana/llm/vault）+ oracle 10 条既有记录零停机移交 external-dns（预置 ownership TXT → `terraform state rm` 解耦），`cloudflare_dns_record.subdomains` 的 `for_each` 集合现已为空。两条隧道也都改成单条 `*.meirong.dev` 通配路由。**净效果：新增子域名只需要写一个 HTTPRoute** —— DNS 记录自动建、通配路由自动转发，`cloudflare/terraform` 不需要任何改动。
     - ⚠️ `policy: upsert-only` 意味着**删掉 HTTPRoute 不会删掉 DNS 记录**，退役服务时要手工清理 CNAME + ownership TXT。
@@ -272,7 +272,7 @@ just apply   # Apply DNS/Tunnel changes
   - **trace↔log↔metric 关联**: Tempo 数据源配 `tracesToLogsV2`→`loki` / `tracesToMetrics`→`prometheus` / `serviceMap`→`prometheus`(均为后向引用，Tempo 在文件中排在 Loki/Prometheus 之后才能解析)。**不要在 Loki 侧配指向 Tempo 的 `datasourceUid`**(前向引用，Tempo 尚未创建 → not found 崩溃); logs→trace 跳转如需要用 Grafana Correlations 单独加。`tracesToLogsV2.tags` 把 span 属性映射到 Loki 标签(`service.name`→`service_name` 等)。
   - **门户下钻**: `Platform` 总览顶部有按 **tag** 的 dashboard 链接(`kubernetes-mixin`/`node-exporter-mixin`/`loki`/`dgx-spark`) — 用 tag 而非 UID, 避免内置面板 UID 变更后失效。
   - **Tag 体系**: 自定义面板统一带 `curated`; 按信号带 `logs`/`metrics`(便于在 Dashboards 列表按 tag 过滤)。
-  - 分工: folder/多集群/Home/datasource-uid 在 values(Helm, 需 `just deploy-prometheus`); `grafana_folder` 注解与 dashboard JSON 在 manifests(ArgoCD `monitoring-dashboards` App 自动同步)。
+  - 分工: folder/多集群/Home/datasource-uid 在 values(Helm, 改 `values/kube-prometheus-stack.yaml` → git push → ArgoCD `kube-prometheus-stack` App 同步); `grafana_folder` 注解与 dashboard JSON 在 manifests(ArgoCD `monitoring-dashboards` App 自动同步)。
 - **SLI / SLO** (2026-06-16 上线；2026-07-12 扩展至 oracle 网关): 服务可用性 SLO 基于**一手的 Cilium Gateway Envoy L7 指标**(真实入口请求，非合成探测)，用 **Sloth** 生成规则。
   - **一手指标来源 (homelab)**: `cilium-envoy` DaemonSet 默认在 `:9964` 暴露 Envoy 指标(`cilium-config` `enable-metrics=true`/`external-envoy-proxy=true`)，`manifests/monitoring/cilium-envoy-servicemonitor.yaml` 的 ServiceMonitor 抓取它(metricRelabelings 只留 RED 指标)。关键指标 `envoy_cluster_upstream_rq_xx{envoy_cluster_name="<gw>/<ns>_<svc>_<port>", envoy_response_code_class="2|3|4|5"}` —— 按网关路由 + 响应码。**无需改 Cilium**(数据面/ClusterMesh CA 不动)。
   - **一手指标来源 (oracle)**: oracle 无 Prometheus Operator——由 otel-collector 的 `prometheus/cilium-envoy` receiver 直接抓取同款 `:9964` 端点（`cloud/oracle/manifests/monitoring/otel-collector.yaml`，keep 正则与 homelab ServiceMonitor 一致），remote-write 到 homelab Prometheus（`cluster="oracle-k3s"`）。**⚠️ 改该 ConfigMap 后必须手动** `kubectl --context oracle-k3s rollout restart ds/otel-collector -n monitoring`（ConfigMap 名无 hash 后缀，Pod 不会自动加载新配置）。
@@ -283,12 +283,12 @@ just apply   # Apply DNS/Tunnel changes
   - **告警**: 每个 SLO 生成多窗口燃尽率告警，`pageAlert→severity:critical` / `ticketAlert→severity:warning`，经现有 Alertmanager(`severity=~"critical|warning"`)路由到 Telegram。
   - **看板**: Grafana `SLO` 文件夹 → "SLO / Service Availability"(`manifests/monitoring/dashboards/slo-dashboard.yaml`，错误预算剩余/燃尽率/SLI 错误率)。
   - **⚠️ 零流量盲区**: 真实流量 SLI 在服务**无人访问时为 NaN**(error=0/total=0；vector(0) 加固后序列恒存在，不再整个消失)。这是一手指标的固有特性，非故障; 燃尽率告警只在真出现 5xx 时触发。闲置服务若要稳定可用性信号，叠一层合成探测(Uptime Kuma/blackbox)兜底。
-- **Deployment summary**: Only two components to deploy for observability changes:
-  1. `just deploy-prometheus` (homelab kube-prometheus-stack Helm release)
-  2. `kubectl --context oracle-k3s apply -f cloud/oracle/manifests/monitoring/otel-collector.yaml` + `kubectl --context oracle-k3s rollout restart daemonset/otel-collector -n monitoring` (oracle-k3s OTel Collector)
+- **Deployment summary**: observability changes land via GitOps（`git push` → ArgoCD 同步）；仅剩少量真手动项：
+  1. homelab kube-prometheus-stack：改 `values/kube-prometheus-stack.yaml` → `git push`（ArgoCD `kube-prometheus-stack` App）
+  2. oracle-k3s OTel Collector：改 `cloud/oracle/manifests/monitoring/otel-collector.yaml` → `git push` 后手动 `kubectl --context oracle-k3s rollout restart ds/otel-collector -n monitoring`（ConfigMap 名无 hash 后缀，不热加载）
   - Dashboard ConfigMaps: auto-synced by ArgoCD after `git push` (via `monitoring-dashboards` Application)
-  - **DGX Spark node_exporter** is a one-time deploy from the `nv-dgx-spark` repo (`make node-exporter-deploy`); the homelab scrape job + dashboard land via `just deploy-prometheus` + `git push`.
-  - **SMART disk health (`smartctl_exporter`)** is a one-time deploy: `cd proxmox/ansible && just node-exporter` (storage-106 + pve, amd64) and `nv-dgx-spark && make smartctl-exporter-deploy` (DGX ×2, arm64); scrape jobs + dashboards then land via `just deploy-prometheus` + `git push`. Details: **Disk health (SMART)** above.
+  - **DGX Spark node_exporter** is a one-time deploy from the `nv-dgx-spark` repo (`make node-exporter-deploy`); the homelab scrape job + dashboard land via `git push`（ArgoCD 同步）.
+  - **SMART disk health (`smartctl_exporter`)** is a one-time deploy: `cd proxmox/ansible && just node-exporter` (storage-106 + pve, amd64) and `nv-dgx-spark && make smartctl-exporter-deploy` (DGX ×2, arm64); scrape jobs + dashboards then land via `git push`（ArgoCD 同步）. Details: **Disk health (SMART)** above.
   - **ESO metrics** are a one-time enablement: homelab ServiceMonitor via `just deploy-eso` (`serviceMonitor.enabled` in `external-secrets.yaml`); oracle metrics Service via `just install-eso` (`--set metrics.service.enabled=true`). The `eso-alerts.yaml` PrometheusRule then reconciles via ArgoCD on `git push`.
 
 ### Services
@@ -344,7 +344,7 @@ just apply   # Apply DNS/Tunnel changes
   2. dashboard JSON 的 `datasource` 模板变量固定并隐藏(`hide:2`, 值 `loki`/`prometheus`); 查询尽量用 `cluster=~"$cluster"` 以支持多集群过滤。
   3. tag 带 `curated` + 信号 tag(`logs`/`metrics`), 便于按 tag 过滤。
   4. 把文件名加入 `argocd/applications/monitoring-dashboards.yaml` 的 `directory.include` 列表。
-  5. `git push` → ArgoCD 同步; 若改动落在 `grafana.sidecar`/`grafana.ini`(folder / 多集群选择器 / Home / datasource uid) 则还需 `just deploy-prometheus`。
+  5. `git push` → ArgoCD 同步; 若改动落在 `grafana.sidecar`/`grafana.ini`(folder / 多集群选择器 / Home / datasource uid)，把 `values/kube-prometheus-stack.yaml` 一并改并 push（ArgoCD `kube-prometheus-stack` App 同步）。
   - 详见 Observability › **Dashboards 组织**。
 - **Homepage config updates**: Homepage 跑在 **oracle-k3s**（`cloud/oracle/manifests/homepage/homepage.yaml`，随 `oracle-k3s` App 同步）。ArgoCD 会在 `git push` 后自动同步 ConfigMap，但配置是用 `subPath` 挂载的、**不会热加载** —— 必须 `kubectl --context oracle-k3s rollout restart deployment/homepage -n homepage` 才生效。不要用 `kubectl delete configmap`（会和 ArgoCD 冲突）。
 - **HTTPRoute template**: Always include explicit `group`/`kind` in `parentRefs` and `group`/`kind`/`weight` in `backendRefs` to prevent ArgoCD OutOfSync drift caused by Gateway controller defaults.

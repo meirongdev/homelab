@@ -26,6 +26,7 @@
 
 ### 已知问题（不阻塞，无人认领）
 
+- **`argocd-image-updater` App 已装未用**：chart 1.2.4 在跑但 0 个 `ImageUpdater` CR，oracle-k3s App 只有旧式注解、无对应 CR——实际没在更新任何镜像。要么补 CR 接上，要么退役（见 `docs/decisions/argocd-image-updater.md`）。
 - **这台 Mac 上 `terraform plan/apply` 连 `192.168.50.4:8006`（Proxmox API）100% `no route to host`**，但 `ping`/`curl`/`ssh` 到同一地址全部正常（curl 有响应，偏慢 ~3s）。**已排除 Tailscale**——整个 `tailscale down` 后仍 100% 复现。当前无阻塞（VM 变更改走 `qm`/SSH）。若日后要用 terraform 管 Proxmox，从 provider 的 HTTP client 行为或本机残留 utun0-3/网络扩展查起，不是标准路由表问题。
 
 ---
@@ -89,7 +90,7 @@ homelab + oracle-k3s 双双从 Flannel 迁 Cilium
 | 2026-07-18 | **ZITADEL DB → CloudNativePG**：冻结的 `bitnamilegacy/postgresql:15.4.0` → CNPG 1.30.0 + PG 17.6，实际停机 ~4.5 分钟 ([演进路线 Phase C](plans/architecture/2026-07-07-tech-debt-and-evolution.md)) |
 | 2026-07-19/20 | **external-dns 双集群全量**：`gateway-httproute` source + `upsert-only`；15 条既有记录零停机移交、terraform 解耦；两条隧道改单条 `*.meirong.dev` 通配路由 → **新增子域名从此只写一个 HTTPRoute** ([决策](decisions/external-dns-adoption.md)) |
 | 2026-07-30 | OpenCost 双集群成本归因 + KRR 周报右尺寸 ([计划](plans/observability/2026-07-30-opencost-multicluster.md) · [计划](plans/observability/2026-07-30-krr-rightsizing.md) · [决策](decisions/opencost-krr-data-sources.md)) |
-| 2026-07-31 | **manual-helm → ArgoCD 采纳**：`kube-prometheus-stack` + `external-dns` ×2；采纳前逐对象验证渲染等价，justfile 旧配方标 `⚠️ LEGACY` 保留为逃生通道 ([决策](decisions/manual-helm-to-argocd-adoption.md)) |
+| 2026-07-31 | **manual-helm → ArgoCD 采纳**：`kube-prometheus-stack` + `external-dns` ×2；采纳前逐对象验证渲染等价；justfile 旧手动配方随 2026-08-01 清理删除，chart 版本唯一真源是 `argocd/applications/*.yaml` 的 `targetRevision`（紧急回滚模板见 `k8s/helm/justfile` 头部注释）([决策](decisions/manual-helm-to-argocd-adoption.md)) |
 | 2026-07-31 | **OTel 2026 对齐**：homelab collector 首次落地（此前根本没部署，容器日志从未进 Loki）+ oracle collector 现代化 ([决策](decisions/otel-2026-alignment.md)) |
 | 2026-07-31 | `manifests/` 目录化（一目录一 App）+ `gateway.yaml` 按路由拆 5 文件 ([决策](decisions/manifests-directory-per-app.md)) |
 

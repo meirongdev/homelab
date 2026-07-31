@@ -47,7 +47,7 @@ LOCK_FILE="/tmp/ebook-sync.lock"
 # 颜色
 # ============================================================================
 RED='\033[0;31m'    GREEN='\033[0;32m'    YELLOW='\033[1;33m'
-BLUE='\033[0;34m'   CYAN='\033[0;36m'     NC='\033[0m'
+BLUE='\033[0;34m'   NC='\033[0m'
 
 # ============================================================================
 # 日志 / 输出
@@ -61,6 +61,7 @@ error()  { echo -e "${RED}❌ $*${NC}" | tee -a "$LOG_FILE"; }
 # 辅助函数
 # ============================================================================
 load_config() {
+  # shellcheck source=/dev/null
   [[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
 }
 
@@ -434,7 +435,7 @@ do_upload() {
   fi
 
   # 批量上传
-  local success_count=0 fail_count=0 skip_count=0
+  local success_count=0 fail_count=0
   local cksum_fail=0
   local idx=0
 

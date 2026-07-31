@@ -25,7 +25,7 @@ Success means all of the following are true:
 
 ## Important Notes
 
-1. Do not use `k8s/helm/justfile` target `deploy-gateway` for this cutover. It still references the old Traefik helper path.
+1. homelab 的 `gateway` / `cloudflare` manifests 由 ArgoCD 管理：改 `k8s/helm/manifests/` → `git push` → 自动同步。旧 `deploy-gateway` / `deploy-cloudflare-tunnel` 配方已删除（2026-08-01），不要手动 kubectl apply。
 2. ArgoCD manages the homelab `gateway` and `cloudflare` manifests, but ArgoCD Application definitions themselves are not auto-managed. Re-apply changed Application manifests explicitly.
 3. oracle-k3s base manifests are still applied from `cloud/oracle/manifests/`.
 4. ClusterMesh is optional in this runbook. The repo is prepared for it, but the mesh is not considered part of the ingress cutover.

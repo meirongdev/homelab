@@ -1,0 +1,104 @@
+# 静态检查：YAML 语法（含重复键）/ justfile 可解析 / terraform fmt / shellcheck（全等级，含引号类 SC2086）。
+# 目的：把踩过的坑（死配方、YAML typo、tf 格式、脚本引号）变成 CI 能拦的——
+# 与 docs-check.yml 同一哲学：规则没有强制就会腐化。
+name: static checks
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - '**/*.yaml'
+      - '**/*.yml'
+      - '**/justfile'
+      - '**/*.tf'
+      - '**/*.sh'
+      - '.github/workflows/static-checks.yml'
+  push:
+    branches: [main]
+    paths:
+      - '**/*.yaml'
+      - '**/*.yml'
+      - '**/justfile'
+      - '**/*.tf'
+      - '**/*.sh'
+      - '.github/workflows/static-checks.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 uv（显式声明，不赌 runner 镜像内容）
+        uses: astral-sh/setup-uv@v6
+
+      - name: YAML 语法解析（含重复键）
+        run: |
+          # os.walk 覆盖隐藏目录（.github/ 等）——glob 的 ** 不匹配点开头目录，会漏掉 workflow 自己。
+          uv run --with pyyaml python - <<'PY'
+          import os, sys, yaml
+          # SafeLoader 子类：映射里重复键直接报错（否则 a:1/a:2 会静默丢配置）。
+          class UniqueKeyLoader(yaml.SafeLoader):
+              def construct_mapping(self, node, deep=False):
+                  seen = []
+                  for key_node, _ in node.value:
+                      key = self.construct_object(key_node, deep=deep)
+                      if key in seen:
+                          raise yaml.constructor.ConstructorError(
+                              "while constructing a mapping", node.start_mark,
+                              f"duplicate key {key!r}", key_node.start_mark)
+                      seen.append(key)
+                  return super().construct_mapping(node, deep)
+          bad = 0
+          files = []
+          for root, dirs, names in os.walk('.'):
+              dirs[:] = [d for d in dirs if d != '.git']  # 精确排除，不做子串匹配
+              for n in names:
+                  if n.endswith(('.yaml', '.yml')):
+                      files.append(os.path.join(root, n))
+          for p in sorted(files):
+              try:
+                  with open(p, encoding='utf-8') as f:
+                      list(yaml.load_all(f, Loader=UniqueKeyLoader))
+              except Exception as e:
+                  print(f'{p}: {e}')
+                  bad += 1
+          if bad:
+              sys.exit(f'{bad} 个 YAML 文件解析失败')
+          print(f'✅ {len(files)} 个 YAML 文件全部可解析（含重复键检查）')
+          PY
+
+      - name: justfile 冒烟（just --list）
+        run: |
+          # 版本与本地开发机一致（just 1.57.0）；升级时两处一起改。
+          # 拉官方 tarball 未做 sha256 校验——homelab 单用户场景可接受（记一笔）。
+          curl -sSfL https://github.com/casey/just/releases/download/1.57.0/just-1.57.0-x86_64-unknown-linux-musl.tar.gz -o /tmp/just.tar.gz
+          tar -xzf /tmp/just.tar.gz -C /tmp just
+          sudo mv /tmp/just /usr/local/bin/just
+          for f in $(find . -name justfile -not -path './.git/*' | sort); do
+            echo "== $f =="
+            (cd "$(dirname "$f")" && just --list >/dev/null)
+          done
+
+      - name: 安装 terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.5
+
+      - name: terraform fmt 检查
+        # -recursive . 自动覆盖新增模块；CI 干净 checkout 里 tfvars 全被 gitignore，等价于只查已跟踪 .tf。
+        run: terraform fmt -check -recursive .
+
+      - name: shellcheck
+        # 镜像 pin 0.11.0，不用 runner 自带的那个——理由同上面的 uv/just/terraform：
+        # 不赌 runner 镜像内容。自带版本随镜像升级漂移，新等级的检查会突然在 main 上炸，
+        # 且"实测零命中"的结论也就跟着失效。升级时改这里的 tag 并本地复跑一遍。
+        # 默认全等级（含 info 级 SC2086 未加引号），0.11.0 实测全仓 *.sh 零命中。
+        # find/sort 在 runner 侧跑（GNU 版，支持 -print0/-z）；容器里只跑 shellcheck 本身。
+        run: |
+          find . -name '*.sh' -not -path './.git/*' -print0 | sort -z \
+            | xargs -0 -r docker run --rm -v "$PWD:/repo" -w /repo \
+                koalaman/shellcheck-alpine:v0.11.0 shellcheck

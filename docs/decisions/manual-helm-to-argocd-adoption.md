@@ -102,8 +102,12 @@ manual-helm 组件，实测 homelab **既无 release 也无 pod**。连带发现
 
 - `kube-prometheus-stack` / `external-dns` / `external-dns-oracle` 三个 Application 上线，
   改 values → `git push` → 3 分钟自动同步，不再需要人肉 `just deploy-*`。
-- 对应 justfile 配方全部标 `⚠️ LEGACY` + 保留为逃生通道（**日常不要跑，selfHeal 会打架**），
-  并写明 `helm rollback` 的紧急回滚路径（release 历史仍在，采纳不销毁它）。
+- 对应 justfile 配方当时标 `⚠️ LEGACY` + 保留为逃生通道。**2026-08-01 已全部删除**：
+  留着的实际效果是给"日常不要跑"的东西留了个能一键跑的入口，而真正需要它的场景
+  （ArgoCD 自身挂了）本来就得手敲 helm。现改为 `k8s/helm/justfile` 头部的两行注释模板
+  （`helm rollback` / `helm upgrade --install ... --version <targetRevision> -f values/<app>.yaml`），
+  chart 版本唯一真源随之收敛到 `argocd/applications/*.yaml`——此前双 pin 已漂移过（loki 7.0.0 vs 7.1.0）。
+  release 历史仍在，采纳不销毁它，`helm rollback` 路径照旧可用。
 - `AppProject.sourceRepos` 加了两个 chart repo。⚠️ AppProject **不在 root App 托管路径下**，
   必须手工 `kubectl apply -f argocd/projects/homelab.yaml`，否则新 App 报
   `repo ... is not permitted in project`。

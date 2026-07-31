@@ -87,7 +87,7 @@
 
 - **Helm chart**: `open-telemetry/opentelemetry-collector` 0.165.0（镜像 `otel/opentelemetry-collector-k8s`——k8s 官方裁剪发行版）
 - **Values**: `k8s/helm/values/opentelemetry-collector.yaml`
-- **Deploy**: ArgoCD `otel-collector` App（改 values → push → 自动同步；`just deploy-otel-collector` 只是 LEGACY 逃生通道）
+- **Deploy**: ArgoCD `otel-collector` App（改 `values/opentelemetry-collector.yaml` → push → 自动同步）
 - **Preset `logsCollection`**: 自动挂载 `/var/log/pods` hostPath，注入 `filelog` receiver
 - **Preset `kubernetesAttributes`**: 自动申请 RBAC，从 K8s API 查询 Pod metadata 并注入到日志 resource attributes
 
@@ -270,9 +270,8 @@ kubectl logs -n personal-services -l app=calibre-web -c log-exporter -f
 # 错误日志聚合
 {k8s_namespace_name=~".+"} |~ "(?i)(error|exception|fatal|panic)"
 
-# 部署 / 移除 OTel Collector
-cd k8s/helm && just deploy-otel-collector
-cd k8s/helm && just remove-otel-collector
+# 部署 / 移除 OTel Collector（ArgoCD `otel-collector` App）
+# 改 values/opentelemetry-collector.yaml → git push → ArgoCD 自动同步
 ```
 
 ---
@@ -304,6 +303,6 @@ cd k8s/helm && just remove-otel-collector
 | `k8s/helm/manifests/monitoring/dashboards/grafana-dashboards.yaml` | 4 个 Loki Dashboard ConfigMap |
 | `k8s/helm/manifests/personal-services/calibre-web.yaml` | log-exporter sidecar 示例 |
 | `argocd/applications/monitoring-dashboards.yaml` | Dashboard GitOps Application |
-| `k8s/helm/justfile` | deploy-otel-collector / remove-otel-collector |
+| `argocd/applications/otel-collector.yaml` | OTel Collector GitOps Application（chart + values） |
 | `docs/plans/archive/2026-02-21-otel-log-migration-design.md` | 迁移设计决策文档 |
 | `docs/plans/observability/2026-02-21-grafana-loki-dashboards.md` | Dashboard 设计决策文档 |

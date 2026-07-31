@@ -20,10 +20,9 @@ Network note: both clusters now use Cilium for the local data plane and Gateway 
 
 1. **Infrastructure**: `cd proxmox/terraform && just init && just apply`
 2. **Kubernetes**: `cd k8s/ansible && just setup-k8s && just fetch-kubeconfig`
-3. **Observability stack**: `cd k8s/helm && just init && just deploy-all`
-4. **Secrets**: `cd k8s/helm && just deploy-vault && just vault-init && just vault-unseal && just deploy-eso`
-5. **GitOps**: `cd k8s/helm && just deploy-argocd` — ArgoCD then auto-deploys all managed apps from Git
-6. **External Access**: `cd cloudflare/terraform && just init && just apply`
+3. **Secrets**: `cd k8s/helm && just deploy-vault && just vault-init && just vault-unseal && just deploy-eso`
+4. **GitOps**: `cd k8s/helm && just deploy-argocd` — ArgoCD then auto-deploys all managed apps from Git，包括 LGTM/otel/external-dns（改 `k8s/helm/values/` 或 `argocd/applications/` + `git push` 生效）
+5. **External Access**: `cd cloudflare/terraform && just init && just apply`
 
 ---
 For AI assistant context this project uses two files, both symlinked so each tool finds its own name:

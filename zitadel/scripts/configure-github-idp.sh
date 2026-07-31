@@ -45,6 +45,7 @@ IDP_NAME="${IDP_NAME:-GitHub}"
 
 # Load .env next to the terraform module if the vars aren't already exported.
 ENV_FILE="$(cd "$(dirname "$0")/../terraform" && pwd)/.env"
+# shellcheck source=/dev/null
 if [[ -f "$ENV_FILE" ]]; then set -a; source "$ENV_FILE"; set +a; fi
 
 : "${ZITADEL_TOKEN:?set ZITADEL_TOKEN (service-user PAT, IAM_OWNER) or provide zitadel/terraform/.env}"
