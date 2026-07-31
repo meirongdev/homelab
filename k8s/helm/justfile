@@ -107,8 +107,8 @@ deploy-tempo:
         --timeout 10m
 
 # ⚠️ LEGACY -- 2026-07-31 已作为 ArgoCD App 部署 (argocd/applications/otel-collector.yaml)。
-# 历史注记：此前 homelab 从未真正部署过 collector（旧 values 的 otlp_http exporter 名
-# 根本不存在，配置校验都过不了）——homelab 日志 2026-07-31 才首次进 Loki。
+# 历史注记：此前 homelab 从未真正部署过 collector（无 release、无 pod）——
+# homelab 日志 2026-07-31 才首次进 Loki。
 # 改配置：改 values/opentelemetry-collector.yaml -> commit -> ArgoCD auto-sync。
 # **不要**日常跑本配方（selfHeal 会打架）；仅作 ArgoCD 不可用时的逃生通道。
 deploy-otel-collector: add-repos
