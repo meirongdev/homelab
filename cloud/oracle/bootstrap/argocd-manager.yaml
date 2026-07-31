@@ -7,7 +7,7 @@
 #
 # 之后取出 token + CA，存入 Vault secret/homelab/argocd-oracle-cluster，
 # 由 ESO 物化成 ArgoCD cluster Secret（见 Task 3）。
-# 说明见 docs/plans/2026-06-04-oracle-k3s-argocd-gitops.md
+# 说明见 docs/plans/networking/2026-06-04-oracle-k3s-argocd-gitops.md
 ---
 apiVersion: v1
 kind: ServiceAccount

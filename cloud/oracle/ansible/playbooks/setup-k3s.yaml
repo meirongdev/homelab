@@ -208,7 +208,7 @@
     # Cilium Gateway 依赖标准 Gateway API CRD，必须独立安装（与 homelab 一致：v1.2.1 standard channel）。
     # 切勿改回让 traefik 托管这些 CRD —— disable traefik 会触发 helm-delete-traefik-crd
     # 把 CRD 一起删掉，导致 Gateway/HTTPRoute 级联回收、路由全断。
-    # 见 docs/plans/2026-06-04-oracle-k3s-argocd-gitops.md 事故复盘。
+    # 见 docs/plans/networking/2026-06-04-oracle-k3s-argocd-gitops.md 事故复盘。
     - name: Apply Gateway API CRDs v1.2.1 (standard channel)
       ansible.builtin.command:
         cmd: >-

@@ -70,7 +70,7 @@ spec:
 # DB 历史:2026-07-06 迁来时用 bitnami PG(bitnamilegacy 冻结镜像,安全债);
 # 2026-07-18 经 pg_dump/pg_restore 迁至 CNPG 集群 zitadel-pg(见 zitadel-pg-cluster.yaml),
 # 旧 zitadel-db HelmChart + zitadel-postgres-auth ExternalSecret 同日退役移除。
-# 完整记录:decisions/ + docs/reference/evolution-roadmap-2026-07-07.md Phase C。
+# 完整记录:decisions/ + docs/plans/architecture/2026-07-07-tech-debt-and-evolution.md Phase C。
 apiVersion: helm.cattle.io/v1
 kind: HelmChart
 metadata:

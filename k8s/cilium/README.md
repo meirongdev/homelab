@@ -41,7 +41,7 @@ the `CiliumEnvoyConfig`; Envoy picks it up via xDS (no envoy restart needed).
 - **`gatewayAPI.enableAppProtocol: true`** — makes Cilium honour Service `appProtocol`
   (`kubernetes.io/h2c` → explicit h2c upstream)，任何 gRPC/h2c 后端过网关都依赖它。
   历史上为 ZITADEL console 引入（关掉会复现 `/ui/console/*` 404，全程见
-  `docs/records/zitadel-console-grpc-404.md`）。ZITADEL 已于 2026-07 迁至
+  `docs/records/2026-06-07-zitadel-console-grpc-404.md`）。ZITADEL 已于 2026-07 迁至
   oracle-k3s，homelab 当前无 h2c 后端——设置无害，刻意保留以备未来 gRPC 服务。
 - **ClusterMesh** to oracle-k3s (`100.107.166.37:32379`, KVStoreMesh). The shared CA
   (`cilium-ca` secret) must be preserved/restored on reinstall or clustermesh trust breaks.
