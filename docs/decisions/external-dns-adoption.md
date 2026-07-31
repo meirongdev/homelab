@@ -37,7 +37,8 @@
 | Gateway 注解 | `external-dns.alpha.kubernetes.io/target: <tunnel-id>.cfargotunnel.com` | Cilium 是 NodePort Gateway，**没有可读的 LB 地址**；显式指定 CNAME 目标 = terraform 一直用的 tunnel 目标，保证格式一致 |
 
 **Cloudflare token**：复用 `cloud/oracle/cloudflare/terraform.tfvars` 里那份已验证有效的 Zone 级 API Token，经 Vault `secret/homelab/external-dns` → ESO 落地为 secret `external-dns/external-dns-cloudflare`（ExternalSecret 归 ArgoCD `external-dns` App；chart 本体是 manual-helm，同 Vault/ESO/kube-prometheus-stack）。
-> 说明：external-dns 的 secret 复用 oracle 那份 token 只是图省事（一份已知可用的 Zone token）。**不是**因为 homelab 没有可用 token——homelab 真正有效的 Cloudflare API Token 一直在 gitignored 的 `cloudflare/terraform/.env` 里，`just plan/apply` 经 `-var` 注入使用，terraform 从未真的被卡住（详见下方 Remaining Work 第 1 项的更正）。曾经 `terraform.tfvars` 里塞的是一段 Tunnel connector token（`eyJhIjoi...`）的误值，但它被 `.env` 的值覆盖、从不生效；2026-07-20 已把本地 tfvars 的该值改回正确 token，消除误导。
+> 说明：external-dns 的 secret 复用 oracle 那份 token 只是图省事（一份已知可用的 Zone token）。**不是**因为 homelab 没有可用 token——homelab 真正有效的 Cloudflare API Token 一直在 gitignored 的 `cloudflare/terraform/.env` 里，`justfile`（`set dotenv-load`）经 `-var` 注入使用，`just plan/apply` 从未真的被卡住（详见下方 Remaining Work 第 1 项的更正）。
+> ⚠️ **仍待清理（2026-07-31 复核）**：`cloudflare/terraform/terraform.tfvars` 里 `cloudflare_api_token` 那段 Tunnel connector token（`eyJhIjoi...`）误值**至今还在**。它不影响 `just` 路径（CLI `-var` 优先级高于 tfvars），但**裸跑 `terraform plan/apply` 会读到它并报鉴权错误**。两份文件都是 gitignored，误值从未进过 git。
 
 ## Verification（2026-07-19 端到端）
 
@@ -47,10 +48,11 @@
 
 ## Consequences
 
-- ✅ **加子域名（homelab）的 DNS 半步已消除**：写一个 HTTPRoute，external-dns 自动建 CNAME。⚠️ 但**隧道路由半步仍在**——cloudflared 无通配 ingress，新 hostname 仍需在 `cloudflare/terraform` 的 `ingress_rules` 里加一条才不 404（详见 Remaining Work 第 5 项）。所以现状是"两步变一步半"，不是"变一步"。
+- ✅ **加子域名 = 只写一个 HTTPRoute（两集群均成立，2026-07-20 起）**：external-dns 建 CNAME，隧道的单条 `*.meirong.dev` 通配路由转发进 gateway，gateway 按 HTTPRoute 分发。`cloudflare/terraform` 完全不需要改。
+  > 演进留痕：本 ADR 初版（2026-07-19）只消除了 DNS 半步，当时 cloudflared 是每 hostname 一条显式 ingress、无通配，新子域名仍会 404，是"两步变一步半"。通配路由是 Remaining Work 第 5 项补上的。
 - ✅ **5 条既有记录已迁移（2026-07-20，零停机验证通过）**：`argocd`/`book`/`grafana`/`llm`/`vault` 的 ownership TXT 已预埋、external-dns 已接管、5 条 CNAME 的 `modified_on` 全程未变；terraform 侧已 `state rm` 并把 DNS 与隧道路由**解耦**（见第 2 项）。归属权登记完成，两套不再并存。
 - ⚠️ **别把 `policy` 改成 `sync`** 除非接受 external-dns 全权删除——`sync` 下它会删掉自己认为"不该存在"的记录（仍受 txt 所有权保护，但风险面变大）。5 条已被正确接管，技术上可升，但 `upsert-only` 已够用、无必要冒险。
-- ⚠️ external-dns 只 watch **它所在的 homelab 集群**的 HTTPRoute；oracle-k3s 的子域名（`auth`/`status`/`keep`/… 由 `cloud/oracle/cloudflare` terraform 管）不在其管辖内，各管各的（第 3 项仍待办）。
+- ⚠️ 每个 external-dns 实例只 watch **它所在集群**的 HTTPRoute，所以**两集群各跑一个实例**（2026-07-20 起，见第 3 项）。两者共享同一把 zone token、同一个 zone，靠不同的 `txtOwnerId`（`homelab-externaldns` / `oracle-externaldns`）区分所有权——**owner id 撞了会互相误判、互相改对方的记录**。
 
 ## Remaining Work / 完成记录
 
@@ -58,7 +60,9 @@
 
 ### 1. ✅ 已澄清：terraform 从没被 token 卡住（原判"🔴 阻塞项"是误判）
 
-原文把它列为第 2 项的"硬前提"，称 tfvars 的 token 是 Tunnel connector 格式、导致 `plan`/`apply`/`state rm` 全报错，需去 Dashboard 建新 token。复核推翻了这个判断：真正有效的 Zone token 一直在 gitignored 的 `cloudflare/terraform/.env`，`justfile` 用 `-var` 注入，`just plan/apply` 从来正常；`terraform.tfvars` 那段 `eyJhIjoi...` 误值被 `-var` 覆盖、从不生效。2026-07-20 已把本地 tfvars 的该值改回正确 token（与 `.env` 同值），`terraform state rm` 与 `just plan`（No changes）均实测通过。**无需再建 token**。（`.env`/`*.tfvars` 均 gitignored，误值从未进过 git。）
+原文把它列为第 2 项的"硬前提"，称 tfvars 的 token 是 Tunnel connector 格式、导致 `plan`/`apply`/`state rm` 全报错，需去 Dashboard 建新 token。复核推翻了这个判断：真正有效的 Zone token 一直在 gitignored 的 `cloudflare/terraform/.env`，`justfile` 用 `-var` 注入，`just plan/apply` 从来正常；`terraform.tfvars` 那段 `eyJhIjoi...` 误值被 `-var` 覆盖、从不生效。`terraform state rm` 与 `just plan`（No changes）均实测通过。**无需再建 token**。（`.env`/`*.tfvars` 均 gitignored，误值从未进过 git。）
+
+> **2026-07-31 复核更正**：本节原先还写了"2026-07-20 已把本地 tfvars 的该值改回正确 token"——**这一句不成立**，复核时 `terraform.tfvars` 里仍是那段 `eyJhIjoi...`。结论（`just` 路径一直正常、无需新建 token）不变，但"误导已消除"是假的：裸跑 `terraform` 仍会踩。清理动作待做，见上方 Cloudflare token 小节的告警框。
 
 ### 2. ✅ 已完成（2026-07-20）：5 条记录归属权转交 external-dns + terraform 解耦收缩
 

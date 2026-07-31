@@ -1,7 +1,11 @@
 # Homelab — Agent Context
 
 > 双集群 homelab（homelab + oracle-k3s）基础设施即代码。
-> 给 AI 助手的项目上下文。在根目录 `AGENTS.md` 软链此文件。
+> 给 AI 助手的**常驻精简上下文**。根目录 `AGENTS.md` 与 `CLAUDE.md` 都软链到本文件。
+>
+> 📖 **需要细节时读 `docs/CONVENTIONS.md`**（62KB，完整约定 + 架构 + 各组件踩坑记录，
+> 另软链为 `.gemini.md` / `.github/copilot-instructions.md`）。本文件刻意保持精简以控制常驻上下文成本，
+> **不要**把长篇内容往这里搬——架构事实进 `reference/`，决策进 `decisions/`，两者都在 CONVENTIONS.md 里有索引。
 
 ## Project Structure
 
@@ -17,7 +21,9 @@ homelab/
 ├── cloudflare/terraform/        # Cloudflare Tunnel + DNS + WAF
 ├── tailscale/terraform/         # Tailscale ACL + 预授权密钥
 └── docs/                        # 文档
-    ├── AGENTS.md                ← 本文件
+    ├── AGENTS.md                ← 本文件（简版；软链为根 AGENTS.md）
+    ├── CONVENTIONS.md           # 完整约定+架构上下文（软链为 .claudemd/.gemini.md/copilot-instructions.md）
+    ├── README.md                # 文档门户/索引
     ├── ARCHITECTURE.md          # 架构概览
     ├── guides/                  # 面向任务的跨领域流程
     ├── reference/               # 当前生效的架构事实 (source of truth)
@@ -44,7 +50,11 @@ homelab/
 | 备份 | `just backup-run` | 手动触发备份 |
 | Cilium | `just deploy-cilium` | 部署/升级 Cilium (k8s/cilium/) |
 | Cloudflare | `just apply` | terraform apply (cloudflare/terraform/) |
-| 集群互联 | `just connect-clustermesh` | Cilium ClusterMesh 连接 |
+| 集群互联 | `just connect-clustermesh <homelab-ts>:32379 <oracle-ts>:32379` | Cilium ClusterMesh 连接（需两个端点参数） |
+| Proxmox | `just init/plan/apply` | `proxmox/terraform/`（**`just` 不是 `make`**，那里的 Makefile 是空文件） |
+| Oracle | `make init/plan/apply` | `cloud/oracle/terraform/`（这里才用 `make`） |
+
+⚠️ **新加子域名不需要动 DNS**：写一个 HTTPRoute 即可（external-dns 建记录 + 隧道通配路由转发），不要改 `cloudflare/terraform`。
 
 ## Architecture Quick Reference
 
@@ -68,7 +78,9 @@ homelab/
 
 ## Security Model
 
-纵深防御 11 层: Cloudflare WAF → ZITADEL OIDC → Vault+ESO → PSA → Kyverno → Trivy → kube-bench → 节点 CIS → Cilium NetworkPolicy → Tetragon/Falco → restic 备份。
+纵深防御 11 层: Cloudflare WAF → ZITADEL OIDC → Vault+ESO → PSA → Kyverno → Trivy → kube-bench → 节点 CIS → 网络(见下) → Tetragon/Falco → restic 备份。
+
+⚠️ **第 9 层网络只到"可见性"**：Hubble 已开，但集群内**没有任何自建 `CiliumNetworkPolicy`**（`kubectl get cnp,ccnp -A` 为空；`argocd` ns 里那几条 NetworkPolicy 是 argo-cd chart 自带的）。网络默认拒绝是**刻意延后**的（单用户威胁模型下收益边际低、debug 成本高），不要把它当成已生效的管控。逐层状态与灰度路径见 `docs/reference/security.md`。
 
 **硬约束**: homelab 是 Ryzen 5600H 单节点笔记本 (idle ~74°C)。所有安全组件 **fail-open + 控 CPU**。
 

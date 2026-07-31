@@ -1,7 +1,10 @@
 # Homelab Development Conventions & Context
 
-This file provides guidance for AI assistants (Claude, Gemini) and developers working in this repository.
-It is symlinked as `CLAUDE.md` and `GEMINI.md` in the project root for automatic AI context loading.
+This file provides guidance for AI assistants and developers working in this repository.
+It is the **long-form** source of AI context (~62 KB), symlinked from `.gemini.md` and
+`.github/copilot-instructions.md`. The **short always-on** counterpart is `docs/AGENTS.md`
+(~5 KB, symlinked from the root as both `AGENTS.md` and `CLAUDE.md`) — that split keeps a 62 KB
+file out of every session's context. Keep the two consistent when either changes.
 
 ## Project Overview
 
@@ -38,21 +41,36 @@ homelab/
 ├── tailscale/
 │   └── terraform/      # Tailscale ACL + node pre-auth keys
 └── docs/
-    ├── README.md       # 文档索引
-    ├── CONVENTIONS.md  # This file (symlinked as CLAUDE.md and GEMINI.md)
-    ├── architecture/   # Architecture notes and TODO
-    ├── runbooks/       # 运维操作手册 (DNS recovery, etc.)
-    └── plans/          # Implementation plan records
+    ├── README.md       # 文档门户/索引
+    ├── CONVENTIONS.md  # This file, 长版 (symlinked as .gemini.md / copilot-instructions.md)
+    ├── AGENTS.md       # 简版常驻上下文 (symlinked as root AGENTS.md + CLAUDE.md)
+    ├── ARCHITECTURE.md # 单页架构总览
+    ├── reference/      # 当前生效的架构事实 (source of truth)
+    ├── decisions/      # 轻量 ADR (场景/选项/取舍)
+    ├── runbooks/       # 可执行运维手册 (DNS recovery, backup 等)
+    ├── guides/         # 面向任务的跨领域流程
+    ├── records/        # 故障复盘/事故报告
+    └── plans/          # 带日期的方案记录 (apps/networking/observability/security/storage) + ROADMAP.md
 ```
+> `docs/architecture/` 已废弃，只剩一张指向新位置的映射表。分层维护规则见 `docs/README.md`。
 
 ## Key Commands (Context-Dependent)
 
 ### Infrastructure (Proxmox)
-Run from `proxmox/terraform/`:
+Run from `proxmox/terraform/`（**`just`，不是 `make`** —— 该目录下的 `Makefile` 是个 0 字节空文件，
+`make` 什么都不会做；真正的配方全在 `justfile` 里）:
 ```bash
-make init    # terraform init
-make plan    # terraform plan
-make apply   # terraform apply
+just init    # 从 example 生成 terraform.tfvars（若缺）+ terraform init
+just plan    # terraform plan -out=terraform.plan
+just apply   # 先 plan 再 apply 那个 plan 文件
+just apply-vm / destroy-vm   # 只针对 VM 资源的细粒度配方
+```
+
+### Infrastructure (Oracle Cloud)
+Run from `cloud/oracle/terraform/`（这里才是 **`make`**）:
+```bash
+make init / make plan / make apply
+make import VCN_ID=... IGW_ID=... ...   # 把既有 OCI 资源导入 state
 ```
 
 ### Kubernetes Setup (K3s)
@@ -68,10 +86,12 @@ Run from `k8s/helm/`:
 ```bash
 just init                  # Initialize .env from .env.example
 just deploy-all            # Deploy full observability stack (LGTM)
-just deploy-homepage       # First-time deploy Homepage dashboard
-just update-homepage       # Update Homepage config + restart pod (apply + rollout restart)
 just status                # Check monitoring namespace state
 ```
+> ⚠️ homepage / it-tools / stirling-pdf **已迁 oracle-k3s**，`k8s/helm/justfile` 里对应的 8 个配方
+> （`deploy-/delete-/update-homepage`、`homepage`、`deploy-/delete-it-tools`、`deploy-/delete-pdf`）
+> 因指向已删除的 manifest 必然失败，已于 2026-07-31 删除。改由 ArgoCD `oracle-k3s` App 同步；
+> 手动部署走 `cd cloud/oracle && just deploy-homepage` / `just deploy-personal-services`。
 
 ### ArgoCD GitOps
 Run from `k8s/helm/`:
@@ -152,11 +172,11 @@ just apply   # Apply DNS/Tunnel changes
 
 ### GitOps (ArgoCD)
 - ArgoCD runs in the `argocd` namespace, UI at `argocd.meirong.dev`
-- **Install**: ArgoCD is **Helm-managed** — chart `argo/argo-cd` `9.5.11` (appVersion v3.3.9), release `argocd`, values in `k8s/helm/values/argocd-values.yaml`, deployed via `just deploy-argocd`. `argocd-values.yaml` is the source of truth (repo-server DNS-gate initContainer, Cilium Gateway health check, ESO ignoreDifferences, `server.insecure`, slim install with dex/notifications/CRDs disabled all live there). History: originally a stock-manifest kubectl install; an in-place Helm adoption was impossible (immutable `.spec.selector` label differences between stock and chart), so it was migrated via a maintenance-window reinstall (delete chart-managed workloads, keep CRDs + Application CRs + `argocd-secret`/`argocd-redis`, then `helm upgrade --install`). Applications survived untouched (they're CRs); ArgoCD downtime ~4 min, managed services unaffected.
+- **Install**: ArgoCD is **Helm-managed** — chart `argo/argo-cd` `10.1.4` (appVersion v3.4.5; pin lives in `k8s/helm/justfile` as `argocd_chart_version`), release `argocd`, values in `k8s/helm/values/argocd-values.yaml`, deployed via `just deploy-argocd`. `argocd-values.yaml` is the source of truth (repo-server DNS-gate initContainer, Cilium Gateway health check, ESO ignoreDifferences, `server.insecure`, slim install with dex/notifications/CRDs disabled all live there). History: originally a stock-manifest kubectl install; an in-place Helm adoption was impossible (immutable `.spec.selector` label differences between stock and chart), so it was migrated via a maintenance-window reinstall (delete chart-managed workloads, keep CRDs + Application CRs + `argocd-secret`/`argocd-redis`, then `helm upgrade --install`). Applications survived untouched (they're CRs); ArgoCD downtime ~4 min, managed services unaffected.
 - **Sync poll interval**: 3 minutes (auto-syncs after every `git push`)
 - **Resource tracking**: ArgoCD v3.x defaults to the **annotation** method — managed objects carry `argocd.argoproj.io/tracking-id`, *not* the v2-era `app.kubernetes.io/instance` label. Handy for telling GitOps-owned resources from manual-helm ones: `kubectl -n <ns> get secret -l owner=helm` (a Helm release archive means manual-helm).
-- **Orphaned-resource monitoring** (2026-07-31): the `homelab` AppProject declares `orphanedResources` with `warn: false` + a 4-entry ignore list — it surfaces "in the cluster but not in Git" objects in each App's resource tree without raising warning conditions. `warn` is off on purpose because `ignore` has **no namespace field** and the four manual-helm namespaces (`kube-system`/`monitoring`/`argocd`/`external-secrets`) contribute ~255 permanently-unclaimed objects. Rationale, measurements, and the rejected alternative (`kor`) are in [`decisions/orphaned-resources.md`](decisions/orphaned-resources.md). ⚠️ **AppProjects are not synced by the `root` App** (it only watches `argocd/applications/`) — after editing `argocd/projects/homelab.yaml` you must `kubectl apply -f` it manually.
-- **Managed by ArgoCD** (auto-sync + selfHeal; homelab in-cluster, plus oracle-k3s as an external cluster):
+- **Orphaned-resource monitoring** (2026-07-31): the `homelab` AppProject declares `orphanedResources` with `warn: false` + a 4-entry ignore list — it surfaces "in the cluster but not in Git" objects in each App's resource tree without raising warning conditions. `warn` is off on purpose because `ignore` has **no namespace field** and the four manual-helm namespaces (`kube-system`/`monitoring`/`argocd`/`external-secrets`) contribute ~255 permanently-unclaimed objects. Rationale, measurements, and the rejected alternative (`kor`) are in `docs/decisions/orphaned-resources.md`. ⚠️ **AppProjects are not synced by the `root` App** (it only watches `argocd/applications/`) — after editing `argocd/projects/homelab.yaml` you must `kubectl apply -f` it manually.
+- **Managed by ArgoCD** (auto-sync + selfHeal; homelab in-cluster, plus oracle-k3s as an external cluster). **25 个 Application，全部在 `homelab` project 下**；核对: `kubectl -n argocd get app`：
   - `root` App → `argocd/applications/` (App-of-Apps; manages all child Applications below)
   - `personal-services` App → `manifests/{calibre-web.yaml,calibre-ebook-sync.yaml,personal-services-limits.yaml}` (homelab)
   - `gateway` App → `manifests/gateway.yaml` (homelab Cilium Gateway)
@@ -176,13 +196,19 @@ just apply   # Apply DNS/Tunnel changes
   - `loki` / `tempo` / `sloth` Apps (Helm charts, `monitoring` ns) — 2026-07-06 迁入 ArgoCD (homelab)
   - `backup` App → `backup/overlays/homelab` — homelab restic CronJob（2026-07-06 迁入；2026-07-07 与 oracle 合并为 kustomize base+overlay，oracle 侧经 `oracle-k3s` App 引 `backup/overlays/oracle`）
   - `external-dns` App → `manifests/external-dns-secret.yaml`（homelab，`external-dns` ns）— 只管 ExternalSecret，Helm release 本身是 manual-helm（见下）
+  - `cnpg-operator` App (Helm chart `cloudnative-pg` 0.29.0 / operator appVersion 1.30.0, ns `cnpg-system`) — 部署到 **oracle-k3s 外部集群**（operator 必须与它管的 `zitadel-pg` `Cluster` CR 同集群），见 Identity 段
+  - `opencost` App (Helm chart `opencost` 2.5.28, ns `opencost`, homelab) + `opencost-oracle` App（同 chart 同版本，部署到 **oracle-k3s 外部集群**，同 falco/cnpg 模式）— 双集群成本归因，见 `docs/reference/cost-and-rightsizing.md`
 - **NOT managed by ArgoCD** (manual `just` commands):
   - HashiCorp Vault — requires manual init/unseal (see `just homelab-recover` for restart recovery)
   - External Secrets Operator — depends on Vault
   - kube-prometheus-stack — Helm release（Loki/Tempo/sloth 已于 2026-07-06 迁 ArgoCD）
-  - NFS Provisioner — infrastructure layer
+  - Cilium — `just deploy-cilium`（`k8s/cilium/values.yaml`，pin v1.19.1）
   - Cloudflare Terraform — non-K8s resources
-  - **external-dns**（Helm chart `external-dns/external-dns` 1.21.1, `just deploy-external-dns`）— 采用理由/取舍/共存安全性见决策记录 [`decisions/external-dns-adoption.md`](decisions/external-dns-adoption.md)。Phase D 自动化补课首发：`sources: [gateway-httproute]`，`provider: cloudflare`（token 复用 oracle 侧 `cloud/oracle/cloudflare/terraform.tfvars` 里已验证有效的 Cloudflare API Token，⚠️ homelab 自己那份 `cloudflare/terraform/terraform.tfvars` 的 `cloudflare_api_token` 当前是**无效值**——格式其实是 Tunnel connector token（`eyJhIjoi...` base64 JSON），不是真正的 API Token，导致该项目 `terraform plan` 直接报错，是 2026-07-19 排查 external-dns 时顺带发现的既有问题，未修复，待补一个真正的 Zone:DNS:Edit token），`domainFilters: [meirong.dev]`，`policy: upsert-only`（永不删除，安全默认）+ `registry: txt`（owner id `homelab-externaldns`）。`homelab-gateway`（`manifests/gateway.yaml`）打了 `external-dns.alpha.kubernetes.io/target` 注解指向 tunnel CNAME 目标，因为 Cilium NodePort Gateway 本身没有可读的 LB 地址。2026-07-19 端到端验证通过（临时测试子域名建出真实 CNAME+TXT，proxied=true，与 terraform 现有记录格式一致，验证后已清理）；`argocd`/`book`/`grafana`/`llm`/`vault` 这 5 条现有记录仍由 terraform 管理，未迁移——尚待决定是否/何时把它们的归属权转给 external-dns 并相应精简 `cloudflare/terraform/terraform.tfvars`。
+  - ~~NFS Provisioner~~ — **已于 2026-07-11 卸载**，不再存在（见 Storage 段；PVC 一律 `local-path`）
+  - **external-dns**（Helm chart `external-dns/external-dns` 1.21.1；homelab `just deploy-external-dns`，oracle `just deploy-external-dns-oracle`）— 采用理由/取舍/完整迁移过程见决策记录 `docs/decisions/external-dns-adoption.md`。配置：`sources: [gateway-httproute]`、`provider: cloudflare`、`domainFilters: [meirong.dev]`、`policy: upsert-only`（永不删除，安全默认）+ `registry: txt`（owner id `homelab-externaldns` / `oracle-externaldns`，两实例各自独立）。两集群的 Gateway（`manifests/gateway.yaml` / `cloud/oracle/manifests/base/gateway.yaml`）都打了 `external-dns.alpha.kubernetes.io/target` 注解指向各自的 tunnel CNAME 目标，因为 Cilium NodePort Gateway 本身没有可读的 LB 地址。
+    - **✅ 2026-07-20 两集群全量完成**：homelab 5 条（argocd/book/grafana/llm/vault）+ oracle 10 条既有记录零停机移交 external-dns（预置 ownership TXT → `terraform state rm` 解耦），`cloudflare_dns_record.subdomains` 的 `for_each` 集合现已为空。两条隧道也都改成单条 `*.meirong.dev` 通配路由。**净效果：新增子域名只需要写一个 HTTPRoute** —— DNS 记录自动建、通配路由自动转发，`cloudflare/terraform` 不需要任何改动。
+    - ⚠️ `policy: upsert-only` 意味着**删掉 HTTPRoute 不会删掉 DNS 记录**，退役服务时要手工清理 CNAME + ownership TXT。
+    - **Cloudflare token**：两集群 external-dns 共用同一把 Zone 级 API Token（Vault `secret/homelab/external-dns` → ESO），最初取自 `cloud/oracle/cloudflare/terraform.tfvars`。⚠️ 注意 `cloudflare/terraform/` 这个 root 的有效 token 在 gitignored 的 `.env` 里，由 `justfile`（`set dotenv-load`）经 `-var` 注入——**必须用 `just plan`/`just apply`，裸跑 `terraform plan` 会读到 `terraform.tfvars` 里那段留存的无效值而报错**。（2026-07-19 曾把这个误判成"token 无效阻塞 terraform"，已更正。）
 - **oracle-k3s manifests** (`cloud/oracle/manifests/`): **under GitOps as of 2026-06-04** — managed by the homelab ArgoCD `oracle-k3s` Application over Tailscale (oracle registered as an external cluster, `https://100.107.166.37:6443`, bearer-token cred from Vault `secret/homelab/argocd-oracle-cluster` materialised by ESO into the `oracle-k3s-cluster` cluster Secret). Auto-sync + selfHeal + **prune** are on; stateful PVCs (`miniflux-db-pvc`, `karakeep-data`, `meilisearch-data`, `uptime-kuma-data`, `stirling-pdf-configs`) carry `argocd.argoproj.io/sync-options: Prune=false`. `git push` → reconciles within 3 min, same as homelab. Bootstrap RBAC (`argocd-manager` SA + cluster-admin) is in `cloud/oracle/bootstrap/argocd-manager.yaml` — applied manually once, kept **out** of the kustomize tree. The `vault-token` Secret (rss-system) remains a manual bootstrap dependency (not pruned, see `base/vault-store.yaml`). Migration record + caveats: `docs/plans/networking/2026-06-04-oracle-k3s-argocd-gitops.md`.
 
 ### Storage
@@ -249,7 +275,7 @@ just apply   # Apply DNS/Tunnel changes
   - **⚠️ 跨集群指标名差异 (2026-07-12 踩坑)**: otel prometheus receiver→prometheusremotewrite 链路按 OpenMetrics 规范给 counter 补 `_total` 后缀——同一指标 homelab 直连抓取叫 `envoy_cluster_upstream_rq_xx`，oracle 侧叫 `envoy_cluster_upstream_rq_xx_total`。写任何查询 oracle 指标的 PromQL 都要注意。**勿改 exporter 的 add_metric_suffixes**：会把 oracle 既有全部指标改名，破坏现有面板/告警。
   - **Sloth**: ArgoCD `sloth` App（Helm chart + `values/sloth-values.yaml`，2026-07-06 迁入 ArgoCD——旧文说 `just deploy-sloth` 非 ArgoCD 已过时）。`sloth.extraLabels.release=kube-prometheus-stack` 让生成的 PrometheusRule 被 operator 的 ruleSelector 选中; `defaultSloPeriod=30d`; 关掉 commonPlugins 的 git-sync sidecar。CRD `PrometheusServiceLevel` 由 chart 安装。Sloth 与规则评估都在 homelab 侧（oracle 指标已 remote-write 过来）。
   - **SLO 定义**: `manifests/slos.yaml`——**两个** `PrometheusServiceLevel`(ArgoCD `monitoring-dashboards` App 管理): `homelab-gateway-availability`(calibre-web/grafana/argocd/vault/bifrost) + `oracle-gateway-availability`(zitadel，2026-07 迁移后入口在 oracle；原 gotify-availability 已随 Gotify 下线一并移除，2026-07)，共 6 个服务 99%/30d(error=5xx, total=全部类)。**新增/改服务或目标**: 在对应 `spec.slos[]` 追加一条(`errorQuery`/`totalQuery` 用 `envoy_cluster_name=~".*/<ns>_<svc>_.*"` 正则匹配路由；oracle 侧记得用 `_total` 指标名 + `cluster="oracle-k3s"`) + 改 `objective`，`git push` 即可。
-  - **⚠️ errorQuery 末尾必须 `OR on() vector(0)` (2026-07-12 踩坑)**: envoy 按响应码类**惰性创建**序列——服务从未返回过 5xx(或 envoy 重启计数器重置)时 errorQuery 为空集，Sloth 生成的 SLI 除法整体消失 → **SLO 序列与燃尽率告警静默失效**。homelab 旧 SLO 一直有数只是因为各服务历史上恰好都出过 5xx。现有 7 条已统一加固，新增 SLO 必须沿用该模式(见 slos.yaml 头部注释)。
+  - **⚠️ errorQuery 末尾必须 `OR on() vector(0)` (2026-07-12 踩坑)**: envoy 按响应码类**惰性创建**序列——服务从未返回过 5xx(或 envoy 重启计数器重置)时 errorQuery 为空集，Sloth 生成的 SLI 除法整体消失 → **SLO 序列与燃尽率告警静默失效**。homelab 旧 SLO 一直有数只是因为各服务历史上恰好都出过 5xx。现有 6 条已统一加固，新增 SLO 必须沿用该模式(见 slos.yaml 头部注释)。
   - **告警**: 每个 SLO 生成多窗口燃尽率告警，`pageAlert→severity:critical` / `ticketAlert→severity:warning`，经现有 Alertmanager(`severity=~"critical|warning"`)路由到 Telegram。
   - **看板**: Grafana `SLO` 文件夹 → "SLO / Service Availability"(`manifests/slo-dashboard.yaml`，错误预算剩余/燃尽率/SLI 错误率)。
   - **⚠️ 零流量盲区**: 真实流量 SLI 在服务**无人访问时为 NaN**(error=0/total=0；vector(0) 加固后序列恒存在，不再整个消失)。这是一手指标的固有特性，非故障; 燃尽率告警只在真出现 5xx 时触发。闲置服务若要稳定可用性信号，叠一层合成探测(Uptime Kuma/blackbox)兜底。
@@ -262,17 +288,23 @@ just apply   # Apply DNS/Tunnel changes
   - **ESO metrics** are a one-time enablement: homelab ServiceMonitor via `just deploy-eso` (`serviceMonitor.enabled` in `external-secrets-values.yaml`); oracle metrics Service via `just install-eso` (`--set metrics.service.enabled=true`). The `eso-alerts.yaml` PrometheusRule then reconciles via ArgoCD on `git push`.
 
 ### Services
+
+> **这张表是服务清单的唯一真相源**（`docs/README.md` 与 `docs/ARCHITECTURE.md` 只链接到这里，不再各存一份副本）。
+> 核对方式: `kubectl --context <ctx> get httproute -A`。
+
 | Service | Cluster | Namespace | URL |
 |---------|---------|-----------|-----|
 | Homepage | oracle-k3s | `homepage` | `home.meirong.dev` |
 | IT-Tools | oracle-k3s | `personal-services` | `tool.meirong.dev` |
 | Stirling-PDF | oracle-k3s | `personal-services` | `pdf.meirong.dev` |
 | Squoosh | oracle-k3s | `personal-services` | `squoosh.meirong.dev` |
+| Excalidraw | oracle-k3s | `personal-services` | `draw.meirong.dev`（oauth2-proxy + ZITADEL） |
 | Trends | oracle-k3s | `personal-services` | `trends.meirong.dev` |
 | Timeslot | oracle-k3s | `personal-services` | `slot.meirong.dev` |
 | Uptime Kuma | oracle-k3s | `personal-services` | `status.meirong.dev` |
 | Miniflux | oracle-k3s | `rss-system` | `rss.meirong.dev` |
 | KaraKeep | oracle-k3s | `rss-system` | `keep.meirong.dev` |
+| RSSHub (+browserless/redis) | oracle-k3s | `rss-system` | Internal only |
 | Redpanda Connect | oracle-k3s | `rss-system` | Internal only |
 | Calibre-Web | homelab | `personal-services` | `book.meirong.dev` |
 | Grafana | homelab | `monitoring` | `grafana.meirong.dev` |
@@ -280,29 +312,26 @@ just apply   # Apply DNS/Tunnel changes
 | ArgoCD | homelab | `argocd` | `argocd.meirong.dev` |
 | ZITADEL (SSO) | oracle-k3s | `zitadel` | `auth.meirong.dev` |
 | Bifrost (LLM gateway) | homelab | `bifrost` | `llm.meirong.dev` (inference API + ZITADEL-gated admin UI) |
-| PostgreSQL | oracle-k3s | `rss-system` | Internal only |
+| PostgreSQL (`rss-postgres`, Miniflux) | oracle-k3s | `rss-system` | Internal only |
+| PostgreSQL (`zitadel-pg`, CNPG) | oracle-k3s | `zitadel` | Internal only |
 
 ## Conventions
 
-- **Task Runners**: Use `just` for Ansible, Helm, and Cloudflare Terraform; `make` for Proxmox Terraform.
+- **Task Runners**: `just` for 除 Oracle 外的一切（Ansible、Helm、Cloudflare Terraform、**Proxmox Terraform**、Tailscale Terraform）；`make` 只用于 `cloud/oracle/terraform/`。⚠️ `proxmox/terraform/Makefile` 是遗留的 0 字节空文件，别被它误导。
 - **Commits**: Conventional Commits format (`feat:`, `fix:`, `chore:`).
 - **Helm Config**: Prefer `values/*.yaml` files; avoid inline `--set` flags.
-- **New Services (GitOps flow)**:
-  1. Create `manifests/<service>.yaml`
-  2. Add HTTPRoute + optional ReferenceGrant to `manifests/gateway.yaml`
-  3. Add filename to `argocd/applications/personal-services.yaml` include list
-  4. Add subdomain to `cloudflare/terraform/terraform.tfvars`
-  5. `git push` → ArgoCD auto-deploys within 3 minutes
-  6. `cd cloudflare/terraform && just apply` for DNS
-  7. Add the new URL to the Uptime Kuma provisioner (see below)
-  - **Exception**: services needing ArgoCD Image Updater (e.g. `it-tools`) get their own Kustomize Application (`manifests/<service>/`) and `argocd/applications/<service>.yaml` instead of joining `personal-services`
-- **Uptime Kuma monitors**: All monitors are defined as code in `manifests/uptime-kuma.yaml` under the `MONITORS` list in the `uptime-kuma-provisioner` ConfigMap. To add a monitor for a new service:
-  1. Append an entry to `MONITORS` in the ConfigMap:
+- **New Services (GitOps flow)** — 详细模板见 skill `.claude/skills/add-service/SKILL.md`。**DNS 已无手工步骤**（2026-07-20 起 external-dns + 通配隧道路由，见 GitOps 段）：写 HTTPRoute 就是建 DNS，**不要**改 `cloudflare/terraform`。
+  - **homelab**: 建 `manifests/<service>.yaml` → HTTPRoute 追加到 `manifests/gateway.yaml`（parentRef `homelab-gateway`/`kube-system`/**8000**）→ 文件名加进 `argocd/applications/personal-services.yaml` 的 include 列表
+  - **oracle-k3s**（无状态个人服务的默认落点，容量更宽裕；⚠️ arm64，先确认镜像有 `linux/arm64`）: 建 `cloud/oracle/manifests/personal-services/<service>.yaml`（HTTPRoute 写在同一个文件里，parentRef `oracle-gateway`/`kube-system`/**80**）→ 路径加进 `cloud/oracle/manifests/kustomization.yaml` 的 `resources`
+  - 两边共同: 新 namespace 需要目标 ns 里的 ReferenceGrant（**`v1beta1`**，声明成 `v1` 会让整个 App `ComparisonError`）；PVC 一律 `storageClassName: local-path`（`nfs-client` 已于 2026-07-11 卸载，引用它的 PVC 会永久 Pending）；`git push` → ArgoCD 3 分钟内同步；最后补 homepage 条目 + Uptime Kuma monitor（见下）
+  - **Exception**: 需要 ArgoCD Image Updater 的服务用自己的 Kustomize Application（`manifests/<service>/` + `argocd/applications/<service>.yaml`），不并入 `personal-services`
+- **Uptime Kuma monitors**: Uptime Kuma 跑在 oracle-k3s；monitor 全部声明式定义在 `cloud/oracle/manifests/uptime-kuma/provisioner.yaml` 的 `uptime-kuma-provisioner` ConfigMap 里的 `MONITORS` 列表。To add a monitor for a new service:
+  1. Append an entry to `MONITORS` in the ConfigMap（oracle 本地服务用集群内 Service URL，homelab 服务用公网 URL）:
      ```python
      {"name": "My Service", "url": "https://<subdomain>.meirong.dev"},
      ```
   2. `git push` → ArgoCD PostSync hook re-runs the provisioner Job automatically
-  3. The script is idempotent: existing monitors are skipped, only new ones are created
+  3. 幂等 + **声明式 prune**：不在 `MONITORS` 里的 monitor 会被删除，所以从列表里摘掉一条就是退役它（不会在状态页上留一个永久红的孤儿）
   - Admin credentials live in Vault at `secret/oracle-k3s/uptime-kuma` (keys: `admin_username`, `admin_password`), synced via ESO ExternalSecret `uptime-kuma-admin` in `personal-services` namespace
 - **Oracle service secrets**: workloads running on `oracle-k3s` should use Vault paths under `secret/oracle-k3s/<service>`. Do not store Oracle-only app credentials under `secret/homelab/*`.
 - **Grafana dashboards (新增/修改)**: dashboard 以 ConfigMap 形式放 `k8s/helm/manifests/`，由 ArgoCD `monitoring-dashboards` App 同步、Grafana sidecar 热加载。约定:
@@ -312,7 +341,7 @@ just apply   # Apply DNS/Tunnel changes
   4. 把文件名加入 `argocd/applications/monitoring-dashboards.yaml` 的 `directory.include` 列表。
   5. `git push` → ArgoCD 同步; 若改动落在 `grafana.sidecar`/`grafana.ini`(folder / 多集群选择器 / Home / datasource uid) 则还需 `just deploy-prometheus`。
   - 详见 Observability › **Dashboards 组织**。
-- **Homepage config updates**: ArgoCD auto-syncs the ConfigMap on `git push`, but `subPath` volume mounts require a pod restart to reload — run `just update-homepage` (does `apply` + `rollout restart` in one step). Do NOT use `kubectl delete configmap` as ArgoCD will conflict.
+- **Homepage config updates**: Homepage 跑在 **oracle-k3s**（`cloud/oracle/manifests/homepage/homepage.yaml`，随 `oracle-k3s` App 同步）。ArgoCD 会在 `git push` 后自动同步 ConfigMap，但配置是用 `subPath` 挂载的、**不会热加载** —— 必须 `kubectl --context oracle-k3s rollout restart deployment/homepage -n homepage` 才生效。不要用 `kubectl delete configmap`（会和 ArgoCD 冲突）。
 - **HTTPRoute template**: Always include explicit `group`/`kind` in `parentRefs` and `group`/`kind`/`weight` in `backendRefs` to prevent ArgoCD OutOfSync drift caused by Gateway controller defaults.
 - **ArgoCD Image Updater** (chart 1.2.4 / image v1.2.2): Uses CRD model — create an `ImageUpdater` CR (not just annotations). Set `useAnnotations: true` in the CR to read image config from Application annotations. Use strategy `newest-build` (not `latest`, deprecated). Chart ≥1.2 moved the log-level Helm key from top-level `logLevel` to `config.log.level` (old key silently ineffective). ⚠️ Currently idle — no `ImageUpdater` CRs exist in the cluster.
 - **ArgoCD Application definitions** (`argocd/applications/*.yaml`): The `root` Application (App-of-Apps) watches this directory recursively, so editing any `*.yaml` here and pushing is enough — ArgoCD will reconcile within the 3-min poll. Manual `kubectl apply` is only needed for the initial `root.yaml` bootstrap, or if `root` itself is missing.

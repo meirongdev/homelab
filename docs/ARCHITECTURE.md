@@ -40,32 +40,32 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 
 | 决策 | 结论 | 文档 |
 |------|------|------|
-| CNI | Cilium (eBPF + VXLAN) | 详见 `decisions/` |
-| Ingress | Cilium Gateway API (非 Traefik) | `decisions/gateway-controller-evaluation.md` |
-| 镜像更新 | ArgoCD Image Updater (CRD 模式) | `decisions/argocd-image-updater.md` |
-| 备份工具 | restic (非 Kopia) | `plans/storage/2026-07-04-*.md` |
-| SSO | 应用原生 OIDC, 非共享入口层 SSO | `plans/networking/2026-03-08-*` |
-| 跨集群网络 | Tailscale Pod CIDR + Cilium ClusterMesh | `reference/tailscale-network.md` |
+| CNI | Cilium (eBPF + VXLAN)，双集群统一；从 Flannel 迁入 | [`plans/networking/2026-03-06-cilium-mesh-installation.md`](plans/networking/2026-03-06-cilium-mesh-installation.md)（无独立 ADR） |
+| Ingress | Cilium Gateway API (非 Traefik) | [`decisions/gateway-controller-evaluation.md`](decisions/gateway-controller-evaluation.md) |
+| 镜像更新 | ArgoCD Image Updater (CRD 模式；当前闲置无 CR) | [`decisions/argocd-image-updater.md`](decisions/argocd-image-updater.md) |
+| 告警投递 | Alertmanager 原生 telegramConfigs (Gotify 已退役) | [`decisions/alerting-telegram-migration.md`](decisions/alerting-telegram-migration.md) |
+| 子域名 DNS | external-dns (HTTPRoute 声明式，取代 Terraform 手管) | [`decisions/external-dns-adoption.md`](decisions/external-dns-adoption.md) |
+| 成本/右尺寸 | OpenCost 走 collector 旁路 + KRR 窄口径采集 | [`decisions/opencost-krr-data-sources.md`](decisions/opencost-krr-data-sources.md) |
+| 配置漂移体检 | ArgoCD 原生 `orphanedResources` (否决 kor) | [`decisions/orphaned-resources.md`](decisions/orphaned-resources.md) |
+| 备份工具 | restic (非 Kopia)，无 server 直推 106 | [`plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md`](plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md) |
+| SSO | 应用原生 OIDC, 非共享入口层 SSO | [`plans/security/2026-03-08-cilium-zitadel-sso-plan.md`](plans/security/2026-03-08-cilium-zitadel-sso-plan.md) |
+| 跨集群网络 | Tailscale Pod CIDR + Cilium ClusterMesh | [`reference/tailscale-network.md`](reference/tailscale-network.md) |
 
 ## Service Inventory
 
-| 服务 | 集群 | URL | 认证 |
-|------|------|-----|------|
-| Calibre-Web | homelab | book.meirong.dev | 内置 |
-| Grafana | homelab | grafana.meirong.dev | 内置 |
-| Vault | homelab | vault.meirong.dev | 内置 |
-| ArgoCD | homelab | argocd.meirong.dev | 内置 |
-| ZITADEL | oracle-k3s | auth.meirong.dev | OIDC |
-| Homepage | oracle-k3s | home.meirong.dev | 公开 |
-| Uptime Kuma | oracle-k3s | status.meirong.dev | 公开 |
-| Miniflux | oracle-k3s | rss.meirong.dev | 内置 |
-| KaraKeep | oracle-k3s | keep.meirong.dev | 内置 |
+完整清单（含 namespace、内部服务、认证方式）在 [CONVENTIONS.md § Services](CONVENTIONS.md#services) —
+**唯一真相源，此处不再复制**（此前三处各存一份副本，已各自漂移）。
+
+分布速览: homelab 跑 **Calibre-Web / Grafana / Vault / ArgoCD / Bifrost**；其余（ZITADEL、Homepage、
+Uptime Kuma、Miniflux、KaraKeep、IT-Tools、Stirling-PDF、Squoosh、Excalidraw、Trends、Timeslot）都在 oracle-k3s。
 
 ## Security (Defense in Depth)
 
-11 层纵深防御: 边缘(WAF) → 身份(OIDC) → 密钥(Vault+ESO) → 准入(PSA) → 策略(Kyverno) → 供应链(Trivy) → CIS → 节点加固 → 网络策略 → 运行时(Tetragon/Falco) → 备份(restic)。
+11 层纵深防御: 边缘(WAF) → 身份(OIDC) → 密钥(Vault+ESO) → 准入(PSA) → 策略(Kyverno) → 供应链(Trivy) → CIS → 节点加固 → 网络(**仅 Hubble 可见性**) → 运行时(Tetragon/Falco) → 备份(restic)。
 
-详见: `reference/security.md`
+⚠️ 第 9 层是 11 层里唯一没落到"管控"的：集群内无自建 `CiliumNetworkPolicy`，**网络默认拒绝刻意延后**。
+
+详见: [`reference/security.md`](reference/security.md)（逐层状态表 + 威胁覆盖矩阵）
 
 ## Current Active Work
 

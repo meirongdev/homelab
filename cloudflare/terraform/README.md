@@ -46,7 +46,7 @@ just apply  # Apply changes
 > cluster (`llm.meirong.dev`), not a Cloudflare AI Gateway. Bifrost runs inside the
 > Tailscale-connected cluster so it can reach `100.x` model machines directly — which
 > a Cloudflare AI Gateway custom provider never could (CF's edge can't see the tailnet).
-> See `docs/plans/2026-06-07-bifrost-llm-gateway.md`.
+> See `docs/plans/apps/2026-06-07-bifrost-llm-gateway.md`.
 
 ## Adding a New Subdomain
 

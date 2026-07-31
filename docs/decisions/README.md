@@ -12,5 +12,8 @@
 ## ADR Convention
 
 新建决策记录:
-- 命名: `NNNN-title.md` (如 `0003-use-restic-over-kopia.md`)
-- 必含: 标题/日期/状态/上下文/决策/结论/后果
+- 命名: **描述性 kebab-case**，`<topic>.md`（如 `external-dns-adoption.md`）——上面 6 条全部如此，
+  沿用即可。（本节此前写的是 `NNNN-title.md` 编号式，但**从未有任何一条 ADR 采用**，
+  2026-07-31 改为记录实际约定。日期写在文首，不靠文件名排序。）
+- 必含: 标题/日期/状态/上下文(Context)/决策(Decision)/后果(Consequences)
+- 决策被推翻时**不删旧文件**：改文首状态为 `已废弃`，并链到取代它的记录

@@ -26,7 +26,7 @@
 
 唯一能造成**永久损失**的场景是 storage-106 磁盘 + 屋内事故。
 
-> ✅ **已定方案（2026-07-06）**：serverless **restic**，每集群 CronJob 逻辑 dump（Vault raft snapshot / pg_dump / sqlite `.backup`）→ **106 ZFS 加密仓库**（`mrstorage/restic`，raidz1 + sanoid 保护）。**先本地仓库、离站 later**（后续 rclone/`restic copy` → OCI always-free 20GB 或 B2）。完整执行计划见 **`docs/plans/2026-07-06-storage-local-migration-and-backup-redesign.md`**。
+> ✅ **已定方案（2026-07-06）**：serverless **restic**，每集群 CronJob 逻辑 dump（Vault raft snapshot / pg_dump / sqlite `.backup`）→ **106 ZFS 加密仓库**（`mrstorage/restic`，raidz1 + sanoid 保护）。**先本地仓库、离站 later**（后续 rclone/`restic copy` → OCI always-free 20GB 或 B2）。完整执行计划见 **`docs/plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md`**。
 
 - 分层：**P0 小数据（Vault + 各 PG + sqlite，总量 <2GB）** 进 restic；**Calibre 书库（100Gi）** 不进 restic，靠 ZFS raidz1 + sanoid（书可再下载，用户已确认不离站）。
 - 凭据：restic repo 密码 + 专用 SSH key 入 Vault `secret/homelab/restic` → ESO。
@@ -95,7 +95,7 @@
 
 个人服务很轻，24GB 用不满。除接收 Gotify（P0）外：
 
-- ✅ **ZITADEL 迁 oracle 已决（2026-07-06）**：不再只是预案——全家 SSO 可用性 > 家里笔记本；`auth.meirong.dev` 走 tunnel、在哪个集群对外无感；PG 迁 oracle local-path，用现成 pg_dump/restore SOP。执行见 2026-07-06 计划 Phase 3 Task 8（纳入 `docs/plans/2026-07-04-zitadel-to-oracle-k3s.md`）。
+- ✅ **ZITADEL 迁 oracle 已决（2026-07-06）**：不再只是预案——全家 SSO 可用性 > 家里笔记本；`auth.meirong.dev` 走 tunnel、在哪个集群对外无感；PG 迁 oracle local-path，用现成 pg_dump/restore SOP。执行见 2026-07-06 计划 Phase 3 Task 8（纳入 `docs/plans/apps/2026-07-04-zitadel-to-oracle-k3s.md`）。
 
 ---
 
@@ -150,4 +150,4 @@
 
 **对症方案**：想增内存 → 给 pve 加内存条（P1-4）；想要真·第二计算节点 → 加一台 N100 级迷你 PC 当 worker，勿复用存储机。
 
-**106 的正确用法（不是加计算，而是升级存储层）**：抬 ARC 读缓存 + ZFS 快照 + 云端离站,把它从"单点裸盘"变成三层受保护存储——同时落地本文档 P0-1 的离站备份。执行细节（备份方案待重新设计）见 **`docs/plans/2026-07-04-storage-106-utilization-and-backup-simplification.md`**。
+**106 的正确用法（不是加计算，而是升级存储层）**：抬 ARC 读缓存 + ZFS 快照 + 云端离站,把它从"单点裸盘"变成三层受保护存储——同时落地本文档 P0-1 的离站备份。执行细节（备份方案待重新设计）见 **`docs/plans/storage/2026-07-04-storage-106-utilization-and-backup-simplification.md`**。
