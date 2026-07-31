@@ -75,12 +75,12 @@ deploy-loki:
         --timeout 10m
 
 # ⚠️ LEGACY — 2026-07-06 已迁 ArgoCD (argocd/applications/sloth.yaml)
-# 改 values/sloth-values.yaml → commit → ArgoCD auto-sync。
+# 改 values/sloth.yaml → commit → ArgoCD auto-sync。
 deploy-sloth:
     helm upgrade --install sloth sloth/sloth \
         --namespace {{namespace}} \
         --kube-context {{ctx}} \
-        --values values/sloth-values.yaml \
+        --values values/sloth.yaml \
         --version 0.16.0 \
         --timeout 5m
     @echo "✅ Sloth deployed. Check: kubectl --context {{ctx}} -n {{namespace}} get pods -l app.kubernetes.io/name=sloth"
@@ -116,11 +116,11 @@ personal_ns := "personal-services"
 
 # 部署 Calibre-Web (使用原生 K8s 清单)
 deploy-calibre:
-    kubectl --context {{ctx}} apply -f manifests/calibre-web.yaml
+    kubectl --context {{ctx}} apply -f manifests/personal-services/calibre-web.yaml
 
 # 删除 Calibre-Web
 delete-calibre:
-    kubectl --context {{ctx}} delete -f manifests/calibre-web.yaml
+    kubectl --context {{ctx}} delete -f manifests/personal-services/calibre-web.yaml
 
 # ⬇️ 备份 (serverless restic → storage-106 ZFS 仓库) ⬇️
 # 设计/运维见 docs/plans/2026-07-06-storage-local-migration-and-backup-redesign.md + docs/runbooks/backup-recovery.md
@@ -146,7 +146,7 @@ backup-status:
 
 # 部署电子书同步 CronJob 和监控
 deploy-ebook-sync:
-    kubectl --context {{ctx}} apply -f manifests/calibre-ebook-sync.yaml
+    kubectl --context {{ctx}} apply -f manifests/personal-services/calibre-ebook-sync.yaml
     @echo "✅ 电子书同步 CronJob 已部署"
 
 # 查看电子书同步 CronJob 状态
@@ -179,7 +179,7 @@ sync-ebooks-no-backup:
 
 # 删除电子书同步 CronJob
 delete-ebook-sync:
-    kubectl --context {{ctx}} delete -f manifests/calibre-ebook-sync.yaml || true
+    kubectl --context {{ctx}} delete -f manifests/personal-services/calibre-ebook-sync.yaml || true
     @echo "✅ 电子书同步 CronJob 已删除"
 
 # 查看电子书备份
@@ -218,20 +218,20 @@ cleanup-logs:
 
 # 部署 Cloudflare Tunnel
 deploy-cloudflare-tunnel: create-cloudflare-secret
-    kubectl --context {{ctx}} apply -f manifests/cloudflare-tunnel.yaml
+    kubectl --context {{ctx}} apply -f manifests/cloudflare/cloudflare-tunnel.yaml
 
 # 删除 Cloudflare Tunnel
 delete-cloudflare-tunnel:
-    kubectl --context {{ctx}} delete -f manifests/cloudflare-tunnel.yaml
+    kubectl --context {{ctx}} delete -f manifests/cloudflare/cloudflare-tunnel.yaml
 
 # 部署 Gateway API 配置 (Cilium Gateway + HTTPRoutes)
 deploy-gateway:
-    kubectl --context {{ctx}} apply -f manifests/gateway.yaml
+    kubectl --context {{ctx}} apply -f manifests/gateway/gateway.yaml
     @echo "✅ Cilium Gateway API resources applied!"
 
 # 删除 Gateway API 配置
 delete-gateway:
-    kubectl --context {{ctx}} delete -f manifests/gateway.yaml || true
+    kubectl --context {{ctx}} delete -f manifests/gateway/gateway.yaml || true
 
 # 查看个人服务状态
 status-personal:
@@ -411,7 +411,7 @@ deploy-vault:
         --namespace {{vault_ns}} \
         --kube-context {{ctx}} \
         --version {{vault_version}} \
-        --values values/vault-values.yaml
+        --values values/vault.yaml
 
 # 初始化 Vault (仅第一次运行)
 vault-init:
@@ -433,16 +433,16 @@ deploy-eso:
         --create-namespace \
         --kube-context {{ctx}} \
         --version {{eso_version}} \
-        --values values/external-secrets-values.yaml
+        --values values/external-secrets.yaml
 
-# 部署 external-dns（HTTPRoute source，Cloudflare provider；见 manifests/external-dns-secret.yaml 取 token）
+# 部署 external-dns（HTTPRoute source，Cloudflare provider；见 manifests/external-dns/external-dns-secret.yaml 取 token）
 deploy-external-dns:
     helm upgrade --install external-dns external-dns/external-dns \
         --namespace external-dns \
         --create-namespace \
         --kube-context {{ctx}} \
         --version {{external_dns_version}} \
-        --values values/external-dns-values.yaml
+        --values values/external-dns.yaml
 
 # 部署 external-dns 到 oracle-k3s（第二个实例，txtOwnerId=oracle-externaldns，target 走 oracle tunnel）。
 # ns + Cloudflare token 的 ExternalSecret 由 oracle kustomize (cloud/oracle/manifests/base/external-dns.yaml)
@@ -453,7 +453,7 @@ deploy-external-dns-oracle:
         --create-namespace \
         --kube-context oracle-k3s \
         --version {{external_dns_version}} \
-        --values values/external-dns-oracle-values.yaml
+        --values values/external-dns-oracle.yaml
 
 # 配置 Vault 与 ESO 的连接 (需要先 init)
 setup-vault-eso:
@@ -464,7 +464,7 @@ setup-vault-eso:
         --namespace external-secrets \
         --from-literal=token=$token \
         --dry-run=client -o yaml | kubectl --context {{ctx}} apply -f -
-    kubectl --context {{ctx}} apply -f manifests/vault-eso-config.yaml
+    kubectl --context {{ctx}} apply -f manifests/vault-eso/vault-eso-config.yaml
 
 # 备份 vault-keys.json 为 K8s Secret（防止丢失）
 vault-backup-keys:
@@ -486,7 +486,7 @@ argocd_ns := "argocd"
 argocd_chart_version := "10.1.4"
 
 # 一键安装 ArgoCD + 应用配置（幂等，可重复执行）
-# 改为官方 Helm chart 部署（k8s/helm/values/argocd-values.yaml）
+# 改为官方 Helm chart 部署（k8s/helm/values/argocd.yaml）
 # 该 values 关闭了 dex/notifications/applicationSet 三个未使用组件、给所有组件加了 resources
 deploy-argocd: add-repos
     # 1. 安装/升级 ArgoCD（CRD 由 chart 接管，重装时保留旧 CRD）
@@ -495,11 +495,11 @@ deploy-argocd: add-repos
         --create-namespace \
         --kube-context {{ctx}} \
         --version {{argocd_chart_version}} \
-        --values values/argocd-values.yaml \
+        --values values/argocd.yaml \
         --wait \
         --timeout 10m
     # 2. 注册 Gateway HTTPRoute（argocd namespace 已存在）
-    kubectl --context {{ctx}} apply -f manifests/gateway.yaml
+    kubectl --context {{ctx}} apply -f manifests/gateway/gateway.yaml
     # 3. 注册 AppProject + Applications
     kubectl --context {{ctx}} apply -f ../../argocd/projects/homelab.yaml
     kubectl --context {{ctx}} apply -f ../../argocd/applications/
@@ -544,7 +544,7 @@ vault-setup-auto-unseal:
     kubectl --context {{ctx}} create secret generic vault-auto-unseal -n {{vault_ns}} \
         --from-literal=unseal-key="$UNSEAL_KEY" --dry-run=client -o yaml | kubectl --context {{ctx}} apply -f -
     echo "⏳ Upgrading Vault Helm chart with auto-unseal postStart hook..."
-    helm upgrade vault hashicorp/vault -n {{vault_ns}} --kube-context {{ctx}} --version {{vault_version}} -f values/vault-values.yaml
+    helm upgrade vault hashicorp/vault -n {{vault_ns}} --kube-context {{ctx}} --version {{vault_version}} -f values/vault.yaml
     echo "✅ Vault auto-unseal configured. Next restart will unseal automatically."
 
 # 重启后健康检查（快速诊断断电恢复状态）

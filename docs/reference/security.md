@@ -19,11 +19,11 @@
 |---|----|------|------|----------|------|
 | 1 | 边缘 | Cloudflare WAF + Tunnel + 限流 | ✅ 生产 | `cloudflare/terraform/waf.tf` | 双（zone 级） |
 | 2 | 身份 | ZITADEL OIDC + GitHub 联邦 | ✅ 生产 | `zitadel/`, 各 app values | oracle-k3s(IdP，2026-07-06 迁自 homelab，见 [zitadel-to-oracle-k3s.md](../plans/apps/2026-07-04-zitadel-to-oracle-k3s.md)) |
-| 3 | 密钥 | Vault + ESO + 健康告警 | ✅ 生产 | `k8s/helm/values/vault-*`, `manifests/eso-alerts.yaml` | 双 |
+| 3 | 密钥 | Vault + ESO + 健康告警 | ✅ 生产 | `k8s/helm/values/vault-*`, `manifests/monitoring/alerts/eso-alerts.yaml` | 双 |
 | 4 | 准入：Pod 基线 | Pod Security Admission | ✅ 生产 | `just harden-psa` / oracle ns 清单 | 双 |
 | 5 | 准入：策略即代码 | Kyverno（Audit） | ✅ 生产 | `values/kyverno.yaml`, `manifests/kyverno-policies/` | homelab |
 | 6 | 供应链/CVE | Trivy Operator | ✅ 生产 | `values/trivy-operator.yaml` | homelab |
-| 7 | CIS 合规 | kube-bench（周巡检） | ✅ 已装 | `manifests/kube-bench.yaml` | homelab |
+| 7 | CIS 合规 | kube-bench（周巡检） | ✅ 已装 | `manifests/kube-bench/kube-bench.yaml` | homelab |
 | 8 | 节点加固 | k3s `protect-kernel-defaults` + sysctl | ⏳ 待重启生效 | `k8s/ansible/playbooks/setup-k3s.yaml` | homelab |
 | 9 | 网络 | Cilium NetworkPolicy + Hubble 可见性 | 🟡 仅可见性 | Cilium（默认拒绝刻意延后） | 双 |
 | 10 | 运行时检测 | Tetragon(homelab) / Falco+Falcosidekick(oracle) | ✅ 已实现（Falco→Telegram 已接通，2026-07 起原生 output，不再经 Gotify） | `values/{tetragon,falco}.yaml` | 双（分别选型） |
@@ -50,7 +50,7 @@
 
 - **Vault = 所有 app 密钥的唯一真相源**；ESO 自动同步 Vault → K8s Secret。
 - **路径约定**：homelab 用 `secret/homelab/<svc>`，oracle 用 `secret/oracle-k3s/<svc>`。
-- **静默陈旧防护**：ESO 健康告警（`externalsecret`/`(cluster)secretstore` `Ready=False`）经 Telegram 报警——堵住"Vault 封印/token 过期 → Secret 不再刷新但 app 仍用旧值"的盲区。规则 `manifests/eso-alerts.yaml`。
+- **静默陈旧防护**：ESO 健康告警（`externalsecret`/`(cluster)secretstore` `Ready=False`）经 Telegram 报警——堵住"Vault 封印/token 过期 → Secret 不再刷新但 app 仍用旧值"的盲区。规则 `manifests/monitoring/alerts/eso-alerts.yaml`。
 - 本地 `.env` 仅用于 bootstrap token（gitignore）。
 
 ## 5. 准入管控 (Admission)
@@ -82,14 +82,14 @@
 - 系统 ns 由 Kyverno 默认 resourceFilters 排除（CNI/控制面绝不 gate）。ClusterPolicy 的服务端默认字段经 App `ignoreDifferences` 消除 OutOfSync。
 
 ### 5.3 LimitRange 资源护栏
-- `manifests/namespace-guardrails.yaml`（ArgoCD `namespace-guardrails` App）给轻量应用 ns（external-secrets/zitadel/argocd/vault/default）注入默认 `requests`(cpu25m/mem64Mi) + `limits.memory`(宽松 1Gi，避免 request>limit 拒绝；不设 cpu limit 避免节流）。personal-services 用自带的 `personal-services-limits.yaml`。
+- `manifests/namespace-guardrails/namespace-guardrails.yaml`（ArgoCD `namespace-guardrails` App）给轻量应用 ns（external-secrets/zitadel/argocd/vault/default）注入默认 `requests`(cpu25m/mem64Mi) + `limits.memory`(宽松 1Gi，避免 request>limit 拒绝；不设 cpu limit 避免节流）。personal-services 用自带的 `personal-services-limits.yaml`。
 - 双重作用：① 节点保护（未声明资源的容器不再无界）；② LimitRanger 在 Kyverno 校验前注入默认值 → 新建 Pod 自动满足 require-requests-limits。**monitoring(重量级)/kube-system(系统) 刻意不加**，避免拒绝风险。
 
 ## 6. 供应链与漏洞扫描 (Supply chain / CVE) — Trivy Operator
 
 - **扫描面**：镜像 CVE + 配置审计 + RBAC 评估 + **镜像内暴露密钥**（最高信号）。结果以 CR 落地（`vulnerabilityreports`/`configauditreports`/`exposedsecretreports`/`rbacassessmentreports`）。
 - **热节点调优**：`scanJobsConcurrentLimit:1`（串行，杜绝扫描器风暴）+ `builtInTrivyServer`(ClientServer + `local-path` PVC 持久化漏洞 DB，避免反复重下；2026-07-11 随存储本地化迁移离开 NFS) + `severity:HIGH,CRITICAL` + `ignoreUnfixed` + 关 `clusterCompliance`（CIS 交给 kube-bench）。
-- **接入可观测**：ServiceMonitor（带 `release:kube-prometheus-stack`）→ Prometheus 抓 `trivy_image_vulnerabilities` 等；告警 `manifests/trivy-alerts.yaml`（critical CVE→warning、暴露密钥 High/Critical→**critical**、absent 元告警）经 Telegram；看板 Grafana `Security` 文件夹。
+- **接入可观测**：ServiceMonitor（带 `release:kube-prometheus-stack`）→ Prometheus 抓 `trivy_image_vulnerabilities` 等；告警 `manifests/monitoring/alerts/trivy-alerts.yaml`（critical CVE→warning、暴露密钥 High/Critical→**critical**、absent 元告警）经 Telegram；看板 Grafana `Security` 文件夹。
 
 ## 7. CIS 合规与节点加固
 

@@ -37,7 +37,7 @@ GitOps 覆盖与安全纵深已成熟。剩余债务集中三处：
    - R2 backend 已在 `cloudflare/terraform/provider.tf:11` 写好但**注释掉**。
    - 后果：笔记本丢失/换机 = 逐资源 `import` 重建；state 含明文密钥（CF token 等）却只有一份本地副本；无锁。
    - state 文件未提交进 git（已核查，`.gitignore` 生效）——风险是"丢"，不是"泄"。
-2. **新子域名两步走**：`cloudflare/terraform/terraform.tfvars` + `k8s/helm/manifests/gateway.yaml` 手动双改（CONVENTIONS 固定流程），可自动化掉 DNS 一半（§四 Phase D）。
+2. **新子域名两步走**：`cloudflare/terraform/terraform.tfvars` + `k8s/helm/manifests/gateway/gateway.yaml` 手动双改（CONVENTIONS 固定流程），可自动化掉 DNS 一半（§四 Phase D）。
 
 ### C. 自动化缺口
 

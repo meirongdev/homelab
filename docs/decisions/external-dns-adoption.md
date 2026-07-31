@@ -9,7 +9,7 @@
 加一个新子域名，此前是 **CONVENTIONS 固定的两步手改**：
 
 1. `cloudflare/terraform/terraform.tfvars` 的 `ingress_rules` 加一条 → `terraform apply` 建 CNAME（指向 tunnel）；
-2. `k8s/helm/manifests/gateway.yaml` 加 `HTTPRoute`（+ 需要时 `ReferenceGrant`）声明 hostname→Service。
+2. `k8s/helm/manifests/gateway/gateway.yaml` 加 `HTTPRoute`（+ 需要时 `ReferenceGrant`）声明 hostname→Service。
 
 两处分属不同工具、不同仓库路径，**必须同步改、漏一处就半通**（只改 tfvars → Cloudflare 转发进来但集群不知道路由去哪；只改 gateway → 集群能路由但公网无 DNS）。是纯手工、易漏、无强制校验的 toil。DNS 那一半（第 1 步）本质上可由集群状态推导——HTTPRoute 里已经写了 hostname，再让人去 tfvars 抄一遍是冗余。
 
@@ -90,7 +90,7 @@
 
 oracle-k3s 处境与 homelab 当初一致（`oracle-gateway` 也是 addressless LoadBalancer，`PROGRAMMED=False`），且子域名更多。本轮全量落地：
 
-- **第二个 external-dns 实例**（`just deploy-external-dns-oracle`，`values/external-dns-oracle-values.yaml`）。`txtOwnerId=oracle-externaldns`（**必须**与 homelab 的 `homelab-externaldns` 不同——共享同一 zone，owner id 撞了会互相误判所有权）。upsert-only / gateway-httproute / cloudflare-proxied。
+- **第二个 external-dns 实例**（`just deploy-external-dns-oracle`，`values/external-dns-oracle.yaml`）。`txtOwnerId=oracle-externaldns`（**必须**与 homelab 的 `homelab-externaldns` 不同——共享同一 zone，owner id 撞了会互相误判所有权）。upsert-only / gateway-httproute / cloudflare-proxied。
 - **Secret 管线**：`cloud/oracle/manifests/base/external-dns.yaml`（ns + ExternalSecret）经 oracle 的 `vault-backend` ClusterSecretStore（走 Tailscale 连 homelab Vault）读**同一把** zone token（`secret/homelab/external-dns` `api_token`）——它是 zone 级 token，对 oracle 子域名同样有效。
 - **target**：`oracle-gateway` 无可读地址，故在 `base/gateway.yaml` 打 `external-dns.alpha.kubernetes.io/target=<oracle tunnel>` 注解（同 homelab）。⚠️ **实测 `--default-targets` / `--force-default-targets` 对 addressless gateway source 都不生效**，注解是唯一可行机制。⚠️ 该 gateway 归 oracle-k3s ArgoCD App（selfHeal）管，手动注解会被回滚，故注解必须进 git 由 ArgoCD 施加（本次经 push→ArgoCD 激活并验证）。
 - **迁移 10 条**（`rss`/`home`/`status`/`tool`/`pdf`/`squoosh`/`keep`/`slot`/`trends`/`auth`）：预埋 owner=oracle-externaldns 的 TXT → external-dns 零停机接管（连续 `All records are already up to date`，10 条 CNAME `modified_on` 全程未变，含 `auth`/SSO），再 `state rm` + terraform 解耦（同 homelab）。
@@ -99,8 +99,8 @@ oracle-k3s 处境与 homelab 当初一致（`oracle-gateway` 也是 addressless 
 ### 4. ✅ 已完成（2026-07-20）：external-dns observability
 
 补的正是"pod 活着但 reconcile 静默失败"这个缺口（token 过期/吊销、API 限流——`KubePodCrashLooping`/`KubePodNotReady` 抓不到）。做法：
-- `values/external-dns-values.yaml` 开 `serviceMonitor.enabled: true` + `additionalLabels.release: kube-prometheus-stack`（否则 kube-prometheus-stack 的 serviceMonitorSelector 不采纳）；`just deploy-external-dns` 已部署，实测被 Prometheus 抓到（target up，经 scrapeClasses relabel 带 `cluster=homelab`）。
-- 新增 `manifests/external-dns-alerts.yaml`（PrometheusRule，`monitoring` ns，`release` 标签；已加入 `argocd/applications/monitoring-dashboards.yaml` 的 `directory.include` 白名单，随 git push 由 ArgoCD 同步）。4 条告警实测已在 Prometheus 加载、health=ok：
+- `values/external-dns.yaml` 开 `serviceMonitor.enabled: true` + `additionalLabels.release: kube-prometheus-stack`（否则 kube-prometheus-stack 的 serviceMonitorSelector 不采纳）；`just deploy-external-dns` 已部署，实测被 Prometheus 抓到（target up，经 scrapeClasses relabel 带 `cluster=homelab`）。
+- 新增 `manifests/monitoring/alerts/external-dns-alerts.yaml`（PrometheusRule，`monitoring` ns，`release` 标签；已加入 `argocd/applications/monitoring-dashboards.yaml` 的 `directory.include` 白名单，随 git push 由 ArgoCD 同步）。4 条告警实测已在 Prometheus 加载、health=ok：
   - `ExternalDNSReconcileStalled`：`time() - external_dns_controller_last_sync_timestamp_seconds{cluster="homelab"} > 600`，for 10m —— 核心盲点（reconcile 静默停摆）。
   - `ExternalDNSRegistryErrors` / `ExternalDNSSourceErrors`：Cloudflare API / HTTPRoute 源读取报错计数上升。
   - `ExternalDNSMetricsAbsent`：metrics 整体消失（controller 挂或 scrape 断，否则会掩盖上面几条），仿照 `ExternalSecretsMetricsAbsent`。

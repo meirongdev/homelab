@@ -183,7 +183,7 @@ Standard kube-prometheus-stack in-cluster scraping with `scrapeClasses` default 
 
 ## NodePort Services on Homelab
 
-`k8s/helm/manifests/monitoring-external.yaml`
+`k8s/helm/manifests/monitoring/monitoring-external.yaml`
 
 | Service | NodePort | Purpose |
 |---------|----------|---------|
@@ -193,7 +193,7 @@ Standard kube-prometheus-stack in-cluster scraping with `scrapeClasses` default 
 
 ## Grafana Dashboards
 
-All 4 Loki dashboards (`k8s/helm/manifests/grafana-dashboards.yaml`) have a `cluster` dropdown variable:
+All 4 Loki dashboards (`k8s/helm/manifests/monitoring/dashboards/grafana-dashboards.yaml`) have a `cluster` dropdown variable:
 
 - **k8s-logs-overview** — log volume by namespace, grouped by cluster
 - **k8s-logs-pod** — per-pod log browser, namespace filtered by cluster
@@ -206,7 +206,7 @@ All 4 Loki dashboards (`k8s/helm/manifests/grafana-dashboards.yaml`) have a `clu
 > [`cloudflare-tunnel-observability.md`](cloudflare-tunnel-observability.md)。入口层的 RED 指标现在
 > 来自 Cilium Envoy（见 CONVENTIONS.md 的 SLI/SLO 段）。
 
-Multi-cluster resource overview (`k8s/helm/manifests/multicluster-overview-dashboard.yaml`):
+Multi-cluster resource overview (`k8s/helm/manifests/monitoring/dashboards/multicluster-overview-dashboard.yaml`):
 
 - **Kubernetes / Multi-Cluster / Resource Overview** (`uid: k8s-multicluster-overview`) — node CPU/memory/disk/network, Pod status table, Deployment/StatefulSet health, container resource usage vs Limit; supports `cluster`, `namespace`, `phase` variables
 

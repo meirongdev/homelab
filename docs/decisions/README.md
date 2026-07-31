@@ -8,11 +8,12 @@
 4. [external-dns-adoption.md](external-dns-adoption.md) — 子域名 DNS 从 Terraform 手管 → HTTPRoute 声明式（含 Crossplane 否决、upsert-only 共存安全性）
 5. [opencost-krr-data-sources.md](opencost-krr-data-sources.md) — 同一个 cAdvisor 缺口，OpenCost 走 collector 旁路、KRR 补窄口径采集（含 krr-enforcer 否决、一处论据自我更正）
 6. [orphaned-resources.md](orphaned-resources.md) — 配置漂移体检选型：否决 kor（信噪比 0.6%，且误判 argocd-secret/vault-token 等要害），改用 ArgoCD 原生 `orphanedResources` 且 `warn: false`
+7. [manifests-directory-per-app.md](manifests-directory-per-app.md) — `k8s/helm/manifests/` 目录化：一个 App 一个目录（目录即清单），废除 `directory.include` glob；`values/` 命名统一 `<app>.yaml`
 
 ## ADR Convention
 
 新建决策记录:
-- 命名: **描述性 kebab-case**，`<topic>.md`（如 `external-dns-adoption.md`）——上面 6 条全部如此，
+- 命名: **描述性 kebab-case**，`<topic>.md`（如 `external-dns-adoption.md`）——上面 7 条全部如此，
   沿用即可。（本节此前写的是 `NNNN-title.md` 编号式，但**从未有任何一条 ADR 采用**，
   2026-07-31 改为记录实际约定。日期写在文首，不靠文件名排序。）
 - 必含: 标题/日期/状态/上下文(Context)/决策(Decision)/后果(Consequences)

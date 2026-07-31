@@ -1,6 +1,6 @@
 ---
 # Namespace + Cloudflare API token for the oracle-k3s external-dns instance (the chart itself
-# is manual-helm: `just deploy-external-dns-oracle`, values/external-dns-oracle-values.yaml).
+# is manual-helm: `just deploy-external-dns-oracle`, values/external-dns-oracle.yaml).
 #
 # Reuses the SAME meirong.dev zone token homelab's instance uses (Vault secret/homelab/external-dns,
 # property=api_token) — it's a zone-scoped Cloudflare API token, so it works for oracle's

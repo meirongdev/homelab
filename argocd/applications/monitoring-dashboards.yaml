@@ -7,12 +7,16 @@ metadata:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: homelab
+  # App 名 "monitoring-dashboards" 是历史名，实际管 monitoring/ 整个目录
+  # （dashboards + alerts + SLO + KRR + 抓取配置）。不改名：改 Application 名
+  # 会触发 ArgoCD 删旧建新（tracking 标签变更），对告警链路有短暂中断，不值得。
   source:
     repoURL: https://github.com/meirongdev/homelab
     targetRevision: main
-    path: k8s/helm/manifests
+    # 目录即清单（含子目录）：放进 monitoring/ 的 yaml 自动纳入同步，无需再维护文件清单。
+    path: k8s/helm/manifests/monitoring
     directory:
-      include: "{grafana-dashboards.yaml,multicluster-overview-dashboard.yaml,dgx-spark-node-dashboard.yaml,macbook-node-dashboard.yaml,storage-106-dashboard.yaml,proxmox-pve-dashboard.yaml,power-overview-dashboard.yaml,opencost-dashboard.yaml,krr.yaml,eso-alerts.yaml,external-dns-alerts.yaml,cilium-envoy-servicemonitor.yaml,slos.yaml,slo-dashboard.yaml,trivy-alerts.yaml,trivy-dashboard.yaml,kyverno-dashboard.yaml,security-events-dashboard.yaml,storage-alerts.yaml,prometheus-rules.yaml,alertmanager-config.yaml,alertmanager-telegram-secret.yaml,monitoring-external.yaml}"
+      recurse: true
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring

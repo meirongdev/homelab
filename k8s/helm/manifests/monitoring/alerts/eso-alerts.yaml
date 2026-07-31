@@ -6,7 +6,7 @@
 # K8s Secret but workloads keep the last-synced value with no signal.
 #
 # Metrics come from the ESO controller (/metrics :8080):
-#   - homelab:    ServiceMonitor enabled in values/external-secrets-values.yaml
+#   - homelab:    ServiceMonitor enabled in values/external-secrets.yaml
 #                 (gets cluster=homelab via the Prometheus scrapeClasses relabel)
 #   - oracle-k3s: scraped by the OTel Collector (prometheus/external-secrets
 #                 receiver) and remote-written with cluster=oracle-k3s

@@ -1,7 +1,7 @@
 # ArgoCD Application Patterns
 
 > 当前 ArgoCD 管理模式分析、可选 pattern 对比与取舍建议。
-> Date: 2026-07-08
+> Date: 2026-07-08 · Updated: 2026-07-31（manifests/ 目录化重组，见 `docs/decisions/manifests-directory-per-app.md`）
 
 ## Current Pattern: App-of-Apps
 
@@ -10,36 +10,28 @@
 ```
 root (Application)
  └─ argocd/applications/*.yaml（排除 root.yaml）
-     ├── loki.yaml           # 多源 Helm (remote chart + local values)
-     ├── kyverno.yaml         # 同上
-    ├── kyverno-policies.yaml
-
-     ├── tempo.yaml           # 同上
-     ├── trivy-operator.yaml  # Helm
-     ├── tetragon.yaml        # Helm
-     ├── falco.yaml           # Helm
-     ├── sloth.yaml           # Helm
-     ├── argocd-image-updater.yaml
-     ├── oracle-k3s.yaml      # Kustomize 目录（跨集群推 oracle-k3s）
-     ├── personal-services.yaml  # directory.include 子集
-     ├── vault-eso.yaml          # directory.include 子集
-     ├── bifrost.yaml            # directory.include 单文件
-     ├── gateway.yaml            # directory.include 单文件
-     ├── monitoring-dashboards.yaml
-     ├── calibre-metadata.yaml
-     ├── namespace-guardrails.yaml
-     ├── kube-bench.yaml
-     ├── backup.yaml
-     └── cloudflare.yaml
+     ├── loki / tempo / sloth / kyverno / tetragon / trivy-operator /
+     │   argocd-image-updater / falco / cnpg-operator / opencost / opencost-oracle
+     │                          # 多源 Helm：remote chart + $values/k8s/helm/values/<app>.yaml
+     ├── oracle-k3s             # Kustomize 树（跨集群推 cloud/oracle/manifests/）
+     ├── backup                 # Kustomize（backup/overlays/homelab）
+     ├── monitoring-dashboards  → manifests/monitoring/（目录源 + recurse）
+     ├── personal-services      → manifests/personal-services/（目录源）
+     ├── vault-eso              → manifests/vault-eso/（目录源）
+     ├── bifrost / gateway / cloudflare / external-dns /
+     │   kube-bench / namespace-guardrails
+     │                          → manifests/<同名目录>/（目录源）
+     ├── calibre-metadata       → manifests/calibre-metadata/（Kustomize）
+     └── kyverno-policies       → manifests/kyverno-policies/（目录源）
 ```
 
 ### 3 种子模式
 
 | 子模式 | 代表 | 说明 |
 |--------|------|------|
-| Helm Chart + 本地 values | `loki.yaml`, `kyverno.yaml` | 多源：remote chart repo + `$values/k8s/helm/values/` |
+| Helm Chart + 本地 values | `loki.yaml`, `kyverno.yaml` | 多源：remote chart repo + `$values/k8s/helm/values/<app>.yaml`（oracle 变体 `<app>-oracle.yaml`） |
 | Kustomize 目录 | `oracle-k3s.yaml` | `cloud/oracle/manifests/` 整棵 kustomize 树 |
-| directory.include 子集 | `personal-services.yaml` | 从 `k8s/helm/manifests/` 用 glob 选特定文件 |
+| 目录源（目录即清单） | `personal-services.yaml`, `monitoring-dashboards.yaml` | 一个 App ↔ `k8s/helm/manifests/` 下一个子目录，目录内文件全部纳管；2026-07-31 起取代 `directory.include` glob（所有权地图见 `k8s/helm/manifests/README.md`） |
 
 ### 跨集群
 
@@ -83,10 +75,15 @@ fullnameOverride: foo
 > 本地 `helm template -f values.yaml` **复现不出**这个问题（它不模拟 ArgoCD 的 release
 > 命名），只能在同步后查实际对象。改名会触发 ArgoCD 删旧建新。
 
-### 3. `directory.include` 是显式清单，新文件不会被自动捡起
+### 3. ~~`directory.include` 是显式清单，新文件不会被自动捡起~~（2026-07-31 已消除）
 
-`monitoring-dashboards.yaml` 这类用 `directory.include: "{a.yaml,b.yaml,…}"` 的 App，
-往 `k8s/helm/manifests/` 放新文件后**必须同步把文件名加进 glob**，否则文件静静躺着不生效。
+曾经：用 `directory.include: "{a.yaml,b.yaml,…}"` 的 App，往 `k8s/helm/manifests/` 放新文件后
+**必须同步把文件名加进 glob**，否则文件静静躺着不生效（OpenCost/KRR 落地时踩到的就是它）。
+
+现已按**一个 App 一个目录**重组（`docs/decisions/manifests-directory-per-app.md`），App 一律
+目录源，文件放进目录即生效。**显式清单仍残留在 kustomize 树**——`cloud/oracle/manifests/`
+与 `k8s/helm/manifests/calibre-metadata/` 的 `kustomization.yaml` `resources:` 列表，新文件
+必须登记（calibre-metadata 曾漏登记 `metadata-enrich.yaml`），此坑在那里仍然成立。
 
 ## Alternative Patterns
 

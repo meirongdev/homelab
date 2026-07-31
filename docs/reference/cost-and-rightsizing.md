@@ -74,7 +74,7 @@ homelab 靠 `scrapeClasses` 默认类，oracle 靠 otel target label + remote-wr
 
 ### 看板
 
-`k8s/helm/manifests/opencost-dashboard.yaml` → Grafana `Platform` 文件夹，
+`k8s/helm/manifests/monitoring/dashboards/opencost-dashboard.yaml` → Grafana `Platform` 文件夹，
 uid `opencost-multicluster-overview`。
 
 **刻意只用 OpenCost 自身的指标，不掺 kube-state-metrics** —— 闲置率不走
@@ -98,7 +98,7 @@ OpenCost 的两个集群，不会混入 `dgx-spark` / `macbook` 这类外部 nod
 
 | 项 | homelab | oracle-k3s |
 |---|---|---|
-| manifest | `k8s/helm/manifests/krr.yaml` | `cloud/oracle/manifests/monitoring/krr.yaml` |
+| manifest | `k8s/helm/manifests/monitoring/krr.yaml` | `cloud/oracle/manifests/monitoring/krr.yaml` |
 | 时间 | 周一 09:00 | 周一 09:15（错峰） |
 | Prometheus | 集群内 `kube-prometheus-stack-prometheus:9090` | 中枢，经 Tailscale `100.94.186.7:31090` |
 | bot token | 复用 `monitoring/alertmanager-telegram` | 自建 ExternalSecret `krr-telegram` |

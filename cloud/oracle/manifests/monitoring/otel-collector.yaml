@@ -285,7 +285,7 @@ data:
                     cluster: oracle-k3s
 
       # Cilium Gateway Envoy L7 指标 —— zitadel 等 oracle 入口可用性 SLO
-      # (k8s/helm/manifests/slos.yaml › oracle-gateway-availability) 的数据源。
+      # (k8s/helm/manifests/monitoring/slos.yaml › oracle-gateway-availability) 的数据源。
       # 对应 homelab 侧的 cilium-envoy ServiceMonitor；oracle 无 Prometheus Operator，
       # 由 otel-collector 直接抓取 headless Service cilium-envoy(:9964)。
       # keep 正则与 homelab 一致：只保留 RED SLI 所需请求指标，丢弃其余 ~5000 条 Envoy 内部指标。

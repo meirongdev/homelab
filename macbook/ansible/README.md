@@ -62,4 +62,4 @@ just site            # 上面几个一起跑（会问 sudo 密码）
 ## 相关（在本 repo 别处）
 
 - Prometheus 抓取 job `node-exporter-macbook`：`k8s/helm/values/kube-prometheus-stack.yaml`
-- Grafana 看板 "MacBook / Node Exporter"：`k8s/helm/manifests/macbook-node-dashboard.yaml`（`Hardware` 文件夹）
+- Grafana 看板 "MacBook / Node Exporter"：`k8s/helm/manifests/monitoring/dashboards/macbook-node-dashboard.yaml`（`Hardware` 文件夹）

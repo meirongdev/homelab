@@ -14,7 +14,7 @@
 #
 # ⚠️ metadata.labels.release=kube-prometheus-stack：经 sloth.extraLabels 也会打到生成的
 #    PrometheusRule，确保被 operator 的 ruleSelector 选中。
-# defaultSloPeriod=30d 由 sloth-values.yaml 设定。
+# defaultSloPeriod=30d 由 sloth.yaml 设定。
 apiVersion: sloth.slok.dev/v1
 kind: PrometheusServiceLevel
 metadata:

@@ -6,7 +6,7 @@
 # 桥、无并发崩溃、无版本绑定构建。详见 decisions/alerting-telegram-migration.md。
 # 投到群 MatthewDaily 的「🚨 Homelab 告警」forum topic(chatID -1003981213530 +
 # messageThreadID 2)。bot token: Vault secret/homelab/telegram → ESO
-# (k8s/helm/manifests/alertmanager-telegram-secret.yaml)→ k8s Secret
+# (k8s/helm/manifests/monitoring/alerts/alertmanager-telegram-secret.yaml)→ k8s Secret
 # monitoring/alertmanager-telegram key=bot-token。
 # Gotify 本体已于 2026-07 彻底下线(不再是"仍服务 Falco"——Falco 也已迁到原生
 # Telegram output,见 falco.yaml + decisions/alerting-telegram-migration.md)。

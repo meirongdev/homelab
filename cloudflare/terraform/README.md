@@ -66,7 +66,7 @@ Then run `just apply`. Terraform will automatically:
 1. Create a CNAME DNS record pointing to the Cloudflare Tunnel.
 2. Update the Tunnel ingress rules to route the hostname to the Cilium Gateway service.
 
-> **Note**: After adding a subdomain here, you also need to add a corresponding `HTTPRoute` in `k8s/helm/manifests/gateway.yaml` so Cilium Gateway API knows where to forward the traffic inside the cluster.
+> **Note**: After adding a subdomain here, you also need to add a corresponding `HTTPRoute` in `k8s/helm/manifests/gateway/gateway.yaml` so Cilium Gateway API knows where to forward the traffic inside the cluster.
 
 ## Managed Resources
 
