@@ -1,5 +1,8 @@
 # Cloudflare Tunnel Observability
 
+> Last updated: 2026-07-31
+> Status: 生效事实
+
 当前架构的入口路径为：`Cloudflare DNS -> Cloudflare Tunnel -> Cilium Gateway API -> Services`。
 
 本仓库已经移除 Traefik 和基于 Traefik router label 的按域名流量拆分方案，因此这里仅记录仍然有效的 Tunnel 健康观测方式，以及现阶段看不到什么。

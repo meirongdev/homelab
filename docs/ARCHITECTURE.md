@@ -29,7 +29,7 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 
 | 维度 | homelab | oracle-k3s |
 |------|---------|------------|
-| 硬件 | Ryzen 5600H 笔记本, 16GB 物理（OS 实际可见 13.5GB，~2GB 被核显 UMA 显存占用；实测见 [architecture-optimization-2026-07-04.md §4](reference/architecture-optimization-2026-07-04.md)） | Oracle Cloud Free Tier (ARM, 24GB) |
+| 硬件 | Ryzen 5600H 笔记本, 16GB 物理（OS 实际可见 15.0GB（MemTotal 15717940 kB；核显 UMA 显存已从 2GB 调整为 512MB）；实测见 [2026-07-04 舰队架构优化 §4](plans/architecture/2026-07-04-fleet-architecture-optimization.md)） | Oracle Cloud Free Tier (ARM, 24GB) |
 | 角色 | 主力集群 (observability/vault/calibre) | 轻量服务 (homepage/it-tools/uptime) |
 | 存储 | local-path (NFS retired 2026-07-11; 106 = cold backup target) | local-path only |
 | 备份 | restic CronJob → 106 sftp | restic CronJob → 106 sftp (via TS) |
@@ -54,7 +54,7 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 ## Service Inventory
 
 完整清单（含 namespace、内部服务、认证方式）在 [CONVENTIONS.md § Services](CONVENTIONS.md#services) —
-**唯一真相源，此处不再复制**（此前三处各存一份副本，已各自漂移）。
+**唯一真相源，此处不复制**。
 
 分布速览: homelab 跑 **Calibre-Web / Grafana / Vault / ArgoCD / Bifrost**；其余（ZITADEL、Homepage、
 Uptime Kuma、Miniflux、KaraKeep、IT-Tools、Stirling-PDF、Squoosh、Excalidraw、Trends、Timeslot）都在 oracle-k3s。
@@ -69,6 +69,5 @@ Uptime Kuma、Miniflux、KaraKeep、IT-Tools、Stirling-PDF、Squoosh、Excalidr
 
 ## Current Active Work
 
-- **主线**: 存储本地化迁移 + 备份体系重建 ✅（2026-07-11 完成）
-- **下一步**: 离站备份, Terraform state → R2, DGX Spark 入编
-- **完整路线图**: `plans/ROADMAP.md`
+开放项（离站备份、Terraform state → R2、prometheus-operator CRD 补升、DGX Spark 入编 等）
+统一维护在 [`ROADMAP.md`](ROADMAP.md)，此处不复制。

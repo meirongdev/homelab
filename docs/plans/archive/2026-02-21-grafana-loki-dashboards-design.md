@@ -1,6 +1,6 @@
 # Grafana Loki Dashboard 集成设计文档
 
-> **Deprecated**: 本设计已实施完成，见 [2026-02-21-grafana-loki-dashboards.md](2026-02-21-grafana-loki-dashboards.md)
+> **Deprecated**: 本设计已实施完成，见 [2026-02-21-grafana-loki-dashboards.md](../observability/2026-02-21-grafana-loki-dashboards.md)
 
 **日期：** 2026-02-21
 **状态：** ✅ 已完成

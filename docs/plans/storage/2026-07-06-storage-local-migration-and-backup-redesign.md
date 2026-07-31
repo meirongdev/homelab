@@ -1,14 +1,25 @@
 # 存储本地化迁移 + 备份体系重建 — 完整执行计划（Agent 可执行）
 
 > 日期: 2026-07-06
-> 状态: 🟢 **Phase 0-2 + Phase 3a(Gotify) 已完成（2026-07-06）**；Phase 3b(ZITADEL) + Phase 4-5 待执行。
-> - ✅ Phase 0-1: serverless restic 备份**双集群上线**，恢复演练通过（详见 §Phase 1 末与 §DoD）。仓库 `881fb124bf` @ 106 `mrstorage/restic`。
-> - ✅ Phase 2: homelab sqlite/fsync PVC（**Vault raft / bifrost / calibre-config**）迁 local-path；alertmanager/audit/trivy 按设计留 NFS。详见 §Phase 2 表。
-> - ✅ Phase 3a: **Gotify → oracle-k3s**（数据迁移 + `notify.meirong.dev` DNS 切换完成，homelab gotify 已删）。ZITADEL(3b) 待专门做（发现前置：oracle Cilium `enable-gateway-api-app-protocol=false` 需开、Bitnami PG chart 12.10.0 可能已下架）。
-> - ✅ Phase 3b: **ZITADEL → oracle-k3s 完成**（数据迁移 + masterkey 同源 + `auth.meirong.dev` 切换 + console gRPC 修复 + **homelab 退役**，全验证）。homelab NFS 现仅剩 alertmanager/audit/trivy（设计）+ calibre-books。
-> - ✅ Phase 4 完成: Task 10 **SMART + zpool 健康告警** + Task 9 **dead-man's switch**（Uptime Kuma 全 monitor 挂 Gotify(oracle) 通知，homelab down → 手机报警，零 homelab 依赖）。
-> 结论: 把 homelab 上所有 **fsync/sqlite/PG 类** 有状态 PVC 从 `nfs-client` 迁到 `local-path`（性能 + 脱离 NFS 启动依赖），大件顺序数据（Calibre 书库）留在 NFS/ZFS。因 `local-path` 无冗余无快照，**先重建一套 serverless restic 备份**（逻辑 dump → 106 ZFS 上的加密仓库）再做迁移。同步把 **Gotify + ZITADEL 迁到 oracle-k3s**（脱离 homelab 故障域），并补上 **dead-man's switch** 与 **zpool/SMART 告警**。
-> 关联: `../../architecture-optimization-2026-07-04.md`（战略母文档）、`2026-07-04-storage-106-utilization-and-backup-simplification.md`（本计划取代其 Task 4-6 备份部分）、`2026-07-04-zitadel-to-oracle-k3s.md`（本计划纳入并执行）、`../runbooks/backup-recovery.md`（运维手册，随本计划回写）
+> 状态: ✅ **Phase 0-4 全部完成**；只剩 **Phase 5（离站备份）** 未做 —— 见 [ROADMAP 开放项 #1](../../ROADMAP.md)。
+>
+> | Phase | 状态 |
+> |-------|------|
+> | 0-1 restic 备份 | ✅ 2026-07-06 双集群上线，恢复演练通过。仓库 `881fb124bf` @ 106 `mrstorage/restic` |
+> | 2 sqlite/fsync PVC → local-path | ✅ 2026-07-06 Vault raft / bifrost / calibre-config 迁完 |
+> | 3a Gotify → oracle-k3s | ✅ 2026-07-06（⚠️ Gotify 已于 2026-07 整体退役，见 [决策](../../decisions/alerting-telegram-migration.md)） |
+> | 3b ZITADEL → oracle-k3s | ✅ 2026-07-06 数据迁移 + masterkey 同源 + `auth.meirong.dev` 切换 + console gRPC 修复 + homelab 退役 |
+> | 4 dead-man's switch + SMART/zpool 告警 | ✅ 2026-07 |
+> | 5 离站备份 | ❌ **未做** |
+>
+> ⚠️ **本文写完后架构又变了两处**，读正文时请注意：
+> 1. **NFS 已于 2026-07-11 整体退役** —— 本文设计里"按设计留 NFS"的 alertmanager/audit/trivy
+>    以及"留在 NFS/ZFS"的 Calibre 书库（24G）后来**全部迁到了 `local-path`**，nfs-client provisioner 已卸载。
+> 2. **dead-man's switch 不经过 Gotify** —— 正文写的是 Uptime Kuma → Gotify(oracle) 通知链；
+>    实际落地形态是 Watchdog → AlertmanagerConfig webhook → Uptime Kuma push monitor → **Telegram**。
+>
+> 结论: 把 homelab 上所有 **fsync/sqlite/PG 类** 有状态 PVC 从 `nfs-client` 迁到 `local-path`（性能 + 脱离 NFS 启动依赖）。因 `local-path` 无冗余无快照，**先重建一套 serverless restic 备份**（逻辑 dump → 106 ZFS 上的加密仓库）再做迁移。同步把 **Gotify + ZITADEL 迁到 oracle-k3s**（脱离 homelab 故障域），并补上 **dead-man's switch** 与 **zpool/SMART 告警**。
+> 关联: `../architecture/2026-07-04-fleet-architecture-optimization.md`（战略母文档）、`2026-07-04-storage-106-utilization-and-backup-simplification.md`（本计划取代其 Task 4-6 备份部分）、`../apps/2026-07-04-zitadel-to-oracle-k3s.md`（本计划纳入并执行）、`../../runbooks/backup-recovery.md`（运维手册，随本计划回写）
 
 ---
 
@@ -278,7 +289,7 @@ Phase 5(离站) / Phase 6(演练自动化) 随后，Phase 5 需 G3 云凭据
 - [ ] 结论回写 `backup-recovery.md`、`TODO.md`、CLAUDE.md。
 
 ## 6. 关联文档
-- 战略母文档: `../../architecture-optimization-2026-07-04.md`
-- 被取代/纳入: `2026-07-04-storage-106-utilization-and-backup-simplification.md`（T4-6）、`2026-07-04-zitadel-to-oracle-k3s.md`
-- 运维手册: `../runbooks/backup-recovery.md`（随本计划回写为 restic 版）
+- 战略母文档: `../architecture/2026-07-04-fleet-architecture-optimization.md`
+- 被取代/纳入: `2026-07-04-storage-106-utilization-and-backup-simplification.md`（T4-6）、`../apps/2026-07-04-zitadel-to-oracle-k3s.md`
+- 运维手册: `../../runbooks/backup-recovery.md`（随本计划回写为 restic 版）
 - 相关记忆: `nfs-hang-wedges-node` / `force-delete-nfs-pod-orphans-lock` / `nfs-tailscale-route-hijack` / `vault-pod-token-empty` / `storage-106-host-specs`

@@ -1,7 +1,8 @@
 # Oracle Cloud Free Tier K3s Cluster Implementation Plan
 
 **Date:** 2026-02-20
-**Status:** Approved (Revised 2026-02-21)
+**Status:** ✅ 已完成 — oracle-k3s 生产运行至今。
+⚠️ 本文写于 Flannel 时代，oracle 已于 2026-03-07 迁 Cilium；2026-06-04 起纳入 ArgoCD GitOps。
 
 ## Goal
 

@@ -1,5 +1,8 @@
 # Backstage 开发者门户（RHDH）实现计划 — Phase 1
 
+> **状态:** ❌ **未执行**（2026-07-31 复核：repo 内零痕迹）。计划写完了但从未落地。
+> 设计取舍见 [同批设计文档](2026-06-06-backstage-developer-portal-design.md)。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 在 oracle-k3s 上部署 RHDH（Red Hat Developer Hub / Backstage 预构建发行版），经 ZITADEL OIDC 登录，连自管 PostgreSQL，纳入 ArgoCD GitOps，并能浏览 Software Catalog。

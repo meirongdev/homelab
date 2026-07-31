@@ -1,5 +1,8 @@
 # 2026-03-08 Cilium Gateway / ClusterMesh Stabilization
 
+> **状态: ✅ 已完成（2026-03-08）** —— ClusterMesh 双集群 connected，Cilium Gateway API 成为唯一入口。
+> ⚠️ 文中提到的 `docs/architecture/*` 路径已不存在（文档 2026-06 重组到 `reference/`+`decisions/`）。
+
 ## Summary
 
 This change set finishes the repository-side cleanup for the new ingress architecture and documents the operational recovery path for homelab.

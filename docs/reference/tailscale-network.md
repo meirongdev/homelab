@@ -1,5 +1,8 @@
 # Tailscale Cross-Cluster Networking
 
+> Last updated: 2026-07-31
+> Status: 生效事实
+>
 > Rewritten 2026-07-07 after the topology review. The original design (each K3s node
 > advertises its Pod CIDR as a Tailscale subnet route) is GONE — cross-cluster pod
 > traffic now rides **Cilium ClusterMesh VXLAN**, with Tailscale as the node-level
@@ -43,6 +46,20 @@ WireGuard disco replies) blackholes. Advertising node0's own /32 is safe only
 because nothing in the tailnet transits traffic toward the OCI VCN.
 Rule of thumb: **never advertise an IP that another tailnet subnet router is
 responsible for delivering to you.**
+
+### `nfs-lan-route` ip-rule — permanent by design, do not remove
+
+`k8s-node` and `pve` each carry an `ip rule` at priority **5260** forcing
+`to 192.168.50.0/24` through `lookup main`. This is **not** leftover scaffolding
+from the 2026-07-12 double-advertiser fix — it is structural and stays.
+
+Because `pve` legitimately advertises `192.168.50.0/24` (it is 24/7, unlike a
+laptop, so it is the right subnet router) and `k8s-node` needs `--accept-routes`
+for kubectl to reach the K8s API, table 52 always holds a route for that LAN
+segment. Non-destructive test on `k8s-node` 2026-07-19 (drop the rule → read the
+route → restore immediately): without the rule, traffic to 192.168.50.x
+immediately switches to `dev tailscale0` — an extra hop through the tunnel to
+reach a host that is one LAN hop away. Keep the rule on **both** nodes.
 
 ## How It Works
 

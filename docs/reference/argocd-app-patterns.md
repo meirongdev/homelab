@@ -1,7 +1,10 @@
 # ArgoCD Application Patterns
 
+> Last updated: 2026-07-31
+> Status: 生效事实
+>
 > 当前 ArgoCD 管理模式分析、可选 pattern 对比与取舍建议。
-> Date: 2026-07-08 · Updated: 2026-07-31（manifests/ 目录化重组，见 `docs/decisions/manifests-directory-per-app.md`）
+> 2026-07-31 随 manifests/ 目录化重组更新，见 [`decisions/manifests-directory-per-app.md`](../decisions/manifests-directory-per-app.md)。
 
 ## Current Pattern: App-of-Apps
 

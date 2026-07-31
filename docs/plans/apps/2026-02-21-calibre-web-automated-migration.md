@@ -1,5 +1,9 @@
 # Calibre-Web-Automated Migration Implementation Plan
 
+> **状态: ✅ 已完成（2026-02-21）** —— CWA 生产运行于 homelab `personal-services`，`book.meirong.dev`。
+> ⚠️ 下文的 NFS 路径与 `manifests/calibre-web.yaml` 均已变更：书库 2026-07-11 迁 `local-path`，
+> manifest 现在是 `k8s/helm/manifests/personal-services/calibre-web.yaml`。
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Replace the linuxserver calibre-web deployment with Calibre-Web-Automated to enable auto-ingest (drop books into `/storage/calibre/ingest`, CWA imports them automatically).

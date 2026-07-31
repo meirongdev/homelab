@@ -1,7 +1,7 @@
 # Gateway Controller Evaluation: Traefik vs Cilium Gateway
 
-> Date: 2026-03-07
-> Decision status: Completed
+> 日期: 2026-03-07
+> 状态: ✅ 已实施
 
 ## Scope
 

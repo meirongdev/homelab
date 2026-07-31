@@ -1,5 +1,10 @@
 # Grafana Loki Dashboard 集成实施计划
 
+> **状态: ✅ 已完成（2026-02-21）** —— 面板由 ArgoCD `monitoring-dashboards` App 同步。
+> ⚠️ 面板组织已于 2026-06-15 整改（按 `grafana_folder` 分文件夹 + 多集群选择器），
+> 且 manifest 已移到 `k8s/helm/manifests/monitoring/dashboards/`。
+> 当前约定见 [CONVENTIONS › Dashboards 组织](../../CONVENTIONS.md)。
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** 为 Loki 日志系统创建 4 个 Grafana Dashboard（Pod 日志浏览器、全局搜索、日志量统计、错误日志聚合），通过 ConfigMap GitOps 方式持久化，ArgoCD 自动同步。

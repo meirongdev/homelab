@@ -1,7 +1,7 @@
 # 成本归因与资源右尺寸
 
-> Date: 2026-07-31
-> Status: Production
+> Last updated: 2026-07-31
+> Status: 生效事实
 
 两套互补的工具：**OpenCost** 回答「钱花在哪」（常驻，出指标 → Grafana），
 **KRR** 回答「该给多少」（周期跑，出报告 → Telegram）。

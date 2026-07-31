@@ -1,5 +1,10 @@
 # 2026-03-08 Cilium + ZITADEL SSO Reintroduction Plan
 
+> **状态: ✅ 已落地** —— 最终形态是**各应用原生 ZITADEL OIDC**（Grafana / ArgoCD / Miniflux / KaraKeep /
+> Stirling-PDF），少数无法直连 OIDC 的应用（Bifrost 管理面、Excalidraw）用 per-app oauth2-proxy。
+> 不再有共享入口层 SSO。当前身份模型见 [CONVENTIONS § Identity](../../CONVENTIONS.md)。
+> ⚠️ ZITADEL 本体已于 2026-07-06 迁至 oracle-k3s。
+
 ## Goal
 
 在保留 `Cilium Gateway API + pure HTTPRoute` 架构的前提下，重新为需要登录的应用提供统一身份能力，并避免回退到 Traefik-specific ForwardAuth。

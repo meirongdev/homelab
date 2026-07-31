@@ -3,7 +3,7 @@
 > 双集群 homelab（homelab + oracle-k3s）基础设施即代码。
 > 给 AI 助手的**常驻精简上下文**。根目录 `AGENTS.md` 与 `CLAUDE.md` 都软链到本文件。
 >
-> 📖 **需要细节时读 `docs/CONVENTIONS.md`**（62KB，完整约定 + 架构 + 各组件踩坑记录，
+> 📖 **需要细节时读 `docs/CONVENTIONS.md`**（长版，完整约定 + 架构 + 各组件踩坑记录，
 > 另软链为 `.gemini.md` / `.github/copilot-instructions.md`）。本文件刻意保持精简以控制常驻上下文成本，
 > **不要**把长篇内容往这里搬——架构事实进 `reference/`，决策进 `decisions/`，两者都在 CONVENTIONS.md 里有索引。
 
@@ -22,16 +22,20 @@ homelab/
 ├── tailscale/terraform/         # Tailscale ACL + 预授权密钥
 └── docs/                        # 文档
     ├── AGENTS.md                ← 本文件（简版；软链为根 AGENTS.md）
-    ├── CONVENTIONS.md           # 完整约定+架构上下文（软链为 .claudemd/.gemini.md/copilot-instructions.md）
+    ├── CONVENTIONS.md           # 完整约定+架构上下文（软链为 .gemini.md / copilot-instructions.md）
     ├── README.md                # 文档门户/索引
     ├── ARCHITECTURE.md          # 架构概览
+    ├── ROADMAP.md               # 唯一的开放项清单
     ├── guides/                  # 面向任务的跨领域流程
     ├── reference/               # 当前生效的架构事实 (source of truth)
     ├── decisions/               # 技术决策记录 (轻量 ADR)
     ├── records/                 # 故障复盘/事故报告
     ├── runbooks/                # 运维操作手册 (SOP)
-    └── plans/                   # 带日期的方案/复盘 (按类别: storage|networking|security|observability|apps)
+    └── plans/                   # 带日期的方案档案，写完即冻结
+        └── apps|architecture|networking|observability|security|storage/
 ```
+> **写文档前先读 `docs/README.md` 的「文档组织规则」（R1-R7）**：目录归属、命名、
+> 文首必填字段、状态枚举、索引维护、唯一真相源。放错目录/漏建索引都算违规。
 
 ## Key Commands
 
@@ -69,7 +73,7 @@ homelab/
 ## Documentation Rules
 
 1. **架构事实**写进 `reference/`，不在 plan 里留"唯一副本"
-2. **临时决策/排障**写进 `plans/<category>/`
+2. **临时决策/排障**写进 `plans/<category>/`（**写完即冻结的历史快照，不代表现状**——查现状看 `reference/`）
 3. **可重复的 SOP**写进 `runbooks/`
 4. **技术决策**写进 `decisions/`（记录当时场景和取舍）
 5. **命令步骤必须可执行**，避免思路型描述

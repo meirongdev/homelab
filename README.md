@@ -6,6 +6,7 @@ Network note: both clusters now use Cilium for the local data plane and Gateway 
 
 ## Documentation Index
 
+- **[Docs Portal](docs/README.md)**: start here — 分层说明与全部入口。
 - **[Project Conventions & AI Guide](docs/AGENTS.md)**: Project context for AI assistants (Codex, Claude).
   - Full conventions: [docs/CONVENTIONS.md](docs/CONVENTIONS.md)
 - **[Infrastructure (Proxmox/Terraform)](proxmox/README.md)**: VM provisioning and host preparation.
@@ -13,7 +14,7 @@ Network note: both clusters now use Cilium for the local data plane and Gateway 
 - **[Applications (Helm/Manifests)](k8s/helm/README.md)**: Deploying the monitoring stack, databases, and personal services.
 - **[External Access (Cloudflare/Terraform)](cloudflare/terraform/README.md)**: Tunnel and DNS management.
 - **[GitOps (ArgoCD)](argocd/)**: Application manifests and AppProject definitions.
-- **[Project Roadmap](docs/plans/ROADMAP.md)**: Current status and future plans.
+- **[Project Roadmap](docs/ROADMAP.md)**: Current status and future plans.
 
 ## Quick Start Summary
 
@@ -27,11 +28,10 @@ Network note: both clusters now use Cilium for the local data plane and Gateway 
 ---
 For AI assistant context this project uses two files, both symlinked so each tool finds its own name:
 
-| File | Size | Symlinked from | Role |
-|---|---|---|---|
-| `docs/AGENTS.md` | ~5 KB | `AGENTS.md`, `CLAUDE.md` | condensed always-on context; points to the file below for depth |
-| `docs/CONVENTIONS.md` | ~62 KB | `.gemini.md`, `.github/copilot-instructions.md` | full conventions + architecture + per-component gotchas |
+| File | Symlinked from | Role |
+|---|---|---|
+| `docs/AGENTS.md` | `AGENTS.md`, `CLAUDE.md` | condensed always-on context (~5 KB); points to the file below for depth |
+| `docs/CONVENTIONS.md` | `.gemini.md`, `.github/copilot-instructions.md` | full conventions + architecture + per-component gotchas (~60 KB) |
 
-The split is deliberate: tools that auto-load a context file get the small one, so a 62 KB file
-isn't pulled into every session. (A `.claudemd` symlink used to exist here — no tool reads that
-name, so it was inert; replaced by `CLAUDE.md` on 2026-07-31.)
+The split is deliberate: tools that auto-load a context file get the small one, so the long one
+isn't pulled into every session. **Keep the two consistent when either changes.**

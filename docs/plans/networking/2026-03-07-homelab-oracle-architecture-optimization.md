@@ -1,9 +1,10 @@
-> **WARNING: HISTORICAL (2026-07):** This plan was written when the architecture still used Traefik, Kopia, and NFS runtime storage. All milestones completed. See docs/ARCHITECTURE.md, docs/reference/, and docs/plans/ROADMAP.md for current state.
-
 # Homelab + Oracle K3s 最优架构方案
 
+> 状态: ✅ **已完成**（全部里程碑）。⚠️ **历史文档**：写于架构仍使用 Traefik / Kopia / NFS 运行时存储的时期，
+> 三者现已全部退役。当前状态见 [ARCHITECTURE.md](../../ARCHITECTURE.md)、[reference/](../../reference/README.md)、[ROADMAP.md](../../ROADMAP.md)。
+> ⚠️ 文中出现的 `docs/architecture/*` 路径已不存在——该目录 2026-06 重组进 `reference/`+`decisions/`，
+> `TODO.md` 则成为 `docs/ROADMAP.md`。
 > 日期: 2026-03-07
-> 状态: In Progress (Milestone 3 ✅ Completed)
 > 目标: 基于 Cilium 统一双集群架构，优化备份与灾难恢复，定义清晰的演进路径。
 
 ## 1. 执行摘要

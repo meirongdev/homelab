@@ -1,7 +1,8 @@
 # Oracle K3s Migration & Cross-Cluster Observability
 
 **Date:** 2026-02-22
-**Status:** Approved, ready for implementation
+**Status:** ✅ 已完成 — Homepage / Uptime Kuma 已迁 oracle-k3s，跨集群可观测已生产运行。
+当前架构见 [reference/observability-multicluster.md](../../reference/observability-multicluster.md)。
 
 ## Goal
 

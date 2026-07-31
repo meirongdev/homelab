@@ -1,7 +1,7 @@
 # manifests/ 目录化：一个 ArgoCD App 一个目录，废除 directory.include 清单
 
 > 日期: 2026-07-31
-> 状态: 已实施
+> 状态: ✅ 已实施
 
 ## 上下文
 

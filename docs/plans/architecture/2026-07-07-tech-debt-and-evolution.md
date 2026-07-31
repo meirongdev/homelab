@@ -1,10 +1,13 @@
 # 技术债盘点与演进路线（含 Crossplane 评估）
 
+> 状态: ⚠️ **部分落地** —— 盘点快照，非现状。Phase C（ZITADEL DB → CNPG）、Phase D（external-dns）、
+> Phase E（存储本地化）已完成；Phase A（Terraform state → R2）仍开放，见 [ROADMAP](../../ROADMAP.md)。
+> **Crossplane 不引入的结论仍然有效**（§三）。
 > 日期: 2026-07-07
 > 范围: 仓库技术债 + IaC/GitOps 工具链 2026 选型（软件/工具链层）
-> 定位: 承接 [architecture-optimization-2026-07-04](architecture-optimization-2026-07-04.md)（物理层）。回答"是否引入 Crossplane"——**结论：不引入**（§三）。
+> 定位: 承接 [2026-07-04 舰队架构优化](2026-07-04-fleet-architecture-optimization.md)（物理层）。回答"是否引入 Crossplane"——**结论：不引入**（§三）。
 > 背景: 2026-07-07 已完成一轮 repo↔集群一致性清理（helm pin 对齐、homelab postgres 残留移除、ReferenceGrant v1beta1 回退、gotify-bridge 双 App 争抢去重，22 App 全 Synced/Healthy）。本文是清理后的存量盘点与后续顺序。
-> **2026-07-11 更新**: 本文列为"既列未做"/Phase E 的存储本地化迁移（nfs-client → local-path）已完成，见 `docs/plans/ROADMAP.md` Phase 4。
+> **2026-07-11 更新**: 本文列为"既列未做"/Phase E 的存储本地化迁移（nfs-client → local-path）已完成，见 `docs/ROADMAP.md` Phase 4。
 
 ---
 
@@ -112,7 +115,7 @@ GitOps 覆盖与安全纵深已成熟。剩余债务集中三处：
 
 ### Phase B — 既有 P0 收尾（下个周末；顺序维持母文档）
 
-离站备份（restic 仓库 → OCI always-free 20GB / B2）→ dead-man's switch（Watchdog → oracle Uptime Kuma push）→ zpool/SMART PrometheusRule。见 [2026-07-06 计划](../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md)。
+离站备份（restic 仓库 → OCI always-free 20GB / B2）→ dead-man's switch（Watchdog → oracle Uptime Kuma push）→ zpool/SMART PrometheusRule。见 [2026-07-06 计划](../storage/2026-07-06-storage-local-migration-and-backup-redesign.md)。
 
 ### Phase C — ZITADEL DB → CloudNativePG ✅ 2026-07-18 完成（实际停机 ~4.5 分钟）
 

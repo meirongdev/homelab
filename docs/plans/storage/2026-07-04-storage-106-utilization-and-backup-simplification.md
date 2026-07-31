@@ -4,7 +4,7 @@
 > 状态: ⚠️ **部分完成 / 被取代**。
 > - ✅ **Task 1（ARC→4GB）+ Task 2（sanoid，31 快照）已完成**（2026-07-06 实测）；Task 3（ARC 重启持久化）待核 `/etc/modprobe.d/zfs.conf`。
 > - ➡️ **Task 4-6（备份路线/离站/恢复演练）由 [2026-07-06 存储本地化迁移 + 备份体系重建](2026-07-06-storage-local-migration-and-backup-redesign.md) 取代** —— Kopia 已于 2026-07-05 移除，新方案定为 serverless **restic → 106 ZFS 仓库，离站 later**。本文档保留作 ARC/sanoid 与决策依据的历史记录。
-> 关联: `../../architecture-optimization-2026-07-04.md`（战略母文档）、`../runbooks/backup-recovery.md`（现有 Kopia 备份运维）
+> 关联: `../architecture/2026-07-04-fleet-architecture-optimization.md`（战略母文档）、`../../runbooks/backup-recovery.md`（现有 Kopia 备份运维）
 > 结论: 把 106 从"单点裸盘"升级为**带 ARC 读缓存 + ZFS 快照 + 云端离站**的三层受保护存储；**不加计算**。备份层默认**保留 Kopia + 用 rclone 只做离站**（最小改动）；若要根治 Kopia server 复杂度则迁 **restic**（需用户确认）。
 
 ---
@@ -216,7 +216,7 @@ zpool status mrstorage; zfs list -t snapshot | wc -l; command -v sanoid rclone r
   #            kopia restore <snapshot-id> /tmp/verify/    # 校验文件/pg_dump 可解析
   ```
 - **验证/DoD**: 至少一次成功从**离站副本**恢复 Vault 数据 + 一个 PG dump（`pg_restore --list` 可解析）。
-- **产出**: 把演练结果与命令回写 `docs/runbooks/backup-recovery.md`，并勾掉 `docs/architecture/TODO.md` 的"恢复演练"。
+- **产出**: 把演练结果与命令回写 `docs/runbooks/backup-recovery.md`，并勾掉路线图的"恢复演练"（当时叫 `docs/architecture/TODO.md`，现为 `docs/ROADMAP.md`）。
 
 ---
 
@@ -255,7 +255,7 @@ Task 3 (ARC 落盘+重启) ──(G1 维护窗口)──► 可与其他需重�
 7. 回滚: 并行期内直接切回 Kopia(未删除前零风险)。
 
 ## 6. 关联文档
-- 战略母文档: `../../architecture-optimization-2026-07-04.md`
-- 现有备份运维: `../runbooks/backup-recovery.md`
+- 战略母文档: `../architecture/2026-07-04-fleet-architecture-optimization.md`
+- 现有备份运维: `../../runbooks/backup-recovery.md`
 - 存储/NFS 约定: `CLAUDE.md` › Storage / Backup & Recovery
 - 相关经验: 记忆 `storage-106-host-specs` / `nfs-hang-wedges-node` / `force-delete-nfs-pod-orphans-lock` / `vault-pod-token-empty`

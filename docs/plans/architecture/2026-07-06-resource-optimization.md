@@ -1,8 +1,11 @@
 # 服务资源分配优化建议
 
+> 状态: ⚠️ **部分落地** —— 2026-07-06 的建议快照，**不代表当前实际 requests/limits**。
+> 当前值以集群为准（`kubectl -n <ns> get deploy -o yaml`）或以 `k8s/helm/values/` 为准。
 > 日期: 2026-07-06
 > 范围: homelab 集群（5600H, 12GB VM）常驻服务资源 requests/limits 调整
-> 前置: `architecture-optimization-2026-07-04.md`（物理层架构优化）、`k8s-qos-resource-management.md`（QoS 策略基准）
+> 前置: [2026-07-04 舰队架构优化](2026-07-04-fleet-architecture-optimization.md)（物理层）、
+> [reference/k8s-qos-resource-management.md](../../reference/k8s-qos-resource-management.md)（QoS 策略基准）
 
 ---
 
