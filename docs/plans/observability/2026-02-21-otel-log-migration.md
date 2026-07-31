@@ -1,3 +1,5 @@
+> **HISTORICAL (executed — 2026-02):** This plan describes the Promtail-to-OTel replacement that was completed in February 2026. Promtail has been long removed; the OTel Collector DaemonSet is the standard log pipeline. The `nfs-subdir-external-provisioner` Helm repo reference is obsolete (NFS retired 2026-07-11). See docs/reference/observability-otel-logging.md for current architecture.
+
 # OTel 日志迁移实施计划
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

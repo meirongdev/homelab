@@ -1,3 +1,7 @@
+> **HISTORICAL (2026-03-07):** This runbook documents the initial Cilium Gateway cutover that was completed in March 2026. Traefik and Kopia are long gone; ClusterMesh has been connected since 2026-03-08. For current operational checks, see docs/reference/cloudflare-tunnel-observability.md and docs/reference/tailscale-network.md. The command patterns remain valid for validating Gateway/HTTPRoute/Tunnel health.
+
+> ⚠️ **Preconditions outdated:** The "Preconditions" section mentions checking for Traefik and Kopia — those no longer exist. The initial cutover is complete.
+
 # Cilium Gateway Cutover Runbook
 
 > Purpose: deploy the current repo state for `Cloudflare Tunnel -> Cilium Gateway API -> Services`, then validate traffic end to end.

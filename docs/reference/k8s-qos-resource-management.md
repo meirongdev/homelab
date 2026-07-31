@@ -60,7 +60,7 @@ Homelab 由两个集群组成：
 | **ArgoCD**（Helm chart）| 安全/可观测组件（kyverno、tetragon、trivy、falco、**loki、tempo、sloth**） | auto-sync / 120s reconciliation |
 | **just deploy-X**（Helm）| 基础设施层（kube-prometheus-stack、vault、cilium、external-secrets）| 手动触发（bootstrapping/恢复场景） |
 
-2026-07-06 将 loki、tempo、sloth、restic-backup 从 Helm/kubectl 管理迁入 ArgoCD。
+loki、tempo、sloth、restic-backup 已从 Helm/kubectl 管理迁入 ArgoCD（2026-07-06）。
 
 ---
 

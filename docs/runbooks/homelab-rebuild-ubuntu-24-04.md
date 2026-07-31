@@ -1,3 +1,6 @@
+> **⚠️ HISTORICAL CONTEXT (2026-03):** This runbook was written for a specific rebuild after a Cilium BPF verifier bug on a development kernel. The conservative-mode instructions (kubeProxyReplacement: false, gatewayAPI.enabled: false) were a temporary workaround for that incident. **Do not follow Phase 4 literally for a routine rebuild** — Cilium Gateway API with kubeProxyReplacement: true is the standard configuration.
+> For current Cilium deployment, see k8s/cilium/README.md and just deploy-cilium.
+
 # Homelab Rebuild on Ubuntu 24.04 LTS
 
 ## Goal

@@ -1,3 +1,5 @@
+> **WARNING: HISTORICAL (2026-07):** This plan was written when the architecture still used Traefik, Kopia, and NFS runtime storage. All milestones completed. See docs/ARCHITECTURE.md, docs/reference/, and docs/plans/ROADMAP.md for current state.
+
 # Homelab + Oracle K3s 最优架构方案
 
 > 日期: 2026-03-07
