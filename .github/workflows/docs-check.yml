@@ -1,0 +1,41 @@
+# 强制 docs/README.md 里的文档组织规则 R1-R7（能自动查的那几条）。
+#
+# 为什么需要它：2026-07-31 把规则写下来并让全库符合，但规则没有强制手段就会重新腐化——
+# 上一次腐化的表现是 reference/ 混进带日期的建议快照、plans/ 类别目录没索引、四处死链。
+#
+# ⚠️ 本检查只看**结构**（命名/文首字段/索引/链接）。它查不出文档内容与集群漂移
+# ——那次 NFS 描述错误格式完美，是 kubectl 照出来的。内容准确性仍需人工实测。
+name: docs check
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - docs/**
+      - scripts/check-docs.py
+      - .github/workflows/docs-check.yml
+  push:
+    branches: [main]
+    paths:
+      - docs/**
+      - scripts/check-docs.py
+      - .github/workflows/docs-check.yml
+      # 这些目录的注释里引用 docs/ 路径，改名后会失效
+      - "**/justfile"
+      - argocd/**
+      - cloud/**
+      - k8s/**
+      - zitadel/**
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 只用标准库，不需要 setup-python / 装依赖
+      - name: 检查文档组织规则
+        run: python3 scripts/check-docs.py
