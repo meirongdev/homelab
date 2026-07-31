@@ -44,3 +44,45 @@ spec:
   namespaceResourceWhitelist:
     - group: "*"
       kind: "*"
+
+  # 孤儿资源监控 —— 找「在集群里、但不在 Git 里」的东西（与 CVE/成本报告互补:
+  # 那些找的是「配置有问题」,这个找的是「配置压根没进 Git」)。
+  #
+  # 判定条件(ArgoCD 三者同时满足才算孤儿):
+  #   1. 位于本 project 下某个 Application 的 destination namespace
+  #   2. 没有 tracking 标记(本集群 ArgoCD v3.x 用注解 argocd.argoproj.io/tracking-id,
+  #      不是 v2 的 app.kubernetes.io/instance label —— 排查时别看错)
+  #   3. 没有 ownerReferences(所以 ReplicaSet/Pod/Job-from-CronJob 天然不会被误报)
+  # 另有 3 条内置豁免:default SA、kube-root-ca.crt、default ns 的 kubernetes Service。
+  #
+  # ⚠️ warn: false 是刻意的。ignore 列表只支持 group/kind/name,**没有 namespace 字段**,
+  # 而 kube-system / monitoring / argocd / external-secrets 四个 ns 里的组件
+  # (cilium+k3s / kube-prometheus-stack / ArgoCD 自身 / ESO operator)都是手动 helm 装的,
+  # 天然全部「无人认领」—— 实测这四个 ns 贡献 255 条,且无法用 ignore 屏蔽。
+  # 开 warn: true 会给 loki/tempo/gateway/vault-eso 等 App 常挂黄色告警条,
+  # 直接复刻 trivy 那种告警疲劳。warn: false 下孤儿仍在各 App 的资源树里可见,
+  # 只是不产生 warning condition —— 看 personal-services/trivy-operator 这类
+  # 「GitOps 自有」ns 时列表是干净的(实测全集群仅剩 7 条,条条有意义)。
+  # 若日后想要真告警,正确做法是把上述四个 ns 的 App 拆到独立 project,而不是加 ignore。
+  orphanedResources:
+    warn: false
+    ignore:
+      # Endpoints 由 endpoints controller 为每个 Service 自动创建,无 ownerRef、
+      # 永远不会进 Git(EndpointSlice 有 ownerRef,已被条件 3 自动排除)。实测 50 条。
+      - group: ""
+        kind: Endpoints
+        name: "*"
+      # Helm 自己的 release 状态存档,不是工作负载。实测 34 条。
+      - group: ""
+        kind: Secret
+        name: "sh.helm.release.v1.*"
+      # kyverno 准入 webhook 的自签 TLS,由 cleanup-controller 运行时生成并轮转。
+      - group: ""
+        kind: Secret
+        name: "kyverno-*.kyverno.svc.kyverno-tls-*"
+      # trivy-server StatefulSet 的 volumeClaimTemplate 产物:PVC 不带 ownerRef,
+      # 但它确实由 STS 管理。注意这里只豁免这一个具名 PVC —— PVC 整类不能豁免,
+      # 「意外多出来的 PVC」正是最该被看见的孤儿(参见 calibre PVC 的 Prune=false 保护)。
+      - group: ""
+        kind: PersistentVolumeClaim
+        name: "data-trivy-server-0"
