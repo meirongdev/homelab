@@ -36,10 +36,10 @@ Ask the user (or infer from context) the following:
 
 | | homelab | oracle-k3s |
 |---|---|---|
-| Manifest | `k8s/helm/manifests/<service>.yaml` | `cloud/oracle/manifests/personal-services/<service>.yaml` |
-| HTTPRoute lives in | `k8s/helm/manifests/gateway.yaml` (central file) | the same file as the Deployment |
+| Manifest | `k8s/helm/manifests/personal-services/<service>.yaml` | `cloud/oracle/manifests/personal-services/<service>.yaml` |
+| HTTPRoute lives in | `k8s/helm/manifests/gateway/gateway.yaml` (central file) | the same file as the Deployment |
 | Gateway parentRef | `homelab-gateway`, ns `kube-system`, **port 8000** | `oracle-gateway`, ns `kube-system`, **port 80** |
-| Registration | add filename to `argocd/applications/personal-services.yaml` `include` | add path to `cloud/oracle/manifests/kustomization.yaml` `resources` |
+| Registration | none — files in `k8s/helm/manifests/personal-services/` are picked up automatically | add path to `cloud/oracle/manifests/kustomization.yaml` `resources` |
 
 ### Step 2 — Create the Deployment + Service manifest
 
@@ -91,7 +91,7 @@ If the PVC holds important data (e.g. media libraries), add the `argocd.argoproj
 
 ### Step 3 — Add the HTTPRoute
 
-On **homelab**, append to `k8s/helm/manifests/gateway.yaml`. On **oracle-k3s**, append to the service's own manifest file. Always include all explicit fields to prevent ArgoCD OutOfSync drift:
+On **homelab**, append to `k8s/helm/manifests/gateway/gateway.yaml`. On **oracle-k3s**, append to the service's own manifest file. Always include all explicit fields to prevent ArgoCD OutOfSync drift:
 
 ```yaml
 ---
@@ -148,20 +148,15 @@ spec:
 
 ### Step 4 — Register with GitOps
 
-**homelab** — add the filename to the `include` list in `argocd/applications/personal-services.yaml`:
+**homelab** — nothing to do. The `personal-services` App syncs the whole `k8s/helm/manifests/personal-services/` directory (one directory per Application since 2026-07-31, see `k8s/helm/manifests/README.md`), so the new file is picked up automatically on push.
 
-```yaml
-directory:
-  include: "{calibre-web.yaml,calibre-ebook-sync.yaml,personal-services-limits.yaml,<service-name>.yaml}"
-```
-
-**oracle-k3s** — add the path under `resources:` in `cloud/oracle/manifests/kustomization.yaml`:
+**oracle-k3s** — add the path under `resources:` in `cloud/oracle/manifests/kustomization.yaml` (its kustomize tree is still an explicit list — a file not registered there silently does nothing):
 
 ```yaml
   - personal-services/<service-name>.yaml
 ```
 
-If the service belongs to a different logical group (e.g. infrastructure), add it to the appropriate Application instead, or create a new one under `argocd/applications/` (the `root` App-of-Apps picks it up on push).
+If the service belongs to a different logical group (e.g. infrastructure), put it in the matching `k8s/helm/manifests/<app>/` directory instead, or create a new directory plus an Application under `argocd/applications/` pointing at it (the `root` App-of-Apps picks it up on push).
 
 ### Step 5 — Add service to homepage
 

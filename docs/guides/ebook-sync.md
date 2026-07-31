@@ -20,7 +20,7 @@
 
 ## K8s CronJob
 
-`k8s/helm/manifests/calibre-ebook-sync.yaml` — 每 6h 在 pod 内运行健康检查：
+`k8s/helm/manifests/personal-services/calibre-ebook-sync.yaml` — 每 6h 在 pod 内运行健康检查：
 
 - 统计 ingest 堆积
 - 查询数据库新增
@@ -30,7 +30,7 @@
 部署：
 
 ```bash
-kubectl apply -f k8s/helm/manifests/calibre-ebook-sync.yaml
+kubectl apply -f k8s/helm/manifests/personal-services/calibre-ebook-sync.yaml
 ```
 
 ## 传输流程

@@ -11,9 +11,8 @@ spec:
   source:
     repoURL: https://github.com/meirongdev/homelab
     targetRevision: main
-    path: k8s/helm/manifests
-    directory:
-      include: "{bifrost.yaml}"
+    # 目录即清单：放进该目录的 yaml 自动纳入同步，新增文件无需改本文件。
+    path: k8s/helm/manifests/bifrost
 
   destination:
     server: https://kubernetes.default.svc

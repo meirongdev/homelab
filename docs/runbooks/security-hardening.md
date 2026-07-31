@@ -31,7 +31,7 @@ helm search repo aqua/trivy-operator --versions | head    # → argocd/applicati
 helm search repo kyverno/kyverno     --versions | head    # → argocd/applications/kyverno.yaml
 ```
 
-kube-bench 镜像 tag（`k8s/helm/manifests/kube-bench.yaml`）与 k3s 基准名同理——见该层下方说明。
+kube-bench 镜像 tag（`k8s/helm/manifests/kube-bench/kube-bench.yaml`）与 k3s 基准名同理——见该层下方说明。
 
 ---
 
@@ -73,7 +73,7 @@ kubectl --context k3s-homelab -n personal-services run psa-test --image=busybox 
 kubectl --context k3s-homelab create job --from=cronjob/kube-bench kube-bench-once -n kube-bench
 kubectl --context k3s-homelab logs -n kube-bench job/kube-bench-once | less
 ```
-**k3s 基准/镜像 tag 排错**：若日志报 "unable to find config / benchmark not found"，列出镜像内可用基准目录并改 `manifests/kube-bench.yaml` 的 `--benchmark`：
+**k3s 基准/镜像 tag 排错**：若日志报 "unable to find config / benchmark not found"，列出镜像内可用基准目录并改 `manifests/kube-bench/kube-bench.yaml` 的 `--benchmark`：
 ```bash
 kubectl --context k3s-homelab run kb --rm -it --image=docker.io/aquasec/kube-bench:v0.15.6 --command -- ls /opt/kube-bench/cfg/
 ```
@@ -86,7 +86,7 @@ kubectl --context k3s-homelab run kb --rm -it --image=docker.io/aquasec/kube-ben
 kubectl --context k3s-homelab get pods -n trivy-system
 kubectl --context k3s-homelab get vulnerabilityreports,configauditreports,exposedsecretreports -A
 ```
-- 指标核对（首次扫描后）：`kubectl -n trivy-system port-forward svc/trivy-operator 8080:8080` 然后 `curl -s localhost:8080/metrics | grep trivy_`，确认 `trivy_image_vulnerabilities` / `trivy_exposedsecrets_findings` / `trivy_resource_configaudits` 名称与 `manifests/trivy-alerts.yaml` 一致（不同 chart 版本可能微调）。
+- 指标核对（首次扫描后）：`kubectl -n trivy-system port-forward svc/trivy-operator 8080:8080` 然后 `curl -s localhost:8080/metrics | grep trivy_`，确认 `trivy_image_vulnerabilities` / `trivy_exposedsecrets_findings` / `trivy_resource_configaudits` 名称与 `manifests/monitoring/alerts/trivy-alerts.yaml` 一致（不同 chart 版本可能微调）。
 - 看板：Grafana → `Security` 文件夹 → "Security / Trivy 漏洞概览"。
 - 告警：critical CVE / 暴露密钥经 Alertmanager→Telegram。
 

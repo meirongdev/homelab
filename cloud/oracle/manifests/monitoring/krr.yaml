@@ -1,7 +1,7 @@
 # KRR (robusta-dev/krr) — 资源 requests/limits 右尺寸推荐（oracle-k3s）
 # 每周一 09:15 跑一次（homelab 侧 09:00，错峰），结果推到同一个 Telegram 话题。
 #
-# 与 homelab 版（k8s/helm/manifests/krr.yaml）的差异只有三处：
+# 与 homelab 版（k8s/helm/manifests/monitoring/krr.yaml）的差异只有三处：
 #   ① Prometheus 指向中枢（oracle 本地没有 Prometheus），经 Tailscale NodePort 31090
 #   ② -l=oracle-k3s
 #   ③ bot token 需本集群自己的 ExternalSecret（跨集群读同一个 Vault 路径，同 falcosidekick）

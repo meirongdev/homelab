@@ -11,9 +11,8 @@ spec:
   source:
     repoURL: https://github.com/meirongdev/homelab
     targetRevision: main
-    path: k8s/helm/manifests
-    directory:
-      include: "{vault-eso-config.yaml,cloudflare-external-secret.yaml,grafana-external-secret.yaml,github-external-secret.yaml,argocd-oracle-cluster-external-secret.yaml,argocd-oidc-external-secret.yaml}"
+    # 目录即清单：放进该目录的 yaml 自动纳入同步，新增 ExternalSecret 无需改本文件。
+    path: k8s/helm/manifests/vault-eso
 
   destination:
     server: https://kubernetes.default.svc

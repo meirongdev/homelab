@@ -1,7 +1,7 @@
 ---
 # Sloth — SLO 生成器（PrometheusServiceLevel CR → PrometheusRule）
 # Chart: sloth/sloth
-# Values: k8s/helm/values/sloth-values.yaml
+# Values: k8s/helm/values/sloth.yaml
 # 2026-07-06: 从 Helm 直接管理迁入 ArgoCD（参照 falco.yaml 的 multi-source 模式）
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -19,7 +19,7 @@ spec:
       targetRevision: "0.16.0"
       helm:
         valueFiles:
-          - $values/k8s/helm/values/sloth-values.yaml
+          - $values/k8s/helm/values/sloth.yaml
     - repoURL: https://github.com/meirongdev/homelab
       targetRevision: main
       ref: values

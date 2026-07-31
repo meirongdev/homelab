@@ -169,7 +169,7 @@ kubectl exec -n <ns> <pod> -c <app-container> -- find / -name "*.log" 2>/dev/nul
 ```
 
 **已实施案例：**
-- `k8s/helm/manifests/calibre-web.yaml` — 日志文件：`/config/calibre-web.log`
+- `k8s/helm/manifests/personal-services/calibre-web.yaml` — 日志文件：`/config/calibre-web.log`
 
 ---
 
@@ -287,11 +287,11 @@ cd k8s/helm && just remove-otel-collector
 | `k8s/helm/values/opentelemetry-collector.yaml` | OTel Collector Helm values（logs + traces） |
 | `k8s/helm/values/tempo.yaml` | Tempo Helm values（traces backend） |
 | `k8s/helm/values/kube-prometheus-stack.yaml` | Grafana datasources（Tempo tracesToLogs/Metrics） |
-| `k8s/helm/manifests/monitoring-external.yaml` | Tempo NodePort :31317（跨集群 traces） |
+| `k8s/helm/manifests/monitoring/monitoring-external.yaml` | Tempo NodePort :31317（跨集群 traces） |
 | `cloud/oracle/manifests/monitoring/otel-collector.yaml` | Oracle-k3s OTel Collector（logs + metrics + traces） |
 | `k8s/helm/values/loki.yaml` | Loki config（promtail.enabled: false） |
-| `k8s/helm/manifests/grafana-dashboards.yaml` | 4 个 Loki Dashboard ConfigMap |
-| `k8s/helm/manifests/calibre-web.yaml` | log-exporter sidecar 示例 |
+| `k8s/helm/manifests/monitoring/dashboards/grafana-dashboards.yaml` | 4 个 Loki Dashboard ConfigMap |
+| `k8s/helm/manifests/personal-services/calibre-web.yaml` | log-exporter sidecar 示例 |
 | `argocd/applications/monitoring-dashboards.yaml` | Dashboard GitOps Application |
 | `k8s/helm/justfile` | deploy-otel-collector / remove-otel-collector |
 | `docs/plans/observability/2026-02-21-otel-log-migration-design.md` | 迁移设计决策文档 |

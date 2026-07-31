@@ -21,8 +21,8 @@ homelab/
 ├── k8s/
 │   ├── ansible/      # K3s cluster setup and node config
 │   └── helm/         # Application deployment
-│       ├── values/
-│       ├── manifests/
+│       ├── values/       # Helm values, one per app: <app>.yaml (+ <app>-oracle.yaml variants)
+│       ├── manifests/    # Raw manifests, one directory per ArgoCD Application (see manifests/README.md)
 │       └── justfile
 ├── cloudflare/       # External access management
 │   └── terraform/
@@ -137,7 +137,7 @@ vim k8s/helm/.env
 - Rotate passwords periodically
 
 ### Syncing to Kubernetes (ESO)
-To make a Vault secret available to an application, create an `ExternalSecret` manifest in `k8s/helm/manifests/`.
+To make a Vault secret available to an application, create an `ExternalSecret` manifest in `k8s/helm/manifests/vault-eso/` (shared secrets, synced by the `vault-eso` App) or in the owning app's own manifest directory.
 
 Example `ExternalSecret` (`v1`):
 ```yaml

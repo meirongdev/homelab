@@ -8,7 +8,7 @@
 # but every newly-added/changed HTTPRoute never gets its DNS record and nobody is told.
 #
 # Metrics come from the external-dns controller (/metrics :7979) on BOTH clusters:
-#   - homelab:    ServiceMonitor in values/external-dns-values.yaml (gets cluster=homelab via
+#   - homelab:    ServiceMonitor in values/external-dns.yaml (gets cluster=homelab via
 #                 the Prometheus scrapeClasses relabel).
 #   - oracle-k3s: scraped by its OTel Collector (prometheus/external-dns receiver) and
 #                 remote-written with cluster=oracle-k3s.

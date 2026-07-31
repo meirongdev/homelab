@@ -39,7 +39,7 @@ ConfigMap，平时一切正常，只在**从 Git 重建集群**时暴露成缺�
 - `argocd/argocd-secret`（server signature key）、`argocd/oracle-k3s-cluster`（oracle 外部集群凭据）
 - `external-secrets/vault-token`（删了全部 ESO 停摆）
 - `monitoring/alertmanager-kube-prometheus-stack-alertmanager`（Alertmanager 配置源）
-- `monitoring/alertmanager-telegram` —— 它正被 `k8s/helm/manifests/krr.yaml` 的 CronJob 以
+- `monitoring/alertmanager-telegram` —— 它正被 `k8s/helm/manifests/monitoring/krr.yaml` 的 CronJob 以
   `secretKeyRef` 引用；kor 不遍历 CronJob 的 podTemplate
 - `opencost/custom-pricing-model` —— deploy 里有 `PRICING_CONFIGMAP_NAME` 环境变量指名读取；
   kor 只认 volume 挂载和 `envFrom`/`valueFrom`
