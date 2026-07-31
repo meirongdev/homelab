@@ -91,7 +91,11 @@
 
 - [x] Uptime Kuma SSO 监控修复 (maxredirects config)
 - [x] Loki retention 配置 (values.yaml update) ✅ 2026-03-19
-- [x] Grafana 旧 dashboard 清理 ✅ 2026-03-19 禁用 AIX/Darwin/proxy dashboard
+- [x] Grafana 旧 dashboard 清理 ✅ 2026-03-19 —— **⚠️ 2026-07-31 复核，本条原描述有一半不实**：
+  - ✅ **proxy 面板确已禁掉**（`kubeProxy.enabled: false`，Cilium 做了 kube-proxy replacement；`helm get manifest` 里已无该 ConfigMap）
+  - ❌ **AIX/Darwin 面板并没有被禁掉**。values 里那两行 `nodeExporter.operatingSystem.{aix,darwin}.enabled: false` 已生效地写进了 release，但**它们只 gate node-exporter mixin 的 PrometheusRule，不 gate Grafana dashboard**——chart 87.6.0 的 `helm get manifest` 至今仍渲染 `kube-prometheus-stack-nodes-aix` / `-nodes-darwin` 两个 ConfigMap，集群里也确实还在。
+  - 实际起作用的是**另一件事**：2026-06-15 的 dashboard 整改给 chart 自带 mixin 面板统一打了 `grafana_folder: Kubernetes Built-in` 注解，把它们归档进子文件夹、不再污染顶层。所以"看不见了"是**归档**的效果，不是禁用。
+  - 若真要移除：kube-prometheus-stack 没有单面板开关，只能整体关 `grafana.defaultDashboardsEnabled`（会一起丢掉 20+ 张有用的 mixin 面板），不划算。**现状（归档进子文件夹）已经够用，建议维持**。
 - [x] repo↔集群一致性清零（helm pin 对齐、homelab postgres 残留移除、ReferenceGrant v1beta1、gotify-bridge 双 App 争抢去重）✅ 2026-07-07
 - [x] 双集群清理审计 ✅ 2026-07-12（孤儿 Job×7 / 0 副本 RS×97 / 未用镜像≈19G；falco inotify 根因修复 + ansible 固化；zitadel/gotify SLO 迁 oracle 指标 + 7 条 SLO errorQuery 空集加固 + 补 bifrost SLO；NFSStorageNodeDown→BackupTargetNodeDown；zitadel 迁移残留注释清零）
 - [x] justfile 卫生 ✅ 2026-07-12: `deploy-prometheus`/`-nowait` 双 `--version` 去重（删死变量 `prometheus_stack_version=82.10.1`，实际生效的一直是 `kube_prometheus_stack_version=87.6.0`）；`loki_version` 6.53.0→7.0.0 对齐 ArgoCD 实际部署（防 `just deploy-loki` 意外降级）；顺带清理 Kopia 退役残留——justfile `kopia-*` 配方块删除、`KopiaBackupNotRunning` 告警改名 `BackupNotRunning` 并修正幽灵 `02:00/UTC` → 实际 `03:00/03:30 Asia/Shanghai`、kube-bench/setup-k3s/prune 警告的陈旧注释校正

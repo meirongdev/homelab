@@ -25,4 +25,13 @@ Network note: both clusters now use Cilium for the local data plane and Gateway 
 6. **External Access**: `cd cloudflare/terraform && just init && just apply`
 
 ---
-For AI assistant context, this project uses `docs/CONVENTIONS.md` (linked as `CLAUDE.md` and `GEMINI.md` in root).
+For AI assistant context this project uses two files, both symlinked so each tool finds its own name:
+
+| File | Size | Symlinked from | Role |
+|---|---|---|---|
+| `docs/AGENTS.md` | ~5 KB | `AGENTS.md`, `CLAUDE.md` | condensed always-on context; points to the file below for depth |
+| `docs/CONVENTIONS.md` | ~62 KB | `.gemini.md`, `.github/copilot-instructions.md` | full conventions + architecture + per-component gotchas |
+
+The split is deliberate: tools that auto-load a context file get the small one, so a 62 KB file
+isn't pulled into every session. (A `.claudemd` symlink used to exist here — no tool reads that
+name, so it was inert; replaced by `CLAUDE.md` on 2026-07-31.)

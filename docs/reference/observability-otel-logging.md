@@ -294,5 +294,5 @@ cd k8s/helm && just remove-otel-collector
 | `k8s/helm/manifests/calibre-web.yaml` | log-exporter sidecar 示例 |
 | `argocd/applications/monitoring-dashboards.yaml` | Dashboard GitOps Application |
 | `k8s/helm/justfile` | deploy-otel-collector / remove-otel-collector |
-| `docs/plans/2026-02-21-otel-log-migration-design.md` | 迁移设计决策文档 |
-| `docs/plans/2026-02-21-grafana-loki-dashboards-design.md` | Dashboard 设计决策文档 |
+| `docs/plans/observability/2026-02-21-otel-log-migration-design.md` | 迁移设计决策文档 |
+| `docs/plans/observability/2026-02-21-grafana-loki-dashboards.md` | Dashboard 设计决策文档 |

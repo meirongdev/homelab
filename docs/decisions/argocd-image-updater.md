@@ -1,6 +1,16 @@
 # ArgoCD Image Updater
 
-## 工作原理
+> **状态（2026-07-31 复核）：已部署但完全空闲，没有在更新任何镜像。**
+> `kubectl get imageupdater -A` 返回 0 个 CR，日志常驻 `No ImageUpdater CRs to process`。
+> chart 1.2.4 / image v1.2.2（升级原委见文末）。
+>
+> ⚠️ **下面「工作原理 / 关键配置文件 / 验证 / 问题排查」几节写的是 it-tools 那套 homelab 配置，
+> 已经不存在了**——it-tools 于 2026-07 迁往 oracle-k3s（`cloud/oracle/manifests/personal-services/it-tools.yaml`），
+> `argocd/applications/it-tools.yaml` 与 `k8s/helm/manifests/it-tools/` 整个目录都已删除。
+> 保留这几节是因为**机制说明和排查思路仍然适用**（将来给某个 App 配 `ImageUpdater` CR 时可直接套用），
+> 但**里面的文件路径、`it-tools` Application、示例命令都不要照抄执行**。
+
+## 工作原理（历史示例：it-tools，文件均已删除）
 
 Image Updater 每 **2 分钟**扫描一次，完整流程如下：
 
@@ -121,13 +131,17 @@ kubectl get secret git-creds -n argocd \
 
 ### 症状：修改了 Application 注解后未生效
 
-注解存在于 `argocd/applications/it-tools.yaml`（git 中），但 ArgoCD **不管理 Application 对象本身**，只管理 Application 指向的内容。修改注解后需要手动应用：
+> ⚠️ **本节原有的说法已作废**：原文称"ArgoCD 不管理 Application 对象本身，改注解后需手动 `kubectl apply`"。
+> 这在引入 App-of-Apps 之前成立，**现在不成立**——`root` App 递归 watch `argocd/applications/`
+> 并开了 automated+selfHeal，所以改 `argocd/applications/*.yaml` **`git push` 就够了**，
+> 3 分钟内 reconcile。手动 `kubectl apply` 只在 bootstrap `root.yaml` 或 `root` 本身丢失时才需要。
+> （同 `docs/CONVENTIONS.md` 的 "ArgoCD Application definitions" 条。）
+
+所以这个症状现在的排查方向是：确认 push 是否已被 `root` App 同步下来。
 
 ```bash
-kubectl apply -f argocd/applications/it-tools.yaml
-# 验证
-kubectl get application it-tools -n argocd \
-  -o jsonpath='{.metadata.annotations.argocd-image-updater\.argoproj\.io/it-tools\.update-strategy}'
+kubectl get application <app> -n argocd \
+  -o jsonpath='{.metadata.annotations}' | tr ',' '\n' | grep image-updater
 ```
 
 ### 症状：Pod 重启后日志 level 变回 info（v1.1.0 已知问题，chart ≥1.2 已修复）

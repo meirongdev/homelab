@@ -42,4 +42,4 @@ kubectl apply -f k8s/helm/manifests/calibre-ebook-sync.yaml
 
 ## 元数据补全
 
-参考 `docs/plans/2026-07-05-calibre-metadata-enrichment.md`。
+参考 `docs/plans/apps/2026-07-05-calibre-metadata-enrichment.md`。

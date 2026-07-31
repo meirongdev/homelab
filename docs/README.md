@@ -1,7 +1,8 @@
 # Homelab Docs Portal
 
-> Last updated: 2026-07-06
-> 当前主线: [plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md](plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md)
+> Last updated: 2026-07-31
+> 当前开放项: 离站备份、Terraform state → R2、DGX Spark 入编 — 见 [plans/ROADMAP.md](plans/ROADMAP.md)
+> （2026-07-06 存储本地化 + 备份重建计划已于 2026-07-11 完成，转为历史记录）
 
 ## 文档分层
 
@@ -17,6 +18,7 @@
 | `assets/` | 图片/架构图 | 引用链接 |
 
 **编写规则**: 架构事实写 `reference/` 而非仅写 `plans/`；过期内容标注 `Deprecated` 并链接替代文档。
+`docs/architecture/` 已废弃（内容已拆进 `reference/`+`decisions/`），只保留一张旧路径→新路径的映射表。
 
 ## 快速入口
 
@@ -38,24 +40,11 @@
 
 ### 服务总览
 
-| 服务 | 集群 | URL | 认证 |
-|------|------|-----|------|
-| Calibre-Web | homelab | book.meirong.dev | 内置 |
-| Grafana | homelab | grafana.meirong.dev | 内置 |
-| Vault | homelab | vault.meirong.dev | 内置 |
-| ArgoCD | homelab | argocd.meirong.dev | 内置 |
-| ZITADEL | oracle-k3s | auth.meirong.dev | OIDC |
-| Homepage | oracle-k3s | home.meirong.dev | 公开 |
-| IT-Tools | oracle-k3s | tool.meirong.dev | 公开 |
-| Stirling-PDF | oracle-k3s | pdf.meirong.dev | 公开 |
-| Squoosh | oracle-k3s | squoosh.meirong.dev | 公开 |
-| Miniflux | oracle-k3s | rss.meirong.dev | 内置 |
-| KaraKeep | oracle-k3s | keep.meirong.dev | 内置 |
-| Timeslot | oracle-k3s | slot.meirong.dev | Basic Auth |
-| Uptime Kuma | oracle-k3s | status.meirong.dev | 公开 |
-| Sink (短链) | Cloudflare Workers | s.meirong.dev | N/A |
+见 [CONVENTIONS.md § Services](CONVENTIONS.md#services)（唯一真相源，含集群/namespace/URL）。
+集群外还有一个 **Sink 短链服务**（`s.meirong.dev`，Cloudflare Workers，源码是 `cloudflare/workers/sink/` submodule）。
 
-SSO 状态: `HTTPRoute` 层不再承载共享 SSO。ZITADEL 仍作为身份提供方保留，详见 [plans/security/2026-03-08-cilium-zitadel-sso-plan.md](plans/security/2026-03-08-cilium-zitadel-sso-plan.md)。
+SSO 状态: `HTTPRoute` 层不再承载共享 SSO，改为应用原生 OIDC（少数无认证的应用用 per-app oauth2-proxy）。
+ZITADEL 仍是唯一 IdP，详见 CONVENTIONS.md 的 Identity 段与 [plans/security/2026-03-08-cilium-zitadel-sso-plan.md](plans/security/2026-03-08-cilium-zitadel-sso-plan.md)。
 
 Oracle 集群工作负载的 Vault 路径约定: `secret/oracle-k3s/<service>`。
 
@@ -63,9 +52,10 @@ Oracle 集群工作负载的 Vault 路径约定: `secret/oracle-k3s/<service>`�
 
 | 数据 | 状态 |
 |------|------|
-| Vault / PG / sqlite | 🟢 restic 每夜备份 → 106 ZFS 仓库 (演练通过) |
-| Calibre 书库 | 🟢 ZFS raidz1 + sanoid 快照 (不入 restic) |
-| 离站副本 | 🔴 待做 — `plans/storage/2026-07-06-*.md` |
+| Vault / PG / sqlite | 🟢 restic 每夜备份 → 106 ZFS 仓库 (2026-07-06 恢复演练通过) |
+| Calibre 书库 | 🟢 **自 2026-07-11 起纳入 restic 夜备**（书库已随存储本地化迁到 `local-path`，不再受 106 的 ZFS raidz1/sanoid 保护，所以必须进 restic） |
+| 整机 VM | 🟢 PVE 每周 vzdump (VM 100 → 106 `backups`, keep-last=3) |
+| 离站副本 | 🔴 待做 — 见 [plans/ROADMAP.md](plans/ROADMAP.md) Phase 5 |
 
 ## 推荐阅读顺序
 

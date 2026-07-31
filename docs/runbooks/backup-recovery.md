@@ -66,6 +66,6 @@ Vault unseal keys: `vault-keys.json` / K8s secret `vault-backup-keys`（见记�
 4. **离站（later）** — 抗屋内灾难（106 磁盘全损/失窃/火灾）。
 
 ## 相关文档
-- 主计划: `docs/plans/2026-07-06-storage-local-migration-and-backup-redesign.md`
+- 主计划: `docs/plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md`
 - 战略母文档: `architecture-optimization-2026-07-04.md`（P0-1 离站备份）
-- 存储 106 收尾: `docs/plans/2026-07-04-storage-106-utilization-and-backup-simplification.md`（ARC/sanoid）
+- 存储 106 收尾: `docs/plans/storage/2026-07-04-storage-106-utilization-and-backup-simplification.md`（ARC/sanoid）

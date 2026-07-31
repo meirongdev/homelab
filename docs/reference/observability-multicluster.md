@@ -200,9 +200,11 @@ All 4 Loki dashboards (`k8s/helm/manifests/grafana-dashboards.yaml`) have a `clu
 - **k8s-logs-errors** — error rate aggregation, per cluster
 - **k8s-logs-search** — full-text search across selected cluster(s)
 
-Cloudflare Tunnel dashboard (`k8s/helm/manifests/cloudflare-tunnel-dashboard.yaml`):
-
-- **Cloudflare Tunnel + Per-Domain Traffic** — tunnel health and cluster-level ingress path visibility without Traefik router metrics
+> ~~Cloudflare Tunnel dashboard (`k8s/helm/manifests/cloudflare-tunnel-dashboard.yaml`)~~ —
+> **该面板已随 Traefik→Cilium Gateway 切换一并删除**（commit `76b285a`），文件与 ConfigMap 均不存在。
+> 隧道本身仍有指标可采，但没有现成看板；能观测/看不到什么见
+> [`cloudflare-tunnel-observability.md`](cloudflare-tunnel-observability.md)。入口层的 RED 指标现在
+> 来自 Cilium Envoy（见 CONVENTIONS.md 的 SLI/SLO 段）。
 
 Multi-cluster resource overview (`k8s/helm/manifests/multicluster-overview-dashboard.yaml`):
 
