@@ -211,21 +211,10 @@ cleanup-logs:
     @echo "=== 最后一次清理的详细信息 ==="
     @tail -30 $(ls -t ~/.local/share/calibre-cleanup/*.log 2>/dev/null | head -1) 2>/dev/null || echo "暂无清理日志"
 
-# 部署 IT-Tools
-deploy-it-tools:
-    kubectl --context {{ctx}} apply -f manifests/it-tools.yaml
-
-# 删除 IT-Tools
-delete-it-tools:
-    kubectl --context {{ctx}} delete -f manifests/it-tools.yaml
-
-# 部署 Stirling-PDF
-deploy-pdf:
-    kubectl --context {{ctx}} apply -f manifests/stirling-pdf.yaml
-
-# 删除 Stirling-PDF
-delete-pdf:
-    kubectl --context {{ctx}} delete -f manifests/stirling-pdf.yaml
+# IT-Tools / Stirling-PDF 的配方已删除（2026-07-31）——两个服务已迁往 oracle-k3s，
+# manifests/{it-tools,stirling-pdf}.yaml 随迁移删除，配方只会报 "no such file"。
+# 现由 ArgoCD `oracle-k3s` App 从 cloud/oracle/manifests/personal-services/ 同步；
+# 需要手动部署时用 `cd cloud/oracle && just deploy-personal-services`。
 
 # 部署 Cloudflare Tunnel
 deploy-cloudflare-tunnel: create-cloudflare-secret
@@ -249,22 +238,12 @@ status-personal:
     kubectl --context {{ctx}} get all,pvc -n {{personal_ns}}
 
 # ⬇️ Homepage 仪表盘 ⬇️
-deploy-homepage:
-    kubectl --context {{ctx}} apply -f manifests/homepage.yaml
-    @echo "✅ Homepage deployed! Access at http://<NodeIP>:30080"
-
-delete-homepage:
-    kubectl --context {{ctx}} delete -f manifests/homepage.yaml
-
-# 更新 Homepage 配置并重启（ArgoCD 管理下直接 apply + restart）
-update-homepage:
-    kubectl --context {{ctx}} apply -f manifests/homepage.yaml
-    kubectl --context {{ctx}} rollout restart deployment/homepage -n homepage
-    kubectl --context {{ctx}} rollout status deployment/homepage -n homepage --timeout=60s
-
-homepage:
-    @echo "Homepage is available at http://localhost:8080"
-    kubectl --context {{ctx}} port-forward -n homepage svc/homepage 8080:3000
+# 配方已删除（2026-07-31）——Homepage 已迁 oracle-k3s，homelab 上连 `homepage` namespace 都没有，
+# manifests/homepage.yaml 也已随迁移删除。现由 ArgoCD `oracle-k3s` App 从
+# cloud/oracle/manifests/homepage/ 同步。
+#   手动部署:   cd cloud/oracle && just deploy-homepage
+#   改配置生效: kubectl --context oracle-k3s rollout restart deployment/homepage -n homepage
+#              （ConfigMap 是 subPath 挂载，ArgoCD 同步后不会热加载）
 
 deploy-all: add-repos create-namespace deploy-prometheus
     @echo "✅ All monitoring components deployed successfully!"
