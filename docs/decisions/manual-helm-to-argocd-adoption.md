@@ -1,7 +1,8 @@
 # manual-helm → ArgoCD：采纳现存 Helm release 的验证方法与三个陷阱
 
 > 日期: 2026-07-31
-> 状态: 已实施（kube-prometheus-stack / external-dns ×2）；otel-collector 待决
+> 状态: 已实施（kube-prometheus-stack / external-dns ×2）；otel-collector 已于同日落地
+> （全新 ArgoCD App 部署，非采纳——见 `otel-2026-alignment.md`）
 
 ## 上下文
 

@@ -29,6 +29,8 @@ spec:
     - https://prometheus-community.github.io/helm-charts
     # external-dns 双集群（同上，两实例 values 不同、txtOwnerId 必须不同）
     - https://kubernetes-sigs.github.io/external-dns/
+    # OTel Collector（homelab 节点代理：日志→Loki、OTLP 追踪→Tempo；2026-07-31）
+    - https://open-telemetry.github.io/opentelemetry-helm-charts
 
   destinations:
     - server: https://kubernetes.default.svc

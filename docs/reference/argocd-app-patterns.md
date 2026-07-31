@@ -11,15 +11,16 @@
 root (Application)
  └─ argocd/applications/*.yaml（排除 root.yaml）
      ├── loki / tempo / sloth / kyverno / tetragon / trivy-operator /
-     │   argocd-image-updater / falco / cnpg-operator / opencost / opencost-oracle
+     │   argocd-image-updater / falco / cnpg-operator / opencost / opencost-oracle /
+     │   kube-prometheus-stack / external-dns-oracle / otel-collector
      │                          # 多源 Helm：remote chart + $values/k8s/helm/values/<app>.yaml
+     ├── external-dns           # 混合多源：chart + manifests/external-dns/（目录源，管 ExternalSecret）
      ├── oracle-k3s             # Kustomize 树（跨集群推 cloud/oracle/manifests/）
      ├── backup                 # Kustomize（backup/overlays/homelab）
      ├── monitoring-dashboards  → manifests/monitoring/（目录源 + recurse）
      ├── personal-services      → manifests/personal-services/（目录源）
      ├── vault-eso              → manifests/vault-eso/（目录源）
-     ├── bifrost / gateway / cloudflare / external-dns /
-     │   kube-bench / namespace-guardrails
+     ├── bifrost / gateway / cloudflare / kube-bench / namespace-guardrails
      │                          → manifests/<同名目录>/（目录源）
      ├── calibre-metadata       → manifests/calibre-metadata/（Kustomize）
      └── kyverno-policies       → manifests/kyverno-policies/（目录源）
