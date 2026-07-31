@@ -1,3 +1,9 @@
+---
+# external-dns — homelab 实例（HTTPRoute → Cloudflare DNS）
+# Chart: external-dns/external-dns · Values: k8s/helm/values/external-dns.yaml
+# 2026-07-31: chart 本体从 manual-helm（just deploy-external-dns）采纳进 ArgoCD。
+# 采纳前已验证渲染等价：live 6 对象 vs 渲染 6 对象逐字节一致 → 首次同步是 no-op。
+# 本 App 同时管 k8s/helm/manifests/external-dns/（Cloudflare token 的 ExternalSecret）。
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -8,12 +14,25 @@ metadata:
 spec:
   project: homelab
 
-  source:
-    repoURL: https://github.com/meirongdev/homelab
-    targetRevision: main
-    # 目录即清单：放进该目录的 yaml 自动纳入同步，新增文件无需改本文件。
-    # （external-dns chart 本体仍由 justfile 的 helm 配方部署，这里只管 ESO secret。）
-    path: k8s/helm/manifests/external-dns
+  sources:
+    # chart 版本 —— 升级前 `helm search repo external-dns/external-dns --versions` 核对。
+    # ⚠️ Application 名必须保持 `external-dns`：ArgoCD 用 App 名当 Helm release 名，
+    # 而 release 名会进 Deployment 的 spec.selector（app.kubernetes.io/instance），
+    # 那是不可变字段——改名会让同步直接失败。详见 docs/reference/argocd-app-patterns.md。
+    - repoURL: https://kubernetes-sigs.github.io/external-dns/
+      chart: external-dns
+      targetRevision: "1.21.1"
+      helm:
+        valueFiles:
+          - $values/k8s/helm/values/external-dns.yaml
+        # DNSEndpoint CRD 由最初的 helm install 从 chart 的 crds/ 装过，集群里已存在；
+        # 本集群不用 crd source（只用 gateway-httproute），交给 ArgoCD 管没有收益。
+        skipCrds: true
+    - repoURL: https://github.com/meirongdev/homelab
+      targetRevision: main
+      # 目录即清单：external-dns 的 ExternalSecret 在这里。
+      path: k8s/helm/manifests/external-dns
+      ref: values
 
   destination:
     server: https://kubernetes.default.svc

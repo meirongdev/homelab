@@ -1,0 +1,53 @@
+---
+# external-dns — oracle-k3s 实例（跨集群部署，模式同 falco/opencost-oracle）
+# Chart: external-dns/external-dns · Values: k8s/helm/values/external-dns-oracle.yaml
+# 2026-07-31: chart 本体从 manual-helm（just deploy-external-dns-oracle）采纳进 ArgoCD。
+# ns + Cloudflare token 的 ExternalSecret 由 oracle-k3s kustomize App 提供
+# （cloud/oracle/manifests/base/external-dns.yaml），本 App 只管 chart。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: external-dns-oracle
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: homelab
+
+  sources:
+    # 与 homelab 侧保持同 chart 版本，避免两实例行为漂移。
+    - repoURL: https://kubernetes-sigs.github.io/external-dns/
+      chart: external-dns
+      targetRevision: "1.21.1"
+      helm:
+        # ⚠️ 必须显式指定 releaseName。App 名不能叫 `external-dns`（homelab 那个占了，
+        # 同一 argocd ns 不能重名），而 ArgoCD 默认拿 App 名当 release 名 ——
+        # release 名会进 Deployment 的 spec.selector.matchLabels
+        # （app.kubernetes.io/instance），那是**不可变字段**，
+        # 采纳现存 release 时会直接同步失败。
+        # `fullnameOverride` 治不了这个：它只改对象名，instance 标签照旧泄漏 release 名。
+        # 实测（2026-07-31）：不加此项 → 5 删 5 建；只加 fullnameOverride → 5 个对象
+        # selector/labels 不匹配；加了它 → 与 live 逐字节一致。
+        releaseName: external-dns
+        valueFiles:
+          - $values/k8s/helm/values/external-dns-oracle.yaml
+        # 同 homelab：DNSEndpoint CRD 集群里已存在，且本集群不用 crd source。
+        skipCrds: true
+    - repoURL: https://github.com/meirongdev/homelab
+      targetRevision: main
+      ref: values
+
+  destination:
+    # oracle-k3s 外部集群（Tailscale 端点；与 oracle-k3s / falco / opencost-oracle App 同）
+    server: https://100.107.166.37:6443
+    namespace: external-dns
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # external-dns ns 由 oracle-k3s kustomize App 拥有（含 PSA 标签 + ESO secret），
+      # 故此处不重复创建/管理 ns，避免双重所有权（同 falco/opencost-oracle）。
+      - CreateNamespace=false
+      - ServerSideApply=true
