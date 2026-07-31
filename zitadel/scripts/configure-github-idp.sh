@@ -7,7 +7,7 @@
 # direct/bypass connection fails ZITADEL's instance-host check. REST is plain
 # HTTP/JSON — no trailers — and works through the gateway. Same reason as
 # configure-smtp.sh and configure-bifrost-oauth.sh. See
-# docs/records/zitadel-console-grpc-404.md.
+# docs/records/2026-06-07-zitadel-console-grpc-404.md.
 #
 # Federates GitHub into ZITADEL so every OIDC / oauth2-proxy app (Bifrost admin,
 # etc.) gains a "Sign in with GitHub" button WITHOUT any app change — ZITADEL
