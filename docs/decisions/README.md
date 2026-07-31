@@ -7,6 +7,7 @@
 3. [alerting-telegram-migration.md](alerting-telegram-migration.md) — Gotify bridge 崩溃 bug → Alertmanager 原生 Telegram（含 Gotify 插件方案评估）
 4. [external-dns-adoption.md](external-dns-adoption.md) — 子域名 DNS 从 Terraform 手管 → HTTPRoute 声明式（含 Crossplane 否决、upsert-only 共存安全性）
 5. [opencost-krr-data-sources.md](opencost-krr-data-sources.md) — 同一个 cAdvisor 缺口，OpenCost 走 collector 旁路、KRR 补窄口径采集（含 krr-enforcer 否决、一处论据自我更正）
+6. [orphaned-resources.md](orphaned-resources.md) — 配置漂移体检选型：否决 kor（信噪比 0.6%，且误判 argocd-secret/vault-token 等要害），改用 ArgoCD 原生 `orphanedResources` 且 `warn: false`
 
 ## ADR Convention
 
