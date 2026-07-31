@@ -1,7 +1,14 @@
-> **⚠️ HISTORICAL CONTEXT (2026-03):** This runbook was written for a specific rebuild after a Cilium BPF verifier bug on a development kernel. The conservative-mode instructions (kubeProxyReplacement: false, gatewayAPI.enabled: false) were a temporary workaround for that incident. **Do not follow Phase 4 literally for a routine rebuild** — Cilium Gateway API with kubeProxyReplacement: true is the standard configuration.
-> For current Cilium deployment, see k8s/cilium/README.md and just deploy-cilium.
-
 # Homelab Rebuild on Ubuntu 24.04 LTS
+
+> **触发条件**：homelab 节点在 Cilium 数据面变更后不稳定，尤其 `dmesg` 出现开发内核上的
+> `cilium-agent` BPF verifier bug（见 § When to Use）。
+> **成功判定**：K3s 起来 + Cilium 健康 + Gateway 通，见 § Validation。
+> **回滚**：本文本身就是恢复流程；Cilium 侧回退用 `just deploy-cilium` 重装。
+>
+> ⚠️ **Phase 4 不要照抄**：其中的保守模式（`kubeProxyReplacement: false`、`gatewayAPI.enabled: false`）
+> 是当年为绕开那个 BPF bug 的临时手段。**标准配置是 `kubeProxyReplacement: true` + Cilium Gateway API**，
+> 见 `k8s/cilium/README.md` 与 `just deploy-cilium`。
+> Last updated: 2026-07-31
 
 ## Goal
 

@@ -1,7 +1,9 @@
 # Observability — OTel 日志与追踪架构
 
-**更新日期：** 2026-07-31（homelab collector 首次真实落地 + 2026 OTel 对齐，见 `docs/decisions/otel-2026-alignment.md`）
-**状态：** 生产运行中
+> Last updated: 2026-07-31
+> Status: 生效事实
+>
+> 2026-07-31 homelab collector 首次真实落地 + 2026 OTel 对齐，见 [`decisions/otel-2026-alignment.md`](../decisions/otel-2026-alignment.md)。
 
 ---
 
@@ -303,5 +305,5 @@ cd k8s/helm && just remove-otel-collector
 | `k8s/helm/manifests/personal-services/calibre-web.yaml` | log-exporter sidecar 示例 |
 | `argocd/applications/monitoring-dashboards.yaml` | Dashboard GitOps Application |
 | `k8s/helm/justfile` | deploy-otel-collector / remove-otel-collector |
-| `docs/plans/observability/2026-02-21-otel-log-migration-design.md` | 迁移设计决策文档 |
+| `docs/plans/archive/2026-02-21-otel-log-migration-design.md` | 迁移设计决策文档 |
 | `docs/plans/observability/2026-02-21-grafana-loki-dashboards.md` | Dashboard 设计决策文档 |

@@ -1,7 +1,7 @@
 # Alerting Delivery: Gotify Bridge → Native Telegram
 
-> Date: 2026-07-18
-> Decision status: Completed
+> 日期: 2026-07-18
+> 状态: ✅ 已实施
 
 ## Scope
 

@@ -1,66 +1,121 @@
 # Homelab Docs Portal
 
 > Last updated: 2026-07-31
-> 当前开放项: 离站备份、Terraform state → R2、DGX Spark 入编 — 见 [plans/ROADMAP.md](plans/ROADMAP.md)
-> （2026-07-06 存储本地化 + 备份重建计划已于 2026-07-11 完成，转为历史记录）
+> 这是**索引 + 文档规则**。运行态事实都在下面链接的文档里，本页不复制副本。
 
-## 文档分层
+## 从哪里开始
 
-| 目录 | 内容 | 维护规则 |
-|------|------|----------|
-| `ARCHITECTURE.md` | 架构概览 (单页) | 与 reference/ 同步 |
-| `reference/` | 当前生效的架构事实 (source of truth) | 架构变更必同步 |
-| `guides/` | 面向任务的跨领域流程 | 非日期绑定 |
-| `runbooks/` | 可直接执行的运维手册 (SOP) | 命令可执行, 可回滚 |
-| `plans/` | 带日期的方案/复盘/迁移记录 (按类别) | 完成后收敛到 reference/ |
-| `records/` | 故障复盘/事故报告 | 时间线和根因 |
-| `decisions/` | 技术决策记录 (轻量 ADR) | 场景+选项+取舍 |
-| `assets/` | 图片/架构图 | 引用链接 |
+| 想知道什么 | 读这个 |
+|-----------|--------|
+| 整体长什么样 | [ARCHITECTURE.md](ARCHITECTURE.md) — 单页双集群总览 |
+| 怎么在这个 repo 里干活 | [CONVENTIONS.md](CONVENTIONS.md) — 命令、约定、各组件踩坑（长版 AI 上下文） |
+| 现在跑着哪些服务 | [CONVENTIONS.md § Services](CONVENTIONS.md#services) — **服务清单唯一真相源** |
+| 还剩什么没做 | [ROADMAP.md](ROADMAP.md) — 开放项 + 已完成 + 明确不做 |
+| 出事了怎么办 | [runbooks/](runbooks/README.md) — 可直接执行的 SOP |
+| 为什么是这个方案 | [decisions/](decisions/README.md) — 轻量 ADR |
+| 安全做到哪一层 | [reference/security.md](reference/security.md) — 逐层状态 + 威胁覆盖矩阵 |
 
-**编写规则**: 架构事实写 `reference/` 而非仅写 `plans/`；过期内容标注 `Deprecated` 并链接替代文档。
-`docs/architecture/` 已废弃（内容已拆进 `reference/`+`decisions/`），只保留一张旧路径→新路径的映射表。
+---
 
-## 快速入口
+# 文档组织规则
 
-1. 项目约定: [CONVENTIONS.md](CONVENTIONS.md) — 开发规则与 AI 上下文
-2. 架构概览: [ARCHITECTURE.md](ARCHITECTURE.md) — 双集群总览
-3. 参考索引: [reference/README.md](reference/README.md)
-4. 运维手册: [runbooks/README.md](runbooks/README.md)
-5. 计划索引: [plans/README.md](plans/README.md)
-6. 决策记录: [decisions/README.md](decisions/README.md)
-7. 故障复盘: [records/README.md](records/README.md)
-8. 安全总览: [reference/security.md](reference/security.md) — 纵深防御 + 威胁覆盖矩阵
+以下 7 条是**强制**的。新增或改动文档前先对照；违反的一律按下面的处理方式修。
 
-## 当前运行态摘要
+## R1 — 目录归属：一篇文档只属于一类
 
-| 集群 | CNI | 跨集群 underlay | Ingress Gateway |
-|------|-----|------------------|-----------------|
-| homelab | Cilium (eBPF + VXLAN) | Tailscale (Pod CIDR only) | Cilium Gateway API |
-| oracle-k3s | Cilium (eBPF + VXLAN) | Tailscale (Pod CIDR only) | Cilium Gateway API |
+先问「这篇文档回答什么问题」，再决定放哪。
 
-### 服务总览
+| 目录 | 回答的问题 | 收 | **不收** |
+|------|-----------|-----|---------|
+| `reference/` | **现在是什么样？** | 当前生效的架构事实，长期维护 | 带日期的建议、执行过程、一次性排障 |
+| `decisions/` | **为什么选 A 不选 B？** | 选型场景、被否决的选项、取舍 | 怎么做（步骤） |
+| `runbooks/` | **出事了怎么办？** | 针对本基础设施、可照抄执行的 SOP | 一次性迁移记录、非基础设施的工具说明 |
+| `guides/` | **这个跨领域任务怎么走？** | 非故障处置的流程（含本地工具） | 单组件故障 SOP |
+| `records/` | **那次到底怎么回事？** | 已发生的故障/排障复盘 | 计划、建议 |
+| `plans/<类别>/` | **当时打算怎么做？** | 带日期的方案，**写完即冻结** | 需要长期维护的事实 |
+| `plans/archive/` | **当初为什么考虑过 X，后来为什么没做？** | 不存在于当前系统的方案 | 已完成的方案（见下） |
+| `ROADMAP.md` | **还剩什么没做？** | 唯一的开放项清单 | 实施细节（链到 decisions/plans） |
 
-见 [CONVENTIONS.md § Services](CONVENTIONS.md#services)（唯一真相源，含集群/namespace/URL）。
-集群外还有一个 **Sink 短链服务**（`s.meirong.dev`，Cloudflare Workers，源码是 `cloudflare/workers/sink/` submodule）。
+类别：`apps` / `architecture` / `networking` / `observability` / `security` / `storage`。
 
-SSO 状态: `HTTPRoute` 层不再承载共享 SSO，改为应用原生 OIDC（少数无认证的应用用 per-app oauth2-proxy）。
-ZITADEL 仍是唯一 IdP，详见 CONVENTIONS.md 的 Identity 段与 [plans/security/2026-03-08-cilium-zitadel-sso-plan.md](plans/security/2026-03-08-cilium-zitadel-sso-plan.md)。
+**什么时候移进 `archive/`**：一份方案记录的东西**从未存在，或已被整体移除**——
+状态为 `❌ 未实施` / `❌ 已取消` / `⚠️ 已被取代` / 前提已消失。判据是一句话：
+**读它对理解当前系统有没有帮助？** 没有就归档。
+⚠️ **`✅ 已完成` 一律不归档**——完成的方案正是当前架构的依据（`cilium-mesh-installation`
+就是 CNI 选型的唯一记录），归档等于把依据藏起来。归档是**移动不是删除**，且必须在
+`archive/README.md` 写明「为什么死了 / 被谁取代」。
 
-Oracle 集群工作负载的 Vault 路径约定: `secret/oracle-k3s/<service>`。
+**判据**：一篇文档如果需要「随架构变化持续更新」，它属于 `reference/`；
+如果它「记录某一天的判断」，它属于 `plans/` 或 `decisions/`。**建议 ≠ 事实。**
 
-### 备份状态
+## R2 — 命名
 
-| 数据 | 状态 |
+| 位置 | 格式 | 例 |
+|------|------|-----|
+| `plans/*/`、`records/` | `YYYY-MM-DD-<topic>.md` | `2026-07-06-resource-optimization.md` |
+| `reference/`、`decisions/`、`runbooks/`、`guides/` | `<topic>.md`，**文件名不带日期** | `tailscale-network.md` |
+
+全部小写 kebab-case。常青文档的文件名带日期是 R1 违规的信号——说明它其实是快照。
+
+## R3 — 文首必填字段
+
+**所有文档**：H1 标题必须是文件第一行（banner/warning 放 H1 之后）。
+
+| 目录 | 还必须有 |
+|------|---------|
+| `reference/` | `Last updated` + `Status` |
+| `decisions/` | `日期` + `状态` + Context / Decision / Consequences |
+| `plans/` | `日期` + `状态` + 结论 |
+| `runbooks/` | 触发条件 + 成功判定 + 回滚（恢复类 runbook 本身即回滚，注明豁免） |
+| `records/` | 日期 + 影响 + 根因 |
+
+## R4 — 状态枚举
+
+`plans/` 与 `decisions/` 的状态只用这几个值，便于扫读：
+
+`✅ 已完成` · `🚧 执行中` · `📐 设计` · `⚠️ 部分完成` · `⚠️ 已被取代` · `❌ 未实施` · `❌ 已取消`
+
+`⚠️ 已被取代` / `❌` 必须链到取代它的文档或说明原因。
+
+## R5 — 每个目录的 README 是完整索引
+
+`reference/` `decisions/` `runbooks/` `guides/` `records/` 和 `plans/<类别>/` 都必须有 README，
+**列出该目录的全部文档**，且只列自己目录的（不跨目录索引）。加文档就更新索引。
+
+## R6 — 唯一真相源
+
+一个事实只在一处维护，别处只链接。已确立的真相源：
+
+| 事实 | 唯一位置 |
+|------|---------|
+| 服务清单 | [CONVENTIONS.md § Services](CONVENTIONS.md#services) |
+| 开放项 / 待办 | [ROADMAP.md](ROADMAP.md) |
+| 安全逐层状态 | [reference/security.md](reference/security.md) |
+| 资源实际数值 | `k8s/helm/values/` 与集群本身（文档只写原则） |
+
+## R7 — 命令必须可执行
+
+写明执行目录与集群 context（`cd k8s/helm && just …`、`kubectl --context oracle-k3s …`），
+避免「思路型」描述。过期内容不删除：标 `Deprecated` 并链到替代文档。
+
+---
+
+## 目录一览
+
+| 目录 | 内容 |
 |------|------|
-| Vault / PG / sqlite | 🟢 restic 每夜备份 → 106 ZFS 仓库 (2026-07-06 恢复演练通过) |
-| Calibre 书库 | 🟢 **自 2026-07-11 起纳入 restic 夜备**（书库已随存储本地化迁到 `local-path`，不再受 106 的 ZFS raidz1/sanoid 保护，所以必须进 restic） |
-| 整机 VM | 🟢 PVE 每周 vzdump (VM 100 → 106 `backups`, keep-last=3) |
-| 离站副本 | 🔴 待做 — 见 [plans/ROADMAP.md](plans/ROADMAP.md) Phase 5 |
+| [reference/](reference/README.md) | 当前生效的架构事实（source of truth） |
+| [decisions/](decisions/README.md) | 轻量 ADR |
+| [runbooks/](runbooks/README.md) | 可执行运维 SOP |
+| [guides/](guides/README.md) | 跨领域任务流程 |
+| [records/](records/README.md) | 故障复盘 |
+| [plans/](plans/README.md) | 带日期的方案档案（6 个类别） |
+| `assets/` | 图片/架构图（目前为空） |
 
 ## 推荐阅读顺序
 
-1. [reference/tailscale-network.md](reference/tailscale-network.md) — 跨集群网络
-2. [reference/observability-multicluster.md](reference/observability-multicluster.md) — 可观测方案
-3. [reference/k8s-qos-resource-management.md](reference/k8s-qos-resource-management.md) — 资源管理
-4. [runbooks/backup-recovery.md](runbooks/backup-recovery.md) — 备份与恢复
-5. [plans/networking/2026-03-07-homelab-oracle-architecture-optimization.md](plans/networking/2026-03-07-homelab-oracle-architecture-optimization.md) — 架构优化方案
+1. [ARCHITECTURE.md](ARCHITECTURE.md) — 先看全局
+2. [reference/tailscale-network.md](reference/tailscale-network.md) — 跨集群网络（最容易踩坑的一层）
+3. [reference/observability-multicluster.md](reference/observability-multicluster.md) — 日志/指标/追踪怎么汇总
+4. [reference/security.md](reference/security.md) — 纵深防御 11 层，注意第 9 层只到"可见性"
+5. [runbooks/backup-recovery.md](runbooks/backup-recovery.md) — 备份与恢复

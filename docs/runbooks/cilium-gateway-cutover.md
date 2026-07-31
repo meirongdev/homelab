@@ -1,12 +1,16 @@
-> **HISTORICAL (2026-03-07):** This runbook documents the initial Cilium Gateway cutover that was completed in March 2026. Traefik and Kopia are long gone; ClusterMesh has been connected since 2026-03-08. For current operational checks, see docs/reference/cloudflare-tunnel-observability.md and docs/reference/tailscale-network.md. The command patterns remain valid for validating Gateway/HTTPRoute/Tunnel health.
-
-> ⚠️ **Preconditions outdated:** The "Preconditions" section mentions checking for Traefik and Kopia — those no longer exist. The initial cutover is complete.
-
 # Cilium Gateway Cutover Runbook
 
-> Purpose: deploy the current repo state for `Cloudflare Tunnel -> Cilium Gateway API -> Services`, then validate traffic end to end.
-> Scope: homelab + oracle-k3s.
-> Last updated: 2026-03-07
+> **触发条件**：重新部署或整体验证入口链路 `Cloudflare Tunnel → Cilium Gateway API → Services` 时；
+> 集群重建后、Gateway/HTTPRoute 大改后、隧道换配置后。
+> **成功判定**：Phase 4（集群内验证）+ Phase 5（公网验证）全部通过。
+> **回滚**：见 § Rollback（Git / Cloudflare 路由 / K8s manifests 三层）。
+> **范围**：homelab + oracle-k3s。
+>
+> ⚠️ **历史背景**：本文最初写于 2026-03-07 的首次 cutover，那次已完成。
+> **§ Preconditions 里检查 Traefik 与 Kopia 的步骤已作废**——两者均已退役，跳过即可。
+> ClusterMesh 自 2026-03-08 起已连接（§ Phase 6 因此通常不需要执行）。
+> 日常健康观测另见 [reference/cloudflare-tunnel-observability.md](../reference/cloudflare-tunnel-observability.md)。
+> Last updated: 2026-07-31
 
 ## Goal
 

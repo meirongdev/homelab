@@ -1,6 +1,7 @@
 # ArgoCD Image Updater
 
-> **状态（2026-07-31 复核）：已部署但完全空闲，没有在更新任何镜像。**
+> 日期: 2026-02-19（2026-07-31 复核）
+> 状态: ⚠️ **已部署但完全空闲，没有在更新任何镜像。**
 > `kubectl get imageupdater -A` 返回 0 个 CR，日志常驻 `No ImageUpdater CRs to process`。
 > chart 1.2.4 / image v1.2.2（升级原委见文末）。
 >

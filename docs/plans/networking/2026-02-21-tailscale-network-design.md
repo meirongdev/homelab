@@ -1,7 +1,9 @@
 # Tailscale 跨集群网络互通设计文档
 
 **日期**: 2026-02-21
-**状态**: ✅ 完成（见 ROADMAP.md Phase 3；后续演进见 `docs/reference/tailscale-network.md`）
+**状态**: ✅ 完成（见 [ROADMAP](../../ROADMAP.md)；**当前网络模型已演进**，见 [reference/tailscale-network.md](../../reference/tailscale-network.md)）
+⚠️ 文中出现的 `docs/architecture/*` 路径已不存在——该目录 2026-06 重组进 `reference/`+`decisions/`，
+`TODO.md` 则成为 `docs/ROADMAP.md`。
 
 ## 背景
 

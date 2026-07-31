@@ -1,7 +1,7 @@
 # OTel 2026 对齐：homelab collector 首次落地 + oracle collector 现代化
 
 > 日期: 2026-07-31
-> 状态: 已实施
+> 状态: ✅ 已实施
 
 ## 上下文
 

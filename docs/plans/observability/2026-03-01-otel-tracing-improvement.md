@@ -1,7 +1,11 @@
 # OTel Tracing & Collector Improvement Plan
 
 > Date: 2026-03-01
-> Status: Implementing
+> Status: ✅ 已完成 — 双集群 OTLP traces → Tempo 已生产运行。
+> ⚠️ 此后 collector 形态又变过：2026-07-31 homelab 首次真正部署 collector、oracle 侧现代化，
+> 当前架构见 [reference/observability-otel-logging.md](../../reference/observability-otel-logging.md)
+> 与 [decisions/otel-2026-alignment.md](../../decisions/otel-2026-alignment.md)。
+> ⚠️ 文中出现的 `docs/architecture/*` 路径已不存在——该目录 2026-06 重组进 `reference/`+`decisions/`。
 
 ## Background
 

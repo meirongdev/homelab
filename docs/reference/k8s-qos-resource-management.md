@@ -1,7 +1,12 @@
 # K8s 资源管理与 QoS 策略
 
-本文档记录 Homelab 中 CPU/Memory requests & limits 的设定原则和实际配置。
-**当前值参见** [resource-optimization-2026-07-06.md](resource-optimization-2026-07-06.md)（含最新调整明细）。
+> Last updated: 2026-07-31
+> Status: 生效事实（本文只定**原则**，不存具体数值）
+
+本文档记录 Homelab 中 CPU/Memory requests & limits 的设定**原则**。
+**具体数值不在本文维护** —— 以 `k8s/helm/values/` 与集群实际为准
+（`kubectl -n <ns> get deploy -o yaml`）。2026-07-06 那轮调整的推导过程见
+[plans/architecture/2026-07-06-resource-optimization.md](../plans/architecture/2026-07-06-resource-optimization.md)（历史快照）。
 
 > 延伸阅读：[K8s CPU 配置：QoS、Throttling 与驱逐策略](https://meirong.dev/posts/k8s-cpu-qos-resource-management/)
 
@@ -106,6 +111,6 @@ rate(container_cpu_cfs_throttled_seconds_total[5m])
 ## 相关文档
 
 - [cost-and-rightsizing.md](cost-and-rightsizing.md) — OpenCost 成本归因 + KRR 右尺寸
-- [resource-optimization-2026-07-06.md](resource-optimization-2026-07-06.md) — 最新资源优化明细
+- [plans/architecture/2026-07-06-resource-optimization.md](../plans/architecture/2026-07-06-resource-optimization.md) — 2026-07-06 那轮调整的推导（历史快照，非当前值）
 - [observability-multicluster.md](observability-multicluster.md) — 多集群监控架构
 - [Kubernetes QoS 官方文档](https://kubernetes.io/docs/tasks/configure-pod-container/quality-service-pod/)

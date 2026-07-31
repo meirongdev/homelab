@@ -1,9 +1,10 @@
 # Guides
 
-> 面向任务的跨领域流程文档，非日期绑定、非 SOP 的单次操作。
+> 面向任务的跨领域流程，非日期绑定、也不是故障处置 SOP（那些在 [runbooks/](../runbooks/README.md)）。
 
-## Available Guides
+| 指南 | 内容 |
+|------|------|
+| [ebook-sync.md](ebook-sync.md) | Calibre-Web 电子书同步（本地 → cwa ingest） |
+| [hermes-agent.md](hermes-agent.md) | Hermes Agent（MacBook 本地工具）Profile 管理与 MCP 集成 |
 
-1. [ebook-sync.md](ebook-sync.md) — Calibre-Web 电子书同步
-
-> 需要补充的新指南请新建 `topic.md` 并更新本索引。
+新增指南：`<topic>.md`（文件名不带日期），并更新上表。

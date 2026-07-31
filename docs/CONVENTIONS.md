@@ -1,10 +1,8 @@
 # Homelab Development Conventions & Context
 
-This file provides guidance for AI assistants and developers working in this repository.
-It is the **long-form** source of AI context (~62 KB), symlinked from `.gemini.md` and
-`.github/copilot-instructions.md`. The **short always-on** counterpart is `docs/AGENTS.md`
-(~5 KB, symlinked from the root as both `AGENTS.md` and `CLAUDE.md`) — that split keeps a 62 KB
-file out of every session's context. Keep the two consistent when either changes.
+Long-form context for AI assistants and developers. Symlinked as `.gemini.md` and
+`.github/copilot-instructions.md`. The short always-on counterpart is `docs/AGENTS.md`
+(symlinked as root `AGENTS.md` + `CLAUDE.md`) — **keep the two consistent when either changes.**
 
 ## Project Overview
 
@@ -45,14 +43,17 @@ homelab/
     ├── CONVENTIONS.md  # This file, 长版 (symlinked as .gemini.md / copilot-instructions.md)
     ├── AGENTS.md       # 简版常驻上下文 (symlinked as root AGENTS.md + CLAUDE.md)
     ├── ARCHITECTURE.md # 单页架构总览
+    ├── ROADMAP.md      # 唯一的开放项清单
     ├── reference/      # 当前生效的架构事实 (source of truth)
     ├── decisions/      # 轻量 ADR (场景/选项/取舍)
     ├── runbooks/       # 可执行运维手册 (DNS recovery, backup 等)
     ├── guides/         # 面向任务的跨领域流程
     ├── records/        # 故障复盘/事故报告
-    └── plans/          # 带日期的方案记录 (apps/networking/observability/security/storage) + ROADMAP.md
+    └── plans/          # 带日期的方案档案，写完即冻结
+        └── apps|architecture|networking|observability|security|storage/
 ```
-> `docs/architecture/` 已废弃，只剩一张指向新位置的映射表。分层维护规则见 `docs/README.md`。
+> **文档组织规则 R1-R7 在 `docs/README.md`**（目录归属 / 命名 / 文首必填字段 / 状态枚举 /
+> 索引维护 / 唯一真相源 / 命令可执行）。新增或移动文档前先对照。
 
 ## Key Commands (Context-Dependent)
 
@@ -88,10 +89,9 @@ just init                  # Initialize .env from .env.example
 just deploy-all            # Deploy full observability stack (LGTM)
 just status                # Check monitoring namespace state
 ```
-> ⚠️ homepage / it-tools / stirling-pdf **已迁 oracle-k3s**，`k8s/helm/justfile` 里对应的 8 个配方
-> （`deploy-/delete-/update-homepage`、`homepage`、`deploy-/delete-it-tools`、`deploy-/delete-pdf`）
-> 因指向已删除的 manifest 必然失败，已于 2026-07-31 删除。改由 ArgoCD `oracle-k3s` App 同步；
-> 手动部署走 `cd cloud/oracle && just deploy-homepage` / `just deploy-personal-services`。
+> ⚠️ homepage / it-tools / stirling-pdf **跑在 oracle-k3s**，由 ArgoCD `oracle-k3s` App 同步。
+> 手动部署走 `cd cloud/oracle && just deploy-homepage` / `just deploy-personal-services`
+> （`k8s/helm/justfile` 里对应的旧配方已删除）。
 
 ### ArgoCD GitOps
 Run from `k8s/helm/`:
@@ -119,7 +119,7 @@ just apply   # Apply DNS/Tunnel changes
 - **Ingress**: Cilium Gateway API is the only in-cluster HTTP entrypoint (`HTTPRoute` resources in `manifests/gateway/gateway.yaml`)
 - **CNI**: Both clusters use **Cilium** (eBPF + VXLAN); homelab deployed 2026-03-06, oracle-k3s migrated from Flannel 2026-03-07
   - homelab Cilium is **Helm-managed via `just deploy-cilium`** (not ArgoCD); values codified in `k8s/cilium/values.yaml` (+ `README.md`). Pinned to v1.19.1 images. The recipe pins `--version 1.19.1`, applies that file, and restores the live `cilium-ca` for ClusterMesh (self-signs on a fresh install).
-  - **`gatewayAPI.enableAppProtocol: true` is required** — without it, ZITADEL console v1 gRPC calls (auth.v1/admin.v1) 404 through the gateway because Envoy's grpc_web filter sends converted native-gRPC over HTTP/1.1 to a backend that needs h2c. Honouring Service `appProtocol` gives `zitadel:8080` an explicit h2c upstream. Runbook: `docs/records/zitadel-console-grpc-404.md`
+  - **`gatewayAPI.enableAppProtocol: true` is required** — without it, ZITADEL console v1 gRPC calls (auth.v1/admin.v1) 404 through the gateway because Envoy's grpc_web filter sends converted native-gRPC over HTTP/1.1 to a backend that needs h2c. Honouring Service `appProtocol` gives `zitadel:8080` an explicit h2c upstream. Runbook: `docs/records/2026-06-07-zitadel-console-grpc-404.md`
 - **homelab K8s Node**: `10.10.10.10` / Tailscale `100.94.186.7` | **Proxmox host** (`pve`): `192.168.50.4` / Tailscale `100.118.193.51` (Ryzen 5600H laptop; runs the `k8s-node` VM)
 - **oracle-k3s Node**: `10.0.0.26` / Tailscale `100.107.166.37`
 - **Cross-cluster network**: Tailscale subnet routing (Pod CIDR only): homelab `10.42.0.0/16`; oracle-k3s `10.52.0.0/16`。Cilium ClusterMesh active (connected 2026-03-08 via `cilium clustermesh connect --source-endpoint 100.94.186.7:32379 --destination-endpoint 100.107.166.37:32379 --allow-mismatching-ca`). KVStoreMesh enabled on both sides. 见 `docs/reference/tailscale-network.md`
@@ -144,7 +144,7 @@ just apply   # Apply DNS/Tunnel changes
 - **硬约束驱动选型**: homelab 单节点 5600H 笔记本（idle ~74°C、重启需 `just homelab-recover`），故全部 **fail-open + 控 CPU**：Kyverno `failurePolicy: Ignore`、Trivy 串行扫描、周期型工具优先。
 - **Pod Security Admission (PSA)**: 内置准入，**永远在线的基线地板**（Kyverno 挂了也生效）。homelab 经 **`just harden-psa`**（幂等 `kubectl label`，**刻意不走 ArgoCD**——渲染 Namespace 对象的 App 配 prune+selfHeal 会有"误同步 prune 删 ns + 级联删 PVC"的致命风险）；oracle 在 kustomize 树各 `*/namespace.yaml` 的 labels 里声明（那些 ns 本就被 kustomize 拥有，改现有资源无 prune 风险）。**等级**: 应用 ns `enforce=baseline`（实测零特权工作负载）；`kube-system`/`monitoring` `enforce=privileged`（cilium/node-exporter/otel/grafana 需特权）显式豁免，但仍打 `warn/audit=baseline` 留审计线索。**不做 `restricted`**（grafana 跑 root，属后续逐 ns 的活）。
 - **Kyverno**（准入策略即代码，仅 homelab）: Helm App `kyverno`（`values/kyverno.yaml`，所有 controller `replicas:1`、`backgroundScanInterval:24h`），策略 CR 单独由 `kyverno-policies` App 同步（`manifests/kyverno-policies/`，便于**逐条 Audit→Enforce**）。4 条策略全部 `validationFailureAction: Audit` + `failurePolicy: Ignore` 起步：require-requests-limits / disallow-latest-tag / restrict-image-registries（噪声最大，长期 Audit）/ require-probes。系统 ns 由 Kyverno 默认 resourceFilters 已排除。**Audit→Enforce**: 读 `kubectl get polr -A` 确认某策略零违规后，改对应文件的 action 为 `Enforce` 再 push。
-- **Trivy Operator**（镜像 CVE / 配置审计 / RBAC / 暴露密钥，仅 homelab）: Helm App，ns `trivy-system`，`values/trivy-operator.yaml`。热节点关键: `scanJobsConcurrentLimit:1` + `builtInTrivyServer`(ClientServer 模式 + NFS PVC 持久化漏洞 DB) + `severity:HIGH,CRITICAL` + `ignoreUnfixed` + 关 `clusterComplianceEnabled`（CIS 交给 kube-bench）。指标经 ServiceMonitor(**带 `release: kube-prometheus-stack`**)抓取；告警 `manifests/monitoring/alerts/trivy-alerts.yaml`（critical CVE→warning、暴露密钥→critical、absent 元告警）；看板 `manifests/monitoring/dashboards/trivy-dashboard.yaml`（Grafana `Security` 文件夹）。后两者已并入 `monitoring-dashboards` App 的 include glob。
+- **Trivy Operator**（镜像 CVE / 配置审计 / RBAC / 暴露密钥，仅 homelab）: Helm App，ns `trivy-system`，`values/trivy-operator.yaml`。热节点关键: `scanJobsConcurrentLimit:1` + `builtInTrivyServer`(ClientServer 模式 + `local-path` PVC `data-trivy-server-0` 持久化漏洞 DB，2026-07-11 随存储本地化离开 NFS) + `severity:HIGH,CRITICAL` + `ignoreUnfixed` + 关 `clusterComplianceEnabled`（CIS 交给 kube-bench）。指标经 ServiceMonitor(**带 `release: kube-prometheus-stack`**)抓取；告警 `manifests/monitoring/alerts/trivy-alerts.yaml`（critical CVE→warning、暴露密钥→critical、absent 元告警）；看板 `manifests/monitoring/dashboards/trivy-dashboard.yaml`（Grafana `Security` 文件夹）。后两者已并入 `monitoring-dashboards` App 的 include glob。
 - **kube-bench**（CIS 巡检）: `manifests/kube-bench/kube-bench.yaml`（专用 `kube-bench` ns 标 privileged + 每周 CronJob），独立 ArgoCD App。**必须用 k3s 基准**（`--benchmark k3s-cis-*`，否则满屏假 FAIL）；结果打 stdout→Loki（按 `{namespace="kube-bench"}` 查）。
 - **节点 CIS 加固**: `k8s/ansible/playbooks/setup-k3s.yaml` 加 `/etc/sysctl.d/31-k8s-protect-kernel.conf`(protect-kernel-defaults 所需 sysctl) + config.yaml `protect-kernel-defaults: true`。**顺序保障**: sysctl drop-in 先落盘持久化，故 k3s 重启时检查必过。**现有节点需维护窗口 `systemctl restart k3s`/重启才生效**。**API 审计日志刻意延后**（磁盘紧）。
 - **⚠️ chart 版本**: Kyverno/Trivy 的 `argocd/applications/*.yaml` pin 的 chart 版本**部署前须 `helm search repo ... --versions` 核对**（避免 sync 失败）。**AppProject** `argocd/projects/homelab.yaml` 的 `sourceRepos` 已加 kyverno+aquasecurity 仓库，但 AppProject 非 ArgoCD 自动同步，需 `kubectl apply` 一次。
@@ -206,8 +206,7 @@ just apply   # Apply DNS/Tunnel changes
   - External Secrets Operator — depends on Vault
   - Cilium — `just deploy-cilium`（`k8s/cilium/values.yaml`，pin v1.19.1）
   - Cloudflare Terraform — non-K8s resources
-  - ~~NFS Provisioner~~ — **已于 2026-07-11 卸载**，不再存在（见 Storage 段；PVC 一律 `local-path`）
-  - ~~kube-prometheus-stack~~ / ~~external-dns~~ / ~~otel-collector~~ — **已于 2026-07-31 迁入/落地 ArgoCD**（见上）。`just deploy-prometheus` / `deploy-external-dns*` / `deploy-otel-collector` 保留为 `⚠️ LEGACY` 逃生通道，**日常不要跑**（selfHeal 会与手动 helm 来回打架）；紧急回滚仍可 `helm -n <ns> rollback <release> <rev>`
+  - ⚠️ `just deploy-prometheus` / `deploy-external-dns*` / `deploy-otel-collector` 是 **`⚠️ LEGACY` 逃生通道**——这三者已于 2026-07-31 迁入 ArgoCD（见上），**日常不要跑**（selfHeal 会与手动 helm 来回打架）；紧急回滚仍可 `helm -n <ns> rollback <release> <rev>`
   - **external-dns 配置参考**（chart `external-dns/external-dns` 1.21.1，现由 ArgoCD 管）— 采用理由/取舍/完整迁移过程见决策记录 `docs/decisions/external-dns-adoption.md`。配置：`sources: [gateway-httproute]`、`provider: cloudflare`、`domainFilters: [meirong.dev]`、`policy: upsert-only`（永不删除，安全默认）+ `registry: txt`（owner id `homelab-externaldns` / `oracle-externaldns`，两实例各自独立）。两集群的 Gateway（`manifests/gateway/gateway.yaml` / `cloud/oracle/manifests/base/gateway.yaml`）都打了 `external-dns.alpha.kubernetes.io/target` 注解指向各自的 tunnel CNAME 目标，因为 Cilium NodePort Gateway 本身没有可读的 LB 地址。
     - **✅ 2026-07-20 两集群全量完成**：homelab 5 条（argocd/book/grafana/llm/vault）+ oracle 10 条既有记录零停机移交 external-dns（预置 ownership TXT → `terraform state rm` 解耦），`cloudflare_dns_record.subdomains` 的 `for_each` 集合现已为空。两条隧道也都改成单条 `*.meirong.dev` 通配路由。**净效果：新增子域名只需要写一个 HTTPRoute** —— DNS 记录自动建、通配路由自动转发，`cloudflare/terraform` 不需要任何改动。
     - ⚠️ `policy: upsert-only` 意味着**删掉 HTTPRoute 不会删掉 DNS 记录**，退役服务时要手工清理 CNAME + ownership TXT。
@@ -219,20 +218,21 @@ just apply   # Apply DNS/Tunnel changes
 - **⚠️ NFS is retired as a runtime dependency (2026-07-11).** After 106 went down for 3 days (07-08→07-11: calibre-web/trivy/nfs-provisioner Error, pvestatd D-state pileup, zero alerts delivered), **all** K8s PVCs were migrated to `local-path` (last stragglers: alertmanager, `audit-vault-0`, `data-trivy-server-0`, and the 24G Calibre book library). The `nfs-client` provisioner is uninstalled; `k8s/helm/values/nfs-values.yaml` deleted. 106's only remaining roles are **cold backup targets**: restic nightly (sftp `/storage/restic`) + PVE weekly vzdump (NFS storage `backups`). Old data left in place on 106 (`/storage/calibre`, `/storage/nfs/k8s/`) as pre-migration snapshots.
 - Legacy note: the two NFS exports (`/storage`, `/storage/calibre`) still exist on 106 (Ansible-managed) but nothing mounts them at runtime anymore. PVE storages `vm-disks`/`containers`/`iso-templates` are `disable 1` (empty; ISOs copied to pve `local`).
 - **⚠️ sqlite-backed apps must NOT use `nfs-client` — use `local-path` (node-local, k3s built-in default SC).** sqlite relies on POSIX byte-range locks (`fcntl`) + synchronous small writes; NFS locking (NLM) makes that pathologically slow/hangy on this setup — a single DB write/lock can block for minutes. **Grafana** hit this: its sqlite on an NFS PVC made startup hang at "Loading plugins" (writes plugin state to the DB) past the 160s liveness deadline → **8-day CrashLoop** (fixed 2026-07-04 by moving `grafana.persistence.storageClassName: local-path` + relaxed liveness + disabled boot-time grafana.com plugin calls). On local disk the same migrations run in ms (were 3m48s each on NFS). Grafana state is reproducible (dashboards = ConfigMaps, datasources = values), so a fresh local DB is safe. (Large sequential-write workloads like Loki chunks tolerate NFS better than sqlite — it's specifically the lock+fsync pattern that dies. **Prometheus TSDB was also moved to `local-path`** the same day: on `nfs-client` its head/WAL reads on restart hung on a wedged NFS client (thread stuck in `D` state, zero progress) and raced the operator's ~900s startup probe → CrashLoop. History was discarded (P2, disposable). Migrating an operator-managed StatefulSet's storageClass = `spec.storage.volumeClaimTemplate` is immutable, so: set `spec.paused: true` on the Prometheus CR, force-delete the stuck pod, delete the STS + old PVC, then unpause → operator recreates the STS with the new SC + a fresh PVC. `prometheusSpec.maximumStartupDurationSeconds: 1800` kept as a harmless startup safety-net.)
-- **OS reinstall is data-safe**: the OS is on the boot disk; all data is on the `mrstorage` ZFS pool. After a host rebuild, re-running `storage-playbook.yaml` does `zpool import -f mrstorage` + rebuilds `/etc/exports` + `exportfs -ra`. Because the ZFS dataset is unchanged, existing NFS PVs keep the same file handles (no `ESTALE`) and pods re-mount transparently. Expect a brief node wedge while NFS is down — the classic containerd `failed to reserve container name` symptom — which self-heals once NFS returns. (Verified 2026-06-13 reinstall: pods restarted/recovered, no data loss.)
+- **Rebuilding 106 is data-safe and no longer touches the clusters**: the OS is on the boot disk, all data is on the `mrstorage` ZFS pool. After a host rebuild, re-running `storage-playbook.yaml` does `zpool import -f mrstorage` + rebuilds `/etc/exports` + `exportfs -ra`. Since 2026-07-11 **no pod mounts 106**, so a rebuild only pauses the backup window — the old "node wedges while NFS is down / containerd `failed to reserve container name`" failure mode is gone with the NFS dependency. (That symptom was verified on the 2026-06-13 reinstall, back when PVCs still rode NFS; kept here because it is the signature of *any* future NFS reintroduction.)
 - PVCs for stateful services (e.g. Calibre-Web) carry `argocd.argoproj.io/sync-options: Prune=false` to prevent accidental deletion
-- **Storage tiering (Phase 2 done 2026-07-06 — see `docs/plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md`)**: generalising the Grafana/Prometheus/Loki move above to the fsync/sqlite/PG PVCs that actually suffer on NFS.
-  - **Tier A — hot stateful → `local-path`** (node-local, fast fsync, boot-independent of NFS/Tailscale). **No redundancy, no ZFS snapshots** → **backup is mandatory** (restic, below). ✅ Migrated: `data-vault-0` (raft; audit stays NFS), `bifrost-data`→`bifrost-data-local`, `calibre-web-automated-config`→`…-local` (thumbnails excluded — 12k small files, regenerated). **Left on NFS by design** (append-log/bolt/rebuildable-cache, not sqlite-lock victims): `alertmanager-*-db`, `audit-vault-0`, `data-trivy-server-0`. **Moved to oracle** (not homelab local): ✅ Gotify (2026-07-06 move, fully decommissioned 2026-07, see `decisions/alerting-telegram-migration.md`) + ✅ ZITADEL-PG (2026-07-06, `auth.meirong.dev` cut over; homelab copies decommissioned). homelab NFS now down to **`calibre-books` (100Gi RWX) + alertmanager-db + audit-vault-0 + data-trivy-server-0** (the last three intentionally on NFS). All sqlite/PG fsync victims are on local-path.
-  - ⚠️ **Migration procedure** (StatefulSet templates + Deployment claims both): stop → copy to a new `-local` PVC → `kubectl patch … volumes/<idx>/persistentVolumeClaim/claimName` (**json-patch by index** — strategic-merge doesn't touch the volumes list) → verify → for ArgoCD apps **push git + `refresh=hard` before re-enabling auto-sync** (else it syncs the old revision and reverts the claim). Vault (STS, baseline PSA → no hostPath): copy via two local PVCs; `injector.affinity:""` needed or the injector rollout deadlocks on one node.
-  - **Tier B — large sequential → NFS/ZFS** (raidz1 + sanoid): `calibre-books` (100Gi RWX) stays. Books are not in restic (re-downloadable; user opted for ZFS-only, no offsite).
-  - **Tier C — backup repo → `mrstorage/restic`** (`/storage/restic`, dedicated ZFS dataset, 50G quota): the encrypted restic store; see Backup & Recovery.
-  - ⚠️ **Ordering**: a PVC's restic backup must exist + be restore-verified **before** its NFS→local-path migration (local-path loses the underlying raidz1/snapshot safety net).
+- **Current PVC inventory: everything is `local-path`.** Verified against the live cluster 2026-07-31 — the only StorageClass is `local-path (default)`, and all 11 PVCs use it: `data-vault-0`, `audit-vault-0`, `bifrost-data-local`, `calibre-books-local` (50Gi RWO), `calibre-web-automated-config-local`, `data-trivy-server-0`, `alertmanager-…-db`, `prometheus-…-db`, `storage-loki-0`, `kube-prometheus-stack-grafana`, `opencost-pvc`. **There is no `nfs-client` StorageClass** — a PVC referencing it stays Pending forever.
+  - ⚠️ **Consequence: `local-path` has no redundancy and no ZFS snapshots** — restic backup is the *only* safety net for every one of those volumes. See Backup & Recovery.
+- **Migration history** (`docs/plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md`): the 2026-07-06 plan was a *tiered* design — move sqlite/PG/fsync victims to `local-path`, deliberately leave append-log/bolt/rebuildable volumes (`alertmanager-*-db`, `audit-vault-0`, `data-trivy-server-0`) plus the Calibre book library on NFS/ZFS. **That tiering no longer exists**: the 106 outage of 07-08→07-11 forced *all* remaining volumes onto `local-path` and the provisioner was uninstalled. Read the tiering rationale in that plan as history, not as current layout.
+  - ⚠️ **Migration procedure**, if you ever need to repoint a claim (StatefulSet templates + Deployment claims both): stop → copy to a new `-local` PVC → `kubectl patch … volumes/<idx>/persistentVolumeClaim/claimName` (**json-patch by index** — strategic-merge doesn't touch the volumes list) → verify → for ArgoCD apps **push git + `refresh=hard` before re-enabling auto-sync** (else it syncs the old revision and reverts the claim). Vault (STS, baseline PSA → no hostPath): copy via two local PVCs; `injector.affinity:""` needed or the injector rollout deadlocks on one node.
+  - **Calibre 书库 is in restic.** The 07-06 plan said books were ZFS-only and excluded from restic (re-downloadable); that changed with the move to `local-path` — losing the raidz1/snapshot net made backup mandatory. The homelab backup script discovers `/localpath/*calibre-books-local*` and logs `[warn] books NOT in this backup` if missing (`backup/overlays/homelab/backup-script.yaml`).
+  - **106 is now purely a backup target**: restic repo `mrstorage/restic` (`/storage/restic`, dedicated ZFS dataset, 50G quota) + PVE weekly vzdump. See Backup & Recovery.
 
 ### Secrets Management
 - **HashiCorp Vault**: Primary source of truth for all app secrets (running in `vault` namespace)
 - **External Secrets Operator (ESO)**: Syncs Vault secrets → K8s Secrets automatically
 - **ESO health alerting**: `externalsecret`/`(cluster)secretstore` `Ready=False` (Vault sealed, token expired/revoked, or a bad `remoteRef` key) alerts via Telegram — closes the silent-stale-secret gap (an unsynced Secret otherwise keeps serving its last value with no error). Rule: `k8s/helm/manifests/monitoring/alerts/eso-alerts.yaml`; details under Observability › Alerting.
 - Local `.env` files: Used for initial bootstrap tokens only (gitignored)
+- **No standing plaintext Vault inventory.** The old `k8s/helm/values/vault_values.md` dump is gone (2026-07-31) and is not to be recreated as a resident file — generate a listing on demand and delete it. The `.gitignore` rule `**/vault_values.md` stays as a guard. Vault itself is the source of truth (nightly restic backup); a stale dump is worse than none — the last one had 10 dead paths and was missing 12 live ones.
 
 ### Observability
 - LGTM stack (Loki, Grafana, Tempo, Prometheus/Mimir) in `monitoring` namespace
@@ -261,9 +261,10 @@ just apply   # Apply DNS/Tunnel changes
   OTEL_SERVICE_NAME=<service-name>
   OTEL_RESOURCE_ATTRIBUTES=cluster=<homelab|oracle-k3s>,k8s.namespace.name=<ns>
   ```
-- **Alerting** (Alertmanager → Telegram, 2026-07-18 起): `severity: warning|critical` rules route natively via Alertmanager `telegramConfigs`(零中间 bridge)到群 **MatthewDaily** 的「🚨 Homelab 告警」话题(`chatID: -1003981213530` + `messageThreadID: 2`); `info`/`Watchdog` are dropped. bot token: Vault `secret/homelab/telegram` → ESO(`alertmanager-telegram-secret.yaml`)。**New `PrometheusRule`/`ServiceMonitor` resources MUST carry the label `release: kube-prometheus-stack`** or the operator's `ruleSelector`/`serviceMonitorSelector` ignores them silently. First rule: **ESO health** (`eso-alerts.yaml`, deployed via the ArgoCD `monitoring-dashboards` Application). A single rule covers both clusters since oracle ESO metrics arrive remote-written with `cluster=oracle-k3s`. 旧的 `alertmanager-gotify-bridge`(druggeri/alertmanager_gotify_bridge)已下线——有 `concurrent map writes` fatal 崩溃 bug(全局无锁 metrics map，两个并发 webhook 即崩，50 天 66 次重启）且上游无维护。**Gotify 本体已于 2026-07 彻底下线**（Falco 告警、dead-man's switch 均已改走原生 Telegram，RSS 阅读推送直接砍掉未迁移；Deployment/PVC/网关路由/DNS/homepage/SLO/backup 条目全部移除）。详见 `decisions/alerting-telegram-migration.md`。
+- **Alerting** (Alertmanager → Telegram, 2026-07-18 起): `severity: warning|critical` rules route natively via Alertmanager `telegramConfigs`(零中间 bridge)到群 **MatthewDaily** 的「🚨 Homelab 告警」话题(`chatID: -1003981213530` + `messageThreadID: 2`); `info` is dropped. **`Watchdog` is NOT dropped** — the `watchdog` AlertmanagerConfig CRD claims it first and webhooks it to the oracle Uptime Kuma push monitor (dead-man's switch, see below); the static tree's `null` receiver only catches genuinely unmatched alerts. bot token: Vault `secret/homelab/telegram` → ESO(`alertmanager-telegram-secret.yaml`)。**New `PrometheusRule`/`ServiceMonitor` resources MUST carry the label `release: kube-prometheus-stack`** or the operator's `ruleSelector`/`serviceMonitorSelector` ignores them silently. First rule: **ESO health** (`eso-alerts.yaml`, deployed via the ArgoCD `monitoring-dashboards` Application). A single rule covers both clusters since oracle ESO metrics arrive remote-written with `cluster=oracle-k3s`. 旧的 `alertmanager-gotify-bridge`(druggeri/alertmanager_gotify_bridge)已下线——有 `concurrent map writes` fatal 崩溃 bug(全局无锁 metrics map，两个并发 webhook 即崩，50 天 66 次重启）且上游无维护。**Gotify 本体已于 2026-07 彻底下线**（Falco 告警、dead-man's switch 均已改走原生 Telegram，RSS 阅读推送直接砍掉未迁移；Deployment/PVC/网关路由/DNS/homepage/SLO/backup 条目全部移除）。详见 `decisions/alerting-telegram-migration.md`。
 - **Dashboards 组织** (2026-06-15 整改，治理面板平铺混乱 + 跨集群指标叠加): Grafana 面板按文件夹分组，核心配置在 `k8s/helm/values/kube-prometheus-stack.yaml` 的 `grafana.sidecar.dashboards`：
   - **文件夹**: `folderAnnotation: grafana_folder` + `provider.foldersFromFilesStructure: true`。每个 dashboard ConfigMap 用注解 `grafana_folder: <名称>` 指定文件夹。当前布局: `Platform`(多集群总览, Home) / `Logs`(Loki 日志) / `Hardware`(裸金属主机: Storage-106 / Proxmox-pve / DGX Spark / MacBook + 功耗概览, 含 SMART 硬盘健康) / `Kubernetes Built-in`(chart 自带 mixin 面板, 由 `sidecar.dashboards.annotations.grafana_folder` 统一归档, 不污染顶层)。
+    - ⚠️ **归档 ≠ 禁用**：`nodeExporter.operatingSystem.{aix,darwin}.enabled: false` 只 gate node-exporter mixin 的 **PrometheusRule**，**不 gate dashboard**——chart 87.6.0 至今仍渲染 `kube-prometheus-stack-nodes-aix` / `-nodes-darwin` 两个 ConfigMap，集群里也确实还在，只是被归档进子文件夹看不见了。kube-prometheus-stack **没有单面板开关**，真要移除只能整体关 `grafana.defaultDashboardsEnabled`（会一起丢掉 20+ 张有用的 mixin 面板），不划算——维持现状。（`kubeProxy.enabled: false` 那条是真禁用，Cilium 做了 kube-proxy replacement，manifest 里已无该 ConfigMap。）
   - **多集群选择器**: `multicluster.global.enabled: true` 让 ~21 张内置 mixin 面板出现可见的 `cluster` 下拉(`hide:0`)。指标均带 `cluster` 标签(`homelab`/`oracle-k3s`/`dgx-spark`); 关闭时这些面板会把三集群指标求和叠加，无法分析。
   - **Home 面板**: `grafana.ini` 的 `dashboards.default_home_dashboard_path: /tmp/dashboards/Platform/multicluster-overview.json`(sidecar 把带 `grafana_folder: Platform` 注解的 CM 写入该子目录, 故路径含 `Platform/`)。
   - **数据源固定与稳定 uid**: 数据源 uid 现为稳定值 `prometheus` / `loki` / `tempo`。Prometheus 类面板(multicluster / dgx)的 `datasource` 模板变量固定并隐藏(`hide:2`, 值 `prometheus`); Loki 类面板保持自动选择(集群内仅一个 Loki)。
@@ -292,7 +293,7 @@ just apply   # Apply DNS/Tunnel changes
 
 ### Services
 
-> **这张表是服务清单的唯一真相源**（`docs/README.md` 与 `docs/ARCHITECTURE.md` 只链接到这里，不再各存一份副本）。
+> **这张表是服务清单的唯一真相源** —— `docs/README.md` 与 `docs/ARCHITECTURE.md` 只链接到这里，不要再复制副本（复制过，三份各自漂移了）。
 > 核对方式: `kubectl --context <ctx> get httproute -A`。
 
 | Service | Cluster | Namespace | URL |
@@ -317,6 +318,7 @@ just apply   # Apply DNS/Tunnel changes
 | Bifrost (LLM gateway) | homelab | `bifrost` | `llm.meirong.dev` (inference API + ZITADEL-gated admin UI) |
 | PostgreSQL (`rss-postgres`, Miniflux) | oracle-k3s | `rss-system` | Internal only |
 | PostgreSQL (`zitadel-pg`, CNPG) | oracle-k3s | `zitadel` | Internal only |
+| Sink (短链) | **集群外** — Cloudflare Workers | — | `s.meirong.dev`（源码是 `cloudflare/workers/sink/` submodule） |
 
 ## Conventions
 

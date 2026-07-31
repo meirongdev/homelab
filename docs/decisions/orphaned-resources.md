@@ -1,7 +1,7 @@
 # 孤儿资源监控：kor vs ArgoCD 原生 orphanedResources
 
 > 日期: 2026-07-31
-> 状态: 已实施
+> 状态: ✅ 已实施
 
 ## 上下文
 

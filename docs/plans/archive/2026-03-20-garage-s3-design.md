@@ -1,7 +1,9 @@
 # Garage S3 部署设计文档
 
 **日期**: 2026-03-20
-**状态**: 已批准
+**状态**: ❌ **从未实施**（2026-07-31 复核：repo 内零痕迹，无 Application、无 manifest、无 values）。
+当初的三个动因都已消失——Kopia 于 2026-07-05 整体移除，Loki/Tempo 一直用本地存储没换 S3 后端。
+本文仅作选型留档。
 **目标**: 在 homelab K3s 集群部署 Garage S3 兼容对象存储，为 Loki、Tempo、Kopia 及未来服务提供 S3 后端
 
 ---

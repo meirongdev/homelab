@@ -1,8 +1,8 @@
 # external-dns 采用：子域名 DNS 从 Terraform 手管转向 HTTPRoute 声明式
 
-> Date: 2026-07-19（2026-07-20 补：homelab 收尾 + observability + oracle-k3s 全量落地 + 双集群隧道通配）
-> Decision status: Implemented（**两集群全量完成**）— homelab + oracle-k3s 均已：既有记录零停机迁移给 external-dns、terraform DNS 解耦收缩、隧道改单条 `*.meirong.dev` 通配路由。homelab 另配 ServiceMonitor+告警。加子域名从此**只写一个 HTTPRoute**（两集群均已端到端验证）。
-> 关联：[演进路线 Phase D](../reference/evolution-roadmap-2026-07-07.md) · [gateway-controller-evaluation](gateway-controller-evaluation.md)
+> 日期: 2026-07-19（2026-07-20 补：homelab 收尾 + observability + oracle-k3s 全量落地 + 双集群隧道通配）
+> 状态: ✅ 已实施（**两集群全量完成**）— homelab + oracle-k3s 均已：既有记录零停机迁移给 external-dns、terraform DNS 解耦收缩、隧道改单条 `*.meirong.dev` 通配路由。homelab 另配 ServiceMonitor+告警。加子域名从此**只写一个 HTTPRoute**（两集群均已端到端验证）。
+> 关联：[演进路线 Phase D](../plans/architecture/2026-07-07-tech-debt-and-evolution.md) · [gateway-controller-evaluation](gateway-controller-evaluation.md)
 
 ## Context（痛点）
 
@@ -18,7 +18,7 @@
 | 方案 | 结论 |
 |---|---|
 | **维持两步手改** | 痛点不消除；子域名越多越容易漂移 |
-| **Crossplane + Cloudflare provider** | ❌ 否决。`cdloh/provider-cloudflare` 2023-01 后无维护、无 v2；且 Crossplane 控制面对单人静态云面是过度工程（详见[演进路线](../reference/evolution-roadmap-2026-07-07.md)「三、Crossplane 评估」） |
+| **Crossplane + Cloudflare provider** | ❌ 否决。`cdloh/provider-cloudflare` 2023-01 后无维护、无 v2；且 Crossplane 控制面对单人静态云面是过度工程（详见[演进路线](../plans/architecture/2026-07-07-tech-debt-and-evolution.md)「三、Crossplane 评估」） |
 | **external-dns（选定）** | ~20MB 控制器，Gateway API HTTPRoute 已是一等 source；直接消掉第 1 步。加子域名从此只写一个 HTTPRoute |
 
 > 为什么不是"把 gateway.yaml 也塞进 terraform"或反过来：terraform 不感知集群运行态（它不会 watch HTTPRoute），无论怎么合并，加子域名仍需人去改 terraform 输入。让**集群成为真相源、DNS 跟随集群**才是消除 toil 的方向，这也和本仓库既有取向一致（Cilium Gateway 作统一入口、ArgoCD 声明式）。

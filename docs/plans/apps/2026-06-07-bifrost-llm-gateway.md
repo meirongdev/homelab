@@ -1,12 +1,13 @@
 # Bifrost LLM gateway (replaces Cloudflare AI Gateway)
 
 **Date**: 2026-06-07
-**Status**: implemented (code) — pending operator steps (ZITADEL client + Vault secret + DNS apply + CF dashboard delete)
+**Status**: ✅ 已上线 — `llm.meirong.dev` 生产运行（ArgoCD `bifrost` App + oauth2-proxy 管理面 + virtual-key 网关面）。
+文首原写的"pending operator steps"（ZITADEL client / Vault secret / DNS apply / CF dashboard delete）均已完成。
 
 ## Why
 
 The repo had a Cloudflare AI Gateway (`shared-llm`) intended as the unified LLM
-egress. Its own design doc (`docs/superpowers/specs/2026-05-31-cloudflare-ai-gateway-design.md`)
+egress. Its own design doc ([`plans/archive/2026-05-31-cloudflare-ai-gateway-design.md`](../archive/2026-05-31-cloudflare-ai-gateway-design.md))
 flagged the blocker: CF AI Gateway custom providers need a **Cloudflare-edge-reachable
 HTTPS upstream**, but the target models live on **Tailscale `100.x`** machines
 (DGX Spark, `100.89.15.120`) that CF's edge cannot reach. So it could never front them.
@@ -80,8 +81,8 @@ The inference gate + DGX provider are already configured and verified (above). R
 **Persistence caveat**: enforce flag + routing rule + provider + VKs live in the **PVC SQLite DB**
 (`bifrost-data`, `Prune=false`), NOT in git — Bifrost's intended runtime-config model. If that PVC is
 ever rebuilt, **re-create the `require-vk-gate` routing rule and re-enable enforce**, or the gate opens
-(config.json's `enforce_auth_on_inference` alone does not gate — see above). Consider adding `bifrost-data`
-to the Kopia backup set.
+(config.json's `enforce_auth_on_inference` alone does not gate — see above). ⚠️ 原文这里写"考虑加进 Kopia 备份集"——
+Kopia 已于 2026-07-05 移除；该 PVC 现名 `bifrost-data-local`，已在 restic 夜备覆盖范围内。
 
 ## Verify (admin plane)
 

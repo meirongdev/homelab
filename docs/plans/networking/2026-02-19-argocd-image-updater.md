@@ -1,5 +1,9 @@
 # ArgoCD Image Updater 实现计划
 
+> **状态: ⚠️ 已部署但当前闲置** —— `argocd-image-updater` App 在跑，但集群内 `ImageUpdater` CR 为 0 个，
+> 实际没有在更新任何镜像；本文的目标对象 it-tools 也已迁到 oracle-k3s。
+> CRD 模型与约束见 [decisions/argocd-image-updater.md](../../decisions/argocd-image-updater.md)。
+
 **Goal:** 安装 ArgoCD Image Updater，自动监控 `ghcr.io/meirongdev/it-tools` 镜像，有新版本时自动提交 Git 并由 ArgoCD 部署。
 
 **Architecture:** Image Updater 以 Helm 方式部署在 `argocd` namespace，通过 ESO 从 Vault 获取 GitHub PAT，用于 GHCR 镜像拉取和 Git 写回。`it-tools` 从 `personal-services` Directory Application 中拆分为独立的 Kustomize Application，以支持 Image Updater 的 Git write-back。

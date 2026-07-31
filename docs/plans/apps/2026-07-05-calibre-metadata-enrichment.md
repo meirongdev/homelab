@@ -1,5 +1,10 @@
 # Calibre 元数据补全方案
 
+> **状态: ✅ 已实施** —— 由 ArgoCD `calibre-metadata` App 交付
+> （`k8s/helm/manifests/calibre-metadata/`：metadata-updater + enrich 脚本 ConfigMap + Job）。
+> ⚠️ **下文"环境"一节已过期**：Calibre 库不再在 NFS 上，2026-07-11 起书库和 config 都在 `local-path`
+> （见 [CONVENTIONS § Storage](../../CONVENTIONS.md)）。
+
 > 清理 Calibre 图库时发现约 1,500+ 本书缺少发布年份（pubdate=0101-01-01）。本方案旨在系统性地补全所有电子书的元数据。
 
 ## 现状

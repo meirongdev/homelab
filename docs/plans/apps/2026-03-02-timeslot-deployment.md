@@ -1,5 +1,7 @@
 # Timeslot Deployment — 2026-03-02
 
+> **状态: ✅ 已部署** —— `slot.meirong.dev` 在 oracle-k3s `personal-services` ns 生产运行。
+
 ## Overview
 
 Deploy [timeslot](https://github.com/meirongdev/timeslot) — a self-hosted calendar visibility

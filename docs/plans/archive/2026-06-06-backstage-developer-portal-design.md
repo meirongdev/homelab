@@ -1,6 +1,7 @@
 # Backstage 开发者门户（RHDH 发行版）设计方案
 
-> **状态:** 📐 Design（2026-06-06）— 待评审，评审通过后转 writing-plans 出实现计划
+> **状态:** ❌ **未实施**（2026-07-31 复核：repo 内零痕迹，无 `argocd/applications/backstage.yaml`、无 manifest）。
+> 设计与 Phase 1 实现计划都写完了，但从未执行。本文作选型留档。
 > **结论（拟）:** 在 oracle-k3s 上以 **Red Hat Developer Hub（RHDH）预构建发行版**形态部署 Backstage，插件走动态配置（无源码仓库、无镜像构建）。专用 `backstage` 命名空间 + 自管 PostgreSQL，ZITADEL OIDC 登录，经独立 Helm-source ArgoCD Application 纳入 GitOps。分三阶段落地。
 
 **Goal:** 给 homelab 加一个开发者门户/IDP——统一编目 ~15 个服务（Software Catalog），集中渲染各仓库文档（TechDocs），提供黄金路径模板（Scaffolder），并在门户内直接查看每个服务的 Kubernetes / ArgoCD 部署状态。

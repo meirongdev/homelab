@@ -1,8 +1,10 @@
 # Homelab 机器与集群架构优化建议
 
+> 状态: ⚠️ **部分落地** —— 建议快照，非现状。ZITADEL 迁 oracle、dead-man's switch、restic 备份、核显 UMA 显存调整（2GB→512MB）已做；
+> 离站备份、DGX Spark 入编仍开放，见 [ROADMAP](../../ROADMAP.md)。
 > 日期: 2026-07-04
 > 范围: 全舰队（homelab / oracle-k3s / storage-106 / DGX Spark ×2 / MacBook）机器角色与集群架构
-> 定位: 承接 `docs/plans/networking/2026-03-07-homelab-oracle-architecture-optimization.md` 与 `docs/reference/simplification-recommendations-2026-03.md`，聚焦**物理层错配**而非新增组件
+> 定位: 承接 `docs/plans/networking/2026-03-07-homelab-oracle-architecture-optimization.md` 与 `docs/plans/archive/../archive/2026-03-07-simplification-recommendations.md`，聚焦**物理层错配**而非新增组件
 
 ---
 
@@ -14,7 +16,7 @@
 
 2. **故障域集中**：~~身份（ZITADEL）、~~密钥（Vault）、GitOps（管两个集群）、告警出口（Alertmanager → ~~gotify-bridge → Gotify~~ **原生 telegramConfigs → Telegram，2026-07-18 起**）——三种"救命能力"住在同一台笔记本的同一个 VM 里（ZITADEL 已随 2026-07-06 迁移脱离，见上条）。**homelab 整机挂掉时，指标告警链全哑**（Watchdog 被 drop，没有 dead-man's switch），只能靠人工发现。
 
-3. **数据单点**：Kopia 已于 2026-07-05 移除，~~当前全系统无任何备份~~ **已由 restic 取代**（2026-07-06 上线 + 恢复演练通过，见下方 P0-1）。`docs/plans/ROADMAP.md` Phase 4 的"离站备份"仍未做，是当前唯一**不可逆**的残余风险。
+3. **数据单点**：Kopia 已于 2026-07-05 移除，~~当前全系统无任何备份~~ **已由 restic 取代**（2026-07-06 上线 + 恢复演练通过，见下方 P0-1）。`docs/ROADMAP.md` Phase 4 的"离站备份"仍未做，是当前唯一**不可逆**的残余风险。
 
 优化按"数据不可再生 > 告警可达 > 容量 > 质量"排序，分三级。
 
@@ -128,7 +130,7 @@
 3. **一个月内**：pve 内存升级（下单即可）、Renovate 接入。
 4. **随后**：DGX 入编三件套（IaC + GPU 指标 + Bifrost fallback/SLO）。
 
-其中第 1、2、8 项本质是把 `docs/plans/ROADMAP.md` 里躺了三个月的 unchecked 项提到最前——方向早已判断正确，缺的只是排期。
+其中第 1、2、8 项本质是把 `docs/ROADMAP.md` 里躺了三个月的 unchecked 项提到最前——方向早已判断正确，缺的只是排期。
 
 ---
 
