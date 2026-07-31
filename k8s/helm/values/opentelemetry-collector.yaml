@@ -92,8 +92,12 @@ config:
       # 禁用 chart 默认 metrics 管道（理由见文件头）
       metrics: null
 
-# 只开实际使用的端口；chart 默认还会开 jaeger/zipkin 一堆兼容端口，全关
+# 只开实际使用的端口；chart 默认还会开 jaeger/zipkin 一堆兼容端口，全关。
+# metrics 端口默认也是关的——serviceMonitor 指向名为 metrics 的 Service 端口，
+# 不显式打开它 SM 就永远抓不到目标（2026-07-31 踩过）。
 ports:
+  metrics:
+    enabled: true
   jaeger-compact:
     enabled: false
   jaeger-thrift:
