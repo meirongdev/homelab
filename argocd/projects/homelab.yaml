@@ -25,6 +25,10 @@ spec:
     - https://cloudnative-pg.github.io/charts
     # OpenCost 双集群成本归因（homelab + oracle-k3s 各一份）
     - https://opencost.github.io/opencost-helm-chart
+    # Prometheus/Grafana/Alertmanager 全栈（2026-07-31 从 manual-helm 采纳进 ArgoCD）
+    - https://prometheus-community.github.io/helm-charts
+    # external-dns 双集群（同上，两实例 values 不同、txtOwnerId 必须不同）
+    - https://kubernetes-sigs.github.io/external-dns/
 
   destinations:
     - server: https://kubernetes.default.svc

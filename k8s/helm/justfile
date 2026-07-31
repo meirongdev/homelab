@@ -39,9 +39,15 @@ create-cloudflare-secret:
 # chart 版本必须 pin：不 pin 时 `helm repo update` 后本配方会顺带把整个 stack 升到
 # 最新版（2026-07-04 曾因此从 86.3.2 意外升到 87.6.0，operator 滚动了 prometheus/alertmanager）。
 # 升级请显式改这里的值。
+# ⚠️ 2026-07-31 起真正生效的 pin 在 argocd/applications/kube-prometheus-stack.yaml，
+# 这里的值只服务下面两条 LEGACY 逃生配方 —— 两处要一起改。
 kube_prometheus_stack_version := "87.6.0"
 
-# 部署 Prometheus + Grafana
+# ⚠️ LEGACY -- 2026-07-31 已迁 ArgoCD (argocd/applications/kube-prometheus-stack.yaml)
+# 日常改配置：改 values/kube-prometheus-stack.yaml -> commit -> ArgoCD auto-sync。
+# **不要**日常跑本配方：ArgoCD 开着 selfHeal，手动 helm upgrade 出的差异会被它改回去，
+# 两边来回打架。仅在 ArgoCD 自身不可用时作为逃生通道使用。
+# 紧急回滚: helm -n monitoring rollback kube-prometheus-stack <revision>
 deploy-prometheus: create-grafana-secret
     @echo "⏳ Deploying Prometheus stack (this may take 5-10 minutes)..."
     helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
@@ -53,6 +59,7 @@ deploy-prometheus: create-grafana-secret
         --timeout 15m \
         --debug
 
+# ⚠️ LEGACY -- 同上，见 deploy-prometheus 的说明
 deploy-prometheus-nowait: create-grafana-secret
     helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
         --namespace {{namespace}} \
@@ -97,7 +104,15 @@ deploy-tempo:
         --wait \
         --timeout 10m
 
-# 部署 OpenTelemetry Collector (DaemonSet 模式，替换 Promtail)
+# ⚠️ 2026-07-31 实测：homelab **当前没有部署 OTel Collector**（`helm list -A` 无此 release、
+# 集群无对应 pod），本配方从未在现集群跑成过或早已被卸载。后果：**homelab 自己的容器日志
+# 完全没有进 Loki** —— Loki 里只有 `cluster="oracle-k3s"`（oracle 那份是 kustomize 管的裸
+# DaemonSet，经 Tailscale otlphttp 推过来）。受影响的包括 kube-bench CIS 巡检结果、
+# backup CronJob 输出等"打 stdout 就以为进 Loki 了"的东西。
+# 跑本配方会**新增**一个采集全节点日志的 DaemonSet：在 5600H 单节点（idle ~74°C）上
+# 意味着额外 CPU + Loki PVC 增长，属于一次独立的容量决策，不是"迁 GitOps"。
+# 待决：要么按需部署（届时直接建 ArgoCD App，别用本配方），要么删掉本配方 + values。
+# 详见 docs/decisions/manual-helm-to-argocd-adoption.md
 deploy-otel-collector: add-repos
     helm upgrade --install opentelemetry-collector open-telemetry/opentelemetry-collector \
         --namespace {{namespace}} \
@@ -435,7 +450,11 @@ deploy-eso:
         --version {{eso_version}} \
         --values values/external-secrets.yaml
 
-# 部署 external-dns（HTTPRoute source，Cloudflare provider；见 manifests/external-dns/external-dns-secret.yaml 取 token）
+# ⚠️ LEGACY -- 2026-07-31 已迁 ArgoCD (argocd/applications/external-dns.yaml)
+# 改 values/external-dns.yaml -> commit -> ArgoCD auto-sync。
+# **不要**日常跑本配方（selfHeal 会打架）；仅作 ArgoCD 不可用时的逃生通道。
+# 紧急回滚: helm -n external-dns rollback external-dns <revision>
+# token 来源见 manifests/external-dns/external-dns-secret.yaml
 deploy-external-dns:
     helm upgrade --install external-dns external-dns/external-dns \
         --namespace external-dns \
@@ -444,9 +463,13 @@ deploy-external-dns:
         --version {{external_dns_version}} \
         --values values/external-dns.yaml
 
-# 部署 external-dns 到 oracle-k3s（第二个实例，txtOwnerId=oracle-externaldns，target 走 oracle tunnel）。
-# ns + Cloudflare token 的 ExternalSecret 由 oracle kustomize (cloud/oracle/manifests/base/external-dns.yaml)
-# 经 ArgoCD 提供；chart 本体在此手动部署（与 homelab 实例同约定）。
+# ⚠️ LEGACY -- 2026-07-31 已迁 ArgoCD (argocd/applications/external-dns-oracle.yaml)
+# 第二个实例，txtOwnerId=oracle-externaldns，target 走 oracle tunnel。
+# ns + Cloudflare token 的 ExternalSecret 由 oracle kustomize
+# (cloud/oracle/manifests/base/external-dns.yaml) 经 ArgoCD 提供。
+# **不要**日常跑本配方（selfHeal 会打架）；仅作逃生通道。
+# ⚠️ 注意 ArgoCD 侧那个 App 必须带 helm.releaseName: external-dns，否则 release 名
+# 变成 external-dns-oracle，撞上 Deployment selector 的不可变字段。
 deploy-external-dns-oracle:
     helm upgrade --install external-dns external-dns/external-dns \
         --namespace external-dns \

@@ -225,7 +225,11 @@ ENV JAVA_TOOL_OPTIONS="-javaagent:/otel/opentelemetry-javaagent.jar"
 **接入成本：** 需修改应用代码或 Dockerfile，适合新服务。
 
 > **追踪架构**（2026-03-01 上线）：
-> - homelab: App → OTel Collector (ClusterIP :4317) → Tempo
+> - ⚠️ **2026-07-31 校正：homelab 侧的 OTel Collector 现已不存在**（`helm list -A` 无此
+>   release、集群无 pod）。因此下面这条 homelab 链路**当前不成立**，homelab 自己的容器
+>   日志也没有进 Loki（Loki 里只有 `cluster="oracle-k3s"`）。oracle 那条仍然有效。
+>   状态与取舍见 `docs/decisions/manual-helm-to-argocd-adoption.md`。
+> - ~~homelab: App → OTel Collector (ClusterIP :4317) → Tempo~~（collector 不在了）
 > - oracle-k3s: App → OTel Collector (ClusterIP :4317) → Tempo NodePort :31317 (via Tailscale)
 > - Grafana 已配置 tracesToLogs / tracesToMetrics / nodeGraph / serviceMap
 > - 详见 `docs/reference/observability-multicluster.md` ⇢ Traces Pipeline 章节

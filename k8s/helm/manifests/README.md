@@ -14,7 +14,7 @@
 | `calibre-metadata/` | `calibre-metadata` | `personal-services` | 元数据补全 Job/CronJob。⚠️ **kustomize**：新文件必须登记进 `kustomization.yaml` |
 | `cloudflare/` | `cloudflare` | `cloudflare` | Cloudflare Tunnel（cloudflared） |
 | `external-dns/` | `external-dns` | `external-dns` | Cloudflare token 的 ExternalSecret（chart 本体是 manual-helm：`just deploy-external-dns`） |
-| `gateway/` | `gateway` | `kube-system` | Cilium Gateway + 全部 HTTPRoute / ReferenceGrant（新子域名往 `gateway.yaml` 追加 HTTPRoute 即可，DNS 由 external-dns 自动建） |
+| `gateway/` | `gateway` | `kube-system` | `gateway.yaml` = GatewayClass + Gateway 本体；每条对外路由一个 `route-<service>.yaml`（ReferenceGrant + HTTPRoute 成对）。**新子域名 = 新建一个 `route-*.yaml`**，DNS 由 external-dns 自动建 |
 | `kube-bench/` | `kube-bench` | `kube-bench` | CIS 周巡检 CronJob（ns 由 manifest 自身渲染） |
 | `kyverno-policies/` | `kyverno-policies` | `kyverno` | Kyverno ClusterPolicy（与 kyverno chart 安装分离，便于逐条 Audit→Enforce） |
 | `monitoring/` | `monitoring-dashboards` | `monitoring` | `dashboards/`（Grafana ConfigMap）、`alerts/`（PrometheusRule + Alertmanager 配置/secret）、`slos.yaml`、`krr.yaml`（右尺寸周报）、`monitoring-external.yaml`（外部抓取）、`cilium-envoy-servicemonitor.yaml` |

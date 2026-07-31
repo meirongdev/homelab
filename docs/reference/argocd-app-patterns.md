@@ -66,14 +66,35 @@ kubectl --context k3s-homelab apply -f argocd/projects/homelab.yaml
 所以 oracle 侧渲染出的 Service 会变成 `foo-oracle` —— 任何写死
 `foo.<ns>.svc.cluster.local` 的地方（otel 抓取目标、runbook、跨集群引用）都会失配。
 
-修法：在该集群的 values 顶层加
+**全新部署**（资源由 ArgoCD 亲手创建，如 `opencost-oracle`）：在该集群的 values 顶层加
+`fullnameOverride: foo` 就够了。
+
+⚠️ **采纳现存 Helm release 时 `fullnameOverride` 不够用**（2026-07-31 实测更正）。
+release 名不只影响对象名，还会渲染进 `app.kubernetes.io/instance` 标签，而该标签在
+Deployment 的 **`spec.selector.matchLabels`** 里 —— 那是**不可变字段**。
+以 external-dns 采纳为例：
+
+| 配置 | 结果 |
+|---|---|
+| 什么都不加 | **5 删 5 建**（全部资源改名重建） |
+| 只加 `fullnameOverride` | 对象名对上了，5 个对象的 selector/labels 仍不符 → 同步失败 |
+| `helm.releaseName: foo` | ✅ 与 live 逐字节一致 |
+
+正解是把 release 名与 Application 名解耦：
 
 ```yaml
-fullnameOverride: foo
+sources:
+  - repoURL: https://example.github.io/charts
+    chart: foo
+    targetRevision: "1.2.3"
+    helm:
+      releaseName: foo        # ← App 叫 foo-oracle，release 仍叫 foo
+      valueFiles: [$values/k8s/helm/values/foo-oracle.yaml]
 ```
 
-> 本地 `helm template -f values.yaml` **复现不出**这个问题（它不模拟 ArgoCD 的 release
-> 命名），只能在同步后查实际对象。改名会触发 ArgoCD 删旧建新。
+> 本地 `helm template -f values.yaml` 默认**复现不出**这个问题，但只要显式把 release 名
+> 传成 ArgoCD 会用的那个（`helm template foo-oracle ...`）就能提前暴露 —— 采纳前务必这样
+> 比对，见 `docs/decisions/manual-helm-to-argocd-adoption.md`。
 
 ### 3. ~~`directory.include` 是显式清单，新文件不会被自动捡起~~（2026-07-31 已消除）
 

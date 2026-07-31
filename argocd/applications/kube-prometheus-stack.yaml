@@ -1,0 +1,73 @@
+---
+# kube-prometheus-stack — Prometheus + Grafana + Alertmanager + operator + exporters
+# Chart: prometheus-community/kube-prometheus-stack
+# Values: k8s/helm/values/kube-prometheus-stack.yaml
+#
+# 2026-07-31: 从 manual-helm（just deploy-prometheus）采纳进 ArgoCD。
+# 采纳前逐对象验证（见 docs/decisions/manual-helm-to-argocd-adoption.md）：
+#   live 98 对象 vs 渲染 105 对象 → **0 裁剪**、7 个新增全是 Helm hook（跑完即删）、
+#   1 个差异是 Grafana PVC 的 live-only 字段 volumeName（ArgoCD 的 diff 不认它作变更）。
+#
+# ⚠️ Application 名必须保持 `kube-prometheus-stack`（= 现存 Helm release 名）。
+# ArgoCD 拿 App 名当 release 名，而 release 名会进 Deployment/StatefulSet 的
+# spec.selector（app.kubernetes.io/instance）——不可变字段，改名 = 同步失败。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: homelab
+
+  sources:
+    # chart 版本必须 pin：不 pin 时会随 chart repo 更新意外整栈升级
+    # （2026-07-04 曾因此从 86.3.2 意外升到 87.6.0，operator 滚动了 prometheus/alertmanager）。
+    # 与 k8s/helm/justfile 的 kube_prometheus_stack_version 保持一致。
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: "87.6.0"
+      helm:
+        valueFiles:
+          - $values/k8s/helm/values/kube-prometheus-stack.yaml
+        # ⚠️ 刻意 skip CRD，这是本次采纳的核心取舍。
+        # `helm upgrade` **从不**升级 chart 的 crds/ 目录，所以集群里的 10 个
+        # monitoring.coreos.com CRD 至今停在 operator **v0.89.0**，而实际运行的
+        # operator 是 **v0.92.1**（chart 87.6.0 自带）——这个陈旧是 Helm 造成的既存事实。
+        # 若让 ArgoCD 接管 CRD，首次同步会顺带把 10 个 CRD 升到 v0.92.1：那是一次
+        # 独立的、有自己风险面的变更（~1MB CRD × 10、可能影响既有 CR 校验），
+        # 不该被"迁 GitOps"这件事夹带执行。故先 skip，保持采纳是纯 no-op。
+        # CRD 陈旧作为独立待决项记录在 docs/decisions/manual-helm-to-argocd-adoption.md。
+        skipCrds: true
+    - repoURL: https://github.com/meirongdev/homelab
+      targetRevision: main
+      ref: values
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+
+  # admission webhook 的 caBundle 由 chart 的 admission-patch Job 在运行时注入自签证书，
+  # git/chart 侧渲染为空 —— 不豁免的话 selfHeal 每次同步都可能把证书抹掉再等 Job 补回，
+  # 白白抖动 webhook（failurePolicy 是 Ignore，不会挡准入，但没必要让它抖）。
+  ignoreDifferences:
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+      name: kube-prometheus-stack-admission
+      jqPathExpressions:
+        - .webhooks[].clientConfig.caBundle
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+      name: kube-prometheus-stack-admission
+      jqPathExpressions:
+        - .webhooks[].clientConfig.caBundle
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # 必须 SSA：本 chart 的对象多且大，client-side apply 会撞 annotation 长度上限。
+      - ServerSideApply=true
