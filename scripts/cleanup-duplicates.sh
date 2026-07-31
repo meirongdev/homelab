@@ -37,7 +37,7 @@ fi
 
 # 统计重复
 DELETE_IDS=()
-while IFS='|' read -r title ids; do
+while IFS='|' read -r _ ids; do
   if [ -z "$ids" ]; then
     continue
   fi
@@ -61,7 +61,7 @@ fi
 
 DELETE_COUNT=${#DELETE_IDS[@]}
 echo -e "${BLUE}ℹ${NC} 发现 $DELETE_COUNT 本重复书籍"
-echo -e "${BLUE}ℹ${NC} 待删除 IDs: ${DELETE_IDS[@]}"
+echo -e "${BLUE}ℹ${NC} 待删除 IDs: ${DELETE_IDS[*]}"
 
 if [ "$DRY_RUN" = "--dry-run" ]; then
   echo -e "${GREEN}✓${NC} 测试模式完成"

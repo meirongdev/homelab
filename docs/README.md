@@ -30,6 +30,9 @@ python3 scripts/check-docs.py --list   # 看哪几条能自动查
 
 CI 在每次 PR 与 push to main 时跑（`.github/workflows/docs-check.yml`）。
 
+> 另有 `.github/workflows/static-checks.yml` 管**代码侧**的静态检查（YAML 语法+重复键 /
+> `just --list` 可解析 / `terraform fmt` / shellcheck），与本文的文档规则互不重叠。
+
 | | 规则 | 谁来查 |
 |---|------|--------|
 | R2 | 命名 | ✅ 脚本 |

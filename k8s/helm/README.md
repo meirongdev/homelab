@@ -47,14 +47,10 @@ just setup-k8s
 just fetch-kubeconfig
 ```
 
-### 3. Deploy Observability Stack with Helm
+### 3. Observability Stack (GitOps)
 
-```bash
-cd k8s/helm
-just init              # Create .env from template
-vim .env               # Set your passwords
-just deploy-all
-```
+LGTM 栈（Loki/Grafana/Tempo/Sloth/otel-collector）已全部由 ArgoCD 管理（`argocd/applications/`）。
+装好 ArgoCD 后（`just deploy-argocd`），改 `k8s/helm/values/*.yaml` 或 `argocd/applications/*.yaml` → `git push` → 3 分钟内自动同步。
 
 ## Security Best Practices
 
@@ -124,17 +120,13 @@ just prometheus
 ## Secrets Management
 
 ### Current Approach
-```bash
-# Copy template and set your secrets
-cp k8s/helm/.env.example k8s/helm/.env
-vim k8s/helm/.env
-```
+Secrets live in **HashiCorp Vault**，由 **External Secrets Operator (ESO)** 同步到 K8s——Helm 配方不再有 `.env`（旧 `k8s/helm/.env(.example)` 已于 2026-08-01 退役：其两个消费者 `create-grafana-secret`/`create-cloudflare-secret` 随 ArgoCD 迁移被删，且无任何配方读它）。
+
+> ⚠️ 其它 terraform root（cloudflare/tailscale/zitadel/…）仍用各自的 `.env`，别误删；`.gitignore` 里的 `.env` 规则照旧生效。
 
 ### ⚠️ Important Security Notes
-- **Never commit `.env` files to Git**
-- Store backup of `.env` in a secure password manager
-- Use strong, unique passwords (min 16 characters)
-- Rotate passwords periodically
+- **Never commit `.env` files to Git**（其余 root 的 `.env` 同理）
+- Vault secret 的备份见 `docs/runbooks/backup-recovery.md`
 
 ### Syncing to Kubernetes (ESO)
 To make a Vault secret available to an application, create an `ExternalSecret` manifest in `k8s/helm/manifests/vault-eso/` (shared secrets, synced by the `vault-eso` App) or in the owning app's own manifest directory.

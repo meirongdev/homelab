@@ -3,7 +3,7 @@
 # Chart: open-telemetry/opentelemetry-collector · Values: k8s/helm/values/opentelemetry-collector.yaml
 #
 # 2026-07-31: 首次部署（此前 homelab 没有 collector，自身容器日志从未进 Loki——
-# Loki 里只有 cluster="oracle-k3s"；justfile 的 deploy-otel-collector 是未落地遗留物）。
+# Loki 里只有 cluster="oracle-k3s"）。
 # 全新部署，无采纳问题，fullnameOverride 在 values 里（对象名对齐 oracle 侧 otel-collector）。
 # 设计取舍见 docs/decisions/otel-2026-alignment.md
 apiVersion: argoproj.io/v1alpha1

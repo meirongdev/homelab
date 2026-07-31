@@ -44,13 +44,13 @@ homelab/
 | 类别 | 命令 | 说明 |
 |------|------|------|
 | K3s | `just setup-k8s` | 安装 K3s (k8s/ansible/) |
-| 部署 | `just deploy-all` | 部署 LGTM 全栈 (Loki/Grafana/Tempo/Mimir) |
+| 部署 | GitOps（`git push`） | LGTM/otel/external-dns 全 GitOps：charts+values 在 `argocd/applications/` 与 `k8s/helm/values/` |
 | ArgoCD | `just deploy-argocd` | 安装 ArgoCD + 注册所有 Application (幂等) |
 | ArgoCD | `just argocd-password` | 打印 admin 初始密码 |
 | GitOps | `git push` → ArgoCD 自动同步 | 3 分钟轮询, 不可手动 kubectl apply 覆盖 |
 | Vault | `just deploy-vault` | 部署 Vault |
 | Vault | `just vault-init && just vault-unseal` | 初始化和解封 |
-| 备份 | `just deploy-backup` | 部署 restic CronJob |
+| 备份 | GitOps（`backup` App） | restic CronJob 由 ArgoCD 同步，改 `backup/overlays/` + git push |
 | 备份 | `just backup-run` | 手动触发备份 |
 | Cilium | `just deploy-cilium` | 部署/升级 Cilium (k8s/cilium/) |
 | Cloudflare | `just apply` | terraform apply (cloudflare/terraform/) |

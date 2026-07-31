@@ -6,8 +6,9 @@
 # the other's records). Each only watches its OWN cluster's HTTPRoutes, and the hostnames are
 # disjoint, so with distinct owners + upsert-only they coexist without touching each other.
 #
-# Deployed via manual helm (`just deploy-external-dns-oracle`), same convention as homelab's
-# instance. The Cloudflare token comes from the ExternalSecret in the oracle Kustomize tree
+# Deployed by the ArgoCD `external-dns-oracle` App (multi-source chart + values,
+# argocd/applications/external-dns-oracle.yaml), same convention as homelab's instance.
+# The Cloudflare token comes from the ExternalSecret in the oracle Kustomize tree
 # (cloud/oracle/manifests/base/external-dns.yaml), which reads the same Vault zone token.
 provider:
   name: cloudflare

@@ -59,13 +59,10 @@
 ## 传输架构
 
 ```
-本机                       NFS 存储节点 (192.168.50.106)     K8s Pod
-━━━━━━━━━━━━━━━━━          ━━━━━━━━━━━━━━━━━━━━━━━━━━━      ━━━━━━━━━━━━━
-~/Downloads/books/  ───→   /storage/calibre/ingest/  ──→   /cwa-book-ingest/
-    sync-ebooks.sh          (rsync, 主路径)                  (calibre-web 自动导入)
-                              ↑
-                            └── 不可用时降级到
-                            kubectl cp → pod (回退路径)
+本机 ~/Downloads/books/          K8s Pod (personal-services)
+━━━━━━━━━━━━━━━━━━━━━━          ━━━━━━━━━━━━━━━━━━━━━━━━
+  sync-ebooks.sh  ──(kubectl cp)──→  /cwa-book-ingest/  ──→  calibre-web 自动导入
+                  (sha256 校验 + 入库确认)
 ```
 
 ## 输出示例
@@ -77,7 +74,7 @@
 
 [10:30:01] ℹ 扫描本地目录: ~/Downloads/books
 [10:30:01] ✅ 本地找到 66 本电子书
-[10:30:01] ℹ 传输通道: NFS 直连 (192.168.50.106)
+[10:30:01] ℹ 传输通道: kubectl cp
 [10:30:02] ℹ 获取 calibre 数据库书籍列表...
 [10:30:02] ✅ 数据库现有 2032 本书
 

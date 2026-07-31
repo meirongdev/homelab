@@ -1,18 +1,20 @@
 namespace := "monitoring"
 ctx := "k3s-homelab"
-set dotenv-load
 
 # Pinned Helm chart versions — bump deliberately after reviewing release notes.
 # Match what is currently deployed on the cluster (see `helm list -A`).
-loki_version             := "7.0.0"   # ArgoCD-managed (argocd/applications/loki.yaml); keep in sync
-tempo_version            := "1.24.4"
-# ⚠️ 真正生效的 pin 在 argocd/applications/otel-collector.yaml（chart 0.165.0），
-# 此值只服务下面的 LEGACY 逃生配方——两处要一起改，且须与 oracle 侧 contrib 镜像同 appVersion。
-otel_collector_version   := "0.165.0"
+# ⚠️ 只有仍需手动管理的 release 在这里 pin（cilium/vault/eso；argocd 的 pin 是
+# `argocd_chart_version`，就在 deploy-argocd 上方，跟着那条配方走）。
+# LGTM/otel/external-dns 已全部迁 ArgoCD（2026-07-31）：chart 版本唯一真源是
+# argocd/applications/<app>.yaml 的 targetRevision——不要在这里重复维护（此前双 pin 漂移过：loki 7.0.0 vs 7.1.0）。
 cilium_version           := "1.19.1"
 vault_version            := "0.33.0"
 eso_version              := "2.6.0"
-external_dns_version     := "1.21.1"
+
+# ⚠️ 紧急回滚 / 手动重部署（仅 ArgoCD 不可用时；配置真源仍是 values/<app>.yaml）：
+#   helm -n <ns> rollback <release> <rev>
+#   helm upgrade --install <release> <repo>/<chart> -n <ns> --kube-context k3s-homelab \
+#     --version <argocd/applications/<app>.yaml 里的 targetRevision> -f values/<app>.yaml
 
 add-repos:
     helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
@@ -26,125 +28,14 @@ add-repos:
     helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/
     helm repo update
 
-create-namespace:
-    kubectl --context {{ctx}} create namespace {{namespace}} --dry-run=client -o yaml | kubectl --context {{ctx}} apply -f -
-
-create-grafana-secret:
-    @echo "🔒 Grafana secrets are managed by Vault and External Secrets Operator."
-    @kubectl --context {{ctx}} get secret grafana-admin-credentials -n {{namespace}} > /dev/null 2>&1 || (echo "❌ Error: grafana-admin-credentials secret not found. Check Vault/ESO sync." && exit 1)
-
-create-cloudflare-secret:
-    @echo "🔒 Cloudflare secrets are managed by Vault and External Secrets Operator."
-    @kubectl --context {{ctx}} create namespace cloudflare --dry-run=client -o yaml | kubectl --context {{ctx}} apply -f -
-    @kubectl --context {{ctx}} get secret cloudflare-tunnel-token -n cloudflare > /dev/null 2>&1 || (echo "❌ Error: cloudflare-tunnel-token secret not found. Check Vault/ESO sync." && exit 1)
-
-# chart 版本必须 pin：不 pin 时 `helm repo update` 后本配方会顺带把整个 stack 升到
-# 最新版（2026-07-04 曾因此从 86.3.2 意外升到 87.6.0，operator 滚动了 prometheus/alertmanager）。
-# 升级请显式改这里的值。
-# ⚠️ 2026-07-31 起真正生效的 pin 在 argocd/applications/kube-prometheus-stack.yaml，
-# 这里的值只服务下面两条 LEGACY 逃生配方 —— 两处要一起改。
-kube_prometheus_stack_version := "87.6.0"
-
-# ⚠️ LEGACY -- 2026-07-31 已迁 ArgoCD (argocd/applications/kube-prometheus-stack.yaml)
-# 日常改配置：改 values/kube-prometheus-stack.yaml -> commit -> ArgoCD auto-sync。
-# **不要**日常跑本配方：ArgoCD 开着 selfHeal，手动 helm upgrade 出的差异会被它改回去，
-# 两边来回打架。仅在 ArgoCD 自身不可用时作为逃生通道使用。
-# 紧急回滚: helm -n monitoring rollback kube-prometheus-stack <revision>
-deploy-prometheus: create-grafana-secret
-    @echo "⏳ Deploying Prometheus stack (this may take 5-10 minutes)..."
-    helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
-        --namespace {{namespace}} \
-        --kube-context {{ctx}} \
-        --values values/kube-prometheus-stack.yaml \
-        --version {{kube_prometheus_stack_version}} \
-        --wait \
-        --timeout 15m \
-        --debug
-
-# ⚠️ LEGACY -- 同上，见 deploy-prometheus 的说明
-deploy-prometheus-nowait: create-grafana-secret
-    helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
-        --namespace {{namespace}} \
-        --kube-context {{ctx}} \
-        --values values/kube-prometheus-stack.yaml \
-        --version {{kube_prometheus_stack_version}} \
-        --timeout 15m
-    @echo "✅ Helm release created. Check status with: just status"
-
-# ⚠️ LEGACY -- 2026-07-06 已迁 ArgoCD (argocd/applications/loki.yaml)
-# 改 values/loki.yaml -> commit -> ArgoCD auto-sync
-# 如需紧急回滚: helm -n monitoring rollback loki <revision>
-deploy-loki:
-    helm upgrade --install loki grafana/loki \
-        --namespace {{namespace}} \
-        --kube-context {{ctx}} \
-        --version {{loki_version}} \
-        --values values/loki.yaml \
-        --wait \
-        --timeout 10m
-
-# ⚠️ LEGACY — 2026-07-06 已迁 ArgoCD (argocd/applications/sloth.yaml)
-# 改 values/sloth.yaml → commit → ArgoCD auto-sync。
-deploy-sloth:
-    helm upgrade --install sloth sloth/sloth \
-        --namespace {{namespace}} \
-        --kube-context {{ctx}} \
-        --values values/sloth.yaml \
-        --version 0.16.0 \
-        --timeout 5m
-    @echo "✅ Sloth deployed. Check: kubectl --context {{ctx}} -n {{namespace}} get pods -l app.kubernetes.io/name=sloth"
-
-# ⚠️ LEGACY -- 2026-07-06 已迁 ArgoCD (argocd/applications/tempo.yaml)
-# 改 values/tempo.yaml -> commit -> ArgoCD auto-sync
-# 如需紧急回滚: helm -n monitoring rollback tempo <revision>
-deploy-tempo:
-    helm upgrade --install tempo grafana/tempo \
-        --namespace {{namespace}} \
-        --kube-context {{ctx}} \
-        --version {{tempo_version}} \
-        --values values/tempo.yaml \
-        --wait \
-        --timeout 10m
-
-# ⚠️ LEGACY -- 2026-07-31 已作为 ArgoCD App 部署 (argocd/applications/otel-collector.yaml)。
-# 历史注记：此前 homelab 从未真正部署过 collector（无 release、无 pod）——
-# homelab 日志 2026-07-31 才首次进 Loki。
-# 改配置：改 values/opentelemetry-collector.yaml -> commit -> ArgoCD auto-sync。
-# **不要**日常跑本配方（selfHeal 会打架）；仅作 ArgoCD 不可用时的逃生通道。
-deploy-otel-collector: add-repos
-    helm upgrade --install opentelemetry-collector open-telemetry/opentelemetry-collector \
-        --namespace {{namespace}} \
-        --kube-context {{ctx}} \
-        --version {{otel_collector_version}} \
-        --values values/opentelemetry-collector.yaml \
-        --wait \
-        --timeout 5m
-
-# 删除 OTel Collector
-remove-otel-collector:
-    helm uninstall opentelemetry-collector -n {{namespace}} --kube-context {{ctx}} || true
-
 # ⬇️ 个人服务相关命令 ⬇️
 personal_ns := "personal-services"
-
-# 部署 Calibre-Web (使用原生 K8s 清单)
-deploy-calibre:
-    kubectl --context {{ctx}} apply -f manifests/personal-services/calibre-web.yaml
-
-# 删除 Calibre-Web
-delete-calibre:
-    kubectl --context {{ctx}} delete -f manifests/personal-services/calibre-web.yaml
 
 # ⬇️ 备份 (serverless restic → storage-106 ZFS 仓库) ⬇️
 # 设计/运维见 docs/plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md + docs/runbooks/backup-recovery.md
 # 前置(一次性 bootstrap，不在 git): 106 建 mrstorage/restic dataset + restic init + 授权 restic SSH key；
 #   Vault 写 secret/homelab/restic (repo_password / ssh_private_key_b64 / vault_token) + backup policy。
-
-# 部署 homelab 备份 CronJob (Vault raft snapshot + sqlite/config + calibre books → 106)
-# ⚠️ LEGACY — 2026-07-06 已迁 ArgoCD (argocd/applications/backup.yaml)
-# 请直接改 backup/overlays/homelab + commit, ArgoCD auto-sync。
-deploy-backup:
-    kubectl --context {{ctx}} apply -k ../../backup/overlays/homelab
+# CronJob 由 ArgoCD `backup` App 管理（backup/overlays/homelab）：改配置 → git push → 自动同步。
 
 # 立即手动触发一次备份
 backup-run:
@@ -156,11 +47,6 @@ backup-status:
     kubectl --context {{ctx}} -n backup logs -l app=restic-backup --tail=20 --prefix 2>/dev/null || true
 
 # ⬇️ 电子书同步 ⬇️
-
-# 部署电子书同步 CronJob 和监控
-deploy-ebook-sync:
-    kubectl --context {{ctx}} apply -f manifests/personal-services/calibre-ebook-sync.yaml
-    @echo "✅ 电子书同步 CronJob 已部署"
 
 # 查看电子书同步 CronJob 状态
 ebook-sync-status:
@@ -189,11 +75,6 @@ sync-ebooks-cleanup:
 sync-ebooks-no-backup:
     @echo "⏳ 同步电子书到 calibre-web (不备份)..."
     bash scripts/sync-ebooks.sh --no-backup --cleanup
-
-# 删除电子书同步 CronJob
-delete-ebook-sync:
-    kubectl --context {{ctx}} delete -f manifests/personal-services/calibre-ebook-sync.yaml || true
-    @echo "✅ 电子书同步 CronJob 已删除"
 
 # 查看电子书备份
 ebook-backup-list:
@@ -229,23 +110,6 @@ cleanup-logs:
 # 现由 ArgoCD `oracle-k3s` App 从 cloud/oracle/manifests/personal-services/ 同步；
 # 需要手动部署时用 `cd cloud/oracle && just deploy-personal-services`。
 
-# 部署 Cloudflare Tunnel
-deploy-cloudflare-tunnel: create-cloudflare-secret
-    kubectl --context {{ctx}} apply -f manifests/cloudflare/cloudflare-tunnel.yaml
-
-# 删除 Cloudflare Tunnel
-delete-cloudflare-tunnel:
-    kubectl --context {{ctx}} delete -f manifests/cloudflare/cloudflare-tunnel.yaml
-
-# 部署 Gateway API 配置 (Cilium Gateway + HTTPRoutes)
-deploy-gateway:
-    kubectl --context {{ctx}} apply -f manifests/gateway/gateway.yaml
-    @echo "✅ Cilium Gateway API resources applied!"
-
-# 删除 Gateway API 配置
-delete-gateway:
-    kubectl --context {{ctx}} delete -f manifests/gateway/gateway.yaml || true
-
 # 查看个人服务状态
 status-personal:
     kubectl --context {{ctx}} get all,pvc -n {{personal_ns}}
@@ -257,9 +121,6 @@ status-personal:
 #   手动部署:   cd cloud/oracle && just deploy-homepage
 #   改配置生效: kubectl --context oracle-k3s rollout restart deployment/homepage -n homepage
 #              （ConfigMap 是 subPath 挂载，ArgoCD 同步后不会热加载）
-
-deploy-all: add-repos create-namespace deploy-prometheus
-    @echo "✅ All monitoring components deployed successfully!"
 
 # ⬇️ Cilium CNI ⬇️
 
@@ -366,14 +227,13 @@ debug-pods:
 logs pod:
     kubectl --context {{ctx}} logs {{pod}} -n {{namespace}} --tail=100 --follow
 
-remove-all:
-    helm uninstall kube-prometheus-stack -n {{namespace}} --kube-context {{ctx}} || true
-    helm uninstall loki -n {{namespace}} --kube-context {{ctx}} || true
-    helm uninstall tempo -n {{namespace}} --kube-context {{ctx}} || true
-    helm uninstall calibre-web -n {{personal_ns}} --kube-context {{ctx}} || true
-    kubectl --context {{ctx}} delete secret grafana-admin-credentials -n {{namespace}} || true
-    kubectl --context {{ctx}} delete namespace {{namespace}} || true
-    kubectl --context {{ctx}} delete namespace {{personal_ns}} || true
+# ⚠️ 旧 `remove-all` 已删除（2026-08-01）。它 `helm uninstall` kube-prometheus-stack/loki/tempo
+# 再删掉整个 monitoring + personal-services ns，而这些现在全是 prune+selfHeal 的 ArgoCD App——
+# 跑一次就是人肉与 selfHeal 对拆：对象被 ArgoCD 立刻拉回，只剩半状态和一堆 Terminating ns。
+# （它顺手删的 grafana-admin-credentials 也早已是 ESO 同步产物，删了会被 ESO 重建。）
+# 真要拆栈，顺序是先摘 GitOps 再删对象：
+#   argocd app delete <app> --cascade      # 走 finalizer 级联删该 App 的所有对象
+#   kubectl --context k3s-homelab delete ns monitoring personal-services   # 确认无残留后再删 ns
 
 get-grafana-password:
     @kubectl --context {{ctx}} get secret -n {{namespace}} grafana-admin-credentials -o jsonpath="{.data.admin-password}" | base64 -d
@@ -389,16 +249,6 @@ prometheus:
     @echo "Prometheus is available at http://localhost:9090"
     kubectl --context {{ctx}} port-forward -n {{namespace}} svc/kube-prometheus-stack-prometheus 9090:9090
 
-init:
-    #!/usr/bin/env bash
-    if [ ! -f .env ]; then
-        cp .env.example .env
-        echo "✅ Created .env file from .env.example"
-        echo "⚠️  Please edit .env and set your passwords before deploying!"
-    else
-        echo "✅ .env file already exists"
-    fi
-
 # 查看集群资源使用情况
 check-resources:
     @echo "=== Node Resources ==="
@@ -406,14 +256,6 @@ check-resources:
     @echo ""
     @echo "=== Pod Resources in {{namespace}} ==="
     kubectl --context {{ctx}} top pods -n {{namespace}}
-
-# Update Prometheus stack
-update-prometheus:
-    helm upgrade kube-prometheus-stack prometheus-community/kube-prometheus-stack \
-      -n monitoring \
-      --kube-context {{ctx}} \
-      --version {{kube_prometheus_stack_version}} \
-      -f values/kube-prometheus-stack.yaml
 
 # ⬇️ Vault & Secret Management ⬇️
 vault_ns := "vault"
@@ -447,34 +289,6 @@ deploy-eso:
         --kube-context {{ctx}} \
         --version {{eso_version}} \
         --values values/external-secrets.yaml
-
-# ⚠️ LEGACY -- 2026-07-31 已迁 ArgoCD (argocd/applications/external-dns.yaml)
-# 改 values/external-dns.yaml -> commit -> ArgoCD auto-sync。
-# **不要**日常跑本配方（selfHeal 会打架）；仅作 ArgoCD 不可用时的逃生通道。
-# 紧急回滚: helm -n external-dns rollback external-dns <revision>
-# token 来源见 manifests/external-dns/external-dns-secret.yaml
-deploy-external-dns:
-    helm upgrade --install external-dns external-dns/external-dns \
-        --namespace external-dns \
-        --create-namespace \
-        --kube-context {{ctx}} \
-        --version {{external_dns_version}} \
-        --values values/external-dns.yaml
-
-# ⚠️ LEGACY -- 2026-07-31 已迁 ArgoCD (argocd/applications/external-dns-oracle.yaml)
-# 第二个实例，txtOwnerId=oracle-externaldns，target 走 oracle tunnel。
-# ns + Cloudflare token 的 ExternalSecret 由 oracle kustomize
-# (cloud/oracle/manifests/base/external-dns.yaml) 经 ArgoCD 提供。
-# **不要**日常跑本配方（selfHeal 会打架）；仅作逃生通道。
-# ⚠️ 注意 ArgoCD 侧那个 App 必须带 helm.releaseName: external-dns，否则 release 名
-# 变成 external-dns-oracle，撞上 Deployment selector 的不可变字段。
-deploy-external-dns-oracle:
-    helm upgrade --install external-dns external-dns/external-dns \
-        --namespace external-dns \
-        --create-namespace \
-        --kube-context oracle-k3s \
-        --version {{external_dns_version}} \
-        --values values/external-dns-oracle.yaml
 
 # 配置 Vault 与 ESO 的连接 (需要先 init)
 setup-vault-eso:

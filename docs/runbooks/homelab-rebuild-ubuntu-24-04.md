@@ -175,10 +175,8 @@ Examples:
 ```bash
 cd /Users/matthew/projects/homelab/k8s/helm
 just deploy-argocd
-just deploy-cloudflare-tunnel
-just deploy-prometheus
-just deploy-loki
-just deploy-tempo
+# 各 App 的 manifests（cloudflare/gateway/personal-services 等）由 ArgoCD 随 git push 同步，无需手动 kubectl apply
+# LGTM 栈（kube-prometheus-stack/loki/tempo/sloth/otel-collector）由 ArgoCD 自动同步，无需手动 helm
 ```
 
 Then verify critical namespaces:

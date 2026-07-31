@@ -14,7 +14,7 @@
 
 ## 脚本
 
-`scripts/sync-ebooks.sh` — 本地运行，通过 NFS 或 kubectl cp 将文件传到 calibre-web ingest 目录。
+`scripts/sync-ebooks.sh` — 本地运行，通过 `kubectl cp` 将文件传到 calibre-web ingest 目录（**唯一**传输通道；NFS 直传路径已随书库迁 `local-path` 于 2026-07-12 删除）。
 
 详细用法见 `scripts/README.md`。
 
@@ -27,17 +27,20 @@
 - 上报磁盘用量
 - ingest > 50 文件堆积时标记为失败
 
-部署：
+该文件由 ArgoCD `personal-services` App 管理（目录 `k8s/helm/manifests/personal-services/`），改动走 GitOps：
 
 ```bash
-kubectl apply -f k8s/helm/manifests/personal-services/calibre-ebook-sync.yaml
+git add k8s/helm/manifests/personal-services/calibre-ebook-sync.yaml
+git commit -m "chore(calibre): 更新 ebook-sync 监控"
+git push   # ArgoCD 3 分钟内自动同步
 ```
+
+⚠️ **不要手动 `kubectl apply`**——该目录归 `personal-services` App（prune+selfHeal+SSA），手动应用会被 ArgoCD 改回去。
 
 ## 传输流程
 
 ```
-本机 rsync ─→ NFS /storage/calibre/ingest/ ─→ pod /cwa-book-ingest/ ─→ calibre-web 自动入库
-  ↑ (失败时降级到 kubectl cp)
+本机 ~/Downloads/books/ ──(kubectl cp + sha256 校验)──→ pod /cwa-book-ingest/ ──→ calibre-web 自动入库
 ```
 
 ## 元数据补全
