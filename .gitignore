@@ -82,3 +82,8 @@ openspec/
 .github/skills/
 proxmox/ansible/.vault_pass
 .gstack/
+
+# Agent 本地设置：允许列表里可能内联真实凭据（如 wrangler 命令带 CLOUDFLARE_API_TOKEN）。
+# 此前只靠 ~/.config/git/ignore 这条全局规则挡着——换台机器/新克隆就没保护了，故在 repo 内固化。
+.claude/settings.local.json
+.qwen/settings.local.json
