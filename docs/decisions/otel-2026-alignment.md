@@ -7,9 +7,11 @@
 
 仓库的 OTel 现状（2026-07-31 盘点）：
 
-- **homelab 没有 collector**——`values/opentelemetry-collector.yaml`（2026-03）从未真正
-  跑起来过：exporter 写的是不存在的 `otlp_http` 组件（正确名 `otlphttp`），配置校验都过不了。
-  后果：homelab 自己的容器日志从未进 Loki（Loki 里只有 `cluster="oracle-k3s"`）。
+- **homelab 没有 collector**——`values/opentelemetry-collector.yaml`（2026-03）从未随任何
+  helm release 生效过（实测：无 release、无 pod、Loki 里只有 `cluster="oracle-k3s"`）。
+  （曾据"旧 values 写了 `otlp_http`"推断配置本身跑不通——**该推断撤回**：0.156 起组件
+  规范名恰好迁到了下划线风格，`otlp_http` 成了新规范名、`otlphttp` 转为弃用别名，
+  旧名在当年版本是否有效已不可考，也无关紧要——"从未部署"的铁证是集群状态，不是组件名。）
 - **oracle 有一份能跑的裸 DaemonSet**（contrib 0.120.0，kustomize 管理），承载 oracle 全部
   日志/指标/追踪跨 Tailscale 推到 homelab；配置质量不错，但按 2026 标准有四个实质差距（见下）。
 
@@ -28,7 +30,11 @@
 | `k8s.cluster.name` semconv | 双侧 resource processor | 与运营标签 `cluster` **并存**（见"拒绝"表第 2 行） |
 | 双侧同版本 0.156.0 | 双侧 | oracle 0.120.0 → 0.156.0（落后 36 个版本）；升级纪律：两侧同 appVersion 一起动 |
 | collector 自身遥测 | homelab ServiceMonitor | queue 深度/丢弃计数/export 失败率进 Prometheus（管道自己的健康信号） |
-| 管道断流告警 | `monitoring/alerts/otel-pipeline-alerts.yaml` | oracle 全部遥测过一根管子，死了没人报错（remote-write 序列静默变陈旧）——`absent_over_time(up{cluster="oracle-k3s",job="node-exporter"}[15m])` 关闭这个 fail-silent 缺口 |
+| 组件命名 | 双侧 | 0.156 的规范名已迁往下划线风格（`otlp_http`/`k8s_attributes`/`file_log`/`prometheus_remote_write`），旧名成弃用别名（启动仅 warn）。**双侧暂留别名**：homelab chart preset 生成的就是别名，只迁手写侧会造成两集群风格分裂——待 chart 跟进后一起切 |
+
+（曾计划新增 `OracleTelemetryPipelineDown` 断流告警，复核发现 `prometheus-rules.yaml` 的
+`OracleTelemetryAbsent`（critical，`absent(up{cluster="oracle-k3s"})`，for 15m）早已覆盖
+同一故障面——重复规则已撤销，此缺口本就是关着的。）
 
 部署形态：homelab = ArgoCD `otel-collector` App（多源 chart 0.165.0 + `$values`，全新部署
 故 `fullnameOverride` 合法——与采纳现存 release 的场景区分，见

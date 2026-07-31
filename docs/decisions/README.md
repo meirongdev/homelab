@@ -10,7 +10,7 @@
 6. [orphaned-resources.md](orphaned-resources.md) — 配置漂移体检选型：否决 kor（信噪比 0.6%，且误判 argocd-secret/vault-token 等要害），改用 ArgoCD 原生 `orphanedResources` 且 `warn: false`
 7. [manifests-directory-per-app.md](manifests-directory-per-app.md) — `k8s/helm/manifests/` 目录化：一个 App 一个目录（目录即清单），废除 `directory.include` glob；`values/` 命名统一 `<app>.yaml`
 8. [manual-helm-to-argocd-adoption.md](manual-helm-to-argocd-adoption.md) — 采纳现存 Helm release 的渲染等价性验证法；CRD 陈旧与迁移解耦（`skipCrds`）；更正「`fullnameOverride` 可解决跨集群同 chart」的旧说法（正解是 `helm.releaseName`）；otel-collector 其实从未部署
-9. [otel-2026-alignment.md](otel-2026-alignment.md) — OTel 2026 对齐：homelab collector 首次落地（k8s 裁剪发行版 + ArgoCD App）、oracle 现代化（container operator 修分段行 bug、file_storage checkpoint+持久队列、0.120→0.156）、管道断流告警；采纳/拒绝各一张表
+9. [otel-2026-alignment.md](otel-2026-alignment.md) — OTel 2026 对齐：homelab collector 首次落地（k8s 裁剪发行版 + ArgoCD App）、oracle 现代化（container operator 修分段行 bug、file_storage checkpoint+持久队列、0.120→0.156）；采纳/拒绝各一张表 + 一次撤回的推断、一条撤销的重复告警
 
 ## ADR Convention
 

@@ -232,8 +232,8 @@ ENV JAVA_TOOL_OPTIONS="-javaagent:/otel/opentelemetry-javaagent.jar"
 
 > **追踪架构**：
 > - homelab: App → OTel Collector (`otel-collector.monitoring.svc:4317`) → Tempo
->   ⚠️ 历史更正：**2026-07-31 才首次真正部署**——2026-03 声称的"上线"从未发生（旧 values
->   写的 `otlp_http` exporter 名不存在，配置从未跑通），homelab 容器日志同日首次进 Loki。
+>   ⚠️ 历史更正：**2026-07-31 才首次真正部署**——2026-03 声称的"上线"从未发生
+>   （实测无 release、无 pod），homelab 容器日志同日首次进 Loki。
 >   现由 ArgoCD `otel-collector` App 管理，取舍见 `docs/decisions/otel-2026-alignment.md`。
 > - oracle-k3s: App → OTel Collector (ClusterIP :4317) → Tempo NodePort :31317 (via Tailscale)
 > - Grafana 已配置 tracesToLogs / tracesToMetrics / nodeGraph / serviceMap

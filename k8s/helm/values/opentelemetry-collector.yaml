@@ -9,8 +9,8 @@
 #
 # ⚠️ 刻意没有 metrics 管道：homelab 指标由 kube-prometheus-stack 原生抓取
 # （ServiceMonitor + additionalScrapeConfigs，含 cloudflared），collector 不做重复采集。
-# 历史注记：本文件 2026-03 的旧版从未真正跑起来过——exporter 写的是不存在的
-# `otlp_http` 组件（正确名 otlphttp），配置校验都过不了。
+# 历史注记：本文件 2026-03 的旧版从未随任何 helm release 生效过
+# （2026-07-31 实测：无 release、无 pod、Loki 无 homelab 日志）。
 # 设计取舍全集见 docs/decisions/otel-2026-alignment.md
 
 mode: daemonset
