@@ -70,6 +70,12 @@
   - ✅ **两集群隧道均改单条 `*.meirong.dev` 通配路由** → 加子域名从此**只写一个 HTTPRoute**（DNS 自动建 + 通配转发进 gateway），端到端实测通过。
   - ✅ 澄清：所谓"🔴 无效 token 阻塞"是**误判**——有效 token 一直在 gitignored `.env`。
   - 🟢 低优先增强（非阻塞）：oracle external-dns 尚无 observability（homelab 告警规则 `cluster="homelab"` 限定，未覆盖 oracle；需 oracle OTel 抓 `:7979`）；两实例可按需评估 `upsert-only`→`sync`。
+  - ✅ **2026-07-31 两实例的 chart 本体迁入 ArgoCD**（此前只有 ExternalSecret 在 GitOps 下，chart 是 manual-helm）。采纳前已验证渲染等价（两侧各 6/5 对象逐字节一致）。⚠️ oracle 侧必须带 `helm.releaseName: external-dns`，见下方 manual-helm 采纳条目。
+- [x] **manual-helm → ArgoCD 采纳** ✅ 2026-07-31：`kube-prometheus-stack` + `external-dns` ×2 三个 Application 上线，改 values → push → 自动同步；justfile 对应配方标 `⚠️ LEGACY` 保留为逃生通道。采纳前逐对象验证渲染等价性（`helm get manifest` vs `helm template`，只在「0 裁剪、变更可解释」时动手）。取舍与三个陷阱见决策记录 [`decisions/manual-helm-to-argocd-adoption.md`](../decisions/manual-helm-to-argocd-adoption.md)，要点：
+  - ⏳ **待决：prometheus-operator CRD 陈旧**。集群 10 个 `monitoring.coreos.com` CRD 停在 operator **v0.89.0**，实际运行的 operator 是 **v0.92.1** —— 根因是 `helm upgrade` **从不**升级 chart 的 `crds/` 目录。本次刻意 `skipCrds: true` 把这次升级与迁移解耦（保持采纳为纯 no-op）。补升两条路：去掉 `skipCrds` 让 ArgoCD 接管（之后随 chart 自动跟进，推荐），或手工 `kubectl apply --server-side`。需单独开窗口验证。
+  - 📝 **更正**：`fullnameOverride` **不足以**解决"同 chart 部署到两集群"——release 名还会渲染进 `app.kubernetes.io/instance`，而它在 Deployment `spec.selector` 里是不可变字段。正解是 `helm.releaseName`。`opencost-oracle` 用 `fullnameOverride` 没出事，是因为它是 ArgoCD 全新部署、不存在既有 selector 可撞（两种场景要分清）。`reference/argocd-app-patterns.md` 的坑 #2 已更新。
+  - ❌ **otel-collector 未迁移，因为它根本没部署**：homelab 无 release 无 pod，`just deploy-otel-collector` + `values/opentelemetry-collector.yaml` 是未落地的遗留物。连带发现 **homelab 自己的容器日志从未进 Loki**（Loki 里只有 `cluster="oracle-k3s"`，oracle 那份是 kustomize 管的裸 DaemonSet 经 Tailscale 推来），`reference/observability-otel-logging.md` 声称的 homelab 链路不成立 —— 两处已就地标注。⏳ **待决**：补部署是一次容量决策（5600H 单节点 idle ~74°C + Loki 5Gi PVC 增长），要做就直接建 ArgoCD App，别用那条配方。
+- [x] **gateway.yaml 按路由拆分** ✅ 2026-07-31：11 个对象拆成 5 文件（`gateway.yaml` = GatewayClass + Gateway 本体，4 条 `route-<service>.yaml` 各含 ReferenceGrant + HTTPRoute）。拆后对象集合与内容逐字节一致。新子域名从此 = 新建一个 `route-*.yaml`（目录源自动纳管）。
 - [ ] **离站备份 (OCI always-free / B2)**: restic 仓库 → 云（rclone/`restic copy`）。见 2026-07-06 计划 Phase 5（later）
 - [ ] **DGX Spark 入编**: 推理服务 IaC + GPU 指标(dcgm) + Bifrost 双机 fallback + SLO。见母文档 P1-5
 - [ ] **恢复演练自动化**: 月度 CronJob 校验 restic restore。见母文档 P2-8
