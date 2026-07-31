@@ -1,3 +1,13 @@
+# scripts/
+
+| 脚本 | 用途 |
+|------|------|
+| [`check-docs.py`](check-docs.py) | 文档组织规则检查器（强制 [R1-R7](../docs/README.md)）。`python3 scripts/check-docs.py`，CI 每次 PR/push 跑 |
+| `sync-ebooks.sh` | calibre-web 电子书同步（下详） |
+| `cleanup-duplicates.sh` | 清理重复书目 |
+
+---
+
 # sync-ebooks.sh — calibre-web 电子书同步
 
 将本地电子书批量同步到 homelab 的 calibre-web ingest 目录，并验证入库结果。
@@ -6,8 +16,7 @@
 
 | 特性 | 说明 |
 |------|------|
-| ✅ NFS 直传 | 主传输路径，处理文件名中的特殊字符 |
-| 🔄 kubectl 回退 | NFS 不可用时自动降级 |
+| ✅ kubectl cp 传输 | **唯一**传输通道。⚠️ 原有的「NFS 直传为主、kubectl 回退」已于 2026-07-12 整条删除——书库迁 `local-path` 后，那条路径写的是 106 上迁移前的孤儿快照目录，校验和在副本上比对、全程报绿但书从未真正入库 |
 | 🔁 自动重试 | 每文件最多 3 次，指数退避 |
 | ✅ 校验和验证 | 传输后 sha256 比对，确保数据完整 |
 | 📊 入库确认 | 查询 calibre-web 数据库确认新书入库 |

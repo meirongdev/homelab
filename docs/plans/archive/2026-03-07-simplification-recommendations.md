@@ -1,6 +1,6 @@
 # Architecture Simplification Recommendations (2026-03)
 
-> **Deprecated (2026-06-05):** Some recommendations in this document have been superseded by subsequent decisions.
+> **状态**: ⚠️ 已被取代（2026-06-05）—— Some recommendations in this document have been superseded by subsequent decisions.
 > - **Recommendation #5** ("keep oracle-k3s outside ArgoCD") was overtaken by the [oracle-k3s GitOps migration](../networking/2026-06-04-oracle-k3s-argocd-gitops.md) completed on 2026-06-04.
 > - Other recommendations remain valid as design guidance. See the plan record for the actual implementation decisions.
 

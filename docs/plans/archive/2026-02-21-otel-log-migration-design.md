@@ -1,9 +1,8 @@
 # OTel 日志迁移设计文档
 
-> **Deprecated**: 本设计已实施完成，见 [2026-02-21-otel-log-migration.md](../observability/2026-02-21-otel-log-migration.md)
+> **状态**: ⚠️ 已被取代 —— 本设计已实施完成，见[实现文档](../observability/2026-02-21-otel-log-migration.md)。
 
 **日期：** 2026-02-21
-**状态：** ✅ 已完成
 **范围：** 仅日志管道（Metrics/Traces 不变）
 
 ## 背景
