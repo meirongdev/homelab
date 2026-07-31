@@ -32,8 +32,8 @@ data:
           "targets": [
             {
               "datasource": {"type": "loki", "uid": "${datasource}"},
-              "expr": "sum by (cluster, service_namespace) (count_over_time({cluster=~\"${cluster}\", service_namespace=~\".+\"}[$__interval]))",
-              "legendFormat": "{{cluster}}/{{service_namespace}}",
+              "expr": "sum by (cluster, k8s_namespace_name) (count_over_time({cluster=~\"${cluster}\", k8s_namespace_name=~\".+\"}[$__interval]))",
+              "legendFormat": "{{cluster}}/{{k8s_namespace_name}}",
               "queryType": "range",
               "refId": "A"
             }
@@ -53,8 +53,8 @@ data:
           "targets": [
             {
               "datasource": {"type": "loki", "uid": "${datasource}"},
-              "expr": "sum by (cluster, service_namespace) (count_over_time({cluster=~\"${cluster}\", service_namespace=~\".+\"} |~ \"(?i)(error|exception|fatal|panic)\" [$__interval]))",
-              "legendFormat": "{{cluster}}/{{service_namespace}} errors",
+              "expr": "sum by (cluster, k8s_namespace_name) (count_over_time({cluster=~\"${cluster}\", k8s_namespace_name=~\".+\"} |~ \"(?i)(error|exception|fatal|panic)\" [$__interval]))",
+              "legendFormat": "{{cluster}}/{{k8s_namespace_name}} errors",
               "queryType": "range",
               "refId": "A"
             }
@@ -80,7 +80,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "loki", "uid": "${datasource}"},
-              "expr": "{cluster=~\"${cluster}\", service_namespace=~\".+\"} |~ \"(?i)(error|exception|fatal|panic)\"",
+              "expr": "{cluster=~\"${cluster}\", k8s_namespace_name=~\".+\"} |~ \"(?i)(error|exception|fatal|panic)\"",
               "queryType": "range",
               "refId": "A"
             }
@@ -166,7 +166,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "loki", "uid": "${datasource}"},
-              "expr": "{cluster=~\"${cluster}\", service_namespace=~\"${namespace:pipe}\", k8s_pod_name=~\"${pod:pipe}\"} |~ \"${search}\"",
+              "expr": "{cluster=~\"${cluster}\", k8s_namespace_name=~\"${namespace:pipe}\", k8s_pod_name=~\"${pod:pipe}\"} |~ \"${search}\"",
               "queryType": "range",
               "refId": "A"
             }
@@ -209,14 +209,14 @@ data:
           {
             "current": {},
             "datasource": {"type": "loki", "uid": "${datasource}"},
-            "definition": "label_values({cluster=~\"${cluster}\"}, service_namespace)",
+            "definition": "label_values({cluster=~\"${cluster}\"}, k8s_namespace_name)",
             "hide": 0,
             "includeAll": true,
             "allValue": ".+",
             "label": "Namespace",
             "multi": true,
             "name": "namespace",
-            "query": {"label": "service_namespace", "stream": "{cluster=~\"${cluster}\"}", "type": 1},
+            "query": {"label": "k8s_namespace_name", "stream": "{cluster=~\"${cluster}\"}", "type": 1},
             "refresh": 2,
             "sort": 1,
             "type": "query"
@@ -224,14 +224,14 @@ data:
           {
             "current": {},
             "datasource": {"type": "loki", "uid": "${datasource}"},
-            "definition": "label_values({cluster=~\"${cluster}\", service_namespace=~\"${namespace:pipe}\"}, k8s_pod_name)",
+            "definition": "label_values({cluster=~\"${cluster}\", k8s_namespace_name=~\"${namespace:pipe}\"}, k8s_pod_name)",
             "hide": 0,
             "includeAll": true,
             "allValue": ".+",
             "label": "Pod",
             "multi": true,
             "name": "pod",
-            "query": {"label": "k8s_pod_name", "stream": "{cluster=~\"${cluster}\", service_namespace=~\"${namespace:pipe}\"}", "type": 1},
+            "query": {"label": "k8s_pod_name", "stream": "{cluster=~\"${cluster}\", k8s_namespace_name=~\"${namespace:pipe}\"}", "type": 1},
             "refresh": 2,
             "sort": 1,
             "type": "query"
@@ -285,15 +285,15 @@ data:
           "targets": [
             {
               "datasource": {"type": "loki", "uid": "${datasource}"},
-              "expr": "sum by (cluster, service_namespace) (count_over_time({cluster=~\"${cluster}\", service_namespace=~\"${namespace:pipe}\"} |~ \"(?i)(error|exception|fatal|panic)\" [$__interval]))",
-              "legendFormat": "{{cluster}}/{{service_namespace}} errors",
+              "expr": "sum by (cluster, k8s_namespace_name) (count_over_time({cluster=~\"${cluster}\", k8s_namespace_name=~\"${namespace:pipe}\"} |~ \"(?i)(error|exception|fatal|panic)\" [$__interval]))",
+              "legendFormat": "{{cluster}}/{{k8s_namespace_name}} errors",
               "queryType": "range",
               "refId": "A"
             },
             {
               "datasource": {"type": "loki", "uid": "${datasource}"},
-              "expr": "sum by (cluster, service_namespace) (count_over_time({cluster=~\"${cluster}\", service_namespace=~\"${namespace:pipe}\"} |~ \"(?i)(warn|warning)\" [$__interval]))",
-              "legendFormat": "{{cluster}}/{{service_namespace}} warnings",
+              "expr": "sum by (cluster, k8s_namespace_name) (count_over_time({cluster=~\"${cluster}\", k8s_namespace_name=~\"${namespace:pipe}\"} |~ \"(?i)(warn|warning)\" [$__interval]))",
+              "legendFormat": "{{cluster}}/{{k8s_namespace_name}} warnings",
               "queryType": "range",
               "refId": "B"
             }
@@ -319,7 +319,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "loki", "uid": "${datasource}"},
-              "expr": "{cluster=~\"${cluster}\", service_namespace=~\"${namespace:pipe}\"} |~ \"(?i)(error|exception|fatal|panic|warn)\"",
+              "expr": "{cluster=~\"${cluster}\", k8s_namespace_name=~\"${namespace:pipe}\"} |~ \"(?i)(error|exception|fatal|panic|warn)\"",
               "queryType": "range",
               "refId": "A"
             }
@@ -362,14 +362,14 @@ data:
           {
             "current": {},
             "datasource": {"type": "loki", "uid": "${datasource}"},
-            "definition": "label_values({cluster=~\"${cluster}\"}, service_namespace)",
+            "definition": "label_values({cluster=~\"${cluster}\"}, k8s_namespace_name)",
             "hide": 0,
             "includeAll": true,
             "allValue": ".+",
             "label": "Namespace",
             "multi": true,
             "name": "namespace",
-            "query": {"label": "service_namespace", "stream": "{cluster=~\"${cluster}\"}", "type": 1},
+            "query": {"label": "k8s_namespace_name", "stream": "{cluster=~\"${cluster}\"}", "type": 1},
             "refresh": 2,
             "sort": 1,
             "type": "query"
@@ -414,8 +414,8 @@ data:
           "targets": [
             {
               "datasource": {"type": "loki", "uid": "${datasource}"},
-              "expr": "sum by (cluster, service_namespace) (count_over_time({cluster=~\"${cluster}\", service_namespace=~\"${namespace:pipe}\"} |~ \"${search}\" [$__interval]))",
-              "legendFormat": "{{cluster}}/{{service_namespace}}",
+              "expr": "sum by (cluster, k8s_namespace_name) (count_over_time({cluster=~\"${cluster}\", k8s_namespace_name=~\"${namespace:pipe}\"} |~ \"${search}\" [$__interval]))",
+              "legendFormat": "{{cluster}}/{{k8s_namespace_name}}",
               "queryType": "range",
               "refId": "A"
             }
@@ -441,7 +441,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "loki", "uid": "${datasource}"},
-              "expr": "{cluster=~\"${cluster}\", service_namespace=~\"${namespace:pipe}\"} |~ \"${search}\"",
+              "expr": "{cluster=~\"${cluster}\", k8s_namespace_name=~\"${namespace:pipe}\"} |~ \"${search}\"",
               "queryType": "range",
               "refId": "A"
             }
@@ -484,14 +484,14 @@ data:
           {
             "current": {},
             "datasource": {"type": "loki", "uid": "${datasource}"},
-            "definition": "label_values({cluster=~\"${cluster}\"}, service_namespace)",
+            "definition": "label_values({cluster=~\"${cluster}\"}, k8s_namespace_name)",
             "hide": 0,
             "includeAll": true,
             "allValue": ".+",
             "label": "Namespace",
             "multi": true,
             "name": "namespace",
-            "query": {"label": "service_namespace", "stream": "{cluster=~\"${cluster}\"}", "type": 1},
+            "query": {"label": "k8s_namespace_name", "stream": "{cluster=~\"${cluster}\"}", "type": 1},
             "refresh": 2,
             "sort": 1,
             "type": "query"

@@ -6,6 +6,10 @@
 #   - cilium-envoy metrics  → homelab Prometheus（网关 L7 RED 指标，oracle 网关 SLO 数据源）
 #   - application traces    → homelab Tempo via Tailscale (otlp grpc)
 # Architecture: apps/filelog/prometheus -> memory_limiter/k8sattributes/resource/batch -> otlphttp / prometheusremotewrite / otlp
+# 2026-07-31 对齐 2026 OTel 实践（docs/decisions/otel-2026-alignment.md）：
+#   filelog 换 container operator；file_storage checkpoint + 跨 Tailscale 持久发送队列；
+#   补 k8s.cluster.name semconv；镜像 0.120.0→0.156.0（与 homelab collector 同版本）。
+#   保持 contrib 发行版：prometheusremotewrite exporter 不在 k8s 裁剪发行版里。
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -90,7 +94,7 @@ spec:
       serviceAccountName: otel-collector
       containers:
         - name: otel-collector
-          image: otel/opentelemetry-collector-contrib:0.120.0
+          image: otel/opentelemetry-collector-contrib:0.156.0
           args:
             - --config=/etc/otel/config.yaml
           ports:
@@ -125,6 +129,11 @@ spec:
               # kept well under this ceiling to account for Go RSS > heap.
               cpu: 500m
               memory: 512Mi
+          # 显式 root：/var/log/pods 只读 + /var/lib/otelcol checkpoint/队列可写
+          # （hostPath root:root；节点日志代理的通行惯例，同 homelab collector）
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
           volumeMounts:
             - name: config
               mountPath: /etc/otel/config.yaml
@@ -136,6 +145,8 @@ spec:
             - name: varlibdockercontainers
               mountPath: /var/lib/docker/containers
               readOnly: true
+            - name: otel-state
+              mountPath: /var/lib/otelcol
           env:
             - name: K8S_NODE_NAME
               valueFrom:
@@ -159,6 +170,11 @@ spec:
         - name: varlibdockercontainers
           hostPath:
             path: /var/lib/docker/containers
+        # filelog checkpoint + 发送队列的持久化目录（bbolt 文件）
+        - name: otel-state
+          hostPath:
+            path: /var/lib/otelcol
+            type: DirectoryOrCreate
       tolerations:
         - operator: Exists
 ---
@@ -172,6 +188,11 @@ data:
     extensions:
       health_check:
         endpoint: 0.0.0.0:13133
+      # 持久化存储（bbolt）：filelog checkpoint + otlphttp/otlp 发送队列共用一个实例
+      #（每个组件在目录下各得一个独立文件）
+      file_storage:
+        directory: /var/lib/otelcol
+        create_directory: true
 
     receivers:
       # OTLP receiver — applications send traces/logs/metrics here
@@ -190,64 +211,16 @@ data:
         start_at: end
         include_file_path: true
         include_file_name: false
+        # checkpoint 落盘：重启从断点续读（此前无 checkpoint + start_at:end，
+        # 每次重启都会丢掉停机窗口内产生的日志）
+        storage: file_storage
         operators:
-          # Parse CRI/containerd log format
-          - type: router
-            id: get-format
-            routes:
-              - output: parser-docker
-                expr: 'body matches "^\\{"'
-              - output: parser-cri
-                expr: 'body matches "^[^ Z]+ "'
-              - output: parser-containerd
-                expr: 'body matches "^[^ Z]+Z"'
-          # Docker JSON format
-          - type: json_parser
-            id: parser-docker
-            output: extract-metadata-from-filepath
-            timestamp:
-              parse_from: attributes.time
-              layout: '%Y-%m-%dT%H:%M:%S.%LZ'
-          # CRI format
-          - type: regex_parser
-            id: parser-cri
-            regex: '^(?P<time>[^ Z]+) (?P<stream>stdout|stderr) (?P<logtag>[^ ]*) ?(?P<log>.*)$'
-            output: extract-metadata-from-filepath
-            timestamp:
-              parse_from: attributes.time
-              layout: '%Y-%m-%dT%H:%M:%S.%L%j'
-          # Containerd format
-          - type: regex_parser
-            id: parser-containerd
-            regex: '^(?P<time>[^ ^Z]+Z) (?P<stream>stdout|stderr) (?P<logtag>[^ ]*) ?(?P<log>.*)$'
-            output: extract-metadata-from-filepath
-            timestamp:
-              parse_from: attributes.time
-              layout: '%Y-%m-%dT%H:%M:%S.%LZ'
-          # Extract metadata from file path
-          - type: regex_parser
-            id: extract-metadata-from-filepath
-            regex: '^.*\/(?P<namespace>[^_]+)_(?P<pod_name>[^_]+)_(?P<uid>[a-f0-9\-]+)\/(?P<container_name>[^\._]+)\/(?P<restart_count>\d+)\.log$'
-            parse_from: attributes["log.file.path"]
-          # Promote extracted filepath attributes to resource attributes for k8sattributes processor
-          - type: move
-            from: attributes.uid
-            to: resource["k8s.pod.uid"]
-          - type: move
-            from: attributes.namespace
-            to: resource["k8s.namespace.name"]
-          - type: move
-            from: attributes.pod_name
-            to: resource["k8s.pod.name"]
-          - type: move
-            from: attributes.container_name
-            to: resource["k8s.container.name"]
-          - type: move
-            from: attributes.log
-            to: body
-          - type: move
-            from: attributes.stream
-            to: attributes["log.iostream"]
+          # container operator：自动识别 docker/containerd/CRI 三种格式、按 CRI logtag
+          # 重组分段长行（>16KB 日志此前会被手写链拆成多条）、从文件路径提取
+          # k8s.pod.uid/name、k8s.namespace.name、k8s.container.name 等资源属性。
+          # 2026-07-31 取代此前 ~60 行手写 router/regex/move 链（与 homelab 对齐）。
+          - type: container
+            add_metadata_from_filepath: true
 
       # cloudflared metrics — ClusterIP within cloudflare namespace
       prometheus/cloudflared:
@@ -416,7 +389,12 @@ data:
                 name: k8s.namespace.name
       resource:
         attributes:
+          # `cluster` 是全部 dashboard/告警/SLO 的运营标签，保留；
+          # `k8s.cluster.name` 是 OTel semconv 规范属性（两个都打，见 ADR）。
           - key: cluster
+            value: oracle-k3s
+            action: upsert
+          - key: k8s.cluster.name
             value: oracle-k3s
             action: upsert
       batch:
@@ -429,7 +407,13 @@ data:
         endpoint: "http://100.94.186.7:31080/otlp"
         tls:
           insecure: true
+        # 跨 Tailscale 出口：发送队列持久化（bbolt），collector 重启或链路中断时
+        # 缓冲中的日志不再丢失，恢复后续传
+        sending_queue:
+          storage: file_storage
       # Metrics → homelab Prometheus via Tailscale (Prometheus Remote Write)
+      # （刻意不加持久化队列：PRW exporter 的 WAL 上游仍是 experimental 且有已知问题；
+      #   指标断点在下一个抓取周期自愈，容忍度远高于日志/追踪）
       prometheusremotewrite:
         endpoint: "http://100.94.186.7:31090/api/v1/write"
         tls:
@@ -441,11 +425,13 @@ data:
         endpoint: "100.94.186.7:31317"
         tls:
           insecure: true
+        sending_queue:
+          storage: file_storage
       debug:
         verbosity: basic
 
     service:
-      extensions: [health_check]
+      extensions: [health_check, file_storage]
       telemetry:
         logs:
           level: warn

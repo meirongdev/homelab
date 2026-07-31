@@ -222,7 +222,7 @@ Multi-cluster resource overview (`k8s/helm/manifests/monitoring/dashboards/multi
 }
 ```
 
-All LogQL queries use: `{cluster=~"${cluster}", service_namespace=~"..."}`
+All LogQL queries use: `{cluster=~"${cluster}", k8s_namespace_name=~"..."}`
 
 ## Service Health Checks
 

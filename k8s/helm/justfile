@@ -6,7 +6,9 @@ set dotenv-load
 # Match what is currently deployed on the cluster (see `helm list -A`).
 loki_version             := "7.0.0"   # ArgoCD-managed (argocd/applications/loki.yaml); keep in sync
 tempo_version            := "1.24.4"
-otel_collector_version   := "0.147.1"
+# ⚠️ 真正生效的 pin 在 argocd/applications/otel-collector.yaml（chart 0.165.0），
+# 此值只服务下面的 LEGACY 逃生配方——两处要一起改，且须与 oracle 侧 contrib 镜像同 appVersion。
+otel_collector_version   := "0.165.0"
 cilium_version           := "1.19.1"
 vault_version            := "0.33.0"
 eso_version              := "2.6.0"
@@ -104,15 +106,11 @@ deploy-tempo:
         --wait \
         --timeout 10m
 
-# ⚠️ 2026-07-31 实测：homelab **当前没有部署 OTel Collector**（`helm list -A` 无此 release、
-# 集群无对应 pod），本配方从未在现集群跑成过或早已被卸载。后果：**homelab 自己的容器日志
-# 完全没有进 Loki** —— Loki 里只有 `cluster="oracle-k3s"`（oracle 那份是 kustomize 管的裸
-# DaemonSet，经 Tailscale otlphttp 推过来）。受影响的包括 kube-bench CIS 巡检结果、
-# backup CronJob 输出等"打 stdout 就以为进 Loki 了"的东西。
-# 跑本配方会**新增**一个采集全节点日志的 DaemonSet：在 5600H 单节点（idle ~74°C）上
-# 意味着额外 CPU + Loki PVC 增长，属于一次独立的容量决策，不是"迁 GitOps"。
-# 待决：要么按需部署（届时直接建 ArgoCD App，别用本配方），要么删掉本配方 + values。
-# 详见 docs/decisions/manual-helm-to-argocd-adoption.md
+# ⚠️ LEGACY -- 2026-07-31 已作为 ArgoCD App 部署 (argocd/applications/otel-collector.yaml)。
+# 历史注记：此前 homelab 从未真正部署过 collector（旧 values 的 otlp_http exporter 名
+# 根本不存在，配置校验都过不了）——homelab 日志 2026-07-31 才首次进 Loki。
+# 改配置：改 values/opentelemetry-collector.yaml -> commit -> ArgoCD auto-sync。
+# **不要**日常跑本配方（selfHeal 会打架）；仅作 ArgoCD 不可用时的逃生通道。
 deploy-otel-collector: add-repos
     helm upgrade --install opentelemetry-collector open-telemetry/opentelemetry-collector \
         --namespace {{namespace}} \

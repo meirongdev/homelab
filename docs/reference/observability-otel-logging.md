@@ -1,6 +1,6 @@
 # Observability — OTel 日志与追踪架构
 
-**更新日期：** 2026-03-01
+**更新日期：** 2026-07-31（homelab collector 首次真实落地 + 2026 OTel 对齐，见 `docs/decisions/otel-2026-alignment.md`）
 **状态：** 生产运行中
 
 ---
@@ -13,23 +13,26 @@
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────────┐   │
 │  │  OTel Collector DaemonSet (monitoring namespace)        │   │
-│  │  image: otel/opentelemetry-collector-contrib            │   │
+│  │  image: otel/opentelemetry-collector-k8s:0.156.0        │   │
+│  │  (ArgoCD otel-collector App; oracle 侧同版本 contrib)    │   │
 │  │                                                         │   │
 │  │  Receivers:                                             │   │
 │  │    filelog ──── /var/log/pods/**/*.log (hostPath)      │   │
 │  │    otlp ────── gRPC :4317 / HTTP :4318 (traces+logs)  │   │
 │  │                                                         │   │
 │  │  Processors:                                            │   │
-│  │    memory_limiter ── 200MiB limit, 50MiB spike          │   │
+│  │    memory_limiter ── 160MiB limit, 40MiB spike          │   │
 │  │    k8sattributes ── 注入 k8s 元数据到 resource attrs   │   │
+│  │    resource ────── cluster + k8s.cluster.name          │   │
 │  │    batch ───────── 10000 条 / 5s 批量发送            │   │
 │  │                                                         │   │
 │  │  Exporters:                                             │   │
-│  │    otlp_http ──── loki-gateway:80/otlp (logs)          │   │
+│  │    otlphttp/loki ── loki-gateway:80/otlp (logs)        │   │
 │  │    otlp/tempo ─── tempo:4317 (traces)                  │   │
 │  │                                                         │   │
 │  │  Extensions:                                            │   │
 │  │    health_check ── :13133 (liveness/readiness)         │   │
+│  │    file_storage ── /var/lib/otelcol (filelog 断点)     │   │
 │  └─────────────────────────────────────────────────────────┘   │
 │            │                        ▲                           │
 │            │ /var/log/pods/         │ stdout/stderr             │
@@ -80,9 +83,9 @@
 
 ### OTel Collector (DaemonSet)
 
-- **Helm chart**: `open-telemetry/opentelemetry-collector`
+- **Helm chart**: `open-telemetry/opentelemetry-collector` 0.165.0（镜像 `otel/opentelemetry-collector-k8s`——k8s 官方裁剪发行版）
 - **Values**: `k8s/helm/values/opentelemetry-collector.yaml`
-- **Deploy**: `cd k8s/helm && just deploy-otel-collector`
+- **Deploy**: ArgoCD `otel-collector` App（改 values → push → 自动同步；`just deploy-otel-collector` 只是 LEGACY 逃生通道）
 - **Preset `logsCollection`**: 自动挂载 `/var/log/pods` hostPath，注入 `filelog` receiver
 - **Preset `kubernetesAttributes`**: 自动申请 RBAC，从 K8s API 查询 Pod metadata 并注入到日志 resource attributes
 
@@ -94,16 +97,19 @@ Loki 3.x 原生支持 OTLP 协议（`/otlp/v1/logs`），自动将 OTel resource
 
 | Label | 来源 | 示例 |
 |-------|------|------|
-| `service_namespace` | OTel resource attr | `personal-services` |
-| `service_name` | OTel resource attr | `calibre-web` |
-| `k8s_namespace_name` | k8sattributes processor | `personal-services` |
-| `k8s_pod_name` | k8sattributes processor | `calibre-web-569cc4444d-rfw67` |
-| `k8s_container_name` | k8sattributes processor | `calibre-web` / `log-exporter` |
+| `cluster` | resource processor（运营标签，与 Prometheus 侧一致） | `homelab` / `oracle-k3s` |
+| `k8s_namespace_name` | container operator + k8sattributes → Loki 默认索引标签 | `personal-services` |
+| `k8s_pod_name` | 同上 | `calibre-web-569cc4444d-rfw67` |
+| `k8s_container_name` | 同上 | `calibre-web` / `log-exporter` |
 | `k8s_deployment_name` | k8sattributes processor | `calibre-web` |
-| `k8s_node_name` | k8sattributes processor | `k8s-node` |
-| `stream` | filelog receiver | `stdout` / `stderr` |
+| `service_name` | OTel resource attr（SDK 上报的服务用） | `calibre-web` |
 
-> **注意**：`start_at: end`（OTel Collector 默认值）— Collector 重启后只采集**新写入**的日志行，历史日志不会回溯。
+（以上 6 个是 2026-07-31 对 Loki `/loki/api/v1/labels` 的实测全集。`k8s.node.name`、
+`log.iostream` 等其余属性在 **structured metadata** 里，不是索引标签——查询时用管道过滤：
+`{k8s_namespace_name="x"} | log_iostream="stderr"`。）
+
+> **注意**：filelog 断点（`file_storage` checkpoint，2026-07-31 起）— Collector 重启后从
+> 断点续读，不重复不漏采；仅**首次**部署时 `start_at: end` 只采新增行。
 
 ### Grafana Sidecar Dashboard 机制
 
@@ -129,7 +135,7 @@ Dashboard ConfigMaps 通过 ArgoCD Application `monitoring-dashboards` 管理（
 
 **LogQL 查询示例：**
 ```logql
-{service_namespace="personal-services", k8s_container_name="it-tools"}
+{k8s_namespace_name="personal-services", k8s_container_name="it-tools"}
 ```
 
 ---
@@ -165,7 +171,7 @@ kubectl exec -n <ns> <pod> -c <app-container> -- find / -name "*.log" 2>/dev/nul
 
 **LogQL 查询示例（Calibre-Web）：**
 ```logql
-{service_namespace="personal-services", k8s_container_name="log-exporter"}
+{k8s_namespace_name="personal-services", k8s_container_name="log-exporter"}
 ```
 
 **已实施案例：**
@@ -224,12 +230,11 @@ ENV JAVA_TOOL_OPTIONS="-javaagent:/otel/opentelemetry-javaagent.jar"
 
 **接入成本：** 需修改应用代码或 Dockerfile，适合新服务。
 
-> **追踪架构**（2026-03-01 上线）：
-> - ⚠️ **2026-07-31 校正：homelab 侧的 OTel Collector 现已不存在**（`helm list -A` 无此
->   release、集群无 pod）。因此下面这条 homelab 链路**当前不成立**，homelab 自己的容器
->   日志也没有进 Loki（Loki 里只有 `cluster="oracle-k3s"`）。oracle 那条仍然有效。
->   状态与取舍见 `docs/decisions/manual-helm-to-argocd-adoption.md`。
-> - ~~homelab: App → OTel Collector (ClusterIP :4317) → Tempo~~（collector 不在了）
+> **追踪架构**：
+> - homelab: App → OTel Collector (`otel-collector.monitoring.svc:4317`) → Tempo
+>   ⚠️ 历史更正：**2026-07-31 才首次真正部署**——2026-03 声称的"上线"从未发生（旧 values
+>   写的 `otlp_http` exporter 名不存在，配置从未跑通），homelab 容器日志同日首次进 Loki。
+>   现由 ArgoCD `otel-collector` App 管理，取舍见 `docs/decisions/otel-2026-alignment.md`。
 > - oracle-k3s: App → OTel Collector (ClusterIP :4317) → Tempo NodePort :31317 (via Tailscale)
 > - Grafana 已配置 tracesToLogs / tracesToMetrics / nodeGraph / serviceMap
 > - 详见 `docs/reference/observability-multicluster.md` ⇢ Traces Pipeline 章节
@@ -255,13 +260,13 @@ kubectl logs -n monitoring -l app.kubernetes.io/name=opentelemetry-collector -f
 kubectl logs -n personal-services -l app=calibre-web -c log-exporter -f
 
 # 在 Loki 查询某 namespace 所有日志
-{service_namespace="personal-services"}
+{k8s_namespace_name="personal-services"}
 
 # 按容器名过滤（sidecar 日志）
-{service_namespace="personal-services", k8s_container_name="log-exporter"}
+{k8s_namespace_name="personal-services", k8s_container_name="log-exporter"}
 
 # 错误日志聚合
-{service_namespace=~".+"} |~ "(?i)(error|exception|fatal|panic)"
+{k8s_namespace_name=~".+"} |~ "(?i)(error|exception|fatal|panic)"
 
 # 部署 / 移除 OTel Collector
 cd k8s/helm && just deploy-otel-collector

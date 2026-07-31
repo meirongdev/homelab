@@ -1,0 +1,43 @@
+---
+# OTel Collector — homelab 节点代理（容器日志 → Loki，应用 OTLP 追踪 → Tempo）
+# Chart: open-telemetry/opentelemetry-collector · Values: k8s/helm/values/opentelemetry-collector.yaml
+#
+# 2026-07-31: 首次部署（此前 homelab 没有 collector，自身容器日志从未进 Loki——
+# Loki 里只有 cluster="oracle-k3s"；justfile 的 deploy-otel-collector 是未落地遗留物）。
+# 全新部署，无采纳问题，fullnameOverride 在 values 里（对象名对齐 oracle 侧 otel-collector）。
+# 设计取舍见 docs/decisions/otel-2026-alignment.md
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: otel-collector
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: homelab
+
+  sources:
+    # chart 版本 —— 升级前 `helm search repo open-telemetry/opentelemetry-collector --versions`
+    # 核对，并与 oracle 侧 contrib 镜像版本（cloud/oracle/manifests/monitoring/otel-collector.yaml）
+    # 同步：两集群 collector 保持同一 appVersion，避免行为漂移。
+    - repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
+      chart: opentelemetry-collector
+      targetRevision: "0.165.0"
+      helm:
+        valueFiles:
+          - $values/k8s/helm/values/opentelemetry-collector.yaml
+    - repoURL: https://github.com/meirongdev/homelab
+      targetRevision: main
+      ref: values
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false   # monitoring ns 已存在（kube-prometheus-stack 所在）
+      - ServerSideApply=true
