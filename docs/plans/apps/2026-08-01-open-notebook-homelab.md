@@ -60,26 +60,26 @@ deprecated，UI 只用于看板/临时实验（provisioner 不 prune 手工加�
 
 下表即 provisioner 声明的期望状态（base URL / 模型 ID 均为 2026-08-01 实测存在的值）：
 
-| 用途 | 凭据类型 | Base URL | 模型 |
+| 用途 | 凭据（均 openai_compatible） | 模型 | 默认位 |
 |---|---|---|---|
-| 对话/生成 | OpenAI-Compatible（LLM URL） | `http://100.97.87.120:8000/v1` | `deepseek-v4-flash`（`max_model_len` 1,000,000） |
-| Embedding | oMLX | `http://100.89.15.120:8000/v1` | `mlx-community__Qwen3-Embedding-4B-4bit-DWQ` |
-| STT | OpenAI-Compatible（**STT URL**） | `http://100.89.15.120:8000/v1` | `mlx-community__Qwen3-ASR-1.7B-8bit` |
-| TTS | OpenAI-Compatible（**TTS URL**） | `http://100.89.15.120:8000/v1` | `mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit` |
-| Rerank | — | — | ⚠️ `/v1/rerank` 路由在，但 Mac 上**没加载 reranker 模型**，需先加载 |
+| 对话/生成 | `dgx-vllm` (`100.97.87.120:8000/v1`) | `deepseek-v4-flash`（`max_model_len` 1,000,000） | chat / transformation / large_context / tools |
+| 对话兜底 | `mac-omlx` (`100.89.15.120:8000/v1`) | `mlx-community__Qwen3.6-35B-A3B-nvfp4`（262k ctx） | **非默认**——DGX（跨境共享、暂无告警）不可达时 UI 一键切换 |
+| Embedding | `mac-omlx` | `mlx-community__Qwen3-Embedding-4B-4bit-DWQ`（2560 维） | embedding |
+| STT | `mac-omlx` | `mlx-community__Qwen3-ASR-1.7B-8bit` | speech_to_text |
+| TTS | `mac-omlx` | `mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit` | text_to_speech |
+| Rerank | — | `Qwen3-Reranker-0.6B-4bit` 已加载、OMLX `/v1/rerank` 已验证（真实相关性分数），但 **Open Notebook v1.14 没有 rerank 消费位**（providers 无该 modality、defaults 无该字段、`search.py` 无重排步骤）——**刻意不注册**，留给未来的网关/RAG 消费方 | — |
 
 要点：
 
-- **oMLX 凭据只支持 chat + embedding**，不支持 STT/TTS —— 音频两项必须走 OpenAI-Compatible
-  凭据的 per-service URL。`/v1/audio/transcriptions` 与 `/v1/audio/speech` 在 mbp-m2-pro 的
-  OMLX 上实测存在（POST 空 body 返回 422 字段校验错误，非 404）。
+- 两个凭据统一用 openai_compatible（早期表格写 Embedding 走 oMLX 凭据类型——两者都能用，
+  统一成一种少一个变量；per-service URL 不需要，两台机器各一个 base_url 就够）。
 - 不经 Bifrost：这两个后端在 tailnet 上对 k8s-node 直接可达，走网关只是多一跳。
   `llm.meirong.dev` 继续只服务公网面（codex）。
 - **DGX 那条是跨境链路**：k8s-node 在新加坡（`tailscale netcheck` 最近 DERP = sin 4.2ms），
   spark 在国内，中间经 DERP(hkg)，无直连，RTT 66–83ms。对话流式感觉不到，
   但**逐条同步调用（如批量向量化）会被 RTT 吃掉**，摄取必须批处理。
-- **mbp-m2-pro 是笔记本**，OMLX 上列了 5 个模型但装不下同时常驻，会按需换入换出；
-  embedding 密集任务与 TTS/对话并发时延迟会跳。
+- **mbp-m2-pro 是笔记本**，OMLX 上列了 7 个模型（2026-08-01 晚）但装不下同时常驻，
+  按需换入换出；embedding 密集任务与 TTS/对话（尤其 35B 兜底模型）并发时延迟会跳。
 
 ## 执行步骤
 
@@ -182,7 +182,7 @@ kubectl -n personal-services annotate httproute open-notebook reconcile-nudge-
 |---|---|---|
 | ~~模型接线~~ | ✅ **已 GitOps 化**（2026-08-01）：`open-notebook-provision.yaml` PostSync hook 声明式 reconcile，本机对活实例双跑验证（首跑全建 + 二跑全 up-to-date），DGX 链路 test 拿到真实补全 | — |
 | ~~Mac OMLX audio/embedding 打不通~~ | ✅ **已排障**（2026-08-01 晚，经 `macbook/ansible/`——纠正本文早先"Mac 无 SSH 权限、不在 IaC 内"的说法：仓库有现成的 ansible 管理面，`matthew` + `~/.ssh/vgio`）。根因是 **omlx-server 旧进程**：venv 里 `mlx-audio 0.4.3` 其实装着、`mlx_audio.tts.models` 路径存在，进程重启后 embedding（2560 维）与 STT（真转录）全通 | 常驻小尾巴：TTS 的 model test 永远 WARN——Open Notebook 的 test 硬编码 voice=`alloy`，Qwen3-TTS 音色是 `serena/vivian/uncle_fu/ryan/aiden/ono_anna/sohee/eric/dylan`；直打 voice=serena 出真 WAV，做播客时在 speaker profile 里选这些音色即可 |
-| **Reranker 模型** | Mac 可经 `macbook/ansible/` 管理，但 OMLX 尚未加载任何 reranker 模型（`/v1/rerank` 路由在） | 在 Mac 上加载 MLX reranker，再把它加进 provisioner 的 MODELS |
+| ~~Reranker 模型~~ | ✅→🚫 **已加载但刻意不接**（2026-08-01 晚）：`Qwen3-Reranker-0.6B-4bit` 上线，OMLX `/v1/rerank` 实测返回真实相关性分数；但 Open Notebook v1.14 **没有 rerank 消费位**（providers modality / defaults 字段 / `search.py` 三处确认），注册进来只是假接线 | 等上游加 rerank 支持，或未来 LiteLLM 网关 / 自建 RAG 管道作为消费方 |
 | **摄取脚本未跑过一次真实上传** | 需要先在 UI 建出 notebook 拿到 id。⚠️ 对活实例验证时**抓出一个真 bug 并已修**：脚本原来打 `:5055/sources` → **404**，FastAPI 的 router 全挂在 `/api` 下（`POST /api/sources` 返回 400 "File upload or file_path is required"，说明路由在、`type=upload` 认）。只有探针用的 `/health` 在根上 | 建好 notebook 后把 `MAX_BOOKS` 改成 `1` 试一本 |
 | **夜备的 SurrealDB 导出未经一次真实夜跑** | ✅ 命令本身已对活库验证（2026-08-01 手工照抄脚本命令：rc=0，35439 bytes SurrealQL）；剩下只是看它嵌在整个 Job 里跑一遍 | 看 08-02 凌晨日志有没有 `open-notebook.surql = N bytes`，或手工 `just backup-run` |
 | **`app-password` 只有 9 位，同时是公网 API 的 Bearer token** | 实测 `/api/*` 经 Next.js 转发在公网可达（未授权一律 401）——这个口令不只是登录页，也是 API 的唯一屏障，且前面没有针对性限速 | 换 ≥16 位随机串：`vault kv put`（三键一起写）→ ESO force-sync → **`kubectl rollout restart deploy/open-notebook`**（env 注入，pod 不重启不生效） |

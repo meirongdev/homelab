@@ -40,14 +40,22 @@ data:
          "modalities": ["language"],
          "api_key": "dummy", "base_url": "http://100.97.87.120:8000/v1"},
         {"name": "mac-omlx", "provider": "openai_compatible",
-         "modalities": ["embedding", "speech_to_text", "text_to_speech"],
+         "modalities": ["language", "embedding", "speech_to_text", "text_to_speech"],
          "api_key": "dummy", "base_url": "http://100.89.15.120:8000/v1"},
     ]
     MODELS = [
         {"name": "deepseek-v4-flash", "type": "language", "credential": "dgx-vllm"},
+        # 备用对话模型（非默认）：DGX 是跨境共享机器且暂无告警（ROADMAP #4），
+        # 它不可达时在 UI 里一键切到这个本地 35B（262k ctx）兜底。
+        {"name": "mlx-community__Qwen3.6-35B-A3B-nvfp4", "type": "language", "credential": "mac-omlx"},
         {"name": "mlx-community__Qwen3-Embedding-4B-4bit-DWQ", "type": "embedding", "credential": "mac-omlx"},
         {"name": "mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit", "type": "text_to_speech", "credential": "mac-omlx"},
         {"name": "mlx-community__Qwen3-ASR-1.7B-8bit", "type": "speech_to_text", "credential": "mac-omlx"},
+        # 刻意不纳管的 Mac 模型：
+        #   - Qwen3-Reranker-0.6B-4bit —— OMLX /v1/rerank 已验证（真实相关性分数），但
+        #     Open Notebook v1.14 没有 rerank 消费位（providers 无该 modality、defaults 无该
+        #     字段、search.py 无重排步骤），注册进来只会是个假接线。留给未来的网关/RAG 消费方。
+        #   - gemma-4 / diffusiongemma —— mlx-learning 项目的实验模型，不属于这套阅读栈。
     ]
     DEFAULTS = {  # 值是上面 MODELS 里的 name
         "default_chat_model": "deepseek-v4-flash",
