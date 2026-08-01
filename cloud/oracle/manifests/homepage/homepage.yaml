@@ -96,6 +96,13 @@ data:
             href: https://tool.meirong.dev
             description: 开发者工具箱
 
+        # homelab 集群的服务（同 Calibre-Web）：不写 kubernetes: 块——
+        # Homepage 跑在 oracle-k3s，查不到 homelab 的 pod 状态。
+        - Open Notebook:
+            icon: open-notebook.png
+            href: https://notebook.meirong.dev
+            description: AI 研读笔记本（本地模型）
+
         - Stirling-PDF:
             icon: stirling-pdf.png
             href: https://pdf.meirong.dev
