@@ -50,12 +50,15 @@ data:
     echo "[backup] copy sqlite/config files (*.db*/small *.json, prune cache)..."
     for base in /localpath; do
       [ -d "$base" ] || continue
-      for pat in bifrost-data calibre-web-automated-config; do
+      # open-notebook-data：/app/data 整体不备份（播客可重放），但其中
+      # sqlite-db/checkpoints.sqlite 是对话线程状态（LangGraph checkpointer），
+      # 不在 SurrealDB /export 里 —— 靠本圈的 *.sqlite* 模式捞走（2026-08-01 实测发现）。
+      for pat in bifrost-data calibre-web-automated-config open-notebook-data; do
         for d in "$base"/*"$pat"*; do
           [ -d "$d" ] || continue
           dest="/work/pvc/$(basename "$d")"
           find "$d" -maxdepth 3 \
-            \( -name processed_books -o -name thumbnails -o -name cache \) -prune -o \
+            \( -name processed_books -o -name thumbnails -o -name cache -o -name .cache \) -prune -o \
             -type f \( -name '*.db' -o -name '*.db-wal' -o -name '*.db-shm' -o -name '*.sqlite*' -o -name '*.json' \) -size -80M -print 2>/dev/null | \
           while IFS= read -r f; do
             rel="${f#"$d"/}"
@@ -87,8 +90,10 @@ data:
       echo "[warn] surrealdb /export failed — Open Notebook NOT in this backup"
       rm -f /work/open-notebook.surql
     fi
-    # 注：/app/data（open-notebook-data-local）刻意不备份——里面是上传原件（书库里已有）
-    # 与生成的播客音频（可重放），与 calibre config PVC 剪掉 processed_books/thumbnails 同理。
+    # 注：/app/data（open-notebook-data-local）的大文件（上传原件、播客音频）刻意不备份
+    # ——可重放/书库里已有，与 calibre config PVC 剪掉 processed_books/thumbnails 同理。
+    # 其中的 checkpoints.sqlite（对话状态）由上面第 2 步的 *.sqlite* 模式捞走。
+    # ⚠️ 直接经 UI 拖拽上传、且不在书库里的原件是唯一真丢的东西（提取文本/向量在 DB 里）。
 
     # --- 3) restic backup + 保留策略 ---
     # 书库目录直接纳入（不经 /work 中转，避免每晚 24G 拷贝）；
