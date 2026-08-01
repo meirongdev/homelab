@@ -4,6 +4,7 @@
 
 | 日期 | 记录 | 内容 |
 |------|------|------|
+| 2026-08-01 | [oracle-k3s-dns-outage](2026-08-01-oracle-k3s-dns-outage.md) | oracle-k3s 丢失 OCI DNS 上游 `169.254.169.254:53` → CoreDNS 全挂 → cloudflared 崩溃 → 全部 meirong.dev 不可达 ~20min |
 | 2026-07-12 | [pve-screen-backlight-always-on](2026-07-12-pve-screen-backlight-always-on.md) | pve 屏幕常亮（`setterm powersave` 静默失败） |
 | 2026-06-07 | [zitadel-console-grpc-404](2026-06-07-zitadel-console-grpc-404.md) | ZITADEL Console v1 gRPC 经网关 404 → Cilium `enableAppProtocol` |
 | 2026-03-15 | [cilium-hubble-tls-issue](2026-03-15-cilium-hubble-tls-issue.md) | Hubble TLS 证书问题排查 |
