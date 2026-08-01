@@ -11,8 +11,12 @@
 #      kubectl -n personal-services create job ingest-$(date +%s) --from=cronjob/open-notebook-ingest
 #   4. 看日志：kubectl -n personal-services logs -l job-name=ingest-… -f
 #
-# 未验证：API 契约取自上游源码（api/routers/sources.py、api/auth.py），
-# 尚未对跑起来的实例打过。首次运行请把 MAX_BOOKS 设成 1 先试。
+# 已对活实例验证的部分（2026-08-01）：`/api` 前缀、`Authorization: Bearer <app-password>`、
+# `type=upload` 被接受、GET /api/sources 与 /api/notebooks 均返回 200 []。
+# 仍未验证：一次真实的整本上传（要先有 notebook id）。首次运行请把 MAX_BOOKS 设成 1 先试。
+#
+# 顺带发现：上游也接受 `file_path` 代替 multipart `file`。这里仍用 file 上传——
+# app pod 没有挂书库 PVC（只挂 open-notebook-data-local），file_path 在它的容器里解析不到。
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -41,7 +45,11 @@ data:
     : "${NOTEBOOK_ID:?NOTEBOOK_ID 为空 —— 先在 UI 建 notebook 并填进 open-notebook-ingest-params}"
     : "${BOOK_PATTERN:?BOOK_PATTERN 为空 —— 拒绝无差别摄取整个书库}"
     MAX_BOOKS="${MAX_BOOKS:-20}"
-    API="${API:-http://open-notebook.personal-services.svc:5055}"
+    # ⚠️ 必须带 /api 前缀：FastAPI 的 router 全挂在 /api 下。
+    # 2026-08-01 实测：POST :5055/sources → 404；POST :5055/api/sources → 400
+    # "File upload or file_path is required for upload type"（路由在、type=upload 认）。
+    # 只有 /health 在根上（免鉴权，探针用的就是它）。
+    API="${API:-http://open-notebook.personal-services.svc:5055/api}"
     PW="$(cat /secrets/app-password)"
 
     echo "[ingest] pattern='$BOOK_PATTERN' notebook='$NOTEBOOK_ID' max=$MAX_BOOKS"
