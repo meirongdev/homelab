@@ -1,7 +1,8 @@
 # Open Notebook 部署（homelab k3s）
 
-> 状态: 🚧 **代码全部入库，待写 Vault + push 验证** —— 部署清单、HTTPRoute、按需摄取工具、
-> 夜备的 SurrealDB 导出、Homepage/Uptime Kuma 登记均已提交；剩下三步必须由人执行（见"未完成项与理由"）。
+> 状态: ⚠️ **已上线，模型接线待在 UI 完成** —— 2026-08-01 部署验证通过：两个 Pod Running、
+> `https://notebook.meirong.dev` 返回 307（跳登录）、四个 ArgoCD App 全 Synced+Healthy、
+> Homepage 条目已加载、Uptime Kuma PostSync hook Succeeded。剩下的是浏览器里配模型（见"未完成项与理由"）。
 > 日期: 2026-08-01
 > 范围: 把 Open Notebook 跑起来、接上现有推理算力（DGX + Mac OMLX），并把它纳入既有的备份/门户/探测体系。
 
@@ -144,14 +145,39 @@ v1 推荐 UI 配置，落 SurrealDB；env 那套（`OPENAI_COMPATIBLE_BASE_URL*`
 已验证：`kubectl apply --dry-run=server` 全部通过、`kubectl kustomize backup/overlays/homelab` 构建通过
 （原有 volume/mount 未被 patch 挤掉）、两段内嵌 shell `sh -n` 通过、`scripts/check-docs.py` 0 违规。
 
+## 上线实测（2026-08-01）
+
+```
+ArgoCD:   personal-services / gateway / backup / oracle-k3s → 全部 Synced + Healthy @ a5db2b7
+Pods:     open-notebook 1/1、open-notebook-surrealdb 1/1
+ESO:      open-notebook-secret SecretSynced（3 个键齐）
+公网:     https://notebook.meirong.dev → 307（跳登录页，符合开了 OPEN_NOTEBOOK_PASSWORD 的预期）
+pod 内:   :5055/health → 200 {"status":"healthy"}；:5055/api/health → 401；:8502/ → 307
+门户:     homepage pod 重启后已加载条目（ConfigMap 走 subPath，同步不触发 reload）
+探测:     oracle-k3s 的 PostSync hook Succeeded → Uptime Kuma monitor 已 provision
+```
+
+### ⚠️ 踩到一个会复现的坑：HTTPRoute 的 `BackendNotFound` 排序竞态
+
+路由由 `gateway` App 同步、工作负载由 `personal-services` App 同步，**两者没有先后保证**。
+这次路由先落地，Cilium 记下 `ResolvedRefs=False / BackendNotFound`，然后 **Service 创建后它不会自动重算**
+——`observedGeneration` 停在 1，等 5 分钟状态不动，表现是 `gateway` App 一直 Degraded。
+
+碰一下路由（加个无意义注解）即刻变 `True`，随后把注解删掉状态仍保持 `True`：
+
+```bash
+kubectl -n personal-services annotate httproute open-notebook reconcile-nudge="$(date +%s)" --overwrite
+kubectl -n personal-services annotate httproute open-notebook reconcile-nudge-
+```
+
+已写进 `add-service` 技能第 3 步，以后每加一个服务都该顺手查一次 `ResolvedRefs`。
+
 ## 未完成项与理由
 
 | 项 | 为什么没做 | 怎么解 |
 |---|---|---|
-| **写 Vault 密钥** | `app-password` 是**人要记住并在登录页输入**的口令，不该由工具代生成塞进 KV；且 KV v2 的 `put` 是整体替换，拆成两次写会留下一个残缺的中间态 | 执行步骤 1 那条命令，一次性写三个键 |
-| **push（= 部署）** | push 即部署，且**必须排在写 Vault 之后**：密钥不在时 ESO 同步不出 Secret，两个 Deployment 会停在 `CreateContainerConfigError`，ArgoCD App 转 Degraded | 写完 Vault 再 push |
 | **模型接线** | 只能在浏览器 UI 做（Settings → API Keys）。非弃用的配置路径只有 UI，env 那套上游已标 deprecated | 按上方"模型接线"表逐项填 + Test Connection |
 | **Reranker 模型** | 要加载在 `mbp-m2-pro` 的 OMLX 上。那台机器**不在本仓库的 IaC 范围内**，且本机没有它的 SSH 权限（`Permission denied (publickey)`），无法远程操作 | 在那台 Mac 上加载一个 MLX reranker，再回 UI 配 Rerank |
-| **摄取脚本未对活实例验证** | API 契约（`POST /sources` 的 multipart 字段、`Authorization: Bearer <password>`）读的是上游源码 `api/routers/sources.py` / `api/auth.py`，实例还没起来，没法真打一次 | 首跑把 `MAX_BOOKS` 改成 `1` 试一本 |
-| **探针没用 `/health`** | 源码里 `/health` 是免鉴权路由，理论上比 tcpSocket 强；但它挂在 5055 的哪个前缀下没实测。**探针路径猜错 = Pod 永远不 Ready**，比探测粒度粗更糟，所以先用 tcpSocket | 起来后 `curl :5055/health` 确认，再换 httpGet |
+| **摄取脚本未对活实例验证** | API 契约（`POST /sources` 的 multipart 字段、`Authorization: Bearer <password>`）读的是上游源码 `api/routers/sources.py` / `api/auth.py`。服务虽已起来，但要先在 UI 建出 notebook 拿到 id 才能真打一次 | 建好 notebook 后把 `MAX_BOOKS` 改成 `1` 试一本 |
+| **夜备的 SurrealDB 导出未经一次真实夜跑** | CronJob 03:00 触发，上线时已过点。`/export` 端点与请求头取自 SurrealDB v2 文档，未对活库打过 | 看 08-02 凌晨那次的日志有没有 `open-notebook.surql = N bytes`，或手工 `just backup-run` |
 | **oauth2-proxy + ZITADEL** | 刻意不做：Open Notebook 没有原生 OIDC，套 oauth2-proxy 等于在它自带的口令认证之上再叠一层，且前端→后端的内部转发要额外验证不被打断。单用户下收益不抵复杂度 | 保持 `OPEN_NOTEBOOK_PASSWORD` |

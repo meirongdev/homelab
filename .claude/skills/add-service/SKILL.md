@@ -125,6 +125,18 @@ spec:
 
 This HTTPRoute is also what creates the DNS record: external-dns watches `gateway-httproute` sources and writes a proxied CNAME + ownership TXT for each hostname. `policy: upsert-only` means **deleting the HTTPRoute does not delete the DNS record** — clean it up by hand if you retire the service.
 
+⚠️ **首次部署必查 `ResolvedRefs`（homelab 侧的排序竞态，2026-08-01 实测）**：路由由 `gateway` App 同步、
+工作负载由另一个 App 同步，两者没有先后保证。若路由先落地，Cilium 会记下
+`ResolvedRefs=False / BackendNotFound`，而且 **Service 后来创建时它不会自动重算**（`observedGeneration`
+停在 1，等 5 分钟也不动），表现为 `gateway` App 一直 Degraded、域名 503。碰一下路由即可强制 reconcile：
+
+```bash
+kubectl -n <namespace> get httproute <name> \
+  -o jsonpath='{.status.parents[0].conditions[?(@.type=="ResolvedRefs")].status}{"\n"}'   # 期望 True
+kubectl -n <namespace> annotate httproute <name> reconcile-nudge="$(date +%s)" --overwrite
+kubectl -n <namespace> annotate httproute <name> reconcile-nudge-      # 生效后把注解删掉，避免 git 之外的漂移
+```
+
 **Important**: the Gateway lives in `kube-system`, so cross-namespace backend refs need a ReferenceGrant in the *target* namespace. Grants already exist for homelab `personal-services`/`monitoring`/`vault`/`argocd`/`bifrost` and oracle `personal-services`/`homepage`/`rss-system` — verify with `kubectl get referencegrant -A`. For any other namespace, prepend:
 
 ```yaml
