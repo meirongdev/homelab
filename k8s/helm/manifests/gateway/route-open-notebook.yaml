@@ -1,0 +1,36 @@
+# notebook.meirong.dev -> open-notebook (personal-services)
+#
+# 只路由 8502（Next.js 前端）：`/api/*` 由前端进程内部转发到 5055 的 FastAPI，
+# 5055 不对外暴露（上游 reverse-proxy 文档明确"只需代理一个端口"）。
+# 前端用 WebSocket，Cilium Gateway 原生支持 upgrade，无需额外配置。
+#
+# 本 ns 的 ReferenceGrant 已由 route-calibre-web.yaml 里的 `allow-gateway-to-calibre` 覆盖
+# （它没有限定 Service 名，作用于 personal-services 下全部 Service），故此处不重复声明。
+#
+# DNS 由 external-dns 从本 HTTPRoute 建（proxied CNAME + owner TXT），不要动 cloudflare/terraform。
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: open-notebook
+  namespace: personal-services
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: homelab-gateway
+      namespace: kube-system
+      port: 80
+  hostnames:
+    - "notebook.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: open-notebook
+          port: 8502
+          weight: 1

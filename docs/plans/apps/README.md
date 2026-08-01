@@ -4,6 +4,7 @@
 
 | 日期 | 方案 | 状态 |
 |------|------|------|
+| 2026-08-01 | [Open Notebook 部署（homelab k3s）](2026-08-01-open-notebook-homelab.md) | 🚧 代码入库，待写 Vault + push 验证 |
 | 2026-07-05 | [Calibre 元数据补全](2026-07-05-calibre-metadata-enrichment.md) | ✅ 已完成 |
 | 2026-07-04 | [ZITADEL 迁移至 oracle-k3s](2026-07-04-zitadel-to-oracle-k3s.md) | ✅ 已完成 |
 | 2026-06-07 | [Bifrost LLM gateway](2026-06-07-bifrost-llm-gateway.md) | ✅ 已完成 |

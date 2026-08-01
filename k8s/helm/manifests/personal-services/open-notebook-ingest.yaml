@@ -1,0 +1,135 @@
+# Calibre 书库 → Open Notebook 的按需摄取（**不是**全量向量化）
+#
+# 设计前提：2040 本 / 23G 全量灌进去是自找的问题——粗算 1.5 亿 token，
+# 而 NotebookLM 式的用法本来就是"按 notebook 加 source"。所以这里是一个
+# **默认永不运行、参数为空即拒绝执行**的批量工具，不是夜间管道。
+#
+# 用法：
+#   1. 在 UI 里建一个 notebook，复制它的 id（形如 `notebook:xxxxx`）
+#   2. 改下面 ConfigMap 的 NOTEBOOK_ID / BOOK_PATTERN（进 git，这样"灌过什么"有据可查）
+#   3. push 等 ArgoCD 同步后手工触发一次：
+#      kubectl -n personal-services create job ingest-$(date +%s) --from=cronjob/open-notebook-ingest
+#   4. 看日志：kubectl -n personal-services logs -l job-name=ingest-… -f
+#
+# 未验证：API 契约取自上游源码（api/routers/sources.py、api/auth.py），
+# 尚未对跑起来的实例打过。首次运行请把 MAX_BOOKS 设成 1 先试。
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: open-notebook-ingest-params
+  namespace: personal-services
+data:
+  # 目标 notebook id。**留空 = Job 直接失败退出**（防手滑）。
+  NOTEBOOK_ID: ""
+  # 对 find 出来的完整路径做 grep -i 过滤，例如 "swift" / "Grant Kemp" / "机器学习"。
+  # **留空 = Job 直接失败退出**——这是拦住"全库 2040 本"的那道闸。
+  BOOK_PATTERN: ""
+  # 单次上限，二道闸。首次试跑建议先改成 "1"。
+  MAX_BOOKS: "20"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: open-notebook-ingest-script
+  namespace: personal-services
+data:
+  ingest.sh: |
+    #!/bin/sh
+    set -eu
+
+    : "${NOTEBOOK_ID:?NOTEBOOK_ID 为空 —— 先在 UI 建 notebook 并填进 open-notebook-ingest-params}"
+    : "${BOOK_PATTERN:?BOOK_PATTERN 为空 —— 拒绝无差别摄取整个书库}"
+    MAX_BOOKS="${MAX_BOOKS:-20}"
+    API="${API:-http://open-notebook.personal-services.svc:5055}"
+    PW="$(cat /secrets/app-password)"
+
+    echo "[ingest] pattern='$BOOK_PATTERN' notebook='$NOTEBOOK_ID' max=$MAX_BOOKS"
+
+    # -size -95M：上游 MaxBodySizeMiddleware 默认上限 100MB（OPEN_NOTEBOOK_MAX_UPLOAD_SIZE_MB），
+    # 超了直接 413，先在这里筛掉免得跑一半才炸。
+    find /books -type f -size -95M \( -name '*.epub' -o -name '*.pdf' \) 2>/dev/null \
+      | grep -i -- "$BOOK_PATTERN" \
+      | head -n "$MAX_BOOKS" > /tmp/list || true
+
+    count="$(wc -l < /tmp/list)"
+    echo "[ingest] matched $count file(s)"
+    if [ "$count" -eq 0 ]; then
+      echo "[ingest] 没有匹配文件，退出（这算失败，免得静默什么都没干）"
+      exit 1
+    fi
+
+    rc=0
+    while IFS= read -r f; do
+      title="$(basename "$f")"
+      echo "[ingest] -> $title"
+      # type=upload + async_processing=true：立刻返回，切片/向量化交给应用的后台 worker
+      # （并发已在 Deployment 里压到 2 条，见 open-notebook.yaml）。
+      code="$(curl -sS -o /tmp/resp -w '%{http_code}' -X POST "$API/sources" \
+        -H "Authorization: Bearer $PW" \
+        -F 'type=upload' \
+        -F "notebook_id=$NOTEBOOK_ID" \
+        -F "title=$title" \
+        -F 'embed=true' \
+        -F 'async_processing=true' \
+        -F "file=@$f")" || code=000
+      case "$code" in
+        2*) echo "[ingest]    ok ($code)" ;;
+        *)  echo "[ingest]    FAILED ($code): $(head -c 300 /tmp/resp 2>/dev/null)"; rc=1 ;;
+      esac
+    done < /tmp/list
+
+    echo "[ingest] DONE rc=$rc"
+    exit "$rc"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: open-notebook-ingest
+  namespace: personal-services
+spec:
+  # 2 月 31 日：语法合法、永远不会到来。配合 suspend 双保险——
+  # 这个 CronJob 只作为 `kubectl create job --from=` 的模板存在。
+  schedule: "0 5 31 2 *"
+  suspend: true
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      # 手工 `create job --from=` 出来的 Job 不受上面 historyLimit 管，靠 TTL 自清，
+      # 否则会顶到本 ns 的 ResourceQuota（count/jobs.batch: 15）。
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: ingest
+              image: docker.io/curlimages/curl:8.11.1
+              command: ["sh", "/scripts/ingest.sh"]
+              envFrom:
+                - configMapRef:
+                    name: open-notebook-ingest-params
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 256Mi
+              volumeMounts:
+                - { name: scripts, mountPath: /scripts, readOnly: true }
+                - { name: secrets, mountPath: /secrets, readOnly: true }
+                # 书库同 ns、同节点，RWO 多 pod 共挂没问题；只读挂载。
+                # 库里目录 0777 / 文件 0666，非 root uid 也读得到（curlimages/curl 是 uid 100）。
+                - { name: books, mountPath: /books, readOnly: true }
+          volumes:
+            - name: scripts
+              configMap: { name: open-notebook-ingest-script }
+            - name: secrets
+              secret: { secretName: open-notebook-secret, defaultMode: 0400 }
+            - name: books
+              persistentVolumeClaim:
+                claimName: calibre-books-local
+                readOnly: true

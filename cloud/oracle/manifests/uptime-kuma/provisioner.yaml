@@ -32,6 +32,9 @@ data:
         {"name": "Grafana",        "url": "https://grafana.meirong.dev/",       "accepted_statuscodes": ["300-399"], "maxredirects": 0},
         {"name": "HashiCorp Vault","url": "https://vault.meirong.dev/",         "accepted_statuscodes": ["300-399"], "maxredirects": 0},
         {"name": "Calibre-Web",    "url": "https://book.meirong.dev/",          "accepted_statuscodes": ["300-399"], "maxredirects": 0},
+        # Open Notebook: OPEN_NOTEBOOK_PASSWORD 开着时 / 可能直接 200（Next.js 客户端渲染登录页）
+        # 也可能 3xx 跳 /login——两段都收，等实测出稳定状态码后再收紧。
+        {"name": "Open Notebook",  "url": "https://notebook.meirong.dev/",      "accepted_statuscodes": ["200-299", "300-399"], "maxredirects": 0},
         {"name": "ArgoCD",         "url": "https://argocd.meirong.dev/",        "accepted_statuscodes": ["200-299", "300-399"]},
         # 备份服务（原 Kopia）现已迁移 Tailscale NodePort（https://100.94.186.7:31515，自签 cert），不再有公网入口，故不在此处探测。
         # --- new info pipeline services ---

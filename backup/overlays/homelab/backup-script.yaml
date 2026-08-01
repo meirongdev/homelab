@@ -67,6 +67,29 @@ data:
     done
     echo "[backup]   pvc files = $(find /work/pvc -type f 2>/dev/null | wc -l), size = $(du -sh /work/pvc 2>/dev/null | cut -f1)"
 
+    # --- 2b) Open Notebook：SurrealDB 逻辑导出 ---
+    # 上面那圈按 *.db*/*.json 抓文件的做法对 SurrealDB 无效：它的 rocksdb 是一组
+    # .sst/MANIFEST/CURRENT，且被活着的单写者进程持有，热拷出来不一致。
+    # 走 HTTP /export 拿 SurrealQL 全量（与 Vault raft snapshot 同样是"逻辑 dump"路子）。
+    # 库里存着 notebooks/sources/向量 + 各模型凭据，量小，每晚全量即可。
+    # 口令来自 optional 卷：Vault 未写时这里只 warn，不中断夜备（见 cronjob-patch.yaml）。
+    echo "[backup] surrealdb export (open_notebook)..."
+    SURREAL_PW="$(cat /creds-open-notebook/SURREAL_PASSWORD 2>/dev/null || true)"
+    if [ -z "$SURREAL_PW" ]; then
+      echo "[warn] SURREAL_PASSWORD absent (vault secret/homelab/open-notebook not written?) — Open Notebook NOT in this backup"
+    elif curl -sf -u "root:$SURREAL_PW" \
+        -H "Surreal-NS: open_notebook" -H "Surreal-DB: open_notebook" \
+        -H "Accept: application/octet-stream" \
+        http://open-notebook-surrealdb.personal-services.svc:8000/export \
+        -o /work/open-notebook.surql; then
+      echo "[backup]   open-notebook.surql = $(wc -c < /work/open-notebook.surql) bytes"
+    else
+      echo "[warn] surrealdb /export failed — Open Notebook NOT in this backup"
+      rm -f /work/open-notebook.surql
+    fi
+    # 注：/app/data（open-notebook-data-local）刻意不备份——里面是上传原件（书库里已有）
+    # 与生成的播客音频（可重放），与 calibre config PVC 剪掉 processed_books/thumbnails 同理。
+
     # --- 3) restic backup + 保留策略 ---
     # 书库目录直接纳入（不经 /work 中转，避免每晚 24G 拷贝）；
     # PVC 重建会改变 pvc-<uid> 路径前缀 → restic 视为新路径重传一次，属预期。

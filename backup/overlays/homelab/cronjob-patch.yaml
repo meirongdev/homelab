@@ -17,5 +17,16 @@ spec:
             - name: backup
               resources:
                 limits: { cpu: "1", memory: "512Mi" }   # 03:00 夜间窗口,1 核短时突发可接受
+              volumeMounts:
+                # Open Notebook 的 SurrealDB 口令（逻辑导出用）
+                - { name: creds-open-notebook, mountPath: /creds-open-notebook, readOnly: true }
+          volumes:
+            - name: creds-open-notebook
+              secret:
+                secretName: open-notebook-surreal
+                defaultMode: 0400
+                # optional：Vault 里还没写 secret/homelab/open-notebook 时，Pod 照常启动，
+                # 脚本只跳过这一项并打 warn——不让一个新应用的密钥拖垮整条夜备。
+                optional: true
           # nfsdata 挂载已移除（2026-07-11）：全部 PVC 已迁 local-path，
           # 备份 Job 不再依赖 106 的 NFS 在线（106 只作为 sftp 备份目标）
