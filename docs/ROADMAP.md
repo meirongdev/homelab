@@ -1,6 +1,6 @@
 # Homelab Roadmap
 
-> Last updated: 2026-07-31
+> Last updated: 2026-08-01
 > 本文只回答两件事：**还剩什么没做**，和**做过什么/为什么不做**。
 > 实施细节不写在这里——每条都链到 `decisions/`（取舍）或 `plans/`（执行过程）。
 >
@@ -23,6 +23,8 @@
 | 6 | **PSA: `backup` ns 定级** | 实测后决定是否纳入 `psa_baseline_ns`（`k8s/helm/justfile` 注释有标记）。注意 sqlite 备份 CronJob 用特权 hostPath 读 local-path 根，大概率要走 privileged/豁免。 |
 | 7 | **oracle external-dns 可观测** | homelab 的 4 条 external-dns 告警规则限定 `cluster="homelab"`，未覆盖 oracle 实例；需 oracle OTel 抓 `:7979`。非阻塞。（[external-dns 决策](decisions/external-dns-adoption.md)） |
 | 8 | **低优先 / 可选** | Renovate（chart/image 版本自动 PR）· MacBook `TargetDown` 静默规则 · Vault Dynamic Secrets（PostgreSQL 动态凭据，规模不需要）· Cloudflare Pro WAF（Managed Ruleset + OWASP CRS）。（母文档 P2） |
+
+| 9 | **oracle-k3s 外部 DNS 冗余** | 单点上游 `169.254.169.254:53` 曾致全网 ~20min 不可达（2026-08-01）。给节点 `resolv.conf` / CoreDNS `forward` 加备用上游（如 1.1.1.1），顺带降低 cloudflared 崩溃率。（[复盘](records/2026-08-01-oracle-k3s-dns-outage.md)） |
 
 ### 已知问题（不阻塞，无人认领）
 
