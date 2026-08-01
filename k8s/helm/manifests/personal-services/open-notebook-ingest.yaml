@@ -25,7 +25,7 @@ metadata:
   namespace: personal-services
 data:
   # 目标 notebook id。**留空 = Job 直接失败退出**（防手滑）。
-  # 2026-08-02 首跑: "SRE" notebook
+  # 2026-08-01 首跑: "SRE" notebook
   NOTEBOOK_ID: "notebook:y8z8uo1ij0g6wp0w66sh"
   # 对 find 出来的完整路径做 grep -i 过滤，例如 "swift" / "Grant Kemp" / "机器学习"。
   # **留空 = Job 直接失败退出**——这是拦住"全库 2040 本"的那道闸。
@@ -64,7 +64,7 @@ data:
     # 95MB 上限：上游 MaxBodySizeMiddleware 默认 100MB（OPEN_NOTEBOOK_MAX_UPLOAD_SIZE_MB），
     # 超了直接 413，先在这里筛掉免得跑一半才炸。
     # ⚠️ 写 -95000000c 而非 -95M：curlimages/curl 是 BusyBox find，-size 只认 POSIX
-    #    后缀，"95M" 直接报 invalid number（2026-08-02 首跑就栽在这上，当时 stderr
+    #    后缀，"95M" 直接报 invalid number（2026-08-01 首跑就栽在这上，当时 stderr
     #    还被 2>/dev/null 吞了——所以现在也不再静音 stderr）。
     find /books -type f -size -95000000c \( -name '*.epub' -o -name '*.pdf' \) \
       | grep -i -- "$BOOK_PATTERN" \

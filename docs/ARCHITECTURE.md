@@ -56,7 +56,7 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 完整清单（含 namespace、内部服务、认证方式）在 [CONVENTIONS.md § Services](CONVENTIONS.md#services) —
 **唯一真相源，此处不复制**。
 
-分布速览: homelab 跑 **Calibre-Web / Grafana / Vault / ArgoCD / Bifrost**；其余（ZITADEL、Homepage、
+分布速览: homelab 跑 **Calibre-Web / Open Notebook / Grafana / Vault / ArgoCD / Bifrost**；其余（ZITADEL、Homepage、
 Uptime Kuma、Miniflux、KaraKeep、IT-Tools、Stirling-PDF、Squoosh、Excalidraw、Trends、Timeslot）都在 oracle-k3s。
 
 ## Security (Defense in Depth)
