@@ -33,7 +33,8 @@
 | sqlite: bifrost / calibre-config | homelab | 特权 CronJob hostPath 读 local-path + `sqlite3 ".backup"`（在线 API）|
 | sqlite: karakeep / uptime-kuma / timeslot | oracle | 同上 |
 | meilisearch | oracle | dump / tar |
-| **Calibre 书库 (100Gi)** | homelab | **不进 restic** — 留 NFS/ZFS，靠 raidz1 + sanoid 快照（书可再下载）|
+| SurrealDB: open-notebook | homelab | HTTP `GET /export` 逻辑导出 → `open-notebook.surql`（rocksdb 是活进程持有的 `.sst/MANIFEST`，热拷不一致）。口令走 optional 卷，缺失时只 warn 不中断夜备 |
+| **Calibre 书库** | homelab | **已进 restic**（2026-07-11 起）：`calibre-books-local`（~24G）目录整体纳入，增量去重。⚠️ 本行原写"不进 restic，留 NFS/ZFS"，NFS 退役后已不成立 |
 
 **为什么 sqlite 走 hostPath**：local-path 卷是 RWO、被 app 占用，旁路 Pod 无法挂载。单节点场景用特权 CronJob 直接读节点 `/var/lib/rancher/k3s/storage/`，对 sqlite 用在线 `.backup` API（读活库安全），无需改任何 app。
 
@@ -55,6 +56,10 @@ restic -r <repo> restore latest --target /tmp/restore --host <homelab|oracle-k3s
 # Vault：新 Vault init+unseal 后 → vault operator raft snapshot restore -force /tmp/restore/vault.snap → 用旧 unseal keys 解封
 # PG  ：psql -U <user> -d <db> < /tmp/restore/<db>.sql（或 pg_restore）
 # sqlite：直接替换 app PVC 内 .db（app 停机时），sqlite3 <db> "PRAGMA integrity_check"
+# SurrealDB (open-notebook)：新库起来后从集群内 POST 回去（口令 = vault secret/homelab/open-notebook 的 surreal-password）
+#   curl -sSf -u "root:<pw>" -H "Surreal-NS: open_notebook" -H "Surreal-DB: open_notebook" \
+#        --data-binary @/tmp/restore/work/open-notebook.surql \
+#        http://open-notebook-surrealdb.personal-services.svc:8000/import
 ```
 
 Vault unseal keys: `vault-keys.json` / K8s secret `vault-backup-keys`（见记忆 `vault-pod-token-empty`）。

@@ -1,0 +1,289 @@
+# Open Notebook — 个人 AI 研读/知识库（NotebookLM 自托管替代）
+#
+# 为什么落 homelab 而不是 oracle-k3s（add-service 技能的默认值）：
+#   1. 两台 GB10 DGX Spark 是**跨 tailnet 共享进来的节点**（`spark-*.tailf63175.ts.net`，
+#      owner kaixinhuang3307@）。Tailscale 的共享是按"人"授予的，`meirongdev@` 名下的设备
+#      （k8s-node / 两台 Mac / pve）看得见；node0 是 tagged-devices，**netmap 里根本没有这两台**
+#      （2026-08-01 实测：`tailscale ping` → "no matching peer"，curl :8000 → 8s 超时）。
+#      oracle 上的 Open Notebook 摸不到主模型。
+#   2. 书库 PVC `calibre-books-local`（23G / 2040 本）在本命名空间，后续摄取 Job 要挂它。
+#      PVC 是命名空间级对象 → 摄取侧必须同 ns。RWO 在单节点上多 pod 共挂没问题
+#      （与 calibre-web.yaml 里那条注释同理，RWO 是节点级语义）。
+#
+# 模型不在这里配：v1 推荐在 Settings → API Keys 里加 OpenAI-Compatible / oMLX 凭据，
+# 配置落 SurrealDB（env 变量那套已被上游标记 deprecated）。具体填什么值见
+# docs/plans/apps/2026-08-01-open-notebook-homelab.md，**该 PVC 必须进 restic 夜备**，
+# 否则重建即丢——与 bifrost PVC-only 配置同一类债。
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  # SurrealDB rocksdb 数据文件（notebooks / sources / 向量 / 模型凭据）
+  name: open-notebook-surreal-local
+  namespace: personal-services
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  # /app/data —— 上传的原始文件 + 生成的播客音频，比 DB 长得快
+  name: open-notebook-data-local
+  namespace: personal-services
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: open-notebook-secret
+  namespace: personal-services
+spec:
+  # 前置手工步骤（ESO 拉不到就会一直 SecretSyncedError，Deployment 停在
+  # CreateContainerConfigError）：
+  #   vault kv put secret/homelab/open-notebook \
+  #     encryption-key=<>=16 位随机串> app-password=<UI 登录口令> surreal-password=<DB 口令>
+  # ⚠️ encryption-key 丢了 = 库里存的所有模型凭据解不开，只能重配。
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: open-notebook-secret
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: encryption-key
+      remoteRef:
+        key: homelab/open-notebook
+        property: encryption-key
+    - secretKey: app-password
+      remoteRef:
+        key: homelab/open-notebook
+        property: app-password
+    - secretKey: surreal-password
+      remoteRef:
+        key: homelab/open-notebook
+        property: surreal-password
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open-notebook-surrealdb
+  namespace: personal-services
+  labels:
+    app: open-notebook-surrealdb
+spec:
+  replicas: 1
+  # rocksdb 是单写者：滚动更新会让新旧两个 pod 同时抢 /mydata 的文件锁。
+  strategy:
+    type: Recreate
+    # 显式 null，防止 server-side apply 留下 rollingUpdate 块（K8s 会拒绝）
+    rollingUpdate: null
+  selector:
+    matchLabels:
+      app: open-notebook-surrealdb
+  template:
+    metadata:
+      labels:
+        app: open-notebook-surrealdb
+    spec:
+      securityContext:
+        # 上游 compose 显式 `user: root`——镜像默认用户写不了挂载卷。
+        # 本 ns 的 PSA 是 baseline（非 restricted），root 允许。
+        runAsUser: 0
+      containers:
+        - name: surrealdb
+          image: docker.io/surrealdb/surrealdb:v2.6.5
+          # 上游 compose 钉在 v2；v3 已发布但 Open Notebook 未声明支持，不要跟。
+          # entrypoint 是 /surreal，所以用 args 而非 command。
+          args:
+            - start
+            - --log
+            - info
+            - --bind
+            - 0.0.0.0:8000
+            - --user
+            - $(SURREAL_USER)
+            - --pass
+            - $(SURREAL_PASSWORD)
+            - rocksdb:/mydata/mydatabase.db
+          env:
+            - name: SURREAL_USER
+              value: root
+            - name: SURREAL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: open-notebook-secret
+                  key: surreal-password
+            - name: SURREAL_EXPERIMENTAL_GRAPHQL
+              value: "true"
+          ports:
+            - name: http
+              containerPort: 8000
+          readinessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 768Mi
+          volumeMounts:
+            - name: data
+              mountPath: /mydata
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: open-notebook-surreal-local
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: open-notebook-surrealdb
+  namespace: personal-services
+spec:
+  selector:
+    app: open-notebook-surrealdb
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open-notebook
+  namespace: personal-services
+  labels:
+    app: open-notebook
+spec:
+  replicas: 1
+  # /app/data 是 RWO 且应用会在里面落临时文件，同理不做滚动更新。
+  strategy:
+    type: Recreate
+    rollingUpdate: null
+  selector:
+    matchLabels:
+      app: open-notebook
+  template:
+    metadata:
+      labels:
+        app: open-notebook
+    spec:
+      containers:
+        - name: open-notebook
+          # `-single`（内嵌 DB）变体上游已标记 deprecated、v2 移除，故走两容器形态。
+          image: docker.io/lfnovo/open_notebook:1.14.0
+          env:
+            - name: OPEN_NOTEBOOK_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: open-notebook-secret
+                  key: encryption-key
+            - name: OPEN_NOTEBOOK_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: open-notebook-secret
+                  key: app-password
+            - name: SURREAL_URL
+              value: ws://open-notebook-surrealdb.personal-services.svc:8000/rpc
+            - name: SURREAL_USER
+              value: root
+            - name: SURREAL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: open-notebook-secret
+                  key: surreal-password
+            - name: SURREAL_NAMESPACE
+              value: open_notebook
+            - name: SURREAL_DATABASE
+              value: open_notebook
+            # 前端据此拼 API 地址；必须是对外 https URL。
+            - name: API_URL
+              value: https://notebook.meirong.dev
+            # 默认 5。这台是 idle ~74°C 的 5600H 单节点笔记本，后台任务
+            # （切片/向量化/播客渲染）压到 2 条，避免和 LGTM/Vault 抢 CPU。
+            - name: OPEN_NOTEBOOK_WORKER_MAX_TASKS
+              value: "2"
+          ports:
+            # 8502 = Next.js 前端，对外只需这一个：/api/* 由它内部转发到 5055。
+            - name: web
+              containerPort: 8502
+            # 5055 = FastAPI，仅供集群内调用（后续摄取 Job 走这个）。
+            - name: api
+              containerPort: 5055
+          # 用 tcpSocket 而非 httpGet：开了 OPEN_NOTEBOOK_PASSWORD 后 `/` 会跳登录，
+          # 状态码随版本变化，探活不该依赖它。
+          startupProbe:
+            tcpSocket:
+              port: 8502
+            periodSeconds: 10
+            # 首启要跑 DB 迁移，给到 5 分钟
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: 8502
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8502
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 640Mi
+            limits:
+              cpu: 1000m
+              memory: 1536Mi
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: open-notebook-data-local
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: open-notebook
+  namespace: personal-services
+spec:
+  selector:
+    app: open-notebook
+  ports:
+    - name: web
+      protocol: TCP
+      port: 8502
+      targetPort: 8502
+    - name: api
+      protocol: TCP
+      port: 5055
+      targetPort: 5055
