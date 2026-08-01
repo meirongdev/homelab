@@ -31,6 +31,9 @@ data:
   BOOK_PATTERN: ""
   # 单次上限，二道闸。首次试跑建议先改成 "1"。
   MAX_BOOKS: "20"
+  # 是否在摄取时同步做向量化。⚠️ 2026-08-01：Mac OMLX 缺 mlx_audio 依赖，
+  # /v1/embeddings 服务端 500——修好前用 "false"（只提取文本，之后可在 UI 重嵌）。
+  EMBED: "true"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -78,7 +81,7 @@ data:
         -F 'type=upload' \
         -F "notebook_id=$NOTEBOOK_ID" \
         -F "title=$title" \
-        -F 'embed=true' \
+        -F "embed=${EMBED:-true}" \
         -F 'async_processing=true' \
         -F "file=@$f")" || code=000
       case "$code" in
