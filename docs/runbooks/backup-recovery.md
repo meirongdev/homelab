@@ -30,7 +30,7 @@
 | Vault (raft) | homelab | `vault operator raft snapshot save`（network API）|
 | ZITADEL PG | oracle（迁移后）| `pg_dump`（network）|
 | Miniflux PG | oracle | `pg_dump`（network）|
-| sqlite: bifrost / calibre-config | homelab | 特权 CronJob hostPath 读 local-path + `sqlite3 ".backup"`（在线 API）|
+| sqlite: bifrost / calibre-config / open-notebook checkpoints | homelab | 特权 CronJob hostPath 读 local-path + `sqlite3 ".backup"`（在线 API）|
 | sqlite: karakeep / uptime-kuma / timeslot | oracle | 同上 |
 | meilisearch | oracle | dump / tar |
 | SurrealDB: open-notebook | homelab | HTTP `GET /export` 逻辑导出 → `open-notebook.surql`（rocksdb 是活进程持有的 `.sst/MANIFEST`，热拷不一致）。口令走 optional 卷，缺失时只 warn 不中断夜备 |
