@@ -26,6 +26,10 @@
 
 - [argocd-app-patterns.md](argocd-app-patterns.md) — ArgoCD 管理模式、pattern 对比、新增 Application 的 3 个坑
 
+### 应用
+
+- [open-notebook.md](open-notebook.md) — AI 研读知识库：部署形态、模型接线（DGX + Mac OMLX，provisioner 声明式）、配置真相源地图、备份口径
+
 ---
 
 > **本目录只放常青事实。** 带日期的诊断/建议（架构优化、技术债盘点、资源右尺寸建议）
