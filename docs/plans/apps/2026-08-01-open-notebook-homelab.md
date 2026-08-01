@@ -51,10 +51,14 @@ homelab k8s-node → 100.97.87.120:8000/v1/models → 200（TCP connect 66ms）
 后台任务并发压到 2（`OPEN_NOTEBOOK_WORKER_MAX_TASKS`，默认 5），避免和 LGTM/Vault 抢这台
 idle ~74°C 的 5600H。
 
-## 模型接线（部署后在 Settings → API Keys 里配）
+## 模型接线（✅ 已 GitOps 化，2026-08-01）
 
-v1 推荐 UI 配置，落 SurrealDB；env 那套（`OPENAI_COMPATIBLE_BASE_URL*`）上游已标 deprecated，故不写进清单。
-以下 base URL / 模型 ID 均为 2026-08-01 实测存在的值：
+~~部署后在 Settings → API Keys 里配~~ → **`open-notebook-provision.yaml` 声明式接线**：
+credentials/models/defaults 由 ArgoCD PostSync hook 幂等 reconcile（照抄 uptime-kuma-provisioner
+房子模式），改模型 = 改该文件 + git push。env 那套（`OPENAI_COMPATIBLE_BASE_URL*`）上游已标
+deprecated，UI 只用于看板/临时实验（provisioner 不 prune 手工加的项）。
+
+下表即 provisioner 声明的期望状态（base URL / 模型 ID 均为 2026-08-01 实测存在的值）：
 
 | 用途 | 凭据类型 | Base URL | 模型 |
 |---|---|---|---|
@@ -176,8 +180,9 @@ kubectl -n personal-services annotate httproute open-notebook reconcile-nudge-
 
 | 项 | 为什么没做 | 怎么解 |
 |---|---|---|
-| **模型接线** | 只能在浏览器 UI 做（Settings → API Keys）。非弃用的配置路径只有 UI，env 那套上游已标 deprecated | 按上方"模型接线"表逐项填 + Test Connection |
-| **Reranker 模型** | 要加载在 `mbp-m2-pro` 的 OMLX 上。那台机器**不在本仓库的 IaC 范围内**，且本机没有它的 SSH 权限（`Permission denied (publickey)`），无法远程操作 | 在那台 Mac 上加载一个 MLX reranker，再回 UI 配 Rerank |
+| ~~模型接线~~ | ✅ **已 GitOps 化**（2026-08-01）：`open-notebook-provision.yaml` PostSync hook 声明式 reconcile，本机对活实例双跑验证（首跑全建 + 二跑全 up-to-date），DGX 链路 test 拿到真实补全 | — |
+| **Mac OMLX 缺 `mlx_audio` 依赖** | provisioner 的 test 揪出来的：embedding `/v1/embeddings` 服务端 500、TTS/STT 报 `No module named 'mlx_audio.tts/stt.models'`（直打 OMLX 复现，与集群侧无关）。那台机器不在本仓库 IaC 内、本机无 SSH 权限（`Permission denied (publickey)`） | 在 mbp-m2-pro 上给 OMLX 的环境装 `mlx_audio`（TTS 报错里给了 pip 提示）；修好后下一次 sync 的 hook 日志自动转绿。期间摄取用 `EMBED=false` |
+| **Reranker 模型** | 同上，Mac 侧不在 IaC 内 | 在那台 Mac 上加载一个 MLX reranker，再把它加进 provisioner 的 MODELS |
 | **摄取脚本未跑过一次真实上传** | 需要先在 UI 建出 notebook 拿到 id。⚠️ 对活实例验证时**抓出一个真 bug 并已修**：脚本原来打 `:5055/sources` → **404**，FastAPI 的 router 全挂在 `/api` 下（`POST /api/sources` 返回 400 "File upload or file_path is required"，说明路由在、`type=upload` 认）。只有探针用的 `/health` 在根上 | 建好 notebook 后把 `MAX_BOOKS` 改成 `1` 试一本 |
 | **夜备的 SurrealDB 导出未经一次真实夜跑** | ✅ 命令本身已对活库验证（2026-08-01 手工照抄脚本命令：rc=0，35439 bytes SurrealQL）；剩下只是看它嵌在整个 Job 里跑一遍 | 看 08-02 凌晨日志有没有 `open-notebook.surql = N bytes`，或手工 `just backup-run` |
 | **`app-password` 只有 9 位，同时是公网 API 的 Bearer token** | 实测 `/api/*` 经 Next.js 转发在公网可达（未授权一律 401）——这个口令不只是登录页，也是 API 的唯一屏障，且前面没有针对性限速 | 换 ≥16 位随机串：`vault kv put`（三键一起写）→ ESO force-sync → **`kubectl rollout restart deploy/open-notebook`**（env 注入，pod 不重启不生效） |
