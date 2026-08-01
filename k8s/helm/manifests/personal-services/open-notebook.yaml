@@ -242,21 +242,28 @@ spec:
             # 5055 = FastAPI，仅供集群内调用（后续摄取 Job 走这个）。
             - name: api
               containerPort: 5055
-          # 用 tcpSocket 而非 httpGet：开了 OPEN_NOTEBOOK_PASSWORD 后 `/` 会跳登录，
-          # 状态码随版本变化，探活不该依赖它。
+          # 2026-08-01 上线后实测（在 pod 内 curl）：
+          #   :5055/health   -> 200 {"status":"healthy"}（免鉴权，api/auth.py 的豁免名单里）
+          #   :5055/api/health -> 401（在鉴权后面，别用）
+          #   :8502/         -> 307（开了 OPEN_NOTEBOOK_PASSWORD 后跳登录；httpGet 收 200-399，算健康）
+          # 所以 startup/liveness 打 API 的 /health（连得上 DB 才 healthy），
+          # readiness 打 8502 —— 那才是流量真正落的端口。
           startupProbe:
-            tcpSocket:
-              port: 8502
+            httpGet:
+              path: /health
+              port: 5055
             periodSeconds: 10
             # 首启要跑 DB 迁移，给到 5 分钟
             failureThreshold: 30
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: /
               port: 8502
             periodSeconds: 10
           livenessProbe:
-            tcpSocket:
-              port: 8502
+            httpGet:
+              path: /health
+              port: 5055
             periodSeconds: 30
             failureThreshold: 3
           resources:
