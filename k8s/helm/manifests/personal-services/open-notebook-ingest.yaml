@@ -90,7 +90,10 @@ data:
         -F "title=$title" \
         -F "embed=${EMBED:-true}" \
         -F 'async_processing=true' \
-        -F "file=@$f")" || code=000
+        -F "file=@\"$f\"")" || code=000
+      # ↑ @ 后的路径必须再套一层双引号：curl -F 把裸逗号当多文件分隔符，
+      #   而 calibre 路径里全是逗号分隔的作者名（首跑 curl(26) 就是这么来的）。
+      #   路径里带双引号的文件会仍然失败——calibre 会把 " 转成 _，实际不会出现。
       case "$code" in
         2*) echo "[ingest]    ok ($code)" ;;
         *)  echo "[ingest]    FAILED ($code): $(head -c 300 /tmp/resp 2>/dev/null)"; rc=1 ;;
