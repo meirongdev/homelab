@@ -1,0 +1,200 @@
+# Open Notebook 模型接线的 GitOps 化 —— 声明式 provisioner（照抄 uptime-kuma-provisioner 的房子模式）
+#
+# 为什么存在：credentials / models / defaults 本来只能在 Settings UI 里配，落 SurrealDB——
+# 又一份"活在 DB、不在 git"的运行时状态（bifrost PVC-SQLite 同款债）。上游 API
+# （/api/credentials、/api/models、/api/models/defaults）足够完整，2026-08-01 已对活实例
+# 全程干跑验证（create → test → delete 全通，DGX 的 model test 拿到了真实补全）。
+#
+# 行为：
+#   - 幂等 reconcile：credential 按 name、model 按 (name,type) 对账，缺则建，漂移则改/告警
+#   - defaults 每次同步都 PUT（七个默认位全部指向下面声明的模型）
+#   - **不 prune**：UI 里手工加的实验性模型/凭据只告警不删（与 uptime-kuma 的 prune 相反——
+#     哑监控项会永久变红，孤儿模型无害）
+#   - 连通性 test 只告警不失败：DGX/Mac 是外部机器，它们睡着不该把 personal-services
+#     整个 App 的 sync 打成失败
+#
+# ⚠️ 已知现状（2026-08-01）：Mac (mbp-m2-pro) 的 OMLX 缺 mlx_audio 依赖，
+# embedding/TTS/STT 三个 test 会红（服务端 500，直打 /v1/embeddings 复现，与本清单无关）。
+# 在 Mac 上装好依赖后，下一次 sync 的 hook 日志会自动转绿。
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: open-notebook-provisioner-script
+  namespace: personal-services
+data:
+  provision.py: |
+    import json, os, sys, urllib.request, urllib.error
+
+    API = os.environ.get("API", "http://open-notebook.personal-services.svc:5055/api")
+    PW = os.environ["OPEN_NOTEBOOK_PASSWORD"]
+
+    # ---- 期望状态（改这里 + git push = 改配置）----
+    # api_key 都是 "dummy"：vLLM 与 OMLX 均未开启鉴权，esperanto 只是需要非空值。
+    CREDENTIALS = [
+        {"name": "dgx-vllm", "provider": "openai_compatible",
+         "modalities": ["language"],
+         "api_key": "dummy", "base_url": "http://100.97.87.120:8000/v1"},
+        {"name": "mac-omlx", "provider": "openai_compatible",
+         "modalities": ["embedding", "speech_to_text", "text_to_speech"],
+         "api_key": "dummy", "base_url": "http://100.89.15.120:8000/v1"},
+    ]
+    MODELS = [
+        {"name": "deepseek-v4-flash", "type": "language", "credential": "dgx-vllm"},
+        {"name": "mlx-community__Qwen3-Embedding-4B-4bit-DWQ", "type": "embedding", "credential": "mac-omlx"},
+        {"name": "mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit", "type": "text_to_speech", "credential": "mac-omlx"},
+        {"name": "mlx-community__Qwen3-ASR-1.7B-8bit", "type": "speech_to_text", "credential": "mac-omlx"},
+    ]
+    DEFAULTS = {  # 值是上面 MODELS 里的 name
+        "default_chat_model": "deepseek-v4-flash",
+        "default_transformation_model": "deepseek-v4-flash",
+        "large_context_model": "deepseek-v4-flash",   # max_model_len=1M，正适合整本书
+        "default_tools_model": "deepseek-v4-flash",
+        "default_embedding_model": "mlx-community__Qwen3-Embedding-4B-4bit-DWQ",
+        "default_text_to_speech_model": "mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
+        "default_speech_to_text_model": "mlx-community__Qwen3-ASR-1.7B-8bit",
+    }
+    # ----------------------------------------------
+
+    def req(method, path, body=None, timeout=30):
+        r = urllib.request.Request(
+            API + path, method=method,
+            headers={"Authorization": "Bearer " + PW, "Content-Type": "application/json"},
+            data=json.dumps(body).encode() if body is not None else None)
+        try:
+            with urllib.request.urlopen(r, timeout=timeout) as resp:
+                raw = resp.read()
+                return resp.status, json.loads(raw) if raw else None
+        except urllib.error.HTTPError as e:
+            raw = e.read()
+            try: parsed = json.loads(raw)
+            except Exception: parsed = raw.decode(errors="replace")[:200]
+            return e.code, parsed
+
+    fatal = 0
+
+    def must(status, payload, what):
+        global fatal
+        if status >= 400:
+            print(f"[provision] FATAL {what}: HTTP {status} {payload}")
+            fatal += 1
+            return False
+        return True
+
+    # 1) credentials：按 name 对账
+    st, existing = req("GET", "/credentials")
+    if not must(st, existing, "GET /credentials"): sys.exit(1)
+    by_name = {c["name"]: c for c in existing}
+    cred_ids = {}
+    for want in CREDENTIALS:
+        have = by_name.get(want["name"])
+        if have is None:
+            st, resp = req("POST", "/credentials", want)
+            if must(st, resp, f"create credential {want['name']}"):
+                cred_ids[want["name"]] = resp["id"]
+                print(f"[provision] created credential {want['name']} -> {resp['id']}")
+        else:
+            cred_ids[want["name"]] = have["id"]
+            drift = {k: want[k] for k in ("base_url", "modalities")
+                     if have.get(k) != want[k]}
+            if drift:
+                st, resp = req("PUT", f"/credentials/{have['id']}", drift)
+                if must(st, resp, f"update credential {want['name']}"):
+                    print(f"[provision] updated credential {want['name']}: {sorted(drift)}")
+            else:
+                print(f"[provision] credential {want['name']} up-to-date")
+    unmanaged = sorted(set(by_name) - {c["name"] for c in CREDENTIALS})
+    if unmanaged:
+        print(f"[provision] note: unmanaged credentials (left alone): {unmanaged}")
+
+    # 2) models：按 (name,type) 对账。API 无 PUT——漂移只告警，人来决定删重建
+    st, existing = req("GET", "/models")
+    if not must(st, existing, "GET /models"): sys.exit(1)
+    by_key = {(m["name"], m["type"]): m for m in existing}
+    model_ids = {}
+    for want in MODELS:
+        key = (want["name"], want["type"])
+        have = by_key.get(key)
+        if have is None:
+            body = {"name": want["name"], "type": want["type"],
+                    "provider": "openai_compatible",
+                    "credential": cred_ids[want["credential"]]}
+            st, resp = req("POST", "/models", body)
+            if must(st, resp, f"create model {want['name']}"):
+                model_ids[want["name"]] = resp["id"]
+                print(f"[provision] created model {want['type']}: {want['name']}")
+        else:
+            model_ids[want["name"]] = have["id"]
+            if have.get("credential") != cred_ids.get(want["credential"]):
+                print(f"[provision] WARN model {want['name']} points at a different credential "
+                      f"({have.get('credential')}); not auto-fixed (no PUT route) — delete & resync to adopt")
+            else:
+                print(f"[provision] model {want['name']} up-to-date")
+    unmanaged = sorted(set(by_key) - {(m["name"], m["type"]) for m in MODELS})
+    if unmanaged:
+        print(f"[provision] note: unmanaged models (left alone): {unmanaged}")
+
+    # 3) defaults：解析 name -> id，整组 PUT（幂等）
+    want_defaults = {k: model_ids[v] for k, v in DEFAULTS.items() if v in model_ids}
+    st, resp = req("PUT", "/models/defaults", want_defaults)
+    if must(st, resp, "PUT /models/defaults"):
+        print(f"[provision] defaults set: {sorted(want_defaults)}")
+
+    if fatal:
+        print(f"[provision] {fatal} fatal error(s)"); sys.exit(1)
+
+    # 4) 连通性冒烟（只告警：外部机器睡着不该 fail 掉整个 sync）
+    for name, cid in cred_ids.items():
+        st, resp = req("POST", f"/credentials/{cid}/test", None, timeout=20)
+        ok = isinstance(resp, dict) and resp.get("success")
+        print(f"[provision] test credential {name}: {'OK' if ok else 'WARN'} "
+              f"{(resp or {}).get('message', resp) if isinstance(resp, dict) else resp}")
+    for name, mid in model_ids.items():
+        st, resp = req("POST", f"/models/{mid}/test", None, timeout=60)
+        ok = isinstance(resp, dict) and resp.get("success")
+        msg = (resp or {}).get("message", "") if isinstance(resp, dict) else str(resp)
+        print(f"[provision] test model {name}: {'OK' if ok else 'WARN'} {str(msg)[:140]}")
+
+    print("[provision] DONE")
+---
+# PostSync hook：personal-services App 每次 sync 后跑一遍（幂等，~10s）。
+# 成功即删（BeforeHookCreation,HookSucceeded），失败保留 Job 供排查并使 sync 标红。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: open-notebook-provisioner
+  namespace: personal-services
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 300
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: provision
+          image: docker.io/library/python:3.12-alpine
+          command: ["python3", "/scripts/provision.py"]
+          env:
+            - name: OPEN_NOTEBOOK_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: open-notebook-secret
+                  key: app-password
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: scripts
+          configMap:
+            name: open-notebook-provisioner-script

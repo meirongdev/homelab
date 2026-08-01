@@ -19,7 +19,7 @@
 | `kyverno-policies/` | `kyverno-policies` | `kyverno` | Kyverno ClusterPolicy（与 kyverno chart 安装分离，便于逐条 Audit→Enforce） |
 | `monitoring/` | `monitoring-dashboards` | `monitoring` | `dashboards/`（Grafana ConfigMap）、`alerts/`（PrometheusRule + Alertmanager 配置/secret）、`slos.yaml`、`krr.yaml`（右尺寸周报）、`monitoring-external.yaml`（外部抓取）、`cilium-envoy-servicemonitor.yaml` |
 | `namespace-guardrails/` | `namespace-guardrails` | 跨 ns | 轻量应用 ns 的 LimitRange 护栏 |
-| `personal-services/` | `personal-services` | `personal-services` | calibre-web、calibre-ebook-sync + 该 ns 的 LimitRange。**新个人服务放这里**（见 add-service 技能） |
+| `personal-services/` | `personal-services` | `personal-services` | calibre-web、calibre-ebook-sync、open-notebook（app + 按需摄取 + 模型接线 provisioner）+ 该 ns 的 LimitRange/Quota。**新个人服务放这里**（见 add-service 技能） |
 | `vault-eso/` | `vault-eso` | `external-secrets` | ClusterSecretStore 配置 + 共享 ExternalSecret |
 
 ## 备注
