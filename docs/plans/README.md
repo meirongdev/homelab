@@ -12,7 +12,7 @@
 
 | 类别 | 内容 | 份数 |
 |------|------|------|
-| [apps/](apps/README.md) | 应用部署/迁移方案 | 10 |
+| [apps/](apps/README.md) | 应用部署/迁移方案 | 11 |
 | [networking/](networking/README.md) | 网络/集群方案 | 8 |
 | [observability/](observability/README.md) | 可观测方案 | 7 |
 | [security/](security/README.md) | 安全加固方案 | 3 |
