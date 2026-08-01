@@ -61,9 +61,12 @@ data:
 
     echo "[ingest] pattern='$BOOK_PATTERN' notebook='$NOTEBOOK_ID' max=$MAX_BOOKS"
 
-    # -size -95M：上游 MaxBodySizeMiddleware 默认上限 100MB（OPEN_NOTEBOOK_MAX_UPLOAD_SIZE_MB），
+    # 95MB 上限：上游 MaxBodySizeMiddleware 默认 100MB（OPEN_NOTEBOOK_MAX_UPLOAD_SIZE_MB），
     # 超了直接 413，先在这里筛掉免得跑一半才炸。
-    find /books -type f -size -95M \( -name '*.epub' -o -name '*.pdf' \) 2>/dev/null \
+    # ⚠️ 写 -95000000c 而非 -95M：curlimages/curl 是 BusyBox find，-size 只认 POSIX
+    #    后缀，"95M" 直接报 invalid number（2026-08-02 首跑就栽在这上，当时 stderr
+    #    还被 2>/dev/null 吞了——所以现在也不再静音 stderr）。
+    find /books -type f -size -95000000c \( -name '*.epub' -o -name '*.pdf' \) \
       | grep -i -- "$BOOK_PATTERN" \
       | head -n "$MAX_BOOKS" > /tmp/list || true
 
