@@ -25,12 +25,16 @@ metadata:
   namespace: personal-services
 data:
   # 目标 notebook id。**留空 = Job 直接失败退出**（防手滑）。
-  NOTEBOOK_ID: ""
+  # 2026-08-02 首跑: "SRE" notebook
+  NOTEBOOK_ID: "notebook:y8z8uo1ij0g6wp0w66sh"
   # 对 find 出来的完整路径做 grep -i 过滤，例如 "swift" / "Grant Kemp" / "机器学习"。
   # **留空 = Job 直接失败退出**——这是拦住"全库 2040 本"的那道闸。
-  BOOK_PATTERN: ""
+  # ⚠️ 先预览再跑（裸 "sre" 会误捞 Sreeram/Sreejith 两位作者的书）：
+  #   kubectl -n personal-services exec deploy/calibre-web -c calibre-web -- \
+  #     sh -c 'find /calibre-library -type f -size -95M \( -name "*.epub" -o -name "*.pdf" \) | grep -i "<pattern>"'
+  BOOK_PATTERN: "betsy beyer"
   # 单次上限，二道闸。首次试跑建议先改成 "1"。
-  MAX_BOOKS: "20"
+  MAX_BOOKS: "1"
   # 是否在摄取时同步做向量化（embedding 走 Mac OMLX，2026-08-01 晚已修复验证：2560 维）。
   # 留作运维开关：Mac 不在线/在忙时可临时置 "false" 只提取文本，之后在 UI 重嵌。
   EMBED: "true"
@@ -139,7 +143,9 @@ spec:
             - name: scripts
               configMap: { name: open-notebook-ingest-script }
             - name: secrets
-              secret: { secretName: open-notebook-secret, defaultMode: 0400 }
+              # 0444 而非 0400：secret 卷文件属主是 root，而 curlimages/curl 以 uid 100 跑，
+              # 0400 会让脚本 cat 不到口令直接失败（backup 的 CronJob 用 0400 是因为它 runAsUser: 0）。
+              secret: { secretName: open-notebook-secret, defaultMode: 0444 }
             - name: books
               persistentVolumeClaim:
                 claimName: calibre-books-local
