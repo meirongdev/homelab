@@ -31,8 +31,8 @@ data:
   BOOK_PATTERN: ""
   # 单次上限，二道闸。首次试跑建议先改成 "1"。
   MAX_BOOKS: "20"
-  # 是否在摄取时同步做向量化。⚠️ 2026-08-01：Mac OMLX 缺 mlx_audio 依赖，
-  # /v1/embeddings 服务端 500——修好前用 "false"（只提取文本，之后可在 UI 重嵌）。
+  # 是否在摄取时同步做向量化（embedding 走 Mac OMLX，2026-08-01 晚已修复验证：2560 维）。
+  # 留作运维开关：Mac 不在线/在忙时可临时置 "false" 只提取文本，之后在 UI 重嵌。
   EMBED: "true"
 ---
 apiVersion: v1

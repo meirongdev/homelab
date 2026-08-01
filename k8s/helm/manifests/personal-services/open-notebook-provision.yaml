@@ -13,9 +13,13 @@
 #   - 连通性 test 只告警不失败：DGX/Mac 是外部机器，它们睡着不该把 personal-services
 #     整个 App 的 sync 打成失败
 #
-# ⚠️ 已知现状（2026-08-01）：Mac (mbp-m2-pro) 的 OMLX 缺 mlx_audio 依赖，
-# embedding/TTS/STT 三个 test 会红（服务端 500，直打 /v1/embeddings 复现，与本清单无关）。
-# 在 Mac 上装好依赖后，下一次 sync 的 hook 日志会自动转绿。
+# 已知现状（2026-08-01 晚，Mac 侧经 macbook/ansible 排障后）：7 个 test 里 6 个绿。
+#   - 之前 embedding 500 / "No module named mlx_audio.*" 的根因是 **omlx-server 旧进程**
+#     （venv 里 mlx-audio 其实装着，进程重启后全部消失）——不是缺依赖。
+#   - 唯一常驻 WARN：TTS 的 model test。Open Notebook 的 test 硬编码 voice='alloy'，
+#     Qwen3-TTS 只有 serena/vivian/uncle_fu/ryan/aiden/ono_anna/sohee/eric/dylan。
+#     功能本身是好的（voice=serena 直打出真 WAV，STT 能转录回来）；
+#     实际做播客时在 speaker profile 里选上述音色即可。
 ---
 apiVersion: v1
 kind: ConfigMap
