@@ -54,9 +54,13 @@ metadata:
   namespace: personal-services
 spec:
   # 前置手工步骤（ESO 拉不到就会一直 SecretSyncedError，Deployment 停在
-  # CreateContainerConfigError）：
+  # CreateContainerConfigError）。不用切 kubectl context，vault.meirong.dev 走隧道可直连，
+  # 但 VAULT_ADDR 不设会去连 127.0.0.1:8200：
+  #   export VAULT_ADDR=https://vault.meirong.dev
   #   vault kv put secret/homelab/open-notebook \
-  #     encryption-key=<>=16 位随机串> app-password=<UI 登录口令> surreal-password=<DB 口令>
+  #     encryption-key=<≥16 位随机串> app-password=<UI 登录口令> surreal-password=<DB 口令>
+  # 完整步骤（含隧道挂掉时走 pod 的兜底）见
+  # docs/plans/apps/2026-08-01-open-notebook-homelab.md 执行步骤 1。
   # ⚠️ encryption-key 丢了 = 库里存的所有模型凭据解不开，只能重配。
   refreshInterval: "1h"
   secretStoreRef:

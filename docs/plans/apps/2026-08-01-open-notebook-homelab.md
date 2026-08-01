@@ -78,13 +78,42 @@ v1 推荐 UI 配置，落 SurrealDB；env 那套（`OPENAI_COMPATIBLE_BASE_URL*`
 
 ## 执行步骤
 
-1. **写 Vault**（前置，否则 ESO 拉不到、Pod 停在 `CreateContainerConfigError`）：
+1. **写 Vault**（前置，否则 ESO 拉不到、Pod 停在 `CreateContainerConfigError`）。
+
+   **不需要切 kubectl context**：`vault.meirong.dev` 经 Cloudflare Tunnel → Cilium Gateway
+   → `vault:8200`，从这台 Mac 直连即可；token 用 `~/.vault-token` 里已缓存的 root（`expire_time: null`）。
+   唯一的坑是 **`VAULT_ADDR` 不设会连 `127.0.0.1:8200` 然后 connection refused**：
 
    ```bash
+   export VAULT_ADDR=https://vault.meirong.dev
    vault kv put secret/homelab/open-notebook \
      encryption-key="$(openssl rand -hex 24)" \
-     app-password='<UI 登录口令>' \
+     app-password='<你选的 UI 登录口令>' \
      surreal-password="$(openssl rand -hex 16)"
+
+   # 只看键名不打印值
+   vault kv get -format=json secret/homelab/open-notebook \
+     | python3 -c "import json,sys;print(sorted(json.load(sys.stdin)['data']['data']))"
+   ```
+
+   KV 是 **v2、挂在 `secret/`**（`vault secrets list` 可确认），所以路径就是 `secret/homelab/…`。
+   写完让 ESO 立刻拉（否则等 `refreshInterval: 1h`）：
+
+   ```bash
+   kubectl -n personal-services annotate externalsecret open-notebook-secret \
+     force-sync=$(date +%s) --overwrite
+   ```
+
+   **隧道/网关挂了时的兜底**（走集群内；⚠️ pod 里的 `$VAULT_TOKEN` 是空的，
+   照抄 oracle 侧那套 `VAULT_TOKEN=$VAULT_TOKEN vault kv put` 会 403）：
+
+   ```bash
+   # vault-keys.json 是 gitignored 且本机已无副本，先从集群里的备份恢复
+   kubectl -n vault get secret vault-backup-keys \
+     -o jsonpath='{.data.vault-keys\.json}' | base64 -d > vault-keys.json
+   ROOT=$(python3 -c "import json;print(json.load(open('vault-keys.json'))['root_token'])")
+   kubectl -n vault exec vault-0 -- sh -c \
+     "VAULT_TOKEN=$ROOT vault kv put secret/homelab/open-notebook encryption-key=… app-password=… surreal-password=…"
    ```
 
    ⚠️ `encryption-key` 丢失 = 库里存的模型凭据全部解不开。它本身也在 Vault 的备份范围内。
