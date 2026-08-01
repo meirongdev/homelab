@@ -178,6 +178,6 @@ kubectl -n personal-services annotate httproute open-notebook reconcile-nudge-
 |---|---|---|
 | **模型接线** | 只能在浏览器 UI 做（Settings → API Keys）。非弃用的配置路径只有 UI，env 那套上游已标 deprecated | 按上方"模型接线"表逐项填 + Test Connection |
 | **Reranker 模型** | 要加载在 `mbp-m2-pro` 的 OMLX 上。那台机器**不在本仓库的 IaC 范围内**，且本机没有它的 SSH 权限（`Permission denied (publickey)`），无法远程操作 | 在那台 Mac 上加载一个 MLX reranker，再回 UI 配 Rerank |
-| **摄取脚本未对活实例验证** | API 契约（`POST /sources` 的 multipart 字段、`Authorization: Bearer <password>`）读的是上游源码 `api/routers/sources.py` / `api/auth.py`。服务虽已起来，但要先在 UI 建出 notebook 拿到 id 才能真打一次 | 建好 notebook 后把 `MAX_BOOKS` 改成 `1` 试一本 |
+| **摄取脚本未跑过一次真实上传** | 需要先在 UI 建出 notebook 拿到 id。⚠️ 对活实例验证时**抓出一个真 bug 并已修**：脚本原来打 `:5055/sources` → **404**，FastAPI 的 router 全挂在 `/api` 下（`POST /api/sources` 返回 400 "File upload or file_path is required"，说明路由在、`type=upload` 认）。只有探针用的 `/health` 在根上 | 建好 notebook 后把 `MAX_BOOKS` 改成 `1` 试一本 |
 | **夜备的 SurrealDB 导出未经一次真实夜跑** | CronJob 03:00 触发，上线时已过点。`/export` 端点与请求头取自 SurrealDB v2 文档，未对活库打过 | 看 08-02 凌晨那次的日志有没有 `open-notebook.surql = N bytes`，或手工 `just backup-run` |
 | **oauth2-proxy + ZITADEL** | 刻意不做：Open Notebook 没有原生 OIDC，套 oauth2-proxy 等于在它自带的口令认证之上再叠一层，且前端→后端的内部转发要额外验证不被打断。单用户下收益不抵复杂度 | 保持 `OPEN_NOTEBOOK_PASSWORD` |
