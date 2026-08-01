@@ -37,8 +37,8 @@ Ask the user (or infer from context) the following:
 | | homelab | oracle-k3s |
 |---|---|---|
 | Manifest | `k8s/helm/manifests/personal-services/<service>.yaml` | `cloud/oracle/manifests/personal-services/<service>.yaml` |
-| HTTPRoute lives in | `k8s/helm/manifests/gateway/gateway.yaml` (central file) | the same file as the Deployment |
-| Gateway parentRef | `homelab-gateway`, ns `kube-system`, **port 8000** | `oracle-gateway`, ns `kube-system`, **port 80** |
+| HTTPRoute lives in | its own `k8s/helm/manifests/gateway/route-<service>.yaml` | the same file as the Deployment |
+| Gateway parentRef | `homelab-gateway`, ns `kube-system`, **port 80** | `oracle-gateway`, ns `kube-system`, **port 80** |
 | Registration | none — files in `k8s/helm/manifests/personal-services/` are picked up automatically | add path to `cloud/oracle/manifests/kustomization.yaml` `resources` |
 
 ### Step 2 — Create the Deployment + Service manifest
@@ -91,7 +91,7 @@ If the PVC holds important data (e.g. media libraries), add the `argocd.argoproj
 
 ### Step 3 — Add the HTTPRoute
 
-On **homelab**, append to `k8s/helm/manifests/gateway/gateway.yaml`. On **oracle-k3s**, append to the service's own manifest file. Always include all explicit fields to prevent ArgoCD OutOfSync drift:
+On **homelab**, create a new file `k8s/helm/manifests/gateway/route-<service-name>.yaml` — one route per file since the 2026-07-31 directory reorg; `gateway.yaml` now holds only the GatewayClass + Gateway itself. On **oracle-k3s**, append to the service's own manifest file. Always include all explicit fields to prevent ArgoCD OutOfSync drift:
 
 ```yaml
 ---
@@ -107,7 +107,7 @@ spec:
       kind: Gateway
       name: <homelab-gateway|oracle-gateway>
       namespace: kube-system
-      port: <8000 for homelab | 80 for oracle>
+      port: 80          # both gateways listen on 80; TLS terminates at the Cloudflare edge
   hostnames:
     - "<subdomain>.meirong.dev"
   rules:
