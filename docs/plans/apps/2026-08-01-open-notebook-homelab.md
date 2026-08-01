@@ -1,8 +1,8 @@
 # Open Notebook 部署（homelab k3s）
 
-> 状态: ⚠️ **已上线，模型接线待在 UI 完成** —— 2026-08-01 部署验证通过：两个 Pod Running、
-> `https://notebook.meirong.dev` 返回 307（跳登录）、四个 ArgoCD App 全 Synced+Healthy、
-> Homepage 条目已加载、Uptime Kuma PostSync hook Succeeded。剩下的是浏览器里配模型（见"未完成项与理由"）。
+> 状态: ✅ **已完成**（2026-08-01：部署 + 模型接线 GitOps 化 + 摄取管线首跑打通）。
+> **本文是冻结的过程快照**——现状事实看 [reference/open-notebook.md](../../reference/open-notebook.md)，
+> 批量摄取操作看 [runbooks/open-notebook-ingest.md](../../runbooks/open-notebook-ingest.md)。
 > 日期: 2026-08-01
 > 范围: 把 Open Notebook 跑起来、接上现有推理算力（DGX + Mac OMLX），并把它纳入既有的备份/门户/探测体系。
 
@@ -183,7 +183,7 @@ kubectl -n personal-services annotate httproute open-notebook reconcile-nudge-
 | ~~模型接线~~ | ✅ **已 GitOps 化**（2026-08-01）：`open-notebook-provision.yaml` PostSync hook 声明式 reconcile，本机对活实例双跑验证（首跑全建 + 二跑全 up-to-date），DGX 链路 test 拿到真实补全 | — |
 | ~~Mac OMLX audio/embedding 打不通~~ | ✅ **已排障**（2026-08-01 晚，经 `macbook/ansible/`——纠正本文早先"Mac 无 SSH 权限、不在 IaC 内"的说法：仓库有现成的 ansible 管理面，`matthew` + `~/.ssh/vgio`）。根因是 **omlx-server 旧进程**：venv 里 `mlx-audio 0.4.3` 其实装着、`mlx_audio.tts.models` 路径存在，进程重启后 embedding（2560 维）与 STT（真转录）全通 | 常驻小尾巴：TTS 的 model test 永远 WARN——Open Notebook 的 test 硬编码 voice=`alloy`，Qwen3-TTS 音色是 `serena/vivian/uncle_fu/ryan/aiden/ono_anna/sohee/eric/dylan`；直打 voice=serena 出真 WAV，做播客时在 speaker profile 里选这些音色即可 |
 | ~~Reranker 模型~~ | ✅→🚫 **已加载但刻意不接**（2026-08-01 晚）：`Qwen3-Reranker-0.6B-4bit` 上线，OMLX `/v1/rerank` 实测返回真实相关性分数；但 Open Notebook v1.14 **没有 rerank 消费位**（providers modality / defaults 字段 / `search.py` 三处确认），注册进来只是假接线 | 等上游加 rerank 支持，或未来 LiteLLM 网关 / 自建 RAG 管道作为消费方 |
-| ~~摄取脚本未跑过一次真实上传~~ | ✅ **首跑打通**（2026-08-02，Google SRE 书 → "SRE" notebook）：上传 200 → 提取 → 111 chunks → Mac embedding 146.5s 全量完成 → 语义搜 "error budget and SLO" 命中原文段落（score 0.73）。首跑连环揪出 **4 个真 bug**（都已修进 git）：① API 路径缺 `/api` 前缀（404）；② secret 卷 0400 属主 root 而 job 以 uid 100 跑，读不到口令；③ **BusyBox find 不认 `-size -95M`**（GNU 语法，报错还被 `2>/dev/null` 吞成"matched 0"——顺带取消了 stderr 静音）；④ **curl -F 把路径里的逗号当多文件分隔符**（calibre 路径全是逗号分隔的作者名），`@` 路径需再套一层双引号 | 之后每批：预览 pattern → 改 params 进 git → push → `create job --from=cronjob/open-notebook-ingest` |
+| ~~摄取脚本未跑过一次真实上传~~ | ✅ **首跑打通**（2026-08-01，Google SRE 书 → "SRE" notebook）：上传 200 → 提取 → 111 chunks → Mac embedding 146.5s 全量完成 → 语义搜 "error budget and SLO" 命中原文段落（score 0.73）。首跑连环揪出 **4 个真 bug**（都已修进 git）：① API 路径缺 `/api` 前缀（404）；② secret 卷 0400 属主 root 而 job 以 uid 100 跑，读不到口令；③ **BusyBox find 不认 `-size -95M`**（GNU 语法，报错还被 `2>/dev/null` 吞成"matched 0"——顺带取消了 stderr 静音）；④ **curl -F 把路径里的逗号当多文件分隔符**（calibre 路径全是逗号分隔的作者名），`@` 路径需再套一层双引号 | 之后每批：预览 pattern → 改 params 进 git → push → `create job --from=cronjob/open-notebook-ingest` |
 | **夜备的 SurrealDB 导出未经一次真实夜跑** | ✅ 命令本身已对活库验证（2026-08-01 手工照抄脚本命令：rc=0，35439 bytes SurrealQL）；剩下只是看它嵌在整个 Job 里跑一遍 | 看 08-02 凌晨日志有没有 `open-notebook.surql = N bytes`，或手工 `just backup-run` |
 | **`app-password` 只有 9 位，同时是公网 API 的 Bearer token** | 实测 `/api/*` 经 Next.js 转发在公网可达（未授权一律 401）——这个口令不只是登录页，也是 API 的唯一屏障，且前面没有针对性限速 | 换 ≥16 位随机串：`vault kv put`（三键一起写）→ ESO force-sync → **`kubectl rollout restart deploy/open-notebook`**（env 注入，pod 不重启不生效） |
 | **oauth2-proxy + ZITADEL** | 刻意不做：Open Notebook 没有原生 OIDC，套 oauth2-proxy 等于在它自带的口令认证之上再叠一层，且前端→后端的内部转发要额外验证不被打断。单用户下收益不抵复杂度 | 保持 `OPEN_NOTEBOOK_PASSWORD` |

@@ -311,6 +311,7 @@ just apply   # Apply DNS/Tunnel changes
 | RSSHub (+browserless/redis) | oracle-k3s | `rss-system` | Internal only |
 | Redpanda Connect | oracle-k3s | `rss-system` | Internal only |
 | Calibre-Web | homelab | `personal-services` | `book.meirong.dev` |
+| Open Notebook (AI 研读) | homelab | `personal-services` | `notebook.meirong.dev`（模型走 DGX + Mac OMLX，见 [reference/open-notebook.md](reference/open-notebook.md)） |
 | Grafana | homelab | `monitoring` | `grafana.meirong.dev` |
 | HashiCorp Vault | homelab | `vault` | `vault.meirong.dev` |
 | ArgoCD | homelab | `argocd` | `argocd.meirong.dev` |
