@@ -121,8 +121,16 @@ applicationSet:
 
 # --- 资源声明 ---
 # application-controller 内存：512Mi 在加入 Trivy(~18 大 CRD)+Kyverno(更大 CRD) 两个
-# Helm App 后被 dry-run/diff 峰值顶爆 OOMKilled(137)，全量 resync 时尤甚。抬到 1Gi limit
-# / 384Mi request 给 CRD diff 留头寸（节点 10GiB，其余组件占用小）。改后需 `just deploy-argocd`。
+# Helm App 后被 dry-run/diff 峰值顶爆 OOMKilled(137)，全量 resync 时尤甚。曾抬到 1Gi。
+# 2026-08-02 **同一故障在 1Gi 复发**（10:01:47Z exitCode 137）：App 数涨到 28，
+# 又多了 CNPG/OpenCost 的大 CRD。实测不是泄漏——7d 曲线在 0.54–0.68G 平稳震荡，
+# 是 reconcile 尖峰（5m 分辨率可见 0.85G，2d 峰值达 limit 的 94%）顶爆。
+# 抬到 1.5Gi 给尖峰留头寸；request 维持 384Mi（节点 12.6GiB / MemAvailable 4.2G，
+# limit 不是预留，抬它不占实际内存）。
+# ⚠️ 控制面峰值随**被管对象规模**增长（App 数、CRD 大小），不随流量——每次新增
+#    大 CRD 的 App 之后回头看一眼 `max_over_time(...[2d]) / limit`，别等它再炸。
+#    查法见 docs/reference/k8s-qos-resource-management.md 的「检测 OOMKill」。
+# 改后需 `cd k8s/helm && just deploy-argocd`（manual-helm，git push 不生效）。
 controller:
   resources:
     requests:
@@ -130,7 +138,7 @@ controller:
       memory: 384Mi
     limits:
       cpu: 1000m
-      memory: 1Gi
+      memory: 1536Mi
 
 repoServer:
   resources:
