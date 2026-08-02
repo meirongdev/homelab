@@ -1,0 +1,16 @@
+# ⚠️ Namespace 单独成文件，**不要**把它塞回其他清单里。
+# 2026-08-03 事故教训：`personal-services` 的 Namespace 当时内嵌在 calibre-web.yaml
+# 顶部。calibre 迁 oracle 时 `git rm` 掉那个文件 → ArgoCD prune 掉 Namespace →
+# **级联删除了同 ns 下毫不相关的 open-notebook 全部数据**（PVC 上的 Prune=false
+# 护栏无效，因为被 prune 的是 ns 不是 PVC）。
+# 复盘见 docs/records/2026-08-03-namespace-prune-cascade.md
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cloudflare
+  labels:
+    # Pod Security Admission — cloudflared 是 baseline 安全的
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: baseline
+    pod-security.kubernetes.io/audit: baseline
