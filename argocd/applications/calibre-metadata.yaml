@@ -14,7 +14,7 @@ spec:
     path: k8s/helm/manifests/calibre-metadata
 
   destination:
-    server: https://kubernetes.default.svc
+    server: https://100.94.186.7:6443
     namespace: personal-services
 
   # 一次性 Job (enrich) 创建后由 job-controller 注入 suspend/selector/template labels，
