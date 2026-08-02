@@ -49,7 +49,10 @@ metadata:
   labels:
     app: calibre-web
 spec:
-  replicas: 1
+  # ⏸ 2026-08-03 迁移切换窗口：停掉本实例，让 sqlite 干净关闭（metadata.db 处于 WAL
+  #   模式，有 152KB 未 checkpoint 的 -wal），然后重跑一次增量 rsync 取一致的 DB 副本。
+  #   本文件将在切换完成后整体删除 —— calibre 已迁 oracle-k3s。
+  replicas: 0
   # SQLite (/config/cwa.db) is held with an exclusive write lock by the live
   # calibre-web container; a rolling update would let the new pod's
   # disable-auto-convert init container race the old pod for that lock.
