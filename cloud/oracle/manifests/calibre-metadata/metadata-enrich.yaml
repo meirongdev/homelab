@@ -1,0 +1,321 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metadata-enrich-script
+  namespace: personal-services
+data:
+  enrich_metadata.py: |
+    #!/usr/bin/env python3
+    import json
+    import os
+    import re
+    import sqlite3
+    import ssl
+    import subprocess
+    import sys
+    import time
+    import urllib.error
+    import urllib.request
+    from pathlib import Path
+    from datetime import datetime, timezone
+
+    ssl._create_default_https_context = ssl._create_unverified_context
+
+    CALIBRE_LIBRARY = "/calibre-library"
+    METADATA_DB = os.path.join(CALIBRE_LIBRARY, "metadata.db")
+    API_DELAY = 0.6
+    EBOOK_META = "/app/calibre/bin/ebook-meta"
+    TEN_YEARS_AGO = 2016
+
+    def log(msg):
+        print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+    def get_ebook_files(book_dir):
+        for pattern in ("*.epub", "*.mobi", "*.azw3", "*.azw", "*.pdf"):
+            matches = sorted(Path(book_dir).glob(pattern))
+            if matches:
+                return [str(m) for m in matches]
+        return []
+
+    def parse_ebook_meta_output(output):
+        meta = {}
+        for line in output.splitlines():
+            line = line.rstrip()
+            if ":" not in line:
+                continue
+            key, _, val = line.partition(":")
+            key = key.strip()
+            val = val.strip()
+            if key == "Title":
+                meta["title"] = val
+            elif key == "Author(s)":
+                meta["authors"] = [a.strip() for a in val.split(",")]
+            elif key == "Publisher":
+                meta["publisher"] = val
+            elif key == "Languages":
+                meta["languages"] = val
+            elif key == "Published":
+                meta["published"] = val
+            elif key == "Identifiers":
+                meta["identifiers"] = val
+        return meta
+
+    def extract_isbn(identifiers_str):
+        if not identifiers_str:
+            return None
+        for part in identifiers_str.split(","):
+            part = part.strip()
+            if part.lower().startswith("isbn:"):
+                raw = part.split(":", 1)[1].strip()
+                digits = raw.replace("-", "")
+                if len(digits) in (10, 13) and digits.isdigit():
+                    return digits
+        return None
+
+    def run_ebook_meta(filepath):
+        try:
+            result = subprocess.run(
+                [EBOOK_META, filepath],
+                capture_output=True, text=True, timeout=30
+            )
+            if result.returncode != 0:
+                err = result.stderr.strip()[:120]
+                if "Usage:" not in err:
+                    log(f"  ebook-meta failed: {err}")
+                return None
+            return parse_ebook_meta_output(result.stdout)
+        except (subprocess.TimeoutExpired, OSError) as e:
+            log(f"  ebook-meta error: {e}")
+            return None
+
+    def query_openlibrary_by_isbn(isbn):
+        url = f"https://openlibrary.org/isbn/{isbn}.json"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "CalibreMetadataEnrich/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+            pub_date = data.get("publish_date") or data.get("published_date")
+            if pub_date:
+                return pub_date
+            pub_year = data.get("publish_year")
+            if pub_year:
+                return str(pub_year)
+            return None
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None
+            return None
+        except Exception:
+            return None
+
+    def query_openlibrary_by_title_author(title, author):
+        query = urllib.parse.quote(f"{title} {author}")
+        url = f"https://openlibrary.org/search.json?q={query}&limit=1"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "CalibreMetadataEnrich/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+            docs = data.get("docs", [])
+            if docs:
+                fp = docs[0].get("first_publish_year")
+                if fp:
+                    return str(fp)
+            return None
+        except Exception:
+            return None
+
+    def get_file_mtime(book_dir):
+        mtimes = []
+        for pattern in ("*.epub", "*.mobi", "*.azw3", "*.azw", "*.pdf"):
+            for f in Path(book_dir).glob(pattern):
+                try:
+                    mtimes.append(os.path.getmtime(f))
+                except OSError:
+                    pass
+        if mtimes:
+            return min(mtimes)
+        return None
+
+    def parse_date_to_timestamp(date_str):
+        if not date_str:
+            return None
+        date_str = date_str.strip()
+        if date_str.isdigit() and len(date_str) == 4:
+            return f"{date_str}-01-01 00:00:00+00:00"
+        m = re.match(r"(\d{4})-\d{2}(?:-\d{2})?", date_str)
+        if m:
+            return f"{m.group(1)}-01-01 00:00:00+00:00"
+        m = re.search(r"(\d{4})", date_str)
+        if m:
+            return f"{m.group(1)}-01-01 00:00:00+00:00"
+        return None
+
+    def update_book_pubdate(conn, book_id, pubdate_ts):
+        if not pubdate_ts:
+            return False
+        try:
+            cur = conn.execute(
+                "UPDATE books SET pubdate=?, last_modified=CURRENT_TIMESTAMP WHERE id=?",
+                (pubdate_ts, book_id))
+            return cur.rowcount > 0
+        except sqlite3.Error as e:
+            log(f"  DB error for book {book_id}: {e}")
+            return False
+
+    def update_book_isbn(conn, book_id, isbn):
+        if not isbn:
+            return
+        try:
+            existing = conn.execute(
+                "SELECT 1 FROM identifiers WHERE book=? AND type='isbn'",
+                (book_id,)).fetchone()
+            if not existing:
+                conn.execute(
+                    "INSERT INTO identifiers (book, type, val) VALUES (?, 'isbn', ?)",
+                    (book_id, isbn))
+        except sqlite3.Error as e:
+            log(f"  DB ISBN error for book {book_id}: {e}")
+
+    def main():
+        log("=" * 60)
+        log("Calibre 元数据补全（阶段二）启动")
+        log("数据源: OpenLibrary ISBN -> OpenLibrary Search -> 文件 mtime")
+        log("=" * 60)
+
+        if not os.path.exists(METADATA_DB):
+            log(f"ERROR: metadata.db not found at {METADATA_DB}")
+            sys.exit(1)
+
+        conn = sqlite3.connect(METADATA_DB)
+        conn.create_function("title_sort", 1, lambda x: x)
+        conn.create_function("uuid4", 0, lambda: "00000000-0000-0000-0000-000000000000")
+        conn.row_factory = sqlite3.Row
+
+        rows = conn.execute("""
+            SELECT DISTINCT b.id, b.title, b.path,
+                   (SELECT GROUP_CONCAT(a.name, ' | ')
+                    FROM books_authors_link bal2
+                    JOIN authors a ON bal2.author = a.id
+                    WHERE bal2.book = b.id) as authors
+            FROM books b
+            WHERE (SUBSTR(b.pubdate, 1, 4) = '0101' OR b.pubdate IS NULL OR b.pubdate = '')
+            ORDER BY b.id
+        """).fetchall()
+
+        total = len(rows)
+        log(f"待处理书籍数: {total}")
+
+        stats = {"processed": 0, "found_isbn": 0,
+                 "ol_isbn_ok": 0, "ol_search_ok": 0,
+                 "mtime_ok": 0, "updated_db": 0,
+                 "skipped": 0, "api_calls": 0}
+        old_books = []
+
+        for i, book in enumerate(rows, 1):
+            book_id = book["id"]
+            title = book["title"]
+            authors_str = book["authors"] or ""
+            book_path = book["path"]
+            full_path = os.path.join(CALIBRE_LIBRARY, book_path)
+
+            if not os.path.isdir(full_path):
+                log(f"[{i}/{total}] SKIP (dir) id={book_id}")
+                stats["skipped"] += 1
+                continue
+
+            log(f"[{i}/{total}] id={book_id} {title[:55]}...")
+
+            ebook_file = get_ebook_files(full_path)
+            if not ebook_file:
+                log(f"  No ebook file")
+                stats["skipped"] += 1
+                continue
+
+            meta = run_ebook_meta(ebook_file[0])
+            if not meta:
+                stats["skipped"] += 1
+                continue
+
+            isbn = extract_isbn(meta.get("identifiers"))
+            first_author = authors_str.split(" | ")[0] if authors_str else ""
+            pubdate = None
+            source = ""
+
+            # Strategy 1: OpenLibrary by ISBN
+            if isbn:
+                stats["found_isbn"] += 1
+                log(f"  ISBN: {isbn}")
+                update_book_isbn(conn, book_id, isbn)
+                conn.commit()
+                stats["api_calls"] += 1
+                pubdate = query_openlibrary_by_isbn(isbn)
+                if pubdate:
+                    stats["ol_isbn_ok"] += 1
+                    source = "OL-ISBN"
+                    log(f"  ✅ OL ISBN: {pubdate}")
+                    time.sleep(API_DELAY)
+
+            # Strategy 2: OpenLibrary by title+author
+            if not pubdate and title and first_author:
+                log(f"  Trying OL search ...")
+                stats["api_calls"] += 1
+                pubdate = query_openlibrary_by_title_author(title, first_author)
+                if pubdate:
+                    stats["ol_search_ok"] += 1
+                    source = "OL-Search"
+                    log(f"  ✅ OL Search: {pubdate}")
+                time.sleep(API_DELAY)
+
+            # Strategy 3: file mtime fallback
+            if not pubdate:
+                mtime = get_file_mtime(full_path)
+                if mtime:
+                    mtime_year = datetime.fromtimestamp(mtime, tz=timezone.utc).year
+                    pubdate = str(mtime_year)
+                    source = "mtime"
+                    stats["mtime_ok"] += 1
+                    log(f"  ✅ mtime: {mtime_year}")
+
+            # Update DB
+            if pubdate:
+                ts = parse_date_to_timestamp(pubdate)
+                if ts and update_book_pubdate(conn, book_id, ts):
+                    conn.commit()
+                    stats["updated_db"] += 1
+                    log(f"  ✅ [{source}] -> {ts}")
+                    year = int(ts[:4])
+                    if year <= TEN_YEARS_AGO:
+                        old_books.append((book_id, title, first_author, year))
+            else:
+                log(f"  ❌ No date found")
+
+            stats["processed"] += 1
+
+        remaining = conn.execute(
+            "SELECT COUNT(*) FROM books WHERE (SUBSTR(pubdate,1,4)='0101' OR pubdate IS NULL OR pubdate='')"
+        ).fetchone()[0]
+
+        log("")
+        log("=" * 60)
+        log("处理完成")
+        log(f"  处理总数:        {stats['processed']}")
+        log(f"  OL ISBN查到:     {stats['ol_isbn_ok']}")
+        log(f"  OL搜索查到:      {stats['ol_search_ok']}")
+        log(f"  mtime兜底:       {stats['mtime_ok']}")
+        log(f"  已更新数据库:    {stats['updated_db']}")
+        log(f"  跳过:            {stats['skipped']}")
+        log(f"  API 调用数:      {stats['api_calls']}")
+        log(f"  仍有 {remaining} 本书缺发布日期")
+        log("=" * 60)
+
+        if old_books:
+            log("")
+            log(f"发现 {len(old_books)} 本发布超过 10 年的书籍:")
+            for bid, bt, ba, byr in sorted(old_books, key=lambda x: x[3]):
+                log(f"  [{byr}] id={bid} {bt[:55]} - {ba or 'Unknown'}")
+
+        log("=" * 60)
+        conn.close()
+
+    if __name__ == "__main__":
+        main()
