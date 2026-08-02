@@ -1,14 +1,4 @@
----
-# ZITADEL (SSO) — migrated from homelab 2026-07-06 (fault-domain separation).
-# Mirror of k8s/helm/manifests/zitadel.yaml; ONLY diff = PG storageClass nfs-client→local-path.
-# ExternalSecrets read secret/homelab/zitadel (SAME source → byte-identical masterkey; a copy
-# would risk making every DB-encrypted key undecryptable → total SSO break). ExternalDomain
-# stays auth.meirong.dev; PG data migrated via pg_dump so instance/keys/apps preserved.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: zitadel
----
+# （本文件的 Namespace 已于 2026-08-03 拆到 namespace.yaml —— 理由见该文件头注）
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:

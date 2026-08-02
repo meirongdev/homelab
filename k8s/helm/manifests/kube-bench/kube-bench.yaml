@@ -1,29 +1,4 @@
----
-# CIS Kubernetes Benchmark 周期巡检 (kube-bench)
-#
-# 每周一次跑 Aqua kube-bench 对照 CIS 基准检查节点/控制面配置，结果打到 stdout
-# → 现有 OTel→Loki 管道收集 → 在 Grafana/Loki 里按 `namespace="kube-bench"` 查阅。
-#
-# ⚠️ 必须用 k3s 基准 (`--benchmark k3s-cis-*`)：k3s 控制面是单二进制、无
-#    /etc/kubernetes/manifests 静态 Pod，跑通用 cis 基准会满屏假 FAIL。
-#    若 Job 报 "unable to find config / benchmark"，把下面的 `--benchmark` 值改成
-#    镜像内 /opt/kube-bench/cfg/ 实际存在的 k3s 目录（或升级镜像 tag）：
-#       kubectl run kb --rm -it --image=docker.io/aquasec/kube-bench:v0.10.7 \
-#         --command -- ls /opt/kube-bench/cfg/
-#
-# 需 hostPID + 只读 host 挂载来检视节点配置 → 专用 namespace 标 PSA privileged。
-# Job 短暂运行（每周一次），对热节点几乎无常驻开销。
-# 由独立 ArgoCD App `kube-bench` 同步（见 argocd/applications/kube-bench.yaml）。
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: kube-bench
-  labels:
-    # kube-bench 需 hostPID + hostPath 检视节点 → 显式 privileged 豁免
-    pod-security.kubernetes.io/enforce: privileged
-    pod-security.kubernetes.io/warn: privileged
-    pod-security.kubernetes.io/audit: privileged
----
+# （本文件的 Namespace 已于 2026-08-03 拆到 namespace.yaml —— 理由见该文件头注）
 apiVersion: batch/v1
 kind: CronJob
 metadata:

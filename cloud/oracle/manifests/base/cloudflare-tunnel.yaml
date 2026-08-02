@@ -1,15 +1,5 @@
+# （本文件的 Namespace 已于 2026-08-03 拆到 namespace-cloudflare.yaml —— 理由见该文件头注）
 # Cloudflare Tunnel deployment for oracle-k3s (independent from homelab)
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: cloudflare
-  labels:
-    # Pod Security Admission — cloudflared 是 baseline 安全的
-    pod-security.kubernetes.io/enforce: baseline
-    pod-security.kubernetes.io/enforce-version: latest
-    pod-security.kubernetes.io/warn: baseline
-    pod-security.kubernetes.io/audit: baseline
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret

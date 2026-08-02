@@ -1,24 +1,4 @@
----
-# Namespace + Cloudflare API token for the oracle-k3s external-dns instance (the chart itself
-# is ArgoCD-managed: argocd/applications/external-dns-oracle.yaml, values/external-dns-oracle.yaml).
-#
-# Reuses the SAME meirong.dev zone token homelab's instance uses (Vault secret/homelab/external-dns,
-# property=api_token) — it's a zone-scoped Cloudflare API token, so it works for oracle's
-# subdomains too (same zone). oracle's vault-backend ClusterSecretStore reaches homelab's Vault
-# over Tailscale, and already reads other homelab/* paths (telegram, zitadel), so this is the
-# established cross-cluster secret pattern.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: external-dns
-  labels:
-    name: external-dns
-    # external-dns runs unprivileged — baseline is safe (matches rss-system et al).
-    pod-security.kubernetes.io/enforce: baseline
-    pod-security.kubernetes.io/enforce-version: latest
-    pod-security.kubernetes.io/warn: baseline
-    pod-security.kubernetes.io/audit: baseline
----
+# （本文件的 Namespace 已于 2026-08-03 拆到 namespace-external-dns.yaml —— 理由见该文件头注）
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
