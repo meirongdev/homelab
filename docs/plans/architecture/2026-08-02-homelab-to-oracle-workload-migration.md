@@ -125,7 +125,7 @@ homelab 的磁盘压力（65%，剩 43.5 GB）**得靠搬 calibre 才能解决**
 | 项 | 说明 |
 |---|---|
 | **Vault 迁 oracle** | 见 §4，属可用性议题而非容量议题，内存收益仅 ~160 Mi |
-| calibre 镜像不再被扫描 | trivy-operator 只在 homelab；calibre 迁 oracle 后其镜像脱离 CVE 扫描（`k8s/helm/values/trivy-operator.yaml` 里那条 CWA kepubify 的 accepted-risk 也随之失效）。要么给 oracle 也上 trivy，要么接受 |
+| ~~calibre 镜像不再被扫描~~ | ✅ **2026-08-03 已解决**：oracle 也上了一份 trivy-operator（`values/trivy-operator-oracle.yaml`），accepted-risk CVE 按镜像实际所在集群重排。顺带覆盖了同期迁过去的 ArgoCD/Loki/Tempo |
 | Vault 孤儿 path 清理 | `secret/homelab/argocd-oracle-cluster` 随本次迁移失去消费者，未删 |
 
 ## 相关

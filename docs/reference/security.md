@@ -23,7 +23,7 @@
 | 3 | 密钥 | Vault + ESO + 健康告警 | ✅ 生产 | `k8s/helm/values/vault-*`, `manifests/monitoring/alerts/eso-alerts.yaml` | 双 |
 | 4 | 准入：Pod 基线 | Pod Security Admission | ✅ 生产 | `just harden-psa` / oracle ns 清单 | 双 |
 | 5 | 准入：策略即代码 | Kyverno（Audit） | ✅ 生产 | `values/kyverno.yaml`, `manifests/kyverno-policies/` | homelab |
-| 6 | 供应链/CVE | Trivy Operator | ✅ 生产 | `values/trivy-operator.yaml` | homelab |
+| 6 | 供应链/CVE | Trivy Operator | ✅ 生产 | `values/trivy-operator.yaml` · `values/trivy-operator-oracle.yaml` | **双集群**（oracle 2026-08-03 补齐）|
 | 7 | CIS 合规 | kube-bench（周巡检） | ✅ 已装 | `manifests/kube-bench/kube-bench.yaml` | homelab |
 | 8 | 节点加固 | k3s `protect-kernel-defaults` + sysctl | ⏳ 待重启生效 | `k8s/ansible/playbooks/setup-k3s.yaml` | homelab |
 | 9 | 网络 | Cilium NetworkPolicy + Hubble 可见性 | 🟡 仅可见性 | Cilium（默认拒绝刻意延后） | 双 |
@@ -89,8 +89,14 @@
 ## 6. 供应链与漏洞扫描 (Supply chain / CVE) — Trivy Operator
 
 - **扫描面**：镜像 CVE + 配置审计 + RBAC 评估 + **镜像内暴露密钥**（最高信号）。结果以 CR 落地（`vulnerabilityreports`/`configauditreports`/`exposedsecretreports`/`rbacassessmentreports`）。
-- **热节点调优**：`scanJobsConcurrentLimit:1`（串行，杜绝扫描器风暴）+ `builtInTrivyServer`(ClientServer + `local-path` PVC 持久化漏洞 DB，避免反复重下；2026-07-11 随存储本地化迁移离开 NFS) + `severity:HIGH,CRITICAL` + `ignoreUnfixed` + 关 `clusterCompliance`（CIS 交给 kube-bench）。
-- **接入可观测**：ServiceMonitor（带 `release:kube-prometheus-stack`）→ Prometheus 抓 `trivy_image_vulnerabilities` 等；告警 `manifests/monitoring/alerts/trivy-alerts.yaml`（critical CVE→warning、暴露密钥 High/Critical→**critical**、absent 元告警）经 Telegram；看板 Grafana `Security` 文件夹。
+- **热节点调优（homelab）**：`scanJobsConcurrentLimit:1`（串行，杜绝扫描器风暴；oracle 无热约束，用 2）+ `builtInTrivyServer`(ClientServer + `local-path` PVC 持久化漏洞 DB，避免反复重下；2026-07-11 随存储本地化迁移离开 NFS) + `severity:HIGH,CRITICAL` + `ignoreUnfixed` + 关 `clusterCompliance`（CIS 交给 kube-bench）。
+- **oracle 侧差异（2026-08-03 新增）**：该集群没有 Prometheus Operator（`monitoring.coreos.com` CRD 为 0），
+  故 `serviceMonitor.enabled=false`，指标由 otel-collector 直抓再 remote-write。
+  ⚠️ 抓取目标必须写**容器端口 8080** 而非 Service 端口 80 —— chart 的 trivy-operator Service 是
+  headless(`ClusterIP: None`)，DNS 直接返回 pod IP，端口映射不生效（实测 :80 refused / :8080 200）。
+  且 values 需 `fullnameOverride: trivy-operator`，否则 ArgoCD 会用 Application 名当 release 名 → NXDOMAIN。
+  上这份的动机：2026-08 的迁移把 ArgoCD/Loki/Tempo/Calibre 搬去 oracle，那些镜像原本脱离了扫描。
+- **接入可观测**：ServiceMonitor（带 `release:kube-prometheus-stack`，仅 homelab）→ Prometheus 抓 `trivy_image_vulnerabilities` 等；告警 `manifests/monitoring/alerts/trivy-alerts.yaml`（critical CVE→warning、暴露密钥 High/Critical→**critical**、absent 元告警）经 Telegram；看板 Grafana `Security` 文件夹。
 
 ## 7. CIS 合规与节点加固
 
