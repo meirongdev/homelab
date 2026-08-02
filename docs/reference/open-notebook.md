@@ -19,7 +19,14 @@
 | 探针 | startup/liveness 打 `:5055/health`（免鉴权、连得上 DB 才 200）；readiness 打 `:8502/` |
 
 **为什么在 homelab 不在 oracle**：两台 DGX Spark 是跨 tailnet 共享节点，按"人"授予——
-`meirongdev@` 的设备可达，oracle 的 tagged-device **在 netmap 里根本没有它们**；且书库 PVC 在本 ns。
+`meirongdev@` 的设备可达，oracle 的 tagged-device **在 netmap 里根本没有它们**。
+
+> ⚠️ 2026-08-02 更正：原文还有一条理由"且书库 PVC 在本 ns"，**已不成立**——
+> calibre 当天迁去了 oracle-k3s（书库 23G 是 homelab 那台 124GB 笔记本 VM 上最大的
+> 单一数据集）。模型后端那条理由不受影响，Open Notebook 仍留在 homelab；
+> 但**批量摄取 Job 跟着书走了**：它挂载书库 PVC，而 PVC 不能跨集群挂，
+> 故现在跑在 oracle、经公网 `notebook.meirong.dev/api` 把文件推回来。
+> 见 [../runbooks/open-notebook-ingest.md](../runbooks/open-notebook-ingest.md)。
 
 ## 模型接线（provisioner 声明式管理）
 
