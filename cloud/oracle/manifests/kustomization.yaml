@@ -59,12 +59,10 @@ resources:
   - argocd/homelab-cluster-external-secret.yaml
   - argocd/argocd-oidc-external-secret.yaml
   - argocd/image-updater-secrets.yaml
-  # ⚠️ argocd/route-argocd.yaml 刻意**尚未**列入：两个集群的 external-dns 都是
-  # --policy=upsert-only 且 owner TXT 不同（homelab-externaldns / oracle-externaldns）。
-  # 一旦本集群出现 argocd.meirong.dev 的 HTTPRoute，oracle 的 external-dns 会因为
-  # 「看不到自己拥有的同名记录」而把它当作需要**新建**，去 Cloudflare 建一条重复 CNAME。
-  # 正确顺序是：先删 homelab 侧路由 + 手工删 Cloudflare 的 CNAME/TXT，再挂这一行。
-  # 见 docs/runbooks/argocd-control-plane-on-oracle.md「域名切换」。
+  # 入口路由。2026-08-02 按 runbook 的顺序挂上：先摘 homelab 侧路由 → 删 Cloudflare 的
+  # CNAME(argocd) 与 owner TXT(cname-argocd) → 才挂这一行。顺序反了会建出重复 CNAME
+  # （两侧 external-dns 都是 upsert-only 且 owner TXT 不同，谁也删不掉对方的记录）。
+  - argocd/route-argocd.yaml
   # Personal services (IT-Tools, Stirling-PDF, Squoosh, Timeslot, Trends, Excalidraw)
   - personal-services/it-tools.yaml
   - personal-services/stirling-pdf.yaml
