@@ -11,8 +11,9 @@
 #   1. serviceMonitor **必须关**：oracle 没有 Prometheus Operator
 #      （实测 `kubectl get crd | grep monitoring.coreos.com` 为 0 条），
 #      开着会让整个 App 渲染出无法识别的 CRD 而同步失败。
-#      指标改由 oracle 的 otel-collector 直抓 Service 的 metrics 端口(**80**，不是 8080)
-#      再 remote-write 回 homelab Prometheus
+#      指标改由 oracle 的 otel-collector 直抓 :8080 再 remote-write 回 homelab Prometheus
+#      （⚠️ 必须是容器端口 8080 而非 Service 端口 80——该 Service 是 headless，
+#        DNS 直接给 pod IP，端口映射不生效；实测 :80 refused / :8080 200）
 #      ——同 external-dns / opencost / ESO 的既有做法，见
 #      cloud/oracle/manifests/monitoring/otel-collector-config.yaml。
 #

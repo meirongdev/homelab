@@ -143,8 +143,13 @@ receivers:
   # 2026-08-03 随 oracle 侧 trivy-operator 上线新增。本集群没有 Prometheus Operator
   # （实测 `kubectl get crd | grep monitoring.coreos.com` 为 0 条），所以不同于 homelab
   # 用 ServiceMonitor，这里由 collector 直抓 operator 的 metrics 端口再 remote-write。
-  # ⚠️ 端口是 **80** 不是 8080 —— chart 的 Service 把 metrics 暴露在 80（pod 内才是 8080）；
-  #    写 8080 会一直失败。该 Service 还是 headless(ClusterIP: None)，DNS 解析到 pod IP，正常。
+  #
+  # ⚠️ 端口必须写 **8080（容器端口）而不是 80（Service 端口）**：
+  #    chart 的 trivy-operator Service 是 **headless(ClusterIP: None)** —— DNS 直接返回
+  #    pod IP，流量根本不经过 Service，那条 80→8080 的端口映射**完全不生效**。
+  #    实测：`curl svc:80/metrics` connection refused，`curl svc:8080/metrics` HTTP 200。
+  #    （homelab 侧看不到这个坑，因为它走 ServiceMonitor，由 Prometheus Operator
+  #      按 endpoints 的 targetPort 解析。）
   # ⚠️ 目标名依赖 values 里的 fullnameOverride: trivy-operator —— 不加的话 ArgoCD 会用
   #    Application 名(trivy-operator-oracle)当 helm release 名，这里直接 NXDOMAIN。
   # 消费方是共享的 manifests/monitoring/alerts/trivy-alerts.yaml —— 那些规则本就写成
@@ -155,7 +160,7 @@ receivers:
         - job_name: 'trivy-operator'
           scrape_interval: 60s
           static_configs:
-            - targets: ['trivy-operator.trivy-system.svc.cluster.local:80']
+            - targets: ['trivy-operator.trivy-system.svc.cluster.local:8080']
               labels:
                 cluster: oracle-k3s
 
