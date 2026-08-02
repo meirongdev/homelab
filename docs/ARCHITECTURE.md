@@ -30,7 +30,7 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 | 维度 | homelab | oracle-k3s |
 |------|---------|------------|
 | 硬件 | Ryzen 5600H 笔记本, 16GB 物理（OS 实际可见 15.0GB（MemTotal 15717940 kB；核显 UMA 显存已从 2GB 调整为 512MB）；实测见 [2026-07-04 舰队架构优化 §4](plans/architecture/2026-07-04-fleet-architecture-optimization.md)） | Oracle Cloud Free Tier (ARM, 24GB) |
-| 角色 | 主力集群 (observability/vault/calibre) | 轻量服务 (homepage/it-tools/uptime) |
+| 角色 | 指标中枢 + Vault + 本地模型接入 (Prometheus/Grafana/Vault/Open Notebook/Bifrost) | 公网服务 + GitOps 控制面 + 日志/追踪 + 身份面 (ArgoCD/Loki/Tempo/ZITADEL/Calibre/…) |
 | 存储 | local-path (NFS retired 2026-07-11; 106 = cold backup target) | local-path only |
 | 备份 | restic CronJob → 106 sftp | restic CronJob → 106 sftp (via TS) |
 | 安全 | Tetragon + Kyverno + Trivy | Falco (oracle 无 Kyverno/Trivy) |
@@ -56,7 +56,7 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 完整清单（含 namespace、内部服务、认证方式）在 [CONVENTIONS.md § Services](CONVENTIONS.md#services) —
 **唯一真相源，此处不复制**。
 
-分布速览: homelab 跑 **Calibre-Web / Open Notebook / Grafana / Vault / ArgoCD / Bifrost**；其余（ZITADEL、Homepage、
+分布速览（2026-08 大调整后）: homelab 跑 **Open Notebook / Prometheus / Grafana / Alertmanager / Vault / Bifrost**；oracle-k3s 跑 **ArgoCD 控制面 / Loki / Tempo / Calibre-Web**，其余（ZITADEL、Homepage、
 Uptime Kuma、Miniflux、KaraKeep、IT-Tools、Stirling-PDF、Squoosh、Excalidraw、Trends、Timeslot）都在 oracle-k3s。
 
 ## Security (Defense in Depth)

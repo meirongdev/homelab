@@ -1,7 +1,9 @@
 # homelab → oracle-k3s 负载迁移
 
 > 日期: 2026-08-02
-> 状态: ✅ Phase 2 + Phase 3(ArgoCD) **全部完成**（含域名切换与旧实例退役）；剩余候选见 §5
+> 状态: ✅ Phase 2(Loki/Tempo) + Phase 3(ArgoCD) + calibre **全部完成**；剩余候选见 §5
+> ⚠️ calibre 退役步骤引发过一次事故（Namespace 内嵌在应用清单里→prune 级联删数据），
+>   数据已完整恢复，复盘见 [records/2026-08-03-namespace-prune-cascade.md](../../records/2026-08-03-namespace-prune-cascade.md)
 > 范围: 盘点 homelab 上还有哪些负载能搬到 oracle-k3s，并执行其中两项
 > 定位: 承接 [2026-07-04 舰队架构优化](2026-07-04-fleet-architecture-optimization.md)
 >   的「算力倒挂 / 故障域集中」问题陈述，但**推翻了它的两条结论**（见 §4）
@@ -22,7 +24,7 @@
 
 | # | 工作负载 | 释放内存 | 释放磁盘 | arm64 | 结论 |
 |---|---|---|---|---|---|
-| 1 | calibre-web (CWA) + 2 个 CronJob | ~203 Mi | **38 GB** | ✅ 已核实 | 未做（磁盘收益最大，建议下一步）|
+| 1 | calibre-web (CWA) + 2 个 CronJob | ~203 Mi | **38 GB** | ✅ 已核实 | ✅ **2026-08-03 完成** |
 | 2 | **Loki + loki-gateway + Tempo** | ~240 Mi | ~5 GB | ✅ | ✅ **本次完成（Phase 2）** |
 | 3 | **ArgoCD**（5 个 pod） | **~730 Mi** | — | ✅ | ✅ **本次完成（Phase 3）** |
 | 4 | Vault | ~160 Mi | ~12 GB PVC | ✅ | 未做（方向性决策，见 §4）|
@@ -104,9 +106,9 @@ Vault 是唯一保留分歧的一项：舰队文档把它留在 pve，而它自�
 
 | | 迁移前 | 迁移后 |
 |---|---|---|
-| homelab pod 内存合计 | ~6.2 GB | **5.2 GB**（-1.0 GB）|
+| homelab pod 内存合计 | ~6.2 GB | **5.2 GB**（-1.0 GB；calibre 迁走后节点用量进一步降到 67%）|
 | homelab 节点 MemAvailable | 3.3–4.2 GB | **4.4 GB** |
-| homelab 磁盘可用 | 43.0 GB | 43.5 GB（Loki 实际占用远小于 5Gi 配额）|
+| homelab 磁盘可用 | 43.0 GB | **84.0 GB**（65%→32%；Loki 只省了 0.5GB，真正的 38GB 来自 calibre）|
 | oracle 内存 | 8375 Mi (38%) | 9715 Mi (44%) |
 | ArgoCD Applications | 28（homelab 控制面）| **28/28 Synced+Healthy**（oracle 控制面）|
 
@@ -122,8 +124,8 @@ homelab 的磁盘压力（65%，剩 43.5 GB）**得靠搬 calibre 才能解决**
 
 | 项 | 说明 |
 |---|---|
-| **calibre-web 迁 oracle** | 磁盘收益最大的一笔（23G 书库 + 15G config = **38 GB**），arm64 已核实可用。homelab 磁盘瓶颈的唯一实质解法 |
 | **Vault 迁 oracle** | 见 §4，属可用性议题而非容量议题，内存收益仅 ~160 Mi |
+| calibre 镜像不再被扫描 | trivy-operator 只在 homelab；calibre 迁 oracle 后其镜像脱离 CVE 扫描（`k8s/helm/values/trivy-operator.yaml` 里那条 CWA kepubify 的 accepted-risk 也随之失效）。要么给 oracle 也上 trivy，要么接受 |
 | Vault 孤儿 path 清理 | `secret/homelab/argocd-oracle-cluster` 随本次迁移失去消费者，未删 |
 
 ## 相关
