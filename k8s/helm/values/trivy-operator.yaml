@@ -84,6 +84,12 @@ trivy:
       # grafana 自带认证栈,不走 kin-openapi 的 ValidationHandler 鉴权,实际不可利用。等上游 bump。
       - id: GHSA-r277-6w6q-xmqw
         statement: "grafana kin-openapi v0.140.0, 无已修镜像(v13.1.1 go.mod 仍 0.140.0), grafana 不走 kin-openapi 认证路径, 2026-09 复审"
+      # open_notebook 镜像内打包的 npm tar 7.5.1/7.5.11(前端构建产物,两处副本),
+      # 修复版本 7.5.19。1.14.0(2026-07-21)已是最新 stable —— 再往上只有 v1-dev,
+      # 不适合钉在生产。无可升级到的已修镜像,故先豁免。
+      # 实际风险低:该 tar 只在镜像构建期解包受信任的 npm 包,运行时不处理用户上传的归档。
+      - id: CVE-2026-59873
+        statement: "open_notebook 内置 npm tar 7.5.x(修复 7.5.19), 1.14.0 已是最新 stable 无已修镜像, 运行时不解包不可信归档, 2026-10 复审"
   # 扫描 Job（client）资源
   resources:
     requests:
