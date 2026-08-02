@@ -251,13 +251,26 @@ prometheus:
     # 资源限制
     # memory limit 1Gi→1.5Gi（2026-07-04）：head/WAL 回放峰值内存曾逼近 1Gi（实测 694Mi 仍在涨）
     #   有 OOM 风险；节点约 2.3Gi 余量，limit 抬到 1.5Gi 给回放留头（request 不变，调度无碍）。
+    # memory limit 1.5Gi→2.5Gi（2026-08-02）：GC 抖动实测。稳态 RSS 1462Mi 已贴到 1536Mi
+    #   limit 的 95%，heap_inuse 1093Mi / next_gc 1211Mi —— Go 几乎每次分配都要触发回收。
+    #   症状是长窗口查询慢到离谱：sloth 的 30d SLI 录制规则，只有 24 条 series、实际只读到
+    #   7d 数据，单次查询却要 75s（6h 窗口同一查询只要 2s），约合 75µs/sample，比正常
+    #   Prometheus 慢 ~3 个数量级 —— 不是查询复杂度，是堆压满后的 GC 抖动。
+    #   连锁反应：6 个 sloth SLI 组每轮 40~70s 却挂在 30s interval 上 →
+    #   PrometheusMissingRuleEvaluations 常驻。
+    #   节点当时 8.6Gi/11.6Gi（约 2.7Gi 余量），+1Gi 后仍留 ~1.7Gi。
+    #   ⚠️ 为什么不是"加 retention 到 30d"：那会让同一批 30d 窗口查询多读 ~4 倍数据，
+    #      在 1.5Gi limit 下几乎必然 OOM，把问题放大而不是解决（2026-08-02 评估：
+    #      30d 需 ~25-27GiB 磁盘 + 3~4Gi 内存，这台 5600H 笔记本的内存扛不住，故维持 7d）。
+    # requests 保持 512Mi：单节点无调度竞争，不预留过多；如将来出现节点内存压力驱逐，
+    #   再把 requests 提到接近稳态 RSS 以改善 eviction 排序。
     resources:
       requests:
         cpu: 200m
         memory: 512Mi
       limits:
         cpu: 1000m
-        memory: 1536Mi
+        memory: 2560Mi
 
 
     # 添加额外的抓取配置
