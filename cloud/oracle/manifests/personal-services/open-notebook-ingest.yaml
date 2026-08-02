@@ -1,0 +1,198 @@
+# Open Notebook 批量摄取 —— 2026-08-02 随书库从 homelab 迁入 oracle-k3s。
+#
+# 为什么它要搬：CronJob 直接挂载 calibre-books-local PVC，而 PVC 不能跨集群挂。
+# 书搬走了，Job 只能跟着搬。open-notebook 应用本身**留在 homelab**（模型后端是
+# 跨 tailnet 按人共享的 DGX/Mac，oracle 看不到），所以改成经公网 API 推送。
+#
+# 仍是「手动触发模板」：schedule 是永不到来的 2/31 + suspend: true，
+# 用法见 docs/runbooks/open-notebook-ingest.md。
+# Calibre 书库 → Open Notebook 的按需摄取（**不是**全量向量化）
+#
+# 设计前提：2040 本 / 23G 全量灌进去是自找的问题——粗算 1.5 亿 token，
+# 而 NotebookLM 式的用法本来就是"按 notebook 加 source"。所以这里是一个
+# **默认永不运行、参数为空即拒绝执行**的批量工具，不是夜间管道。
+#
+# 用法：
+#   1. 在 UI 里建一个 notebook，复制它的 id（形如 `notebook:xxxxx`）
+#   2. 改下面 ConfigMap 的 NOTEBOOK_ID / BOOK_PATTERN（进 git，这样"灌过什么"有据可查）
+#   3. push 等 ArgoCD 同步后手工触发一次：
+#      kubectl -n personal-services create job ingest-$(date +%s) --from=cronjob/open-notebook-ingest
+#   4. 看日志：kubectl -n personal-services logs -l job-name=ingest-… -f
+#
+# 已对活实例验证的部分（2026-08-01）：`/api` 前缀、`Authorization: Bearer <app-password>`、
+# `type=upload` 被接受、GET /api/sources 与 /api/notebooks 均返回 200 []。
+# 仍未验证：一次真实的整本上传（要先有 notebook id）。首次运行请把 MAX_BOOKS 设成 1 先试。
+#
+# 顺带发现：上游也接受 `file_path` 代替 multipart `file`。这里仍用 file 上传——
+# app pod 没有挂书库 PVC（只挂 open-notebook-data-local），file_path 在它的容器里解析不到。
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: open-notebook-ingest-params
+  namespace: personal-services
+data:
+  # 目标 notebook id。**留空 = Job 直接失败退出**（防手滑）。
+  # 2026-08-01 首跑: "SRE" notebook
+  # ⚠️ 2026-08-02 起 calibre 在 oracle、open-notebook 仍在 homelab（DGX 跨 tailnet
+  # 按人授予，oracle 的 tagged-device 看不到那些节点，见 reference/open-notebook.md）。
+  # 书在本集群、API 在对面 —— 这个 Job 跟着**书**走，通过公网 API 把文件推回去。
+  # 走 notebook.meirong.dev 而非集群内 svc：HTTPRoute 只路由 8502，Next.js 前端把
+  # /api/* 内转到 5055；Bearer 口令是公网 /api/* 的唯一屏障，脚本已在用。
+  # 上传经 Cloudflare，free plan 请求体上限 100MB —— 脚本本来就按 95MB 筛，未触顶。
+  API: "https://notebook.meirong.dev/api"
+  NOTEBOOK_ID: "notebook:y8z8uo1ij0g6wp0w66sh"
+  # 对 find 出来的完整路径做 grep -i 过滤，例如 "swift" / "Grant Kemp" / "机器学习"。
+  # **留空 = Job 直接失败退出**——这是拦住"全库 2040 本"的那道闸。
+  # ⚠️ 先预览再跑（裸 "sre" 会误捞 Sreeram/Sreejith 两位作者的书）：
+  #   kubectl -n personal-services exec deploy/calibre-web -c calibre-web -- \
+  #     sh -c 'find /calibre-library -type f -size -95M \( -name "*.epub" -o -name "*.pdf" \) | grep -i "<pattern>"'
+  BOOK_PATTERN: "betsy beyer"
+  # 单次上限，二道闸。首次试跑建议先改成 "1"。
+  MAX_BOOKS: "1"
+  # 是否在摄取时同步做向量化（embedding 走 Mac OMLX，2026-08-01 晚已修复验证：2560 维）。
+  # 留作运维开关：Mac 不在线/在忙时可临时置 "false" 只提取文本，之后在 UI 重嵌。
+  EMBED: "true"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: open-notebook-ingest-script
+  namespace: personal-services
+data:
+  ingest.sh: |
+    #!/bin/sh
+    set -eu
+
+    : "${NOTEBOOK_ID:?NOTEBOOK_ID 为空 —— 先在 UI 建 notebook 并填进 open-notebook-ingest-params}"
+    : "${BOOK_PATTERN:?BOOK_PATTERN 为空 —— 拒绝无差别摄取整个书库}"
+    MAX_BOOKS="${MAX_BOOKS:-20}"
+    # ⚠️ 必须带 /api 前缀：FastAPI 的 router 全挂在 /api 下。
+    # 2026-08-01 实测：POST :5055/sources → 404；POST :5055/api/sources → 400
+    # "File upload or file_path is required for upload type"（路由在、type=upload 认）。
+    # 只有 /health 在根上（免鉴权，探针用的就是它）。
+    API="${API:-http://open-notebook.personal-services.svc:5055/api}"
+    PW="$(cat /secrets/app-password)"
+
+    echo "[ingest] pattern='$BOOK_PATTERN' notebook='$NOTEBOOK_ID' max=$MAX_BOOKS"
+
+    # 95MB 上限：上游 MaxBodySizeMiddleware 默认 100MB（OPEN_NOTEBOOK_MAX_UPLOAD_SIZE_MB），
+    # 超了直接 413，先在这里筛掉免得跑一半才炸。
+    # ⚠️ 写 -95000000c 而非 -95M：curlimages/curl 是 BusyBox find，-size 只认 POSIX
+    #    后缀，"95M" 直接报 invalid number（2026-08-01 首跑就栽在这上，当时 stderr
+    #    还被 2>/dev/null 吞了——所以现在也不再静音 stderr）。
+    find /books -type f -size -95000000c \( -name '*.epub' -o -name '*.pdf' \) \
+      | grep -i -- "$BOOK_PATTERN" \
+      | head -n "$MAX_BOOKS" > /tmp/list || true
+
+    count="$(wc -l < /tmp/list)"
+    echo "[ingest] matched $count file(s)"
+    if [ "$count" -eq 0 ]; then
+      echo "[ingest] 没有匹配文件，退出（这算失败，免得静默什么都没干）"
+      exit 1
+    fi
+
+    rc=0
+    while IFS= read -r f; do
+      title="$(basename "$f")"
+      echo "[ingest] -> $title"
+      # type=upload + async_processing=true：立刻返回，切片/向量化交给应用的后台 worker
+      # （并发已在 Deployment 里压到 2 条，见 open-notebook.yaml）。
+      code="$(curl -sS -o /tmp/resp -w '%{http_code}' -X POST "$API/sources" \
+        -H "Authorization: Bearer $PW" \
+        -F 'type=upload' \
+        -F "notebook_id=$NOTEBOOK_ID" \
+        -F "title=$title" \
+        -F "embed=${EMBED:-true}" \
+        -F 'async_processing=true' \
+        -F "file=@\"$f\"")" || code=000
+      # ↑ @ 后的路径必须再套一层双引号：curl -F 把裸逗号当多文件分隔符，
+      #   而 calibre 路径里全是逗号分隔的作者名（首跑 curl(26) 就是这么来的）。
+      #   路径里带双引号的文件会仍然失败——calibre 会把 " 转成 _，实际不会出现。
+      case "$code" in
+        2*) echo "[ingest]    ok ($code)" ;;
+        *)  echo "[ingest]    FAILED ($code): $(head -c 300 /tmp/resp 2>/dev/null)"; rc=1 ;;
+      esac
+    done < /tmp/list
+
+    echo "[ingest] DONE rc=$rc"
+    exit "$rc"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: open-notebook-ingest
+  namespace: personal-services
+spec:
+  # 2 月 31 日：语法合法、永远不会到来。配合 suspend 双保险——
+  # 这个 CronJob 只作为 `kubectl create job --from=` 的模板存在。
+  schedule: "0 5 31 2 *"
+  suspend: true
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      # 手工 `create job --from=` 出来的 Job 不受上面 historyLimit 管，靠 TTL 自清，
+      # 否则会顶到本 ns 的 ResourceQuota（count/jobs.batch: 15）。
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: ingest
+              # 8.11.1(2024-12) → 8.21.0(2026-06)：旧镜像的 alpine libssl3/libcrypto3
+              # 停在 3.3.2-r4，带 CVE-2026-31789(Critical，需 ≥3.3.7-r0)，长期把
+              # TrivyImageCriticalVulnerabilities 顶成 firing。8.21.0 实测为 3.5.7-r0。
+              # 仍是 alpine/BusyBox 基底，上面 find -size 的 POSIX 写法不受影响。
+              image: docker.io/curlimages/curl:8.21.0
+              command: ["sh", "/scripts/ingest.sh"]
+              envFrom:
+                - configMapRef:
+                    name: open-notebook-ingest-params
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 256Mi
+              volumeMounts:
+                - { name: scripts, mountPath: /scripts, readOnly: true }
+                - { name: secrets, mountPath: /secrets, readOnly: true }
+                # 书库同 ns、同节点，RWO 多 pod 共挂没问题；只读挂载。
+                # 库里目录 0777 / 文件 0666，非 root uid 也读得到（curlimages/curl 是 uid 100）。
+                - { name: books, mountPath: /books, readOnly: true }
+          volumes:
+            - name: scripts
+              configMap: { name: open-notebook-ingest-script }
+            - name: secrets
+              # 0444 而非 0400：secret 卷文件属主是 root，而 curlimages/curl 以 uid 100 跑，
+              # 0400 会让脚本 cat 不到口令直接失败（backup 的 CronJob 用 0400 是因为它 runAsUser: 0）。
+              secret: { secretName: open-notebook-ingest-secret, defaultMode: 0444 }
+            - name: books
+              persistentVolumeClaim:
+                claimName: calibre-books-local
+                readOnly: true
+---
+# 只取 app-password 一个键 —— 这个 Job 需要的就是公网 /api/* 的 Bearer 口令。
+# 与 homelab 的 open-notebook-secret **同源读同一个 Vault path**，不复制凭据。
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: open-notebook-ingest-secret
+  namespace: personal-services
+spec:
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: open-notebook-ingest-secret
+    creationPolicy: Owner
+  data:
+    - secretKey: app-password
+      remoteRef:
+        key: secret/homelab/open-notebook
+        property: app-password

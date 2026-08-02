@@ -63,7 +63,19 @@ resources:
   # CNAME(argocd) 与 owner TXT(cname-argocd) → 才挂这一行。顺序反了会建出重复 CNAME
   # （两侧 external-dns 都是 upsert-only 且 owner TXT 不同，谁也删不掉对方的记录）。
   - argocd/route-argocd.yaml
-  # Personal services (IT-Tools, Stirling-PDF, Squoosh, Timeslot, Trends, Excalidraw)
+  # Personal services (IT-Tools, Stirling-PDF, Squoosh, Timeslot, Trends, Excalidraw, Calibre-Web)
+  # calibre 全家 2026-08-02 从 homelab 迁入（动机是磁盘：书库 23GB 是那台笔记本 VM 上
+  # 最大的单一数据集）。open-notebook-ingest 跟着**书**走 —— 它挂载书库 PVC，而
+  # open-notebook 应用本身留在 homelab，故改成经公网 API 推送。
+  - personal-services/calibre-web.yaml
+  - personal-services/calibre-ebook-sync.yaml
+  - personal-services/open-notebook-ingest.yaml
+  # ⚠️ personal-services/route-calibre-web.yaml 刻意**尚未**列入 —— 同 argocd 那次：
+  # 提前挂上会让本集群 external-dns 把 book.meirong.dev 当作待新建、去 CF 建重复 CNAME。
+  # 属于域名切换步骤，不属于部署。
+  # ⚠️ calibre-metadata/ 目录也**不在**这棵 kustomize 树里 —— 它是独立的 ArgoCD App
+  # （argocd/applications/calibre-metadata.yaml），因为一次性 enrich Job 需要专门的
+  # ignoreDifferences（job-controller 会注入 suspend/selector/labels，否则永久 OutOfSync）。
   - personal-services/it-tools.yaml
   - personal-services/stirling-pdf.yaml
   - personal-services/squoosh.yaml
