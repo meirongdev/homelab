@@ -117,7 +117,9 @@ spec:
                 limits: { memory: "1Gi" }
           containers:
             - name: notify
-              image: docker.io/curlimages/curl:8.11.1
+              # 8.21.0：8.11.1 的 alpine libssl3/libcrypto3 停在 3.3.2-r4，
+              # 带 Critical CVE-2026-31789（需 ≥3.3.7-r0）。两集群的 krr 保持同版本。
+              image: docker.io/curlimages/curl:8.21.0
               env:
                 - name: BOT_TOKEN
                   valueFrom:
