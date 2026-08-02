@@ -1,0 +1,15 @@
+# ⚠️ Namespace 单独成文件，**不要**把它塞回其他清单里。
+# 2026-08-03 事故教训：`personal-services` 的 Namespace 当时内嵌在 calibre-web.yaml
+# 顶部。calibre 迁 oracle 时 `git rm` 掉那个文件 → ArgoCD prune 掉 Namespace →
+# **级联删除了同 ns 下毫不相关的 open-notebook 全部数据**（PVC 上的 Prune=false
+# 护栏无效，因为被 prune 的是 ns 不是 PVC）。
+# 复盘见 docs/records/2026-08-03-namespace-prune-cascade.md
+# ZITADEL (SSO) — migrated from homelab 2026-07-06 (fault-domain separation).
+# Mirror of k8s/helm/manifests/zitadel.yaml; ONLY diff = PG storageClass nfs-client→local-path.
+# ExternalSecrets read secret/homelab/zitadel (SAME source → byte-identical masterkey; a copy
+# would risk making every DB-encrypted key undecryptable → total SSO break). ExternalDomain
+# stays auth.meirong.dev; PG data migrated via pg_dump so instance/keys/apps preserved.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: zitadel
