@@ -59,23 +59,33 @@ spec:
             description: "node_zfs_zpool_state{state=online}=0 —— 池处于 degraded/faulted 等状态。raidz1 仅容 1 盘，resilver 期第二盘故障会毁池；离站备份是最终安全网（见 backup-recovery runbook）。"
 
     - name: nvme-wear-trend
+      # ⚠️ interval 必须显式设置（2026-08-02）：本组原先跟随全局 30s 评估间隔，实测单轮
+      #    耗时 120s——超间隔 4 倍，是拖垮 Prometheus 的第三大消费者（前两名是已关掉的
+      #    kube-apiserver-{burnrate,availability}.rules）。NVMe 磨损以"月"为尺度变化，
+      #    每 30s 重算一次纯属浪费；1h 已远超需求精度，成本降到原先的 1/120。
+      interval: 1h
       rules:
-        # 14 日窗口的每日磨损增量（percentage_used/天）。低写入负载下可能为 0。
+        # ⚠️ 窗口必须 ≤ retention（当前 7d，见 values/kube-prometheus-stack.yaml）。
+        #    原先写的是 [14d] / [30d]：超出保留期的部分并不会报错，而是**静默截断**成
+        #    实际可用的 ~7d 数据——既拿不到宣称的 14/30 天趋势（结果与注释不符），
+        #    又要让每次评估全量扫穿整个 TSDB。改为 6d 留 1d 余量，避免边界抖动。
+        # 每日磨损增量（percentage_used/天）。低写入负载下可能为 0。
         - record: nvme_wear_daily_rate
-          expr: clamp_min(deriv(smartctl_device_percentage_used[14d]) * 86400, 0)
-        # 基于 30 天线性趋势预测 90 天后的 percentage_used
+          expr: clamp_min(deriv(smartctl_device_percentage_used[6d]) * 86400, 0)
+        # 基于 6 天线性趋势预测 90 天后的 percentage_used。
+        # 6d→90d 是 15 倍外推，只当早期预警用；静态阈值 NvmeWearHigh(>90%) 才是最终确认。
         - record: nvme_predicted_wear_90d
-          expr: predict_linear(smartctl_device_percentage_used[30d], 90 * 86400)
+          expr: predict_linear(smartctl_device_percentage_used[6d], 90 * 86400)
         # 趋势报警：90 天内预测 wear > 85%（写入加速时比静态阈值 NvmeWearHigh 更早预警）
         - alert: NvmeWearAccelerating
-          expr: predict_linear(smartctl_device_percentage_used[30d], 90 * 86400) > 85
+          expr: predict_linear(smartctl_device_percentage_used[6d], 90 * 86400) > 85
           for: 6h
           labels:
             severity: warning
           annotations:
             summary: "NVMe {{ $labels.device }} @ {{ $labels.nodename }} 磨损加速，90 天预测 >85%"
             description: |
-              基于 30 天线性趋势，预测 90 天后 percentage_used ≈ {{ $value | humanize }}%。
+              基于 6 天线性趋势（受 Prometheus retention=7d 限制），预测 90 天后 percentage_used ≈ {{ $value | humanize }}%。
               当前磨损值与日增速率见 smartctl_device_percentage_used / nvme_wear_daily_rate。
               如写入量持续，需计划换盘；NvmeWearHigh（静态 >90%）为最终确认。
 
