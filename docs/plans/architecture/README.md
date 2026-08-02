@@ -6,6 +6,7 @@
 
 | 日期 | 方案 | 状态 |
 |------|------|------|
+| 2026-08-02 | [homelab → oracle 负载迁移](2026-08-02-homelab-to-oracle-workload-migration.md)（Loki/Tempo + ArgoCD 已迁；**推翻 2026-07-04 的两条结论**） | ✅ 主体完成 |
 | 2026-07-07 | [技术债盘点与演进路线](2026-07-07-tech-debt-and-evolution.md)（含 **Crossplane 不引入**结论） | ⚠️ 部分落地 |
 | 2026-07-06 | [服务资源分配优化建议](2026-07-06-resource-optimization.md) | ⚠️ 部分落地 |
 | 2026-07-04 | [舰队机器与集群架构优化](2026-07-04-fleet-architecture-optimization.md)（ROADMAP 的 `P0-x`/`P1-x`/`P2-x` 编号出自这里） | ⚠️ 部分落地 |
