@@ -20,7 +20,7 @@ spec:
       targetRevision: main
       ref: values
   destination:
-    server: https://kubernetes.default.svc
+    server: https://100.94.186.7:6443
     namespace: kyverno
   # chart 的 CRD 无 spec.conversion，但 API server 默认补 conversion:{strategy:None}
   # → 11 个 policies.kyverno.io CRD 永远 OutOfSync（纯服务端默认，sync 改不掉）。忽略该字段。

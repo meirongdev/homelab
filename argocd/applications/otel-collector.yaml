@@ -31,7 +31,7 @@ spec:
       ref: values
 
   destination:
-    server: https://kubernetes.default.svc
+    server: https://100.94.186.7:6443
     namespace: monitoring
 
   syncPolicy:
