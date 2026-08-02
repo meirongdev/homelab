@@ -1,8 +1,12 @@
 ---
-# Loki — 日志聚合（SingleBinary 模式）
+# Loki — 日志聚合（SingleBinary 模式），双集群唯一日志存储
 # Chart: grafana/loki
 # Values: k8s/helm/values/loki.yaml
 # 2026-07-06: 从 Helm 直接管理迁入 ArgoCD（参照 falco.yaml 的 multi-source 模式）
+# 2026-08-02: destination 从 homelab 迁 oracle-k3s。动机是 homelab 内存 76%/磁盘 66%
+#   见底，而 Loki 是纯「写入-存储」组件，不像 Prometheus 需要贴着抓取目标；
+#   附带收益：homelab 整机故障时**故障前的日志还在**（此前日志与被观测对象同归于尽）。
+#   两集群 otel-collector 的 exporter 端点随之调整，见 docs/reference/observability-multicluster.md
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -25,7 +29,8 @@ spec:
       ref: values
 
   destination:
-    server: https://kubernetes.default.svc
+    # oracle-k3s 外部集群（Tailscale 端点；与 oracle-k3s App 同）
+    server: https://100.107.166.37:6443
     namespace: monitoring
 
   syncPolicy:
@@ -33,5 +38,7 @@ spec:
       prune: true
       selfHeal: true
     syncOptions:
-      - CreateNamespace=true
+      # monitoring ns 由 oracle-k3s kustomize App 拥有（含 PSA privileged 标签），
+      # 故此处不重复创建/管理 ns，避免双重所有权（同 falco.yaml）。
+      - CreateNamespace=false
       - ServerSideApply=true
