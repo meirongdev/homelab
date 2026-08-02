@@ -1,0 +1,46 @@
+---
+# Trivy Operator —— oracle-k3s 实例（2026-08-03 新增）
+#
+# 动机：2026-08 的两轮迁移把 ArgoCD 控制面 / Loki / Tempo / Calibre-Web 搬到了 oracle，
+# 而 trivy-operator 此前只在 homelab —— 这些镜像随之脱离 CVE 扫描。oracle 上还常驻
+# ZITADEL(身份面) 与一众公网服务，本就是更该被扫的一侧。
+#
+# 与 homelab 实例（trivy-operator.yaml）共用同一 chart，values 分开：
+# oracle 那份关掉 ServiceMonitor（本集群无 Prometheus Operator）、并发从 1 抬到 2、
+# accepted-risk CVE 按镜像实际所在集群重排。详见 values 文件头。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: trivy-operator-oracle
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: homelab
+  sources:
+    # chart 版本与 homelab 实例保持一致 —— 两侧同版本，避免行为漂移。
+    # 升级前 `helm search repo aqua/trivy-operator --versions` 核对（chart 版本 ≠ Trivy 版本）。
+    - repoURL: https://aquasecurity.github.io/helm-charts
+      chart: trivy-operator
+      targetRevision: "0.33.1"
+      helm:
+        valueFiles:
+          - $values/k8s/helm/values/trivy-operator-oracle.yaml
+    - repoURL: https://github.com/meirongdev/homelab
+      targetRevision: main
+      ref: values
+  destination:
+    # oracle-k3s 自身 —— ArgoCD 控制面在本集群，故写 in-cluster
+    server: https://kubernetes.default.svc
+    namespace: trivy-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # trivy-system 是本 App 独占的 ns（没有别的东西住在里面），由 App 自己创建/回收。
+      # 刻意**不**把 Namespace 放进 oracle 的 kustomize 树 —— 那样会重演
+      # 2026-08-03 那次「删共享清单文件连带 prune 掉整个 ns」的事故
+      # （见 docs/records/2026-08-03-namespace-prune-cascade.md）。
+      - CreateNamespace=true
+      - ServerSideApply=true

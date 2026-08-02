@@ -61,6 +61,12 @@ trivy:
   #   2. 不能用 expired_at 字段:helm values 的 YAML→JSON 往返会把日期变成带引号的
   #      字符串,而 trivy(yaml.v3)只对不带引号的标量做 timestamp 解析 →
   #      decode error → 所有扫描 Job FATAL。复审日期只能写在 statement 里。
+  # ⚠️ 2026-08-03：ArgoCD 与 Calibre-Web 已迁 oracle-k3s，下面 5 条（CVE-2025-68121 /
+  #    CVE-2026-33186 / CVE-2023-24538 / CVE-2023-24540 / CVE-2024-24790）在本集群
+  #    **已无对应镜像**，理论上可删。刻意先留着：多余的 ignore 条目是无害的（永不匹配），
+  #    而漏掉一条会立刻变成 firing 噪音。等 oracle 侧首轮扫描出结果、确认这些 CVE 确实
+  #    只出现在那边之后，在下一次 CVE 复审（2026-09）时一并清理。
+  #    oracle 侧的对应条目见 values/trivy-operator-oracle.yaml。
   ignoreFileName: ".trivyignore.yaml"
   ignoreFile:
     vulnerabilities:

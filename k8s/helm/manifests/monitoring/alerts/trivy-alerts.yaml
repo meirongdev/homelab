@@ -2,8 +2,13 @@
 # Trivy Operator 安全发现告警。
 #
 # 指标来自 Trivy Operator 控制器（/metrics :8080，operator.metricsFindingsEnabled=true）：
-#   - homelab: ServiceMonitor 由 chart 启用（values/trivy-operator.yaml，带 release 标签）
-#   覆盖单集群（Trivy 仅 homelab 先上；将来镜像到 oracle 时本规则自然适用，靠 cluster 标签区分）
+#   - homelab:   ServiceMonitor 由 chart 启用（values/trivy-operator.yaml，带 release 标签）
+#   - oracle-k3s: 本集群无 Prometheus Operator（CRD 为 0），由 otel-collector 直抓
+#                 trivy-operator:8080 再 remote-write（values/trivy-operator-oracle.yaml
+#                 里 serviceMonitor.enabled=false）
+#   **2026-08-03 起双集群覆盖**：下列聚合规则本就写成 `sum by (cluster)`，
+#   oracle 指标一到就自动生效，未改任何表达式；只有 MetricsAbsent 这类
+#   "序列消失" 的元告警必须按集群各写一条（absent() 对不存在的 label 值无从判断）。
 #
 # severity warning|critical → 经 Alertmanager 原生 telegramConfigs 路由到 Telegram（见 values/kube-prometheus-stack.yaml）。
 # `release: kube-prometheus-stack` 标签必需，否则 ruleSelector 不采纳本 PrometheusRule。
@@ -63,3 +68,14 @@ spec:
           annotations:
             summary: "Trivy Operator 指标在 homelab 缺失"
             description: ">2h 无 trivy_image_vulnerabilities 序列——Trivy Operator 可能已宕或 ServiceMonitor 抓取中断，会掩盖所有漏洞/密钥告警。检查 `kubectl get pods -n trivy-system`。"
+
+        # oracle 侧同款。⚠️ 不能合并成一条 `absent(trivy_image_vulnerabilities)` ——
+        # 那样只要有**任一**集群还在上报就不告警，恰好掩盖"单集群扫描器挂了"这个场景。
+        - alert: TrivyOperatorMetricsAbsentOracle
+          expr: absent(trivy_image_vulnerabilities{cluster="oracle-k3s"})
+          for: 2h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Trivy Operator 指标在 oracle-k3s 缺失"
+            description: ">2h 无 cluster=oracle-k3s 的 trivy_image_vulnerabilities 序列——Trivy Operator 可能已宕，或 oracle otel-collector 的 prometheus/trivy-operator 抓取中断（该侧不走 ServiceMonitor）。检查 `kubectl --context oracle-k3s get pods -n trivy-system` 与 collector 日志。"
