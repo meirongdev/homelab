@@ -28,7 +28,7 @@ calibre-web auto-imports from the ingest folder a few minutes after the copy.
 | Flag | Default | Purpose |
 |------|---------|---------|
 | `--source` | `~/Downloads/books` | Local dir to scan (the main input) |
-| `--context` | `k3s-homelab` | kubectl context |
+| `--context` | `oracle-k3s` | kubectl context（2026-08-02 calibre 从 homelab 迁至 oracle-k3s）|
 | `--namespace` | `personal-services` | calibre-web namespace |
 | `--selector` | `app=calibre-web` | Label selector → pod |
 | `--ingest-path` | `/cwa-book-ingest` | Ingest folder in the pod |
