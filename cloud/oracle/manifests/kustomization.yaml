@@ -24,10 +24,14 @@ resources:
   - uptime-kuma/uptime-kuma.yaml
   - uptime-kuma/secrets.yaml
   - uptime-kuma/provisioner.yaml
-  # Observability (lightweight collectors — infra lives on homelab)
+  # Observability
+  # 2026-08-02 起本集群不再只是「轻量采集端」：Loki(日志)+Tempo(追踪) 已从 homelab 迁入
+  # （工作负载由独立的 loki / tempo Helm App 部署，同 falco 模式；此处只放 NodePort 入口）。
+  # Prometheus/Grafana/Alertmanager 仍在 homelab——它们要贴着抓取目标，不搬。
   - monitoring/namespace.yaml
   - monitoring/otel-collector.yaml
   - monitoring/exporters.yaml
+  - monitoring/monitoring-external.yaml
   # KRR 右尺寸推荐周报（查中枢 Prometheus，结果推 Telegram）
   - monitoring/krr.yaml
   # OpenCost 成本归因：仅 namespace（工作负载由独立 opencost-oracle Helm App 部署，同 falco 模式）
