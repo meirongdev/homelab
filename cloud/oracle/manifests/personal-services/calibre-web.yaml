@@ -58,7 +58,14 @@ metadata:
   labels:
     app: calibre-web
 spec:
-  replicas: 1
+  # ⏸ 迁移窗口：暂置 0，让 23GB 书库与 config 落在**静止**的卷上再起。
+  #   （上一步用 replicas:1 起过一次空 pod —— local-path 是 WaitForFirstConsumer，
+  #    不起 pod PVC 就不绑定、节点上没有目录可写。那次 init 容器如期失败：
+  #    disable-auto-convert 假定 cwa.db 已存在，空卷上报 "no such table: cwa_settings"。
+  #    这也说明**光靠 Git 无法从零重建 calibre**，必须先恢复 config —— 属既有性质，
+  #    已记入迁移方案文档。）
+  #   数据灌完立即改回 1。
+  replicas: 0
   # SQLite (/config/cwa.db) is held with an exclusive write lock by the live
   # calibre-web container; a rolling update would let the new pod's
   # disable-auto-convert init container race the old pod for that lock.
