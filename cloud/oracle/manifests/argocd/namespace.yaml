@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+  labels:
+    # ArgoCD 全部组件零特权（无 hostNetwork/hostPID/hostPath），可跑在 baseline 之下。
+    # 与 homelab 侧口径一致（见 k8s/helm/justfile 的 psa_baseline_ns）。
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted

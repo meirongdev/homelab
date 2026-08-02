@@ -1,0 +1,22 @@
+# ArgoCD —— oracle-k3s 专用**增量** values，叠加在 values/argocd.yaml 之上。
+# 用法（见 k8s/helm/justfile 的 deploy-argocd）：
+#   helm upgrade --install argocd argo/argo-cd -f values/argocd.yaml -f values/argocd-oracle.yaml
+#
+# 2026-08-02 ArgoCD 控制面从 homelab 迁到 oracle-k3s。动机：
+#   1. 内存 —— ArgoCD 全家 ~730Mi，是 homelab（12GB 笔记本 VM，实测 76%）上第二大的块，
+#      而 oracle 有 24GB、实测 38%。application-controller 的 reconcile 尖峰刚在
+#      1Gi 上 OOM 过一次（见 values/argocd.yaml 里的注释），抬到 1.5Gi 只是拖延。
+#   2. 恢复的鸡生蛋 —— 此前 homelab 整机故障时 ArgoCD 随之死亡，必须先人工
+#      `just deploy-argocd` 才能把集群拉回来。控制面在云上则 homelab 重建后自动收敛。
+# 代价：application-controller 到 homelab apiserver 多一跳 WAN（实测 RTT ~175ms），
+#   每次 reconcile 都要付。被管对象规模不变，故沿用 argocd.yaml 里的并发限流参数。
+#
+# 通盘取舍见 docs/plans/architecture/2026-08-02-homelab-to-oracle-workload-migration.md
+
+# ⚠️ 唯一必须覆盖的键。homelab 那份写的是 crds.install=false —— 因为它的 CRD 是
+# 早年 stock manifest 装的，收编进 Helm 时刻意不让 chart 接管、避免对正在被 CR 使用的
+# CRD 做 ownership 变更。oracle 是**全新集群，一个 ArgoCD CRD 都没有**，
+# 沿用 false 会让 Application/AppProject 压根建不出来（apply 直接 no matches for kind）。
+crds:
+  install: true
+  keep: true
