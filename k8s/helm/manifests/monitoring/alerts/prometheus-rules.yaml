@@ -136,6 +136,34 @@ spec:
               No cloudflared replicas are available. All `*.meirong.dev` services are inaccessible
               from the internet.
 
+    - name: kubelet
+      rules:
+        # chart 自带的 KubeletDown 已在 values 里 disabled（见 kube-prometheus-stack.yaml
+        # 的 defaultRules.disabled 注释）：它按 cluster 维度做 unless，而 oracle-k3s 上报
+        # kube_node_info 却**故意只抓 kubelet 的 cadvisor 端点**（job=kubelet-cadvisor），
+        # 永不存在 job="kubelet" → unless 恒成立 → 自 2026-08-02 起永久误报 critical。
+        # 这里保留 homelab 侧的真实检测能力，写法与 eso-alerts / external-dns-alerts
+        # 的 absent 类告警一致：显式锁 cluster="homelab"。
+        # ⚠️ 若将来 oracle 也开始抓 kubelet /metrics，把这里改回按 cluster 聚合即可。
+        - alert: KubeletDown
+          expr: |
+            count by (cluster) (kube_node_info{job="kube-state-metrics", cluster="homelab"})
+              unless on (cluster)
+            count by (cluster) (up{job="kubelet", metrics_path="/metrics", cluster="homelab"} == 1)
+          for: 15m
+          labels:
+            severity: critical
+            component: kubernetes
+          annotations:
+            summary: "homelab kubelet 已从 Prometheus 目标发现中消失"
+            description: |
+              homelab 集群不再有健康的 job="kubelet" 抓取目标（持续 15 分钟以上），
+              但 kube-state-metrics 仍能看到节点对象。节点级指标（cadvisor/资源用量）
+              会同时失效，多数依赖 kubelet 指标的告警将静默失效。
+              Check: `kubectl --context k3s-homelab get --raw /api/v1/nodes/k8s-node/proxy/metrics | head`
+              以及 ServiceMonitor kube-prometheus-stack-kubelet 是否仍存在。
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeletdown
+
     - name: multicluster-telemetry
       rules:
         - alert: OracleTelemetryAbsent
