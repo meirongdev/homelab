@@ -1,0 +1,181 @@
+# ebook-sync 监控 CronJob —— 2026-08-02 随 calibre 从 homelab 迁入。
+# 脚本只读书库 PVC 与 metadata.db，无跨集群耦合，逐字搬运。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ebook-sync-script
+  namespace: personal-services
+data:
+  sync-ebooks.sh: |
+    #!/bin/bash
+    # 在 K8s pod 内运行的 calibre-web 健康检查与 ingest 监控脚本
+    # CronJob 每 6h 触发一次
+    set -euo pipefail
+
+    CALIBRE_LIBRARY="/calibre-library"
+    INGEST_DIR="/cwa-book-ingest"
+    LOCK_FILE="/tmp/ebook-sync.lock"
+    LOG_FILE="/tmp/ebook-sync.log"
+
+    log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $@" | tee -a "$LOG_FILE"; }
+
+    log "=== ebook-sync 开始 ==="
+
+    # 锁 — 防止并发
+    if [ -f "$LOCK_FILE" ]; then
+        pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            log "另一个进程 (PID $pid) 正在运行，退出"; exit 0
+        fi
+        log "移除过期锁"; rm -f "$LOCK_FILE"
+    fi
+    echo "$$" > "$LOCK_FILE"
+    trap 'rm -f "$LOCK_FILE"' EXIT
+
+    # 1. 检查 ingest 目录
+    if [ ! -d "$INGEST_DIR" ]; then
+        log "错误: Ingest 目录不存在: $INGEST_DIR"; exit 1
+    fi
+    PENDING=$(find "$INGEST_DIR" -maxdepth 1 -type f 2>/dev/null | wc -l)
+
+    # 2. 检查数据库
+    if [ ! -f "$CALIBRE_LIBRARY/metadata.db" ]; then
+        log "错误: 元数据库不存在: $CALIBRE_LIBRARY/metadata.db"; exit 1
+    fi
+
+    TOTAL=$(sqlite3 "$CALIBRE_LIBRARY/metadata.db" "SELECT COUNT(*) FROM books;" 2>/dev/null || echo "0")
+    PREV_TOTAL_FILE="/tmp/ebook-sync-prev-total"
+
+    # 3. 计算新增
+    NEW_BOOKS=0
+    if [ -f "$PREV_TOTAL_FILE" ]; then
+        PREV=$(cat "$PREV_TOTAL_FILE")
+        NEW_BOOKS=$(( TOTAL - PREV ))
+    fi
+    echo "$TOTAL" > "$PREV_TOTAL_FILE"
+
+    # 4. 最近 5 本入库的书
+    RECENT=$(sqlite3 "$CALIBRE_LIBRARY/metadata.db" \
+      "SELECT title || ' — ' || author_sort FROM books ORDER BY id DESC LIMIT 5;" 2>/dev/null || true)
+
+    # 5. 磁盘用量
+    LIB_SIZE=$(du -sh "$CALIBRE_LIBRARY" 2>/dev/null | awk '{print $1}')
+    INGEST_SIZE=$(du -sh "$INGEST_DIR" 2>/dev/null | awk '{print $1}')
+
+    # 6. 输出报告
+    echo "============================================"
+    echo "  calibre-web 同步报告"
+    echo "============================================"
+    echo "  📚 书库总计:     $TOTAL 本"
+    echo "  📤 待导入 (ingest): $PENDING 个"
+    echo "  ✨ 本轮新增:    $NEW_BOOKS 本"
+    echo "  💾 书库大小:    $LIB_SIZE"
+    echo "  📥 Ingest 大小: $INGEST_SIZE"
+    echo "============================================"
+    echo "  最近入库:"
+    echo "$RECENT" | while IFS= read -r line; do
+        [ -n "$line" ] && echo "    · $line"
+    done
+    echo "============================================"
+
+    # 7. 健康判定
+    if [ "$PENDING" -gt 50 ]; then
+        log "警告: ingest 队列堆积 ($PENDING 个)，calibre-web 可能未正常消费"
+        [ -f "$PREV_TOTAL_FILE" ] && echo "" > "$PREV_TOTAL_FILE"
+        exit 1
+    fi
+
+    log "=== ebook-sync 完成 (总计 $TOTAL 本) ==="
+    exit 0
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ebook-sync-monitor
+  namespace: personal-services
+spec:
+  schedule: "0 */6 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 600
+      template:
+        spec:
+          serviceAccountName: calibre-web-sync
+          containers:
+            - name: sync-monitor
+              image: crocodilestick/calibre-web-automated@sha256:4ff5be5cd6f18d91cc72bf316260d8c34c980f09a862372bc77d25c9ddb0efef
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  source /scripts/sync-ebooks.sh
+              env:
+                - name: TZ
+                  value: "Asia/Shanghai"
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: books
+                  mountPath: /calibre-library
+                - name: books
+                  mountPath: /cwa-book-ingest
+                  subPath: ingest
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 128Mi
+          volumes:
+            - name: scripts
+              configMap:
+                name: ebook-sync-script
+                defaultMode: 0755
+            - name: books
+              persistentVolumeClaim:
+                claimName: calibre-books-local
+          restartPolicy: OnFailure
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: calibre-web-sync
+  namespace: personal-services
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: calibre-web-sync
+  namespace: personal-services
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: calibre-web-sync
+  namespace: personal-services
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: calibre-web-sync
+subjects:
+  - kind: ServiceAccount
+    name: calibre-web-sync
+    namespace: personal-services
