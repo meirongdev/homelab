@@ -1,0 +1,110 @@
+# Trivy Operator —— oracle-k3s 实例（镜像 CVE / 配置审计 / RBAC / 暴露密钥 持续扫描）
+# Chart: aqua/trivy-operator  ·  ArgoCD App: argocd/applications/trivy-operator-oracle.yaml
+#
+# 为什么 oracle 也要一份（2026-08-03 新增）：此前 trivy-operator 只在 homelab，
+# 而 2026-08 的两轮迁移把 **ArgoCD 控制面 / Loki / Tempo / Calibre-Web** 都搬到了 oracle
+# ——这些镜像随之脱离 CVE 扫描，形成盲区。oracle 上还常驻 ZITADEL(身份面)、KaraKeep、
+# Miniflux 等公网服务，本就是更该被扫的一侧。
+#
+# 与 homelab 那份（values/trivy-operator.yaml）的**三处实质差异**：
+#
+#   1. serviceMonitor **必须关**：oracle 没有 Prometheus Operator
+#      （实测 `kubectl get crd | grep monitoring.coreos.com` 为 0 条），
+#      开着会让整个 App 渲染出无法识别的 CRD 而同步失败。
+#      指标改由 oracle 的 otel-collector 直抓 :8080 再 remote-write 回 homelab Prometheus
+#      ——同 external-dns / opencost / ESO 的既有做法，见
+#      cloud/oracle/manifests/monitoring/otel-collector-config.yaml。
+#
+#   2. scanJobsConcurrentLimit 从 1 抬到 **2**：homelab 那个 1 是为「5600H 笔记本
+#      idle 74°C」的热约束设的，oracle 是 4 核云实例、实测 CPU 9%，没有该约束。
+#      顺带缓解一个已知运维痛点：Complete 状态的滞留 Job 会占住并发槽，
+#      limit=1 时任何一个滞留都会让整个扫描队列停摆。
+#
+#   3. accepted-risk CVE 列表按**镜像实际所在集群**重排（见下）。
+#
+# 其余（ClientServer + builtInTrivyServer 共享 DB、severity 只取 HIGH/CRITICAL、
+# ignoreUnfixed、clusterComplianceEnabled=false）与 homelab 同口径，理由见那份 values。
+
+targetNamespaces: ""
+excludeNamespaces: "kube-system,kube-public,kube-node-lease,trivy-system"
+
+operator:
+  # 见文件头 §2：oracle 无热约束，2 条并发 + 缓解滞留 Job 占槽
+  scanJobsConcurrentLimit: 2
+  scanJobTTL: "1h"
+  metricsFindingsEnabled: true
+  vulnerabilityScannerEnabled: true
+  vulnerabilityScannerScanOnlyCurrentRevisions: true
+  configAuditScannerEnabled: true
+  configAuditScannerScanOnlyCurrentRevisions: true
+  rbacAssessmentScannerEnabled: true
+  exposedSecretScannerEnabled: true
+  clusterComplianceEnabled: false        # CIS 节点合规交给 kube-bench（homelab 侧）
+  builtInTrivyServer: true
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 256Mi
+  limits:
+    cpu: 250m
+    memory: 512Mi                        # 同 homelab：256Mi 会 OOM（2026-07-16 实测）
+
+trivy:
+  mode: ClientServer
+  ignoreUnfixed: true
+  severity: "HIGH,CRITICAL"
+
+  # trivy ≥0.72.0 必须：0.71 的临时目录名会让多容器 workload 的扫描 100% 撞名互删。
+  image:
+    tag: "0.72.0"
+
+  # ---- Accepted-risk CVE 抑制 ----
+  # ⚠️ 格式坑（改动前必读，与 homelab 那份同）：
+  #   1. 必须 .trivyignore.yaml（YAML）格式——chart 把 ignoreFile 渲染成 "- CVE-xxx" 行，
+  #      纯文本解析器会把行首的 "-" 当成 ID → 静默失效；
+  #   2. 不能用 expired_at 字段——helm 的 YAML→JSON 往返会给日期加引号，
+  #      而 trivy(yaml.v3) 只对不带引号的标量做 timestamp 解析 → 所有扫描 Job FATAL。
+  #      复审日期只能写在 statement 里。
+  ignoreFileName: ".trivyignore.yaml"
+  ignoreFile:
+    vulnerabilities:
+      # --- ArgoCD（2026-08-02 从 homelab 迁入本集群）---
+      - id: CVE-2025-68121
+        statement: "Go stdlib, argocd v3.4.5 等上游重建镜像; v3.5 GA 约 2026-08-04, 2026-09 复审"
+      - id: CVE-2026-33186
+        statement: "grpc-go, argocd v3.4.5 无可用修复版, 等 v3.4.6/v3.5, 2026-09 复审"
+      # --- Calibre-Web-Automated（2026-08-03 从 homelab 迁入本集群）---
+      # 镜像内 kepubify 为 Go 1.17.8 构建，上游一直未重建
+      - id: CVE-2023-24538
+        statement: "CWA kepubify (Go 1.17.8), 上游未重建, 2026-11 复审"
+      - id: CVE-2023-24540
+        statement: "CWA kepubify (Go 1.17.8), 上游未重建, 2026-11 复审"
+      - id: CVE-2024-24790
+        statement: "CWA kepubify (Go 1.17.8), 上游未重建, 2026-11 复审"
+
+  # 扫描 Job（client）资源
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # 内置 Trivy server：持久化漏洞 DB。DB 可丢可重建（重下一次即可），
+  # 故用 local-path 无妨；oracle 节点剩余 155GB，2Gi 无压力。
+  storageClassName: local-path
+  storageSize: 2Gi
+  server:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+# ⚠️ 见文件头 §1：oracle 无 Prometheus Operator，ServiceMonitor CRD 不存在，必须关。
+serviceMonitor:
+  enabled: false
