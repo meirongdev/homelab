@@ -209,14 +209,22 @@ spec:
                 if [ "$files" -gt 0 ] || [ "$dirs" -gt 0 ]; then
                   echo "[fix-perms] fixed $files files and $dirs directories"
                 fi
-                sleep 30
+                # 5 分钟一轮（2026-08-02 从 30s 上调）：全量递归扫 ~1900 本书，30s 一轮
+                # 意味着占空比约 50%，在 100m limit 下实测 CPU 节流 91.6%，长期触发
+                # CPUThrottlingHigh，还白白吃掉这台单节点笔记本的 CPU/热预算。
+                # 摄入后权限最多晚 5 分钟修好——ingest 本就不是交互式路径，可接受。
+                sleep 300
               done
           resources:
             requests:
               cpu: 1m
               memory: 8Mi
             limits:
-              cpu: 100m
+              # limit 100m→500m（2026-08-02）：这是个突发型负载（扫一次几秒、然后长睡），
+              # 卡在 100m 只会把每轮扫描拉长成持续被节流的几十秒。放宽上限让它尽快扫完再
+              # 回到 idle，配合上面 30s→300s 的间隔，**平均** CPU 占用反而大幅下降。
+              # requests 保持 1m，调度与资源预留不受影响。
+              cpu: 500m
               memory: 32Mi
           volumeMounts:
             - name: books
