@@ -59,3 +59,17 @@ resources:
   - personal-services/timeslot.yaml
   - personal-services/trends.yaml
   - personal-services/excalidraw.yaml
+
+# ⚠️ otel-collector 的配置必须走 configMapGenerator，不能写成普通 ConfigMap 资源。
+# 2026-08-02 实测踩坑：把配置改成写 oracle 本地 Loki 后，ConfigMap 更新了、
+# DaemonSet spec 没变 → **Pod 根本不重启**（实测 age 2d5h / 0 restart），
+# 而 OTel Collector 只在启动时读一次配置文件 → 改动静默不生效，日志仍旧发往老地址。
+# （homelab 侧没这个问题：Helm chart 会在 pod template 上打 configmap checksum 注解。）
+# configMapGenerator 给生成的 ConfigMap 名字加内容哈希后缀，并自动重写 DaemonSet 的
+# volume 引用 → 配置一变，名字就变，DaemonSet 随之滚动。改配置只需改
+# monitoring/otel-collector-config.yaml。
+configMapGenerator:
+  - name: otel-collector-config
+    namespace: monitoring
+    files:
+      - config.yaml=monitoring/otel-collector-config.yaml
