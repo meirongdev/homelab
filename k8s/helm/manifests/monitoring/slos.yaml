@@ -27,20 +27,6 @@ spec:
   labels:
     cluster: homelab
   slos:
-    - name: "calibre-web-availability"
-      objective: 99.0
-      description: "Calibre-Web (book.meirong.dev) 入口可用性，error=5xx"
-      sli:
-        events:
-          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/personal-services_calibre-web_.*", envoy_response_code_class="5"}[{{.window}}])) OR on() vector(0)
-          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/personal-services_calibre-web_.*"}[{{.window}}]))
-      alerting:
-        name: CalibreWebGatewayHighErrorRate
-        labels: { slo_service: calibre-web }
-        pageAlert:
-          labels: { severity: critical }
-        ticketAlert:
-          labels: { severity: warning }
     - name: "grafana-availability"
       objective: 99.0
       description: "Grafana (grafana.meirong.dev) 入口可用性，error=5xx"
@@ -51,20 +37,6 @@ spec:
       alerting:
         name: GrafanaGatewayHighErrorRate
         labels: { slo_service: grafana }
-        pageAlert:
-          labels: { severity: critical }
-        ticketAlert:
-          labels: { severity: warning }
-    - name: "argocd-availability"
-      objective: 99.0
-      description: "ArgoCD (argocd.meirong.dev) 入口可用性，error=5xx"
-      sli:
-        events:
-          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/argocd_argocd-server_.*", envoy_response_code_class="5"}[{{.window}}])) OR on() vector(0)
-          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/argocd_argocd-server_.*"}[{{.window}}]))
-      alerting:
-        name: ArgoCDGatewayHighErrorRate
-        labels: { slo_service: argocd }
         pageAlert:
           labels: { severity: critical }
         ticketAlert:
@@ -118,6 +90,34 @@ spec:
   labels:
     cluster: oracle-k3s
   slos:
+    - name: "calibre-web-availability"
+      objective: 99.0
+      description: "[oracle-k3s] Calibre-Web (book.meirong.dev) 入口可用性，error=5xx"
+      sli:
+        events:
+          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/personal-services_calibre-web_.*", envoy_response_code_class="5"}[{{.window}}])) OR on() vector(0)
+          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/personal-services_calibre-web_.*"}[{{.window}}]))
+      alerting:
+        name: CalibreWebGatewayHighErrorRate
+        labels: { slo_service: calibre-web }
+        pageAlert:
+          labels: { severity: critical }
+        ticketAlert:
+          labels: { severity: warning }
+    - name: "argocd-availability"
+      objective: 99.0
+      description: "[oracle-k3s] ArgoCD (argocd.meirong.dev) 入口可用性，error=5xx"
+      sli:
+        events:
+          errorQuery: sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/argocd_argocd-server_.*", envoy_response_code_class="5"}[{{.window}}])) OR on() vector(0)
+          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/argocd_argocd-server_.*"}[{{.window}}]))
+      alerting:
+        name: ArgoCDGatewayHighErrorRate
+        labels: { slo_service: argocd }
+        pageAlert:
+          labels: { severity: critical }
+        ticketAlert:
+          labels: { severity: warning }
     - name: "zitadel-availability"
       objective: 99.0
       description: "ZITADEL (auth.meirong.dev) 入口可用性，error=5xx"

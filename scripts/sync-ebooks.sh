@@ -28,7 +28,9 @@ MANIFEST_DIR="${HOME}/.local/share/calibre-web-sync"
 LOG_FILE="${MANIFEST_DIR}/sync.log"
 
 # --- 传输目标 —— kubectl ---
-KUBE_CONTEXT="${KUBE_CONTEXT:-k3s-homelab}"
+# 2026-08-02: calibre 迁 oracle-k3s（书库 23G，homelab 那台笔记本 VM 磁盘吃紧）。
+# 仍可用 --context / KUBE_CONTEXT 覆盖。
+KUBE_CONTEXT="${KUBE_CONTEXT:-oracle-k3s}"
 NAMESPACE="personal-services"
 POD_SELECTOR="app=calibre-web"
 INGEST_PATH="/cwa-book-ingest"
