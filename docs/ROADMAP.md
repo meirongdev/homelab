@@ -1,6 +1,6 @@
 # Homelab Roadmap
 
-> Last updated: 2026-08-01
+> Last updated: 2026-08-02
 > 本文只回答两件事：**还剩什么没做**，和**做过什么/为什么不做**。
 > 实施细节不写在这里——每条都链到 `decisions/`（取舍）或 `plans/`（执行过程）。
 >
@@ -17,14 +17,15 @@
 |---|------|------|
 | 1 | **离站备份** | restic 仓库 → 云（OCI always-free / B2，`rclone` 或 `restic copy`）。当前只有 106 本地副本，火灾/失窃即全损。需人工先开云桶。（[2026-07-06 计划 Phase 5](plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md)，母文档 P0-1） |
 | 2 | **Terraform state → R2** | 5 个 root 全本地 state：笔记本单点、无锁、含明文密钥。顺带可评估 OpenTofu + `use_lockfile`。（[演进路线 Phase A](plans/architecture/2026-07-07-tech-debt-and-evolution.md)） |
-| 3 | **prometheus-operator CRD 补升** | 集群 10 个 `monitoring.coreos.com` CRD 停在 operator v0.89.0，实际运行 v0.92.1——`helm upgrade` 从不升级 chart 的 `crds/`。采纳进 ArgoCD 时刻意 `skipCrds: true` 把它与迁移解耦。两条路：去掉 `skipCrds` 让 ArgoCD 接管（推荐，之后随 chart 自动跟进），或手工 `kubectl apply --server-side`。需单独维护窗口验证。（[manual-helm 采纳决策](decisions/manual-helm-to-argocd-adoption.md)） |
-| 4 | **DGX Spark 入编** | 推理服务 IaC + GPU 指标（dcgm）+ Bifrost 双机 fallback + SLO。当前两台 GB10（各 128GB）只接了 node_exporter / smartctl_exporter。（母文档 P1-5） |
-| 5 | **恢复演练自动化** | 月度 CronJob 自动校验 restic restore，取代手工演练。（母文档 P2-8） |
-| 6 | **PSA: `backup` ns 定级** | 实测后决定是否纳入 `psa_baseline_ns`（`k8s/helm/justfile` 注释有标记）。注意 sqlite 备份 CronJob 用特权 hostPath 读 local-path 根，大概率要走 privileged/豁免。 |
-| 7 | **oracle external-dns 可观测** | homelab 的 4 条 external-dns 告警规则限定 `cluster="homelab"`，未覆盖 oracle 实例；需 oracle OTel 抓 `:7979`。非阻塞。（[external-dns 决策](decisions/external-dns-adoption.md)） |
-| 8 | **低优先 / 可选** | Renovate（chart/image 版本自动 PR）· MacBook `TargetDown` 静默规则 · Vault Dynamic Secrets（PostgreSQL 动态凭据，规模不需要）· Cloudflare Pro WAF（Managed Ruleset + OWASP CRS）。（母文档 P2） |
-
-| 9 | **oracle-k3s 外部 DNS 冗余** | 单点上游 `169.254.169.254:53` 曾致全网 ~20min 不可达（2026-08-01）。给节点 `resolv.conf` / CoreDNS `forward` 加备用上游（如 1.1.1.1），顺带降低 cloudflared 崩溃率。（[复盘](records/2026-08-01-oracle-k3s-dns-outage.md)） |
+| 3 | **DGX ×2 无文件系统指标** | 2026-08-02 补裸机告警时发现：两台 DGX **完全没有 `node_filesystem_*` 序列**（`count by (job) (node_filesystem_size_bytes)` 无 `node-exporter-dgx-spark`）——容器化 node_exporter（`--net=host --pid=host`）没挂宿主根目录，磁盘只能靠 SMART，写满了不会有任何告警。需在 `nv-dgx-spark` repo 给容器加 `-v /:/host:ro,rslave` + `--path.rootfs=/host` 重部署（`make node-exporter-deploy`）。同理 macbook 没有 `node_memory_MemAvailable_bytes`（darwin 无此指标，属固有限制、不可修）。 |
+| 4 | **prometheus-operator CRD 补升** | 集群 10 个 `monitoring.coreos.com` CRD 停在 operator v0.89.0，实际运行 v0.92.1——`helm upgrade` 从不升级 chart 的 `crds/`。采纳进 ArgoCD 时刻意 `skipCrds: true` 把它与迁移解耦。两条路：去掉 `skipCrds` 让 ArgoCD 接管（推荐，之后随 chart 自动跟进），或手工 `kubectl apply --server-side`。需单独维护窗口验证。（[manual-helm 采纳决策](decisions/manual-helm-to-argocd-adoption.md)） |
+| 5 | **DGX Spark 入编** | 推理服务 IaC + GPU 指标（dcgm）+ Bifrost 双机 fallback + SLO。当前两台 GB10（各 128GB）只接了 node_exporter / smartctl_exporter。（母文档 P1-5） |
+| 6 | **恢复演练自动化** | 月度 CronJob 自动校验 restic restore，取代手工演练。（母文档 P2-8） |
+| 7 | **PSA: `backup` ns 定级** | 实测后决定是否纳入 `psa_baseline_ns`（`k8s/helm/justfile` 注释有标记）。注意 sqlite 备份 CronJob 用特权 hostPath 读 local-path 根，大概率要走 privileged/豁免。 |
+| 8 | **oracle external-dns 可观测** | homelab 的 4 条 external-dns 告警规则限定 `cluster="homelab"`，未覆盖 oracle 实例；需 oracle OTel 抓 `:7979`。非阻塞。（[external-dns 决策](decisions/external-dns-adoption.md)） |
+| 9 | **oracle-k3s 外部 DNS 冗余** | 单点上游 `169.254.169.254:53` 曾致全网 ~20min 不可达（2026-08-01）。给节点 `resolv.conf` / CoreDNS `forward` 加备用上游（如 1.1.1.1），顺带降低 cloudflared 崩溃率。**仍在发作**：2026-08-02 复核，oracle 两个 cloudflared 副本 7d 各重启 8–11 次（homelab 侧 0 次）。（[复盘](records/2026-08-01-oracle-k3s-dns-outage.md)） |
+| 10 | **PriorityClass 全缺（加固）** | 全 repo `priorityClassName` **零命中**，53 个 pod 全在 priority 0，只有 k3s 自带组件有 `system-*-critical`。homelab 39/47 运行 pod 是 Burstable，而 kubelet 在 QoS 类**内**的排序判据正是 Pod Priority → 真到节点内存压力时，Vault / ArgoCD 与 calibre-web 同级。当前不紧急（7d 最低 MemAvailable 3.31G / 12.66G，离节点驱逐还远），属加固而非救火。模型见 [reference/k8s-qos-resource-management.md](reference/k8s-qos-resource-management.md)。 |
+| 11 | **低优先 / 可选** | Renovate（chart/image 版本自动 PR）· MacBook `TargetDown` 静默规则 · Vault Dynamic Secrets（PostgreSQL 动态凭据，规模不需要）· Cloudflare Pro WAF（Managed Ruleset + OWASP CRS）。（母文档 P2） |
 
 ### 已知问题（不阻塞，无人认领）
 
@@ -95,6 +96,7 @@ homelab + oracle-k3s 双双从 Flannel 迁 Cilium
 | 2026-07-31 | **manual-helm → ArgoCD 采纳**：`kube-prometheus-stack` + `external-dns` ×2；采纳前逐对象验证渲染等价；justfile 旧手动配方随 2026-08-01 清理删除，chart 版本唯一真源是 `argocd/applications/*.yaml` 的 `targetRevision`（紧急回滚模板见 `k8s/helm/justfile` 头部注释）([决策](decisions/manual-helm-to-argocd-adoption.md)) |
 | 2026-07-31 | **OTel 2026 对齐**：homelab collector 首次落地（此前根本没部署，容器日志从未进 Loki）+ oracle collector 现代化 ([决策](decisions/otel-2026-alignment.md)) |
 | 2026-07-31 | `manifests/` 目录化（一目录一 App）+ `gateway.yaml` 按路由拆 5 文件 ([决策](decisions/manifests-directory-per-app.md)) |
+| 2026-08-02 | **OOM 盲区闭环**（起因：`argocd-application-controller` 当天 10:01:47Z 静默 OOMKilled，无任何告警，靠人工翻 `lastState` 才发现）：① ArgoCD controller limit `1Gi→1536Mi`（同一故障 512Mi→1Gi 后在 App 数涨到 28 + CNPG/OpenCost 大 CRD 时复发；实测非泄漏，是 reconcile 尖峰，2d 峰值达 limit 94%）② 新增 `ContainerOOMKilled` 告警——此前**零条规则**引用 `kube_pod_container_status_last_terminated_reason`，且 `KubePodCrashLooping` 结构上抓不到（OOM 后干净重启不进 `CrashLoopBackOff`）③ 新增 `metal-nodes-resources` 组补齐 pve/106/DGX 的内存与文件系统告警——chart 的 node-exporter mixin 全部硬编码 `job="node-exporter"`，此前这几台机（含承载整个集群的 hypervisor）只有 `up==0`。阈值按主机分别实测标定，详见 [CONVENTIONS § Alerting](CONVENTIONS.md) 与 [k8s-qos-resource-management § 检测 OOMKill](reference/k8s-qos-resource-management.md) |
 
 ### 审计与清理（历史）
 

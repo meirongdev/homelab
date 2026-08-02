@@ -124,6 +124,30 @@ spec:
             summary: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} stuck Pending"
             description: "Storage class may be misconfigured or backing storage is unreachable."
 
+        # 2026-08-02 加：容器撞到**自身 memory limit** 被内核杀掉（exitCode 137）
+        # 此前是完全的盲区——chart 自带的 KubePodCrashLooping 抓不到，因为 OOM 后
+        # 容器干净重启、从不进 CrashLoopBackOff。argocd-application-controller 就这么
+        # 静默 OOM 了（2026-08-02 10:01:47Z），是人工翻 lastState 才发现的。
+        # 用 increase() 而非 ==1：last_terminated_reason 会一直停在 OOMKilled，
+        # 直接等值判断会让告警永久挂着；这里只在**新发生**时触发。
+        - alert: ContainerOOMKilled
+          expr: |
+            increase(kube_pod_container_status_restarts_total[15m]) > 0
+              and on (cluster, namespace, pod, container)
+            kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+          for: 0m
+          labels:
+            severity: warning
+            component: workload
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.pod }} [{{ $labels.container }}] 被 OOMKilled（{{ $labels.cluster }}）"
+            description: |
+              容器撞到自身 memory limit 被杀（exitCode 137），已重启。不影响邻居 pod，
+              但会中断该容器的服务，且**不会**触发 KubePodCrashLooping。
+              先看 7d 曲线形状再动手：稳定爬升=泄漏（查代码），基线震荡+偶发尖峰=头寸不够（抬 limit）。
+              Check: `kubectl --context k3s-homelab -n {{ $labels.namespace }} describe pod {{ $labels.pod }}`
+              逼近 limit 的容器排名与判读见 docs/reference/k8s-qos-resource-management.md「检测 OOMKill」。
+
         - alert: CloudflaredAllReplicasDown
           expr: kube_deployment_status_replicas_available{deployment="cloudflared"} == 0
           for: 2m
@@ -163,6 +187,101 @@ spec:
               Check: `kubectl --context k3s-homelab get --raw /api/v1/nodes/k8s-node/proxy/metrics | head`
               以及 ServiceMonitor kube-prometheus-stack-kubelet 是否仍存在。
             runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeletdown
+
+    # 2026-08-02 加：kube-prometheus-stack 的 node-exporter mixin 规则
+    # （NodeMemoryHighUtilization / NodeFilesystemAlmostOutOfSpace / CPU 那组）
+    # 全部硬编码 job="node-exporter"，**只覆盖两个 K3s 节点**。裸机与外部主机跑在
+    # node-exporter-metal-nodes / -dgx-spark / -macbook 下，一条都不匹配 →
+    # 在此之前，承载整个 homelab 集群的 hypervisor 连内存/磁盘告警都没有。
+    #
+    # 刻意**不**统一放宽成 job=~"node-exporter.*"：几台机的正常态差别太大，
+    # 一个阈值必然要么误报要么漏报，所以按主机分开定（阈值取自 2026-08-02 实测）。
+    # ⚠️ 采集能力不齐，写新规则前先确认指标存在：
+    #    - DGX ×2 **没有** node_filesystem_*（容器化 node_exporter 未挂宿主根）→ 磁盘只能靠 SMART
+    #    - macbook **没有** node_memory_MemAvailable_bytes（darwin 无此指标）
+    #    - pve 的 ZFS ARC 实测约等于 0（arc_size≈0），低 MemAvailable 是**虚拟机占用**，
+    #      不是可回收缓存；106 反过来，ARC 3.8G 必须加回来才是真可用量
+    - name: metal-nodes-resources
+      rules:
+        - alert: MetalNodeFilesystemLow
+          expr: |
+            100 * node_filesystem_avail_bytes{job="node-exporter-metal-nodes", fstype=~"ext4|xfs|zfs|btrfs"}
+              / node_filesystem_size_bytes{job="node-exporter-metal-nodes", fstype=~"ext4|xfs|zfs|btrfs"} < 15
+          for: 30m
+          labels:
+            severity: warning
+            component: infrastructure
+          annotations:
+            summary: "{{ $labels.nodename }} 的 {{ $labels.mountpoint }} 剩余空间 < 15%"
+            description: |
+              裸机主机文件系统吃紧（当前 {{ $value | printf "%.1f" }}% 可用）。
+              注意 106 的 /storage/restic 是 restic 仓库——填满会让**双集群夜备同时失败**。
+              Check: `ssh root@192.168.50.106 'zfs list -o name,used,avail'`（pve 换 192.168.50.4 + `df -h`）。
+              2026-08-02 基线：pve / = 79% 可用，106 /storage = 92%，106 /storage/restic = 51%。
+
+        - alert: MetalNodeFilesystemCritical
+          expr: |
+            100 * node_filesystem_avail_bytes{job="node-exporter-metal-nodes", fstype=~"ext4|xfs|zfs|btrfs"}
+              / node_filesystem_size_bytes{job="node-exporter-metal-nodes", fstype=~"ext4|xfs|zfs|btrfs"} < 8
+          for: 15m
+          labels:
+            severity: critical
+            component: infrastructure
+          annotations:
+            summary: "{{ $labels.nodename }} 的 {{ $labels.mountpoint }} 剩余空间 < 8%"
+            description: |
+              即将写满（当前 {{ $value | printf "%.1f" }}%）。ZFS 写满会让整个池转只读，
+              备份与 vzdump 一起失效。立即清理或扩容。
+
+        # pve：ARC≈0，低 MemAvailable 是 VM 分配的稳态，不是故障——用**绝对下限**而非百分比，
+        # 否则永久误报。2026-08-02 实测 676Mi，7d 最低 522Mi，且已在用 1.07G swap。
+        # 300Mi 触发说明比稳态又恶化了一截（多半是新开 VM 或宿主进程泄漏）。
+        - alert: ProxmoxHostMemoryLow
+          expr: node_memory_MemAvailable_bytes{job="node-exporter-metal-nodes", instance="192.168.50.4:9100"} < 300 * 1024 * 1024
+          for: 30m
+          labels:
+            severity: warning
+            component: infrastructure
+          annotations:
+            summary: "Proxmox 宿主 pve 可用内存 < 300Mi"
+            description: |
+              pve 承载整个 homelab K3s VM（12.6GiB）。可用内存跌破稳态基线，
+              继续恶化会触发宿主 OOM killer——被杀的可能就是 K3s VM 本身。
+              Check: `ssh root@192.168.50.4 'free -h; qm list'`，看是否有新 VM/进程占用。
+
+        # 106：ARC 是可回收缓存，必须加回来（减 arc_c_min 是 ARC 不会缩到的那部分）。
+        # 2026-08-02 实测真可用 4.98G/7.57G ≈ 66%，10% 阈值有充分余量。
+        - alert: StorageNodeMemoryLow
+          expr: |
+            100 * (
+              node_memory_MemAvailable_bytes{job="node-exporter-metal-nodes", instance="192.168.50.106:9100"}
+                + node_zfs_arc_size - node_zfs_arc_c_min
+            ) / node_memory_MemTotal_bytes{job="node-exporter-metal-nodes", instance="192.168.50.106:9100"} < 10
+          for: 30m
+          labels:
+            severity: warning
+            component: infrastructure
+          annotations:
+            summary: "storage-106 真实可用内存 < 10%（已计入可回收 ZFS ARC）"
+            description: |
+              该表达式已把 ARC 当可回收算回去，所以触发意味着**真的**没内存了，
+              不是 ARC 占着。106 内存不足会拖慢 restic 夜备与 ZFS。
+              Check: `ssh root@192.168.50.106 'free -h; arc_summary | head -30'`。
+
+        # DGX：模型常驻显存/内存，低可用是常态——同样用绝对下限。
+        # 2026-08-02 实测 9.9G / 11.2G 可用（共 121G），4GiB 触发有余量。
+        - alert: DgxSparkMemoryLow
+          expr: node_memory_MemAvailable_bytes{job="node-exporter-dgx-spark"} < 4 * 1024 * 1024 * 1024
+          for: 30m
+          labels:
+            severity: warning
+            component: infrastructure
+          annotations:
+            summary: "{{ $labels.nodename }} 可用内存 < 4GiB"
+            description: |
+              DGX Spark（GB10，128GB）可用内存偏低，新的推理请求可能 OOM。
+              Check: `ssh <dgx> 'free -h'`，看是否有该卸载的模型常驻。
+              ⚠️ DGX 没有 node_filesystem_* 指标（容器化 node_exporter 未挂宿主根），磁盘只能看 SMART。
 
     - name: multicluster-telemetry
       rules:
