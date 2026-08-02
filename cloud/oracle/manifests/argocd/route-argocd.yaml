@@ -1,0 +1,51 @@
+# argocd.meirong.dev -> argocd-server (argocd ns)，oracle-k3s 侧。
+# 2026-08-02 随 ArgoCD 控制面从 homelab 迁入本集群；homelab 侧的同名路由
+# （k8s/helm/manifests/gateway/route-argocd.yaml）在切换完成后删除。
+#
+# ⚠️ ArgoCD 自己的入口。改这条路由前想清楚：路由坏了就只能用
+# kubectl port-forward 修 ArgoCD（UI 进不去，但 GitOps 同步不受影响）。
+#
+# ⚠️ 光有这条路由**不会**把域名切过来：两个集群各有自己的 Cloudflare 隧道，
+# DNS 记录指向哪条隧道才是决定因素；而两侧 external-dns 都是 --policy=upsert-only
+# 且带各自的 owner TXT，谁也删不掉对方的记录。切换步骤见
+# docs/runbooks/argocd-control-plane-on-oracle.md「域名切换」一节。
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-gateway-to-argocd
+  namespace: argocd
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: argocd
+  to:
+    - group: ""
+      kind: Service
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: oracle-gateway
+      namespace: kube-system
+      port: 80
+  hostnames:
+    - "argocd.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: argocd-server
+          port: 80
+          weight: 1
