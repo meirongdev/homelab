@@ -1,0 +1,48 @@
+---
+# 跨集群可观测性的 NodePort 入口（oracle-k3s 侧）
+#
+# 2026-08-02 Loki/Tempo 从 homelab 迁到本集群后，跨 Tailscale 的写入方向反转：
+#   旧: oracle otel-collector → homelab 100.94.186.7:31080/:31317
+#   新: homelab otel-collector → oracle 100.107.166.37:31080/:31317
+# 端口号刻意与 homelab 侧原有配置保持一致，只换节点 IP，便于对照排查。
+#
+# 指标方向**没有**反转：Prometheus 仍在 homelab，oracle 的 prometheusremotewrite
+# 依旧打到 homelab 的 prometheus-otlp-external(31090)，见
+# k8s/helm/manifests/monitoring/monitoring-external.yaml。
+#
+# selector 抄自 chart 生成的 Service 标签（loki 7.1.0 / tempo 1.24.4），
+# 与 homelab 原文件逐字一致——两侧同 chart 版本，标签不会漂移。
+---
+# Loki Gateway — 供 homelab OTel Collector 推送日志（OTLP HTTP）
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki-gateway-external
+  namespace: monitoring
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/component: gateway
+  ports:
+    - port: 80
+      targetPort: 8080
+      nodePort: 31080
+      name: http
+---
+# Tempo gRPC receiver — 供 homelab OTel Collector 推送追踪（OTLP gRPC）
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo-otlp-external
+  namespace: monitoring
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: tempo
+  ports:
+    - port: 4317
+      targetPort: 4317
+      nodePort: 31317
+      protocol: TCP
+      name: otlp-grpc

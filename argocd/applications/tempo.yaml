@@ -1,8 +1,9 @@
 ---
-# Tempo — 分布式追踪后端（SingleBinary + filesystem 存储）
+# Tempo — 分布式追踪后端（SingleBinary + filesystem 存储），双集群唯一追踪存储
 # Chart: grafana/tempo
 # Values: k8s/helm/values/tempo.yaml
 # 2026-07-06: 从 Helm 直接管理迁入 ArgoCD（参照 falco.yaml 的 multi-source 模式）
+# 2026-08-02: destination 从 homelab 迁 oracle-k3s（与 loki 同批，理由见 loki.yaml 头注）。
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -25,7 +26,8 @@ spec:
       ref: values
 
   destination:
-    server: https://kubernetes.default.svc
+    # oracle-k3s 外部集群（Tailscale 端点；与 oracle-k3s App 同）
+    server: https://100.107.166.37:6443
     namespace: monitoring
 
   syncPolicy:
@@ -33,5 +35,6 @@ spec:
       prune: true
       selfHeal: true
     syncOptions:
-      - CreateNamespace=true
+      # monitoring ns 由 oracle-k3s kustomize App 拥有（同 falco.yaml / loki.yaml）
+      - CreateNamespace=false
       - ServerSideApply=true
