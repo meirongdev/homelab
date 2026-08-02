@@ -67,6 +67,8 @@ resources:
   # calibre 全家 2026-08-02 从 homelab 迁入（动机是磁盘：书库 23GB 是那台笔记本 VM 上
   # 最大的单一数据集）。open-notebook-ingest 跟着**书**走 —— 它挂载书库 PVC，而
   # open-notebook 应用本身留在 homelab，故改成经公网 API 推送。
+  # 护栏必须与 ebook-sync-monitor 同在（它当年泄漏 92 个 Job pod 打爆过节点）
+  - personal-services/personal-services-limits.yaml
   - personal-services/calibre-web.yaml
   - personal-services/calibre-ebook-sync.yaml
   - personal-services/open-notebook-ingest.yaml
