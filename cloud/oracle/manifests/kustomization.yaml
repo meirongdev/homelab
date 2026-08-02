@@ -72,9 +72,9 @@ resources:
   - personal-services/calibre-web.yaml
   - personal-services/calibre-ebook-sync.yaml
   - personal-services/open-notebook-ingest.yaml
-  # ⚠️ personal-services/route-calibre-web.yaml 刻意**尚未**列入 —— 同 argocd 那次：
-  # 提前挂上会让本集群 external-dns 把 book.meirong.dev 当作待新建、去 CF 建重复 CNAME。
-  # 属于域名切换步骤，不属于部署。
+  # 入口路由。2026-08-03 按顺序挂上：先摘 homelab 侧路由 → 删 CF 的 CNAME(book) 与
+  # owner TXT(cname-book) → 才挂这一行。顺序反了会建出重复 CNAME。
+  - personal-services/route-calibre-web.yaml
   # ⚠️ calibre-metadata/ 目录也**不在**这棵 kustomize 树里 —— 它是独立的 ArgoCD App
   # （argocd/applications/calibre-metadata.yaml），因为一次性 enrich Job 需要专门的
   # ignoreDifferences（job-controller 会注入 suspend/selector/labels，否则永久 OutOfSync）。
