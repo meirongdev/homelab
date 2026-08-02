@@ -58,6 +58,7 @@ resources:
   - argocd/namespace.yaml
   - argocd/homelab-cluster-external-secret.yaml
   - argocd/argocd-oidc-external-secret.yaml
+  - argocd/image-updater-secrets.yaml
   # ⚠️ argocd/route-argocd.yaml 刻意**尚未**列入：两个集群的 external-dns 都是
   # --policy=upsert-only 且 owner TXT 不同（homelab-externaldns / oracle-externaldns）。
   # 一旦本集群出现 argocd.meirong.dev 的 HTTPRoute，oracle 的 external-dns 会因为

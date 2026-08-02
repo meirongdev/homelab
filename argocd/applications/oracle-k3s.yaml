@@ -29,7 +29,8 @@ spec:
     path: cloud/oracle/manifests # Kustomize 树
 
   destination:
-    server: https://100.107.166.37:6443
+    # oracle-k3s 自身 —— 2026-08-02 ArgoCD 控制面迁入本集群后，这里是 in-cluster
+    server: https://kubernetes.default.svc
     namespace: default # 仅作无 namespace 资源的兜底；manifests 各自声明 ns
 
   syncPolicy:

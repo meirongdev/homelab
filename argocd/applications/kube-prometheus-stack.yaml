@@ -45,7 +45,7 @@ spec:
       ref: values
 
   destination:
-    server: https://kubernetes.default.svc
+    server: https://100.94.186.7:6443
     namespace: monitoring
 
   # admission webhook 的 caBundle 由 chart 的 admission-patch Job 在运行时注入自签证书，

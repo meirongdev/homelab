@@ -32,13 +32,21 @@ spec:
     # OTel Collector（homelab 节点代理：日志→Loki、OTLP 追踪→Tempo；2026-07-31）
     - https://open-telemetry.github.io/opentelemetry-helm-charts
 
+  # ⚠️ 2026-08-02 ArgoCD 控制面迁到 oracle-k3s 后，`kubernetes.default.svc` 的所指
+  # **变了**：它现在是 oracle 自己，不再是 homelab。homelab 变成需要显式列出的外部集群。
+  # 三条都保留：切换期间新旧控制面并存，两种写法都要能通过 project 校验。
   destinations:
+    # in-cluster —— 控制面所在集群。迁移前=homelab，迁移后=oracle-k3s。
     - server: https://kubernetes.default.svc
+      namespace: "*"
+    # homelab Tailscale 端点(canonical;cluster Secret + Application 均用此)
+    - server: https://100.94.186.7:6443
       namespace: "*"
     # oracle-k3s 公网端点(保留作 fallback)
     - server: https://<ORACLE_PUBLIC_IP>:6443
       namespace: "*"
-    # oracle-k3s Tailscale 端点(canonical;cluster Secret + Application 均用此)
+    # oracle-k3s Tailscale 端点(迁移前 canonical;迁移后 oracle 自己走 in-cluster,
+    # 这条留着兼容尚未重写完的 Application 与紧急回滚)
     - server: https://100.107.166.37:6443
       namespace: "*"
 
