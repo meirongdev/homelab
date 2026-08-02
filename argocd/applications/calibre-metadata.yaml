@@ -11,10 +11,11 @@ spec:
   source:
     repoURL: https://github.com/meirongdev/homelab
     targetRevision: main
-    path: k8s/helm/manifests/calibre-metadata
+    path: cloud/oracle/manifests/calibre-metadata
 
   destination:
-    server: https://100.94.186.7:6443
+    # 2026-08-03 随 calibre 迁 oracle-k3s（= 控制面所在集群，故写 in-cluster）
+    server: https://kubernetes.default.svc
     namespace: personal-services
 
   # 一次性 Job (enrich) 创建后由 job-controller 注入 suspend/selector/template labels，
