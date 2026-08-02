@@ -49,12 +49,13 @@ backup-status:
 # ⬇️ 电子书同步 ⬇️
 
 # 查看电子书同步 CronJob 状态
+# ⚠️ calibre 全家 2026-08-02 迁 oracle-k3s，故这里用 calibre_ctx 而非 ctx
 ebook-sync-status:
     @echo "=== 电子书同步 CronJob ==="
-    @kubectl --context {{ctx}} get cronjob -n personal-services ebook-sync-monitor
+    @kubectl --context {{calibre_ctx}} get cronjob -n personal-services ebook-sync-monitor
     @echo ""
     @echo "=== 最近的 Job 执行 ==="
-    @kubectl --context {{ctx}} get jobs -n personal-services -l job-name=ebook-sync-monitor --sort-by=.metadata.creationTimestamp | tail -5
+    @kubectl --context {{calibre_ctx}} get jobs -n personal-services -l job-name=ebook-sync-monitor --sort-by=.metadata.creationTimestamp | tail -5
 
 # 本地同步电子书 (测试模式)
 sync-ebooks-dry-run:
@@ -90,12 +91,12 @@ ebook-sync-logs:
 # 测试模式查看重复书籍
 cleanup-calibre-dry-run:
     @echo "🔍 测试模式: 显示会删除的重复书籍..."
-    bash ../../scripts/cleanup-duplicates.sh k3s-homelab --dry-run
+    bash ../../scripts/cleanup-duplicates.sh oracle-k3s --dry-run
 
 # 清理 calibre 数据库中的重复书籍
 cleanup-calibre-duplicates:
     @echo "🧹 清理 calibre 数据库中的重复书籍..."
-    bash ../../scripts/cleanup-duplicates.sh k3s-homelab
+    bash ../../scripts/cleanup-duplicates.sh oracle-k3s
 
 # 查看清理日志
 cleanup-logs:
@@ -320,6 +321,10 @@ argocd_ns := "argocd"
 # cloud/oracle/manifests/argocd/homelab-cluster-external-secret.yaml）。
 # 迁移经过与回滚路径见 docs/runbooks/argocd-control-plane-on-oracle.md。
 argocd_ctx := "oracle-k3s"
+
+# calibre 全家（calibre-web / ebook-sync / calibre-metadata）2026-08-02 迁 oracle-k3s
+# ——动机是磁盘：书库 23G 是 homelab 那台 124GB 笔记本 VM 上最大的单一数据集。
+calibre_ctx := "oracle-k3s"
 
 # Argo CD chart version — 调整前先 helm search repo argo/argo-cd 看最新
 # 10.1.4 = appVersion v3.4.5（从 v3.3.9 升级，修 CVE-2025-68121 / CVE-2026-33186 Go 运行时 CVE）。
