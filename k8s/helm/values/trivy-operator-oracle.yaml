@@ -11,7 +11,8 @@
 #   1. serviceMonitor **必须关**：oracle 没有 Prometheus Operator
 #      （实测 `kubectl get crd | grep monitoring.coreos.com` 为 0 条），
 #      开着会让整个 App 渲染出无法识别的 CRD 而同步失败。
-#      指标改由 oracle 的 otel-collector 直抓 :8080 再 remote-write 回 homelab Prometheus
+#      指标改由 oracle 的 otel-collector 直抓 Service 的 metrics 端口(**80**，不是 8080)
+#      再 remote-write 回 homelab Prometheus
 #      ——同 external-dns / opencost / ESO 的既有做法，见
 #      cloud/oracle/manifests/monitoring/otel-collector-config.yaml。
 #
@@ -24,6 +25,13 @@
 #
 # 其余（ClientServer + builtInTrivyServer 共享 DB、severity 只取 HIGH/CRITICAL、
 # ignoreUnfixed、clusterComplianceEnabled=false）与 homelab 同口径，理由见那份 values。
+
+# ⚠️ ArgoCD 用 Application 名当 helm release 名，不加这条的话本集群对象会叫
+# `trivy-operator-oracle`，与 homelab 的 `trivy-operator` 不一致 —— 告警/看板/runbook
+# 里的名字就得分两套写。对齐命名（同 oracle otel-collector 的既有做法）。
+# 2026-08-03 实测教训：最初漏了这条，collector 抓 `trivy-operator.trivy-system.svc`
+# 直接 NXDOMAIN。
+fullnameOverride: trivy-operator
 
 targetNamespaces: ""
 excludeNamespaces: "kube-system,kube-public,kube-node-lease,trivy-system"

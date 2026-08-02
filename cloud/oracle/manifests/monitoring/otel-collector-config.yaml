@@ -142,7 +142,11 @@ receivers:
   # Trivy Operator 安全发现 → homelab Prometheus (cluster=oracle-k3s)。
   # 2026-08-03 随 oracle 侧 trivy-operator 上线新增。本集群没有 Prometheus Operator
   # （实测 `kubectl get crd | grep monitoring.coreos.com` 为 0 条），所以不同于 homelab
-  # 用 ServiceMonitor，这里由 collector 直抓 operator 的 :8080 再 remote-write。
+  # 用 ServiceMonitor，这里由 collector 直抓 operator 的 metrics 端口再 remote-write。
+  # ⚠️ 端口是 **80** 不是 8080 —— chart 的 Service 把 metrics 暴露在 80（pod 内才是 8080）；
+  #    写 8080 会一直失败。该 Service 还是 headless(ClusterIP: None)，DNS 解析到 pod IP，正常。
+  # ⚠️ 目标名依赖 values 里的 fullnameOverride: trivy-operator —— 不加的话 ArgoCD 会用
+  #    Application 名(trivy-operator-oracle)当 helm release 名，这里直接 NXDOMAIN。
   # 消费方是共享的 manifests/monitoring/alerts/trivy-alerts.yaml —— 那些规则本就写成
   # `sum by (cluster)`，指标一到就自动覆盖本集群，无需改告警表达式。
   prometheus/trivy-operator:
@@ -151,7 +155,7 @@ receivers:
         - job_name: 'trivy-operator'
           scrape_interval: 60s
           static_configs:
-            - targets: ['trivy-operator.trivy-system.svc.cluster.local:8080']
+            - targets: ['trivy-operator.trivy-system.svc.cluster.local:80']
               labels:
                 cluster: oracle-k3s
 
