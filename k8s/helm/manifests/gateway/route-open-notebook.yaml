@@ -4,8 +4,11 @@
 # 5055 不对外暴露（上游 reverse-proxy 文档明确"只需代理一个端口"）。
 # 前端用 WebSocket，Cilium Gateway 原生支持 upgrade，无需额外配置。
 #
-# 本 ns 的 ReferenceGrant 已由 route-calibre-web.yaml 里的 `allow-gateway-to-calibre` 覆盖
-# （它没有限定 Service 名，作用于 personal-services 下全部 Service），故此处不重复声明。
+# ⚠️ 2026-08-02：本 ns 的 ReferenceGrant 原先**寄生在 route-calibre-web.yaml** 里
+# （那条 `allow-gateway-to-calibre` 没限定 Service 名，作用于 personal-services 下全部
+# Service）。calibre 迁 oracle 要删那个文件，会顺手弄断 notebook.meirong.dev ——
+# 故在此声明一条独立、命名如实的 grant。两条同名不同实体可以共存（ReferenceGrant 是
+# 累加式授权），旧的随 route-calibre-web.yaml 一起删，中间没有空窗。
 #
 # DNS 由 external-dns 从本 HTTPRoute 建（proxied CNAME + owner TXT），不要动 cloudflare/terraform。
 ---
@@ -34,3 +37,19 @@ spec:
           name: open-notebook
           port: 8502
           weight: 1
+---
+# personal-services 下 HTTPRoute → Service 的引用授权（不限定 Service 名）。
+# 从 route-calibre-web.yaml 里独立出来，见文首说明。
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-gateway-to-personal-services
+  namespace: personal-services
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: personal-services
+  to:
+    - group: ""
+      kind: Service
