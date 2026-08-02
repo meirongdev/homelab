@@ -69,15 +69,26 @@ config:
       timeout: 5s
 
   exporters:
-    # Loki 3.x 原生 OTLP 摄入端点（oracle 侧走 NodePort 到同一个 loki-gateway，
-    # 这里是集群内直达；http 明文，无需 tls 段）
+    # 2026-08-02: Loki/Tempo 迁至 oracle-k3s 后，本集群改为**跨 Tailscale 写出**
+    # （方向与迁移前相反，此前是 oracle 写进来）。两端 NodePort 号沿用旧值，只换节点 IP。
+    # 跨 Tailscale 出口一律加持久化发送队列（bbolt，复用 storeCheckpoints preset 已挂的
+    # file_storage/{/var/lib/otelcol}）：collector 重启或链路中断时缓冲不丢，恢复后续传
+    # ——集群内直达时不需要，跨 WAN 必须有，做法同 oracle 侧 collector。
+    #
+    # Loki 3.x 原生 OTLP 摄入端点（loki-gateway :80 → NodePort 31080）
     otlphttp/loki:
-      endpoint: http://loki-gateway.monitoring.svc.cluster.local/otlp
-    # Tempo OTLP gRPC（集群内明文）
-    otlp/tempo:
-      endpoint: tempo.monitoring.svc.cluster.local:4317
+      endpoint: http://100.107.166.37:31080/otlp
       tls:
         insecure: true
+      sending_queue:
+        storage: file_storage
+    # Tempo OTLP gRPC（tempo :4317 → NodePort 31317）
+    otlp/tempo:
+      endpoint: 100.107.166.37:31317
+      tls:
+        insecure: true
+      sending_queue:
+        storage: file_storage
 
   service:
     pipelines:

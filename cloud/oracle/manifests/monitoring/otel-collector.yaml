@@ -1,10 +1,12 @@
 ---
 # OTel Collector DaemonSet for oracle-k3s
 # Collects:
-#   - container logs        → homelab Loki via Tailscale (otlphttp)
+#   - container logs        → Loki，集群内直达（2026-08-02 Loki 迁入本集群前是跨 Tailscale）
 #   - cloudflared metrics   → homelab Prometheus via Tailscale (prometheusremotewrite)
 #   - cilium-envoy metrics  → homelab Prometheus（网关 L7 RED 指标，oracle 网关 SLO 数据源）
-#   - application traces    → homelab Tempo via Tailscale (otlp grpc)
+#   - application traces    → Tempo，集群内直达（同 Loki）
+# ⚠️ 日志/追踪与指标的方向**不再一致**：Loki/Tempo 在本集群，Prometheus 仍在 homelab
+#    （它要贴着抓取目标，不搬）。排查时别默认「所有遥测都往同一个方向走」。
 # Architecture: apps/filelog/prometheus -> memory_limiter/k8sattributes/resource/batch -> otlphttp / prometheusremotewrite / otlp
 # 2026-07-31 对齐 2026 OTel 实践（docs/decisions/otel-2026-alignment.md）：
 #   filelog 换 container operator；file_storage checkpoint + 跨 Tailscale 持久发送队列；
@@ -402,15 +404,13 @@ data:
         timeout: 5s
 
     exporters:
-      # Logs → homelab Loki via Tailscale (OTLP HTTP)
+      # Logs → Loki，**集群内直达**（2026-08-02 Loki 从 homelab 迁入本集群后，
+      # 这条从跨 Tailscale NodePort 变成 svc 直连；同时去掉持久化发送队列——
+      # 那是为跨 WAN 链路中断准备的，同节点内不需要）
       otlphttp:
-        endpoint: "http://100.94.186.7:31080/otlp"
+        endpoint: "http://loki-gateway.monitoring.svc.cluster.local/otlp"
         tls:
           insecure: true
-        # 跨 Tailscale 出口：发送队列持久化（bbolt），collector 重启或链路中断时
-        # 缓冲中的日志不再丢失，恢复后续传
-        sending_queue:
-          storage: file_storage
       # Metrics → homelab Prometheus via Tailscale (Prometheus Remote Write)
       # （刻意不加持久化队列：PRW exporter 的 WAL 上游仍是 experimental 且有已知问题；
       #   指标断点在下一个抓取周期自愈，容忍度远高于日志/追踪）
@@ -420,13 +420,11 @@ data:
           insecure: true
         external_labels:
           cluster: oracle-k3s
-      # Traces → homelab Tempo via Tailscale (OTLP gRPC)
+      # Traces → Tempo，集群内直达（同上，2026-08-02 起 Tempo 在本集群）
       otlp/tempo:
-        endpoint: "100.94.186.7:31317"
+        endpoint: "tempo.monitoring.svc.cluster.local:4317"
         tls:
           insecure: true
-        sending_queue:
-          storage: file_storage
       debug:
         verbosity: basic
 

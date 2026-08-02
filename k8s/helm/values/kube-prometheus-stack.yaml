@@ -121,6 +121,11 @@ grafana:
   # "Datasource provisioning error: data source not found" 并整个 Pod CrashLoop。
   # 解法：先用 deleteDatasources 按 name 删旧记录，再以稳定 uid 重建（Grafana 官方对
   # “给已有数据源赋 uid”的标准做法）。删除-重建用同一 uid，幂等、对引用方无副作用。
+  #
+  # ⚠️ 2026-08-02: Loki/Tempo 已迁至 oracle-k3s，两个 url 从集群内 svc 改为
+  # **oracle 节点的 Tailscale IP + NodePort**（Grafana 仍在 homelab，不搬——它要贴着
+  # Prometheus）。uid 保持 loki/tempo 不变，所有 dashboard 与 tracesToLogsV2 引用不受影响。
+  # 该链路是跨 WAN 的（实测 RTT ~175ms），面板首屏会比迁移前慢一档，属预期。
   deleteDatasources:
     - name: Loki
       orgId: 1
@@ -130,7 +135,7 @@ grafana:
     - name: Loki
       type: loki
       uid: loki
-      url: http://loki-gateway.monitoring.svc.cluster.local
+      url: http://100.107.166.37:31080
       access: proxy
       isDefault: false
       jsonData:
@@ -143,7 +148,8 @@ grafana:
     - name: Tempo
       type: tempo
       uid: tempo
-      url: http://tempo.monitoring.svc.cluster.local:3200
+      # 查询走 3200/HTTP 的 NodePort 31320，与写入用的 31317(OTLP gRPC) 是两个端口
+      url: http://100.107.166.37:31320
       access: proxy
       isDefault: false
       jsonData:
