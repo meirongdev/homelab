@@ -1,7 +1,7 @@
 # homelab → oracle-k3s 负载迁移
 
 > 日期: 2026-08-02
-> 状态: ✅ Phase 2 + Phase 3(ArgoCD) 已完成主体；收尾步骤见文末「未完成」
+> 状态: ✅ Phase 2 + Phase 3(ArgoCD) **全部完成**（含域名切换与旧实例退役）；剩余候选见 §5
 > 范围: 盘点 homelab 上还有哪些负载能搬到 oracle-k3s，并执行其中两项
 > 定位: 承接 [2026-07-04 舰队架构优化](2026-07-04-fleet-architecture-optimization.md)
 >   的「算力倒挂 / 故障域集中」问题陈述，但**推翻了它的两条结论**（见 §4）
@@ -98,15 +98,33 @@ Vault 是唯一保留分歧的一项：舰队文档把它留在 pve，而它自�
 真正的收益是「homelab 重启后 Vault sealed 期间 oracle 刷不了密钥」这个窗口，
 属可用性而非容量问题，不该和本次的容量目标混在一起做。
 
-## 5. 未完成 / 下一步
+## 5. 收尾实测 + 剩余候选
+
+### 迁移前后（实测）
+
+| | 迁移前 | 迁移后 |
+|---|---|---|
+| homelab pod 内存合计 | ~6.2 GB | **5.2 GB**（-1.0 GB）|
+| homelab 节点 MemAvailable | 3.3–4.2 GB | **4.4 GB** |
+| homelab 磁盘可用 | 43.0 GB | 43.5 GB（Loki 实际占用远小于 5Gi 配额）|
+| oracle 内存 | 8375 Mi (38%) | 9715 Mi (44%) |
+| ArgoCD Applications | 28（homelab 控制面）| **28/28 Synced+Healthy**（oracle 控制面）|
+
+⚠️ **别用 `kubectl top nodes` 的百分比衡量这类迁移的收益**：homelab 节点 workingSet
+8463 Mi 里有 **3236 Mi 是 OS/页缓存**，删 Pod 不会让它缩（页缓存是可回收的，但不会
+主动释放）。所以节点百分比只从 76% 动到 72%，而 Pod 层面实际释放了整整 1.0 GB。
+要看真实头寸就看 **MemAvailable**，或把各 Pod 的 workingSet 加总。
+
+**磁盘几乎没省** —— Loki 的 PVC 配额虽是 5Gi，7 天保留期下实际只占约 0.5 GB。
+homelab 的磁盘压力（65%，剩 43.5 GB）**得靠搬 calibre 才能解决**，那才是 38 GB。
+
+### 剩余候选
 
 | 项 | 说明 |
 |---|---|
-| **`argocd.meirong.dev` 域名切换** | 仍指向 homelab 隧道。步骤（含 external-dns `upsert-only` + owner TXT 的坑）见 runbook「域名切换」一节 |
-| **退役 homelab ArgoCD** | ⚠️ 必须**先摘 Application/AppProject 的 finalizer 再删**，否则级联删掉 homelab 上的一切。见 runbook |
-| **退役 homelab Loki/Tempo** | 目前作为未纳管的孤儿仍在运行（占 ~240 Mi + 5 GB）。删掉即丢失迁移前的历史日志（values 自述「日志为 P2 可丢数据」，保留期 168h）|
-| **calibre-web 迁 oracle** | 磁盘收益最大的一笔（38 GB），本次未做 |
-| **Vault 迁 oracle** | 见 §4，属可用性议题 |
+| **calibre-web 迁 oracle** | 磁盘收益最大的一笔（23G 书库 + 15G config = **38 GB**），arm64 已核实可用。homelab 磁盘瓶颈的唯一实质解法 |
+| **Vault 迁 oracle** | 见 §4，属可用性议题而非容量议题，内存收益仅 ~160 Mi |
+| Vault 孤儿 path 清理 | `secret/homelab/argocd-oracle-cluster` 随本次迁移失去消费者，未删 |
 
 ## 相关
 
