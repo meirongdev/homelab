@@ -45,7 +45,8 @@ homelab/
 |------|------|------|
 | K3s | `just setup-k8s` | 安装 K3s (k8s/ansible/) |
 | 部署 | GitOps（`git push`） | LGTM/otel/external-dns 全 GitOps：charts+values 在 `argocd/applications/` 与 `k8s/helm/values/` |
-| ArgoCD | `just deploy-argocd` | 安装 ArgoCD + 注册所有 Application (幂等) |
+| ArgoCD | `just deploy-argocd` | 安装/升级 ArgoCD chart + AppProject (幂等)。⚠️ **控制面在 oracle-k3s**，不含 Application 注册 |
+| ArgoCD | `just deploy-argocd-apps` | 注册 Application 对象。☠️ destination 未重写时跑它会把 homelab 全套负载装到 oracle |
 | ArgoCD | `just argocd-password` | 打印 admin 初始密码 |
 | GitOps | `git push` → ArgoCD 自动同步 | 3 分钟轮询, 不可手动 kubectl apply 覆盖 |
 | Vault | `just deploy-vault` | 部署 Vault |
@@ -62,6 +63,10 @@ homelab/
 
 ## Architecture Quick Reference
 
+- **GitOps 控制面在 oracle-k3s**（2026-08-02 迁移）：`destination.server: kubernetes.default.svc`
+  在 Application 里指的是 **oracle**；homelab 负载必须显式写 `https://100.94.186.7:6443`。
+  日志(Loki)/追踪(Tempo) 同批迁 oracle，**但 Prometheus/Grafana/Alertmanager 仍在 homelab**
+  ——遥测不是单向的。见 `docs/runbooks/argocd-control-plane-on-oracle.md`
 - **CNI**: 双集群 Cilium eBPF + VXLAN
 - **Ingress**: Cilium Gateway API (唯一入口)
 - **跨集群**: Tailscale Pod CIDR 路由 + Cilium ClusterMesh

@@ -1,24 +1,10 @@
 ---
 # External NodePort services for cross-cluster observability
-# Allows oracle-k3s OTel Collector to push logs to homelab Loki via Tailscale
-# Allows oracle-k3s OTel Collector to push metrics to homelab Prometheus via Tailscale
----
-# Loki Gateway — exposed for oracle-k3s OTel Collector (logs)
-apiVersion: v1
-kind: Service
-metadata:
-  name: loki-gateway-external
-  namespace: monitoring
-spec:
-  type: NodePort
-  selector:
-    app.kubernetes.io/name: loki
-    app.kubernetes.io/component: gateway
-  ports:
-    - port: 80
-      targetPort: 8080
-      nodePort: 31080
-      name: http
+#
+# ⚠️ 2026-08-02 起这里**只剩 Prometheus 一条**。Loki 与 Tempo 已迁往 oracle-k3s，
+# 跨集群的日志/追踪方向随之反转（改成 homelab 写出去），对应的 NodePort 也搬到了
+# cloud/oracle/manifests/monitoring/monitoring-external.yaml。
+# 指标方向没变：oracle 的 OTel Collector 仍经 Tailscale prometheusremotewrite 到这里。
 ---
 # Prometheus OTLP receiver — exposed for oracle-k3s OTel Collector (metrics push)
 # Prometheus must have enableFeatures: [otlp-write-receiver] set
@@ -37,20 +23,3 @@ spec:
       targetPort: 9090
       nodePort: 31090
       name: http
----
-# Tempo gRPC receiver — exposed for oracle-k3s OTel Collector (traces push)
-apiVersion: v1
-kind: Service
-metadata:
-  name: tempo-otlp-external
-  namespace: monitoring
-spec:
-  type: NodePort
-  selector:
-    app.kubernetes.io/name: tempo
-  ports:
-    - port: 4317
-      targetPort: 4317
-      nodePort: 31317
-      protocol: TCP
-      name: otlp-grpc

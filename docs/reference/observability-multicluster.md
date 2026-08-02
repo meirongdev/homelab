@@ -1,28 +1,42 @@
 # Multi-Cluster Observability Architecture
 
-> Last updated: 2026-07-31
+> Last updated: 2026-08-02
 > Status: 生效事实
 
 ## Overview
 
-Two k3s clusters are monitored from a single Grafana/Loki/Prometheus/Tempo stack on the homelab cluster. Cross-cluster connectivity is provided by Tailscale. All oracle-k3s telemetry (logs + metrics + traces) is pushed via a single OTel Collector DaemonSet.
+⚠️ **2026-08-02 起遥测不再是单向的。** Loki(日志) 与 Tempo(追踪) 已迁到 **oracle-k3s**，
+Prometheus/Grafana/Alertmanager 仍在 **homelab**。排查时别默认「所有遥测都往同一个方向走」。
+
+- **日志 / 追踪** → 汇聚在 oracle：homelab 跨 Tailscale 写出，oracle 集群内直达
+- **指标** → 仍汇聚在 homelab：oracle 跨 Tailscale `prometheusremotewrite` 写入（方向未变）
+- **Grafana** 留在 homelab（贴着 Prometheus），经 NodePort 跨 Tailscale 查询 oracle 的 Loki/Tempo
+
+搬 Loki/Tempo 的理由：homelab 是 12GB 笔记本 VM（内存实测 76%、磁盘 66%），
+而 Loki/Tempo 是纯「写入-存储」组件，不像 Prometheus 需要贴着抓取目标 —— 是 LGTM 里
+唯一可安全切分出去的子集。附带收益：homelab 整机故障时**故障前的日志与追踪还在**，
+此前它们和被观测对象同归于尽（PVC 在同一块盘上）。
+取舍全集见 [../plans/architecture/2026-08-02-homelab-to-oracle-workload-migration.md](../plans/architecture/2026-08-02-homelab-to-oracle-workload-migration.md)。
 
 ```
 ┌─────────────────────────────────────┐     Tailscale     ┌─────────────────────────────────────┐
 │          k3s-homelab                │                    │          oracle-k3s                 │
 │  (100.94.186.7)                     │                    │  (100.107.166.37)                   │
 │                                     │                    │                                     │
-│  Grafana ◄── Loki      :31080/otlp │◄── logs (OTLP) ─── │  OTel Collector DaemonSet           │
-│  Grafana ◄── Prometheus :31090     │◄── metrics (PRW) ── │    ├ filelog → logs pipeline         │
-│  Grafana ◄── Tempo     :31317     │◄── traces (OTLP) ── │    ├ otlp → traces pipeline          │
-│                                     │                    │    ├ prometheus/node-exporter        │
-│  scrapeClasses:                     │                    │    ├ prometheus/kube-state-metrics   │
-│    cluster=homelab (all local jobs) │                    │    ├ prometheus/cloudflared          │
-│                                     │                    │                                          │
-│  OTel Collector (homelab logs+traces)│                    │  node-exporter (hostNetwork:9100)    │
-│  node-exporter, kube-state-metrics  │                    │  kube-state-metrics (:8080)          │
+│  Prometheus :31090                 │◄── metrics (PRW) ── │  OTel Collector DaemonSet           │
+│  Alertmanager                       │                    │    ├ filelog → logs ──┐              │
+│  Grafana ──── logs query :31080 ──►│                    │    ├ otlp → traces ───┤ 集群内直达   │
+│         └──── trace query :31320 ──►│                    │    ├ prometheus/* ────┘→ PRW 跨网    │
+│                                     │                    │                       │              │
+│  OTel Collector ─ logs   :31080 ──►│                    │                       ▼              │
+│         (homelab)└trace  :31317 ──►│                    │  Loki   (:31080 gateway / :31320 查询)│
+│  node-exporter, kube-state-metrics  │                    │  Tempo  (:31317 ingest)              │
 └─────────────────────────────────────┘                    └─────────────────────────────────────┘
 ```
+
+> Tempo 的写入口(4317/gRPC → 31317)与查询口(3200/HTTP → 31320)是**两个端口**；
+> Loki 的 gateway(:80 → 31080) 一个口同时承担写入与查询。只开 31317 的症状是
+> 「trace 写得进去、Grafana 查不出来」。
 
 ## Cluster Label Strategy
 
@@ -53,7 +67,7 @@ All metrics carry a `cluster` label for multi-cluster dashboard queries:
    - `attributes.container_name` → `resource["k8s.container.name"]`
 4. **k8sattributes processor** uses `k8s.pod.uid` (resource attribute) to look up the pod in the K8s API and enrich with `k8s.deployment.name`, `k8s.node.name`, etc.
 5. **resource processor** adds `cluster: oracle-k3s` label
-6. **otlphttp exporter** ships to `http://100.94.186.7:31080/otlp/v1/logs` (Loki gateway NodePort via Tailscale)
+6. **otlphttp exporter** ships to `http://loki-gateway.monitoring.svc.cluster.local/otlp` —— 2026-08-02 起 Loki 就在本集群，集群内直达（此前是跨 Tailscale 的 `100.94.186.7:31080`）
 
 > **Bug fixed 2026-02-22:** The original config did not promote filepath-extracted attributes to resource attributes, so `k8sattributes` could never find the pod (all identifier values were empty strings). Logs arrived in Loki as `unknown_service` with no namespace/pod labels.
 
@@ -115,10 +129,10 @@ All metrics pass through `resource` processor (adds `cluster: oracle-k3s`) → `
 
 ### Architecture
 
-Both clusters have OTLP receivers (gRPC :4317, HTTP :4318) on their local OTel Collectors. Applications send traces to the cluster-local Collector via ClusterIP Service. The Collector enriches spans with `cluster` label and forwards to homelab Tempo.
+Both clusters have OTLP receivers (gRPC :4317, HTTP :4318) on their local OTel Collectors. Applications send traces to the cluster-local Collector via ClusterIP Service. The Collector enriches spans with `cluster` label and forwards to Tempo —— 2026-08-02 起 Tempo 在 **oracle-k3s**（homelab 跨 Tailscale 写出，oracle 集群内直达）。
 
 ```
-Application Pod                      OTel Collector              Tempo (homelab)
+Application Pod                      OTel Collector              Tempo (oracle-k3s)
   OTEL_EXPORTER_OTLP_ENDPOINT  →  otlp receiver (4317/4318)  →  otlp/tempo exporter
      (ClusterIP in-cluster)        memory_limiter → resource     (direct or via Tailscale)
                                    → batch
@@ -128,14 +142,15 @@ Application Pod                      OTel Collector              Tempo (homelab)
 
 **Pipeline:** `otlp → memory_limiter → resource(cluster=homelab) → batch → otlp/tempo`
 
-- Collector sends traces directly to `tempo.monitoring.svc.cluster.local:4317` (in-cluster gRPC)
+- ⚠️ 2026-08-02 起 **不再是集群内直达**：Tempo 已迁 oracle，homelab collector 跨 Tailscale
+  发到 `100.107.166.37:31317`，并带持久化发送队列（file_storage，链路中断不丢缓冲）
 - ClusterIP Service: `opentelemetry-collector.monitoring.svc:4317/4318`
 
 ### oracle-k3s Traces
 
 **Pipeline:** `otlp → memory_limiter → resource(cluster=oracle-k3s) → batch → otlp/tempo`
 
-- Collector forwards traces to `100.94.186.7:31317` (Tempo NodePort via Tailscale)
+- Collector forwards traces to `tempo.monitoring.svc.cluster.local:4317` —— 同上，2026-08-02 起集群内直达
 - ClusterIP Service: `otel-collector.monitoring.svc:4317/4318`
 
 ### Sampling Strategy
@@ -187,8 +202,17 @@ Standard kube-prometheus-stack in-cluster scraping with `scrapeClasses` default 
 
 | Service | NodePort | Purpose |
 |---------|----------|---------|
-| `loki-gateway-external` | 31080 | Receives OTLP logs from oracle OTel |
-| `prometheus-otlp-external` | 31090 | Receives Prometheus remote_write from oracle OTel || `tempo-otlp-external` | 31317 | Receives OTLP gRPC traces from oracle OTel |
+| ~~`loki-gateway-external`~~ | ~~31080~~ | 已随 Loki 迁往 oracle，homelab 侧 Service 已从 Git 移除 |
+| ~~`tempo-otlp-external`~~ | ~~31317~~ | 已随 Tempo 迁往 oracle，homelab 侧 Service 已从 Git 移除 |
+| `prometheus-otlp-external` | 31090 | Receives Prometheus remote_write from oracle OTel（**方向未变**，Prometheus 仍在 homelab）|
+
+oracle-k3s 侧新增（`cloud/oracle/manifests/monitoring/monitoring-external.yaml`）：
+
+| Service | NodePort | Purpose |
+|---------|----------|---------|
+| `loki-gateway-external` | 31080 | 收 homelab OTel 的日志；同时是 Grafana 的日志查询口 |
+| `tempo-otlp-external` | 31317 | 收 homelab OTel 的追踪（OTLP gRPC 写入口）|
+| `tempo-query-external` | 31320 | Grafana 的追踪**查询**口（3200/HTTP，与写入口不同）|
 > **Note:** kube-state-metrics NodePort (31082) on oracle-k3s is no longer used for cross-cluster scrape. OTel Collector scrapes it locally via ClusterIP and pushes via remote_write.
 
 ## Grafana Dashboards
