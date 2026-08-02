@@ -209,9 +209,10 @@ spec:
                 if [ "$files" -gt 0 ] || [ "$dirs" -gt 0 ]; then
                   echo "[fix-perms] fixed $files files and $dirs directories"
                 fi
-                # 5 分钟一轮（2026-08-02 从 30s 上调）：全量递归扫 ~1900 本书，30s 一轮
-                # 意味着占空比约 50%，在 100m limit 下实测 CPU 节流 91.6%，长期触发
-                # CPUThrottlingHigh，还白白吃掉这台单节点笔记本的 CPU/热预算。
+                # 5 分钟一轮（2026-08-02 从 30s 上调）：全量递归扫整个库（实测 5870 文件
+                # + 3866 目录），30s 一轮占空比约 50%，在 100m limit 下实测 CPU 节流
+                # 91.6%，长期触发 CPUThrottlingHigh，还白白吃这台单节点笔记本的热预算。
+                # 改 300s 后实测平均占用降到 0.0007 core。
                 # 摄入后权限最多晚 5 分钟修好——ingest 本就不是交互式路径，可接受。
                 sleep 300
               done
@@ -220,11 +221,16 @@ spec:
               cpu: 1m
               memory: 8Mi
             limits:
-              # limit 100m→500m（2026-08-02）：这是个突发型负载（扫一次几秒、然后长睡），
-              # 卡在 100m 只会把每轮扫描拉长成持续被节流的几十秒。放宽上限让它尽快扫完再
-              # 回到 idle，配合上面 30s→300s 的间隔，**平均** CPU 占用反而大幅下降。
-              # requests 保持 1m，调度与资源预留不受影响。
-              cpu: 500m
+              # limit 100m→1000m（2026-08-02）。不是"多给资源"，是消除 CFS 节流的结构性
+              # 误报：本容器是单线程 busybox find 的突发型负载（每轮只要约 0.2 CPU-秒，
+              # 然后睡 5 分钟）。CPU limit <1 core 时，配额小于单线程一个周期能跑满的
+              # 100ms → 这 0.2s 必然被切成多个周期反复节流；throttled/periods 只统计
+              # "有活可跑"的周期，占空比越低这个比值反而越难看（500m 时仍有 66.7%），
+              # CPUThrottlingHigh(>25%) 就会一直复燃。
+              # limit = 1000m 时单线程最多用满一个周期的 100ms，配额恰好够 → 结构上
+              # 不可能被节流。代价是每 5 分钟约 0.2s 的单核突发，约 0.07% 一个核，
+              # 对 5600H 的 CPU/热预算可忽略；requests 保持 1m，调度不受影响。
+              cpu: 1000m
               memory: 32Mi
           volumeMounts:
             - name: books
