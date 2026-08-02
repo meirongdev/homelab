@@ -127,7 +127,11 @@ spec:
           restartPolicy: Never
           containers:
             - name: ingest
-              image: docker.io/curlimages/curl:8.11.1
+              # 8.11.1(2024-12) → 8.21.0(2026-06)：旧镜像的 alpine libssl3/libcrypto3
+              # 停在 3.3.2-r4，带 CVE-2026-31789(Critical，需 ≥3.3.7-r0)，长期把
+              # TrivyImageCriticalVulnerabilities 顶成 firing。8.21.0 实测为 3.5.7-r0。
+              # 仍是 alpine/BusyBox 基底，上面 find -size 的 POSIX 写法不受影响。
+              image: docker.io/curlimages/curl:8.21.0
               command: ["sh", "/scripts/ingest.sh"]
               envFrom:
                 - configMapRef:
