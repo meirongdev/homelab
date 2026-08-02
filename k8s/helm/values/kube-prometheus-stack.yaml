@@ -171,6 +171,48 @@ grafana:
         nodeGraph:
           enabled: true
 
+# ── 默认规则裁剪 ────────────────────────────────────────────────────────────
+# 背景（2026-08-02 排障）：Prometheus 被规则评估压垮——CPU 长期贴着 1000m limit，
+# 存活探针（timeout 3s）超时触发 kubelet 重启容器（累计 7 次），进而引发
+# PrometheusRuleFailures(critical) ×2 + PrometheusMissingRuleEvaluations ×7。
+# 实测单轮评估耗时 vs 组 interval：
+#   kube-apiserver-burnrate.rules      745s / 30s   ← 超 24 倍，单组最大 CPU 消费者
+#   kube-apiserver-availability.rules  255s / 180s
+# 两组合计约 1000s/轮，把其它组（sloth SLI、nvme）全部挤到饿死。
+#
+# 关掉的理由不只是"贵"，更是"本来就算不出来"：本集群 retention=7d（见下），
+# 而 availability 组按 [30d] 窗口聚合、burnrate 组最长按 [3d] 速率计算，
+# 30d 窗口落在 7d 数据上永远被截断 → 数值无意义，却要全量扫 TSDB。
+# 单节点 k3s 也没有"apiserver 错误预算烧尽"这种需要分级响应的运维场景。
+#
+# ⚠️ kubeApiserverSlos 必须跟着一起关：它的 KubeAPIErrorBudgetBurn 告警依赖
+#    burnrate 组产出的 apiserver_request:burnrate* 记录规则，只关 burnrate 会让
+#    这些告警永远查不到数据（静默失效比显式关闭更危险）。
+# 保留 kubeApiserverHistogram：不在耗时 top12，且 apiserver 看板的延迟分位面板依赖它。
+# 代价：Grafana "Kubernetes / API server" 看板的可用性/错误预算面板会空——
+#       但它们此前显示的就是 30d 窗口套 7d 数据的错误值，属于止损而非功能回退。
+defaultRules:
+  rules:
+    kubeApiserverAvailability: false
+    kubeApiserverBurnrate: false
+    kubeApiserverSlos: false
+
+  ## Disabled PrometheusRule alerts
+  # KubeletDown 在本双集群拓扑下是恒定误报（2026-08-02）。chart 规则形如：
+  #   count by (cluster) (kube_node_info{job="kube-state-metrics"})
+  #     unless on (cluster) count by (cluster) (up{job="kubelet",metrics_path="/metrics"} == 1)
+  # oracle-k3s 会上报 kube_node_info（其 kube-state-metrics 经 otel remote-write 进来），
+  # 但**故意只抓 kubelet 的 cadvisor 端点**——job=kubelet-cadvisor、
+  # metrics_path=/metrics/cadvisor，且 keep 正则只留 KRR 用到的 2 个指标
+  # （见 cloud/oracle/manifests/monitoring/otel-collector.yaml 的设计说明）。
+  # 即 oracle 侧永远不存在 job="kubelet" 的抓取 → unless 恒成立 → 永久 firing。
+  # 处理方式与仓库既有约定一致（external-dns / external-secrets 的 absent 类告警
+  # 都写死 cluster="homelab"）：关掉 chart 版本，改由
+  # manifests/monitoring/alerts/prometheus-rules.yaml 的 kubelet 组提供 homelab
+  # 限定的替代规则，homelab 侧真出问题时依旧会告警。
+  disabled:
+    KubeletDown: true
+
 prometheus:
   prometheusSpec:
     retention: 7d
