@@ -26,8 +26,10 @@ resources:
 #     -H 'Accept: application/vnd.oci.image.index.v1+json' \
 #     https://ghcr.io/v2/meirongdev/jobs-sg/manifests/sha-<short12> | grep -i docker-content-digest
 #
-# 当前 = jobs-sg 2d7b9ad（"fix: match the live MCF API shapes so ingest actually
-# works"）。在此之前发布的镜像 ingest 一律 panic，别回滚到它们。
+# 当前 = jobs-sg d833623（"feat(enrich): make the LLM model chain and concurrency
+# configurable"）—— cronjob-enrich.yaml 的 LLM_MODELS/LLM_CONCURRENCY 需要它才生效，
+# 更早的镜像会忽略这两个变量、按硬编码的 Bifrost 模型名去打 DGX 并 404。
+# 别回滚到 2d7b9ad 之前 —— 那些镜像的 ingest 一律 panic。
 images:
   - name: ghcr.io/meirongdev/jobs-sg
-    digest: sha256:46249a17636d39c43c471c47f4870e87f469bf4b17d11bbed0354e3220021da7
+    digest: sha256:f6c72c505d66d8b1a29c9b608c5e813de3fe7ab650a21eb47b2a3512f0fde143

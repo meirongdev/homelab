@@ -24,9 +24,34 @@ Telegram）、`web`（只读服务 + `/metrics`）。三个 CronJob + 一个 Dep
 | 组件 | 触发 | 说明 |
 |---|---|---|
 | `ingest` | 每日 18:15 UTC（02:15 SGT） | 增量；程序按 SGT 判断周日自动转全量 reconcile |
-| `enrich` | 每日 19:10 UTC | 规则 + LLM（经 Bifrost）；fail-open |
+| `enrich` | 每日 19:10 UTC | 规则 + LLM（**直连 DGX vLLM**）；fail-open |
 | `report` | 周一 01:00 UTC（09:00 SGT） | 出 HTML/MD + 推 Telegram |
 | `jobs-sg-web` | 常驻 | 只读挂载 PVC，服务周报 + Prometheus 指标 |
+
+## LLM 富化：直连 DGX，不经 Bifrost
+
+`enrich` 的 `LLM_BASE_URL` 指向 **DGX Spark vLLM `http://100.97.87.120:8000`**
+（Tailscale IP，pod 直连；同一台机器也在给 Open Notebook 供模型）。这样**完全不需要
+Bifrost virtual key**，也就少了一条 Vault 依赖。
+
+⚠️ **模型 id 是后端相关的**：Bifrost 路由用带 provider 前缀的名字
+（`custom_dgx/deepseek-v4-flash`），裸 vLLM 提供的是 `deepseek-v4-flash`，写前缀名
+会 404。上游原先把模型链**硬编码**成 Bifrost 形式，2026-08-03（`d833623`）才改成读
+`LLM_MODELS` / `LLM_CONCURRENCY` 环境变量（默认仍是 Bifrost 链，不破兼容）。
+
+实测（2026-08-03，`jobs-sg` ns 内的 pod）：DGX 可达、**无需认证**、`x-bf-vk` 头被
+vLLM 忽略；`deepseek-v4-flash`（1M ctx）返回的正是 enrich 要的严格 JSON。
+
+**取舍**：省掉 VK 与 Vault 依赖，但没有 Bifrost 的 `custom_m2` 回退，也没有用量计量；
+DGX 是跨 tailnet 共享的境内机器（RTT 66–83ms），不可用时 enrich fail-open 退回纯规则。
+**切回 Bifrost**：`LLM_BASE_URL` 改回 `http://bifrost.bifrost.svc.cluster.local:8080`
+并删掉 `LLM_MODELS`（默认链即 Bifrost 形式），再往 Vault 写 `bifrost-vk`。
+
+**吞吐**：实测单条抽取约 **15s**（deepseek 的 reasoning 占了大部分 output token）。
+baseline 之后积压约 4900 条 → 并发 3 要 ~7h，装不进 1h 的 deadline，故设
+`LLM_CONCURRENCY=8` + `activeDeadlineSeconds: 10800`（3h）。稳态每日增量只有几百条
+（约 7 分钟）。**并发别再往上加** —— DGX 是共享机器，不是专属算力。
+`enrich_cache` 按 `description_sha256` 去重，转岗重发的帖子不重复计费。
 
 ## 为什么用独立 ns + 独立 Application
 
@@ -95,9 +120,14 @@ CR + git write-back 凭据，收益不抵复杂度。手动更新 digest。
 
 Vault `secret/homelab/jobs-sg`，四个 property：
 
+**当前这四个键都还没写** —— 所以 `jobs-sg-secrets` 处于 `SecretSyncedError`，
+这是**已知且可接受**的状态：`optional: true` 让 Pod 照常跑。现状影响只有一条：
+**周报不推 Telegram**（HTML/MD 照常生成，站点照常服务）。
+LLM 富化不受影响 —— 它直连 DGX，不用 `bifrost-vk`（见上）。
+
 | property | 用途 | 缺失时 |
 |---|---|---|
-| `bifrost-vk` | enrich 调 Bifrost 的 virtual key | 退回纯规则模式（fail-open） |
+| `bifrost-vk` | 仅在切回 Bifrost 时需要；直连 DGX 时不用 | 无影响（当前直连 DGX） |
 | `telegram-bot-token` | 周报推送 | report 打 "telegram disabled"，仍出 HTML/MD |
 | `telegram-chat-id` | 群 ID（`-1003981213530`） | 同上 |
 | `telegram-thread-id` | 话题 ID；**空 = 群的 General 话题** | 同上 |
@@ -139,8 +169,22 @@ CI 当时是绿的：`testdata/fixture/jobs.jsonl` 由 `scripts/genfixture` 从*
 生成，fixture 与 bug 相互印证。修复同时加了 `internal/mcf/livedecode_test.go`，用真实
 抓取的响应（已剥离个人字段）做断言，结构体再漂移就在 CI 挂而不是在生产。
 
-修复提交 `2d7b9ad`，对应镜像 `sha-2d7b9ad828d0`。**别回滚到更早的镜像** —— 它们的
-ingest 一律 panic。
+修复提交 `2d7b9ad`。**别回滚到 `2d7b9ad` 之前的镜像** —— 它们的 ingest 一律 panic。
+
+## 上线实测基线（2026-08-03）
+
+首次 bootstrap 的真实数字，可当容量与告警阈值的参考：
+
+| 指标 | 值 |
+|---|---|
+| baseline 全量扫描 | **884 页 / 88,258 seen / 29 分钟 / 0 错误** |
+| 入库候选岗位 | **9,499**（`seen` 远大于 `new`：只有候选岗位入库） |
+| 首份周报 | 2026-W31，1,301 条新岗，生成耗时 6s |
+| enrich 积压（baseline 后） | ~4,900（SWE 子集） |
+| 单条 LLM 抽取 | ~15s（DGX deepseek-v4-flash） |
+
+⚠️ 别按「库里岗位数 ÷ 100」估页数 —— `seen`（88k）远大于 `new`（9.5k），按后者算会把
+全量扫描的耗时高估近一个数量级（`activeDeadlineSeconds: 3600` 实际很宽裕，29 分钟就跑完）。
 
 ## 已知缺口
 
