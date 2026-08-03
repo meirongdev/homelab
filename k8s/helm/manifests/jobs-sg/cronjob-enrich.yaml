@@ -1,9 +1,26 @@
 ---
-# 每日技术栈富化（03:10 SGT = 19:10 UTC），排在 ingest 之后。
+# 每日技术栈富化（03:10 SGT = 19:10 UTC），排在 ingest 之后
+# （baseline 全量扫描实测 29 分钟 / 884 页，所以 19:10 开始不会撞上）。
 # fail-open：LLM 出错时保留规则结果并 exit 0；积压由 JobsSgEnrichBacklog 告警兜底。
 #
-# BIFROST_VK 标 optional —— Vault 里还没写 secret/homelab/jobs-sg 时，enrich 退回
-# 纯规则模式而不是 CreateContainerConfigError 卡死（见 external-secret.yaml）。
+# ⚠️ **直连 DGX vLLM，不经 Bifrost**：省掉 virtual key 这条 Vault 依赖。
+# 模型 id 是后端相关的 —— Bifrost 路由用带 provider 前缀的名字
+# （`custom_dgx/deepseek-v4-flash`），裸 vLLM 提供的是 `deepseek-v4-flash`，
+# 写前缀名会 404。上游 2026-08-03 (d833623) 把模型链改成读 LLM_MODELS 后才可配。
+# 实测（2026-08-03，jobs-sg ns 内的 pod）：DGX 可达、无需认证、`x-bf-vk` 头被忽略。
+#
+# 代价：没有 Bifrost 的 custom_m2 回退，也没有用量计量；DGX 是跨 tailnet 共享的
+# 境内机器（RTT 66–83ms），不可用时 enrich fail-open 退回纯规则模式。
+# 想切回 Bifrost：把 LLM_BASE_URL 改回 http://bifrost.bifrost.svc.cluster.local:8080
+# 并删掉 LLM_MODELS（默认链就是 Bifrost 的），再往 Vault 写 bifrost-vk。
+#
+# BIFROST_VK 保留且标 optional：走 DGX 时它是空值且无害（vLLM 忽略该头），
+# 留着让切回 Bifrost 只需改 base URL。Vault 未写时也不会 CreateContainerConfigError
+# 卡死（见 external-secret.yaml）。
+#
+# activeDeadlineSeconds 放到 3h + 并发 8：baseline 之后积压约 4900 条，实测单条
+# 约 15s，并发 3 要 ~7h 跑不完 1h 的 deadline。稳态每日增量只有几百条（约 7 分钟）。
+# 并发别再往上加 —— DGX 是共享机器，不是专属算力。
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -18,7 +35,7 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 2
-      activeDeadlineSeconds: 3600
+      activeDeadlineSeconds: 10800
       template:
         spec:
           serviceAccountName: jobs-sg
@@ -34,8 +51,15 @@ spec:
               command: ["/usr/local/bin/jobs-sg-enrich"]
               args: ["--data-dir", "/data"]
               env:
+                # DGX Spark vLLM（Tailscale IP，pod 直连；不是集群内 Service）。
+                # 同一台机器也在给 Open Notebook 供模型，见 reference/open-notebook.md。
                 - name: LLM_BASE_URL
-                  value: http://bifrost.bifrost.svc.cluster.local:8080
+                  value: http://100.97.87.120:8000
+                # 裸 vLLM 的模型 id，不带 Bifrost 的 provider 前缀。
+                - name: LLM_MODELS
+                  value: deepseek-v4-flash
+                - name: LLM_CONCURRENCY
+                  value: "8"
                 - name: BIFROST_VK
                   valueFrom:
                     secretKeyRef:
