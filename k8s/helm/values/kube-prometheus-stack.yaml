@@ -356,6 +356,20 @@ prometheus:
               cluster: dgx-spark
               nodename: dgx-spark-2
 
+      # DGX Spark vLLM inference — vLLM server metrics (:8000/metrics, the vLLM default,
+      # NOT the VLLM_PROMETHEUS_PORT=8001 in nv-dgx-spark/config/vllm.env), scraped over
+      # Tailscale. Exposes vllm:* run-state, KV-cache occupancy, TTFT + e2e latency buckets.
+      # Only dgx-spark-1 (V4-Flash head) has the engine up; dgx-spark-2 vllm_node is idle
+      # (no listening port, 2026-08-03 probe) — add its :8000 target if/when it serves.
+      - job_name: 'vllm-dgx-spark'
+        scrape_interval: 15s
+        static_configs:
+          - targets:
+              - 100.97.87.120:8000   # dgx-spark-1 vLLM (deepseek-v4-flash head)
+            labels:
+              cluster: dgx-spark
+              nodename: dgx-spark-1
+
       # MacBook Pro (Apple Silicon) — personal laptop host metrics via node_exporter,
       # installed as a LaunchAgent (~/Library/LaunchAgents/com.prometheus.node_exporter.plist,
       # binary ~/.local/bin/node_exporter, :9100), scraped over Tailscale. Same verbatim-inject
