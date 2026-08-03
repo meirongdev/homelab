@@ -6,9 +6,11 @@
 #      （k8s-node / 两台 Mac / pve）看得见；node0 是 tagged-devices，**netmap 里根本没有这两台**
 #      （2026-08-01 实测：`tailscale ping` → "no matching peer"，curl :8000 → 8s 超时）。
 #      oracle 上的 Open Notebook 摸不到主模型。
-#   2. 书库 PVC `calibre-books-local`（23G / 2040 本）在本命名空间，后续摄取 Job 要挂它。
-#      PVC 是命名空间级对象 → 摄取侧必须同 ns。RWO 在单节点上多 pod 共挂没问题
-#      （与 calibre-web.yaml 里那条注释同理，RWO 是节点级语义）。
+#   2. ~~书库 PVC `calibre-books-local` 在本命名空间，摄取 Job 要挂它~~ —— **2026-08-02 起不成立**：
+#      calibre 全家迁去了 oracle-k3s（书库 23G 是这台 124GB 笔记本 VM 上最大的单一数据集）。
+#      PVC 不能跨集群挂，所以**批量摄取 Job 跟着书走了**，现在跑在 oracle、经公网
+#      `notebook.meirong.dev/api` 把文件推回来。理由 ① 不受影响，Open Notebook 仍留 homelab。
+#      见 docs/reference/open-notebook.md 与 docs/runbooks/open-notebook-ingest.md。
 #
 # 模型不在这里配：v1 推荐在 Settings → API Keys 里加 OpenAI-Compatible / oMLX 凭据，
 # 配置落 SurrealDB（env 变量那套已被上游标记 deprecated）。具体填什么值见
