@@ -1,0 +1,22 @@
+---
+# jobs.db + raw/ 归档 + report/。10Gi 够 ~5 年（归档全类目年增 ~1.5GB）。
+#
+# storageClassName 必须是 local-path：nfs-client provisioner 已于 2026-07-11 卸载，
+# 引用它的 PVC 会永久 Pending。
+#
+# Prune=false：ArgoCD 永不删这个 PVC。raw/ 归档是**不可重建**的资产 —— MCF API 只
+# 返回当前在架职位，下架的永远拿不回来。备份归属见
+# backup/overlays/homelab/backup-script.yaml（jobs-sg-data 白名单 + JOBS_ARCHIVE_DIR）。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jobs-sg-data
+  namespace: jobs-sg
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi

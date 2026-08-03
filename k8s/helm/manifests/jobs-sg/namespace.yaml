@@ -1,0 +1,14 @@
+---
+# H1: Namespace 独占文件 —— 删清单文件 = prune 掉文件里全部对象，Namespace 混在
+# 其它对象里会连带删光同 ns 下的 PVC/数据（2026-08-03 级联删除事故）。
+#
+# PSA restricted（不是其它 ns 的 baseline）：全新 Go 应用本来就跑非 root + 只读
+# 根文件系统，白拿一档。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jobs-sg
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

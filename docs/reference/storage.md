@@ -49,9 +49,9 @@ sqlite 依赖 POSIX 字节区间锁（`fcntl`）+ 同步小写入；NFS 的 NLM 
 2026-08-03 对**两个 live 集群**重新生成（上一版 07-31 已含两处过期）。
 **集群里没有 `nfs-client` StorageClass** —— 引用它的 PVC 会永久 Pending。
 
-- **homelab（10 个）**: `data-vault-0`、`audit-vault-0`、`bifrost-data-local`、`data-trivy-server-0`、
+- **homelab（11 个）**: `data-vault-0`、`audit-vault-0`、`bifrost-data-local`、`data-trivy-server-0`、
   `alertmanager-…-db`、`prometheus-…-db`、`kube-prometheus-stack-grafana`、`opencost-pvc`、
-  `open-notebook-data-local`、`open-notebook-surreal-local`
+  `open-notebook-data-local`、`open-notebook-surreal-local`、`jobs-sg-data`（2026-08-03 新增）
 - **oracle-k3s（14 个）**: `storage-loki-0`、`storage-tempo-0`、`opencost-pvc`、`calibre-books-local`、
   `calibre-web-automated-config-local`、`stirling-pdf-configs`、`timeslot-pvc`、`trends-data`、
   `uptime-kuma-data`、`karakeep-data`、`meilisearch-data`、`miniflux-db-pvc`、`data-trivy-server-0`、
@@ -63,6 +63,10 @@ sqlite 依赖 POSIX 字节区间锁（`fcntl`）+ 同步小写入；NFS 的 NLM 
 - 「新增 PVC 却忘了纳入备份」**已由 CI 拦截**（`scripts/check-manifests.py` 的 H4，见
   [manifest-safety-checks.md](manifest-safety-checks.md)）——它上线即抓到 `trends-data`
   静默未备份约两个月。
+  ⚠️ H4 只查「PVC 有没有备份归属」，**查不出「归属了但文件名模式对不上」**：
+  `jobs-sg-data` 的 `raw/<date>/NNN.jsonl.gz` 归档匹配不上白名单那组 `*.db` / `*.json`
+  模式，得靠第 3 步 `JOBS_ARCHIVE_DIR` 整目录纳入才保得住（见
+  [jobs-sg.md](jobs-sg.md)）。这类只能实测（`restic ls` 确认文件真在快照里）。
 - ⚠️ **`local-path` 无冗余、无 ZFS 快照** —— restic 备份是上面每一个卷的**唯一安全网**。
 - 有状态服务的 PVC 带 `argocd.argoproj.io/sync-options: Prune=false` 防误删。
 

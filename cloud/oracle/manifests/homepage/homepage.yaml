@@ -98,6 +98,11 @@ data:
 
         # homelab 集群的服务（同 Calibre-Web）：不写 kubernetes: 块——
         # Homepage 跑在 oracle-k3s，查不到 homelab 的 pod 状态。
+        - Jobs SG:
+            icon: mdi-briefcase-search
+            href: https://jobs.meirong.dev
+            description: 新加坡 SWE 岗位趋势周报
+
         - Open Notebook:
             icon: open-notebook.png
             href: https://notebook.meirong.dev

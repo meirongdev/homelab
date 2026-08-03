@@ -1,0 +1,31 @@
+---
+# ResourceQuota 是护栏，不是容量规划：仓库先例里一个没设 history limit 的 CronJob
+# 泄漏了 92 个卡住的 Job Pod，把单节点推过 110-pod 上限，**阻塞了全集群调度**。
+# count/pods 封顶 10 保证 jobs-sg 再怎么坏也炸不了别的应用。
+#
+# 单独一个 ns（而不是并进 personal-services）也是为这个：personal-services 的
+# quota 限死 count/jobs.batch，三个 CronJob 的历史 Job 会挤占那份为事故加的护栏。
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: jobs-sg-limits
+  namespace: jobs-sg
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 25m
+        memory: 32Mi
+      default:
+        cpu: 500m
+        memory: 384Mi
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: jobs-sg-quota
+  namespace: jobs-sg
+spec:
+  hard:
+    count/jobs.batch: "25"
+    count/pods: "10"

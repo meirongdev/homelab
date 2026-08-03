@@ -1,0 +1,66 @@
+---
+# ServiceMonitor + PrometheusRule。
+#
+# ⚠️ 两者都必须带 label `release: kube-prometheus-stack` —— operator 的 selector 靠它
+# 认领对象，漏了就被**静默忽略**：指标不采、告警不生效，且没有任何报错。
+#
+# Prometheus/Alertmanager 都还在 homelab（2026-08-02 只迁了 ArgoCD/Loki/Tempo 去
+# oracle），所以本文件跟着 jobs-sg 一起落 homelab 是对的。
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: jobs-sg
+  namespace: jobs-sg
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels: { app: jobs-sg-web }
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 60s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: jobs-sg
+  namespace: jobs-sg
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: jobs-sg
+      rules:
+        # 最重要的一条：静默失效比崩溃更危险。ingest panic 了一整天也不会有人发现，
+        # 除非有人盯着"最后一次成功"的时间戳 —— 这正是 2026-08-03 上线前踩到的坑。
+        - alert: JobsSgIngestStale
+          expr: 'time() - jobs_sg_last_success_timestamp_seconds{kind="incremental"} > 36 * 3600'
+          for: 30m
+          labels: { severity: warning }
+          annotations:
+            summary: jobs-sg 增量抓取已停滞 >36h —— 可能静默失效
+        - alert: JobsSgReconcileStale
+          expr: 'time() - jobs_sg_last_success_timestamp_seconds{kind="full_reconcile"} > 10 * 24 * 3600'
+          for: 30m
+          labels: { severity: warning }
+          annotations:
+            summary: jobs-sg 全量 reconcile 已停滞 >10d —— 在架职位数可能失真
+        - alert: JobsSgIngestErrors
+          expr: 'increase(jobs_sg_ingest_errors_total[1d]) > 20'
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: jobs-sg 抓取错误上升 —— 可能是 MCF API 字段形状又变了
+        - alert: JobsSgEnrichBacklog
+          expr: 'jobs_sg_enrich_backlog > 2000'
+          for: 30m
+          labels: { severity: warning }
+          annotations:
+            summary: jobs-sg 富化积压 >2000 —— Bifrost/LLM 可能不可用
+        - alert: JobsSgCronJobFailed
+          expr: 'kube_job_status_failed{namespace="jobs-sg"} > 0'
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: jobs-sg 有 CronJob 失败

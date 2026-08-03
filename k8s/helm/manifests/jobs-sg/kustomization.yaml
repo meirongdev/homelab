@@ -1,0 +1,33 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: jobs-sg
+
+resources:
+  - namespace.yaml
+  - limits.yaml
+  - rbac.yaml
+  - pvc.yaml
+  - external-secret.yaml
+  - cronjob-ingest.yaml
+  - cronjob-enrich.yaml
+  - cronjob-report.yaml
+  - web.yaml
+  - monitoring.yaml
+
+# 镜像按 **manifest-list（OCI index）digest** 固定，不是某个架构的 digest ——
+# 否则换架构就拉不到。homelab 是 amd64，但镜像同时构了 arm64，留着 oracle 迁移出口。
+#
+# Kyverno disallow-latest-tag 是 Enforce（不是 Audit），且策略 digest-aware：
+# digest 与明确 tag 都放行，只拦 :latest。
+#
+# 升级镜像（只改这一行）：
+#   TOKEN=$(curl -s "https://ghcr.io/token?scope=repository%3Ameirongdev%2Fjobs-sg%3Apull&service=ghcr.io" | jq -r .token)
+#   curl -sI -H "Authorization: Bearer $TOKEN" \
+#     -H 'Accept: application/vnd.oci.image.index.v1+json' \
+#     https://ghcr.io/v2/meirongdev/jobs-sg/manifests/sha-<short12> | grep -i docker-content-digest
+#
+# 当前 = jobs-sg 2d7b9ad（"fix: match the live MCF API shapes so ingest actually
+# works"）。在此之前发布的镜像 ingest 一律 panic，别回滚到它们。
+images:
+  - name: ghcr.io/meirongdev/jobs-sg
+    digest: sha256:46249a17636d39c43c471c47f4870e87f469bf4b17d11bbed0354e3220021da7

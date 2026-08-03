@@ -1,0 +1,8 @@
+---
+# 三个 CronJob 与 web 共用。不需要任何 K8s API 权限（数据都在 PVC 里），
+# 故只有 ServiceAccount，没有 Role/RoleBinding —— 别给它加。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jobs-sg
+  namespace: jobs-sg

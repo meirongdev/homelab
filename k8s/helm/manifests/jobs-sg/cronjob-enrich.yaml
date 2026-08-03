@@ -1,0 +1,58 @@
+---
+# 每日技术栈富化（03:10 SGT = 19:10 UTC），排在 ingest 之后。
+# fail-open：LLM 出错时保留规则结果并 exit 0；积压由 JobsSgEnrichBacklog 告警兜底。
+#
+# BIFROST_VK 标 optional —— Vault 里还没写 secret/homelab/jobs-sg 时，enrich 退回
+# 纯规则模式而不是 CreateContainerConfigError 卡死（见 external-secret.yaml）。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: enrich
+  namespace: jobs-sg
+spec:
+  schedule: "10 19 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 3600
+      template:
+        spec:
+          serviceAccountName: jobs-sg
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: enrich
+              image: ghcr.io/meirongdev/jobs-sg
+              command: ["/usr/local/bin/jobs-sg-enrich"]
+              args: ["--data-dir", "/data"]
+              env:
+                - name: LLM_BASE_URL
+                  value: http://bifrost.bifrost.svc.cluster.local:8080
+                - name: BIFROST_VK
+                  valueFrom:
+                    secretKeyRef:
+                      name: jobs-sg-secrets
+                      key: bifrost-vk
+                      optional: true
+              resources:
+                requests: { cpu: 100m, memory: 192Mi }
+                limits: { cpu: 500m, memory: 512Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: [ALL] }
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: jobs-sg-data
