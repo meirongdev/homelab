@@ -1,0 +1,83 @@
+# 新机器开发环境 bootstrap（配到能改 homelab repo）
+
+> Last updated: 2026-08-03
+> 面向「换了一台 Mac，要把本机环境配到能 clone、改、验证这个 repo」的流程。
+> 排障/恢复类走 [runbooks/](../runbooks/README.md)；AI 助手上下文见 [../AGENTS.md](../AGENTS.md)（唯一上下文文件，细节按域在 [reference/](../reference/README.md)）。
+
+## 1. 前置：账号与密钥
+
+- **SSH key**：所有节点（homelab/oracle/pve/106/DGX）共用 `~/.ssh/vgio`。没有就把
+  现有机器的 `~/.ssh/vgio` + `~/.ssh/vgio.pub` 拷过来，权限 `600`/`644`。
+- **GitHub**：`meirongdev` 账号、能访问私有 `homelab` repo 的 key。
+- **Tailscale**：加入 tailnet（设备归属 `meirongdev@`），否则跨集群路由/裸机抓取不通。
+- **Cloudflare / OCI / Proxmox** 账号（按需，改对应 terraform 时才要）。
+
+## 2. 工具链
+
+```bash
+brew install just uv terraform helm kubectl git python3
+uv tool install ansible        # 提供 ansible-playbook（justfile 直接调它）
+```
+
+- `just`：repo 的主任务运行器（**不是 make**；只有 `cloud/oracle/terraform/` 用 make）。
+- `uv`：`check-manifests.py` 用 `uv run --with pyyaml`；ansible 建议 `uv tool install` 隔离。
+- `terraform`：**6 个 root** 都用它 —— `proxmox/terraform`、`cloudflare/terraform`、
+  `tailscale/terraform`、`zitadel/terraform`、`cloud/oracle/terraform`、`cloud/oracle/cloudflare`。
+  （⚠️ `2026-08-03-tf-state-r2.md` 的迁移表只列了其中 5 个，**没有覆盖 `zitadel/terraform`**。）
+- `kubectl`：context 名固定为 `k3s-homelab` 与 `oracle-k3s`。
+
+## 3. Clone 与接入 kubeconfig
+
+```bash
+git clone git@github.com:meirongdev/homelab.git && cd homelab
+
+# homelab（在家庭 LAN 内）：走 pve 跳板
+cd k8s/ansible && just fetch-kubeconfig
+# 远程（不在 LAN）：改连 Tailscale IP
+#   just setup-k8s-remote 只是装集群；fetch 用: ansible-playbook playbooks/fetch-kubeconfig.yaml -e ansible_host=100.94.186.7 -e "ansible_ssh_common_args="
+
+# oracle-k3s：走公网
+cd cloud/oracle && just fetch-kubeconfig
+
+# 验证
+kubectl --context k3s-homelab get nodes
+kubectl --context oracle-k3s get nodes
+```
+
+⚠️ 两个集群的 kubeconfig 都要能拿。缺一个不影响改 repo，但 `just argocd-status` /
+`just clustermesh-status` 这类跨集群命令会报错。
+
+## 4. 本地验证（提交前跑 CI 同款检查）
+
+```bash
+python3 scripts/check-docs.py                # 文档规则 R1-R7 里可自动查的部分（纯标准库）
+python3 scripts/check-docs.py --list         # 看哪几条是脚本查不了、只能靠人的
+uv run --with pyyaml python scripts/check-manifests.py   # 清单安全 H1-H4
+```
+
+## 5. 需要从旧机器带过来的东西（gitignored，新 clone 没有）
+
+- `cloudflare/terraform/.env`：Cloudflare token（justfile `dotenv-load` 注入；裸跑
+  `terraform plan` 会读到 tfvars 里的失效值而报错）。
+- **全部 6 个 root 的 `terraform.tfstate*`**：`proxmox/terraform`、`cloudflare/terraform`、
+  `tailscale/terraform`、`zitadel/terraform`、`cloud/oracle/terraform`、`cloud/oracle/cloudflare`。
+  **state 目前只在本地**（ROADMAP 开放项 #2，未离站）——漏拷哪个，那个 root 就只能
+  `terraform import` 重建（见 `cloud/oracle/terraform/IMPORT.md`）。
+  ⚠️ 别只照着 `2026-08-03-tf-state-r2.md` 的表拷，那张表漏了 `zitadel/terraform`。
+- 各 terraform root 的 `terraform.tfvars`（含明文密钥，勿提交）：对着
+  `terraform.tfvars.example` 重建或直接拷。
+
+## 6. 可选：Vault 操作
+
+需要动 Vault（解封、写 secret、`create-vault-token`）时，从已解封的 homelab Vault 拿
+token（`just vault-init` / `just vault-unseal` 只在 homelab 上跑）。日常 GitOps 不需要。
+
+## 7. 就绪自查
+
+```bash
+cd k8s/helm && just status          # monitoring ns 状态
+cd k8s/helm && just argocd-status   # 28 个 App 的 Sync/Health
+cd cloud/oracle && just clustermesh-status   # 双集群 connected
+```
+
+都绿就说明这台机器能正常改、验、推这个 repo 了。

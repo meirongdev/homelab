@@ -1,6 +1,6 @@
 # Observability — OTel 日志与追踪架构
 
-> Last updated: 2026-07-31
+> Last updated: 2026-08-03
 > Status: 生效事实
 >
 > 2026-07-31 homelab collector 首次真实落地 + 2026 OTel 对齐，见 [`decisions/otel-2026-alignment.md`](../decisions/otel-2026-alignment.md)。
@@ -10,74 +10,40 @@
 ## 整体架构
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  K8s Node (10.10.10.10)                                         │
-│                                                                 │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │  OTel Collector DaemonSet (monitoring namespace)        │   │
-│  │  image: otel/opentelemetry-collector-k8s:0.156.0        │   │
-│  │  (ArgoCD otel-collector App; oracle 侧同版本 contrib)    │   │
-│  │                                                         │   │
-│  │  Receivers:                                             │   │
-│  │    filelog ──── /var/log/pods/**/*.log (hostPath)      │   │
-│  │    otlp ────── gRPC :4317 / HTTP :4318 (traces+logs)  │   │
-│  │                                                         │   │
-│  │  Processors:                                            │   │
-│  │    memory_limiter ── 160MiB limit, 40MiB spike          │   │
-│  │    k8sattributes ── 注入 k8s 元数据到 resource attrs   │   │
-│  │    resource ────── cluster + k8s.cluster.name          │   │
-│  │    batch ───────── 10000 条 / 5s 批量发送            │   │
-│  │                                                         │   │
-│  │  Exporters:                                             │   │
-│  │    otlphttp/loki ── loki-gateway:80/otlp (logs)        │   │
-│  │    otlp/tempo ─── tempo:4317 (traces)                  │   │
-│  │                                                         │   │
-│  │  Extensions:                                            │   │
-│  │    health_check ── :13133 (liveness/readiness)         │   │
-│  │    file_storage ── /var/lib/otelcol (filelog 断点)     │   │
-│  └─────────────────────────────────────────────────────────┘   │
-│            │                        ▲                           │
-│            │ /var/log/pods/         │ stdout/stderr             │
-│            ▼                        │                           │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  应用 Pod                                                 │  │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐  │  │
-│  │  │ 标准应用      │  │ 文件日志应用  │  │ 其他          │  │  │
-│  │  │ stdout/stderr│  │ + log-exporter│  │               │  │  │
-│  │  │              │  │   sidecar    │  │               │  │  │
-│  │  └──────────────┘  └──────────────┘  └───────────────┘  │  │
-│  └──────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-          │
-          │ OTLP HTTP (port 80, path /otlp/v1/logs)
-          │
-          ├────────────────────────────────────────────────┘
-          │                                            │
-          ▼ OTLP HTTP (logs)                  OTLP gRPC (traces)
-┌─────────────────────────┐  ┌─────────────────────────┐
-│  Loki Gateway           │  │  Tempo 2.8.2           │
-│  (loki-gateway svc)     │  │  (tempo svc :4317)     │
-│         │               │  │  OTLP gRPC receiver    │
-│         ▼               │  │  5Gi local-path storage       │
-│  Loki 3.x SingleBinary  │  └─────────────────────────┘
-│  (loki-0 pod)           │            │
-│  OTLP 原生支持           │            ▼ TraceQL
-│  auto-promotes labels   │  ┌─────────────────────────┐
-└─────────────────────────┘  │  Grafana 12.3.3         │
-          │                  │  grafana.meirong.dev    │
-          ▼ LogQL            │                         │
-┌─────────────────────────┐  │  Datasources:          │
-│  Grafana 12.3.3         │  │  · Loki (LogQL)        │
-│  grafana.meirong.dev    │  │  · Tempo (TraceQL)     │
-│                         │  │  · Prometheus (PromQL) │
-│  Dashboards (via sidecar│  │                         │
-│  ConfigMap auto-load):  │  │  Correlations:         │
-│  · Logs / Overview      │  │  · tracesToLogs (Loki) │
-│  · Logs / Pod Browser   │  │  · tracesToMetrics     │
-│  · Logs / Errors        │  │  · nodeGraph           │
-│  · Logs / Cluster Search│  │  · serviceMap          │
-└─────────────────────────┘  └─────────────────────────┘
+                    ┌──────────────────────────────────────────────┐
+                    │  homelab K8s Node (10.10.10.10)              │
+                    │                                              │
+                    │  OTel Collector DaemonSet (monitoring)       │
+                    │   image: otel/opentelemetry-collector-k8s:0.156.0 │
+                    │   filelog → /var/log/pods/** (hostPath)     │
+                    │   otlp    → gRPC :4317 / HTTP :4318          │
+                    │   ── logs:   otlphttp → oracle 31080/otlp    │
+                    │              (via Tailscale)                 │
+                    │   ── traces: otlp/gRPC → oracle 31317        │
+                    │              (via Tailscale)                 │
+                    │                                              │
+                    │  应用 Pod（stdout/stderr 或 log-exporter sidecar）│
+                    │                                              │
+                    │  Grafana 12.3.3（grafana.meirong.dev）       │
+                    │   查询 Loki 31080 / Tempo 31320（跨集群）    │
+                    └──────────────────────┬───────────────────────┘
+                                           │  logs / traces（跨 Tailscale）
+                                           ▼
+                    ┌──────────────────────────────────────────────┐
+                    │  oracle-k3s node (100.107.166.37)            │
+                    │                                              │
+                    │  Loki Gateway (svc :80 → NodePort 31080)     │
+                    │    └→ Loki 3.x SingleBinary (local-path)     │
+                    │  Tempo 2.8.2 (svc :4317)                     │
+                    │    写 :31317 / 查 :31320 (local-path)        │
+                    │                                              │
+                    │  oracle 本地 OTel Collector 集群内直达：      │
+                    │   loki-gateway.svc:80/otlp / tempo.svc:4317  │
+                    └──────────────────────────────────────────────┘
 ```
+
+> ⚠️ **Loki/Tempo 2026-08-02 才迁到 oracle**。更早的文档/记忆里 homelab collector
+> 指向集群内 `loki-gateway:80` / `tempo:4317` —— 那个拓扑已不存在，别照着排障。
 
 ---
 
@@ -233,11 +199,11 @@ ENV JAVA_TOOL_OPTIONS="-javaagent:/otel/opentelemetry-javaagent.jar"
 **接入成本：** 需修改应用代码或 Dockerfile，适合新服务。
 
 > **追踪架构**：
-> - homelab: App → OTel Collector (`otel-collector.monitoring.svc:4317`) → Tempo
+> - homelab: App → OTel Collector (`otel-collector.monitoring.svc:4317`) → **oracle Tempo** `100.107.166.37:31317` (via Tailscale；2026-08-02 起 Tempo 在 oracle，写 NodePort 31317)
 >   ⚠️ 历史更正：**2026-07-31 才首次真正部署**——2026-03 声称的"上线"从未发生
 >   （实测无 release、无 pod），homelab 容器日志同日首次进 Loki。
 >   现由 ArgoCD `otel-collector` App 管理，取舍见 `docs/decisions/otel-2026-alignment.md`。
-> - oracle-k3s: App → OTel Collector (ClusterIP :4317) → Tempo NodePort :31317 (via Tailscale)
+> - oracle-k3s: App → OTel Collector (ClusterIP :4317) → **Tempo 集群内直达** `tempo.monitoring.svc:4317`（2026-08-02 起 Tempo 就在本集群）
 > - Grafana 已配置 tracesToLogs / tracesToMetrics / nodeGraph / serviceMap
 > - 详见 `docs/reference/observability-multicluster.md` ⇢ Traces Pipeline 章节
 
@@ -297,7 +263,7 @@ kubectl logs -n personal-services -l app=calibre-web -c log-exporter -f
 | `k8s/helm/values/opentelemetry-collector.yaml` | OTel Collector Helm values（logs + traces） |
 | `k8s/helm/values/tempo.yaml` | Tempo Helm values（traces backend） |
 | `k8s/helm/values/kube-prometheus-stack.yaml` | Grafana datasources（Tempo tracesToLogs/Metrics） |
-| `k8s/helm/manifests/monitoring/monitoring-external.yaml` | Tempo NodePort :31317（跨集群 traces） |
+| `cloud/oracle/manifests/monitoring/monitoring-external.yaml` | oracle 侧跨集群 NodePort：Loki 31080 / Tempo 写 31317 / 查询 31320（homelab 侧仅剩 Prometheus remote_write 31090） |
 | `cloud/oracle/manifests/monitoring/otel-collector.yaml` | Oracle-k3s OTel Collector（logs + metrics + traces） |
 | `k8s/helm/values/loki.yaml` | Loki config（promtail.enabled: false） |
 | `k8s/helm/manifests/monitoring/dashboards/grafana-dashboards.yaml` | 4 个 Loki Dashboard ConfigMap |

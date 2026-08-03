@@ -3,22 +3,24 @@
 > **这是档案，不是现状。** 每份 plan 记录的是写它那天的世界——里面的路径、版本、拓扑
 > 可能早就变了（Traefik、Kopia、Gotify、NFS 都还活在某些 plan 里）。
 >
-> 要知道**今天**是什么样：读 [reference/](../reference/README.md) 或 [CONVENTIONS.md](../CONVENTIONS.md)。
+> 要知道**今天**是什么样：读 [reference/](../reference/README.md)。
 > 要知道**还剩什么没做**：读 [../ROADMAP.md](../ROADMAP.md)。
 
 ## 类别
 
 每个类别的 README 列出该类全部方案及其状态。
 
+> 份数由 `scripts/check-docs.py` 校验（R5），漂了 CI 会报错。
+
 | 类别 | 内容 | 份数 |
 |------|------|------|
-| [apps/](apps/README.md) | 应用部署/迁移方案 | 11 |
+| [apps/](apps/README.md) | 应用部署/迁移方案 | 10 |
 | [networking/](networking/README.md) | 网络/集群方案 | 8 |
 | [observability/](observability/README.md) | 可观测方案 | 7 |
 | [security/](security/README.md) | 安全加固方案 | 3 |
-| [architecture/](architecture/README.md) | 舰队级架构诊断与演进建议 | 3 |
-| [storage/](storage/README.md) | 存储/备份方案 | 2 |
-| [archive/](archive/README.md) | **不存在于当前系统的方案**（从未实施/已取消/已被取代/前提消失） | 12 |
+| [architecture/](architecture/README.md) | 舰队级架构诊断与演进建议 | 5 |
+| [storage/](storage/README.md) | 存储/备份方案 | 3 |
+| [archive/](archive/README.md) | **不存在于当前系统的方案**（从未实施/已取消/已被取代/前提消失） | 13 |
 
 ⚠️ **已完成的方案不进 archive** —— 它们解释了系统为何是现在这样，留在各自类别里。
 archive 只收「读了也帮不上理解当前系统」的那些。
