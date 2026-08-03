@@ -44,8 +44,10 @@ vLLM 忽略；`deepseek-v4-flash`（1M ctx）返回的正是 enrich 要的严格
 
 **取舍**：省掉 VK 与 Vault 依赖，但没有 Bifrost 的 `custom_m2` 回退，也没有用量计量；
 DGX 是跨 tailnet 共享的境内机器（RTT 66–83ms），不可用时 enrich fail-open 退回纯规则。
-**切回 Bifrost**：`LLM_BASE_URL` 改回 `http://bifrost.bifrost.svc.cluster.local:8080`
-并删掉 `LLM_MODELS`（默认链即 Bifrost 形式），再往 Vault 写 `bifrost-vk`。
+**切回 Bifrost**（三处，缺一不可）：① `LLM_BASE_URL` 改回
+`http://bifrost.bifrost.svc.cluster.local:8080` ② 删掉 `LLM_MODELS`（默认链即 Bifrost
+形式）③ 在 `external-secret.yaml` 补回 `bifrost-vk` 一项、`cronjob-enrich.yaml` 补回
+`BIFROST_VK` env，并把 VK 写进 Vault。当前这两处**都已删除**，因为直连 DGX 用不到。
 
 **单次调用实测 66.5s**（2,326 字描述 / 497 prompt tokens / 937 completion tokens，
 reasoning 占大头）。短 prompt 只要 15s —— 别拿短 prompt 的数字做容量规划。
@@ -225,17 +227,26 @@ ArgoCD 应用也一直 `Degraded`。2026-08-03 首次上线就这么响了 40 �
 `# - external-secret.yaml` 那行取消注释。顺序反了就会再响一次。
 
 未启用期间唯一影响：**周报不推 Telegram**（HTML/MD 照常生成、站点照常服务）。
-LLM 富化不受影响 —— 它直连 DGX，不用 `bifrost-vk`（见上）。
+LLM 富化不受影响 —— 它直连 DGX，压根不用 Bifrost virtual key。
+
+**只有三个键**（`bifrost-vk` 已于 2026-08-03 从声明中删除：直连 DGX 用不到它，
+而 ESO 全有全无的语义意味着**声明了却不用的键是有害的** —— 多一个声明就等于多一个
+必须写进 Vault 的值，否则整个 Secret 同步不了）：
 
 | property | 用途 | 缺失时 |
 |---|---|---|
-| `bifrost-vk` | 仅在切回 Bifrost 时需要；直连 DGX 时不用 | 无影响（当前直连 DGX） |
 | `telegram-bot-token` | 周报推送 | report 打 "telegram disabled"，仍出 HTML/MD |
-| `telegram-chat-id` | 群 ID（`-1003981213530`） | 同上 |
+| `telegram-chat-id` | 群 ID（`-1003981213530`，**与告警同一个群**） | 同上 |
 | `telegram-thread-id` | 话题 ID；**空 = 群的 General 话题** | 同上 |
 
+告警与周报共用同一个群（MatthewDaily / forum），只靠 `message_thread_id` 区分话题：
+告警在 thread `2`（🚨 Homelab 告警），周报应投到另一个内容话题。thread id 取法：
+Telegram 里右键话题 → 复制链接，`t.me/c/<内部 id>/<thread_id>` 的第二个数字。
+⚠️ 上游原先把该字段序列化成 JSON **字符串**（`"7"`），而 Bot API 规定 Integer；
+若被忽略就会静默投到 General 话题且返回 200，看着像成功。2026-08-03 (`8259cba`) 已改发数字。
+
 ⚠️ **ESO 的 `data` 是全有全无的**：Vault 里缺任何一个 property，整个 `jobs-sg-secrets`
-同步失败。四个键必须都存在（`telegram-thread-id` 允许是空串）。消费侧的
+同步失败。上面三个键必须都存在（`telegram-thread-id` 允许是空串）。消费侧的
 `secretKeyRef` 全部标了 `optional: true`，所以 Vault 还没写时 Pod 照常启动并降级，
 而不是 `CreateContainerConfigError` 卡住流水线 —— 同
 `backup/overlays/homelab/open-notebook-external-secret.yaml` 的取舍。
