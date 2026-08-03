@@ -47,9 +47,14 @@ data:
     # --- 2) sqlite/config from local-path（meilisearch/cache 不含）---
     echo "[backup] copy sqlite/config files..."
     # ⚠️ 这是**显式白名单**——新增有状态应用必须往这里加，否则静默不备份。
+    # 该失效模式已由 CI 拦截：scripts/check-manifests.py 的 H4 会把「清单里声明了 PVC
+    # 但既不在本白名单、也没在检查器里写明豁免理由」判为违规。
+    # 规则全文见 docs/reference/manifest-safety-checks.md。
     # calibre-web-automated-config：只取 sqlite(app.db/cwa.db 等)，
     # processed_books/thumbnails 是可重建缓存，与迁移前 homelab 侧同口径剪掉。
-    for pat in karakeep-data uptime-kuma-data timeslot-pvc stirling-pdf-configs calibre-web-automated-config; do
+    # trends-data：2026-08-03 补入——H4 首次运行即抓到它自 2026-06-05 起静默未备份
+    # （45MB SQLite，且 PVC 带 Prune=false，本就是当作要紧数据对待的）。
+    for pat in karakeep-data uptime-kuma-data timeslot-pvc stirling-pdf-configs calibre-web-automated-config trends-data; do
       for d in /localpath/*"$pat"*; do
         [ -d "$d" ] || continue
         dest="/work/pvc/$(basename "$d")"
