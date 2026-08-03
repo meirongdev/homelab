@@ -20,3 +20,8 @@
 crds:
   install: true
   keep: true
+
+# 控制面驱逐优先级：全部 ArgoCD 组件同值（global 兜底），节点内存压力时最后被驱逐。
+# 类 meirong-critical 定义在 cloud/oracle/manifests/base/priorityclasses.yaml。
+global:
+  priorityClassName: meirong-critical

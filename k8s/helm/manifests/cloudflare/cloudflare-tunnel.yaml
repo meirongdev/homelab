@@ -13,6 +13,7 @@ spec:
       labels:
         app: cloudflared
     spec:
+      priorityClassName: meirong-high
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
