@@ -247,7 +247,7 @@ CR + git write-back 凭据，收益不抵复杂度。手动更新 digest。
 |---|---|---|---|
 | bot token | 是 | Vault `secret/homelab/telegram` property `bot_token` → ESO | **已存在**，与告警共用同一个 bot |
 | chat id | 不是 | `cronjob-report.yaml` 明文 | `-1003981213530`（与告警**同一个群**） |
-| thread id | 不是 | `cronjob-report.yaml` 明文 | 当前空串 = 群的 General 话题 |
+| thread id | 不是 | `cronjob-report.yaml` 明文 | **`552`** = 群里的 `jobs-sg` 话题 |
 
 `external-secret.yaml` 只声明 `telegram-bot-token` 一个键。因为它指向的路径**已经在线
 同步**（`monitoring/alertmanager-telegram` 长期 `SecretSynced=True`），所以可以直接注册。
@@ -265,13 +265,23 @@ ArgoCD 应用常驻 `Degraded`。`optional: true` 保住了 Pod，但保不住�
 
 ### 话题路由
 
-告警与周报共用同一个群（MatthewDaily / forum），只靠 `message_thread_id` 区分话题。
-告警在 thread **`2`**（🚨 Homelab 告警）；周报**刻意不填 2** —— 上游 `docs/02 §4.3`
-明令周报不得进告警话题。当前留空即投 General。
+告警与周报共用同一个群（MatthewDaily，`is_forum: true`），只靠 `message_thread_id`
+区分话题：
 
-想投到专门的内容话题：Telegram 里右键该话题 → 复制链接，
-`t.me/c/<内部 id>/<thread_id>`，把第二个数字填进 `cronjob-report.yaml` 的
-`TELEGRAM_THREAD_ID`（**一行改动，不涉及 Vault**）。
+| 话题 | thread id | 谁在用 |
+|---|---|---|
+| 🚨 Homelab 告警 | `2` | Alertmanager / falcosidekick / krr |
+| **jobs-sg** | **`552`** | jobs-sg 周报 |
+| （General） | 留空 | — |
+
+`jobs-sg` 话题是 2026-08-03 由 bot 自己经 `createForumTopic` 建的（bot
+`@matthew_daily_bot` 是群管理员且有 `can_manage_topics`，故无需人工建）。
+**刻意不复用 thread 2** —— 上游 `docs/02 §4.3` 明令周报不得进告警话题。
+
+换话题：Telegram 里右键目标话题 → 复制链接，`t.me/c/<内部 id>/<thread_id>` 的第二个
+数字填进 `cronjob-report.yaml` 的 `TELEGRAM_THREAD_ID`（**一行改动，不涉及 Vault**）。
+bot 也可以再建：`createForumTopic`（见 git 历史里的一次性 Job，
+token 从 Secret 注入、不落日志）。
 
 ⚠️ 上游原先把该字段序列化成 JSON **字符串**（`"7"`），而 Bot API 规定 Integer。
 若被忽略，就会静默投到 General 且返回 200 —— 看着完全像成功，而告警话题与内容话题

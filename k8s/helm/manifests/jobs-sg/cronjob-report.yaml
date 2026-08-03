@@ -50,14 +50,17 @@ spec:
                 # 与 alertmanager-config.yaml 的 chatID 一致。
                 - name: TELEGRAM_CHAT_ID
                   value: "-1003981213530"
-                # 话题（forum topic）ID。⚠️ **留空 = 群的 General 话题**。
-                # 刻意**不填 2** —— thread 2 是「🚨 Homelab 告警」，
-                # 上游 docs/02 §4.3 明令周报不得进告警话题。
-                # 想投到专门的内容话题：Telegram 里右键该话题 → 复制链接，
-                # `t.me/c/<内部 id>/<thread_id>`，把第二个数字填在这里即可（一行改动，
-                # 不涉及 Vault）。
+                # 话题（forum topic）ID → 群里的 **jobs-sg** 话题。
+                # 2026-08-03 由 bot 自己经 createForumTopic 建的（bot 是群管理员且有
+                # can_manage_topics），返回 message_thread_id=552。
+                #
+                # ⚠️ 刻意**不是 2** —— thread 2 是「🚨 Homelab 告警」，
+                # 上游 docs/02 §4.3 明令周报不得进告警话题。留空则是群的 General 话题。
+                #
+                # 换话题：Telegram 里右键目标话题 → 复制链接，
+                # `t.me/c/<内部 id>/<thread_id>` 的第二个数字填这里（一行改动，不涉及 Vault）。
                 - name: TELEGRAM_THREAD_ID
-                  value: ""
+                  value: "552"
               resources:
                 requests: { cpu: 100m, memory: 128Mi }
                 limits: { cpu: 500m, memory: 384Mi }
