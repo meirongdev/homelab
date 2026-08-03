@@ -196,7 +196,10 @@ data:
             kubernetes:
               namespace: rss-system
               container: postgres
-              label_selector: app=miniflux
+              # 2026-08-03 修正：原为 app=miniflux —— 那是 **Miniflux 应用** 的 pod，
+              # 不是数据库；而且它里面没有名为 postgres 的容器，所以这块状态一直取不到。
+              # 真正的 PG pod 是 app=rss-postgres（容器 postgres + postgres-exporter）。
+              label_selector: app=rss-postgres
 
         - HashiCorp Vault:
             icon: vault.png
