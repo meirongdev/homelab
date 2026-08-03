@@ -6,6 +6,7 @@
 
 | 日期 | 方案 | 状态 |
 |------|------|------|
+| 2026-08-03 | [Terraform state → R2](2026-08-03-tf-state-r2.md)（5 个 root 迁 R2 远程后端） | 📐 设计（等 R2 桶 + token） |
 | 2026-08-02 | [homelab → oracle 负载迁移](2026-08-02-homelab-to-oracle-workload-migration.md)（Loki/Tempo + ArgoCD + calibre 全部迁完，含残余清扫；**推翻 2026-07-04 的两条结论**。可复用的操作 SOP 已提炼为 [runbook](../../runbooks/stateful-service-cross-cluster-migration.md)） | ✅ 完成（Vault 仍为剩余候选） |
 | 2026-07-07 | [技术债盘点与演进路线](2026-07-07-tech-debt-and-evolution.md)（含 **Crossplane 不引入**结论） | ⚠️ 部分落地 |
 | 2026-07-06 | [服务资源分配优化建议](2026-07-06-resource-optimization.md) | ⚠️ 部分落地 |

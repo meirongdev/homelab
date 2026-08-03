@@ -185,7 +185,7 @@ just apply   # Apply DNS/Tunnel changes
   - `vault-eso` App → `manifests/vault-eso/`（homelab；ClusterSecretStore 配置 + 共享 ExternalSecret）
   - `calibre-metadata` App → `cloud/oracle/manifests/calibre-metadata/` (Kustomize；2026-08-03 随 calibre 迁 oracle，destination 已改 in-cluster)
   - `monitoring-dashboards` App → `k8s/helm/manifests/monitoring/`（recurse 目录源：dashboards/ Grafana ConfigMap、alerts/ PrometheusRule + Alertmanager 配置、SLO、KRR、外部抓取。App 名是历史名——改 Application 名会触发 ArgoCD 删旧建新，不值得）
-  - `argocd-image-updater` App → Helm chart `argo/argocd-image-updater` 1.2.4（image v1.2.2）。⚠️ 当前空闲：`kubectl get imageupdater -A` 为 0 个 CR，只有 `oracle-k3s` App 带旧式注解但无对应 CR，实际未在更新任何镜像
+  - `argocd-image-updater` App ❌ 已退役（2026-08-03）：0 个 `ImageUpdater` CR 空转数月后卸载，`oracle-k3s` App 的旧式注解一并移除；机制见 [`decisions/argocd-image-updater.md`](decisions/argocd-image-updater.md)
   - `oracle-k3s` App → `cloud/oracle/manifests/` (Kustomize) on the **oracle-k3s external cluster** via Tailscale (`https://100.107.166.37:6443`); cluster cred from Vault→ESO secret `oracle-k3s-cluster` (Task: `docs/plans/networking/2026-06-04-oracle-k3s-argocd-gitops.md`). Added 2026-06-04.
   - `bifrost` App → `manifests/bifrost/` (homelab LLM gateway + oauth2-proxy)
   - `kyverno` App (Helm chart) + `kyverno-policies` App → `manifests/kyverno-policies/` (homelab admission policies)
@@ -338,7 +338,7 @@ just apply   # Apply DNS/Tunnel changes
   - **homelab**: 建 `manifests/<service>.yaml` → HTTPRoute 追加到 `manifests/gateway/gateway.yaml`（parentRef `homelab-gateway`/`kube-system`/**8000**）→ 文件名加进 `argocd/applications/personal-services.yaml` 的 include 列表
   - **oracle-k3s**（无状态个人服务的默认落点，容量更宽裕；⚠️ arm64，先确认镜像有 `linux/arm64`）: 建 `cloud/oracle/manifests/personal-services/<service>.yaml`（HTTPRoute 写在同一个文件里，parentRef `oracle-gateway`/`kube-system`/**80**）→ 路径加进 `cloud/oracle/manifests/kustomization.yaml` 的 `resources`
   - 两边共同: 新 namespace 需要目标 ns 里的 ReferenceGrant（**`v1beta1`**，声明成 `v1` 会让整个 App `ComparisonError`）；PVC 一律 `storageClassName: local-path`（`nfs-client` 已于 2026-07-11 卸载，引用它的 PVC 会永久 Pending）；`git push` → ArgoCD 3 分钟内同步；最后补 homepage 条目 + Uptime Kuma monitor（见下）
-  - **Exception**: 需要 ArgoCD Image Updater 的服务用自己的 Kustomize Application（`manifests/<service>/` + `argocd/applications/<service>.yaml`），不并入 `personal-services`
+  - ~~**Exception**: 需要 ArgoCD Image Updater 的服务用自己的 Kustomize Application~~ ❌ 已退役（2026-08-03），此例外不再适用
 - **Uptime Kuma monitors**: Uptime Kuma 跑在 oracle-k3s；monitor 全部声明式定义在 `cloud/oracle/manifests/uptime-kuma/provisioner.yaml` 的 `uptime-kuma-provisioner` ConfigMap 里的 `MONITORS` 列表。To add a monitor for a new service:
   1. Append an entry to `MONITORS` in the ConfigMap（oracle 本地服务用集群内 Service URL，homelab 服务用公网 URL）:
      ```python
@@ -357,7 +357,7 @@ just apply   # Apply DNS/Tunnel changes
   - 详见 Observability › **Dashboards 组织**。
 - **Homepage config updates**: Homepage 跑在 **oracle-k3s**（`cloud/oracle/manifests/homepage/homepage.yaml`，随 `oracle-k3s` App 同步）。ArgoCD 会在 `git push` 后自动同步 ConfigMap，但配置是用 `subPath` 挂载的、**不会热加载** —— 必须 `kubectl --context oracle-k3s rollout restart deployment/homepage -n homepage` 才生效。不要用 `kubectl delete configmap`（会和 ArgoCD 冲突）。
 - **HTTPRoute template**: Always include explicit `group`/`kind` in `parentRefs` and `group`/`kind`/`weight` in `backendRefs` to prevent ArgoCD OutOfSync drift caused by Gateway controller defaults.
-- **ArgoCD Image Updater** (chart 1.2.4 / image v1.2.2): Uses CRD model — create an `ImageUpdater` CR (not just annotations). Set `useAnnotations: true` in the CR to read image config from Application annotations. Use strategy `newest-build` (not `latest`, deprecated). Chart ≥1.2 moved the log-level Helm key from top-level `logLevel` to `config.log.level` (old key silently ineffective). ⚠️ Currently idle — no `ImageUpdater` CRs exist in the cluster.
+- **ArgoCD Image Updater**: ❌ **已退役（2026-08-03）** —— 0 个 `ImageUpdater` CR 空转数月后卸载。若日后要自动升级镜像，要么重新接入（机制见 [`decisions/argocd-image-updater.md`](decisions/argocd-image-updater.md)：CRD 模型、`useAnnotations: true`、strategy `newest-build`、日志键 `config.log.level`），要么走 Renovate（见 ROADMAP 开放项 #10）。
 - **ArgoCD Application definitions** (`argocd/applications/*.yaml`): The `root` Application (App-of-Apps) watches this directory recursively, so editing any `*.yaml` here and pushing is enough — ArgoCD will reconcile within the 3-min poll. Manual `kubectl apply` is only needed for the initial `root.yaml` bootstrap, or if `root` itself is missing.
 - **ArgoCD self-heal caveat**: Resources already managed by an Application (for example `gateway` managing `manifests/gateway/gateway.yaml`) must be changed in Git first. Ad-hoc `kubectl patch/apply` fixes on live resources will be reconciled away on the next sync.
 - **Kustomize namespace caveat**: The global `namespace:` field in `kustomization.yaml` runs as a transformer after JSON patches, overriding them. Declare namespace explicitly in each manifest instead when resources span multiple namespaces.

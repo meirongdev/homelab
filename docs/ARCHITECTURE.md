@@ -42,7 +42,7 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 |------|------|------|
 | CNI | Cilium (eBPF + VXLAN)，双集群统一；从 Flannel 迁入 | [`plans/networking/2026-03-06-cilium-mesh-installation.md`](plans/networking/2026-03-06-cilium-mesh-installation.md)（无独立 ADR） |
 | Ingress | Cilium Gateway API (非 Traefik) | [`decisions/gateway-controller-evaluation.md`](decisions/gateway-controller-evaluation.md) |
-| 镜像更新 | ArgoCD Image Updater (CRD 模式；当前闲置无 CR) | [`decisions/argocd-image-updater.md`](decisions/argocd-image-updater.md) |
+| 镜像更新 | 无自动升级（ArgoCD Image Updater 已于 2026-08-03 退役；可选 Renovate） | [`decisions/argocd-image-updater.md`](decisions/argocd-image-updater.md) |
 | 告警投递 | Alertmanager 原生 telegramConfigs (Gotify 已退役) | [`decisions/alerting-telegram-migration.md`](decisions/alerting-telegram-migration.md) |
 | 子域名 DNS | external-dns (HTTPRoute 声明式，取代 Terraform 手管) | [`decisions/external-dns-adoption.md`](decisions/external-dns-adoption.md) |
 | 成本/右尺寸 | OpenCost 走 collector 旁路 + KRR 窄口径采集 | [`decisions/opencost-krr-data-sources.md`](decisions/opencost-krr-data-sources.md) |
