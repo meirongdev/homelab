@@ -81,12 +81,9 @@ spec:
                 # 显式写成 300s（= 上游 llm.DefaultTimeout），要调不用重新构镜像。
                 - name: LLM_TIMEOUT
                   value: "300"
-                - name: BIFROST_VK
-                  valueFrom:
-                    secretKeyRef:
-                      name: jobs-sg-secrets
-                      key: bifrost-vk
-                      optional: true
+                # 这里**没有** BIFROST_VK：直连 DGX 不需要 virtual key，
+                # external-secret.yaml 也不再声明该键。切回 Bifrost 时才需要补回
+                # （改 LLM_BASE_URL + 删 LLM_MODELS + 两处加回 bifrost-vk）。
               # CPU limit 3000m：节点是 8 核 / 7600m allocatable，实测 idle 用量约 9%、
               # requests 合计仅 27%，容量宽裕（2026-08-03 核对）。
               #
