@@ -72,15 +72,31 @@ spec:
                   value: deepseek-v4-flash
                 - name: LLM_CONCURRENCY
                   value: "8"
+                # ⚠️ 单次调用超时。上游原本硬编码 60s，而实测真实岗位描述一次要 **66.5s**
+                # （2,326 字描述 / 497 prompt tokens / 937 completion tokens，reasoning 占大头）
+                # —— 超时值恰好卡在真实耗时**下面**，是最糟的位置：几乎每次都差几秒超时，
+                # 每条白烧 2×60s 后 fail-open 留在积压里，实测排空速率只有 2.1 条/分钟。
+                # 且该端点非流式，生成完才回 header（错误信息是 "awaiting headers"），
+                # 这个预算覆盖整个生成过程；客户端放弃也不会让服务端停止生成，白耗共享 GPU。
+                # 显式写成 300s（= 上游 llm.DefaultTimeout），要调不用重新构镜像。
+                - name: LLM_TIMEOUT
+                  value: "300"
                 - name: BIFROST_VK
                   valueFrom:
                     secretKeyRef:
                       name: jobs-sg-secrets
                       key: bifrost-vk
                       optional: true
+              # CPU limit 3000m：节点是 8 核 / 7600m allocatable，实测 idle 用量约 9%、
+              # requests 合计仅 27%，容量宽裕（2026-08-03 核对）。
+              #
+              # ⚠️ 提高 CPU 只能加速**一次性的归档扫描**（500m 下约 150s → 3000m 下约 30s）。
+              # 之后的 LLM 阶段实测 CPU 只有 1m —— 它在等 DGX 推理，不吃 CPU。
+              # 也就是说：这条改动不会缩短占绝大部分时间的富化阶段，别指望它提速整体。
+              # request 仍留 100m：这是每晚一次的批作业，不该常占调度配额。
               resources:
                 requests: { cpu: 100m, memory: 192Mi }
-                limits: { cpu: 500m, memory: 512Mi }
+                limits: { cpu: 3000m, memory: 512Mi }
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true

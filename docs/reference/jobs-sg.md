@@ -47,13 +47,28 @@ DGX 是跨 tailnet 共享的境内机器（RTT 66–83ms），不可用时 enric
 **切回 Bifrost**：`LLM_BASE_URL` 改回 `http://bifrost.bifrost.svc.cluster.local:8080`
 并删掉 `LLM_MODELS`（默认链即 Bifrost 形式），再往 Vault 写 `bifrost-vk`。
 
-**吞吐**：并发 8 下约 **6.5 条/分钟**（真实岗位描述约 70s/条 —— 短 prompt 只要 15s，
-但真实描述长、deepseek 的 reasoning 输出也长）。baseline 后约 4900 条积压，每晚 3h
-窗口约 1100 条，**约 4 个晚上收敛**；进度逐条落库，中途被 deadline 杀掉不丢。
-稳态每日新增几百条，约半小时跑完。`enrich_cache` 按 `description_sha256` 去重。
+**单次调用实测 66.5s**（2,326 字描述 / 497 prompt tokens / 937 completion tokens，
+reasoning 占大头）。短 prompt 只要 15s —— 别拿短 prompt 的数字做容量规划。
 
-想更快只能加并发（CPU 现在是空的，加并发确实有效）——但 DGX 是共享机器，同时在给
-Open Notebook 供交互式推理，往上加会挤占它。8 是刻意保守的。
+⚠️ **超时值曾经卡在真实耗时下面（2026-08-03）**：上游硬编码 60s，而真实调用要 66.5s，
+于是几乎每次都差几秒超时 → 每条白烧 2×60s → fail-open 留在积压里，实测排空只有
+**2.1 条/分钟**（一次运行 14 条 fail-open 告警，全是
+`Client.Timeout exceeded while awaiting headers`）。
+只有特别短的帖子能侥幸跑完，所以表现像「慢」而不是「坏」—— 这类**卡在边界上**的超时
+最难发现。上游 `a17d39d` 改成可配置（`LLM_TIMEOUT`，默认 `llm.DefaultTimeout=300s`），
+清单里显式写 300。
+
+两个容易误读的点：该端点**非流式**，生成完才回 header，所以这个预算覆盖**整个生成过程**，
+不是连接阶段（错误信息里的 "awaiting headers" 极具误导性）；客户端放弃**不会**让服务端
+停止生成，每次超时还白耗一次共享 GPU 容量。
+
+**吞吐**：超时修好后并发 8 约 6～7 条/分钟。baseline 后约 4900 条积压，每晚 3h 窗口，
+**约 2～3 个晚上收敛**；进度逐条落库，中途被 deadline 杀掉不丢。稳态每日新增几百条，
+约半小时跑完。`enrich_cache` 按 `description_sha256` 去重。
+
+想更快只能加并发 —— 但**别指望加 CPU**：LLM 阶段实测 CPU 只有 **1m**，它在等推理。
+而并发的天花板是 DGX 的余量（它同时在给 Open Notebook 供交互式推理），不是本地 CPU。
+8 是刻意保守的。
 
 ## ⚠️ 归档读取：每轮一次，不是每条一次（2026-08-03 实测教训）
 
@@ -225,7 +240,9 @@ CI 当时是绿的：`testdata/fixture/jobs.jsonl` 由 `scripts/genfixture` 从*
 | 首份周报 | 2026-W31，1,301 条新岗，生成耗时 6s |
 | enrich 积压（baseline 后） | ~4,900（SWE 子集） |
 | enrich 规则层（修复后） | **4,837 条 / 30 秒 / 0 错误**（修复前 75 条 / 14 分钟） |
-| 单条 LLM 抽取 | ~70s（真实岗位描述；短 prompt 约 15s） |
+| enrich 归档扫描（集群内，500m limit） | 约 150s，一次性；CPU 顶满，之后降到 ~1m |
+| 单条 LLM 抽取 | **66.5s**（真实描述；短 prompt 约 15s，别用它规划容量） |
+| 节点容量 | 8 核 / 7600m allocatable，idle 用量约 9%、requests 合计 27% |
 
 ⚠️ 别按「库里岗位数 ÷ 100」估页数 —— `seen`（88k）远大于 `new`（9.5k），按后者算会把
 全量扫描的耗时高估近一个数量级（`activeDeadlineSeconds: 3600` 实际很宽裕，29 分钟就跑完）。
