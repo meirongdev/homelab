@@ -19,8 +19,11 @@
 #
 #   2. scanJobsConcurrentLimit 从 1 抬到 **2**：homelab 那个 1 是为「5600H 笔记本
 #      idle 74°C」的热约束设的，oracle 是 4 核云实例、实测 CPU 9%，没有该约束。
-#      顺带缓解一个已知运维痛点：Complete 状态的滞留 Job 会占住并发槽，
-#      limit=1 时任何一个滞留都会让整个扫描队列停摆。
+#      ⚠️ 原先以为抬并发能"顺带缓解 Complete 滞留 Job 占槽"——2026-08-03 首次部署
+#      实测证否：滞留 Job 一样占满 limit=2，队列照样停摆（33 分钟零动静、零报错，
+#      46 个负载只出 7 份报告）。抬并发只是把停摆门槛从 1 个滞留抬到 2 个。
+#      真正的解法是把 scanJobTTL 从 1h 降到 5m 让槽位及时释放（见下方注释），
+#      两个集群都已改。并发上限的职责回归本位：只管"同时跑几个"，不管吞吐。
 #
 #   3. accepted-risk CVE 列表按**镜像实际所在集群**重排（见下）。
 #
@@ -40,7 +43,10 @@ excludeNamespaces: "kube-system,kube-public,kube-node-lease,trivy-system"
 operator:
   # 见文件头 §2：oracle 无热约束，2 条并发 + 缓解滞留 Job 占槽
   scanJobsConcurrentLimit: 2
-  scanJobTTL: "1h"
+  # 见文件头 §2 的实测结论：滞留 Job 占槽要靠这个 TTL 回收，抬并发只是把停摆
+  # 门槛从 1 个滞留抬到 2 个，并没有解决问题。5m 才是真正的解法。
+  # 不要改回 1h —— 那等于把吞吐锁死在 2 个镜像/小时（46 个负载要 23 小时扫完）。
+  scanJobTTL: "5m"
   metricsFindingsEnabled: true
   vulnerabilityScannerEnabled: true
   vulnerabilityScannerScanOnlyCurrentRevisions: true
