@@ -34,10 +34,13 @@ resources:
 #     -H 'Accept: application/vnd.oci.image.index.v1+json' \
 #     https://ghcr.io/v2/meirongdev/jobs-sg/manifests/sha-<short12> | grep -i docker-content-digest
 #
-# 当前 = jobs-sg 738cb98（"perf(enrich): read the archive once per run, not once
-# per job"）。**不要回滚到 d833623 或更早** —— 那些镜像按每条岗位重扫整个归档，
-# 规则层 14 分钟只能处理 75 条并把 CPU 顶满（详见 docs/reference/jobs-sg.md）；
-# 配上这里的 LLM_CONCURRENCY=8 只会更慢。再早于 2d7b9ad 的镜像 ingest 一律 panic。
+# 当前 = jobs-sg a17d39d（"fix(llm): per-call timeout was 60s while real calls take
+# 66s"）。cronjob-enrich.yaml 的 LLM_TIMEOUT 需要它才生效；更早的镜像硬编码 60s，
+# 真实调用要 66.5s → 几乎每条都超时 fail-open，排空只有 2.1 条/分钟。
+#
+# **不要回滚**：早于 738cb98 的镜像按每条岗位重扫整个归档（规则层 14 分钟只处理
+# 75 条、CPU 顶满）；早于 2d7b9ad 的镜像 ingest 一律 panic。
+# 三个坑的实测数据都在 docs/reference/jobs-sg.md。
 images:
   - name: ghcr.io/meirongdev/jobs-sg
-    digest: sha256:fc308964d8bfab2b36ae228615778ac22e1e16b9a1481440dafd83690abe31f8
+    digest: sha256:f7e51d19283481ba249c3546105d8f3f494d56f99b5c9d08dab7cf7fda9e7ba3

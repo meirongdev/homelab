@@ -37,9 +37,12 @@ spec:
               image: ghcr.io/meirongdev/jobs-sg
               command: ["/usr/local/bin/jobs-sg-ingest"]
               args: ["--data-dir", "/data"]
+              # 与 enrich 同理放宽（节点 8 核、idle 约 9%）。ingest 主要受 API 速率限制
+              # （每页 1500ms 延迟），实测 884 页 29 分钟，CPU 不是瓶颈；放宽只是给
+              # SQLite 写入与 gzip 归档留余量，别指望缩短整体耗时。
               resources:
                 requests: { cpu: 100m, memory: 128Mi }
-                limits: { cpu: 500m, memory: 384Mi }
+                limits: { cpu: 2000m, memory: 512Mi }
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
