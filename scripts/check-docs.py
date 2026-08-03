@@ -55,7 +55,7 @@ def status_line(text):
 def check_naming(md, rel):
     """R2 — 带日期的目录用 YYYY-MM-DD- 前缀，常青目录不带日期；全部小写 kebab-case。
 
-    docs/ 顶层文档（README/AGENTS/ARCHITECTURE/CONVENTIONS/ROADMAP）是约定俗成的
+    docs/ 顶层文档（README/AGENTS/ARCHITECTURE/ROADMAP）是约定俗成的
     全大写名，工具链按名字识别它们，豁免命名规则。
     """
     if md.name == "README.md" or len(rel.parts) == 1:
@@ -142,6 +142,63 @@ def check_indexes():
                 fail("R5", idx, f"索引指向已不存在的 {t}")
 
 
+def check_plan_counts():
+    """R5 — plans/README.md 的「份数」列必须与各类别实际文件数一致。
+
+    这一列纯手工维护，每加一份 plan 就会漂（2026-08-03 architecture/storage 两行都漂了）。
+    check_indexes 已经算过每个目录的实际份数，顺手比一下就行。
+    """
+    idx = DOCS / "plans" / "README.md"
+    if not idx.exists():
+        return
+    row = re.compile(r"^\|\s*\[(\w[\w-]*)/\]\([^)]*\)\s*\|.*\|\s*(\d+)\s*\|\s*$")
+    for i, line in enumerate(idx.read_text().splitlines(), 1):
+        m = row.match(line)
+        if not m:
+            continue
+        name, claimed = m.group(1), int(m.group(2))
+        d = DOCS / "plans" / name
+        if not d.is_dir():
+            fail("R5", idx, f"份数表里的 {name}/ 不存在", i)
+            continue
+        actual = len({f.name for f in d.glob("*.md")} - {"README.md"})
+        if actual != claimed:
+            fail("R5", idx, f"{name}/ 份数写 {claimed}，实际 {actual}", i)
+
+
+def check_readme_trees():
+    """非 docs 的 README 里，目录树画出的子目录必须真实存在。
+
+    2026-08-03 `cloudflare/README.md` 画了个早已退役的 `workers/`（Sink submodule，
+    2026-05-27 删除）——目录树是最容易在重构后变成化石的部分，而它又是新人读的第一眼。
+    只校验树的**第一层**（顶格 ├──/└──）且以 `/` 结尾的条目；更深的层级缩进后跳过。
+    """
+    entry = re.compile(r"^[├└]── ([^\s#]+)/")
+    for p in sorted(ROOT.rglob("README.md")):
+        rel = p.relative_to(ROOT)
+        parts = rel.parts
+        if parts[0] in (".git", "docs") or ".terraform" in parts or ".worktrees" in parts:
+            continue
+        base, in_fence = None, False
+        for i, line in enumerate(p.read_text().splitlines(), 1):
+            if line.startswith("```"):
+                in_fence = not in_fence
+                if not in_fence:
+                    base = None
+                continue
+            if not in_fence:
+                continue
+            if base is None:
+                # 树的第一行是根路径（相对仓库根），如 `argocd/` 或 `cloud/oracle/`
+                root_line = line.strip()
+                if root_line.endswith("/") and (ROOT / root_line).is_dir():
+                    base = ROOT / root_line
+                continue
+            m = entry.match(line)
+            if m and not (base / m.group(1)).is_dir():
+                fail("TREE", p, f"目录树画了不存在的 {m.group(1)}/", i)
+
+
 def check_links(md, text):
     """所有 docs 内的相对 markdown 链接必须解析得到。"""
     for i, line in enumerate(text.splitlines(), 1):
@@ -185,8 +242,9 @@ RULES_COVERED = [
     ("R2", "命名（日期前缀 / 常青不带日期 / 小写 kebab-case）", "✅ 自动"),
     ("R3", "H1 在首行 + 各目录文首必填字段", "✅ 自动"),
     ("R4", "plans/decisions 状态带枚举标记", "✅ 自动"),
-    ("R5", "目录 README 索引双向完整", "✅ 自动"),
+    ("R5", "目录 README 索引双向完整 + plans/README.md 份数与实际一致", "✅ 自动"),
     ("--", "docs 内相对链接 + 非 docs 文件对 docs/ 的引用", "✅ 自动"),
+    ("--", "非 docs README 的目录树只画真实存在的子目录", "✅ 自动"),
     ("R1", "目录归属（这份文档该放哪）", "⚠️ 需人判断"),
     ("R6", "唯一真相源（同一事实只维护一处）", "⚠️ 需人判断"),
     ("R7", "命令带执行上下文", "⚠️ 需人判断"),
@@ -211,6 +269,8 @@ def main():
         check_status_enum(md, rel, text)
         check_links(md, text)
     check_indexes()
+    check_plan_counts()
+    check_readme_trees()
     check_external_refs()
 
     total = sum(len(v) for v in violations.values())
