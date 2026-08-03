@@ -35,17 +35,17 @@
 
 ## 2. 边缘安全 (Edge) — Cloudflare
 
-- **零暴露端口**：所有外部流量 `Internet → Cloudflare DNS → Tunnel(cloudflared) → Cilium Gateway → Service`，集群无公网入站端口。
-- **WAF**（zone 级，覆盖两条 Tunnel 所有子域）：5 条自定义规则（拦 WordPress/PHP 扫描、敏感文件 `.env/.git`、漏扫 UA、非标 HTTP 方法、高威胁分 Managed Challenge）+ 认证端点限流（`/login`,`/oauth2`,`/signin`,`/v1/auth` 30 req/10s/IP）。
-- **Zone settings**：SSL Full、TLS 1.2+、Always HTTPS、Browser Integrity Check 等。
-- 细节见 CONVENTIONS.md › *Cloudflare WAF & Security*。
+- **零暴露端口**：所有外部流量 `Internet → Cloudflare DNS → Tunnel(cloudflared) → Cilium Gateway → Service`，集群无公网入站端口。入口链路细节见 [networking-ingress.md](networking-ingress.md)。
+- **WAF**（zone 级，覆盖两条 Tunnel 所有子域；`cloudflare/terraform/waf.tf`，`just apply` 部署）：5 条自定义规则用满免费额度（拦 WordPress/PHP 扫描、敏感文件 `.env/.git`、漏扫 UA、非标 HTTP 方法、高威胁分 Managed Challenge）+ 认证端点限流（`/login`,`/oauth2`,`/signin`,`/v1/auth` 30 req/10s/IP）。Pro 计划才有 Managed Ruleset (SQLi/XSS/RCE)/OWASP CRS/泄漏凭据检测（见 `waf.tf` 注释段）。
+- **Zone settings**：SSL Full、TLS 1.2+、Always HTTPS、Security Level Medium、Browser Integrity Check、Email Obfuscation、Hotlink Protection、Opportunistic Encryption。
+- **API Token 权限**：Zone DNS Edit + Zone WAF Edit + Zone Settings Edit + Cloudflare Tunnel Edit。
 
 ## 3. 身份与访问 (Identity) — ZITADEL OIDC
 
 - **单一 IdP**：`auth.meirong.dev`。无共享 ingress 层 SSO；每个服务**要么公开、要么原生 ZITADEL OIDC、要么自带认证**。
 - **原生 OIDC apps**：Grafana / Miniflux / Stirling-PDF / KaraKeep / ArgoCD / Bifrost(admin)。各自机密 client 由 `zitadel/scripts/*.sh`(REST) 幂等下发，creds 经 Vault→ESO。**本地账号保留为后备**（无锁死风险）。
 - **GitHub 联邦锁定**：instance 级外部 IdP，`isCreationAllowed/isAutoCreation=false` + `autoLinking=EMAIL` —— 陌生人无法自助注册，GitHub 身份仅能按已验证邮箱链接到既有 ZITADEL 用户。
-- 细节见 CONVENTIONS.md › *Identity*。
+- 部署形态与各 app 接入细节见 [identity.md](identity.md)。
 
 ## 4. 密钥管理 (Secrets) — Vault + ESO
 
@@ -53,6 +53,7 @@
 - **路径约定**：homelab 用 `secret/homelab/<svc>`，oracle 用 `secret/oracle-k3s/<svc>`。
 - **静默陈旧防护**：ESO 健康告警（`externalsecret`/`(cluster)secretstore` `Ready=False`）经 Telegram 报警——堵住"Vault 封印/token 过期 → Secret 不再刷新但 app 仍用旧值"的盲区。规则 `manifests/monitoring/alerts/eso-alerts.yaml`。
 - 本地 `.env` 仅用于 bootstrap token（gitignore）。
+- **不留常驻明文 Vault 清单**：旧的 `k8s/helm/values/vault_values.md` dump 已删（2026-07-31），不得重建为常驻文件——按需生成、用完即删；`.gitignore` 的 `**/vault_values.md` 规则保留作护栏。Vault 本身就是真相源（有夜备）；陈旧 dump 比没有更糟——最后那份有 10 条死路径、漏 12 条活路径。
 
 ## 5. 准入管控 (Admission)
 
@@ -141,6 +142,7 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 - **oracle → Falco + Falcosidekick → Telegram**（`values/falco.yaml`，ns `falco`，Helm App 部署到 oracle 集群）。规则库开箱即用；oracle VM CPU 余量大。`driver: modern_ebpf`(CO-RE 无需内核模块)。**双出口**：① Falco JSON→stdout→OTel→Loki（always-on，零依赖）；② Falcosidekick→Telegram（原生 output，warning+，併入群 MatthewDaily「🚨 Homelab 告警」话题——2026-07 前曾经 Gotify 转发，已随其下线迁移，见 `decisions/alerting-telegram-migration.md`）。
   - **Telegram 推送前置（一次性）**：token 走 Vault `secret/homelab/telegram`（与 homelab Alertmanager 共用同一个 bot，跨集群读取）→ ESO(`cloud/oracle/manifests/falco/falcosidekick-secret.yaml`)生成 `falcosidekick-telegram` secret(key `TELEGRAM_TOKEN`)；chatid/messagethreadid 明文配在 `values/falco.yaml`。token 未配好不影响 Falco→Loki 检测，只是 falcosidekick 推送失败。
   - falco ns（含 PSA privileged 标签 + ESO secret）由 oracle-k3s kustomize App 拥有；Falco 工作负载由独立 `falco` Helm App 部署（`CreateNamespace=false`）。
+  - **⚠️ falco 依赖 inotify**：oracle 节点必须 `fs.inotify.max_user_instances=8192`（Ubuntu 默认 128 会被占满，falco 启动即 `could not initialize inotify handler` CrashLoop——2026-07-12 发现时已崩 23 天/2000+ 次重启；sysctl 已固化于 `cloud/oracle/ansible/playbooks/setup-k3s.yaml`）。教训：期间 `KubePodCrashLooping`(warning) 一直在触发但淹没在噪音里——**长期 Progressing/慢性 warning 需要人定期扫一眼兜底**。
 
 ## 9. 安全可观测与告警
 
@@ -181,7 +183,7 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 |------|------|
 | 部署/验证/回滚（Phase 0+1） | [../runbooks/security-hardening.md](../runbooks/security-hardening.md) |
 | 实施决策与权衡 | [../plans/security/2026-06-16-k3s-security-hardening.md](../plans/security/2026-06-16-k3s-security-hardening.md) |
-| 约定速查 | CONVENTIONS.md › *集群内部安全* |
+| 身份/OIDC 接入细节 | [identity.md](identity.md) |
 | 备份恢复 | [../runbooks/backup-recovery.md](../runbooks/backup-recovery.md) |
 | 重启后恢复 | `just homelab-recover`（k8s/helm） |
 

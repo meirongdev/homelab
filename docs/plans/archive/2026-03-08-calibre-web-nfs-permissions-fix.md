@@ -2,7 +2,7 @@
 
 > **状态: ⚠️ 已失去意义（2026-07-11）** —— 本文解决的是 NFS 上的 root-owned 目录权限问题，
 > 而 **NFS 已整体退役**：Calibre 书库与 config 都已迁到 `local-path`，nfs-client provisioner 已卸载。
-> 保留作当时排障思路的记录。见 [CONVENTIONS § Storage](../../CONVENTIONS.md)。
+> 保留作当时排障思路的记录。见 [reference/storage.md](../../reference/storage.md)。
 
 ## Problem Statement
 When uploading books or performing automated ingest in Calibre-Web-Automated, newly created directories on the NFS share are owned by `root`. Since the application drops privileges to user `1000` (PUID) after initialization, it loses the ability to modify these files/directories later, leading to permission denied errors.

@@ -6,30 +6,38 @@
 
 改架构就必须同步这些文档。
 
+### 服务与应用
+
+- [services.md](services.md) — **服务清单唯一真相源**（哪个服务在哪个集群/ns/域名）+ 按服务的运维备忘
+- [open-notebook.md](open-notebook.md) — AI 研读知识库：部署形态、模型接线（DGX + Mac OMLX，provisioner 声明式）、配置真相源地图、备份口径
+
 ### 网络
 
+- [networking-ingress.md](networking-ingress.md) — 入口链路（Tunnel → Cilium Gateway）、HTTPRoute 约定、external-dns DNS 自动化、节点地址速查
 - [tailscale-network.md](tailscale-network.md) — 双集群互联模型（Tailscale 只做 node underlay，pod 流量走 ClusterMesh VXLAN）+ 路由踩坑
 - [cloudflare-tunnel-observability.md](cloudflare-tunnel-observability.md) — Tunnel + Gateway 流量可观测（能看到什么、看不到什么）
 
 ### 可观测
 
-- [observability-multicluster.md](observability-multicluster.md) — 日志/指标/链路追踪统一架构
+- [observability-multicluster.md](observability-multicluster.md) — 日志/指标/链路追踪统一架构（含 dgx-spark/macbook 外部主机与 SMART 采集）
 - [observability-otel-logging.md](observability-otel-logging.md) — OTel 日志管道细节 + 4 种应用接入模式
+- [observability-alerting-slo.md](observability-alerting-slo.md) — 告警路由（Telegram + dead-man's switch）与覆盖盲区、Dashboards 组织约定、SLI/SLO（Sloth）
 - [k8s-qos-resource-management.md](k8s-qos-resource-management.md) — 资源配额与 QoS 约定
 - [cost-and-rightsizing.md](cost-and-rightsizing.md) — OpenCost 成本归因 + KRR 右尺寸（定价模型、指标语义、运维操作）
 
-### 安全
+### 安全与身份
 
 - [security.md](security.md) — 纵深防御 11 层逐层状态 + 威胁覆盖矩阵。⚠️ 第 9 层网络**只到可见性**，无自建 CiliumNetworkPolicy
+- [identity.md](identity.md) — ZITADEL 部署形态（HelmChart CR + CNPG）、各应用原生 OIDC 接入、per-app oauth2-proxy、GitHub 联邦 IdP
+
+### 存储与备份
+
+- [storage.md](storage.md) — 全 `local-path` 布局、NFS 退役事实与故障签名、PVC 清单与迁移程序、restic 备份设计
 
 ### GitOps
 
-- [argocd-app-patterns.md](argocd-app-patterns.md) — ArgoCD 管理模式、pattern 对比、新增 Application 的 3 个坑
+- [argocd-app-patterns.md](argocd-app-patterns.md) — 控制面部署形态、28 个 Application 清单与备注、pattern 对比、新增 Application 的 4 个坑
 - [manifest-safety-checks.md](manifest-safety-checks.md) — CI 强制的清单结构规则 H1-H4（每条都来自一次真实事故）+ 明确列出「静态查不出、只能靠人」的那几类
-
-### 应用
-
-- [open-notebook.md](open-notebook.md) — AI 研读知识库：部署形态、模型接线（DGX + Mac OMLX，provisioner 声明式）、配置真相源地图、备份口径
 
 ---
 
