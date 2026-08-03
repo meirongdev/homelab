@@ -120,9 +120,17 @@ CR + git write-back 凭据，收益不抵复杂度。手动更新 digest。
 
 Vault `secret/homelab/jobs-sg`，四个 property：
 
-**当前这四个键都还没写** —— 所以 `jobs-sg-secrets` 处于 `SecretSyncedError`，
-这是**已知且可接受**的状态：`optional: true` 让 Pod 照常跑。现状影响只有一条：
-**周报不推 Telegram**（HTML/MD 照常生成，站点照常服务）。
+⚠️ **`external-secret.yaml` 当前未在 `kustomization.yaml` 里注册**，因此没有部署。
+
+为什么不是"先放上去等 Vault"：ESO 对不存在的路径会一直 `Ready=False`，于是
+`eso-alerts.yaml` 的 `ExternalSecretNotReady`（`for: 15m`, severity warning）**持续告警**，
+ArgoCD 应用也一直 `Degraded`。2026-08-03 首次上线就这么响了 40 分钟才发现 ——
+`optional: true` 保住了 Pod，但保不住告警面板。宁可先不部署，也不要留一条永远为真的告警。
+
+**启用（想要 Telegram 周报时）**：① 先写 Vault ② 再把 `kustomization.yaml` 里
+`# - external-secret.yaml` 那行取消注释。顺序反了就会再响一次。
+
+未启用期间唯一影响：**周报不推 Telegram**（HTML/MD 照常生成、站点照常服务）。
 LLM 富化不受影响 —— 它直连 DGX，不用 `bifrost-vk`（见上）。
 
 | property | 用途 | 缺失时 |
