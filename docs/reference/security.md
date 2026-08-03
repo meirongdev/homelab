@@ -1,6 +1,6 @@
 # K3s 集群安全架构 (Security Architecture)
 
-> Last updated: 2026-07-31
+> Last updated: 2026-08-04
 > Status: 生效事实
 > Scope: 双集群（homelab + oracle-k3s）的纵深防御模型 —— source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
@@ -36,7 +36,7 @@
 ## 2. 边缘安全 (Edge) — Cloudflare
 
 - **零暴露端口**：所有外部流量 `Internet → Cloudflare DNS → Tunnel(cloudflared) → Cilium Gateway → Service`，集群无公网入站端口。入口链路细节见 [networking-ingress.md](networking-ingress.md)。
-- **WAF**（zone 级，覆盖两条 Tunnel 所有子域；`cloudflare/terraform/waf.tf`，`just apply` 部署）：5 条自定义规则用满免费额度（拦 WordPress/PHP 扫描、敏感文件 `.env/.git`、漏扫 UA、非标 HTTP 方法、高威胁分 Managed Challenge）+ 认证端点限流（`/login`,`/oauth2`,`/signin`,`/v1/auth` 30 req/10s/IP）。Pro 计划才有 Managed Ruleset (SQLi/XSS/RCE)/OWASP CRS/泄漏凭据检测（见 `waf.tf` 注释段）。
+- **WAF**（zone 级，覆盖两条 Tunnel 所有子域；`cloudflare/terraform/waf.tf`，`just apply` 部署）：5 条自定义规则用满免费额度（拦 WordPress/PHP 扫描、敏感文件 `.env/.git`、漏扫 UA、非标 HTTP 方法、高威胁分 Managed Challenge）+ **1 条**限流规则（免费额度就 1 条，共用一个计数器）：认证端点（`/login`,`/oauth2`,`/api/login`,`/signin`,`/v1/auth`）**外加** `draw.meirong.dev` 的 `/socket.io/`（Excalidraw 2026-08-04 去掉 SSO 后，那是个公开的协作中继），30 req/10s/IP+colo → 封 10s。Pro 计划才有 Managed Ruleset (SQLi/XSS/RCE)/OWASP CRS/泄漏凭据检测（见 `waf.tf` 注释段）。
 - **Zone settings**：SSL Full、TLS 1.2+、Always HTTPS、Security Level Medium、Browser Integrity Check、Email Obfuscation、Hotlink Protection、Opportunistic Encryption。
 - **API Token 权限**：Zone DNS Edit + Zone WAF Edit + Zone Settings Edit + Cloudflare Tunnel Edit。
 

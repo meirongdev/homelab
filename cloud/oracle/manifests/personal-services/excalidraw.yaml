@@ -8,7 +8,8 @@
 # (ZITADEL OIDC),但服务端不存任何画布数据(见下面的持久化说明),SSO 没有可保护的对象,
 # 只是给自己加登录摩擦。代价:/socket.io/ 成了开放中继,谁都能拿它开房间烧 arm64 的
 # CPU/带宽 —— 房间本身是客户端 E2E 加密、密钥在 URL fragment,别人进不了你的会话。
-# 要兜底就在 cloudflare/terraform 给这个 host 加 rate limit,不要退回 SSO。
+# 兜底:Cloudflare 那条唯一的限流规则已覆盖 draw 的 /socket.io/(30 req/10s/IP,
+# cloudflare/terraform/waf.tf)。只限 /socket.io/,别扩到整站——冷加载几十个分片会被打穿。
 #
 # 官方前端把协作服务器地址烤进 JS(build-time),自托管标准做法是覆盖 entrypoint,在运行时
 # sed 改写那个硬编码 URL 指向本 origin(见下面 excalidraw Deployment 的 command):

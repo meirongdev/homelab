@@ -104,11 +104,20 @@ Zone-level security settings and WAF rules are defined in `waf.tf`. These are zo
 | 4 | Managed Challenge | High threat score visitors (score > 14) |
 | 5 | Block | Non-standard HTTP methods (TRACE, CONNECT, etc.) |
 
-### Rate Limiting (1 rule)
+### Rate Limiting (1/1 used — Free plan allows exactly one rule)
+
+Both patterns share **one** rule (and therefore one counter) because the Free plan caps
+rate limiting at a single rule. Adding a second one fails at apply time on quota.
 
 | Endpoint Pattern | Threshold | Block Duration |
 |-----------------|-----------|---------------|
-| `/login`, `/oauth2`, `/signin`, `/v1/auth` | 10 req / 10s per IP | 10s |
+| `/login`, `/oauth2`, `/api/login`, `/signin`, `/v1/auth` (any host) | 30 req / 10s per IP+colo | 10s |
+| `draw.meirong.dev` **`/socket.io/` only** — Excalidraw 的公开协作中继 | 同上（共用计数器） | 10s |
+
+> ⚠️ 不要把 `draw.meirong.dev` 整站纳入这条规则：Excalidraw 冷加载要拉几十个 JS/字体
+> 分片，30 req/10s 会被正常访问打穿（边缘命中缓存也计数，"只统计回源请求"是 Business+）。
+> 正常协作大约 4 个请求建立会话，之后是一条长连的 websocket。
+> 实测（2026-08-04）：60 并发打 `/socket.io/` → 9 个 429；单次握手正常 200。
 
 > **Pro Plan Upgrade Path**: With Cloudflare Pro ($20/mo), you can enable:
 > - **Cloudflare Managed Ruleset** — SQLi, XSS, RCE, LFI protection
