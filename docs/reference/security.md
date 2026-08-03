@@ -104,6 +104,10 @@
   并发上限维持原值（散热约束由 `scanJobsConcurrentLimit` 独立保证，与 TTL 正交）。
   **别改回 1h。** 代价：失败 Job 也 5m 内回收，但扫描容器的报错原文会被
   trivy-operator 抄进自己的日志，排障不受影响。
+  改这个值时注意两点：① env 来自 `configMapRef`，需 operator 重启才生效——chart 带
+  `checksum/config` 注解，ArgoCD 同步 ConfigMap 时会自动滚动，不必手动 `rollout restart`；
+  ② `ttlSecondsAfterFinished` 在 Job 创建时就写进 spec，**已存在的 Job 仍按旧 TTL 滞留**，
+  要等它们自然回收后吞吐才真正提上来（改完别急着判断"没效果"）。
   ☠️ **这种"扫描覆盖不全"是静默的**——`TrivyImageCriticalVulnerabilities` 只数
   *现存报告*里的 Critical，`TrivyOperatorMetricsAbsent` 只在序列**整体**消失时才响，
   覆盖率塌到 15% 两头都不占，表现为 `trivy_image_vulnerabilities{cluster="…"}`

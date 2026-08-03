@@ -19,14 +19,20 @@ excludeNamespaces: "kube-system,kube-public,kube-node-lease,trivy-system"
 operator:
   scanJobsConcurrentLimit: 1            # 串行扫描（热节点关键）
   # ⚠️ 别把这个值调大回 1h —— 它不只是"清理时间"，还决定扫描吞吐。
-  # Complete 状态的 Job 仍占着 scanJobsConcurrentLimit 的槽，直到被 TTL 回收；
-  # TTL=1h + limit=1 ⇒ 全集群每小时只扫得动 1 个镜像。叠加 scannerReportTTL=24h
-  # （报告 24h 过期需重扫），29 个工作负载对 24 次/天的天花板已经顶格
-  # ——再加几个负载就会出现"报告先过期、轮不上重扫"的静默盲区。
+  # Complete 状态的 Job 仍占着 scanJobsConcurrentLimit 的槽，直到被 TTL 回收，
+  # 所以 **吞吐上限 ≈ limit ÷ TTL**：
+  #     1h + limit=1 ⇒ 1 个镜像/小时 = 24 次/天（旧值）
+  #     5m + limit=1 ⇒ 12 个镜像/小时（现值，散热不变）
+  # 旧值下 29 个工作负载对着 24 次/天的天花板已经顶格，叠加 scannerReportTTL=24h
+  # （报告 24h 过期需重扫）——再加几个负载就会出现"报告先过期、轮不上重扫"的盲区。
   # 2026-08-03 在 oracle 上实测确诊：2 个 Complete Job 占满 limit=2 后，
   # 队列静止 33 分钟、零日志零报错，46 个负载只产出 7 份报告。
   # 5m 只影响 Job 对象的回收速度，**不改变同时运行的扫描数**（散热约束仍由
-  # scanJobsConcurrentLimit=1 独立保证）。
+  # scanJobsConcurrentLimit=1 独立保证，与 TTL 正交）。
+  # ⚠️ 改这个值需要 operator 重启才生效（env 来自 configMapRef）——chart 带
+  # checksum/config 注解，ArgoCD 同步 cm 时会自动滚动，无需手动 rollout。
+  # 但**已存在的 Job 不受影响**：ttlSecondsAfterFinished 在创建时就写进 Job spec，
+  # 旧 Job 仍按旧 TTL 滞留，要等它们自然回收后吞吐才真正提上来。
   scanJobTTL: "5m"                      # 完成后 5m 回收，及时释放并发槽
   metricsFindingsEnabled: true          # 暴露 trivy_image_vulnerabilities 等 findings 指标
   vulnerabilityScannerEnabled: true
