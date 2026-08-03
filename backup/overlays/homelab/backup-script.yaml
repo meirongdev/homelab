@@ -46,7 +46,15 @@ data:
     #   2026-07-07 从本脚本移除 —— homelab 的 zitadel ns 已删，遗留 dump 步骤导致夜备失败。）
 
     # --- 2) sqlite/config PVC（local-path；2026-07-11 起全部 PVC 已迁离 NFS）---
-    # 只取 sqlite DB(+WAL/SHM) 与小 json 配置；剪掉 cache 等可重建内容。
+    # 只取 sqlite DB(+journal) 与小 json 配置；剪掉 cache 等可重建内容。
+    #
+    # ⚠️ `*.db-journal` 是 2026-08-03 补的：原模式只有 `*.db-wal` / `*.db-shm`，
+    # 那是 **WAL 模式**的产物。jobs-sg 为了让只读挂载的 web 能打开库改用了
+    # **DELETE(rollback) journal**，它的伴随文件叫 `jobs.db-journal`，一个模式都匹配不上。
+    # 后果很隐蔽：若热拷贝正好撞上写事务，jobs.db 是写到一半的状态、而回滚日志没被带走
+    # → 恢复出来的库可能不一致，且 SQLite 没有 journal 可回滚。
+    # 正常时段（03:00 CST）没有写者，所以这是**窗口问题而非必然**，但恰好是那种
+    # 「平时不出事、真出事时才发现备份是坏的」的坑。
     # ⚠️ 下面的 `for pat in ...` 是**显式白名单**——新增有状态应用必须往里加，否则静默不备份。
     # 该失效模式已由 CI 拦截（scripts/check-manifests.py 的 H4）；
     # 规则全文见 docs/reference/manifest-safety-checks.md。
@@ -67,7 +75,7 @@ data:
           dest="/work/pvc/$(basename "$d")"
           find "$d" -maxdepth 3 \
             \( -name processed_books -o -name thumbnails -o -name cache -o -name .cache \) -prune -o \
-            -type f \( -name '*.db' -o -name '*.db-wal' -o -name '*.db-shm' -o -name '*.sqlite*' -o -name '*.json' \) -size -80M -print 2>/dev/null | \
+            -type f \( -name '*.db' -o -name '*.db-wal' -o -name '*.db-shm' -o -name '*.db-journal' -o -name '*.sqlite*' -o -name '*.json' \) -size -80M -print 2>/dev/null | \
           while IFS= read -r f; do
             rel="${f#"$d"/}"
             mkdir -p "$dest/$(dirname "$rel")"
