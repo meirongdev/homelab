@@ -16,7 +16,7 @@
 | Application | `argocd/applications/jobs-sg.yaml` |
 | 镜像 | `ghcr.io/meirongdev/jobs-sg`，按 **manifest-list digest** 固定 |
 | PVC | `jobs-sg-data` 10Gi `local-path`，`Prune=false` |
-| 密钥 | Vault `secret/homelab/jobs-sg` → ESO → `jobs-sg-secrets` |
+| 密钥 | 仅 bot token：复用已有 Vault `secret/homelab/telegram` → ESO → `jobs-sg-secrets`（无新路径、无需手工写值） |
 
 四个二进制、一个镜像：`ingest`（抓取）、`enrich`（技术栈富化）、`report`（周报 +
 Telegram）、`web`（只读服务 + `/metrics`）。三个 CronJob + 一个 Deployment。
@@ -26,7 +26,22 @@ Telegram）、`web`（只读服务 + `/metrics`）。三个 CronJob + 一个 Dep
 | `ingest` | 每日 18:15 UTC（02:15 SGT） | 增量；程序按 SGT 判断周日自动转全量 reconcile |
 | `enrich` | 每日 19:10 UTC | 规则 + LLM（**直连 DGX vLLM**）；fail-open |
 | `report` | 周一 01:00 UTC（09:00 SGT） | 出 HTML/MD + 推 Telegram |
-| `jobs-sg-web` | 常驻 | 只读挂载 PVC，服务周报 + Prometheus 指标 |
+| `jobs-sg-web` | 常驻 | 只读挂载 PVC，服务周报 + 抓取统计 + Prometheus 指标 |
+
+对外路由（全部 200 实测）：
+
+| 路径 | 内容 |
+|---|---|
+| `/` | 最新周报（`report/latest.html`）—— **第一份周报出来前是 404** |
+| `/w/{YYYY-Www}` | 指定周的周报 |
+| `/daily` | 每日抓取统计：按 SGT 日历日一行（run 类型/状态/页数/归档数/新增/SWE/错误/LLM 调用） |
+| `/daily/{YYYY-MM-DD}` | 当日下钻：逐 run 记录、角色与资历分布、技术栈、当天首见岗位（上限 200） |
+| `/healthz` | 只验 DB 能打开 —— 存活探针与 Uptime Kuma 用这个 |
+| `/metrics` | `jobs_sg_*` |
+| `/robots.txt` | — |
+
+`/daily` 系列是随请求渲染（不经 CronJob 落文件）：ingest 约 02:20 SGT 落地，数字必须
+当场就是最新的。周报仍是静态文件 —— 它要归档、要推 Telegram。
 
 ## LLM 富化：直连 DGX，不经 Bifrost
 
@@ -64,14 +79,21 @@ reasoning 占大头）。短 prompt 只要 15s —— 别拿短 prompt 的数字
 不是连接阶段（错误信息里的 "awaiting headers" 极具误导性）；客户端放弃**不会**让服务端
 停止生成，每次超时还白耗一次共享 GPU 容量。
 
-**吞吐**：超时修好后并发 8 约 6～7 条/分钟。baseline 后约 4900 条积压，每晚 3h 窗口，
-**约 2～3 个晚上收敛**；进度逐条落库，中途被 deadline 杀掉不丢。稳态每日新增几百条，
-约半小时跑完。`enrich_cache` 按 `description_sha256` 去重。
+**吞吐（集群实测，reasoning 开）：并发 8 下 3.0 条/分钟。**
+进度逐条落库，中途被 deadline 杀掉不丢；`enrich_cache` 按 `description_sha256` 去重。
+
+⚠️ 别按「单条 66.5s ÷ 并发 8 = 7.5 条/分钟」推算 —— 那是本文档早期写错的数字。
+实测只有 **3.0 条/分钟**：单条独占是 66.5s，但 8 并发时每条被拉长到约 **160s**，
+即 8× 并发只换来 **3.3×** 吞吐，DGX 已接近饱和。据此：
+
+| | 条数 | reasoning 开（3.0/分钟） |
+|---|---|---|
+| baseline 积压 | ~4,900 | ~27h ≈ **9 个 3h 夜间窗口** |
+| 稳态每日新增 | ~200 | ~**1 小时** |
 
 ⚠️ **并发和 CPU 都不是提速的答案**：LLM 阶段实测 CPU 只有 **1m**（在等推理），
-而并发 8 实测只有 **3.0 条/分钟** —— 单条独占 66.5s，8 并发时每条被拉长到约 160s，
-即 8× 并发只换来 3.3× 吞吐，DGX 已接近饱和。再加并发只会加深排队并挤占
-Open Notebook 的交互延迟。
+所以加 CPU 无用（放宽 limit 只加速一次性的归档扫描）；而并发已在饱和区，
+再加只会加深排队并挤占 Open Notebook 的交互延迟。真正的杠杆是下一节的减少 token。
 
 ## 真正的提速杠杆：关掉 reasoning（`LLM_THINKING=false`）
 
@@ -95,14 +117,17 @@ reasoning 占了这个模型 **约 95%** 的 output token。上游 `472aaf5` 加
 且默认**不发**该字段（请求体与从前逐字节一致）—— 它是 vLLM/模板专用的，
 换成 Bifrost 或没有该模板的模型会被拒。
 
-**用法定位**：只用来啃积压，不用于稳态。稳态每日约 200 条、并发 8 下约 25 分钟，
-reasoning 完全跑得起，精度留着。清单里因此**不设** `LLM_THINKING`（= 默认开启），
-啃积压走一次性 Job（不进 git，见 [runbook 段落](#一次性积压回填)）。
+**用法定位**：只用来啃积压，不用于稳态。稳态每日约 200 条、reasoning 开着约 1 小时
+就跑完，精度留着更值。清单里因此**不设** `LLM_THINKING`（= 默认开启），
+啃积压走一次性 Job（不进 git，见下节）。
 
 ## 一次性积压回填
 
-baseline 之后有约 4,800 条积压。按默认（reasoning 开）3.0 条/分钟要跑约 9 个夜间窗口；
-用 `LLM_THINKING=false` 的一次性 Job 可在 1 小时内跑完：
+baseline 之后有约 4,900 条积压。按默认（reasoning 开）3.0 条/分钟要跑约 **9 个**夜间窗口；
+用 `LLM_THINKING=false` 的一次性 Job，集群实测 **26～29 条/分钟**（约 2 小时跑完）：
+
+⚠️ 别拿「DGX 空闲时单条 3.2s」推成 150 条/分钟 —— 8 并发照样把 DGX 推到饱和，
+实际是 26～29 条/分钟。相比 reasoning 开的 3.0 条/分钟，约 **9 倍**。
 
 ```bash
 # 先停掉正在跑的 enrich —— 两个进程会争同一个 SQLite 库，且读到同一份积压、
@@ -212,48 +237,49 @@ CR + git write-back 凭据，收益不抵复杂度。手动更新 digest。
 不是原始响应字节 —— 这是刻意的合规取舍（`createdBy` / `emailRecipient` 等发布者个人
 字段不建模、不落盘），代价是结构体没建模的字段永久丢失。
 
-## 密钥
+## 密钥与 Telegram 路由
 
-Vault `secret/homelab/jobs-sg`，四个 property：
+**没有新的 Vault 路径，也没有需要手工写的值。** 按本仓库既有分工拆开
+（同 Alertmanager / krr / falcosidekick，见
+[decisions/alerting-telegram-migration.md](../decisions/alerting-telegram-migration.md)）：
 
-⚠️ **`external-secret.yaml` 当前未在 `kustomization.yaml` 里注册**，因此没有部署。
+| 项 | 是密钥？ | 放哪 | 值 |
+|---|---|---|---|
+| bot token | 是 | Vault `secret/homelab/telegram` property `bot_token` → ESO | **已存在**，与告警共用同一个 bot |
+| chat id | 不是 | `cronjob-report.yaml` 明文 | `-1003981213530`（与告警**同一个群**） |
+| thread id | 不是 | `cronjob-report.yaml` 明文 | 当前空串 = 群的 General 话题 |
 
-为什么不是"先放上去等 Vault"：ESO 对不存在的路径会一直 `Ready=False`，于是
-`eso-alerts.yaml` 的 `ExternalSecretNotReady`（`for: 15m`, severity warning）**持续告警**，
-ArgoCD 应用也一直 `Degraded`。2026-08-03 首次上线就这么响了 40 分钟才发现 ——
-`optional: true` 保住了 Pod，但保不住告警面板。宁可先不部署，也不要留一条永远为真的告警。
+`external-secret.yaml` 只声明 `telegram-bot-token` 一个键。因为它指向的路径**已经在线
+同步**（`monitoring/alertmanager-telegram` 长期 `SecretSynced=True`），所以可以直接注册。
 
-**启用（想要 Telegram 周报时）**：① 先写 Vault ② 再把 `kustomization.yaml` 里
-`# - external-secret.yaml` 那行取消注释。顺序反了就会再响一次。
+⚠️ **历史教训（2026-08-03）**：最初我新造了一个 `secret/homelab/jobs-sg` 路径并把
+ExternalSecret 直接发上去，但没人去写值 → ESO 对不存在的路径一直 `Ready=False` →
+`eso-alerts.yaml` 的 `ExternalSecretNotReady`（`for: 15m`）**持续告警 40 分钟**、
+ArgoCD 应用常驻 `Degraded`。`optional: true` 保住了 Pod，但保不住告警面板。
+教训有两条：① 不要引用一个还没人填的 Vault 路径；② **先看现有路径够不够用** ——
+这次 `bot_token` 本来就在 Vault 里，chat/thread 本来就不是密钥，压根不需要新路径。
 
-未启用期间唯一影响：**周报不推 Telegram**（HTML/MD 照常生成、站点照常服务）。
-LLM 富化不受影响 —— 它直连 DGX，压根不用 Bifrost virtual key。
+⚠️ **ESO 的 `data` 是全有全无的**，所以只声明真正要用的键。声明了却不用的键不是惰性的，
+是硬要求：曾多声明一个 `bifrost-vk`（直连 DGX 根本不用），等于逼着启用 Telegram 时
+必须连一个用不到的值一起写进 Vault，否则连 bot token 都同步不了。
 
-**只有三个键**（`bifrost-vk` 已于 2026-08-03 从声明中删除：直连 DGX 用不到它，
-而 ESO 全有全无的语义意味着**声明了却不用的键是有害的** —— 多一个声明就等于多一个
-必须写进 Vault 的值，否则整个 Secret 同步不了）：
+### 话题路由
 
-| property | 用途 | 缺失时 |
-|---|---|---|
-| `telegram-bot-token` | 周报推送 | report 打 "telegram disabled"，仍出 HTML/MD |
-| `telegram-chat-id` | 群 ID（`-1003981213530`，**与告警同一个群**） | 同上 |
-| `telegram-thread-id` | 话题 ID；**空 = 群的 General 话题** | 同上 |
+告警与周报共用同一个群（MatthewDaily / forum），只靠 `message_thread_id` 区分话题。
+告警在 thread **`2`**（🚨 Homelab 告警）；周报**刻意不填 2** —— 上游 `docs/02 §4.3`
+明令周报不得进告警话题。当前留空即投 General。
 
-告警与周报共用同一个群（MatthewDaily / forum），只靠 `message_thread_id` 区分话题：
-告警在 thread `2`（🚨 Homelab 告警），周报应投到另一个内容话题。thread id 取法：
-Telegram 里右键话题 → 复制链接，`t.me/c/<内部 id>/<thread_id>` 的第二个数字。
-⚠️ 上游原先把该字段序列化成 JSON **字符串**（`"7"`），而 Bot API 规定 Integer；
-若被忽略就会静默投到 General 话题且返回 200，看着像成功。2026-08-03 (`8259cba`) 已改发数字。
+想投到专门的内容话题：Telegram 里右键该话题 → 复制链接，
+`t.me/c/<内部 id>/<thread_id>`，把第二个数字填进 `cronjob-report.yaml` 的
+`TELEGRAM_THREAD_ID`（**一行改动，不涉及 Vault**）。
 
-⚠️ **ESO 的 `data` 是全有全无的**：Vault 里缺任何一个 property，整个 `jobs-sg-secrets`
-同步失败。上面三个键必须都存在（`telegram-thread-id` 允许是空串）。消费侧的
-`secretKeyRef` 全部标了 `optional: true`，所以 Vault 还没写时 Pod 照常启动并降级，
-而不是 `CreateContainerConfigError` 卡住流水线 —— 同
-`backup/overlays/homelab/open-notebook-external-secret.yaml` 的取舍。
+⚠️ 上游原先把该字段序列化成 JSON **字符串**（`"7"`），而 Bot API 规定 Integer。
+若被忽略，就会静默投到 General 且返回 200 —— 看着完全像成功，而告警话题与内容话题
+只靠这个字段区分。2026-08-03（`8259cba`）已改发数字，非数字值改为显式报错。
 
-Bifrost virtual key 只能在 Bifrost UI 建（持久化在其 PVC 的 SQLite，**不在 git**），
-再手工写进 Vault。集群内走 `bifrost.bifrost.svc` 同样要带 VK —— governance PreHook
-在入口之前生效，绕不过去。
+`TELEGRAM_BOT_TOKEN` 仍标 `optional: true`：ESO 万一没同步上，report 打一行
+"telegram disabled" 后照常生成 HTML/MD，而不是 `CreateContainerConfigError` 卡住整个
+Job —— 同 `backup/overlays/homelab/open-notebook-external-secret.yaml` 的取舍。
 
 ## 可观测
 
