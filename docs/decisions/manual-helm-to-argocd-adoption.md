@@ -91,8 +91,9 @@ manual-helm 组件，实测 homelab **既无 release 也无 pod**。连带发现
   经 Tailscale otlphttp 推到 homelab Loki）
 
 即 **homelab 自己的容器日志完全没进 Loki**，包括 kube-bench CIS 结果、backup CronJob
-输出这些"打 stdout 就以为能在 Loki 查"的东西（CONVENTIONS 里 `{namespace="kube-bench"}`
-这类查询也查不到——顺带一提 label 名也变了，现在是 `k8s_namespace_name`）。
+输出这些"打 stdout 就以为能在 Loki 查"的东西（文档里 `{namespace="kube-bench"}`
+这类查询也查不到——顺带一提 label 名也变了，现在是 `k8s_namespace_name`，见
+`docs/reference/security.md` §7）。
 
 所以这一项不是"迁 GitOps"，而是"要不要新增一个日志采集 DaemonSet"：在 5600H 单节点
 （idle ~74°C，硬约束见 CLAUDE.md）上要额外 CPU，还会让 Loki 的 5Gi PVC 增长。

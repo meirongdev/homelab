@@ -1,6 +1,6 @@
 # ArgoCD Application Patterns
 
-> Last updated: 2026-07-31
+> Last updated: 2026-08-03
 > Status: 生效事实
 >
 > 当前 ArgoCD 管理模式分析、可选 pattern 对比与取舍建议。
@@ -12,9 +12,9 @@
 
 ```
 root (Application)
- └─ argocd/applications/*.yaml（排除 root.yaml）
+ └─ argocd/applications/*.yaml（排除 root.yaml；**非递归**，`recurse: false`，子目录不生效）
      ├── loki / tempo / sloth / kyverno / tetragon / trivy-operator /
-     │   argocd-image-updater / falco / cnpg-operator / opencost / opencost-oracle /
+     │   trivy-operator-oracle / falco / cnpg-operator / opencost / opencost-oracle /
      │   kube-prometheus-stack / external-dns-oracle / otel-collector
      │                          # 多源 Helm：remote chart + $values/k8s/helm/values/<app>.yaml
      ├── external-dns           # 混合多源：chart + manifests/external-dns/（目录源，管 ExternalSecret）
@@ -39,9 +39,110 @@ root (Application)
 
 ### 跨集群
 
-一个 ArgoCD 实例管两个集群 —— `AppProject.destinations` 声明 `homelab` 和 `oracle-k3s` 端点（Tailscale），`Application.spec.destination.server` 选目标。
+**2026-08-02 起控制面在 oracle-k3s**，一个 ArgoCD 实例管两个集群：
+`AppProject.destinations` 声明 `homelab`（`https://100.94.186.7:6443`，经 Tailscale）和
+`oracle-k3s`（`https://kubernetes.default.svc` = **控制面自己所在集群**），
+`Application.spec.destination.server` 选目标。
+⚠️ 控制面搬家后 `kubernetes.default.svc` 的所指从 homelab 变成了 oracle——
+homelab 负载必须显式写 `https://100.94.186.7:6443`，写错会把整套 homelab 负载
+部署到 oracle 上。见 [runbook](../runbooks/argocd-control-plane-on-oracle.md)。
 
-## 新增 Application 的三个坑
+## 控制面部署形态与运维事实
+
+- **Install**: ArgoCD 本体是 **Helm 手动管理**——chart `argo/argo-cd` `10.1.4`（appVersion v3.4.5；
+  pin 在 `k8s/helm/justfile` 的 `argocd_chart_version`），release `argocd`，values
+  `k8s/helm/values/argocd.yaml` + `values/argocd-oracle.yaml`（后者只覆盖 `crds.install=true`）。
+  `just deploy-argocd`（`argocd_ctx := "oracle-k3s"`）只装 chart + AppProject；
+  **Application 注册是单独的 `just deploy-argocd-apps`**。`argocd.yaml` 是唯一真相源
+  （repo-server DNS-gate initContainer、Cilium Gateway 健康检查、ESO ignoreDifferences、
+  `server.insecure`、禁 dex/notifications/CRDs 的瘦装全在里面）。
+  历史：最初是 stock-manifest kubectl 安装，原地 Helm 采纳不可行（`.spec.selector` 不可变标签差异），
+  经维护窗口重装迁移（保 CRD + Application CR + `argocd-secret`/`argocd-redis`），停机约 4 分钟，
+  被管服务无感。
+- **同步节奏**: 3 分钟轮询，`git push` 后自动同步；已纳管资源**不可手动 `kubectl apply`** 覆盖
+  （selfHeal 会拉回，改动必须先进 Git）。
+- **资源追踪**: ArgoCD v3.x 默认 **annotation** 方式——被管对象带 `argocd.argoproj.io/tracking-id`，
+  **不是** v2 时代的 `app.kubernetes.io/instance` label。区分 GitOps 资源与 manual-helm 资源：
+  `kubectl -n <ns> get secret -l owner=helm`（有 Helm release 归档 = manual-helm）。
+- **孤儿资源监控**（2026-07-31）: `homelab` AppProject 声明 `orphanedResources`（`warn: false` +
+  4 条 ignore）——在 App 资源树里标出「集群里有、Git 里没有」的对象但不产生 warning。
+  `warn` 刻意关掉：`ignore` 没有 namespace 字段，4 个 manual-helm ns 贡献 ~255 个永久无主对象。
+  依据/测量/被否的 `kor` 见 [../decisions/orphaned-resources.md](../decisions/orphaned-resources.md)。
+- **homelab 外部集群凭据**: Vault `secret/homelab/argocd-homelab-cluster` → ESO
+  `cloud/oracle/manifests/argocd/homelab-cluster-external-secret.yaml`。
+  （2026-08-02 之前方向相反——oracle 作外部集群的 `argocd-oracle-cluster` 凭据已退役。）
+
+## Application 清单（28 个，全部在 `homelab` project）
+
+核对: `kubectl --context oracle-k3s -n argocd get app`。源→目录映射见上方树；这里只记
+**destination 与踩过坑的备注**。
+
+**目标 homelab（显式 `https://100.94.186.7:6443`，18 个）**:
+`backup` · `bifrost` · `cloudflare` · `external-dns` · `gateway` · `kube-bench` ·
+`kube-prometheus-stack` · `kyverno` · `kyverno-policies` · `monitoring-dashboards` ·
+`namespace-guardrails` · `opencost` · `otel-collector` · `personal-services` · `sloth` ·
+`tetragon` · `trivy-operator` · `vault-eso`
+
+**目标 oracle-k3s（in-cluster `kubernetes.default.svc`，10 个）**:
+`root` · `oracle-k3s` · `calibre-metadata` · `cnpg-operator` · `external-dns-oracle` ·
+`falco` · `loki` · `tempo` · `trivy-operator-oracle` · `opencost-oracle`
+
+值得记住的备注：
+
+- **`kube-prometheus-stack`**（2026-07-31 从 manual-helm 采纳）: ⚠️ 三条硬约束改动前必读
+  [../decisions/manual-helm-to-argocd-adoption.md](../decisions/manual-helm-to-argocd-adoption.md)——
+  ① Application 名不能改（= release 名，进 Deployment 不可变 selector）；② `skipCrds: true`
+  是刻意的（集群 CRD 停在 operator v0.89.0、运行 v0.92.1，`helm upgrade` 从不升 `crds/`，
+  让 ArgoCD 接管会夹带 10 个 CRD 升级——**该升级仍是待决项**）；③ admission webhook `caBundle`
+  已豁免（运行时 Job 注入）。
+- **`otel-collector`**（homelab，2026-07-31 首次部署——此前 homelab 根本没有 collector）:
+  **刻意无 metrics 管道**（kps 原生抓取）；Loki 查询标签是 OTel 风格
+  （`k8s_namespace_name`，非 `namespace`）。升级纪律：chart pin 与 oracle 镜像 tag 同
+  appVersion 一起动。见 [../decisions/otel-2026-alignment.md](../decisions/otel-2026-alignment.md)。
+- **`loki` / `tempo`** 2026-08-02 随负载迁 oracle（destination 改 in-cluster）；**`sloth`
+  留 homelab**（规则评估在 homelab，oracle 指标已 remote-write 过来）。
+- **`personal-services`** 只剩 open-notebook 全家 + LimitRange/Quota（calibre 2026-08-03 迁 oracle）。
+- **`cnpg-operator`** 必须与它管的 `zitadel-pg` `Cluster` CR **同集群**（见
+  [identity.md](identity.md)）。
+- **`monitoring-dashboards`** 的 App 名是历史名——**改 Application 名会触发 ArgoCD 删旧建新**，
+  不值得。
+- **`trivy-operator-oracle`** 2026-08-03 补齐（控制面迁移后 oracle 镜像脱离 CVE 扫描的盲区，
+  见 [security.md §6](security.md)）。
+- **`backup`** = `backup/overlays/homelab`；oracle 侧不是独立 App，经 `oracle-k3s` App 引
+  `backup/overlays/oracle`。
+- **`external-dns` ×2** 的配置事实（upsert-only、token、通配路由）在
+  [networking-ingress.md](networking-ingress.md)；oracle 侧 `helm.releaseName` 的坑见下文坑 2。
+- ~~`argocd-image-updater`~~ ❌ 2026-08-03 退役（0 个 CR 空转数月）；机制存档
+  [../decisions/argocd-image-updater.md](../decisions/argocd-image-updater.md)，替代方向
+  Renovate（ROADMAP #10）。
+
+### oracle-k3s App（kustomize 树）的专有事实
+
+- `cloud/oracle/manifests/` 自 2026-06-04 进 GitOps；auto-sync + selfHeal + **prune** 全开。
+  有状态 PVC（`miniflux-db-pvc`、`karakeep-data`、`meilisearch-data`、`uptime-kuma-data`、
+  `stirling-pdf-configs`）带 `argocd.argoproj.io/sync-options: Prune=false`。
+- **不入 git 的 bootstrap 依赖**: `argocd-manager` SA + cluster-admin 在
+  `cloud/oracle/bootstrap/argocd-manager.yaml`，手工 apply 一次、**刻意留在 kustomize 树外**；
+  `vault-token` Secret（`rss-system`）同为手工前置（不被 prune，见 `base/vault-store.yaml`）。
+- 记录: [首次纳管](../plans/networking/2026-06-04-oracle-k3s-argocd-gitops.md) ·
+  [控制面迁移/重装](../runbooks/argocd-control-plane-on-oracle.md) ·
+  [整节点重建](../runbooks/oracle-k3s-rebuild.md)。
+
+## 不由 ArgoCD 管理的组件
+
+| 组件 | 原因 / 入口 |
+|------|-------------|
+| HashiCorp Vault | 需手动 init/unseal（重启恢复走 `just homelab-recover`） |
+| External Secrets Operator | 依赖 Vault（`just deploy-eso` / oracle `just install-eso`） |
+| Cilium | `just deploy-cilium`，pin v1.19.1（见 [networking-ingress.md](networking-ingress.md)） |
+| Cloudflare Terraform | 非 K8s 资源 |
+
+⚠️ kube-prometheus-stack / otel-collector / external-dns×2 已于 2026-07-31 迁入 ArgoCD，
+justfile 里的手动部署配方已移除——**chart 版本唯一真源是 `argocd/applications/*.yaml` 的
+`targetRevision`**。紧急回滚仍可 `helm -n <ns> rollback <release> <rev>`；手动重部署模板见
+`k8s/helm/justfile` 头部注释。
+
+## 新增 Application 的四个坑
 
 2026-07 引入 OpenCost / KRR 时逐一踩到，都会导致「push 了但不生效」。
 
@@ -58,10 +159,15 @@ application repo https://xxx.github.io/chart is not permitted in project 'homela
 **`git push` 不会让它生效**，必须手工 apply：
 
 ```bash
-kubectl --context k3s-homelab apply -f argocd/projects/homelab.yaml
+kubectl --context oracle-k3s apply -f argocd/projects/homelab.yaml
 ```
 
-（`just deploy-argocd` 也行，但会连带 `helm upgrade` 整个 ArgoCD，通常没必要。）
+（`just deploy-argocd` 也行，但会连带 `helm upgrade` 整个 ArgoCD，通常没必要。
+⚠️ AppProject 随控制面走，**apply 目标是 oracle-k3s**，不是 homelab。）
+
+另注意 **chart 版本 pin**: `argocd/applications/*.yaml` 里 pin 的 `targetRevision`
+部署前须 `helm search repo <chart> --versions` 核对存在（Kyverno/Trivy 落地时因 pin 了
+不存在的版本 sync 失败过）。
 
 ### 2. Application 名 = Helm release 名 → 资源名会带后缀
 
@@ -109,6 +215,12 @@ sources:
 目录源，文件放进目录即生效。**显式清单仍残留在 kustomize 树**——`cloud/oracle/manifests/`
 与 `k8s/helm/manifests/calibre-metadata/` 的 `kustomization.yaml` `resources:` 列表，新文件
 必须登记（calibre-metadata 曾漏登记 `metadata-enrich.yaml`），此坑在那里仍然成立。
+
+### 4. kustomize 全局 `namespace:` 是后置 transformer，会覆盖 JSON patch
+
+`kustomization.yaml` 的全局 `namespace:` 字段在 JSON patch **之后**执行——patch 改的
+namespace 会被它覆盖回去。资源跨多个 namespace 时不要用全局字段，在每个 manifest 里
+显式声明 namespace。
 
 ## Alternative Patterns
 

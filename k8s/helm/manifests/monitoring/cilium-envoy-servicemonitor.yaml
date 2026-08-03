@@ -13,7 +13,7 @@
 # envoy_cluster_name 形如 "<gw-ns>/cilium-gateway-<gw>/<ns>_<svc>_<port>"。
 #
 # ⚠️ 必须带 label release=kube-prometheus-stack，否则 Prometheus Operator 的
-#    serviceMonitorSelector 会静默忽略（见 CONVENTIONS.md › Observability › Alerting）。
+#    serviceMonitorSelector 会静默忽略（见 docs/reference/observability-alerting-slo.md）。
 # cluster=homelab 由 Prometheus 默认 scrapeClass 的 relabeling 自动补上，无需手设。
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor

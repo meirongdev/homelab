@@ -1,6 +1,6 @@
 # Multi-Cluster Observability Architecture
 
-> Last updated: 2026-08-02
+> Last updated: 2026-08-03
 > Status: 生效事实
 
 ## Overview
@@ -47,6 +47,8 @@ All metrics carry a `cluster` label for multi-cluster dashboard queries:
 | homelab (local scrape) | Prometheus `scrapeClasses` with default relabeling | `cluster=homelab` |
 | homelab (metal nodes: proxmox, storage) | `additionalScrapeConfigs` with explicit label | `cluster=homelab` |
 | oracle-k3s (all metrics) | OTel `resource` processor + `prometheusremotewrite` `external_labels` | `cluster=oracle-k3s` |
+| dgx-spark（2× GB10 裸机，非 K8s） | `additionalScrapeConfigs`（Tailscale pull） | `cluster=dgx-spark` |
+| macbook（Apple Silicon 笔记本，非 K8s） | `additionalScrapeConfigs`（Tailscale pull） | `cluster=macbook` |
 
 ## Log Pipeline
 
@@ -179,7 +181,7 @@ env:
 
 ### Grafana Integration
 
-- **Tempo datasource** at `http://tempo.monitoring.svc.cluster.local:3200`
+- **Tempo datasource** at `http://100.107.166.37:31320`（Tempo 2026-08-02 迁 oracle，Grafana 经 oracle `tempo-query-external` NodePort 查询；写入走 `:31317` OTLP gRPC，见 [otel-logging](observability-otel-logging.md)）
 - **tracesToLogs**: Links traces to Loki logs with `filterByTraceID` and `filterBySpanID`
 - **tracesToMetrics**: Links traces to Prometheus RED metrics
 - **nodeGraph**: Enabled for visual service dependency graph
@@ -189,12 +191,42 @@ env:
 
 Standard kube-prometheus-stack in-cluster scraping with `scrapeClasses` default relabeling (`cluster: homelab`).
 
-**Additional scrape targets** (`additionalScrapeConfigs`):
+**Additional scrape targets** (`additionalScrapeConfigs`；⚠️ 这些配置**逐字注入**，
+scrapeClasses 不会给它们 relabel，`cluster`/`nodename` 必须逐 target 写)：
 
 | Job | Target | Labels |
 |-----|--------|--------|
 | `node-exporter-metal-nodes` | `192.168.50.106:9100` (storage-node) | `cluster=homelab` |
 | `node-exporter-metal-nodes` | `192.168.50.4:9100` (proxmox-node) | `cluster=homelab` |
+| `node-exporter-dgx-spark` | `100.97.87.120:9100` / `100.67.164.92:9100`（经 Tailscale） | `cluster=dgx-spark` |
+| `node-exporter-macbook` | `100.89.15.120:9100`（经 Tailscale） | `cluster=macbook` / `nodename=macbook-pro` |
+| `smartctl-storage-106` / `smartctl-proxmox-pve` / `smartctl-dgx-spark` | `:9633`，120s | `nodename` 与 node-exporter job 对齐 |
+
+### 外部主机（非 K8s，metrics-only）
+
+- **dgx-spark**（2× GB10）: node_exporter 从 **`nv-dgx-spark` repo** 部署
+  （`make node-exporter-deploy`，docker `--net=host --pid=host`）。看板 Grafana
+  「DGX Spark / Node Exporter」（`dashboards/dgx-spark-node-dashboard.yaml`）。
+  Tailnet ACL 已放行 `tag:homelab → *:*`。
+- **macbook**（Apple Silicon 笔记本）: node_exporter 是预编译 **`darwin-arm64` 二进制**
+  （`~/.local/bin/node_exporter`，非 Homebrew——那台 Mac 出不了 GitHub，tarball 是 `scp` 进去的），
+  由 LaunchAgent 拉起（`com.prometheus.node_exporter.plist`，`:9100`，无 sudo）。
+  SSH: `ssh -i ~/.ssh/vgio matthew@100.89.15.120`。主机配置已固化为 Ansible
+  （`macbook/ansible/`，`just node-exporter` / `just power`）；GUI-only 步骤在其 README。
+  ⚠️ 笔记本会睡眠/登出，target 抖动导致间歇 `TargetDown`(warning) → Telegram 噪音，
+  烦了就在 Alertmanager silence 掉 `node-exporter-macbook` job。
+- **SMART 磁盘健康**（2026-06-27）: Linux 裸机跑 `smartctl_exporter`（:9633）。
+  部署：storage-106 + pve（amd64）走 `cd proxmox/ansible && just node-exporter`（一个 playbook
+  同装 node_exporter + smartctl_exporter）；DGX ×2（arm64）走 `nv-dgx-spark` repo
+  `make smartctl-exporter-deploy`——**不是容器**（`quay.io/...` 的镜像 amd64-only，GB10 是
+  aarch64，GitHub `linux-arm64` 二进制在控制机下载后 SSH 分发）。macbook 无 SMART
+  （Apple Silicon 内置 NVMe 不暴露标准 SMART 属性，只有文件系统/IO）。
+  看板：Grafana **Hardware** 文件夹（health / 温度 / SSD 磨损 / 通电时长）。
+  - **⚠️ 指标名坑**: 磁盘温度是 `smartctl_device_temperature{temperature_type="current"}`
+    （NVMe+SATA 统一），**不是** `smartctl_device_temperature_celsius`（v0.14.0 无此指标，
+    用了面板静默空白）。SSD 磨损：NVMe `100 - smartctl_device_percentage_used`，SATA
+    `smartctl_attr_normalized_value{attribute_name=~"Media_Wearout_Indicator|Wear_Leveling_Count|SSD_Life_Left|Percent_Lifetime_Remain"}`
+    （磨损 bargauge 两个 target 都带，覆盖两种盘型）。
 
 ## NodePort Services on Homelab
 
@@ -228,7 +260,7 @@ All 4 Loki dashboards (`k8s/helm/manifests/monitoring/dashboards/grafana-dashboa
 > **该面板已随 Traefik→Cilium Gateway 切换一并删除**（commit `76b285a`），文件与 ConfigMap 均不存在。
 > 隧道本身仍有指标可采，但没有现成看板；能观测/看不到什么见
 > [`cloudflare-tunnel-observability.md`](cloudflare-tunnel-observability.md)。入口层的 RED 指标现在
-> 来自 Cilium Envoy（见 CONVENTIONS.md 的 SLI/SLO 段）。
+> 来自 Cilium Envoy（见 [observability-alerting-slo.md](observability-alerting-slo.md) 的 SLI/SLO 段）。
 
 Multi-cluster resource overview (`k8s/helm/manifests/monitoring/dashboards/multicluster-overview-dashboard.yaml`):
 
@@ -278,11 +310,14 @@ All services have liveness and readiness probes configured:
 
 **Fix:** Ensure the OTel config has `move` operators after `extract-metadata-from-filepath` to promote `uid`, `namespace`, `pod_name`, `container_name` to `resource["k8s.*"]` attributes.
 
-### Loki not receiving oracle logs
+### Loki 收不到日志（Loki 在 oracle，两集群的发送方都可能出问题）
 
-1. Check Tailscale connectivity: `curl http://100.107.166.37:9100/metrics` (from homelab)
-2. Check NodePort: `kubectl --context k3s-homelab get svc loki-gateway-external -n monitoring`
-3. Check OTel pod: `kubectl --context oracle-k3s logs -n monitoring daemonset/otel-collector | grep "url:"`
+1. 从 homelab 测到 oracle 的连通性：`curl http://100.107.166.37:31080/otlp/v1/logs`（能收到 4xx 而非超时即通）
+2. 确认 oracle 侧 NodePort 存在：`kubectl --context oracle-k3s get svc loki-gateway-external -n monitoring`
+   （⚠️ homelab 侧同名 Service 已随 2026-08-02 迁移移除，不要再在 `k3s-homelab` 里找）
+3. 查发送方 collector：
+   - homelab：`kubectl --context k3s-homelab logs -n monitoring daemonset/otel-collector | grep -iE "url:|error"`
+   - oracle：`kubectl --context oracle-k3s logs -n monitoring daemonset/otel-collector | grep -iE "url:|error"`
 
 ### Prometheus not scraping oracle metrics
 

@@ -4,7 +4,7 @@
 **Status:** ⚠️ **部分落地**（2026-07-31 复核）。已实现：ZITADEL 身份、ArgoCD GitOps、Vault + ESO。
 **未实现且已明确不做**：Cert-Manager（TLS 在 Cloudflare 边缘终结，见 [ROADMAP 不做清单](../../ROADMAP.md)）、
 Istio（Cilium Gateway API 已满足入口需求）、scaffold 模板与 CI 流水线（从未动工）。
-本文列出的多数文件路径已不存在，读时请对照 [CONVENTIONS.md](../../CONVENTIONS.md)。
+本文列出的多数文件路径已不存在，读时请对照 [AGENTS.md](../../AGENTS.md) 与 [reference/](../../reference/README.md)。
 
 ## Goal
 

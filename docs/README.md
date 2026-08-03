@@ -1,6 +1,6 @@
 # Homelab Docs Portal
 
-> Last updated: 2026-07-31
+> Last updated: 2026-08-03
 > 这是**索引 + 文档规则**。运行态事实都在下面链接的文档里，本页不复制副本。
 
 ## 从哪里开始
@@ -8,8 +8,8 @@
 | 想知道什么 | 读这个 |
 |-----------|--------|
 | 整体长什么样 | [ARCHITECTURE.md](ARCHITECTURE.md) — 单页双集群总览 |
-| 怎么在这个 repo 里干活 | [CONVENTIONS.md](CONVENTIONS.md) — 命令、约定、各组件踩坑（长版 AI 上下文） |
-| 现在跑着哪些服务 | [CONVENTIONS.md § Services](CONVENTIONS.md#services) — **服务清单唯一真相源** |
+| 怎么在这个 repo 里干活 | [AGENTS.md](AGENTS.md) — 命令、约定、硬约束（**唯一 AI 上下文**，根 `AGENTS.md`/`CLAUDE.md`/`.gemini.md`/copilot 都软链到它）；各组件细节按域在 [reference/](reference/README.md) |
+| 现在跑着哪些服务 | [reference/services.md](reference/services.md) — **服务清单唯一真相源** |
 | 还剩什么没做 | [ROADMAP.md](ROADMAP.md) — 开放项 + 已完成 + 明确不做 |
 | 出事了怎么办 | [runbooks/](runbooks/README.md) — 可直接执行的 SOP |
 | 为什么是这个方案 | [decisions/](decisions/README.md) — 轻量 ADR |
@@ -38,8 +38,9 @@ CI 在每次 PR 与 push to main 时跑（`.github/workflows/docs-check.yml`）�
 | R2 | 命名 | ✅ 脚本 |
 | R3 | H1 位置 + 文首必填字段 | ✅ 脚本 |
 | R4 | 状态枚举标记 | ✅ 脚本 |
-| R5 | 目录索引双向完整 | ✅ 脚本 |
+| R5 | 目录索引双向完整 + `plans/README.md` 份数与实际一致 | ✅ 脚本 |
 | — | 相对链接 + 非 docs 文件对 `docs/` 的引用 | ✅ 脚本 |
+| — | 非 docs README 的目录树只画真实存在的子目录 | ✅ 脚本 |
 | R1 | 目录归属 | ⚠️ 人 |
 | R6 | 唯一真相源 | ⚠️ 人 |
 | R7 | 命令带执行上下文 | ⚠️ 人 |
@@ -118,7 +119,7 @@ CI 在每次 PR 与 push to main 时跑（`.github/workflows/docs-check.yml`）�
 
 | 事实 | 唯一位置 |
 |------|---------|
-| 服务清单 | [CONVENTIONS.md § Services](CONVENTIONS.md#services) |
+| 服务清单 | [reference/services.md](reference/services.md) |
 | 开放项 / 待办 | [ROADMAP.md](ROADMAP.md) |
 | 安全逐层状态 | [reference/security.md](reference/security.md) |
 | 资源实际数值 | `k8s/helm/values/` 与集群本身（文档只写原则） |

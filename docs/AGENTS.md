@@ -1,11 +1,13 @@
 # Homelab — Agent Context
 
 > 双集群 homelab（homelab + oracle-k3s）基础设施即代码。
-> 给 AI 助手的**常驻精简上下文**。根目录 `AGENTS.md` 与 `CLAUDE.md` 都软链到本文件。
+> 给 AI 助手的**唯一上下文文件**：根目录 `AGENTS.md`、`CLAUDE.md`、`.gemini.md`、
+> `.github/copilot-instructions.md` 全部软链到本文件。
 >
-> 📖 **需要细节时读 `docs/CONVENTIONS.md`**（长版，完整约定 + 架构 + 各组件踩坑记录，
-> 另软链为 `.gemini.md` / `.github/copilot-instructions.md`）。本文件刻意保持精简以控制常驻上下文成本，
-> **不要**把长篇内容往这里搬——架构事实进 `reference/`，决策进 `decisions/`，两者都在 CONVENTIONS.md 里有索引。
+> 📖 **需要细节时按域读 `docs/reference/`**（各组件生效事实 + 踩坑记录，索引见
+> [docs/reference/README.md](reference/README.md)；文档总门户 [docs/README.md](README.md)）。
+> 本文件刻意保持精简以控制常驻上下文成本，**不要**把长篇内容往这里搬——
+> 架构事实进 `reference/`，决策进 `decisions/`。
 
 ## Project Structure
 
@@ -20,9 +22,11 @@ homelab/
 ├── argocd/                      # GitOps (install|projects|applications/)
 ├── cloudflare/terraform/        # Cloudflare Tunnel + DNS + WAF
 ├── tailscale/terraform/         # Tailscale ACL + 预授权密钥
+├── zitadel/                     # 身份/SSO (terraform|scripts/)
+├── backup/                      # restic 备份 (kustomize base+overlays)
+├── macbook/ansible/             # 远程无头 M2 MacBook 配置
 └── docs/                        # 文档
-    ├── AGENTS.md                ← 本文件（简版；软链为根 AGENTS.md）
-    ├── CONVENTIONS.md           # 完整约定+架构上下文（软链为 .gemini.md / copilot-instructions.md）
+    ├── AGENTS.md                ← 本文件（唯一 AI 上下文；4 个软链见文首）
     ├── README.md                # 文档门户/索引
     ├── ARCHITECTURE.md          # 架构概览
     ├── ROADMAP.md               # 唯一的开放项清单
@@ -57,9 +61,10 @@ homelab/
 | Cloudflare | `just apply` | terraform apply (cloudflare/terraform/) |
 | 集群互联 | `just connect-clustermesh <homelab-ts>:32379 <oracle-ts>:32379` | Cilium ClusterMesh 连接（需两个端点参数） |
 | Proxmox | `just init/plan/apply` | `proxmox/terraform/`（**`just` 不是 `make`**，那里的 Makefile 是空文件） |
-| Oracle | `make init/plan/apply` | `cloud/oracle/terraform/`（这里才用 `make`） |
+| Oracle | `make init/plan/apply` | `cloud/oracle/terraform/`（**唯一**用 `make` 的 terraform root） |
 
-⚠️ **新加子域名不需要动 DNS**：写一个 HTTPRoute 即可（external-dns 建记录 + 隧道通配路由转发），不要改 `cloudflare/terraform`。
+⚠️ **新加子域名不需要动 DNS**：写一个 HTTPRoute 即可（external-dns 建记录 + 隧道通配路由转发），
+不要改 `cloudflare/terraform`。机制见 `docs/reference/networking-ingress.md`。
 
 ## Architecture Quick Reference
 
@@ -74,6 +79,23 @@ homelab/
 - **homelab node**: 10.10.10.10 / TS 100.94.186.7 (Ryzen 5600H 笔记本)
 - **oracle-k3s node**: 10.0.0.26 / TS 100.107.166.37 (Oracle Cloud Free Tier)
 - **NAS (storage-106)**: 192.168.50.106 / TS 100.110.27.111
+
+**按域查细节（`docs/reference/`）**: 服务清单 `services.md`（唯一真相源）· GitOps/App 清单
+`argocd-app-patterns.md` · 入口/DNS `networking-ingress.md` · 跨集群网络 `tailscale-network.md` ·
+存储/备份 `storage.md` · 身份/OIDC `identity.md` · 安全逐层 `security.md` ·
+可观测采集 `observability-multicluster.md` + `observability-otel-logging.md` ·
+告警/看板/SLO `observability-alerting-slo.md` · 成本 `cost-and-rightsizing.md`。
+
+## Working Conventions
+
+- **任务运行器**: `just`（唯一例外 `cloud/oracle/terraform/` 用 `make`）。
+- **Commits**: Conventional Commits（`feat:` / `fix:` / `chore:`）。
+- **Helm**: 配置进 `values/*.yaml`，不用内联 `--set`。
+- **SSH**: 全舰队用 key `~/.ssh/vgio`。
+- **新增服务**: 走 skill `.claude/skills/add-service/SKILL.md`（manifest → HTTPRoute →
+  homepage → Uptime Kuma monitor 全流程）。默认落 **oracle-k3s**（容量宽裕；⚠️ arm64，
+  先确认镜像有 `linux/arm64`）；跨 ns 引用要 ReferenceGrant（**`v1beta1`**）；PVC 一律
+  `local-path`；oracle 服务的密钥放 `secret/oracle-k3s/<service>`，不放 `secret/homelab/*`。
 
 ## Documentation Rules
 
@@ -111,3 +133,4 @@ homelab/
 - **sqlite 应用必须用 `local-path`**, 不用 NFS (fcntl 锁在 NFS 上极慢)
 - **备份**: restic CronJob 直推 106 ZFS 加密仓库 (sftp), 双集群每夜; homelab 另有 PVE 每周 vzdump 整 VM → 106 `backups`
 - **恢复验证**: 2026-07-06 演练通过 (Vault raft + 2 PG + sqlite)
+- PVC 清单 / 迁移程序 / 备份设计细节 → `docs/reference/storage.md`
