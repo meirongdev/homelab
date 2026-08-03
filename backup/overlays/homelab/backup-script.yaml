@@ -58,7 +58,10 @@ data:
       # open-notebook-data：/app/data 整体不备份（播客可重放），但其中
       # sqlite-db/checkpoints.sqlite 是对话线程状态（LangGraph checkpointer），
       # 不在 SurrealDB /export 里 —— 靠本圈的 *.sqlite* 模式捞走（2026-08-01 实测发现）。
-      for pat in bifrost-data open-notebook-data; do
+      # jobs-sg-data：只捞走 jobs.db(+journal)。raw/ 归档是 *.jsonl.gz，**匹配不上**
+      # 下面这组文件名模式 —— 它由第 3 步的 JOBS_ARCHIVE_DIR 整目录纳入，别以为这行
+      # 就把 jobs-sg 备全了（上游 docs/04 §4 只写了加这一行，那是不够的）。
+      for pat in bifrost-data open-notebook-data jobs-sg-data; do
         for d in "$base"/*"$pat"*; do
           [ -d "$d" ] || continue
           dest="/work/pvc/$(basename "$d")"
@@ -101,11 +104,20 @@ data:
     # ⚠️ 直接经 UI 拖拽上传、且不在书库里的原件是唯一真丢的东西（提取文本/向量在 DB 里）。
 
     # --- 3) restic backup + 保留策略 ---
+    # jobs-sg 的 raw/ 归档（raw/<date>/NNN.jsonl.gz）直接纳入，不经 /work 中转：
+    # /work 是 emptyDir，每晚拷一遍会白吃节点临时盘。同 oracle overlay 的 BOOKS_DIR 做法。
+    #
+    # ⚠️ 这是本仓库**唯一不可重建**的数据：MCF API 只返回当前在架职位，下架的拿不回来。
+    # 第 2 步的 *.db 白名单捞不到 .jsonl.gz（模式对不上），只有这里能保住它。
+    # PVC 重建会变 pvc-<uid> 路径前缀 → restic 视为新路径重传一次，属预期。
+    JOBS_ARCHIVE_DIR="$(ls -d /localpath/*jobs-sg-data*/raw 2>/dev/null | head -1 || true)"
+    [ -n "$JOBS_ARCHIVE_DIR" ] || echo "[warn] jobs-sg raw/ archive not found under /localpath — jobs-sg archive NOT in this backup!"
+
     echo "[backup] restic backup..."
     restic cat config >/dev/null 2>&1 || restic init
     # 清理陈旧锁：activeDeadline 杀掉的上一次运行会留下 repo 锁（只清死进程的锁，安全）
     restic unlock 2>/dev/null || true
-    restic backup /work --host homelab --tag nightly --cleanup-cache
+    restic backup /work ${JOBS_ARCHIVE_DIR:+"$JOBS_ARCHIVE_DIR"} --host homelab --tag nightly --cleanup-cache
     echo "[backup] forget/prune..."
     restic forget --host homelab --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune
     restic snapshots --host homelab --latest 2

@@ -1,0 +1,53 @@
+---
+# 每日增量抓取（02:15 SGT = 18:15 UTC）；周日那次由程序自己转成全量 reconcile
+# （cmd/ingest 按 SGT 星期判断，不用单独排一个 CronJob）。
+#
+# concurrencyPolicy: Forbid + activeDeadlineSeconds + 两个 history limit 都是硬要求：
+# 仓库先例里一个缺这几项的 CronJob 泄漏了 92 个卡住的 Job Pod，把单节点推过
+# 110-pod 上限，阻塞了全集群调度。
+#
+# 首次运行是 baseline 全量扫描（DB 空时走 --full-scan-pages），实测约 400 页 / 4 万条
+# 后被 API 429 掐断；watermark 已落库，次日增量续上。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ingest
+  namespace: jobs-sg
+spec:
+  schedule: "15 18 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 3600
+      template:
+        spec:
+          serviceAccountName: jobs-sg
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: ingest
+              image: ghcr.io/meirongdev/jobs-sg
+              command: ["/usr/local/bin/jobs-sg-ingest"]
+              args: ["--data-dir", "/data"]
+              resources:
+                requests: { cpu: 100m, memory: 128Mi }
+                limits: { cpu: 500m, memory: 384Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: [ALL] }
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: jobs-sg-data

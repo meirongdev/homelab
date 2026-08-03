@@ -23,6 +23,7 @@
 | Redpanda Connect | oracle-k3s | `rss-system` | Internal only |
 | Calibre-Web | **oracle-k3s** | `personal-services` | `book.meirong.dev`（2026-08-03 迁移） |
 | Open Notebook (AI 研读) | homelab | `personal-services` | `notebook.meirong.dev`（模型走 DGX + Mac OMLX，见 [open-notebook.md](open-notebook.md)） |
+| jobs-sg (SG 岗位周报) | homelab | `jobs-sg` | `jobs.meirong.dev`（2026-08-03 上线；独立 ns + 3 个 CronJob，见 [jobs-sg.md](jobs-sg.md)） |
 | Grafana | homelab | `monitoring` | `grafana.meirong.dev` |
 | HashiCorp Vault | homelab | `vault` | `vault.meirong.dev` |
 | ArgoCD | **oracle-k3s** | `argocd` | `argocd.meirong.dev`（2026-08-02 控制面迁 oracle，经 Tailscale 纳管 homelab） |
