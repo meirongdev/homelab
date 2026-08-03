@@ -10,6 +10,7 @@
 
 - [services.md](services.md) — **服务清单唯一真相源**（哪个服务在哪个集群/ns/域名）+ 按服务的运维备忘
 - [open-notebook.md](open-notebook.md) — AI 研读知识库：部署形态、模型接线（DGX + Mac OMLX，provisioner 声明式）、配置真相源地图、备份口径
+- [jobs-sg.md](jobs-sg.md) — SG 岗位周报：独立 ns + 3 个 CronJob、digest 固定方式、备份两条路径（白名单捞不到 .jsonl.gz）、首次上线的 bootstrap 依赖
 
 ### 网络
 

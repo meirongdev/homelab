@@ -1,0 +1,118 @@
+---
+# 只读 web（周报 HTML + /metrics）+ Service + HTTPRoute。
+#
+# ⚠️ 依赖顺序：web 用 `mode=ro` 打开 /data/jobs.db，**文件不存在就 exit 1**
+# （sqlite mode=ro 不会建库）。空 PVC 上首次部署必然 CrashLoopBackOff，直到第一次
+# ingest 建出库。首次上线要手动跑一次 bootstrap：
+#   kubectl --context k3s-homelab -n jobs-sg create job ingest-bootstrap --from=cronjob/ingest
+# 这不是配置错误，别去"修"它 —— 之后每晚 ingest 都在跑，库一直在。
+#
+# /data 以 readOnly 挂载：web 绝不写数据目录。这要求 DB 是 rollback journal（DELETE）
+# 而不是 WAL —— WAL 打开时要在数据目录建 -shm，只读挂载上做不到，会 SQLITE_CANTOPEN。
+# 上游已于 2026-08-03 (4538ba9) 改成 DELETE journal，实测只读挂载可正常服务。
+#
+# HTTPRoute 刻意跟 Service 放同一个文件（而非 k8s/helm/manifests/gateway/route-*.yaml）：
+# 路由与后端由同一个 Application 同步，绕开 2026-08-01 实测的排序竞态 —— 路由先落地时
+# Cilium 会记下 ResolvedRefs=False/BackendNotFound 且 **Service 后建也不会自动重算**。
+# 与 oracle 侧「HTTPRoute 跟服务清单放一起」的惯例一致。
+#
+# 不需要 ReferenceGrant：HTTPRoute 与 Service 同在 jobs-sg ns，同 ns 引用无需授权。
+# （Gateway 在 kube-system 属于跨 ns *parentRef*，由 Gateway 的
+# allowedRoutes.namespaces.from: All 放行，不走 ReferenceGrant。）
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jobs-sg-web
+  namespace: jobs-sg
+  labels: { app: jobs-sg-web }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: jobs-sg-web }
+  template:
+    metadata:
+      labels: { app: jobs-sg-web }
+    spec:
+      serviceAccountName: jobs-sg
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: web
+          image: ghcr.io/meirongdev/jobs-sg
+          command: ["/usr/local/bin/jobs-sg-web"]
+          args: ["--data-dir", "/data", "--addr", ":8080"]
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 192Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 3
+            periodSeconds: 15
+          # periodSeconds 显式写出：Kyverno require-probes 的 pattern 校验
+          # readinessProbe.periodSeconds > 0。
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data
+              readOnly: true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: jobs-sg-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jobs-sg-web
+  namespace: jobs-sg
+  labels: { app: jobs-sg-web }
+spec:
+  selector: { app: jobs-sg-web }
+  ports:
+    # 端口名 http 是 monitoring.yaml 里 ServiceMonitor 抓取的目标，别改名。
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 8080
+---
+# jobs.meirong.dev —— 写这条路由就是建 DNS：external-dns 从 HTTPRoute 建 proxied
+# CNAME + 归属 TXT，隧道已有 *.meirong.dev 通配路由。**不要**改 cloudflare/terraform。
+# policy 是 upsert-only：删掉这条路由不会删 DNS 记录，退役时要手工清。
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: jobs-sg-web
+  namespace: jobs-sg
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: homelab-gateway
+      namespace: kube-system
+      # 80，不是 8000：homelab-gateway 只有一个 listener {name: http, port: 80}。
+      port: 80
+  hostnames:
+    - "jobs.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: jobs-sg-web
+          port: 80
+          weight: 1

@@ -47,6 +47,10 @@ data:
         {"name": "Timeslot",       "url": "http://timeslot.personal-services.svc:8080/api/slots"},
         # Trends: GitHub 趋势追踪, /healthz returns 200
         {"name": "Trends",         "url": "http://trends.personal-services.svc:8080/healthz"},
+        # Jobs SG: 在 homelab，故走公网 URL（与上面 Grafana/Vault 同理）。
+        # 探 /healthz 而不是 / —— / 服务的是 report/latest.html，第一份周报出来前是 404，
+        # 拿它当探针会让监控在首周一直红。/healthz 只验 DB 能打开。
+        {"name": "Jobs SG",        "url": "https://jobs.meirong.dev/healthz"},
     ]
 
     def wait_ready(timeout=120):
