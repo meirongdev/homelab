@@ -47,11 +47,46 @@ DGX 是跨 tailnet 共享的境内机器（RTT 66–83ms），不可用时 enric
 **切回 Bifrost**：`LLM_BASE_URL` 改回 `http://bifrost.bifrost.svc.cluster.local:8080`
 并删掉 `LLM_MODELS`（默认链即 Bifrost 形式），再往 Vault 写 `bifrost-vk`。
 
-**吞吐**：实测单条抽取约 **15s**（deepseek 的 reasoning 占了大部分 output token）。
-baseline 之后积压约 4900 条 → 并发 3 要 ~7h，装不进 1h 的 deadline，故设
-`LLM_CONCURRENCY=8` + `activeDeadlineSeconds: 10800`（3h）。稳态每日增量只有几百条
-（约 7 分钟）。**并发别再往上加** —— DGX 是共享机器，不是专属算力。
-`enrich_cache` 按 `description_sha256` 去重，转岗重发的帖子不重复计费。
+**吞吐**：并发 8 下约 **6.5 条/分钟**（真实岗位描述约 70s/条 —— 短 prompt 只要 15s，
+但真实描述长、deepseek 的 reasoning 输出也长）。baseline 后约 4900 条积压，每晚 3h
+窗口约 1100 条，**约 4 个晚上收敛**；进度逐条落库，中途被 deadline 杀掉不丢。
+稳态每日新增几百条，约半小时跑完。`enrich_cache` 按 `description_sha256` 去重。
+
+想更快只能加并发（CPU 现在是空的，加并发确实有效）——但 DGX 是共享机器，同时在给
+Open Notebook 供交互式推理，往上加会挤占它。8 是刻意保守的。
+
+## ⚠️ 归档读取：每轮一次，不是每条一次（2026-08-03 实测教训）
+
+这是本次上线**最大的性能坑**，也是「并发不是万灵药」的现成案例。
+
+上游原先按每条岗位调 `mcf.ReadArchiveRecord` 读描述，而它每次都重新打开 gzip
+**从头扫**。两个富化层各自独立读一遍 → 一轮成本 `2 × 岗位数 × O(归档)`。
+baseline 归档是**单个文件**、88,258 条、解压 402MB，平均记录在 72% 处 →
+**每条要解压约 290MB**。
+
+集群实测：**14 分钟只处理 75 条**，CPU 死死顶在 500m limit 上；照此一轮要
+**约 30 CPU 小时**，而窗口只有 3h。当时我把 `LLM_CONCURRENCY` 从 3 调到 8 想提速，
+**反而更慢** —— 争的是同一份 CPU，不是网络。
+
+上游 `738cb98` 加了 `mcf.ReadArchiveDescriptions`：按文件分组待取的记录下标，
+每个文件只走一遍，且只解码 `description` 字段（不实例化整个 `Job`）；取齐即停，
+停点之后的截断尾部不再算错误。`Enricher.Run` 一次性取两个 backlog（它们按不同
+`job_tech.source` 过滤，故顺序无关），两层共用同一份描述表。
+
+**效果**：同一份归档、同样数据，规则层 **75 条/14 分钟 → 4,837 条/30 秒（0 错误）**，
+容器 CPU 从满载降到 ~0%，瓶颈回到它本该在的地方（推理时间）。
+
+代价是把描述表放进内存，所以特意压过：4,900 条描述峰值 **82.5MiB**（512Mi limit 下
+未 OOM，exit 0）。归档再长几倍也还有余量，但**若日后归档单文件涨到数十万条，
+要重新量一次**——这是用 CPU 换内存，不是白拿。
+
+顺带修掉了「看起来像卡死」的伪装：`enrichOne` 原本把归档读失败**静默丢弃**
+（`if err != nil { return 0,0,1 }`，没有任何日志），所以归档不可读时表现为
+CPU 满载、无日志、无进度 —— 和「慢」完全无法区分。现在两层都会计数并告警式记日志。
+
+另一个误导信号：`jobs_sg_enrich_backlog` 只统计缺 `source='llm'` 的岗位，
+所以**整个规则层阶段它一动不动**，看着像完全卡住。判断进度要看
+`job_tech` 的 `source='llm'` 行数或 `enrich_cache`，别只看这个指标。
 
 ## 为什么用独立 ns + 独立 Application
 
@@ -189,7 +224,8 @@ CI 当时是绿的：`testdata/fixture/jobs.jsonl` 由 `scripts/genfixture` 从*
 | 入库候选岗位 | **9,499**（`seen` 远大于 `new`：只有候选岗位入库） |
 | 首份周报 | 2026-W31，1,301 条新岗，生成耗时 6s |
 | enrich 积压（baseline 后） | ~4,900（SWE 子集） |
-| 单条 LLM 抽取 | ~15s（DGX deepseek-v4-flash） |
+| enrich 规则层（修复后） | **4,837 条 / 30 秒 / 0 错误**（修复前 75 条 / 14 分钟） |
+| 单条 LLM 抽取 | ~70s（真实岗位描述；短 prompt 约 15s） |
 
 ⚠️ 别按「库里岗位数 ÷ 100」估页数 —— `seen`（88k）远大于 `new`（9.5k），按后者算会把
 全量扫描的耗时高估近一个数量级（`activeDeadlineSeconds: 3600` 实际很宽裕，29 分钟就跑完）。
