@@ -96,7 +96,27 @@
   headless(`ClusterIP: None`)，DNS 直接返回 pod IP，端口映射不生效（实测 :80 refused / :8080 200）。
   且 values 需 `fullnameOverride: trivy-operator`，否则 ArgoCD 会用 Application 名当 release 名 → NXDOMAIN。
   上这份的动机：2026-08 的迁移把 ArgoCD/Loki/Tempo/Calibre 搬去 oracle，那些镜像原本脱离了扫描。
+- **⚠️ `scanJobTTL` 决定的是扫描吞吐，不只是清理时间（2026-08-03 实测定性）**：Complete 状态的
+  扫描 Job 在被 TTL 回收前**一直占着 `scanJobsConcurrentLimit` 的槽**，所以
+  **吞吐上限 = limit ÷ TTL**。原先两集群都是 `TTL=1h` ⇒ homelab 1 个镜像/小时、
+  oracle 2 个/小时；oracle 首次部署当天就此停摆在 7/46（无活动 Job、无报错、
+  operator 日志 45 分钟不出一行）。已统一降到 **`5m`**（commit `9c760bf`），
+  并发上限维持原值（散热约束由 `scanJobsConcurrentLimit` 独立保证，与 TTL 正交）。
+  **别改回 1h。** 代价：失败 Job 也 5m 内回收，但扫描容器的报错原文会被
+  trivy-operator 抄进自己的日志，排障不受影响。
+  ☠️ **这种"扫描覆盖不全"是静默的**——`TrivyImageCriticalVulnerabilities` 只数
+  *现存报告*里的 Critical，`TrivyOperatorMetricsAbsent` 只在序列**整体**消失时才响，
+  覆盖率塌到 15% 两头都不占，表现为 `trivy_image_vulnerabilities{cluster="…"}`
+  恒为 0 的**假阴性**。体检方式见下（报告数 vs 工作负载数）。
 - **接入可观测**：ServiceMonitor（带 `release:kube-prometheus-stack`，仅 homelab）→ Prometheus 抓 `trivy_image_vulnerabilities` 等；告警 `manifests/monitoring/alerts/trivy-alerts.yaml`（critical CVE→warning、暴露密钥 High/Critical→**critical**、absent 元告警）经 Telegram；看板 Grafana `Security` 文件夹。
+- **扫描覆盖率体检**（两个数字应接近，差得多 = 队列被堵或扫描在失败）：
+
+  ```bash
+  kubectl get vulnerabilityreports -A --no-headers | wc -l          # 已产出报告数
+  kubectl get deploy,sts,ds,cronjob -A --no-headers \
+    | grep -vE '^(kube-system|kube-public|kube-node-lease|trivy-system)' | wc -l   # 应扫工作负载数
+  kubectl get jobs -n trivy-system                                  # 滞留的 Complete Job = 堵点
+  ```
 
 ## 7. CIS 合规与节点加固
 
