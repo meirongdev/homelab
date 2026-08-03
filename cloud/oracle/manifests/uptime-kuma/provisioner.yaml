@@ -26,9 +26,12 @@ data:
         {"name": "Squoosh",        "url": "http://squoosh.personal-services.svc:8080"},
         {"name": "Stirling-PDF",   "url": "http://stirling-pdf.personal-services.svc:8080/login"},
         {"name": "Uptime Kuma",    "url": "http://uptime-kuma.personal-services.svc:3001"},
-        # --- homelab public services ---
+        # --- public-URL probes (Cloudflare → Cilium Gateway) ---
         # Auth-protected services may redirect to their own login page; treat 2xx-3xx as healthy external reachability.
         # Do not follow redirects into full login exchanges.
+        # ⚠️ 这组不再等同于「homelab 的服务」：Grafana/Vault/Open Notebook 在 homelab，
+        # 而 Calibre-Web 与 ArgoCD 已于 2026-08-02~03 迁去 oracle。探的是端到端公网可达性，
+        # 与后端落在哪个集群无关，故仍走公网 URL；但只有前三个能当 homelab 的存活信号（见下方 dead-man 注释）。
         {"name": "Grafana",        "url": "https://grafana.meirong.dev/",       "accepted_statuscodes": ["300-399"], "maxredirects": 0},
         {"name": "HashiCorp Vault","url": "https://vault.meirong.dev/",         "accepted_statuscodes": ["300-399"], "maxredirects": 0},
         {"name": "Calibre-Web",    "url": "https://book.meirong.dev/",          "accepted_statuscodes": ["300-399"], "maxredirects": 0},
@@ -77,10 +80,12 @@ data:
     STATUS_PAGE_DOMAIN = "status.meirong.dev"
 
     # --- Notification (Telegram) = dead-man's switch ---
-    # oracle Uptime Kuma pings homelab public services (Grafana/Vault/ArgoCD/Calibre) + oracle
+    # oracle Uptime Kuma pings homelab public services (Grafana/Vault/Open Notebook) + oracle
     # services. Attaching a Telegram notification to ALL monitors means: homelab down → its services
     # unreachable → Uptime Kuma → Telegram Bot API (oracle → internet direct), with NO dependency
     # on homelab. oracle直连 api.telegram.org，无需中间层。
+    # ⚠️ 2026-08-03：ArgoCD/Calibre 迁 oracle 后**不再是 homelab 的存活信号**（它们挂了说明
+    # oracle 挂了）。homelab 侧的探针只剩上面那三个，别再往 homelab 搬服务而不补探针。
     # Same bot/group/topic as homelab Alertmanager's telegramConfigs — 「🚨 Homelab 告警」话题。
     TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
     TELEGRAM_CHAT_ID = -1003981213530

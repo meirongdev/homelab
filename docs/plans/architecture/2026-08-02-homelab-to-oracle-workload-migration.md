@@ -126,7 +126,26 @@ homelab 的磁盘压力（65%，剩 43.5 GB）**得靠搬 calibre 才能解决**
 |---|---|
 | **Vault 迁 oracle** | 见 §4，属可用性议题而非容量议题，内存收益仅 ~160 Mi |
 | ~~calibre 镜像不再被扫描~~ | ✅ **2026-08-03 已解决**：oracle 也上了一份 trivy-operator（`values/trivy-operator-oracle.yaml`），accepted-risk CVE 按镜像实际所在集群重排。顺带覆盖了同期迁过去的 ArgoCD/Loki/Tempo |
-| Vault 孤儿 path 清理 | `secret/homelab/argocd-oracle-cluster` 随本次迁移失去消费者，未删 |
+| ~~Vault 孤儿 path 清理~~ | ✅ **2026-08-03 已解决**，见下方「残余清理」 |
+
+### 残余清理（2026-08-03 复查）
+
+迁移完成后做了一次双集群残余扫描，清掉 4 类对象：
+
+| 残余 | 为什么没被自动回收 | 处置 |
+|---|---|---|
+| `clusterrole`+`clusterrolebinding` 各 2 条（`argocd-applicationset-controller`、`argocd-image-updater`） | 集群级 RBAC 不属于任何 ns，删 `argocd` ns 带不走它们，subject 指向已消失的 `sa/argocd/*` | 已删。☠️ **`clusterrolebinding/argocd-manager` 必须留**——那是 oracle 控制面纳管 homelab 的凭据（`sa/kube-system/argocd-manager`），三条都带 `argocd` 前缀，别按前缀批量删 |
+| `configauditreport/statefulset-loki`（monitoring） | 该报告**没有 `ownerReferences`**，trivy-operator 的 GC 靠 ownerRef 级联，抓不到它 → Loki 迁走后仍挂在 trivy dashboard 上冒充现存工作负载 | 已删。同样无 ownerRef 的 `vault/statefulset-vault` 是活的，别一起删 |
+| Vault `secret/homelab/argocd-oracle-cluster`（`bearerToken`+`caData`，2026-06-04 建） | 纳管方向反转后消费它的 ExternalSecret 被删（commit f22929d），path 本身留着 | 已 `vault kv metadata delete`。反方向的 `argocd-homelab-cluster` 是活的，别搞混 |
+| containerd 内约 2.2 GB 迁走工作负载的镜像（calibre×2 / argocd×3 / image-updater×2 / loki×4 / tempo×4） | k3s 镜像 GC 的触发阈值是磁盘 **85%**，节点当时 33% → 永不触发 | `k3s crictl rmi --prune`，连带清掉其它无引用镜像，实际 **释放 9 GB**（37G→28G，33%→24%；containerd 22G→13G） |
+
+⚠️ **`crictl rmi --prune` 会刷一屏 `DeadlineExceeded`**：crictl 默认 RPC 超时 2s，这台单节点笔记本
+的 containerd 跟不上，于是每个镜像都报错。**但删除其实在后台完成了**——别看见报错就重跑，
+先 `df -h` 和 `crictl images` 复核实际结果。
+
+扫过但**确认干净**的：PVC/PV 无孤儿（节点上 10 个 local-path 目录与 10 个 Bound PVC 一一对应）、
+homelab 无遗留 Helm release、无悬空 webhook、Grafana 的 Loki/Tempo datasource 已正确指向
+oracle Tailscale IP、29 个 Application 全 Synced+Healthy、`secret/oracle-k3s/*` 8 条全有消费者。
 
 ## 相关
 
