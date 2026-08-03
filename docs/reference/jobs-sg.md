@@ -43,6 +43,9 @@ Telegram）、`web`（只读服务 + `/metrics`）。三个 CronJob + 一个 Dep
 `/daily` 系列是随请求渲染（不经 CronJob 落文件）：ingest 约 02:20 SGT 落地，数字必须
 当场就是最新的。周报仍是静态文件 —— 它要归档、要推 Telegram。
 
+⚠️ 上表的「200 实测」是**空库/小库时**的结果。`/daily` 与当天的 `/daily/{date}` 在数据
+量涨上来后需要可写 `/tmp` 才不 500，见下文「只读根文件系统还要一个可写 `/tmp`」。
+
 ## LLM 富化：直连 DGX，不经 Bifrost
 
 `enrich` 的 `LLM_BASE_URL` 指向 **DGX Spark vLLM `http://100.97.87.120:8000`**
@@ -204,6 +207,23 @@ kubectl --context k3s-homelab -n jobs-sg logs -f job/ingest-bootstrap
 只读挂载上做不到 → `SQLITE_CANTOPEN`，web 每次启动即崩。上游 2026-08-03（`4538ba9`）
 把 journal 改成 `DELETE` 并去掉只读连接上的 journal pragma，实测只读挂载可正常服务。
 写入方由 cron 排期天然串行（ingest/enrich/report 不重叠），失去 WAL 并发无实际代价。
+
+## 只读根文件系统还要一个可写 `/tmp`（否则大查询 500）
+
+`web` 是 `readOnlyRootFilesystem: true`。SQLite 的排序/分组一旦超出 page cache 就要把
+临时 b-tree 溢出到文件，unix VFS 依次试 `$SQLITE_TMPDIR` → `$TMPDIR` → `/var/tmp` →
+`/usr/tmp` → `/tmp`，**全都不可写就返回 `SQLITE_IOERR_GETTEMPPATH`（扩展码 6410）**，
+日志形如 `"msg":"build page","page":"overview:30","err":"disk I/O error (6410)"`，
+HTTP 500。修法是挂一个 emptyDir 到 `/tmp` 并显式 `SQLITE_TMPDIR=/tmp`（见 `web.yaml`）。
+
+⚠️ **这个坑按数据量触发，冒烟测试抓不到**：2026-08-03 上线当天逐条扫路由全是 200，
+几小时后 bootstrap 全量灌进来，`/daily`（30 天聚合）和 `/daily/2026-08-03`（当天数据最多）
+就双双 500，而数据量小的 `/daily/2026-08-02` 始终 200。**"上线时全绿"不等于"一直绿"**——
+只读根文件系统 + SQLite 的组合，要按最大查询而不是按当时的库来验。
+
+emptyDir 用**磁盘**不用 `medium: Memory`：tmpfs 算进容器 192Mi 内存上限，溢出几十 MB
+就是 OOMKill。`sizeLimit: 256Mi` 兜住节点临时盘（homelab 是笔记本）。`/data` 仍是
+`readOnly`，写隔离没有放松。
 
 ## 镜像固定
 
