@@ -139,16 +139,27 @@ resource "cloudflare_ruleset" "rate_limiting" {
   phase       = "http_ratelimit"
 
   rules = [
-    # Rate limit authentication / login endpoints
-    # Prevents brute-force login attempts across all services:
-    #   auth.meirong.dev (ZITADEL), grafana.meirong.dev, vault.meirong.dev, etc.
+    # ⚠️ Free plan allows exactly ONE rate limiting rule — that is why the Excalidraw
+    # collab relay is folded into this same rule instead of getting its own. The counter
+    # is therefore shared across both matches; harmless here (a session that trips one
+    # will not realistically be near the other).
+    #
+    # (a) Authentication / login endpoints — brute-force protection across all services:
+    #     auth.meirong.dev (ZITADEL), grafana.meirong.dev, vault.meirong.dev, etc.
+    # (b) draw.meirong.dev/socket.io/ — the Excalidraw collab relay went public on
+    #     2026-08-04 (oauth2-proxy removed; nothing server-side to protect). This caps
+    #     scripted abuse of the open websocket relay on the arm64 free-tier box.
+    #     Scoped to /socket.io/ ON PURPOSE — do NOT widen to the whole host: a cold
+    #     Excalidraw page load pulls dozens of JS/font chunks and would trip 30/10s
+    #     (edge-cached hits still count; "only count origin requests" is Business+).
+    #     Legit collab is ~4 requests to open a session, then one long-lived websocket.
     # Threshold: 30 requests / 10 seconds per source IP per colo → block for 10 seconds
-    # Note: Free plan limits period and mitigation_timeout to 10s;
+    # Note: Free plan pins period and mitigation_timeout to 10s;
     #       Pro plan ($20/mo) allows 60s/600s for more effective brute-force protection
     {
       action      = "block"
-      expression  = "(http.request.uri.path contains \"/login\") or (http.request.uri.path contains \"/oauth2\") or (http.request.uri.path contains \"/api/login\") or (http.request.uri.path contains \"/signin\") or (http.request.uri.path contains \"/v1/auth\")"
-      description = "Rate limit authentication endpoints (30 req/10s per IP)"
+      expression  = "(http.request.uri.path contains \"/login\") or (http.request.uri.path contains \"/oauth2\") or (http.request.uri.path contains \"/api/login\") or (http.request.uri.path contains \"/signin\") or (http.request.uri.path contains \"/v1/auth\") or (http.host eq \"draw.meirong.dev\" and http.request.uri.path contains \"/socket.io/\")"
+      description = "Rate limit auth endpoints + Excalidraw collab relay (30 req/10s per IP)"
       enabled     = true
       ratelimit = {
         characteristics     = ["ip.src", "cf.colo.id"]
