@@ -135,10 +135,11 @@ kubectl get secret git-creds -n argocd \
 ### 症状：修改了 Application 注解后未生效
 
 > ⚠️ **本节原有的说法已作废**：原文称"ArgoCD 不管理 Application 对象本身，改注解后需手动 `kubectl apply`"。
-> 这在引入 App-of-Apps 之前成立，**现在不成立**——`root` App 递归 watch `argocd/applications/`
-> 并开了 automated+selfHeal，所以改 `argocd/applications/*.yaml` **`git push` 就够了**，
-> 3 分钟内 reconcile。手动 `kubectl apply` 只在 bootstrap `root.yaml` 或 `root` 本身丢失时才需要。
-> （同 `docs/CONVENTIONS.md` 的 "ArgoCD Application definitions" 条。）
+> 这在引入 App-of-Apps 之前成立，**现在不成立**——`root` App watch `argocd/applications/`
+> （非递归，`recurse: false`）并开了 automated+selfHeal，所以改 `argocd/applications/*.yaml`
+> **`git push` 就够了**，3 分钟内 reconcile。手动 `kubectl apply` 只在 bootstrap `root.yaml`
+> 或 `root` 本身丢失时才需要。
+> （同 `docs/reference/argocd-app-patterns.md` 的「控制面部署形态」条。）
 
 所以这个症状现在的排查方向是：确认 push 是否已被 `root` App 同步下来。
 

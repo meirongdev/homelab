@@ -60,7 +60,7 @@ Telegram Forum Topics 只存在于**超级群**，私聊没有。设计为按消
 ## Consequences
 
 - 新增/改任何 homelab 告警路由，改 `k8s/helm/manifests/monitoring/alerts/alertmanager-config.yaml` 里的 `telegramConfigs`（`chatID`/`messageThreadID`/`message` 模板），不再有 bridge 这层可调。
-- 相关：`CONVENTIONS.md` GitOps/Alerting 段、`reference/security.md` §9。
+- 相关：`reference/observability-alerting-slo.md`（告警路由细节）、`reference/security.md` §9。
 
 ---
 
