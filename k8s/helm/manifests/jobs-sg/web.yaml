@@ -44,6 +44,13 @@ spec:
           image: ghcr.io/meirongdev/jobs-sg
           command: ["/usr/local/bin/jobs-sg-web"]
           args: ["--data-dir", "/data", "--addr", ":8080"]
+          # SQLite 排序/分组溢出到临时文件时要一个**可写**目录。unix VFS 依次试
+          # $SQLITE_TMPDIR → $TMPDIR → /var/tmp → /usr/tmp → /tmp，全都不可写就返回
+          # SQLITE_IOERR_GETTEMPPATH（扩展码 6410）。显式指到挂上来的 emptyDir，
+          # 不依赖搜索顺序。
+          env:
+            - name: SQLITE_TMPDIR
+              value: /tmp
           ports:
             - name: http
               containerPort: 8080
@@ -67,10 +74,22 @@ spec:
             - name: data
               mountPath: /data
               readOnly: true
+            - name: tmp
+              mountPath: /tmp
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: jobs-sg-data
+        # 2026-08-03：`/daily` 与 `/daily/{今天}` 500，日志 `disk I/O error (6410)`
+        # = SQLITE_IOERR_GETTEMPPATH。readOnlyRootFilesystem: true 且没挂任何可写目录，
+        # SQLite 找不到地方放临时 b-tree。只有大查询会踩：`/daily/2026-08-02`（数据少，
+        # 排序留在 page cache 里）一直是 200，所以上线当天扫一遍全绿看不出来。
+        #
+        # 用**磁盘** emptyDir 而不是 medium: Memory —— tmpfs 算进容器 192Mi 内存上限，
+        # 溢出几十 MB 就是 OOMKill。sizeLimit 兜住节点临时盘（homelab 是笔记本）。
+        # 这里不放数据，只放临时文件；/data 仍是 readOnly，写隔离没有放松。
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
 ---
 apiVersion: v1
 kind: Service
