@@ -18,6 +18,10 @@ from collections import defaultdict
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs"
+# 第三方 vendored skill 包（skills-lock.json 管理），内部相对链接指向各自上游仓库，
+# 不受本仓库文档规则约束。必须按 resolve() 后的路径判断：Python 3.13 之前
+# rglob 会跟随目录软链，同一文件还会以 .claude/skills/<name>/ 路径再出现一次。
+VENDORED = ROOT / ".agents"
 
 # 带日期前缀的目录（R2）；其余为常青目录，文件名不得带日期
 DATED_DIRS = {"plans", "records"}
@@ -179,6 +183,8 @@ def check_readme_trees():
         parts = rel.parts
         if parts[0] in (".git", "docs") or ".terraform" in parts or ".worktrees" in parts:
             continue
+        if p.resolve().is_relative_to(VENDORED):
+            continue
         base, in_fence = None, False
         for i, line in enumerate(p.read_text().splitlines(), 1):
             if line.startswith("```"):
@@ -222,6 +228,8 @@ def check_external_refs():
         rel = p.relative_to(ROOT)
         parts = rel.parts
         if parts[0] in (".git", "docs") or ".terraform" in parts or ".worktrees" in parts:
+            continue
+        if p.resolve().is_relative_to(VENDORED):
             continue
         if p.suffix not in exts and p.name != "justfile":
             continue
