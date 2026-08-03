@@ -37,6 +37,9 @@ root (Application)
 | Kustomize 目录 | `oracle-k3s.yaml` | `cloud/oracle/manifests/` 整棵 kustomize 树 |
 | 目录源（目录即清单） | `personal-services.yaml`, `monitoring-dashboards.yaml` | 一个 App ↔ `k8s/helm/manifests/` 下一个子目录，目录内文件全部纳管；2026-07-31 起取代 `directory.include` glob（所有权地图见 `k8s/helm/manifests/README.md`） |
 
+**怎么选**：第 1 种只用于**上游第三方 chart**；**自研应用一律用后两种，不打 chart**——
+理由与推翻条件见 [decisions/no-helm-chart-for-in-house-apps](../decisions/no-helm-chart-for-in-house-apps.md)。
+
 ### 跨集群
 
 **2026-08-02 起控制面在 oracle-k3s**，一个 ArgoCD 实例管两个集群：

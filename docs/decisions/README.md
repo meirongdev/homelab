@@ -8,6 +8,7 @@
 | [external-dns-adoption](external-dns-adoption.md) | 子域名 DNS 从 Terraform 手管 → HTTPRoute 声明式。含 Crossplane 否决、`upsert-only` 共存安全性 |
 | [manual-helm-to-argocd-adoption](manual-helm-to-argocd-adoption.md) | 采纳现存 Helm release 的**渲染等价性验证法**；`skipCrds` 把 CRD 陈旧与迁移解耦。⚠️ 跨集群同 chart 的正解是 `helm.releaseName` 而非 `fullnameOverride` |
 | [manifests-directory-per-app](manifests-directory-per-app.md) | `k8s/helm/manifests/` 一个 App 一个目录（目录即清单），废除 `directory.include` glob |
+| [no-helm-chart-for-in-house-apps](no-helm-chart-for-in-house-apps.md) | 自研应用一律 kustomize/目录源，**不打 chart**；Helm 只用于消费上游 chart。含推翻条件 |
 | [otel-2026-alignment](otel-2026-alignment.md) | homelab collector 首次落地（k8s 裁剪发行版）+ oracle 现代化（container operator、file_storage 持久队列、0.120→0.156） |
 | [alerting-telegram-migration](alerting-telegram-migration.md) | gotify-bridge 有 `concurrent map writes` 崩溃 bug → 改 Alertmanager 原生 Telegram，Gotify 整体退役 |
 | [opencost-krr-data-sources](opencost-krr-data-sources.md) | 同一个 cAdvisor 缺口，OpenCost 走 collector 旁路、KRR 补窄口径采集。含 krr-enforcer 否决 |
