@@ -1,8 +1,13 @@
 # Sink URL Shortener — Cloudflare Workers Deployment
 
 **Date**: 2026-03-03
-**Status**: ✅ 已部署
-**Service URL**: https://s.meirong.dev
+**Status**: ❌ 已取消（2026-05-27 退役，commit `806950b`）
+**Service URL**: ~~https://s.meirong.dev~~（已下线）
+
+> 短链服务整机退役：git submodule（`cloudflare/workers/sink`）、cloudflare workers
+> 的 `justfile`、Homepage 条目一并移除，`.gitmodules` 清空。
+> Cloudflare 侧的 worker / KV / R2 / `s.meirong.dev` 域名路由不在 repo 内，需在
+> Cloudflare dashboard 或 wrangler 里清理（退役时未跟踪）。
 
 ## Overview
 
