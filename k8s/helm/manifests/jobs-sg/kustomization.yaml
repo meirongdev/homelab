@@ -7,15 +7,12 @@ resources:
   - limits.yaml
   - rbac.yaml
   - pvc.yaml
-  # ⚠️ external-secret.yaml 刻意**未注册** —— Vault 里 secret/homelab/jobs-sg 还没写。
-  # ESO 对不存在的路径会一直 Ready=False，而 eso-alerts.yaml 的 ExternalSecretNotReady
-  # (for: 15m) 会因此**持续告警**、ArgoCD 应用也一直 Degraded。2026-08-03 首次上线就这么
-  # 响了 40 分钟。写完 Vault 再把下面这行取消注释即可（文件本身已就绪）：
-  #   vault kv put secret/homelab/jobs-sg telegram-bot-token=... \
-  #     telegram-chat-id=-1003981213530 telegram-thread-id='<内容话题 thread id>'
-  # 未注册期间唯一影响：周报不推 Telegram（HTML/MD 照常生成、站点照常服务；
-  # LLM 富化直连 DGX，不用 bifrost-vk）。
-  # - external-secret.yaml
+  # 2026-08-03 重新启用：改为复用**已存在**的 Vault 路径 `secret/homelab/telegram`
+  # （property bot_token，与告警共用同一个 bot），不再新造 secret/homelab/jobs-sg。
+  # 因此无需任何手工写值，也不会重现之前「指向不存在的路径 → ExternalSecretNotReady
+  # 持续告警 + ArgoCD 常驻 Degraded」那 40 分钟。
+  # chat id / thread id 不是密钥，明文在 cronjob-report.yaml。
+  - external-secret.yaml
   - cronjob-ingest.yaml
   - cronjob-enrich.yaml
   - cronjob-report.yaml

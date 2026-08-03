@@ -1,9 +1,15 @@
 ---
 # 周一 09:00 SGT = 01:00 UTC 出周报 + 推 Telegram。
 #
-# 三个 TELEGRAM_* 都标 optional：Vault 未写时 report 打一行
-# "telegram disabled (env unset)" 后照常生成 HTML/MD（web 依然有内容可服务），
-# 而不是整个 Job 起不来。telegram-thread-id 为空 = 发到群的 General 话题。
+# Telegram 三要素按本仓库既有分工拆开（同 Alertmanager / falco）：
+#   · bot token → Vault `secret/homelab/telegram` (property bot_token) 经 ESO
+#     （external-secret.yaml）—— 与告警共用同一个 bot，**已存在，无需手工写值**
+#   · chat id / thread id → **不是密钥**，就是两个 ID，这里明文给
+#     （Alertmanager 也是把 chatID/messageThreadID 直接写在 alertmanager-config.yaml）
+#
+# TELEGRAM_BOT_TOKEN 仍标 optional：ESO 万一没同步上时 report 打一行
+# "telegram disabled (env unset)" 后照常生成 HTML/MD（站点依然有内容），
+# 而不是 CreateContainerConfigError 卡住整个 Job。
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -40,18 +46,18 @@ spec:
                       name: jobs-sg-secrets
                       key: telegram-bot-token
                       optional: true
+                # 群 MatthewDaily（超级群/forum）—— **与告警同一个群**，
+                # 与 alertmanager-config.yaml 的 chatID 一致。
                 - name: TELEGRAM_CHAT_ID
-                  valueFrom:
-                    secretKeyRef:
-                      name: jobs-sg-secrets
-                      key: telegram-chat-id
-                      optional: true
+                  value: "-1003981213530"
+                # 话题（forum topic）ID。⚠️ **留空 = 群的 General 话题**。
+                # 刻意**不填 2** —— thread 2 是「🚨 Homelab 告警」，
+                # 上游 docs/02 §4.3 明令周报不得进告警话题。
+                # 想投到专门的内容话题：Telegram 里右键该话题 → 复制链接，
+                # `t.me/c/<内部 id>/<thread_id>`，把第二个数字填在这里即可（一行改动，
+                # 不涉及 Vault）。
                 - name: TELEGRAM_THREAD_ID
-                  valueFrom:
-                    secretKeyRef:
-                      name: jobs-sg-secrets
-                      key: telegram-thread-id
-                      optional: true
+                  value: ""
               resources:
                 requests: { cpu: 100m, memory: 128Mi }
                 limits: { cpu: 500m, memory: 384Mi }
