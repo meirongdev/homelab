@@ -1,6 +1,6 @@
 # Services — 服务清单
 
-> Last updated: 2026-08-03
+> Last updated: 2026-08-04
 > Status: 生效事实
 >
 > **这张表是服务清单的唯一真相源** —— `docs/README.md`、`docs/ARCHITECTURE.md` 与各 runbook
@@ -13,7 +13,7 @@
 | IT-Tools | oracle-k3s | `personal-services` | `tool.meirong.dev` |
 | Stirling-PDF | oracle-k3s | `personal-services` | `pdf.meirong.dev` |
 | Squoosh | oracle-k3s | `personal-services` | `squoosh.meirong.dev` |
-| Excalidraw | oracle-k3s | `personal-services` | `draw.meirong.dev`（oauth2-proxy + ZITADEL） |
+| Excalidraw | oracle-k3s | `personal-services` | `draw.meirong.dev`（无认证，2026-08-04 去掉 oauth2-proxy） |
 | Trends | oracle-k3s | `personal-services` | `trends.meirong.dev` |
 | Timeslot | oracle-k3s | `personal-services` | `slot.meirong.dev` |
 | Uptime Kuma | oracle-k3s | `personal-services` | `status.meirong.dev` |

@@ -1,8 +1,14 @@
 # Excalidraw — 手绘风白板 + 实时协作 (draw.meirong.dev)
 #
-# 单一 origin draw.meirong.dev,全部走现有 oauth2-proxy(ZITADEL SSO),按路径分流:
+# 单一 origin draw.meirong.dev,HTTPRoute 直接按路径分流(2026-08-04 去掉 oauth2-proxy):
 #   /            → excalidraw 前端(官方静态镜像)
 #   /socket.io/  → excalidraw-room(实时协作 websocket 中继;自建 arm64 镜像)
+#
+# 无认证,和同 ns 的 IT-Tools/Stirling-PDF/Squoosh 一致。原本挂了 per-app oauth2-proxy
+# (ZITADEL OIDC),但服务端不存任何画布数据(见下面的持久化说明),SSO 没有可保护的对象,
+# 只是给自己加登录摩擦。代价:/socket.io/ 成了开放中继,谁都能拿它开房间烧 arm64 的
+# CPU/带宽 —— 房间本身是客户端 E2E 加密、密钥在 URL fragment,别人进不了你的会话。
+# 要兜底就在 cloudflare/terraform 给这个 host 加 rate limit,不要退回 SSO。
 #
 # 官方前端把协作服务器地址烤进 JS(build-time),自托管标准做法是覆盖 entrypoint,在运行时
 # sed 改写那个硬编码 URL 指向本 origin(见下面 excalidraw Deployment 的 command):
@@ -20,33 +26,6 @@
 #
 # 暴露:wildcard tunnel + external-dns(gateway-httproute)已就绪,HTTPRoute 一份即可。
 # ReferenceGrant allow-gateway-to-personal-services(base/gateway.yaml)已放行本 ns。
----
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  name: excalidraw-oauth2-proxy
-  namespace: personal-services
-spec:
-  refreshInterval: "1h"
-  secretStoreRef:
-    name: vault-backend
-    kind: ClusterSecretStore
-  target:
-    name: excalidraw-oauth2-proxy
-    creationPolicy: Owner
-  data:
-    - secretKey: client-id
-      remoteRef:
-        key: oracle-k3s/excalidraw-oauth2-proxy
-        property: client-id
-    - secretKey: client-secret
-      remoteRef:
-        key: oracle-k3s/excalidraw-oauth2-proxy
-        property: client-secret
-    - secretKey: cookie-secret
-      remoteRef:
-        key: oracle-k3s/excalidraw-oauth2-proxy
-        property: cookie-secret
 ---
 # ---------- 前端(官方静态镜像 + 运行时改写协作 URL) ----------
 apiVersion: apps/v1
@@ -176,101 +155,9 @@ spec:
       targetPort: 80
       name: http
 ---
-# ---------- oauth2-proxy — ZITADEL SSO + 按路径分流(前端 + 协作 ws) ----------
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: excalidraw-oauth2-proxy
-  namespace: personal-services
-  labels:
-    app: excalidraw-oauth2-proxy
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: excalidraw-oauth2-proxy
-  template:
-    metadata:
-      labels:
-        app: excalidraw-oauth2-proxy
-    spec:
-      containers:
-        - name: oauth2-proxy
-          # quay.io/oauth2-proxy/oauth2-proxy:v7.15.2 多架构 manifest-list digest —— oracle arm64。
-          image: quay.io/oauth2-proxy/oauth2-proxy@sha256:aa0bd8dd5ab0c78e4c91c92755ad573a5f92241f88138b4141b8ec803463b4fd
-          ports:
-            - containerPort: 4180
-              name: http
-          args:
-            - --provider=oidc
-            - --oidc-issuer-url=https://auth.meirong.dev
-            - --scope=openid profile email
-            - --email-domain=*
-            # 按路径分流(最长前缀优先):默认 → 前端;/socket.io/ → 协作 room。
-            - --upstream=http://excalidraw.personal-services.svc.cluster.local:80/
-            - --upstream=http://excalidraw-room.personal-services.svc.cluster.local:80/socket.io/
-            # 协作是 websocket;显式开启 ws 代理。
-            - --proxy-websockets=true
-            - --http-address=0.0.0.0:4180
-            - --redirect-url=https://draw.meirong.dev/oauth2/callback
-            - --cookie-domain=draw.meirong.dev
-            - --cookie-secure=true
-            - --cookie-samesite=lax
-            - --cookie-expire=168h
-            - --skip-provider-button=true
-            - --reverse-proxy=true
-            - --whitelist-domain=.meirong.dev
-            - --silence-ping-logging=true
-          env:
-            - name: OAUTH2_PROXY_CLIENT_ID
-              valueFrom:
-                secretKeyRef:
-                  name: excalidraw-oauth2-proxy
-                  key: client-id
-            - name: OAUTH2_PROXY_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: excalidraw-oauth2-proxy
-                  key: client-secret
-            - name: OAUTH2_PROXY_COOKIE_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: excalidraw-oauth2-proxy
-                  key: cookie-secret
-          resources:
-            requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              cpu: 100m
-              memory: 96Mi
-          livenessProbe:
-            httpGet:
-              path: /ping
-              port: 4180
-            initialDelaySeconds: 10
-            periodSeconds: 15
-          readinessProbe:
-            httpGet:
-              path: /ready
-              port: 4180
-            initialDelaySeconds: 5
-            periodSeconds: 10
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: excalidraw-oauth2-proxy
-  namespace: personal-services
-spec:
-  selector:
-    app: excalidraw-oauth2-proxy
-  ports:
-    - port: 4180
-      targetPort: 4180
-      name: http
----
-# HTTPRoute: draw.meirong.dev -> excalidraw-oauth2-proxy -> (authed) 前端 + 协作 room
+# HTTPRoute: draw.meirong.dev -> 前端 + 协作 room(按路径分流,无认证)
+# Gateway API 按前缀长度择优,与 rule 顺序无关;/socket.io/ 不加 URLRewrite,
+# 路径要原样透传给 room(socket.io 服务端默认就监听 /socket.io)。
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -289,10 +176,20 @@ spec:
     - matches:
         - path:
             type: PathPrefix
+            value: /socket.io/
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: excalidraw-room
+          port: 80
+          weight: 1
+    - matches:
+        - path:
+            type: PathPrefix
             value: /
       backendRefs:
         - group: ""
           kind: Service
-          name: excalidraw-oauth2-proxy
-          port: 4180
+          name: excalidraw
+          port: 80
           weight: 1
