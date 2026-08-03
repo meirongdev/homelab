@@ -6,8 +6,9 @@ Compares a local directory against the calibre library DB + the ingest folder,
 validates file integrity, copies new books into the pod's ingest path, and keeps
 a local backup. Pod is resolved dynamically from a label selector (never hardcoded).
 
-All inputs are parameterized — see `--help`. Defaults target the homelab
-calibre-web (context k3s-homelab, ns personal-services, selector app=calibre-web).
+All inputs are parameterized — see `--help`. Defaults target calibre-web on
+oracle-k3s (ns personal-services, selector app=calibre-web); it moved there from
+homelab on 2026-08-02.
 """
 import argparse
 import os
@@ -36,7 +37,7 @@ def parse_args():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--source", default="~/Downloads/books", help="Local directory to scan for ebooks")
-    p.add_argument("--context", default="k3s-homelab", help="kubectl context")
+    p.add_argument("--context", default="oracle-k3s", help="kubectl context")
     p.add_argument("--namespace", default="personal-services", help="calibre-web namespace")
     p.add_argument("--selector", default="app=calibre-web", help="Label selector to find the calibre-web pod")
     p.add_argument("--ingest-path", default="/cwa-book-ingest", help="Ingest folder inside the pod")
