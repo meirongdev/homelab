@@ -78,6 +78,7 @@ openspec/
 .claude/skills/openspec-*/
 .qwen/commands/
 .qwen/skills/
+.qwen/tmp/
 .github/prompts/
 .github/skills/
 proxmox/ansible/.vault_pass
