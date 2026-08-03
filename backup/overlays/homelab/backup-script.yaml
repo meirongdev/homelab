@@ -47,6 +47,9 @@ data:
 
     # --- 2) sqlite/config PVC（local-path；2026-07-11 起全部 PVC 已迁离 NFS）---
     # 只取 sqlite DB(+WAL/SHM) 与小 json 配置；剪掉 cache 等可重建内容。
+    # ⚠️ 下面的 `for pat in ...` 是**显式白名单**——新增有状态应用必须往里加，否则静默不备份。
+    # 该失效模式已由 CI 拦截（scripts/check-manifests.py 的 H4）；
+    # 规则全文见 docs/reference/manifest-safety-checks.md。
     # （processed_books/thumbnails 的剪枝规则随 calibre 一并迁去了 oracle overlay，
     #   2026-08-03 起本集群不再有 calibre config PVC。）
     echo "[backup] copy sqlite/config files (*.db*/small *.json, prune cache)..."

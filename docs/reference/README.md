@@ -25,6 +25,7 @@
 ### GitOps
 
 - [argocd-app-patterns.md](argocd-app-patterns.md) — ArgoCD 管理模式、pattern 对比、新增 Application 的 3 个坑
+- [manifest-safety-checks.md](manifest-safety-checks.md) — CI 强制的清单结构规则 H1-H4（每条都来自一次真实事故）+ 明确列出「静态查不出、只能靠人」的那几类
 
 ### 应用
 
