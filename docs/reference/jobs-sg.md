@@ -66,9 +66,53 @@ reasoning 占大头）。短 prompt 只要 15s —— 别拿短 prompt 的数字
 **约 2～3 个晚上收敛**；进度逐条落库，中途被 deadline 杀掉不丢。稳态每日新增几百条，
 约半小时跑完。`enrich_cache` 按 `description_sha256` 去重。
 
-想更快只能加并发 —— 但**别指望加 CPU**：LLM 阶段实测 CPU 只有 **1m**，它在等推理。
-而并发的天花板是 DGX 的余量（它同时在给 Open Notebook 供交互式推理），不是本地 CPU。
-8 是刻意保守的。
+⚠️ **并发和 CPU 都不是提速的答案**：LLM 阶段实测 CPU 只有 **1m**（在等推理），
+而并发 8 实测只有 **3.0 条/分钟** —— 单条独占 66.5s，8 并发时每条被拉长到约 160s，
+即 8× 并发只换来 3.3× 吞吐，DGX 已接近饱和。再加并发只会加深排队并挤占
+Open Notebook 的交互延迟。
+
+## 真正的提速杠杆：关掉 reasoning（`LLM_THINKING=false`）
+
+reasoning 占了这个模型 **约 95%** 的 output token。上游 `472aaf5` 加了
+`LLM_THINKING` 开关（`false` 时发 `chat_template_kwargs: {"thinking": false}`）。
+实测 4 条真实岗位（DGX 空闲时）：
+
+| | reasoning 开 | reasoning 关 |
+|---|---|---|
+| completion tokens | 1322 / 2019 / 175 / 451 | 82 / 55 / 54 / 45 |
+| 单条延迟 | 78.8 / 134.9 / 8.0 / 20.5s | 3.2 / 5.6 / 1.9 / 2.1s |
+| 平均 | **60.5s** | **3.2s（快 18.8×）** |
+
+**质量代价小且不是单向变差**：taxonomy 映射后的 `job_tech` 有 2/4 完全一致，
+两处差异都只差一项且方向相反 —— 一次多找到 reasoning 漏掉的 `mssql`，
+一次漏掉 `sql`。裸输出确实更松（出现 "ship"、"hats"，来自 "wear many hats"），
+但 `writeResult` 会把每个词过 `tech_taxonomy` **白名单**，没命中的进
+`unmapped_tech`，**进不了 `job_tech`** —— 白名单才是真正的质量闸门。
+
+⚠️ `reasoning_effort` 这个参数该模型**静默忽略**，只有 `chat_template_kwargs` 有效。
+且默认**不发**该字段（请求体与从前逐字节一致）—— 它是 vLLM/模板专用的，
+换成 Bifrost 或没有该模板的模型会被拒。
+
+**用法定位**：只用来啃积压，不用于稳态。稳态每日约 200 条、并发 8 下约 25 分钟，
+reasoning 完全跑得起，精度留着。清单里因此**不设** `LLM_THINKING`（= 默认开启），
+啃积压走一次性 Job（不进 git，见 [runbook 段落](#一次性积压回填)）。
+
+## 一次性积压回填
+
+baseline 之后有约 4,800 条积压。按默认（reasoning 开）3.0 条/分钟要跑约 9 个夜间窗口；
+用 `LLM_THINKING=false` 的一次性 Job 可在 1 小时内跑完：
+
+```bash
+# 先停掉正在跑的 enrich —— 两个进程会争同一个 SQLite 库，且读到同一份积压、
+# 把每次 LLM 调用做两遍
+kubectl --context k3s-homelab -n jobs-sg delete job -l job-name --ignore-not-found
+# 一次性 Job：与 CronJob 同 podspec，只多一个 LLM_THINKING=false，
+# 且**不带 ArgoCD 标签**（否则可能被 sync prune 掉）
+kubectl --context k3s-homelab -n jobs-sg apply -f <一次性 Job yaml>
+```
+
+进度逐条落库（`enrich_cache` + `job_tech`），中途被杀不丢。跑完删掉 Job 即可，
+之后每晚的 CronJob 用默认（reasoning 开）处理当天新增。
 
 ## ⚠️ 归档读取：每轮一次，不是每条一次（2026-08-03 实测教训）
 
