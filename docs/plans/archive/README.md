@@ -19,6 +19,7 @@
 
 | 日期 | 方案 | 为什么取消 |
 |------|------|-----------|
+| 2026-03-03 | [Sink 短链 — Cloudflare Workers](2026-03-03-sink-cloudflare-worker.md) | 2026-05-27 整体退役（commit `806950b`）：submodule + workers justfile + Homepage 条目移除；短链服务下线 |
 | 2026-03-15 | [NAS 经 Cilium External Workload 入网](2026-03-15-cilium-external-workload-nas.md) | 技术上不可行：`CiliumExternalWorkload` CRD 与 CLI 已从 Cilium 1.15+ 移除 |
 
 ## 已被取代
@@ -27,7 +28,7 @@
 |------|------|---------|
 | 2026-05-31 | [Cloudflare AI Gateway — 实现计划](2026-05-31-cloudflare-ai-gateway.md) | 自建 [Bifrost](../apps/2026-06-07-bifrost-llm-gateway.md)。CF 边缘够不到 Tailscale `100.x` 上的模型，方案根本走不通 |
 | 2026-05-31 | [Cloudflare AI Gateway — 设计](2026-05-31-cloudflare-ai-gateway-design.md) | 同上 |
-| 2026-02-25 | [SSO 集成 — Traefik ForwardAuth](2026-02-25-sso-integration.md) | Traefik 与共享入口层 SSO 双双移除；现为**各应用原生 OIDC**，见 [CONVENTIONS § Identity](../../CONVENTIONS.md) |
+| 2026-02-25 | [SSO 集成 — Traefik ForwardAuth](2026-02-25-sso-integration.md) | Traefik 与共享入口层 SSO 双双移除；现为**各应用原生 OIDC**，见 [reference/identity.md](../../reference/identity.md) |
 | 2026-03-07 | [架构简化建议](2026-03-07-simplification-recommendations.md) | 核心建议 #5「oracle 留在 ArgoCD 外」已被 [2026-06-04 GitOps 纳管](../networking/2026-06-04-oracle-k3s-argocd-gitops.md)推翻 |
 | 2026-02-21 | [Calibre-Web-Automated 迁移 — 设计](2026-02-21-calibre-web-automated-migration-design.md) | 已由[实现文档](../apps/2026-02-21-calibre-web-automated-migration.md)落地并取代 |
 | 2026-02-21 | [Grafana Loki 面板 — 设计](2026-02-21-grafana-loki-dashboards-design.md) | 已由[实现文档](../observability/2026-02-21-grafana-loki-dashboards.md)落地并取代 |

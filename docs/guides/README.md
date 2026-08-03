@@ -4,6 +4,7 @@
 
 | 指南 | 内容 |
 |------|------|
+| [dev-machine-bootstrap.md](dev-machine-bootstrap.md) | 换新机器后把环境配到能 clone/改/验这个 repo（密钥、工具链、kubeconfig、本地 CI 检查、需从旧机拷贝的 gitignored 文件） |
 | [ebook-sync.md](ebook-sync.md) | Calibre-Web 电子书同步（本地 → cwa ingest） |
 | [hermes-agent.md](hermes-agent.md) | Hermes Agent（MacBook 本地工具）Profile 管理与 MCP 集成 |
 

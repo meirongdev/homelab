@@ -1,7 +1,7 @@
 # Homelab Architecture
 
 > 单页架构总览，双集群 homelab（homelab + oracle-k3s）。
-> Last updated: 2026-07-31
+> Last updated: 2026-08-03
 
 ## Network Topology
 
@@ -33,8 +33,8 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 | 角色 | 指标中枢 + Vault + 本地模型接入 (Prometheus/Grafana/Vault/Open Notebook/Bifrost) | 公网服务 + GitOps 控制面 + 日志/追踪 + 身份面 (ArgoCD/Loki/Tempo/ZITADEL/Calibre/…) |
 | 存储 | local-path (NFS retired 2026-07-11; 106 = cold backup target) | local-path only |
 | 备份 | restic CronJob → 106 sftp | restic CronJob → 106 sftp (via TS) |
-| 安全 | Tetragon + Kyverno + Trivy | Falco (oracle 无 Kyverno/Trivy) |
-| GitOps | ArgoCD hub (homelab 本地) | ArgoCD spoke (经 TS 纳管) |
+| 安全 | Tetragon + Kyverno + Trivy | Falco + Trivy（oracle 无 Kyverno；Trivy 于 2026-08-03 补齐） |
+| GitOps | ArgoCD spoke（2026-08-02 起被 oracle 控制面经 TS 纳管） | ArgoCD hub（2026-08-02 起控制面在此，in-cluster；`kubernetes.default.svc` = oracle） |
 
 ## Key Architecture Decisions
 
@@ -53,7 +53,7 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 
 ## Service Inventory
 
-完整清单（含 namespace、内部服务、认证方式）在 [CONVENTIONS.md § Services](CONVENTIONS.md#services) —
+完整清单（含 namespace、内部服务、认证方式）在 [reference/services.md](reference/services.md) —
 **唯一真相源，此处不复制**。
 
 分布速览（2026-08 大调整后）: homelab 跑 **Open Notebook / Prometheus / Grafana / Alertmanager / Vault / Bifrost**；oracle-k3s 跑 **ArgoCD 控制面 / Loki / Tempo / Calibre-Web**，其余（ZITADEL、Homepage、

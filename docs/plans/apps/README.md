@@ -1,6 +1,6 @@
 # Plans — Apps
 
-> 应用部署/迁移方案。**档案，非现状**——现状见 [reference/](../../reference/README.md) 与 [CONVENTIONS.md](../../CONVENTIONS.md)。
+> 应用部署/迁移方案。**档案，非现状**——现状见 [reference/](../../reference/README.md)（服务清单在 [reference/services.md](../../reference/services.md)）。
 
 | 日期 | 方案 | 状态 |
 |------|------|------|
@@ -9,7 +9,6 @@
 | 2026-07-05 | [Calibre 元数据补全](2026-07-05-calibre-metadata-enrichment.md) | ✅ 已完成 |
 | 2026-07-04 | [ZITADEL 迁移至 oracle-k3s](2026-07-04-zitadel-to-oracle-k3s.md) | ✅ 已完成 |
 | 2026-06-07 | [Bifrost LLM gateway](2026-06-07-bifrost-llm-gateway.md) | ✅ 已完成 |
-| 2026-03-03 | [Sink 短链 — Cloudflare Workers](2026-03-03-sink-cloudflare-worker.md) | ✅ 已完成 |
 | 2026-03-02 | [Timeslot 部署](2026-03-02-timeslot-deployment.md) | ✅ 已完成 |
 | 2026-02-28 | [信息管道 Miniflux→KaraKeep](2026-02-28-info-pipeline-miniflux-karakeep-gotify.md) | ⚠️ 部分完成（Gotify 段已砍） |
 | 2026-02-21 | [Uptime Kuma 部署](2026-02-21-uptime-kuma-deployment.md) | ✅ 已完成 |

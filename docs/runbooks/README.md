@@ -1,7 +1,7 @@
 # Runbooks
 
 > 可直接执行的运维操作手册（SOP）。**只收针对本 homelab 基础设施、可照抄执行的流程。**
-> Last updated: 2026-07-31
+> Last updated: 2026-08-03
 
 | Runbook | 什么时候用 |
 |---------|-----------|
@@ -11,6 +11,7 @@
 | [security-hardening.md](security-hardening.md) | 安全组件部署 / 验证 / 回滚 |
 | [cilium-gateway-cutover.md](cilium-gateway-cutover.md) | 重新部署或整体验证入口链路（Tunnel → Gateway → Service） |
 | [homelab-rebuild-ubuntu-24-04.md](homelab-rebuild-ubuntu-24-04.md) | 节点重建；Cilium 数据面变更后节点不稳定 |
+| [oracle-k3s-rebuild.md](oracle-k3s-rebuild.md) | oracle-k3s 节点不可恢复时重建（OCI 终止/OS 损坏）；含数据盘点、ArgoCD 控制面重装、ClusterMesh 重连 |
 | [argocd-control-plane-on-oracle.md](argocd-control-plane-on-oracle.md) | 重装/升级 ArgoCD、集群凭据过期、回滚控制面、`argocd.meirong.dev` 跨集群搬家 |
 | [stateful-service-cross-cluster-migration.md](stateful-service-cross-cluster-migration.md) | 把带 PVC 的服务在 homelab ↔ oracle 之间搬家（两遍 rsync、域名两步切换、退役与残余清扫） |
 
