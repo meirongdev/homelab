@@ -91,6 +91,18 @@ data:
             href: https://book.meirong.dev
             description: 电子书管理
 
+        # 2026-08-03 补上：它一直在线（HTTPRoute draw.meirong.dev + 三个 pod）、
+        # services.md 里也列着，但从来没进过这张首页。
+        # 根路径经 oauth2-proxy 会 302 跳 ZITADEL 登录，属正常。
+        - Excalidraw:
+            icon: excalidraw.png
+            href: https://draw.meirong.dev
+            description: 协作白板（ZITADEL 登录）
+            kubernetes:
+              namespace: personal-services
+              container: excalidraw
+              label_selector: app=excalidraw
+
         - IT-Tools:
             icon: it-tools.png
             href: https://tool.meirong.dev
