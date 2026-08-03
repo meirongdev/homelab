@@ -217,6 +217,33 @@
       register: gwapi_crd
       changed_when: "'created' in gwapi_crd.stdout or 'configured' in gwapi_crd.stdout"
 
+- name: Configure systemd-resolved fallback upstream (DNS redundancy)
+  hosts: oracle_masters
+  become: true
+  tasks:
+    # OCI VCN 通过 DHCP 只推一个上游 169.254.169.254 —— 它不可达时全网 DNS 抖（2026-08-01 outage,
+    # 见 docs/records/2026-08-01-oracle-k3s-dns-outage.md)。加 1.1.1.1 做 fallback，主上游不可达时自动切换。
+    - name: Ensure /etc/systemd/resolved.conf.d exists
+      ansible.builtin.file:
+        path: /etc/systemd/resolved.conf.d
+        state: directory
+        mode: "0755"
+
+    - name: Write OCI DNS fallback drop-in
+      ansible.builtin.copy:
+        dest: /etc/systemd/resolved.conf.d/10-oci-fallback.conf
+        content: |
+          [Resolve]
+          FallbackDNS=1.1.1.1 2606:4700:4700::1111
+        mode: "0644"
+      register: dns_dropin
+
+    - name: Restart systemd-resolved to apply fallback
+      ansible.builtin.systemd:
+        name: systemd-resolved
+        state: restarted
+      when: dns_dropin.changed
+
 - name: Verify cluster
   hosts: oracle_masters
   become: true
