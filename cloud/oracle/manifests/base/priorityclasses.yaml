@@ -1,0 +1,19 @@
+# 集群级 PriorityClass —— 给控制面关键负载（ArgoCD/external-dns-oracle/cloudflared）驱逐优先级。
+# 值/设计与 homelab 侧 k8s/helm/manifests/namespace-guardrails/priorityclasses.yaml 保持一致，
+# 详见该文件头部注释。本目录经 oracle-k3s App (Kustomize) 同步到 oracle 集群。
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: meirong-critical
+value: 1000
+globalDefault: false
+description: "控制面关键负载（Vault/ArgoCD）—— 节点内存压力时优先保留"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: meirong-high
+value: 900
+globalDefault: false
+description: "核心网络/编排负载（external-dns/cloudflared）—— 高于普通应用"

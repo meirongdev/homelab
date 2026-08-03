@@ -1,0 +1,27 @@
+# 集群级 PriorityClass —— 给控制面关键负载一个高于默认 0 的驱逐优先级。
+#
+# 背景：全 repo 此前零 `priorityClassName`，53 个 pod 全在 priority 0；真到节点内存压力时，
+# kubelet 在 QoS 类**内**按 Pod Priority 排序驱逐 → Vault/ArgoCD 与批量/工具 pod 同级，
+# 可能先被驱逐。见 docs/reference/k8s-qos-resource-management.md。
+# 设计：值刻意取小（1000/900）——只求在集群自有 pod（全在 0）里排序在前，
+# 不干扰 k3s 自带的 system-node-critical(2e9)/system-cluster-critical(2e9)。
+# PreemptionPolicy 不设（默认 PreemptLowerPriority），需要时可抢占更低优先级 pod。
+#
+# 由 ArgoCD `namespace-guardrails` Application 同步（git push → 3 分钟内）。
+# （读者注意：集群作用域资源不受 dest.namespace 影响，本文件在 homelab 生效。）
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: meirong-critical
+value: 1000
+globalDefault: false
+description: "控制面关键负载（Vault/ArgoCD）—— 节点内存压力时优先保留"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: meirong-high
+value: 900
+globalDefault: false
+description: "核心网络/编排负载（external-dns/cloudflared）—— 高于普通应用"

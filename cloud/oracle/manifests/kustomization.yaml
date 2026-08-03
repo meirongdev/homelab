@@ -7,6 +7,8 @@ resources:
   - base/namespace-cloudflare.yaml
   - base/cloudflare-tunnel.yaml
   - base/gateway.yaml
+  # PriorityClasses（控制面驱逐优先级，见 base/priorityclasses.yaml）
+  - base/priorityclasses.yaml
   # external-dns: ns + Cloudflare token ExternalSecret (chart is ArgoCD-managed, see
   # argocd/applications/external-dns-oracle.yaml + k8s/helm/values/external-dns-oracle.yaml)
   - base/namespace-external-dns.yaml
