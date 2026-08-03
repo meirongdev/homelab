@@ -1,5 +1,7 @@
-# 静态检查：YAML 语法（含重复键）/ justfile 可解析 / terraform fmt / shellcheck（全等级，含引号类 SC2086）。
-# 目的：把踩过的坑（死配方、YAML typo、tf 格式、脚本引号）变成 CI 能拦的——
+# 静态检查：YAML 语法（含重复键）/ 清单安全规则 H1-H4 / justfile 可解析 / terraform fmt /
+# shellcheck（全等级，含引号类 SC2086）。
+# 目的：把踩过的坑（死配方、YAML typo、tf 格式、脚本引号、内嵌 Namespace 被 prune、
+# Application 装错集群、PVC 静默不备份）变成 CI 能拦的——
 # 与 docs-check.yml 同一哲学：规则没有强制就会腐化。
 name: static checks
 
@@ -12,6 +14,7 @@ on:
       - '**/justfile'
       - '**/*.tf'
       - '**/*.sh'
+      - 'scripts/check-manifests.py'
       - '.github/workflows/static-checks.yml'
   push:
     branches: [main]
@@ -21,6 +24,7 @@ on:
       - '**/justfile'
       - '**/*.tf'
       - '**/*.sh'
+      - 'scripts/check-manifests.py'
       - '.github/workflows/static-checks.yml'
 
 permissions:
@@ -70,6 +74,12 @@ jobs:
               sys.exit(f'{bad} 个 YAML 文件解析失败')
           print(f'✅ {len(files)} 个 YAML 文件全部可解析（含重复键检查）')
           PY
+
+      - name: 清单安全规则 H1-H4
+        # 把已经发生过的事故变成能拦的规则：Namespace/CRD 独占文件（2026-08-03 级联删除）、
+        # Application path↔destination 同集群、ReferenceGrant v1beta1、PVC 有备份归属。
+        # 规则全文 docs/reference/manifest-safety-checks.md —— 改检查器要同步改文档。
+        run: uv run --with pyyaml python scripts/check-manifests.py
 
       - name: justfile 冒烟（just --list）
         run: |

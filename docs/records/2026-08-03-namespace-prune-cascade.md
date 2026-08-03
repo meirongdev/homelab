@@ -108,6 +108,15 @@ kubectl annotate httproute -n personal-services open-notebook reconcile-ts=$(dat
 
 每个新文件头部都带警告注释，防止有人再塞回去。
 
+**注释不拦人，所以又补了一道 CI**（2026-08-03）：`scripts/check-manifests.py` 的 **H1**
+把「`Namespace`/`CRD` 与其它资源混在同一文件」判为违规，在 PR 与 main 上运行。
+理由很直接——上面那四个文件当初也没写「这里内嵌了 Namespace」，而**即便写了，
+动手删文件的人也未必会去读被删文件的注释**。规则全文见
+[../reference/manifest-safety-checks.md](../reference/manifest-safety-checks.md)。
+
+> `ClusterRole`/`ClusterRoleBinding` 刻意**不**纳入 H1：它们通常就是应用自己的 RBAC，
+> 与应用同生共死是对的。纳入会在 5 个文件上制造误报，而误报会让整个检查被无视。
+
 ## 本可以更早发现的信号
 
 迁移前我已经检查过「删 homelab calibre 清单会不会影响 open-notebook」，并且**确实
@@ -123,6 +132,13 @@ kubectl annotate httproute -n personal-services open-notebook reconcile-ts=$(dat
 # 删文件前必做
 grep "^kind:" <要删的文件>
 ```
+
+**现在 H1 会自动拦住 `Namespace`/`CRD` 这两类**，但上面那处 ReferenceGrant 耦合
+**仍然拦不住**——它语法正确、作用也正确，错的只是**位置**：那条
+`allow-gateway-to-calibre` 没限定 Service 名，实际授权整个 ns，却住在 calibre 的
+路由文件里。这类「语法对、位置错」的耦合没有静态特征可抓，`grep '^kind:'`
+仍是删文件前的必做动作。已知会咬人的几类见
+[manifest-safety-checks.md 的「查不出来的那些」](../reference/manifest-safety-checks.md)。
 
 ## 备份表现（唯一让这次没变成灾难的东西）
 

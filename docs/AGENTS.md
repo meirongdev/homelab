@@ -85,6 +85,18 @@ homelab/
 6. **过期内容**标注 `Deprecated` 并链接替代文档
 7. **维护所有 README 索引**保持与目录同步
 
+## Manifest Safety (CI 强制)
+
+☠️ **删任何清单文件前先 `grep '^kind:' <file>`** —— ArgoCD 按目录同步，删文件 = prune 掉
+文件里的**全部**对象；内嵌的 `Namespace` 会连带删光同 ns 下**其它应用**的数据
+（PVC 的 `Prune=false` 拦不住，被 prune 的是 ns）。2026-08-03 就这样删过一次。
+
+`scripts/check-manifests.py` 在 CI 上强制 4 条**由真实事故反推**的规则：
+**H1** Namespace/CRD 独占文件 · **H2** Application 的 `path` 与 `destination` 同集群 ·
+**H3** ReferenceGrant 必须 `v1beta1` · **H4** 新增 PVC 必须有备份归属（白名单或写明豁免理由）。
+规则全文 + **静态查不出、只能靠人的那几类** → `docs/reference/manifest-safety-checks.md`。
+搬有状态服务照 `docs/runbooks/stateful-service-cross-cluster-migration.md` 走。
+
 ## Security Model
 
 纵深防御 11 层: Cloudflare WAF → ZITADEL OIDC → Vault+ESO → PSA → Kyverno → Trivy → kube-bench → 节点 CIS → 网络(见下) → Tetragon/Falco → restic 备份。
