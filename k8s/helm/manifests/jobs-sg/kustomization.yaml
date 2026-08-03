@@ -34,8 +34,11 @@ resources:
 #     -H 'Accept: application/vnd.oci.image.index.v1+json' \
 #     https://ghcr.io/v2/meirongdev/jobs-sg/manifests/sha-<short12> | grep -i docker-content-digest
 #
-# 当前 = jobs-sg 472aaf5（"feat(llm): LLM_THINKING toggle to skip chain-of-thought"）。
-# 清单里**不设** LLM_THINKING（= 默认开 reasoning，保精度）；啃积压走一次性 Job，
+# 当前 = jobs-sg 8259cba（Telegram message_thread_id 改发数字）。同时带上
+# d45c8f6 的 /daily 与 /daily/{date} 抓取统计页、/robots.txt。
+#
+# 其前身 472aaf5 加了 LLM_THINKING 开关。清单里**不设** LLM_THINKING
+# （= 默认开 reasoning，保精度）；啃积压走一次性 Job，
 # 见 docs/reference/jobs-sg.md 的「一次性积压回填」。
 #
 # 其前身 a17d39d 修的是超时：更早的镜像硬编码 60s，而真实调用要 66.5s
@@ -46,4 +49,4 @@ resources:
 # 三个坑的实测数据都在 docs/reference/jobs-sg.md。
 images:
   - name: ghcr.io/meirongdev/jobs-sg
-    digest: sha256:188f1a5c2b6968a398f03aada29ade10833dcafd98a842ae49566f14f169c78c
+    digest: sha256:d9d0115266fbab56b2de0cfc1cca1efa41a46144bcbee5658016d8594019803c
