@@ -115,6 +115,14 @@ data:
             href: https://jobs.meirong.dev
             description: 新加坡 SWE 岗位趋势周报
 
+        # `/` 是周报（周一 09:00 SGT 才更新的静态文件），`/daily` 是随请求渲染的
+        # 抓取统计——每天 02:20 SGT ingest 落地后就能看。两者更新节奏差一周，
+        # 各给一个入口，不要合并。
+        - Jobs SG · Daily:
+            icon: mdi-chart-line
+            href: https://jobs.meirong.dev/daily
+            description: 每日抓取统计（SGT 日历日）
+
         - Open Notebook:
             icon: open-notebook.png
             href: https://notebook.meirong.dev
