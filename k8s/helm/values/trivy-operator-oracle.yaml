@@ -147,16 +147,9 @@ trivy:
         statement: "minimist 原型污染(CVSS 3.1); excalidraw-room 的 yarn.lock 随 ROOM_REF 固定, 重建不改变, 修需抬 ROOM_REF, 2026-11 复审"
       - id: GHSA-7rqj-j65f-68wh
         statement: "@auth/core 同形字符 @ 绕过; karakeep 已钉 :release(上游最新)仍未 bump 到 0.41.3, 等上游, 2026-10 复审"
-      #
-      # --- 自建镜像 it-tools：这条**有修法**，是临时豁免不是接受风险 ---
-      # CVE-2026-42945 是 nginx 1.28.2-r1 的任意代码执行(CVSS 8.1)，修复版 1.28.3-r1。
-      # ghcr.io/meirongdev/it-tools 是我们自己构建的（源在 meirongdev/it-tools 仓库，
-      # 不在本仓库），实测 :latest 与 :sha-3192b54 的 base 都还是 nginx 1.28.2-r1。
-      # ✅ 正确修法：把那个仓库 Dockerfile 的 base 抬到 nginx:1.31-alpine
-      #    （本仓库 uptime-kuma push-shim 与 images/squoosh 同批已抬，实测 openssl 3.5.7-r0），
-      #    重建后回来**删掉本条**。复审日期刻意压到 2026-09，别让它沉淀成永久豁免。
-      - id: CVE-2026-42945
-        statement: "nginx 1.28.2-r1 ACE(修复 1.28.3-r1); 自建 it-tools 的 base 待抬到 nginx:1.31-alpine(源在 meirongdev/it-tools 仓库), 修好后删除本条, 2026-09 复审"
+      # （原先这里有一条 CVE-2026-42945 的临时豁免——nginx 1.28.2-r1 任意代码执行。
+      #   2026-08-05 已在源仓库 meirongdev/it-tools 把 base 钉到 nginx:1.30-alpine
+      #   并重建（sha-ffb28a7），实测 nginx-1.30.4-r1 → 真修掉了，故删除该豁免。）
 
   # 扫描 Job（client）资源
   resources:
