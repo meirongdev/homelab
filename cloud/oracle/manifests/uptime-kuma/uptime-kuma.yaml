@@ -1,8 +1,16 @@
 ---
+# ⚠️ 2026-08-05 v1→v2 升级：**换了新 PVC 名**（原 uptime-kuma-data）。
+# v1(1.23.17) 的 kuma.db 有 462MB / 289 万条心跳，v2 首启会做一次不可中断的
+# Aggregate Table 迁移（官方文档：中断就得从备份恢复），而历史数据本身不需要留。
+# 故按"全新安装 + provisioner 重建配置"走：换名 = 拿到干净卷，且**旧卷原样留着**
+# 可随时改回来回滚。旧的 uptime-kuma-data PVC 带 Prune=false，ArgoCD 不会删它，
+# 确认新实例稳定后手工 `kubectl delete pvc uptime-kuma-data` 收回节点磁盘。
+# 备份归属不用改：备份脚本用 /localpath/*uptime-kuma-data* glob、H4 用子串匹配，
+# 新名字含旧名字 → 两边自动覆盖。
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: uptime-kuma-data
+  name: uptime-kuma-data-v2
   namespace: personal-services
   annotations:
     argocd.argoproj.io/sync-options: Prune=false
@@ -13,28 +21,6 @@ spec:
   resources:
     requests:
       storage: 2Gi
----
-# POST→GET shim for the push API. Alertmanager's webhook receiver can only POST,
-# but Kuma's push endpoint (router.get("/api/push/:token")) is GET-only — without
-# this rewrite the homelab Watchdog dead-man's switch can never register a beat.
-# The gateway HTTPRoute sends /api/push traffic to port 3002 (this sidecar).
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: uptime-kuma-push-shim
-  namespace: personal-services
-data:
-  default.conf: |
-    server {
-      listen 3002;
-      location /api/push/ {
-        proxy_method GET;
-        proxy_pass_request_body off;
-        proxy_set_header Content-Length "";
-        proxy_pass http://127.0.0.1:3001;
-      }
-      location / { return 404; }
-    }
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -75,9 +61,38 @@ spec:
         options:
           - name: ndots
             value: "5"
+      initContainers:
+        # ⚠️ 没有这个 init，v2 全新安装会**卡在交互式建库页**：实测日志停在
+        # `SETUP-DATABASE ... Waiting for user action...`，要人去 Web UI 上点选
+        # SQLite/MariaDB。而 `/` 在该状态下同样返回 302，探针一样过 —— 于是 Pod
+        # 显示 Ready 但服务其实不可用，provisioner 随后 login 失败。
+        # v2 读 data/db-config.json 决定数据库类型（server/database.js readDBConfig），
+        # 没有对应的环境变量可用，只能预置文件。存在则不覆盖（幂等）。
+        - name: seed-db-config
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              f=/app/data/db-config.json
+              if [ -s "$f" ]; then
+                echo "db-config.json 已存在，保持原样:"; cat "$f"
+              else
+                printf '{\n    "type": "sqlite"\n}\n' > "$f"
+                echo "已写入 db-config.json:"; cat "$f"
+              fi
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
       containers:
         - name: uptime-kuma
-          image: louislam/uptime-kuma:1
+          # 2026-08-05: :1 → :2.5.0。原 `:1` 实际是 1.23.17（v1 末版，2025-10-20 后
+          # 不再更新），v1 线 EOL，带 liquidjs RCE(CVE-2026-45618, CVSS 10.0)等 npm CVE。
+          # 实测 2.5.0 内 liquidjs 10.26.0(=修复版)、fast-xml-parser 5.8.0(>修复版)。
+          # 钉具体版本而非 `:2` —— 这次迁移够敏感，版本要在 git 里看得见。
+          # ⚠️ 不用 -rootless 变体：官方迁移文档明确 rootless 在 v1→v2 会有启动问题。
+          image: louislam/uptime-kuma:2.5.0
           ports:
             - containerPort: 3001
               name: http
@@ -109,31 +124,16 @@ spec:
               port: 3001
             initialDelaySeconds: 10
             periodSeconds: 5
-        - name: push-shim
-          # 2026-08-04: 1.28-alpine → 1.31-alpine。1.28 系已停更(实测镜像内
-          # libssl3/libcrypto3 仍是 3.5.5-r0,带 CVE-2026-31789);1.31-alpine 实测 3.5.7-r0。
-          image: nginx:1.31-alpine
-          ports:
-            - containerPort: 3002
-              name: push-shim
-          resources:
-            requests:
-              cpu: 10m
-              memory: 16Mi
-            limits:
-              cpu: 50m
-              memory: 32Mi
-          volumeMounts:
-            - name: push-shim-conf
-              mountPath: /etc/nginx/conf.d/default.conf
-              subPath: default.conf
+      # ⚠️ push-shim(nginx POST→GET 边车)已于 2026-08-05 随 v2 升级一并删除。
+      # 它存在的唯一理由是 v1 的推送端点是 `router.get("/api/push/:token")`、只收 GET，
+      # 而 Alertmanager 的 webhook 只会 POST。v2 改成了 `router.all(...)`
+      # （server/routers/api-router.js），实测 POST /api/push/<token> 直接返回 200、
+      # 未知 token 返回 404 —— 边车成了纯粹的死重，顺带少一个镜像的 CVE 面。
+      # 网关侧对应删掉了 /api/push → 3002 的那条 rule（见 base/gateway.yaml）。
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: uptime-kuma-data
-        - name: push-shim-conf
-          configMap:
-            name: uptime-kuma-push-shim
+            claimName: uptime-kuma-data-v2
 ---
 apiVersion: v1
 kind: Service
@@ -148,6 +148,4 @@ spec:
     - port: 3001
       targetPort: 3001
       name: http
-    - port: 3002
-      targetPort: 3002
-      name: push-shim
+    # 3002/push-shim 已随边车一并删除（v2 的 /api/push 原生收 POST），见 Deployment 注释。
