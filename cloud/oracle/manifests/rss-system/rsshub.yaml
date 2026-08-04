@@ -17,7 +17,9 @@ spec:
     spec:
       containers:
         - name: rsshub
-          image: diygod/rsshub@sha256:5bd342154cf936ee3123804ee105ec509402a73ec7e4fc0467c061a6a1c075bf  # 当前运行 digest 固定（原 :latest）
+          # 2026-08-04 digest 刷新（原 sha256:5bd34215…，已落后 upstream :latest）。
+          # 动因：旧 digest 带 libgnutls30 CVE-2026-33845/42010 + protobufjs CVE-2026-41242。
+          image: diygod/rsshub@sha256:b419ecc3227d68e1b15398fd29a75d921d67e34b2aa03dfd0d4d44a6f35213e8  # 当前 :latest 的多架构 index digest
           ports:
             - containerPort: 1200
               name: http

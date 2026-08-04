@@ -47,7 +47,9 @@ spec:
       priorityClassName: meirong-high
       containers:
         - name: cloudflared
-          image: cloudflare/cloudflared@sha256:404528c1cd63c3eb882c257ae524919e4376115e6fe57befca8d603656a91a4c  # 当前运行 digest 固定（原 :latest）
+          # 2026-08-04 digest 刷新（原 sha256:404528c1…，已落后 upstream :latest）。
+          # 动因：旧 digest 带 libssl3t64 CVE-2026-31789（deb13u2 已修）。
+          image: cloudflare/cloudflared@sha256:e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf  # 当前 :latest 的多架构 index digest
           args:
             - tunnel
             - --no-autoupdate
