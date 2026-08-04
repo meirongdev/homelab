@@ -69,7 +69,15 @@ metadata:
 spec:
   repo: https://charts.zitadel.com
   chart: zitadel
-  version: 9.24.0
+  # 2026-08-04: 9.24.0(app v4.10.1) → 9.34.1(app v4.13.1)。动因是 CVE-2026-29191
+  # (CVSS 9.3, /saml-post 端点 XSS → 1-click 账号接管) —— 公网身份面上唯一真正紧急的
+  # CVE,修复版 4.12.0。同时带走 pgx v5.7.6 的 CVE-2026-33815/33816(v4.13.1 已用 pgx v5.9.1)。
+  # 刻意**不**升到 chart 10.x：那是 chart 大版本(values schema 可能改),9.34.1 是 9 系
+  # 最后一版,已逐键核对本文件用到的 8 个 values 路径全部存活(masterkeySecretName /
+  # configSecretName / configmapConfig / resources / ingress.enabled / login.resources /
+  # login.ingress.enabled / login.service.appProtocol)。
+  # ⚠️ 升级会重跑 zitadel-init / zitadel-setup Job 做 DB 迁移,期间 auth.meirong.dev 短暂不可用。
+  version: 9.34.1
   targetNamespace: zitadel
   createNamespace: true
   valuesContent: |-

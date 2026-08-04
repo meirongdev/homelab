@@ -15,7 +15,19 @@ spec:
     spec:
       containers:
         - name: squoosh
-          image: dko0/squoosh:1.12.0
+          # 2026-08-05: dko0/squoosh:1.12.0 → 自建镜像。原镜像上游 2022-07 停更，入口是
+          # Node 16(EOL)静态服务器，Trivy 报 15 条 Critical。自建只取其静态产物换进
+          # nginx:1.31-alpine → 15 条清零。理由与实现见 images/squoosh/Dockerfile。
+          #
+          # ⚠️ 推送顺序：本行依赖 .github/workflows/squoosh-image.yml 先构建出镜像。
+          # 与 images/squoosh/** 同一次 push 的话，ArgoCD(3 分钟轮询)可能早于
+          # CI(多架构构建约 2-4 分钟)，squoosh 会短暂 ImagePullBackOff。分两次推更稳。
+          #
+          # imagePullPolicy: Always —— 自建镜像的价值全在 base 新鲜度：base 出 CVE 时
+          # 重跑 workflow 会把 :1.12.0 指向新构建，但 tag 不变时 IfNotPresent 会让节点
+          # 一直用旧缓存，重建等于没生效。
+          image: ghcr.io/meirongdev/squoosh:1.12.0
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
           resources:
