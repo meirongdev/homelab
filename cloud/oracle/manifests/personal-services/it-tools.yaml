@@ -15,7 +15,17 @@ spec:
     spec:
       containers:
         - name: it-tools
-          image: ghcr.io/meirongdev/it-tools:sha-749c71f
+          # 2026-08-05: sha-749c71f → sha-ffb28a7。旧镜像几个月没重建，Trivy 报 3 条
+          # Critical（libssl3/libcrypto3 3.5.5-r0 + nginx 1.28.2-r1 的 CVE-2026-42945
+          # 任意代码执行, CVSS 8.1）。源仓库 meirongdev/it-tools 已把运行期 base 钉到
+          # nginx:1.30-alpine、构建期钉 node 22 + corepack，实测产出镜像
+          # nginx-1.30.4-r1 / libssl3-3.5.7-r0 → 3 条全消。
+          #
+          # imagePullPolicy: Always —— 源仓库加了每周定时重建，同一个 sha-* tag 会被
+          # 换成 base 更新的镜像（代码没变）。默认的 IfNotPresent 会让节点一直用旧
+          # 缓存，定时重建等于没生效。
+          image: ghcr.io/meirongdev/it-tools:sha-ffb28a7
+          imagePullPolicy: Always
           ports:
             - containerPort: 80
           resources:
