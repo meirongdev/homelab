@@ -118,22 +118,18 @@ trivy:
       - id: CVE-2026-59873
         statement: "npm tar 传递依赖(修复 7.5.19), 6 个上游镜像均无已修版本; gzip 炸弹 DoS 且运行时不解包不可信归档; 同 homelab open_notebook 口径, 2026-10 复审"
       #
-      # --- uptime-kuma v1 线 EOL 的三条（同批分诊）---
-      # `louislam/uptime-kuma:1` 实际就是 1.23.17（v1 末版, 2025-10-20 后不再更新），
-      # 这三条 npm 依赖只在 2.x 修。v1→v2 是有状态迁移，且本仓库的 uptime-kuma
-      # provisioner（cloud/oracle/manifests/uptime-kuma/provisioner.yaml）与 v1 API 耦合，
-      # 不适合塞进这次 CVE 清理 —— 已决定单独立项走 runbook，此处先记豁免 + 复审。
-      # ⚠️ 三条的实际暴露面都需要**已认证的管理员**才能触及（通知模板 / 监控项配置），
-      # status.meirong.dev 不开放注册；这是接受风险的前提，迁移完成后务必删掉这三条。
-      - id: CVE-2026-45618
-        statement: "liquidjs RCE(CVSS 10.0) 经 uptime-kuma 通知模板; v1 线 EOL 无修复版, 触及需已认证管理员; v2 迁移单独立项, 2026-09 复审"
-      - id: CVE-2026-25896
-        statement: "fast-xml-parser XSS, uptime-kuma v1 线 EOL 无修复版; v2 迁移单独立项, 2026-09 复审"
-      # ⚠️ 这条原先也命中 rsshub。2026-08-05 刷新 rsshub digest 后实测其 protobufjs
-      # 已是 7.6.5（>修复版 7.5.5）→ 本条现在只对 uptime-kuma 生效，不会掩盖 rsshub。
-      # 若将来 rsshub 又报此条，说明 digest 回退了，别当成本豁免的正常覆盖范围。
+      # --- uptime-kuma：升到 2.5.0 后只剩这一条（2026-08-05）---
+      # 原先这里挂了三条（liquidjs RCE / fast-xml-parser XSS / protobufjs）。已升级到
+      # 2.5.0，逐个进镜像核过：liquidjs 10.26.0（=修复版）、fast-xml-parser 5.8.0
+      # （>修复版 5.3.5）→ 那两条已删。protobufjs 在 2.5.0 里**仍是 7.2.6**
+      # （修复版 7.5.5），所以这条留着。
+      # ⚠️ 这条原先也命中 rsshub。刷新 rsshub digest 后实测其 protobufjs 已是 7.6.5
+      # → 本条现在只对 uptime-kuma 生效，不会掩盖 rsshub。若将来 rsshub 又报此条，
+      # 说明 digest 回退了，别当成本豁免的正常覆盖范围。
+      # 实际暴露面：protobufjs 注入需要能投喂 .proto 定义，uptime-kuma 里没有这条路径
+      # （gRPC 监控类型的 proto 由已认证管理员配置），status.meirong.dev 不开放注册。
       - id: CVE-2026-41242
-        statement: "protobufjs 注入型 RCE, uptime-kuma v1 线 EOL 无修复版(rsshub 已随 digest 刷新修至 7.6.5); v2 迁移单独立项, 2026-09 复审"
+        statement: "protobufjs 7.2.6(修复 7.5.5); uptime-kuma 2.5.0 仍未 bump, 等上游; 投喂 proto 需已认证管理员, 2026-10 复审"
       #
       # --- 上游已停更、无已修镜像可升的三条（同批分诊，均已逐一实测确认）---
       # alpine-chrome: 实测 `latest` 与 `124` 是同一个 libxml2-2.11.8-r0（修复版 2.11.8-r1），

@@ -136,18 +136,10 @@ spec:
   hostnames:
     - "status.meirong.dev"
   rules:
-    # /api/push goes through the POST→GET shim sidecar (port 3002): Alertmanager's
-    # webhook receiver can only POST, Kuma's push endpoint is GET-only.
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /api/push
-      backendRefs:
-        - group: ""
-          kind: Service
-          name: uptime-kuma
-          port: 3002
-          weight: 1
+    # ⚠️ 2026-08-05 删掉了 /api/push → 3002 的专用 rule。那条存在的理由是 v1 的推送
+    # 端点只收 GET（`router.get`），要靠一个 nginx 边车把 Alertmanager 的 POST 改写成
+    # GET。uptime-kuma 2.x 改成了 `router.all`，实测 POST 直接 200，边车与该 rule 双双
+    # 删除，/api/push 现在跟其它路径一样走 3001。dead-man's switch 的 URL 不变。
     - matches:
         - path:
             type: PathPrefix
