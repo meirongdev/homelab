@@ -53,7 +53,9 @@ data:
         {"name": "Jobs SG",        "url": "https://jobs.meirong.dev/healthz"},
     ]
 
-    def wait_ready(timeout=120):
+    # 300s（原 120s）：v2 全新安装要先跑完全部 old_migrations 补丁才开始监听，
+    # 而本 Job 作为 PostSync hook 会在 Deployment 刚滚动完就起跑。
+    def wait_ready(timeout=300):
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:
@@ -69,15 +71,51 @@ data:
     wait_ready()
 
     from uptime_kuma_api import UptimeKumaApi, MonitorType, NotificationType
-    api = UptimeKumaApi(UPTIME_KUMA_URL)
 
-    try:
+    # ⚠️⚠️ socket.io 建连后的**第一个调用有竞态**，2026-08-05 在全新 2.5.0 上实测：
+    # 构造返回时 sio.connected 已经是 True，但 engine.io 还在做 polling→websocket
+    # 升级，此刻发出的第一个调用会有相当高概率**丢失** —— 客户端等满 timeout 抛
+    # TimeoutError，而服务端根本没收到（当时 user 表仍为 0，能确证没到）。
+    # 构造后 sleep 1s 就稳定复现成功；换更大的 timeout 完全治不了（丢了就是丢了）。
+    #
+    # 所以这里 sleep + 重试双保险：本脚本是 ArgoCD PostSync hook，它失败会让整个
+    # App 的 sync 被标记失败（还会因 retry 把 revision 钉住），不值得为省 2 秒冒险。
+    # 顺带用 need_setup() 当探针：它成功就说明这条连接真的可用，且它的返回值正好是
+    # 下面要用的判据。
+    #
+    # timeout 给足（库默认 10s）：oracle 是免费层 ARM，setup 那步要跑 bcrypt。
+    def connect_api(attempts=5):
+        last = None
+        for n in range(1, attempts + 1):
+            api = UptimeKumaApi(UPTIME_KUMA_URL, timeout=120)
+            time.sleep(2)
+            try:
+                return api, api.need_setup()
+            except Exception as e:
+                last = e
+                print(f"Socket handshake attempt {n}/{attempts} failed: {type(e).__name__}")
+                try:
+                    api.disconnect()
+                except Exception:
+                    pass
+                time.sleep(3)
+        print(f"ERROR: no usable socket.io session after {attempts} attempts: {last}", file=sys.stderr)
+        sys.exit(1)
+
+    api, needs_setup = connect_api()
+
+    # 显式判断该 setup 还是该 login。原先写的是 `try: setup() except: login()` ——
+    # 那会把上面那个 TimeoutError 一并归成"账号已存在"，于是转去 login 报
+    # authIncorrectCreds，真实原因被吃掉、排查时完全看不出是握手丢包。
+    if needs_setup:
         api.setup(username=USERNAME, password=PASSWORD)
         print("Admin account created.")
-    except Exception as e:
-        print(f"Setup failed (likely already exists), logging in: {e}")
-        api.login(username=USERNAME, password=PASSWORD)
-        print("Logged in.")
+    else:
+        print("Already initialized, skipping setup.")
+
+    # setup() 只建用户，不会让当前 socket 进入已认证状态 —— 两条路径都要再 login。
+    api.login(username=USERNAME, password=PASSWORD)
+    print("Logged in.")
 
     STATUS_PAGE_SLUG   = "homelab"
     STATUS_PAGE_TITLE  = "Homelab Status"
@@ -121,11 +159,14 @@ data:
     # If homelab goes down, pushes stop → Uptime Kuma marks DOWN → Telegram notification fires.
     # Both clusters have internet via Cloudflare, so the webhook goes public-internet path.
     #
-    # uptime-kuma-api 1.2.1 (final release; project unmaintained) does not expose pushToken
-    # on add_monitor, but the Kuma server accepts it — the web UI generates the token
-    # client-side and sends it in the same payload. Without it the server stores a NULL
-    # token (it never generates one itself), which can never match the Alertmanager webhook
-    # URL. Inject it past the library's kwarg whitelist:
+    # 库不在 add_monitor 上暴露 pushToken，但 Kuma 服务端接受它 —— web UI 就是在客户端
+    # 生成 token 后塞进同一个 payload。不传的话服务端会自己生成一个随机 token，
+    # 那永远对不上 Alertmanager 的 webhook URL（dead-man's switch 静默失效）。
+    # 绕过库的 kwarg 白名单注入：
+    # ⚠️ 2026-08-05 换到 uptime-kuma-api-v2 后已重新实测这条 monkeypatch 仍然有效：
+    # 全新 2.5.0 上建 PUSH 监控后直接查库确认 monitor.push_token 落的就是下面的常量
+    # （注意 fork 的 get_monitors() 不回传 pushToken 字段，只用 API 断言会得到假阴性，
+    #  验证要查库或直接打 /api/push——未知 token 返回 404、正确 token 返回 200）。
     _orig_build_monitor_data = UptimeKumaApi._build_monitor_data
     def _build_monitor_data_with_push_token(self, *args, pushToken=None, **kwargs):
         data = _orig_build_monitor_data(self, *args, **kwargs)
@@ -229,7 +270,12 @@ spec:
           image: python:3.12-slim
           command: ["/bin/sh", "-c"]
           args:
-            - pip install --quiet uptime-kuma-api==1.2.1 && python /scripts/provision.py
+            # 2026-08-05: uptime-kuma-api==1.2.1 → uptime-kuma-api-v2==1.0.3。
+            # 前者官方只支持 Kuma 1.21.3-1.23.2 且项目已停更，实测打 2.5.0 时
+            # add_monitor(HTTP) 直接报 SQL 列不匹配、save_status_page() 报 KeyError:'incident'
+            # —— 而本 Job 是 ArgoCD PostSync hook，它失败会让整个 App sync 失败。
+            # fork（import 名相同，drop-in）实测对 2.5.0 全部调用面通过。
+            - pip install --quiet uptime-kuma-api-v2==1.0.3 && python /scripts/provision.py
           env:
             - name: UPTIME_KUMA_URL
               value: "http://uptime-kuma.personal-services.svc:3001"
