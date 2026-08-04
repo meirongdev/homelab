@@ -8,7 +8,12 @@ metadata:
   namespace: zitadel
 spec:
   instances: 1
-  imageName: ghcr.io/cloudnative-pg/postgresql:17.6
+  # 2026-08-04: 17.6 → 17.10-standard-bookworm。裸 `17.6` tag 是 **bullseye(deb11)** 底,
+  # 带 4 条 CVE-2022-37454(XKCP SHA-3 缓冲区溢出, CVSS 9.8, 来自 python3.9)+ libgnutls30
+  # 两条。实测新镜像:debian 12.15、libgnutls30 3.7.9-2+deb12u7(=修复版)、**已无 python3.9**
+  # → 6 条 Critical 全消。写 `-standard-` 而非 `-minimal-` 是为保住裸 tag 原有的扩展集合。
+  # 同 major(17)内的 minor 升级,CNPG 滚动重启单实例即可;instances:1 → 期间 zitadel 短暂断库。
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.10-standard-bookworm
 
   bootstrap:
     initdb:
