@@ -110,7 +110,9 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 5
         - name: push-shim
-          image: nginx:1.28-alpine
+          # 2026-08-04: 1.28-alpine → 1.31-alpine。1.28 系已停更(实测镜像内
+          # libssl3/libcrypto3 仍是 3.5.5-r0,带 CVE-2026-31789);1.31-alpine 实测 3.5.7-r0。
+          image: nginx:1.31-alpine
           ports:
             - containerPort: 3002
               name: push-shim
