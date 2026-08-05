@@ -16,17 +16,17 @@
 # homelab Prometheus with cluster="oracle-k3s" — same path as opencost/trivy/clustermesh.
 # There is no Prometheus Operator on oracle-k3s, so no ServiceMonitor.
 #
-# ⚠️ **These rules use only the 5 metric families that image v0.1.0 actually emits**
-# (verified 2026-08-05 by curling the running pod, not by reading source):
-#     readlist_works_total · readlist_lists_total · readlist_runs_retained
-#     readlist_last_score_unix · readlist_grade_counts{grade}
-#   The readlist working tree has a richer set on the way — `readlist_last_snapshot_unix`,
-#   `readlist_last_ingest_unix`, `readlist_orphan_rows`, `readlist_dim_measured{dim}`,
-#   `readlist_pubdate_source{source}` — but they are **uncommitted upstream** and are NOT
-#   in v0.1.0. Two rules that would be much better than what is possible today are
-#   therefore deliberately absent; see "WHEN THE NEXT IMAGE SHIPS" at the bottom.
-#   Do not add rules for those series before confirming the deployed image emits them —
-#   a rule on a non-existent series never fires and looks identical to "all healthy".
+# ⚠️ **Only write rules against metrics the DEPLOYED image actually emits.** A rule on a
+#   non-existent series never fires and looks identical to "all healthy". Verify with
+#   `curl <pod>:8080/metrics | grep readlist_`, not by reading upstream source — the
+#   working tree runs ahead of the released tag (that exact trap cost us two rules on
+#   2026-08-05, when v0.1.0 turned out to emit only 5 of the families the source showed).
+#
+#   v0.2.0 (deployed 2026-08-06) emits 14 families, verified on the running pod:
+#     works_total · lists_total · runs_retained · grade_counts{grade}
+#     last_score_unix · last_snapshot_unix · last_ingest_unix        ← 三个作业各自的新鲜度
+#     orphan_rows · pubdate_source{source} · dim_measured{dim}
+#     ingest_requests · ingest_cache_hits · ingest_throttled · ingest_budget_exhausted
 #
 # ⚠️ The freshness metric reads the **run table**, not the CronJob's exit status. That is
 # deliberate and stronger: a Job that "succeeded" but wrote nothing still shows as stale.
@@ -53,9 +53,9 @@ spec:
         # 36h tolerates one missed night (transient 429/OOM retries next night) and fires
         # on two consecutive misses. A value of 0 = never scored, which also fires — right.
         #
-        # ⚠️ This does NOT cover a stale *corpus*: `score` will happily re-score a
-        # month-old snapshot every night and keep this metric fresh. Catching that needs
-        # readlist_last_snapshot_unix, which v0.1.0 does not emit. Known gap, see bottom.
+        # ⚠️ This does NOT cover a stale *corpus* or stale *evidence* — score re-scores a
+        # month-old snapshot every night and keeps this metric fresh. That is why
+        # ReadlistSnapshotStale and ReadlistIngestStale below exist as separate rules.
         - alert: ReadlistScoreStale
           expr: time() - readlist_last_score_unix > 129600
           for: 30m
@@ -69,6 +69,46 @@ spec:
               查 `kubectl --context oracle-k3s -n personal-services get cronjob
               readlist-score` 与最近一个 Job 的日志。引导/重建见
               docs/runbooks/readlist-bootstrap.md。
+
+        # (1b) The CORPUS is stale even though scoring still succeeds nightly. Added with
+        # v0.2.0, which finally emits last_snapshot_unix. This is the rule ReadlistScoreStale
+        # provably cannot替代: `score` reads the local DB and will happily re-score a
+        # month-old snapshot forever, keeping last_score_unix green the whole time.
+        # What it catches: the snapshot Job losing the calibre volumes — books PVC detached,
+        # metadata.db remounted read-only ("attempt to write a readonly database", because
+        # WAL reads also write -shm), or calibre-web moving its data.
+        - alert: ReadlistSnapshotStale
+          expr: time() - readlist_last_snapshot_unix > 129600
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "readlist: calibre 快照已 >36h 未成功（语料在变旧，打分可能照常绿）"
+            description: >-
+              readlist_last_snapshot_unix 距今 >36h（0 = 从未成功）。注意这**不会**被
+              ReadlistScoreStale 覆盖 —— score 会继续给旧语料打分并保持那条指标常绿。
+              典型原因是 snapshot Job 碰不到 calibre 的卷：calibre-books-local 挂载丢失，
+              或 metadata.db 变成只读挂载（WAL 的读路径也要写 -shm）。看
+              `kubectl --context oracle-k3s -n personal-services logs job/<readlist-snapshot-*>`。
+
+        # (1c) External evidence has stopped refreshing. Added with v0.2.0 (last_ingest_unix).
+        # 3d rather than 36h on purpose: ingest is quota-bounded and its evidence has a
+        # ~180-day refresh cycle upstream, so one or two missed nights是无害的 —— but a key
+        # that got revoked or an egress block should not stay invisible for a week.
+        # Distinct from ReadlistNoExternalEvidence below: this fires when ingest stops
+        # succeeding at all; that one fires when it succeeds but yields nothing.
+        - alert: ReadlistIngestStale
+          expr: time() - readlist_last_ingest_unix > 259200
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "readlist: 外部证据摄入已 >3d 未成功"
+            description: >-
+              readlist_last_ingest_unix 距今 >3d（0 = 从未成功）。A 维(读者评分)与
+              F 维(时效)会逐渐失去判别力，但站点一切照常返回 200。先看最近一个
+              readlist-ingest Job 的日志与 readlist_ingest_throttled（429 计数），
+              再核对 Secret readlist-secrets 里的 GOOGLE_BOOKS_KEY 是否还有效。
 
         # (2) Published an EMPTY library. Exactly the failure §4.1 of the upstream deploy
         # doc warns about: on an empty DB, init/serve self-heals by publishing a 0-book
@@ -119,6 +159,26 @@ spec:
               注意：D 占比高本身是正常的（约 1,000–1,300 本无 ISBN 也无 google id，
               上游刻意跳过）——只有**全部**为 D 才异常。
 
+        # (3b) calibre book id drift. orphan_rows = reading-status rows that no longer join
+        # to any work. Added with v0.2.0 (orphan_rows). Silently distorts to-read-next /
+        # read-and-loved — the two lists that make the site worth visiting — without any
+        # error anywhere. Usual cause: a calibre metadata re-import rewrote book ids.
+        # ⚠️ Threshold from the 2026-08-05/06 measured baseline: **3 orphans out of 63
+        # reading rows**. >10 is a clear step change, but re-tune once there is a week of
+        # data rather than treating 10 as derived from anything.
+        - alert: ReadlistOrphanRowsHigh
+          expr: readlist_orphan_rows > 10
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "readlist: {{ $value }} 行阅读状态 join 不上书目（book id 漂移）"
+            description: >-
+              readlist_orphan_rows = {{ $value }}，基线是 3（全库阅读状态约 63 行）。
+              calibre 的 book id 发生漂移，阅读状态与书目对不上 → to-read-next /
+              read-and-loved 会失真而不会报错。核对 CALIBRE_USER_ID 与最近一次
+              calibre 元数据导入（`calibre-metadata` App 的 enrich Job）。
+
         # (4) The blind spot itself — no readlist metrics arriving at all. Without this,
         # rules 1-3 go silent exactly when things are most broken (pod gone, scrape
         # misconfigured, oracle→homelab remote-write down). 30m so it does not flap on a
@@ -136,24 +196,22 @@ spec:
               remote-write 断了。先看 `kubectl --context oracle-k3s -n personal-services
               get pods -l app=readlist`，再看 monitoring ns 里 otel-collector 的日志。
 
-# ── WHEN THE NEXT IMAGE SHIPS ────────────────────────────────────────────────
-# The readlist working tree already implements the metrics below. Once an image that emits
-# them is deployed (confirm with `curl <pod>:8080/metrics | grep readlist_`), add:
+# ── DELIBERATELY NOT ALERTED ─────────────────────────────────────────────────
+# v0.2.0 also emits these. They were evaluated and left off on purpose — adding them would
+# be alert sprawl, and diluted warnings are worse than none:
 #
-#   ReadlistSnapshotStale     time() - readlist_last_snapshot_unix > 129600
-#     Catches a stale CORPUS while scoring still succeeds nightly — i.e. the snapshot Job
-#     losing access to the calibre volumes (books PVC detached, metadata.db remounted
-#     read-only → "attempt to write a readonly database", since WAL reads write -shm).
-#     Rule (1) provably cannot catch this. This is the most valuable missing rule.
+#   readlist_pubdate_source{source="mtime-fallback"}  (PRD §5 guardrail, should trend → 0)
+#     A slow-moving DATA-QUALITY trend, not an operational failure, and ingest actively
+#     drives it down — so any fixed threshold is either never hit or permanently hit.
+#     Measured 2026-08-06: 37 fallback + 5 missing (the upstream data-baseline doc still
+#     claims 477; it is stale — calibre-metadata enrich repaired most). Watch on a
+#     dashboard; alert only if a calibre re-import makes it jump.
 #
-#   ReadlistOrphanRowsHigh    readlist_orphan_rows > 10
-#     calibre book id drift: reading-status rows that no longer join to a work, which
-#     silently distorts to-read-next / read-and-loved. Baseline measured 2026-08-05 was
-#     **3** orphans out of 63 reading rows, so >10 is a meaningful step change — but
-#     re-check the baseline before trusting the threshold.
+#   readlist_dim_measured{dim}   (per-dimension discriminating power)
+#     Genuinely useful, but "a dimension is thin" is a product judgement with no obvious
+#     threshold — D/P legitimately sit at 0 until LLM labelling ships. Would fire forever.
 #
-#   ReadlistPubdateFallbackRising   readlist_pubdate_source{source="mtime-fallback"}
-#     The PRD §5 guardrail metric (should trend to 0). Measured 2026-08-05: 37 mtime
-#     fallback + 5 missing/placeholder — far below the 477 the upstream data-baseline doc
-#     still claims, because the calibre-metadata enrich runs have since repaired most of
-#     them. Set the threshold from fresh data, not from that doc.
+#   readlist_ingest_{requests,cache_hits,throttled,budget_exhausted}
+#     budget_exhausted is EXPECTED nightly during the initial backfill, and throttled>0 is
+#     already reachable from ReadlistIngestStale's runbook text. Alerting on them would
+#     page for normal operation. Useful as dashboard panels / for diagnosis.
