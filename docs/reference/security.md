@@ -113,6 +113,28 @@
   *现存报告*里的 Critical，`TrivyOperatorMetricsAbsent` 只在序列**整体**消失时才响，
   覆盖率塌到 15% 两头都不占，表现为 `trivy_image_vulnerabilities{cluster="…"}`
   恒为 0 的**假阴性**。体检方式见下（报告数 vs 工作负载数）。
+- **⚠️ 改 `ignoreFile` 不会触发重扫（2026-08-05 实测）**：报告只在两种情况下重新生成
+  —— ① 工作负载的 `resource-spec-hash` 变了（改镜像/改 pod spec）；
+  ② `OPERATOR_SCANNER_REPORT_TTL`（**24h**）到期。报告上**没有** plugin-config 的哈希，
+  所以新增一条 accepted-risk 豁免后，**镜像没变的那些工作负载会继续按旧报告计数最多 24 小时**，
+  `TrivyImageCriticalVulnerabilities` 也就继续 firing —— 这不是豁免写错了。
+  想立刻生效只对相关报告强制重扫（operator 会自动重建，安全可逆）：
+
+  ```bash
+  # 只删仍带 Critical 的报告，别全删（46 个负载 ÷ 并发 2 会排很久）
+  kubectl get vulnerabilityreports -A -o json \
+    | jq -r '.items[] | select((.report.summary.criticalCount // 0) > 0)
+             | "\(.metadata.namespace) \(.metadata.name)"' \
+    | while read -r ns n; do kubectl -n "$ns" delete vulnerabilityreport "$n"; done
+  ```
+
+  排查豁免是否真的生效，别看告警看**报告本身**：`ignoreFile` 里已有的 ID 若仍出现在
+  `vulnerabilityreports` 中，只有两种可能——报告是旧的（等重扫），或格式踩了
+  `values/trivy-operator-oracle.yaml` 文件头记的那两个坑（必须 `.trivyignore.yaml`；
+  不能用 `expired_at`）。
+  ⚠️ `ignoreFile` 按 **CVE ID 全集群**生效，不能限定镜像：给 A 镜像写的豁免会连带
+  掩盖 B 镜像上同 ID 的问题。所以每条 statement 要写清适用镜像，并注明
+  "若在别处又出现说明镜像回退了"（现有条目已按此口径写）。
 - **接入可观测**：ServiceMonitor（带 `release:kube-prometheus-stack`，仅 homelab）→ Prometheus 抓 `trivy_image_vulnerabilities` 等；告警 `manifests/monitoring/alerts/trivy-alerts.yaml`（critical CVE→warning、暴露密钥 High/Critical→**critical**、absent 元告警）经 Telegram；看板 Grafana `Security` 文件夹。
 - **扫描覆盖率体检**（两个数字应接近，差得多 = 队列被堵或扫描在失败）：
 

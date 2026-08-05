@@ -92,7 +92,20 @@ spec:
           # 实测 2.5.0 内 liquidjs 10.26.0(=修复版)、fast-xml-parser 5.8.0(>修复版)。
           # 钉具体版本而非 `:2` —— 这次迁移够敏感，版本要在 git 里看得见。
           # ⚠️ 不用 -rootless 变体：官方迁移文档明确 rootless 在 v1→v2 会有启动问题。
-          image: louislam/uptime-kuma:2.5.0
+          #
+          # ⚠️ 必须是 **-slim**（2026-08-05 实测定性，别改回裸 :2.5.0）：
+          # v2 的裸镜像换成 Debian 12 底并**内置 chromium + mariadb-server**，实测
+          # 裸 :2.5.0 报 **121 条 Critical**（chromium/chromium-common 各 51 = 102 条，
+          # mariadb 系 12 条，其余 mesa/GL），而 v1 只有 5 条 —— 升级反而把
+          # TrivyImageCriticalVulnerabilities 从 73 推到 189。
+          # -slim 实测 **8 条**（其中 6 条已在 trivy ignoreFile：stdlib/tar/grpc/protobufjs，
+          # 余 2 条 libgnutls30 见 values/trivy-operator-oracle.yaml 的豁免理由）。
+          # 两个变体逐项比对过：**只差 chromium**（ping/curl 都在），app 版本同为 2.5.0，
+          # liquidjs 10.26.0 / fast-xml-parser 5.8.0 / protobufjs 7.2.6 与裸镜像完全一致
+          # → 丢掉的只有 "Real Browser" 监控类型，本实例 16 个监控是 15 http + 1 push，
+          # 且 db-config.json 为 sqlite（内置 mariadb-server 同样从未启用），故不受影响。
+          # 若将来要用 Real Browser 监控，得换回裸镜像并连带接受 chromium 那 102 条。
+          image: louislam/uptime-kuma:2.5.0-slim
           ports:
             - containerPort: 3001
               name: http

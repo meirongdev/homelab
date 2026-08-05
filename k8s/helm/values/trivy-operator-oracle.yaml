@@ -131,6 +131,30 @@ trivy:
       - id: CVE-2026-41242
         statement: "protobufjs 7.2.6(修复 7.5.5); uptime-kuma 2.5.0 仍未 bump, 等上游; 投喂 proto 需已认证管理员, 2026-10 复审"
       #
+      # --- uptime-kuma:2.5.0-slim 的 libgnutls30 两条（2026-08-05 新增）---
+      # 背景：v2 裸镜像内置 chromium+mariadb-server，实测 121 条 Critical，故钉 -slim
+      # （见 cloud/oracle/manifests/uptime-kuma/uptime-kuma.yaml 的长注释）。-slim 降到
+      # 8 条，其中 6 条已被上面的 stdlib/tar/grpc/protobufjs 覆盖，只剩这两条。
+      # 两条都是 libgnutls30 3.7.9-2+deb12u6（修复 u7）—— slim 基底比 Debian 当前
+      # 安全更新落后一个补丁版，只能等 louislam 重建，我们无法自行升级。
+      # **两条都需要本实例扮演它并不扮演的角色**（逐条读过公告原文）：
+      #   · CVE-2026-33845：DTLS 握手分片重组的整数下溢，需要解析 DTLS 握手；
+      #     uptime-kuma 是出向 HTTPS 监控客户端，不是 DTLS 服务端（也不收 UDP）。
+      #   · CVE-2026-42010：仅当服务端配置 **RSA-PSK** 密码套件时，用户名 NUL 截断
+      #     导致认证绕过；本实例不作为 TLS 服务端提供 RSA-PSK（入口 TLS 在
+      #     Cloudflare/Gateway 终结，且不启用 PSK 套件）。
+      # Red Hat 定级 7.5 / 7.1（High），NVD 给 9.1 / 9.8 —— 同 CVE-2026-31789 那条的
+      # NVD 过度评分模式。
+      # ⚠️ 覆盖范围警告：trivy ignoreFile 按 CVE ID **全集群**生效。这两条此前也命中
+      # cnpg-postgresql 17.6 与 rsshub，但都已被 782a6cb/697ff50 的镜像升级真修掉
+      # （现报告为 0），所以本豁免当下不掩盖任何已知问题；**若将来这两条又出现在
+      # postgres/rsshub 上，说明镜像回退了，别当成本豁免的正常覆盖范围**（同上面
+      # protobufjs 那条的口径）。
+      - id: CVE-2026-33845
+        statement: "libgnutls30 deb12u6(修复 u7); uptime-kuma:2.5.0-slim 基底待上游重建; DTLS 握手重组漏洞而本实例是出向 HTTPS 客户端非 DTLS 服务端; RedHat 定级 7.5, 2026-11 复审"
+      - id: CVE-2026-42010
+        statement: "libgnutls30 deb12u6(修复 u7); uptime-kuma:2.5.0-slim 基底待上游重建; 需服务端启用 RSA-PSK 套件, 本实例不作 TLS 服务端; RedHat 定级 7.1, NVD 9.8 过度评分, 2026-11 复审"
+      #
       # --- 上游已停更、无已修镜像可升的三条（同批分诊，均已逐一实测确认）---
       # alpine-chrome: 实测 `latest` 与 `124` 是同一个 libxml2-2.11.8-r0（修复版 2.11.8-r1），
       # gcr 上数字 tag 也停在 124 → zenika 已不再重建，无处可升。仅 karakeep 抓取用。
