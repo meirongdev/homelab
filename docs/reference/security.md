@@ -159,12 +159,22 @@
      chart 0.33.1 **没有**平台开关（`extraEnv` 只作用于 operator 自身，不进扫描 Job；
      trivy 插件配置里也没有 platform 键）→ 想修只能让镜像出多架构，
      或接受该镜像不被扫描。**自建 arm64 镜像时顺手加 amd64，扫描才有覆盖。**
+     ✅ 已按此修掉 trends（`meirongdev/trends` 的 release.yml 改成
+     `platforms: linux/amd64,linux/arm64`）：该 Dockerfile 前端跑 BUILDPLATFORM、
+     Go 是 `CGO_ENABLED=0` 按 TARGETARCH 交叉编译，加 amd64 不需要 QEMU，只多一次 go build。
   2. **Docker Hub 匿名拉取限流**。`TOOMANYREQUESTS: You have reached your unauthenticated
      pull rate limit` 会让扫描 FATAL（实测命中 browserless/chrome、stirlingtools/stirling-pdf、
      docker.redpanda.com/redpandadata/connect）。**强制批量重扫最容易触发**——删一批报告
      再重启 operator 会短时间打出几十次 manifest 请求，配额瞬间见底。
-     限流是按小时恢复的，所以这类缺口会自愈；但"自愈前"的窗口里计数偏低，
-     别在这个窗口下结论说"已清零"。
+     ☠️ **失败的扫描不会自动重试，所以这个缺口不会自愈**（2026-08-05 实测：3 个被限流的
+     容器在 40 分钟里零扫描 Job、operator 日志零提及）。配额本身会随窗口恢复，但
+     **没有任何东西会重新触发那次扫描**——连"24h 报告 TTL 到期重扫"这条路都没有
+     （TTL 挂在报告的 annotation 上，没报告就没 TTL）。必须人工
+     `kubectl -n trivy-system rollout restart deploy/trivy-operator` 重新排队。
+     想根治要给扫描 Job 配 Docker Hub 认证（chart 值
+     `trivy.privateRegistryScanSecretsNames`，形如 `{"命名空间":"secret名"}`）——
+     集群现有的那个 dockerconfigjson（`argocd/argocd-image-updater-secret`）
+     **只含 ghcr.io**，覆盖不到 Docker Hub，所以这条目前是**未修**状态。
 - **接入可观测**：ServiceMonitor（带 `release:kube-prometheus-stack`，仅 homelab）→ Prometheus 抓 `trivy_image_vulnerabilities` 等；告警 `manifests/monitoring/alerts/trivy-alerts.yaml`（critical CVE→warning、暴露密钥 High/Critical→**critical**、absent 元告警）经 Telegram；看板 Grafana `Security` 文件夹。
 - **扫描覆盖率体检**（两个数字应接近，差得多 = 队列被堵或扫描在失败）：
 
