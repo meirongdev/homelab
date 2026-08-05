@@ -42,24 +42,29 @@
   机制、正确的诊断判据、以及两个 secret 的分工见
   [reference/tailscale-network.md](reference/tailscale-network.md#两个-secret别把正常的当成配错了2026-08-05-踩过)。
 
-  **缺口 1（无告警）已于 2026-08-05 补完**：抓 kvstoremesh `:9964`
-  （homelab ServiceMonitor + oracle otel `prometheus/clustermesh`）+ 5 条规则，见
-  [observability-alerting-slo.md](reference/observability-alerting-slo.md)。
+  **两个缺口 2026-08-05 当天都已补完**：
+  - **告警**：抓 kvstoremesh `:9964`（homelab ServiceMonitor + oracle otel
+    `prometheus/clustermesh`）+ 5 条规则，见
+    [observability-alerting-slo.md](reference/observability-alerting-slo.md)。
+  - **oracle 侧 peer 固化**：`cloud/oracle/values/cilium-values.yaml` 补上
+    `clustermesh.config.clusters`（+ 三个容器的 resources，此前是 BestEffort）。
+    该目录的 `just deploy-cilium` 带 `--reset-values`，之前跑一次就会删掉对端条目。
+    已用 `helm template` 验证渲染出的 `hostAliases` 与 live 一致。
 
-  **剩下一个真缺口：**
-  1. **oracle 侧配置未固化**：homelab 的 peer 配置在 `k8s/cilium/values.yaml`
-     （`clustermesh.config.clusters[].ips`），但那份 values 只服务 homelab
-     （`ctx := "k3s-homelab"`）。oracle 的 cluster-id/cluster-name/peer 只存在于 live Helm
-     release，仓库无副本 → 在 oracle 上重装或升级 Cilium 就会丢，且**不会有任何报错**。
+  ⚠️ **根因更正（当天连着说错三次，以 helm release 历史为准）**：**配置从来没丢过**。
+  oracle 的 peer 条目自 `cilium.v11`（2026-03-15）、homelab 自 `cilium.v10`（2026-04-27）
+  起就一直正确，直到断开时的 v15 都在。所以既不是"endpoint 写成集群内 DNS 名"
+  （那是 KVStoreMesh 的正常形态），也不是"升级把配置抹了"。真实情况是
+  **clustermesh-apiserver 卡在 up-but-stuck 且不自愈**——修好它的是
+  `cilium clustermesh connect` 顺带触发的 helm upgrade **重建了 homelab 那个 pod**
+  （新 pod `restarts=0`），配置一字未改。**教训**：先看 helm release 历史再下根因结论，
+  别从当前状态倒推。
 
-  **为什么这条不着急**：两集群 `service.cilium.io/global` 的 Service 数量**都是 0**，没有
-  工作负载在用跨集群服务发现（遥测与 ArgoCD→homelab 走 Tailscale + NodePort 直连），
-  ClusterMesh 目前是**纯待命能力**。而且缺口 1 补完后，配置真丢了会由
-  `ClusterMeshPeerConfigMissing` 报出来——从"静默"变成"有人告诉你"，紧迫性已经降一档。
-  固化的做法是给 oracle 建一份自己的 cilium values（`clustermesh.config.clusters` 指向
-  homelab + `cluster.name/id=oracle-k3s/2`），顺带把 oracle 的 Cilium 也纳入
-  `k8s/cilium/README.md` 的真源约定。另一条路是明确退役 ClusterMesh、跨集群一律走
-  NodePort，那这条连同那 5 条告警一起消失。
+  仍未做的是**自愈**：卡死没有自动恢复，只有告警 + 人工跑一次 `just connect-clustermesh`。
+  两集群 `service.cilium.io/global` 的 Service 数量**都是 0**（没有工作负载在用跨集群服务
+  发现，遥测与 ArgoCD→homelab 走 Tailscale + NodePort 直连），ClusterMesh 是**纯待命
+  能力**，为它加自愈探针不划算。另一条路是明确退役 ClusterMesh、跨集群一律走 NodePort，
+  那这条连同那 5 条告警一起消失。
 
 - **这台 Mac 上 `terraform plan/apply` 连 `192.168.50.4:8006`（Proxmox API）100% `no route to host`**，但 `ping`/`curl`/`ssh` 到同一地址全部正常（curl 有响应，偏慢 ~3s）。**已排除 Tailscale**——整个 `tailscale down` 后仍 100% 复现。当前无阻塞（VM 变更改走 `qm`/SSH）。若日后要用 terraform 管 Proxmox，从 provider 的 HTTP client 行为或本机残留 utun0-3/网络扩展查起，不是标准路由表问题。
 

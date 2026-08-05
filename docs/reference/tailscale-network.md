@@ -280,15 +280,43 @@ kubectl --context k3s-homelab -n kube-system get pods -l k8s-app=cilium -o \
   jsonpath='{range .items[*]}{range .status.containerStatuses[?(@.name=="cilium-agent")]}{.state.running.startedAt}{" restarts="}{.restartCount}{"\n"}{end}{end}'
 ```
 
-### ⚠️ oracle 侧的 peer 配置没有固化
+### peer 配置在哪（两侧都已固化，2026-08-05 补齐 oracle）
 
-homelab 的 peer 配置在 [`k8s/cilium/values.yaml`](../../k8s/cilium/values.yaml) 里
-（`clustermesh.config.clusters[].ips` 生成 hostAliases 与 `cilium-kvstoremesh`），所以
-`just deploy-cilium` 会重建出正确配置。但那份 values **只服务 homelab**
-（`ctx := "k3s-homelab"`，见 `k8s/cilium/README.md`）——**oracle 侧的 cluster-id=2、
-cluster-name、以及 peer `homelab @ 100.94.186.7` 只存在于 live Helm release 里，
-仓库中没有任何副本**。任何在 oracle 上重装/升级 Cilium 都会丢掉它，然后必须重跑
-`just connect-clustermesh`。这正是 2026-08-05 发现 mesh 断开的最可能来路。
+| 集群 | values 文件 | 部署入口 |
+|---|---|---|
+| homelab | [`k8s/cilium/values.yaml`](../../k8s/cilium/values.yaml) | `cd k8s/helm && just deploy-cilium`（`ctx := "k3s-homelab"`） |
+| oracle | [`cloud/oracle/values/cilium-values.yaml`](../../cloud/oracle/values/cilium-values.yaml) | `cd cloud/oracle && just deploy-cilium` |
+
+`clustermesh.config.clusters[].ips` 是真源——它同时生成 `cilium-kvstoremesh` secret 的
+endpoint 与 clustermesh-apiserver 的 `hostAliases`。**两个 `deploy-cilium` 都带
+`--reset-values`**，所以缺了这段就等于跑一次删一次。
+oracle 那段**直到 2026-08-05 才补上**（此前只存在于 live helm release 的 stored values）。
+
+⚠️ 仍然必须跑 `just connect-clustermesh` 的唯一场景是**任一集群重建**：那会重新自签
+Cilium CA，两侧要重新交换证书（`--allow-mismatching-ca`）。上面那段只保住 endpoint，
+保不住互信。
+
+### 真实故障模式：up-but-stuck，且不自愈
+
+2026-08-05 那次断开**与配置无关**——helm release 历史证明 peer 条目自 oracle `cilium.v11`
+（2026-03-15）/ homelab `cilium.v10`（2026-04-27）起一直正确。真正的故障是
+**clustermesh-apiserver 活着但卡住**，Cilium 不会自己恢复。修它的其实是
+`cilium clustermesh connect` 顺带触发的 helm upgrade **重建了 pod**（新 pod
+`restarts=0`），配置一字未改。
+
+所以排障顺序应该是：
+
+```bash
+# 1) 先看 helm release 历史，确认配置到底有没有变过（别从当前状态倒推根因）
+kubectl --context <ctx> -n kube-system get secret -l owner=helm,name=cilium -o name
+#    取最后几个版本，解 .data.release（base64 两次 + gunzip）看 config.clustermesh.config.clusters
+# 2) 配置没变 → 就是卡死，重建 pod 即可，不必动配置
+kubectl --context <ctx> -n kube-system rollout restart deploy/clustermesh-apiserver
+```
+
+现在有告警兜底（`ClusterMeshRemoteClusterNotReady` 等 5 条，见
+[observability-alerting-slo.md](observability-alerting-slo.md)），不会再静默。
+**没有做自愈**：两集群 global Service 数量都是 0，纯待命能力不值得加探针。
 
 ## Pre-auth Key Renewal
 

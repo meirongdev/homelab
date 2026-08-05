@@ -207,6 +207,12 @@ deploy-cloudflare-connector:
 
 # ─── Status & Debug ────────────────────────────────────────────
 
+# 重启/改 shape 之后跑这个 —— 23 条不变量一次核完（只读，失败即非零退出）
+# 由来: 2026-08-05 手工改 VM 为 2c/12G 后逐项验收花了二十来条命令，且漏项是静默的
+# （当天漏了 hugepages + kubelet-arg，唯一症状是 capacity−allocatable 恰好 2048Mi）。
+verify-node:
+    bash ../../scripts/verify-oracle-node.sh
+
 # Show cluster status
 status:
     @echo "=== Pods ==="

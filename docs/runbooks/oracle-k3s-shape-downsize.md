@@ -193,6 +193,19 @@ state 的东西会给出错误数字；而 `apply -refresh=false` 会拿 state �
 
 ### 6. 验证
 
+**一条命令核完全部不变量**（2026-08-05 新增，取代下面那串手工检查）：
+
+```bash
+cd /Users/matthew/projects/homelab/cloud/oracle && just verify-node
+```
+
+23 项：主机层（hugepages / kubelet-arg / UDP GRO 持久化 / firewalld 递归防护 / DNS
+fallback / Tailscale 只广播本节点 /32）· 节点账目（capacity、**预留差额** —— 差额恰好
+2048Mi 会被专门指出来，那正是「sysctl 清了但 kubelet 没重启」的典型症状）· pod/App ·
+ClusterMesh 双向 `retrieved=true` · 数据面 HTTP 码。任一条不成立即非零退出。
+
+下面是它逐条对应的手工命令，排障时按需单独跑：
+
 ```bash
 CTX="--context oracle-k3s"
 
