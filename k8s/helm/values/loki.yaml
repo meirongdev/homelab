@@ -116,6 +116,15 @@ gateway:
     limits:
       cpu: 200m
       memory: 128Mi
+  # chart 默认给 gateway 配**硬性** podAntiAffinity（topologyKey kubernetes.io/hostname），
+  # 那是为多节点 HA 设计的。单节点集群上它是**滚动更新死锁**：replicas=1 时
+  # maxUnavailable 25% 向下取整为 0 → 旧 pod 不能先走；maxSurge 25% 起的新 pod
+  # 又因为 anti-affinity 撞上旧 pod 而 Unschedulable。两边互等，永久 Pending，
+  # 不是暂时现象。2026-08-05 改 gateway requests 时实测踩到（"1 node(s) didn't
+  # match pod anti-affinity rules"，卡了 5 分钟没有自愈迹象）。
+  # 置空而不是改 strategy: Recreate —— 后者在 live Deployment 上会报
+  # "rollingUpdate: Forbidden"，得额外加 Replace=true sync-option。
+  affinity: {}
 
 # 明确禁用分布式组件（重要！）
 ingester:
