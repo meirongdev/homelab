@@ -118,15 +118,29 @@
   ② `OPERATOR_SCANNER_REPORT_TTL`（**24h**）到期。报告上**没有** plugin-config 的哈希，
   所以新增一条 accepted-risk 豁免后，**镜像没变的那些工作负载会继续按旧报告计数最多 24 小时**，
   `TrivyImageCriticalVulnerabilities` 也就继续 firing —— 这不是豁免写错了。
-  想立刻生效只对相关报告强制重扫（operator 会自动重建，安全可逆）：
+  想立刻生效就强制重扫。**删报告只是第一步，必须跟一次 operator 重启**
+  （2026-08-05 实测：删掉 6 份报告后只有 2 份被重建，另外 4 份十分钟内既没有
+  扫描 Job 也没有任何报错 —— 删 report 不能可靠触发所属工作负载的 reconcile；
+  重启后立刻排上队）：
 
   ```bash
-  # 只删仍带 Critical 的报告，别全删（46 个负载 ÷ 并发 2 会排很久）
+  # ① 只删仍带 Critical 的报告，别全删（55 个负载 ÷ 并发 2 会排很久）
   kubectl get vulnerabilityreports -A -o json \
     | jq -r '.items[] | select((.report.summary.criticalCount // 0) > 0)
              | "\(.metadata.namespace) \(.metadata.name)"' \
     | while read -r ns n; do kubectl -n "$ns" delete vulnerabilityreport "$n"; done
+
+  # ② 强制全量 reconcile（重启是安全的：报告是 CR，不随 pod 走）
+  kubectl -n trivy-system rollout restart deploy/trivy-operator
+
+  # ③ 必须回查报告真的回来了 —— 缺报告 = 计数为 0 的假阴性，和"已修好"长得一样
+  kubectl get vulnerabilityreports -A --no-headers | wc -l
   ```
+
+  ⚠️ **删了报告却没重建，比不删更危险**：告警只数现存报告，缺失的那几个
+  按 0 计入，于是"漏扫"表现为"已清零"。删完务必按 ③ 核对数量。
+  改 `ignoreFile` 后**不需要**重启 operator 才让豁免生效（实测：operator pod
+  2d 未重启，删掉的报告重建后豁免已生效）—— 重启只是用来把漏掉的重扫排上队。
 
   排查豁免是否真的生效，别看告警看**报告本身**：`ignoreFile` 里已有的 ID 若仍出现在
   `vulnerabilityreports` 中，只有两种可能——报告是旧的（等重扫），或格式踩了
