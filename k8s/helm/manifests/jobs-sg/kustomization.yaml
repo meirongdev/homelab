@@ -31,8 +31,16 @@ resources:
 #     -H 'Accept: application/vnd.oci.image.index.v1+json' \
 #     https://ghcr.io/v2/meirongdev/jobs-sg/manifests/sha-<short12> | grep -i docker-content-digest
 #
-# 当前 = jobs-sg 8259cba（Telegram message_thread_id 改发数字）。同时带上
-# d45c8f6 的 /daily 与 /daily/{date} 抓取统计页、/robots.txt。
+# 当前 = jobs-sg ff5e24e（修「/daily 天天 partial」两个根因）：
+#   ① mcf.ParsePostingDate —— API 的 newPostingDate 是纯日期 "2026-08-03"，
+#     旧代码按 RFC3339 解析全部静默失败 → 增量早停成死代码 → 每晚扫满
+#     300 页熔断标 partial。修好后增量 ~100 页早停。
+#   ② enrich_done 完成标记表 —— LLM 结果零命中的职位从不写 job_tech 行，
+#     ~1.4k 条永留积压、每晚被 enrich_cache 空转重放（llm_cached ≈ backlog）。
+#     首个 enrich run 会经缓存命中一次性排空，无需回填。
+#   历史三天的 partial 是当时的事实记录，不会追溯变绿。
+#
+# 其前身 8259cba（Telegram message_thread_id 改发数字）、d45c8f6（/daily 统计页）。
 #
 # 其前身 472aaf5 加了 LLM_THINKING 开关。清单里**不设** LLM_THINKING
 # （= 默认开 reasoning，保精度）；啃积压走一次性 Job，
@@ -46,4 +54,4 @@ resources:
 # 三个坑的实测数据都在 docs/reference/jobs-sg.md。
 images:
   - name: ghcr.io/meirongdev/jobs-sg
-    digest: sha256:d9d0115266fbab56b2de0cfc1cca1efa41a46144bcbee5658016d8594019803c
+    digest: sha256:48e12b200750dbd47bd2476889dac9e478ec48e6456955264e0b8f2a708b253d
