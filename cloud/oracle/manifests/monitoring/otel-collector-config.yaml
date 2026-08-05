@@ -154,6 +154,36 @@ receivers:
   #    Application 名(trivy-operator-oracle)当 helm release 名，这里直接 NXDOMAIN。
   # 消费方是共享的 manifests/monitoring/alerts/trivy-alerts.yaml —— 那些规则本就写成
   # `sum by (cluster)`，指标一到就自动覆盖本集群，无需改告警表达式。
+  # Cilium ClusterMesh (kvstoremesh) 跨集群连通性 → homelab Prometheus (cluster=oracle-k3s)。
+  # 2026-08-05 新增：当天发现 ClusterMesh 双向断开且**零告警**，事后连断了多久都查不出来
+  # （Prometheus 里 cilium_kvstoremesh_* 一条没有）。同 homelab 侧
+  # k8s/helm/manifests/monitoring/clustermesh-servicemonitor.yaml，消费方是共享的
+  # manifests/monitoring/alerts/clustermesh-alerts.yaml。
+  #
+  # 抓 kvstoremesh 而非 cilium-agent：agent 的同类指标要 `prometheus.enabled`，那需要对
+  # Cilium 做 helm upgrade —— 而 oracle 侧 ClusterMesh peer 配置**未固化在仓库**，升级会
+  # 静默抹掉它（见 docs/reference/tailscale-network.md）。kvstoremesh 容器本来就带
+  # `--prometheus-serve-addr=:9964`，且它正是真正跨 Tailscale 的那一跳。
+  #
+  # 端口写 9964 是安全的：`clustermesh-apiserver-metrics` 同样是 **headless
+  # (ClusterIP: None)**（同下面 trivy 那个坑），DNS 直接返回 pod IP、不经 Service，
+  # 但这里 port == targetPort == 9964，所以不会像 trivy 那样踩到 80→8080 的映射失效。
+  prometheus/clustermesh:
+    config:
+      scrape_configs:
+        - job_name: 'clustermesh-kvstoremesh'
+          scrape_interval: 60s
+          static_configs:
+            - targets: ['clustermesh-apiserver-metrics.kube-system.svc.cluster.local:9964']
+              labels:
+                cluster: oracle-k3s
+          metric_relabel_configs:
+            # 该端点共 ~407 条 cilium_* ，只留跨集群状态这几条（与 homelab ServiceMonitor 的
+            # metricRelabelings 保持同一正则，两侧序列集合必须一致，否则告警只在一侧成立）
+            - source_labels: [__name__]
+              regex: 'cilium_kvstoremesh_remote_cluster(s|_readiness_status|_failures|_last_failure_ts|_cache_revocations)'
+              action: keep
+
   prometheus/trivy-operator:
     config:
       scrape_configs:
@@ -304,6 +334,10 @@ service:
       exporters: [prometheusremotewrite]
     metrics/opencost:
       receivers: [prometheus/opencost]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheusremotewrite]
+    metrics/clustermesh:
+      receivers: [prometheus/clustermesh]
       processors: [memory_limiter, resource, batch]
       exporters: [prometheusremotewrite]
     metrics/trivy-operator:

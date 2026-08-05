@@ -1,0 +1,54 @@
+# 抓取 Cilium ClusterMesh 的 **kvstoremesh** 指标 —— 跨集群连通性的唯一可观测信号。
+#
+# 为什么非要补：2026-08-05 缩容验收时发现 ClusterMesh 双向断开，而**没有任何告警**，
+# 事后连"断了多久"都查不出来（Prometheus 里 `cilium_kvstoremesh_*` 一条都没有）。
+# 详见 docs/reference/tailscale-network.md 与 ROADMAP 已知问题。
+#
+# 为什么抓 kvstoremesh 而不是 cilium-agent：
+#   cilium-agent 的 `cilium_clustermesh_remote_cluster_readiness` 需要 `prometheus.enabled`，
+#   那要对 Cilium 做 helm upgrade —— 而 oracle 侧的 ClusterMesh peer 配置**没有固化在
+#   仓库里**（见 tailscale-network.md 的警告），升级会把它抹掉、且不报错。风险不值得。
+#   kvstoremesh 容器**本来就带** `--prometheus-serve-addr=:9964`（无需改 Cilium），
+#   而且它恰好就是 2026-08-05 真正断掉的那一跳（agent 只连本集群缓存）。
+#
+# 关键指标（实测 :9964 共 407 条 cilium_*，keep 后只留这几条）：
+#   cilium_kvstoremesh_remote_cluster_readiness_status{target_cluster}  0/1 ← 主信号
+#   cilium_kvstoremesh_remote_clusters                                 已配置的对端数
+#   cilium_kvstoremesh_remote_cluster_failures{target_cluster}
+#   cilium_kvstoremesh_remote_cluster_last_failure_ts{target_cluster}
+#
+# ⚠️ selector 必须同时匹配 `app.kubernetes.io/component: metrics`：
+#    `clustermesh-apiserver`（NodePort 2379）与 `clustermesh-apiserver-metrics`
+#    **两个 Service 都带 k8s-app: clustermesh-apiserver**，只写 k8s-app 会同时选中
+#    前者（它没有 kvmesh-metrics 端口，白产生一个空 target）。
+# ⚠️ 必须带 label release=kube-prometheus-stack，否则 Prometheus Operator 的
+#    serviceMonitorSelector 会静默忽略（见 docs/reference/observability-alerting-slo.md）。
+# cluster=homelab 由 Prometheus 默认 scrapeClass 的 relabeling 自动补上，无需手设。
+# oracle 侧没有 Prometheus Operator，对应配置在
+# cloud/oracle/manifests/monitoring/otel-collector-config.yaml 的 prometheus/clustermesh。
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: clustermesh-apiserver
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app.kubernetes.io/part-of: cilium
+spec:
+  namespaceSelector:
+    matchNames:
+      - kube-system
+  selector:
+    matchLabels:
+      k8s-app: clustermesh-apiserver
+      app.kubernetes.io/component: metrics
+  endpoints:
+    - port: kvmesh-metrics
+      interval: 60s
+      path: /metrics
+      metricRelabelings:
+        # 只留 kvstoremesh 的跨集群状态；其余 400 余条内部指标全丢
+        # （`up` 是 Prometheus 合成的，不受 metricRelabelings 影响，一定会保留）
+        - sourceLabels: [__name__]
+          regex: 'cilium_kvstoremesh_remote_cluster(s|_readiness_status|_failures|_last_failure_ts|_cache_revocations)'
+          action: keep
