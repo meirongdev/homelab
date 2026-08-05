@@ -1,6 +1,9 @@
 # readlist —— 技术书多维评分 + 公开书单站（单 Go 二进制:只读 API + 内嵌 SPA + SQLite/WAL）
 #
 # 需求/评分标准/源码的真相源在 meirongdev/readlist；**部署清单的真相源是本文件**。
+# 当前部署版本：**v0.2.0**（2026-08-06 升级；v0.1.0 → v0.2.0 的部署侧改动是
+# livenessProbe 切 /livez、两个探针显式 timeoutSeconds、三个 CronJob 加 timeZone）。
+#
 # 上游 `deploy/oracle/readlist.yaml` 只是参照件，抄过来时按本集群实际改了 4 处，
 # 每一处都别改回去：
 #   1. Gateway 是 `oracle-gateway`/ns `kube-system`/port 80 —— 参照件写的
@@ -9,7 +12,13 @@
 #      参照件说的 `personal-services/kustomization.yaml` 在本仓库不存在；
 #   3. requests 按本集群实测下调（见下方各容器注释）—— 2026-08-05 缩到 2 OCPU 后
 #      节点只有 1800m 可分配，实测已占 1372m(76%)，参照件的 50m/100m 太阔；
-#   4. 补回 `readlist init` initContainer —— 参照件把它丢了，见 Deployment 处注释。
+#   4. web pod 加 emptyDir `/tmp` —— 参照件开了 readOnlyRootFilesystem 却没给可写临时
+#      目录，而 kind 的清单**没开只读根**，等于这条路径从没被验过。
+#
+# ☠️ 还有一处是**不要改回去**的删除：参照件与 kind 清单里的 `readlist init`
+#    initContainer 在本集群**故意不加**，原因见下方 Deployment 处的长注释
+#    （它会把演示语料写进空库）。v0.2.0 里 init 的 seed 行为**没变**，别被
+#    上游 kind 清单带跑偏。
 #
 # ns `personal-services` 由 uptime-kuma/namespace.yaml 创建，这里不建（H1）。
 # ReferenceGrant 不需要：base/gateway.yaml 的 allow-gateway-to-personal-services 已覆盖本 ns。
@@ -128,10 +137,10 @@ spec:
       # 发布一个**0 本书**的 run（诚实的空站），引导按 runbooks/readlist-bootstrap.md 走。
       containers:
         - name: readlist
-          # 版本化 tag（多架构 index digest sha256:63c8b612…d12e4a8c2，含 linux/arm64——
-          # 本集群是 ARM，2026-08-05 核对过 registry 确有 arm64 变体）。
-          # 用不可变 tag 而非 `:main`，所以**不需要** imagePullPolicy: Always。
-          image: ghcr.io/meirongdev/readlist:v0.1.0
+          # 版本化不可变 tag（多架构 index，含 linux/arm64——本集群是 ARM，每次升级
+          # 都要核对 registry 确有 arm64 变体）。用 tag 而非 `:main`，故**不需要**
+          # imagePullPolicy: Always。
+          image: ghcr.io/meirongdev/readlist:v0.2.0
           command: ["readlist", "serve"]
           envFrom:
             - configMapRef:
@@ -139,18 +148,27 @@ spec:
           ports:
             - containerPort: 8080
               name: http
+          # ⚠️ 两个探针**必须走不同端点**（v0.2.0 起）：
+          #   readiness → /healthz（查库）：库慢/还没打分 = 暂时别收流量；
+          #   liveness  → /livez  （**不碰库**）：进程还在就别重启。
+          # 反过来（liveness 查库）就是自伤：爬虫把请求堆在唯一那条 SQLite 连接上
+          # → /healthz 排队超时 → kubelet 在高负载时杀掉唯一副本，而 SQLite 单写锁
+          # 决定了没有第二个副本能顶上。边缘限流挡不住——阈值之下的正常流量就够了。
+          # timeoutSeconds 必须显式给：默认只有 1 秒，正是排队时最先被击穿的那个值。
           readinessProbe:
             httpGet:
               path: /healthz
               port: http
             initialDelaySeconds: 3
             periodSeconds: 5
+            timeoutSeconds: 3
           livenessProbe:
             httpGet:
-              path: /healthz
+              path: /livez
               port: http
             initialDelaySeconds: 10
             periodSeconds: 15
+            timeoutSeconds: 3
           resources:
             requests:
               # 15m 与 trends 同口径（同样是 Go + SQLite + 内嵌 SPA 的只读站）。
@@ -250,6 +268,7 @@ metadata:
   namespace: personal-services
 spec:
   schedule: "5 1 * * *"
+  timeZone: Etc/UTC # 与代码里一律 Now().UTC() 的口径对齐；不写则跟随**节点**时区
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 1
@@ -268,7 +287,7 @@ spec:
             fsGroup: 65532
           containers:
             - name: snapshot
-              image: ghcr.io/meirongdev/readlist:v0.1.0
+              image: ghcr.io/meirongdev/readlist:v0.2.0
               command: ["readlist", "snapshot"]
               envFrom:
                 - configMapRef:
@@ -330,6 +349,7 @@ metadata:
   namespace: personal-services
 spec:
   schedule: "20 1 * * *"
+  timeZone: Etc/UTC # 与代码里一律 Now().UTC() 的口径对齐；不写则跟随**节点**时区
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 1
@@ -348,7 +368,7 @@ spec:
             fsGroup: 65532
           containers:
             - name: ingest
-              image: ghcr.io/meirongdev/readlist:v0.1.0
+              image: ghcr.io/meirongdev/readlist:v0.2.0
               command: ["readlist", "ingest"]
               envFrom:
                 - configMapRef:
@@ -386,6 +406,7 @@ metadata:
   namespace: personal-services
 spec:
   schedule: "40 1 * * *"
+  timeZone: Etc/UTC # 与代码里一律 Now().UTC() 的口径对齐；不写则跟随**节点**时区
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 1
@@ -404,7 +425,7 @@ spec:
             fsGroup: 65532
           containers:
             - name: score
-              image: ghcr.io/meirongdev/readlist:v0.1.0
+              image: ghcr.io/meirongdev/readlist:v0.2.0
               command: ["readlist", "score"]
               envFrom:
                 - configMapRef:
