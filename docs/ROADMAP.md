@@ -12,7 +12,7 @@
 ## 开放项
 
 > 🔥 **进行中（不在下表，因为不是待排期的 backlog）**：oracle-k3s 缩容 4 OCPU/24GB →
-> **2/12**（vendor 回收额度）。前置改动（requests 2712m→~1290m、`meirong-bulk` 分档、
+> **2/12**（vendor 回收额度）。前置改动（requests 2712m→1372m 实测、`meirong-bulk` 分档、
 > hugepages 回收、`system-reserved`）**已进 git**，**shape 尚未 apply**。
 > 步骤、验证、回滚全在 [runbooks/oracle-k3s-shape-downsize.md](runbooks/oracle-k3s-shape-downsize.md)。
 > ⚠️ 缩容按**单向**操作对待：ap-osaka-1 的 A1 长期没容量，涨回去不保证做得到。
