@@ -15,7 +15,7 @@ monitoring:
 # operator 自身资源（oracle 余量大，但仍设上限；reconcile 峰值给到 256Mi）。
 resources:
   requests:
-    cpu: 50m
+    cpu: 25m
     memory: 100Mi
   limits:
     cpu: 250m

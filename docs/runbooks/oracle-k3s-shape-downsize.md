@@ -1,0 +1,217 @@
+# oracle-k3s 缩容到 2 OCPU / 12GB
+
+> Last updated: 2026-08-05
+> Status: 生效事实 + 切换 SOP
+> 触发条件：需要改 `VM.Standard.A1.Flex` 的 shape（vendor 回收额度、腾额度开第二台、
+> 或事后要涨回去）。任何改 `ocpus` / `memory_gb` 的动作都走本文。
+> 成功判定：`kubectl --context oracle-k3s get pods -A | grep -v Running` 只剩
+> Completed 的 Job；`describe node` 的 CPU requests < 80%；节点 `hugepages-2Mi: 0`。
+
+## 为什么不能直接改 tfvars 就 apply
+
+2026-08-05 缩容前实测，直接减半会撞两堵墙：
+
+| 墙 | 数字 | 后果 |
+|---|---|---|
+| CPU requests 装不下 | 2712m requests vs 新 allocatable 2000m | 约 700m 的 pod **永久 Pending**，且是随机哪几个 |
+| 内存 allocatable 低于实际峰值 | allocatable 9.7GiB vs 30d 峰值 used 10.2GiB | 一开机就进 kubelet 驱逐 / 内核 OOM |
+
+两堵墙都不是"用量太大"，是**账记错了**：
+
+- CPU 真实用量 p95 **0.52 核** / p99 0.79 / 30d 峰值 1.92 核。2712m 是 ~40 个 pod
+  每个 50–100m 样板值堆出来的，跟实际消耗无关。
+- 那 10.2GiB 里有 **2GiB 是从没被用过的 hugepages**（OCI Ubuntu 镜像带的 microk8s
+  装机残留 `/etc/sysctl.d/20-microk8s-hugepages.conf`，本机跑 k3s）。扣掉后真实
+  需求峰值 8.2GiB。
+- 另有 **2.3GiB 调度器看不见**：k3s-server 进程 RSS 2021Mi + containerd 240Mi，
+  而节点此前**一条 `system-reserved` 都没配**（capacity−allocatable 的差额恰好等于
+  hugepages，说明 kubelet 认为整机内存全可分给 pod）。
+
+## 缩容后的账（2 OCPU / 12GB）
+
+| 项 | 值 |
+|---|---|
+| capacity | 2000m / ~11985Mi |
+| system-reserved | 200m / 2560Mi |
+| eviction-hard | memory.available<500Mi |
+| **allocatable** | **1800m / ~8925Mi** |
+| CPU requests 合计 | ~1290m（71%），CronJob 峰值另计 ~200m |
+| 内存 requests 合计 | ~5800Mi（65%） |
+| 内存实际峰值（pod 部分） | ~6.0GiB |
+
+## 前置改动（必须先全部生效，再动 shape）
+
+| # | 改什么 | 在哪 | 怎么生效 |
+|---|--------|------|---------|
+| 1 | CPU requests 2712m → ~1290m（43 处） | `cloud/oracle/manifests/**`、`k8s/helm/values/{loki,tempo,falco,cnpg-operator,opencost-oracle,trivy-operator-oracle}.yaml` | `git push` → ArgoCD |
+| 2 | argocd-server 50→25m、argocd-redis 25→15m | `k8s/helm/values/argocd.yaml` | **`cd k8s/helm && just deploy-argocd`**（manual-helm，push 不生效） |
+| 3 | `meirong-bulk`(-10) PriorityClass + 10 个可牺牲应用挂上 | `cloud/oracle/manifests/base/priorityclasses.yaml` 等 | `git push` → ArgoCD |
+| 4 | LimitRange `defaultRequest.cpu` 50m→15m | `cloud/oracle/manifests/personal-services/personal-services-limits.yaml` | `git push`（**要重建 timeslot pod 才吃到新默认值**） |
+| 5 | 清 hugepages + 配 `system-reserved`/`eviction-hard` | `cloud/oracle/ansible/playbooks/setup-k3s.yaml` | 见下面步骤 2 |
+
+### 关于优先级分档
+
+`meirong-critical`(1000) ArgoCD 全家 + zitadel-pg ·
+`meirong-high`(900) cloudflared / external-dns / otel-collector ·
+`(0)` 其余含 **ZITADEL 应用本身** · `meirong-bulk`(-10) calibre-web / stirling-pdf /
+squoosh / it-tools / excalidraw×2 / trends / karakeep / rsshub-browserless。
+
+⚠️ **ZITADEL 应用设不了 priorityClassName**：chart 9.34.1 没有这个 values 键（逐键
+确认过），写进 `valuesContent` 会被静默忽略——比不配更糟，因为看起来像配了。
+它留在 0，靠 `meirong-bulk` 把可牺牲的应用压到它下面来保证相对次序。
+它的库（CNPG Cluster）能设，已设成 `meirong-critical`。
+
+## 切换步骤
+
+### 1. 推前置改动，在 4 OCPU 上先验证账目
+
+```bash
+cd /Users/matthew/projects/homelab
+git push                                   # 前置改动 1/3/4
+cd k8s/helm && just deploy-argocd           # 前置改动 2（manual-helm）
+```
+
+等 ArgoCD 收敛（3 分钟轮询），然后确认 requests 真的降下来了：
+
+```bash
+kubectl --context oracle-k3s describe node oracle-k3s | sed -n '/Allocated resources/,/Events/p'
+# 期望：cpu requests ≈ 1290m。此时仍是 4 OCPU，所以显示的百分比是 /4000m。
+```
+
+**这一步不过就不要往下走**——shape 改完再发现 requests 没降，节点已经在 Pending 了。
+
+⚠️ 这一步本身会滚一批 pod（改了 pod template 就会重建）。两个有用户可见影响的：
+
+- **ZITADEL 会重启**：requests 写在 `HelmChart` 的 `valuesContent` 里，helm-controller
+  重跑 chart → `auth.meirong.dev` 短暂不可用 → **SSO 短暂中断**。挑个没人用的时间。
+- **zitadel-pg 会滚**：CNPG 单实例（`instances: 1`），滚动重启期间 ZITADEL 断库。
+  它和上一条会先后发生，不是同时。
+
+已核对**不会**踩的坑（2026-08-05 用 `kubectl diff -k` 服务端 dry-run 实测，无
+`field is immutable`）：`calibre-metadata-updater` 是 CronJob，`jobTemplate` 可变；
+`loki-0`/`tempo-0`/`trivy-server-0` 是 StatefulSet，`spec.template` 可变。
+唯一不可改的是裸 `kind: Job` 的 `calibre-metadata-enrich`——**它的 200m 是刻意留的**，
+原因写在 `cloud/oracle/manifests/calibre-metadata/enrich-job.yaml` 里。
+
+### 2. 上节点改 kubelet 参数并清 hugepages
+
+```bash
+cd /Users/matthew/projects/homelab/cloud/oracle/ansible
+just setup-k3s      # 幂等；k3s 已装则只重写 config.yaml 和 sysctl
+```
+
+不想跑整个 playbook 就手工等价操作：
+
+```bash
+ssh -i ~/.ssh/vgio ubuntu@100.107.166.37
+sudo rm -f /etc/sysctl.d/20-microk8s-hugepages.conf
+printf 'vm.nr_hugepages = 0\n' | sudo tee /etc/sysctl.d/99-no-hugepages.conf
+sudo sysctl -p /etc/sysctl.d/99-no-hugepages.conf
+# 把 kubelet-arg 两行加进 /etc/rancher/k3s/config.yaml（内容见 setup-k3s.yaml）
+```
+
+⚠️ **`vm.nr_hugepages=0` 生效不等于 node capacity 变了** —— capacity 来自 kubelet
+启动时的 cAdvisor machine info，必须重启 kubelet（= 重启 k3s）才刷新。下一步的
+停机重启正好覆盖，所以这里**不要**单独重启 k3s。
+
+### 3. 静音告警 + 通告停机面
+
+oracle 挂掉会连带的（Prometheus/Grafana/Alertmanager 在 homelab，告警链路本身活着）：
+
+| 服务 | 停机影响 |
+|---|---|
+| ZITADEL | **SSO 全挂**——homelab 侧 Grafana / ArgoCD UI 也登不进 |
+| ArgoCD | GitOps 停摆（控制面在 oracle） |
+| cloudflared ×2 | oracle 侧所有子域 502 |
+| Loki / Tempo | 日志、追踪断档；homelab otel-collector 先排队后丢 |
+| Uptime Kuma | 自己挂了不会报自己 |
+| external-dns(oracle) / opencost / trivy | 停摆，无数据面影响 |
+
+```bash
+# Alertmanager 在 homelab
+kubectl --context k3s-homelab -n monitoring port-forward svc/kube-prometheus-stack-alertmanager 9093:9093
+# 另开一个终端，静音 cluster=oracle-k3s 90 分钟
+amtool silence add cluster=oracle-k3s --duration=90m \
+  --comment="A1 shape downsize 4/24 -> 2/12" --alertmanager.url=http://127.0.0.1:9093
+```
+
+### 4. 干净停机
+
+```bash
+ssh -i ~/.ssh/vgio ubuntu@100.107.166.37 'sudo systemctl stop k3s && sync'
+# 再从 OCI Console / CLI 停实例（flex shape 变更要求实例 STOPPED）
+oci compute instance action --action SOFTSTOP \
+  --instance-id ocid1.instance.oc1.ap-osaka-1.anvwsljr7xo3pvycpglssemim2rrmsv66l4hn7joc54ioyp7jtcafeobgeja
+```
+
+### 5. apply
+
+```bash
+cd /Users/matthew/projects/homelab/cloud/oracle/terraform
+make plan     # 必须是 0 to add, 1 to change, 0 to destroy —— 见下方"如果 plan 想重建"
+make apply
+```
+
+开机（`--action START`），等 SSH 起来。
+
+### 6. 验证
+
+```bash
+CTX="--context oracle-k3s"
+
+# ① hugepages 归零、capacity/allocatable 是新值
+kubectl $CTX get node oracle-k3s -o jsonpath='{.status.capacity}{"\n"}{.status.allocatable}{"\n"}'
+#    期望 capacity cpu=2, hugepages-2Mi=0；allocatable memory ≈ 8925Mi
+
+# ② 没有 Pending
+kubectl $CTX get pods -A --field-selector=status.phase=Pending
+
+# ③ requests 占比
+kubectl $CTX describe node oracle-k3s | sed -n '/Allocated resources/,/Events/p'
+#    期望 cpu ≈ 1290m (72%)、memory ≈ 5800Mi (65%)
+
+# ④ 优先级真的挂上了
+kubectl $CTX get pods -A -o custom-columns=P:.spec.priority,NS:.metadata.namespace,N:.metadata.name \
+  --sort-by=.spec.priority | head -15
+#    期望能看到 -10 那一档
+
+# ⑤ 数据面
+curl -sI https://auth.meirong.dev | head -1     # ZITADEL / SSO
+curl -sI https://home.meirong.dev | head -1     # 隧道 + 网关
+kubectl $CTX -n argocd get app -A | grep -cv "Synced.*Healthy"   # 期望 0
+```
+
+⑥ 24 小时后回看内存水位（Prometheus 在 homelab）：
+
+```promql
+max_over_time((node_memory_MemTotal_bytes{cluster="oracle-k3s"}
+  - node_memory_MemAvailable_bytes{cluster="oracle-k3s"})[24h:5m]) / 1024/1024/1024
+```
+超过 **10 GiB** 就说明余量不够，回头砍 `meirong-bulk` 那一档里的东西。
+
+## 踩坑与回滚
+
+**如果 `make plan` 想重建实例**：立刻停。2026-08-05 实测正确的输出是
+`0 to add, 1 to change, 0 to destroy` + `~ shape_config` 就地更新。出现
+`must be replaced` 一定是别的字段漂移了（镜像 OCID、`create_vnic_details`），
+先查漂移，**绝不要**带着 replace 跑 apply —— `preserve_boot_volume = true` 保得住盘，
+但保不住 ap-osaka-1 的容量。
+
+**涨回 4/24 不保证做得到**：ap-osaka-1 的 A1 Free Tier 长期没容量，回滚可能连续数天
+`Out of host capacity`。**缩容按单向操作对待**。真要回滚就是反着跑本文：
+先 shape apply，再 `git revert` 前置改动。前置改动本身在 4 OCPU 上无害
+（requests 变小只是少占坑），**不急着 revert**。
+
+**开机后头 10 分钟最难受**：ArgoCD repo-server + application-controller 同时全量
+reconcile，撞上只剩 2 核。表现是 app 短暂 `Unknown`/`Progressing`、UI 卡。
+不要在这个窗口手工点 Sync，等它自己收敛。
+
+**别指望把负载挪去 homelab**：那台是 13.5GiB 可见内存的笔记本 VM，7d 最低可用
+只有 3.31G。缩容的余量只能从 oracle 自己身上找。
+
+## 相关
+
+- 逐层资源模型 / QoS → [reference/k8s-qos-resource-management.md](../reference/k8s-qos-resource-management.md)
+- 成本归因与 KRR 右尺寸报告 → [reference/cost-and-rightsizing.md](../reference/cost-and-rightsizing.md)
+- ArgoCD 控制面在 oracle 的后果 → [runbooks/argocd-control-plane-on-oracle.md](argocd-control-plane-on-oracle.md)
+- 整机重建（不是缩容）→ [runbooks/oracle-k3s-rebuild.md](oracle-k3s-rebuild.md)

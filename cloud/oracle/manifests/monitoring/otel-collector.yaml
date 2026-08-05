@@ -93,6 +93,7 @@ spec:
       labels:
         app: otel-collector
     spec:
+      priorityClassName: meirong-high
       serviceAccountName: otel-collector
       containers:
         - name: otel-collector
@@ -123,7 +124,7 @@ spec:
             periodSeconds: 10
           resources:
             requests:
-              cpu: 100m
+              cpu: 75m
               memory: 128Mi
             limits:
               # Sole logs+metrics+traces pipeline for oracle-k3s — under-resourcing

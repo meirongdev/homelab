@@ -109,7 +109,7 @@ spec:
                 Mode: disable
     resources:
       requests:
-        cpu: 100m
+        cpu: 50m
         memory: 192Mi
       limits:
         cpu: 500m
@@ -119,7 +119,7 @@ spec:
     login:
       resources:
         requests:
-          cpu: 50m
+          cpu: 25m
           memory: 96Mi
         limits:
           cpu: 250m

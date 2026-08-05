@@ -13,6 +13,7 @@ spec:
       labels:
         app: it-tools
     spec:
+      priorityClassName: meirong-bulk
       containers:
         - name: it-tools
           # 2026-08-05: sha-749c71f → sha-ffb28a7。旧镜像几个月没重建，Trivy 报 3 条
@@ -30,7 +31,7 @@ spec:
             - containerPort: 80
           resources:
             requests:
-              cpu: 20m
+              cpu: 10m
               memory: 32Mi
             limits:
               cpu: 200m
