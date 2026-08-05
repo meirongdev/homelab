@@ -42,19 +42,24 @@
   机制、正确的诊断判据、以及两个 secret 的分工见
   [reference/tailscale-network.md](reference/tailscale-network.md#两个-secret别把正常的当成配错了2026-08-05-踩过)。
 
-  **剩下两个真缺口：**
-  1. **无告警**：Cilium 的 `cilium_clustermesh_*` 指标**当前完全没被抓**（Prometheus 里
-     `count(cilium_clustermesh_remote_cluster_readiness)` 为空）。这就是它能静默断开的原因，
-     也是为什么断了多久都查不出来。补抓 + 一条 readiness 告警。
-  2. **oracle 侧配置未固化**：homelab 的 peer 配置在 `k8s/cilium/values.yaml`
+  **缺口 1（无告警）已于 2026-08-05 补完**：抓 kvstoremesh `:9964`
+  （homelab ServiceMonitor + oracle otel `prometheus/clustermesh`）+ 5 条规则，见
+  [observability-alerting-slo.md](reference/observability-alerting-slo.md)。
+
+  **剩下一个真缺口：**
+  1. **oracle 侧配置未固化**：homelab 的 peer 配置在 `k8s/cilium/values.yaml`
      （`clustermesh.config.clusters[].ips`），但那份 values 只服务 homelab
      （`ctx := "k3s-homelab"`）。oracle 的 cluster-id/cluster-name/peer 只存在于 live Helm
      release，仓库无副本 → 在 oracle 上重装或升级 Cilium 就会丢，且**不会有任何报错**。
 
-  **优先级判断**：两集群 `service.cilium.io/global` 的 Service 数量**都是 0**，没有工作负载
-  在用跨集群服务发现（遥测与 ArgoCD→homelab 走 Tailscale + NodePort 直连）。所以它目前是
-  **纯待命能力**，缺口 1 比缺口 2 值得先做——没有监测的话，下次断了同样没人知道。
-  另一条路是明确决定退役 ClusterMesh、跨集群一律走 NodePort，那两个缺口一起消失。
+  **为什么这条不着急**：两集群 `service.cilium.io/global` 的 Service 数量**都是 0**，没有
+  工作负载在用跨集群服务发现（遥测与 ArgoCD→homelab 走 Tailscale + NodePort 直连），
+  ClusterMesh 目前是**纯待命能力**。而且缺口 1 补完后，配置真丢了会由
+  `ClusterMeshPeerConfigMissing` 报出来——从"静默"变成"有人告诉你"，紧迫性已经降一档。
+  固化的做法是给 oracle 建一份自己的 cilium values（`clustermesh.config.clusters` 指向
+  homelab + `cluster.name/id=oracle-k3s/2`），顺带把 oracle 的 Cilium 也纳入
+  `k8s/cilium/README.md` 的真源约定。另一条路是明确退役 ClusterMesh、跨集群一律走
+  NodePort，那这条连同那 5 条告警一起消失。
 
 - **这台 Mac 上 `terraform plan/apply` 连 `192.168.50.4:8006`（Proxmox API）100% `no route to host`**，但 `ping`/`curl`/`ssh` 到同一地址全部正常（curl 有响应，偏慢 ~3s）。**已排除 Tailscale**——整个 `tailscale down` 后仍 100% 复现。当前无阻塞（VM 变更改走 `qm`/SSH）。若日后要用 terraform 管 Proxmox，从 provider 的 HTTP client 行为或本机残留 utun0-3/网络扩展查起，不是标准路由表问题。
 

@@ -30,6 +30,18 @@
   `just deploy-eso`（`serviceMonitor.enabled`）、oracle `just install-eso`
   （`--set metrics.service.enabled=true`）。
 
+- **ClusterMesh 告警**（`manifests/monitoring/alerts/clustermesh-alerts.yaml`，2026-08-05 新增）:
+  当天发现跨集群 mesh 双向断开且**零告警**，事后连"断了多久"都无法确定——`cilium_kvstoremesh_*`
+  一条都没被抓。抓的是 clustermesh-apiserver 的 **kvstoremesh** 容器 `:9964`
+  （homelab 走 `clustermesh-servicemonitor.yaml`，oracle 走 otel `prometheus/clustermesh`），
+  **刻意不抓 cilium-agent 的同类指标**：那要开 `prometheus.enabled` 即对 Cilium 做 helm
+  upgrade，而 oracle 侧 peer 配置未固化在仓库、升级会静默抹掉（见
+  [tailscale-network.md](tailscale-network.md)）；且 agent 只连本集群缓存，
+  真正断掉的那一跳恰恰是 kvstoremesh。
+  三种**互不蕴含**的故障各一条规则：`readiness_status == 0`（配了连不上）·
+  `remote_clusters == 0`（**peer 配置整个消失**——此时前者无序列可判，故必须单列）·
+  `absent(...)`（看不见了，即 2026-08-05 那个盲区本身）。
+
 ### ⚠️ 告警覆盖 ≠ 抓取覆盖（2026-08-02 核实）
 
 kube-prometheus-stack 的 node-exporter mixin 规则（`NodeMemoryHighUtilization` /
