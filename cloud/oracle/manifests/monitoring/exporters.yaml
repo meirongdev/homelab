@@ -34,7 +34,7 @@ spec:
               name: metrics
           resources:
             requests:
-              cpu: 20m
+              cpu: 10m
               memory: 32Mi
             limits:
               cpu: 100m
@@ -159,7 +159,7 @@ spec:
               name: telemetry
           resources:
             requests:
-              cpu: 20m
+              cpu: 10m
               memory: 32Mi
             limits:
               cpu: 100m

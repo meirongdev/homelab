@@ -21,10 +21,13 @@ metadata:
 spec:
   limits:
     # 没声明 resources 的容器拿到合理默认值，而不是被当成 0-request / 无上限。
-    # 当前工作负载都自己声明了，所以这条只影响将来新增的无资源声明清单。
+    # ⚠️ 不止影响「将来新增」——`timeslot` 就是靠这条拿到 50m 的：它是本仓库之外的
+    # 手工 Helm release（chart timeslot-0.1.0，无 ArgoCD tracking-id），自己没写
+    # resources。2026-08-05 缩容到 2 OCPU 时 50m→15m：节点只剩 2000m 可分配，
+    # 一个没人认领的默认值不该吃掉 2.5%。
     - type: Container
       defaultRequest:
-        cpu: 50m
+        cpu: 15m
         memory: 64Mi
       default:
         cpu: 500m

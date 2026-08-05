@@ -48,9 +48,15 @@ oracle OpenCost ──(otel prometheus/opencost)─────┘        按 cl
 | 依据 | 实测功耗 + 硬件摊销 | OCI Ampere A1 牌价**影子定价** |
 | CPU | `0.0018` /vCPU-hr | `0.01` /vCPU-hr |
 | RAM | `0.00024` /GiB-hr | `0.0015` /GiB-hr |
-| 月度合计 | ~$12.7 | ~$54.8（实付 $0） |
+| 月度合计 | ~$12.7 | **~$27.4**（实付 $0） |
 
 oracle 用牌价而非 0：看板的价值是「工作负载该放哪个集群」的比较决策，填 0 会让 oracle 永远赢。
+
+> **单价不随 shape 变，月度合计变**：2026-08-05 缩容 4 OCPU/24GB → 2/12 后，
+> oracle 影子成本从 ~$54.8 腰斩到 ~$27.4（`2×0.01×730 + 11.7×0.0015×730`）。
+> 看板上 oracle 的「工作负载该放哪」优势因此缩水一半——这是**有意的**，那台机器
+> 的余量确实少了一半。缩容始末见
+> [runbooks/oracle-k3s-shape-downsize.md](../runbooks/oracle-k3s-shape-downsize.md)。
 
 > ⚠️ 当前 homelab 单价是**占位推导值**（假设整机 45W），尚未用实测功耗校准。
 > 校准步骤见下方「运维操作」。

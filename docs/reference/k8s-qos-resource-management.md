@@ -1,6 +1,6 @@
 # K8s 资源管理与 QoS 策略
 
-> Last updated: 2026-08-02
+> Last updated: 2026-08-05
 > Status: 生效事实（本文只定**原则**，不存具体数值）
 
 本文档记录 Homelab 中 CPU/Memory requests & limits 的设定**原则**。
@@ -16,7 +16,7 @@
 
 Homelab 由两个集群组成：
 - **homelab**（Proxmox K3s, 5600H, 12GB VM）— 有状态/数据面服务
-- **oracle-k3s**（Oracle Cloud A1.Flex 4 OCPU / 24GB）— 公网无状态 + 告警面
+- **oracle-k3s**（Oracle Cloud A1.Flex **2 OCPU / 12GB**，2026-08-05 由 4/24 缩容）— 公网无状态 + 告警面
 
 日常用户约 1–2 人，偶发突发至 ~10 人。
 
@@ -40,19 +40,48 @@ Homelab 由两个集群组成：
 
 `Burstable` 兼顾稳态预留和空闲时 burst，适合单节点家用场景。
 
-### ⚠️ QoS 只排到类，类内排序看 Pod Priority（当前全缺）
+### ⚠️ QoS 只排到类，类内排序看 Pod Priority
 
-上表决定的是**跨类**次序。homelab 39/47 个运行 pod 全是 `Burstable`，所以真到节点内存
+上表决定的是**跨类**次序。两集群绝大多数运行 pod 都是 `Burstable`，所以真到节点内存
 压力时，起决定作用的是 kubelet 的**类内**判据 —— 先看 **Pod Priority**，再看
 「用量超出 request 的幅度」。
 
-**现状（2026-08-02 核实）**：全 repo `priorityClassName` **零命中**，53 个 pod 全在
-priority 0；集群里只有 k3s 自带的 `system-cluster-critical` / `system-node-critical`
-（4+3 个系统 pod）。等价于：**Vault、ArgoCD、Prometheus 与 calibre-web 同级**，
-谁超 request 超得多谁先被驱逐。
+四档（定义：`cloud/oracle/manifests/base/priorityclasses.yaml` 与 homelab 侧
+`k8s/helm/manifests/namespace-guardrails/priorityclasses.yaml`，两边取值一致）：
 
-这是**加固项而非救火**：7d 最低 `MemAvailable` 3.31G / 12.66G，离节点驱逐还远
-（真正咬人的是**容器自身 limit** 被顶爆，见下）。开放项见 [ROADMAP #12](../ROADMAP.md)。
+| 档 | 值 | 谁在里面 |
+|---|---|---|
+| `meirong-critical` | 1000 | Vault、ArgoCD 全家、zitadel-pg |
+| `meirong-high` | 900 | external-dns、cloudflared、otel-collector(oracle) |
+| （默认） | 0 | 其余，含 **ZITADEL 应用本身** |
+| `meirong-bulk` | -10 | 可牺牲的个人应用（calibre-web/stirling-pdf/karakeep/browserless 等） |
+
+⚠️ **两处设不了，不是漏配**：
+
+- **ZITADEL 应用**：chart 9.34.1 没有 `priorityClassName` 这个 values 键（逐键确认过），
+  写进 `valuesContent` 会被 Helm 静默忽略——看起来像配了，实际没有，比不配更危险。
+  改用相对次序保证：`meirong-bulk`(-10) 把可牺牲的应用压到它下面。
+- **timeslot**：本仓库之外的手工 Helm release（chart `timeslot-0.1.0`，无 ArgoCD
+  tracking-id），只能靠 ns 的 LimitRange 给默认 request，动不了它的 pod spec。
+
+`meirong-bulk` 是 2026-08-05 oracle 缩容到 12GB 时加的——内存峰值从占 24GB 的 43%
+变成占 12GB 的 ~70% 后，「谁先死」第一次成为真问题。
+
+### 节点级预留：调度器看不见的那一块
+
+kubelet 的 `allocatable` = `capacity` − `kube-reserved` − `system-reserved` −
+`eviction-hard`。**不声明 reserved，调度器就认为整机内存都能分给 pod**，而
+k3s-server 进程自己就要 ~2GiB（实测 RSS 2021Mi）+ containerd 240Mi。
+
+oracle-k3s 在 2026-08-05 之前一条都没配（`capacity − allocatable` 的差额恰好等于
+那 2GiB hugepages，是巧合不是预留），24GB 上没暴露问题，缩到 12GB 就是必然 OOM。
+现值在 `cloud/oracle/ansible/playbooks/setup-k3s.yaml` 的 `kubelet-arg`。
+
+> 另一类静默损耗：**OCI Ubuntu 镜像带的 microk8s 装机残留**
+> `/etc/sysctl.d/20-microk8s-hugepages.conf` 把 2GiB 锁成 hugetlb 并直接从
+> allocatable 扣掉，而集群里没有任何 pod 申请 hugepages。查法：
+> `kubectl get node <n> -o jsonpath='{.status.capacity.hugepages-2Mi}'` 非 0
+> 且 `grep HugePages_Free /proc/meminfo` == Total。
 
 ---
 
@@ -160,6 +189,7 @@ max by (cluster,namespace,pod,container) (kube_pod_container_resource_limits{res
 ## 相关文档
 
 - [cost-and-rightsizing.md](cost-and-rightsizing.md) — OpenCost 成本归因 + KRR 右尺寸
+- [runbooks/oracle-k3s-shape-downsize.md](../runbooks/oracle-k3s-shape-downsize.md) — 改 A1 shape 的 SOP（本文那套原则的一次实战应用）
 - [plans/architecture/2026-07-06-resource-optimization.md](../plans/architecture/2026-07-06-resource-optimization.md) — 2026-07-06 那轮调整的推导（历史快照，非当前值）
 - [observability-multicluster.md](observability-multicluster.md) — 多集群监控架构
 - [Kubernetes QoS 官方文档](https://kubernetes.io/docs/tasks/configure-pod-container/quality-service-pod/)

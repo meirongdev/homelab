@@ -11,6 +11,12 @@
 
 ## 开放项
 
+> 🔥 **进行中（不在下表，因为不是待排期的 backlog）**：oracle-k3s 缩容 4 OCPU/24GB →
+> **2/12**（vendor 回收额度）。前置改动（requests 2712m→~1290m、`meirong-bulk` 分档、
+> hugepages 回收、`system-reserved`）**已进 git**，**shape 尚未 apply**。
+> 步骤、验证、回滚全在 [runbooks/oracle-k3s-shape-downsize.md](runbooks/oracle-k3s-shape-downsize.md)。
+> ⚠️ 缩容按**单向**操作对待：ap-osaka-1 的 A1 长期没容量，涨回去不保证做得到。
+
 按优先级排列。括号内是出处文档。
 
 | # | 项目 | 说明 |
@@ -23,7 +29,7 @@
 | 6 | **恢复演练自动化** | 月度 CronJob 自动校验 restic restore，取代手工演练。（母文档 P2-8） |
 | 7 | **oracle external-dns 可观测** | homelab 的 4 条 external-dns 告警规则限定 `cluster="homelab"`，未覆盖 oracle 实例；需 oracle OTel 抓 `:7979`。非阻塞。（[external-dns 决策](decisions/external-dns-adoption.md)） |
 | 8 | **oracle-k3s 外部 DNS 冗余** | 单点上游 `169.254.169.254:53` 曾致全网 ~20min 不可达（2026-08-01）。给节点 `resolv.conf` / CoreDNS `forward` 加备用上游（如 1.1.1.1），顺带降低 cloudflared 崩溃率。**仍在发作**：2026-08-03 复核，oracle 两个 cloudflared 副本 26d 各重启 24/28 次（homelab 侧 0 次）。（[复盘](records/2026-08-01-oracle-k3s-dns-outage.md)） |
-| 9 | **PriorityClass 全缺（加固）** | 全 repo `priorityClassName` **零命中**，53 个 pod 全在 priority 0，只有 k3s 自带组件有 `system-*-critical`。homelab 39/47 运行 pod 是 Burstable，而 kubelet 在 QoS 类**内**的排序判据正是 Pod Priority → 真到节点内存压力时，Vault / ArgoCD 与 calibre-web 同级。当前不紧急（7d 最低 MemAvailable 3.31G / 12.66G，离节点驱逐还远），属加固而非救火。模型见 [reference/k8s-qos-resource-management.md](reference/k8s-qos-resource-management.md)。 |
+| 9 | **PriorityClass 覆盖不全（homelab 侧）** | oracle 侧 2026-08-05 随缩容做完了四档（`meirong-critical`/`high`/默认/新增 `meirong-bulk` -10），**homelab 只有 5/38 运行 pod 有优先级**（Vault ×2、external-dns、cloudflared×2），Prometheus/Grafana/Alertmanager 仍在 priority 0，与个人服务同级。homelab 内存压力比 oracle 更紧（7d 最低 MemAvailable 3.31G / 12.66G），照 oracle 的分档补一遍即可。两处**设不了**已确认并记录：ZITADEL（chart 9.34.1 无此 values 键）、timeslot（仓库外手工 Helm release）。模型见 [reference/k8s-qos-resource-management.md](reference/k8s-qos-resource-management.md)。 |
 | 10 | **jobs-sg 收尾（2026-08-03 上线）** | 三项，均不阻塞服务：① **周报 Telegram 已接好**（bot token 复用 `secret/homelab/telegram`、chat id 与 thread id 明文，投群里的 `jobs-sg` 话题 thread 552）；尚未做的只是**端到端实测一次推送**——首次由周一 01:00 UTC 的 CronJob 触发。② **Grafana 面板未做**（`jobs_sg_*` 已在采，可用 Explore）。③ **`classify.WorkMode` 分类法缺口** —— 只认 `remote/hybrid/onsite`，MCF 真实标签是 "Creative Scheduling"/"Flexi-place"，故所有岗位 `work_mode` 都是 `Onsite`（上游应用问题，非部署问题；三项里只有这条有实际产品影响）。（[reference/jobs-sg.md](reference/jobs-sg.md)） |
 | 11 | **低优先 / 可选** | Renovate（chart/image 版本自动 PR）· MacBook `TargetDown` 静默规则 · Vault Dynamic Secrets（PostgreSQL 动态凭据，规模不需要）· Cloudflare Pro WAF（Managed Ruleset + OWASP CRS）。（母文档 P2） |
 

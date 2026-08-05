@@ -39,7 +39,7 @@ customRules:
 # Falco DaemonSet 资源（oracle 有余量，但仍设上限）
 resources:
   requests:
-    cpu: 100m
+    cpu: 50m
     memory: 256Mi
   limits:
     cpu: "1"
@@ -58,7 +58,7 @@ falcosidekick:
   image:
     tag: "2.34.1"
   resources:
-    requests: { cpu: 25m, memory: 64Mi }
+    requests: { cpu: 15m, memory: 64Mi }
     limits: { cpu: 200m, memory: 128Mi }
   config:
     # 仅推 warning 及以上，降噪；併入 Telegram 群 MatthewDaily「🚨 Homelab 告警」话题

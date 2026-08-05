@@ -113,7 +113,7 @@ spec:
               volumeMounts:
                 - { name: out, mountPath: /out }
               resources:
-                requests: { cpu: "100m", memory: "256Mi" }
+                requests: { cpu: "50m", memory: "256Mi" }
                 limits: { memory: "1Gi" }
           containers:
             - name: notify

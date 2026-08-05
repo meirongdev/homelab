@@ -79,6 +79,7 @@ spec:
       labels:
         app: calibre-web
     spec:
+      priorityClassName: meirong-bulk
       securityContext:
         fsGroup: 1000
       initContainers:
@@ -150,7 +151,7 @@ spec:
               value: "poll"
           resources:
             requests:
-              cpu: 100m
+              cpu: 25m
               memory: 256Mi
             limits:
               cpu: 1000m

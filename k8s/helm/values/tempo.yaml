@@ -20,7 +20,7 @@ tempo:
   # 资源限制
   resources:
     requests:
-      cpu: 100m               
+      cpu: 50m               
       memory: 128Mi           
     limits:
       cpu: 300m              
@@ -33,7 +33,7 @@ tempoQuery:
   tag: 2.9.2
   resources:
     requests:
-      cpu: 50m
+      cpu: 15m
       memory: 64Mi
     limits:
       cpu: 100m

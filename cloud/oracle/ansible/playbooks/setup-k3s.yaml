@@ -146,6 +146,25 @@
         state: present
         reload: true
 
+    # OCI 的 Ubuntu 镜像带了一个 microk8s 装机残留：/etc/sysctl.d/20-microk8s-hugepages.conf
+    # 里 vm.nr_hugepages = 1024，即 **2GiB 被锁成 hugetlb**。本机跑的是 k3s，从来没有
+    # 任何 pod 申请过 hugepages（实测 HugePages_Free == HugePages_Total == 1024）。
+    # 代价是实打实的：这 2GiB 直接从 node allocatable 里扣掉（capacity−allocatable 差额
+    # 恰好等于它）。24GB 时占 8% 还能忍，2026-08-05 缩到 12GB 后占 17%，
+    # 不清掉 allocatable 只剩 9.7GiB，低于实测 30d 内存峰值 10.2GiB → 一开机就进驱逐。
+    - name: Remove leftover microk8s hugepages reservation (frees 2GiB)
+      ansible.builtin.file:
+        path: /etc/sysctl.d/20-microk8s-hugepages.conf
+        state: absent
+
+    - name: Zero hugepages (node capacity only refreshes on kubelet restart)
+      ansible.posix.sysctl:
+        name: vm.nr_hugepages
+        value: '0'
+        sysctl_file: /etc/sysctl.d/99-no-hugepages.conf
+        state: present
+        reload: true
+
 - name: Write K3s config file
   hosts: oracle_masters
   become: true
@@ -157,6 +176,7 @@
         mode: '0755'
 
     - name: Write /etc/rancher/k3s/config.yaml
+      register: k3s_config
       ansible.builtin.copy:
         dest: /etc/rancher/k3s/config.yaml
         mode: '0644'
@@ -176,6 +196,30 @@
           flannel-backend: "none"
           disable-network-policy: true
           disable-kube-proxy: true
+          # 2026-08-05 缩容到 2 OCPU / 12GB 时加。此前**一条 reserved 都没配**：
+          # capacity−allocatable 的差额恰好等于那 2GiB hugepages，说明 kubelet 认为
+          # 整机内存全部可分配给 pod。而 k3s-server 进程自己实测 RSS 2021Mi、
+          # containerd 240Mi ——共约 2.3GiB 是调度器完全看不见的。24GB 上无所谓，
+          # 12GB 上是整机 19%，不声明就等于允许调度器超卖到必然 OOM。
+          #
+          # memory=2560Mi：k3s 2021 + containerd 240 + tailscaled/sshd/journald 等约 200，
+          #   再留一点余量。CPU 200m 同理（k3s-server idle 就要 ~150m）。
+          # eviction-hard 500Mi：默认 100Mi 在 12GB 机器上太晚——到那一步内核 OOM killer
+          #   往往已经随机挑了个受害者，kubelet 有序驱逐（按 QoS + Pod Priority）就没机会跑。
+          kubelet-arg:
+            - "system-reserved=cpu=200m,memory=2560Mi"
+            - "eviction-hard=memory.available<500Mi,nodefs.available<10%"
+
+    # 本 playbook **刻意不自动重启 k3s** —— 那等于在一条随手可跑的命令里重启整个集群。
+    # 但 config.yaml 改了不重启就完全不生效，静默失效比报错更坑，所以这里显式喊一声。
+    - name: Warn that config.yaml changes need a k3s restart to take effect
+      ansible.builtin.debug:
+        msg: >-
+          config.yaml 已变更，但 k3s 未重启 —— kubelet-arg（system-reserved /
+          eviction-hard）此刻**尚未生效**。改 shape 的场景请照
+          docs/runbooks/oracle-k3s-shape-downsize.md 走（停机重启会一并生效）；
+          只想立刻生效则手动 `sudo systemctl restart k3s`（全集群 pod 会重建）。
+      when: k3s_config is changed
 
 - name: Install K3s single node
   hosts: oracle_masters

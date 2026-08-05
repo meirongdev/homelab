@@ -82,16 +82,22 @@ variable "instance_image_ocid" {
   type        = string
 }
 
+# 2026-08-05: 4 OCPU / 24GB → 2 / 12（vendor 回收资源）。Free Tier 上限仍是 4/24，
+# 这里的 default 记录**实际在跑的形状**——terraform.tfvars 是 gitignored 的，
+# 不在这里写死就没有任何进 git 的记录。
+# ⚠️ 缩回去不保证做得到：ap-osaka-1 的 A1 长期没容量，涨回 4/24 可能连续数天
+#    "Out of host capacity"。缩容前置条件与回滚见
+#    docs/runbooks/oracle-k3s-shape-downsize.md。
 variable "ocpus" {
-  description = "Number of OCPUs for VM.Standard.A1.Flex (Free Tier max: 4)"
+  description = "Number of OCPUs for VM.Standard.A1.Flex (Free Tier max: 4; running 2 since 2026-08-05)"
   type        = number
-  default     = 4
+  default     = 2
 }
 
 variable "memory_gb" {
-  description = "Memory in GB for VM.Standard.A1.Flex (Free Tier max: 24)"
+  description = "Memory in GB for VM.Standard.A1.Flex (Free Tier max: 24; running 12 since 2026-08-05)"
   type        = number
-  default     = 24
+  default     = 12
 }
 
 variable "boot_volume_size_gb" {
