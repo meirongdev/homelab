@@ -53,15 +53,46 @@ gatewayAPI:
   # 与 homelab k8s/cilium/values.yaml 一致。见 records/zitadel-console-grpc-404.md
   enableAppProtocol: true
 
-# --- ClusterMesh: deploy the control-plane pieces, then connect clusters with cilium CLI ---
+# --- ClusterMesh ---
 clustermesh:
   useAPIServer: true
   config:
     enabled: true
+    # 2026-08-05 补：**这段之前是缺的**，只存在于 live helm release 的 stored values 里
+    # （由 `cilium clustermesh connect` 写入）。而本目录的 `just deploy-cilium` 带
+    # `--reset-values` —— 跑一次就会把对端条目连根删掉，ClusterMesh 静默断开
+    # （kvstoremesh 变成 0 remote clusters，不报任何错）。
+    # 对称物是 homelab 的 k8s/cilium/values.yaml，它一直有这段。
+    #
+    # 写进来之后 `deploy-cilium` 变成幂等：无需再补跑 connect 就能保住 mesh。
+    # ⚠️ 仍然要跑 `just connect-clustermesh` 的唯一场景是**任一集群重建**——那会重新
+    #    自签 CA，两侧要重新交换证书（`--allow-mismatching-ca`）；本段只保住 endpoint。
+    # ips 必须是对端的 **Tailscale IP**（不是 VCN 私网 IP），配合 NodePort 32379。
+    clusters:
+      - name: homelab
+        ips:
+          - 100.94.186.7
+        port: 32379
   apiserver:
     service:
       type: NodePort
       nodePort: 32379
+    # 2026-08-05 补：此前三个容器（apiserver/etcd/kvstoremesh）**完全没有 requests/limits**
+    # → BestEffort。24GB 时无所谓，缩到 12GB 后它是节点内存压力下最先被算账的一档。
+    # 值对齐 homelab 的 k8s/cilium/values.yaml；实测用量 apiserver 32Mi / etcd 13Mi /
+    # kvstoremesh 22Mi，留足余量。（priorityClassName 不用设：chart 已给
+    # system-cluster-critical，实测 pod priority = 2000000000。）
+    resources:
+      requests: { cpu: 25m, memory: 96Mi }
+      limits: { cpu: 500m, memory: 192Mi }
+    etcd:
+      resources:
+        requests: { cpu: 25m, memory: 96Mi }
+        limits: { cpu: 500m, memory: 256Mi }
+    kvstoremesh:
+      resources:
+        requests: { cpu: 15m, memory: 64Mi }
+        limits: { cpu: 300m, memory: 192Mi }
 
 # --- cgroup: K3s mounts cgroup v2 at /sys/fs/cgroup ---
 cgroup:

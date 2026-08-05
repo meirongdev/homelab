@@ -80,7 +80,9 @@ homelab/
   ⚠️ ClusterMesh 排障别看 `cilium-clustermesh` secret 的 endpoint（指向本集群自己是
   **正常的**，KVStoreMesh 设计如此）；对端配置在 `cilium-kvstoremesh` + clustermesh-apiserver
   的 `hostAliases`。判据是 `cilium-dbg status --all-clusters` 里的 `retrieved=true`。
-  **它没有任何告警**（`cilium_clustermesh_*` 指标未被抓），2026-08-05 就这样静默断过。
+  典型故障是 **up-but-stuck 且不自愈**，重建 clustermesh-apiserver pod 即可（配置往往没坏
+  ——下根因结论前先查 helm release 历史）。已有 5 条告警兜底（2026-08-05 补）。
+- **oracle 重启/改 shape 后**跑 `cd cloud/oracle && just verify-node`（23 条不变量一次核完）。
 - **外部流量**: Internet → Cloudflare DNS → Cloudflare Tunnel → Cilium Gateway → Service
 - **homelab node**: 10.10.10.10 / TS 100.94.186.7 (Ryzen 5600H 笔记本)
 - **oracle-k3s node**: 10.0.0.26 / TS 100.107.166.37 (Oracle Cloud Free Tier)
