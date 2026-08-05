@@ -231,6 +231,65 @@ Healthy output must show both:
 - `All 1 nodes are connected to all clusters`
 - `All 1 KVStoreMesh replicas are connected to all clusters`
 
+### 两个 secret，别把正常的当成配错了（2026-08-05 踩过）
+
+KVStoreMesh 下 remote endpoint **不在** `cilium-clustermesh` 里。两者分工：
+
+| secret | 谁读 | 内容 | 正常值 |
+|---|---|---|---|
+| `cilium-clustermesh` | **cilium-agent** | 连**本集群自己**的缓存 | `https://clustermesh-apiserver.kube-system.svc:2379` |
+| `cilium-kvstoremesh` | **kvstoremesh 容器** | 连**对端** | `https://<peer>.mesh.cilium.io:32379` |
+
+⚠️ `cilium-clustermesh` 里那个 `...kube-system.svc:2379` 是**设计如此，不是配错**——
+agent 只读本地缓存，跨集群那一跳由 kvstoremesh 负责。2026-08-05 排障时我按"endpoint
+写成了集群内 DNS 名"去下结论，是错的，白绕一圈。
+
+`<peer>.mesh.cilium.io` 靠 **`clustermesh-apiserver` Deployment 的 `hostAliases`** 解析
+（**不是** cilium DaemonSet 的 —— 查错对象也会得出错误结论）：
+
+```bash
+kubectl --context k3s-homelab -n kube-system get deploy clustermesh-apiserver \
+  -o jsonpath='{.spec.template.spec.hostAliases}'
+#   期望 [{"hostnames":["oracle-k3s.mesh.cilium.io"],"ip":"100.107.166.37"}]
+```
+
+### 正确的诊断姿势
+
+`cilium-dbg status` 的摘要行只给 `N/1 remote clusters ready`，不够。要 `--all-clusters`：
+
+```bash
+kubectl --context oracle-k3s exec -n kube-system ds/cilium -c cilium-agent -- \
+  cilium-dbg status --all-clusters | sed -n '/ClusterMesh/,/^[A-Z]/p'
+```
+
+判据：
+
+- `remote configuration: expected=true, retrieved=true` ← **retrieved 才是真连上**。
+  `retrieved=false` 且 `etcd: 1/1 connected` = agent 连上了本地缓存，但缓存里没有对端
+  数据，即 **kvstoremesh 那一跳断了**。
+- `synchronization status: nodes/endpoints/identities/services` 应全 `true`
+- endpoints/identities 计数应非 0（2026-08-05 修复后：oracle 见 homelab 33 endpoints /
+  33 identities，homelab 见 oracle 48 / 86）
+
+⚠️ **别用 pod 的 `startTime` 推断"断了多久"**。DaemonSet pod 在节点重启后对象不变、
+`startTime` 不变，只有容器重启。`(last: never)` 只覆盖**当前容器进程**的生命周期，
+要配 `state.running.startedAt` 一起看：
+
+```bash
+kubectl --context k3s-homelab -n kube-system get pods -l k8s-app=cilium -o \
+  jsonpath='{range .items[*]}{range .status.containerStatuses[?(@.name=="cilium-agent")]}{.state.running.startedAt}{" restarts="}{.restartCount}{"\n"}{end}{end}'
+```
+
+### ⚠️ oracle 侧的 peer 配置没有固化
+
+homelab 的 peer 配置在 [`k8s/cilium/values.yaml`](../../k8s/cilium/values.yaml) 里
+（`clustermesh.config.clusters[].ips` 生成 hostAliases 与 `cilium-kvstoremesh`），所以
+`just deploy-cilium` 会重建出正确配置。但那份 values **只服务 homelab**
+（`ctx := "k3s-homelab"`，见 `k8s/cilium/README.md`）——**oracle 侧的 cluster-id=2、
+cluster-name、以及 peer `homelab @ 100.94.186.7` 只存在于 live Helm release 里，
+仓库中没有任何副本**。任何在 oracle 上重装/升级 Cilium 都会丢掉它，然后必须重跑
+`just connect-clustermesh`。这正是 2026-08-05 发现 mesh 断开的最可能来路。
+
 ## Pre-auth Key Renewal
 
 Keys expire after 90 days. After expiry:
