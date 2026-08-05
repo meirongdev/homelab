@@ -1,6 +1,6 @@
 # Services — 服务清单
 
-> Last updated: 2026-08-04
+> Last updated: 2026-08-05
 > Status: 生效事实
 >
 > **这张表是服务清单的唯一真相源** —— `docs/README.md`、`docs/ARCHITECTURE.md` 与各 runbook
@@ -15,6 +15,7 @@
 | Squoosh | oracle-k3s | `personal-services` | `squoosh.meirong.dev` |
 | Excalidraw | oracle-k3s | `personal-services` | `draw.meirong.dev`（无认证，2026-08-04 去掉 oauth2-proxy） |
 | Trends | oracle-k3s | `personal-services` | `trends.meirong.dev` |
+| readlist (技术书评分/书单) | oracle-k3s | `personal-services` | `readlist.meirong.dev`（2026-08-05 上线；3 个夜间 CronJob，snapshot 读 calibre 两库，见 [runbooks/readlist-bootstrap.md](../runbooks/readlist-bootstrap.md)） |
 | Timeslot | oracle-k3s | `personal-services` | `slot.meirong.dev` |
 | Uptime Kuma | oracle-k3s | `personal-services` | `status.meirong.dev` |
 | Miniflux | oracle-k3s | `rss-system` | `rss.meirong.dev` |

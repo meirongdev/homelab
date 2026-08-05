@@ -1,12 +1,13 @@
 # Runbooks
 
 > 可直接执行的运维操作手册（SOP）。**只收针对本 homelab 基础设施、可照抄执行的流程。**
-> Last updated: 2026-08-03
+> Last updated: 2026-08-05
 
 | Runbook | 什么时候用 |
 |---------|-----------|
 | [backup-recovery.md](backup-recovery.md) | 备份运维与恢复（数据分级、restore SOP、检查清单） |
 | [open-notebook-ingest.md](open-notebook-ingest.md) | 把 Calibre 书库的某批书灌进 Open Notebook（按需摄取，非全量同步） |
+| [readlist-bootstrap.md](readlist-bootstrap.md) | readlist 空库引导（首次上线 / `readlist-data` 丢失后）：snapshot→score→核对→ingest→score |
 | [dns-network-failure-recovery.md](dns-network-failure-recovery.md) | 断网/路由器重启后服务不自愈、隧道 530、kubectl 不通 |
 | [security-hardening.md](security-hardening.md) | 安全组件部署 / 验证 / 回滚 |
 | [cilium-gateway-cutover.md](cilium-gateway-cutover.md) | 重新部署或整体验证入口链路（Tunnel → Gateway → Service） |

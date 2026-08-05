@@ -44,6 +44,11 @@ spec:
     # 失控的控制器会被卡在这里而不是饿死整个集群。
     pods: "30"
     # Job 对象总数（任何状态）。当年泄漏的是 92 个累积 Job，这条在最早的点上拦住它。
-    # 本 ns 现有三个 CronJob（ebook-sync-monitor / calibre-metadata-updater /
-    # open-notebook-ingest），都带 history limit 或 TTL，稳态远低于 15。
-    count/jobs.batch: "15"
+    # 2026-08-05: 15 → 20。readlist 上线把本 ns 的 CronJob 从 3 个
+    # （ebook-sync-monitor / calibre-metadata-updater / open-notebook-ingest）
+    # 加到 6 个（+ readlist-snapshot/ingest/score）。算一遍最坏情况：
+    #   稳态 5（实测）+ readlist 稳态 3 = 8；六个 CronJob 全失败时 ≈ 11；
+    #   而首次部署要手动建 4 个引导 Job（见 runbooks/readlist-bootstrap.md）→ 15，
+    #   **正好顶到旧上限被拒**。20 留出余量，且仍远低于节点 110 pod 上限——
+    #   失控的控制器照样卡在这里，而不是饿死整个集群。
+    count/jobs.batch: "20"
