@@ -199,10 +199,22 @@ state 的东西会给出错误数字；而 `apply -refresh=false` 会拿 state �
 cd /Users/matthew/projects/homelab/cloud/oracle && just verify-node
 ```
 
-23 项：主机层（hugepages / kubelet-arg / UDP GRO 持久化 / firewalld 递归防护 / DNS
-fallback / Tailscale 只广播本节点 /32）· 节点账目（capacity、**预留差额** —— 差额恰好
-2048Mi 会被专门指出来，那正是「sysctl 清了但 kubelet 没重启」的典型症状）· pod/App ·
-ClusterMesh 双向 `retrieved=true` · 数据面 HTTP 码。任一条不成立即非零退出。
+24 项：主机层（hugepages / kubelet-arg / UDP GRO 持久化 / firewalld 递归防护 /
+FORWARD policy / DNS fallback / Tailscale 只广播本节点 /32）· 节点账目（capacity、
+**预留差额** —— 差额恰好 2048Mi 会被专门指出来，那正是「sysctl 清了但 kubelet 没重启」
+的典型症状）· pod/App · ClusterMesh 双向 `retrieved=true` · 数据面 HTTP 码。
+任一条不成立即非零退出。
+
+**配套还有一条查「配置漂移」的**（上面那条查的是「结果对不对」，两者互补）：
+
+```bash
+cd /Users/matthew/projects/homelab/cloud/oracle && just check-node-drift
+```
+
+它是 `ansible-playbook --check --diff`，只读，**`changed=0` 即无漂移**。这个信号是
+2026-08-05 才变可信的——之前有 4 条结构性假阳性（2 条 firewalld reload 是「动作」不是
+「状态」，已改成 handler；2 条 FORWARD ACCEPT 规则永远无法收敛，已删除，理由见
+`setup-k3s.yaml` 里的注释）。留着假阳性的漂移检测等于没有。
 
 下面是它逐条对应的手工命令，排障时按需单独跑：
 

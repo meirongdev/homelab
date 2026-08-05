@@ -24,6 +24,7 @@
         zone: public
         permanent: true
         state: enabled
+      notify: Reload firewalld
 
     - name: Allow HTTP (80) in firewalld
       ansible.posix.firewalld:
@@ -31,6 +32,7 @@
         zone: public
         permanent: true
         state: enabled
+      notify: Reload firewalld
 
     - name: Allow HTTPS (443) in firewalld
       ansible.posix.firewalld:
@@ -38,11 +40,7 @@
         zone: public
         permanent: true
         state: enabled
-
-    - name: Reload firewalld to apply permanent rules
-      ansible.builtin.service:
-        name: firewalld
-        state: reloaded
+      notify: Reload firewalld
 
     # K3s Cilium overlay needs pod/service CIDRs and interfaces trusted
     # in firewalld, otherwise the nftables filter_FORWARD chain will reject
@@ -53,6 +51,7 @@
         zone: trusted
         permanent: true
         state: enabled
+      notify: Reload firewalld
 
     - name: Trust K3s service CIDR (10.53.0.0/16) in firewalld
       ansible.posix.firewalld:
@@ -60,6 +59,7 @@
         zone: trusted
         permanent: true
         state: enabled
+      notify: Reload firewalld
 
     - name: Trust cni0 interface in firewalld
       ansible.posix.firewalld:
@@ -67,6 +67,7 @@
         zone: trusted
         permanent: true
         state: enabled
+      notify: Reload firewalld
 
     # Cilium VXLAN overlay interface (replaces flannel.1)
     - name: Trust cilium_vxlan interface in firewalld
@@ -75,6 +76,7 @@
         zone: trusted
         permanent: true
         state: enabled
+      notify: Reload firewalld
 
     # Cilium-specific ports
     - name: Allow Cilium health check (4240) in firewalld
@@ -83,6 +85,7 @@
         zone: public
         permanent: true
         state: enabled
+      notify: Reload firewalld
 
     - name: Allow Cilium VXLAN overlay (8472) in firewalld
       ansible.posix.firewalld:
@@ -90,6 +93,7 @@
         zone: public
         permanent: true
         state: enabled
+      notify: Reload firewalld
 
     - name: Allow Hubble Relay (4244) in firewalld
       ansible.posix.firewalld:
@@ -97,6 +101,7 @@
         zone: public
         permanent: true
         state: enabled
+      notify: Reload firewalld
 
     - name: Allow ClusterMesh API server (32379) in firewalld
       ansible.posix.firewalld:
@@ -104,29 +109,28 @@
         zone: public
         permanent: true
         state: enabled
-
-    - name: Reload firewalld after adding trusted sources/interfaces
-      ansible.builtin.service:
-        name: firewalld
-        state: reloaded
+      notify: Reload firewalld
 
     # OCI instances use iptables-legacy alongside nftables; set FORWARD ACCEPT.
+    # 这条是**真正起作用且真正持久**的一条：policy 进 /etc/iptables/rules.v4
+    # （`:FORWARD ACCEPT`），netfilter-persistent 开机恢复，Cilium 也不会改 policy。
     - name: Set FORWARD policy to ACCEPT (required for pod-to-pod routing)
       ansible.builtin.iptables:
         chain: FORWARD
         policy: ACCEPT
 
-    - name: Allow K3s pod CIDR in FORWARD
-      ansible.builtin.iptables:
-        chain: FORWARD
-        source: 10.52.0.0/16
-        jump: ACCEPT
-
-    - name: Allow K3s service CIDR in FORWARD
-      ansible.builtin.iptables:
-        chain: FORWARD
-        destination: 10.53.0.0/16
-        jump: ACCEPT
+    # ⚠️ 2026-08-05 删掉了两条 `-A FORWARD -s 10.52.0.0/16 -j ACCEPT` /
+    #    `-d 10.53.0.0/16 -j ACCEPT`。它们**永远无法收敛**，留着只会让
+    #    `just check-node-drift`（ansible --check）永久报 2 条假 changed，
+    #    把漂移检测变成噪音。完整证据链：
+    #      1. rules.v4 里确实存了这两条，netfilter-persistent 开机 20:41:45 执行成功；
+    #      2. 但 20:44 cilium-agent 起来后，`iptables -S FORWARD` 里只剩
+    #         CILIUM_FORWARD 跳转和 wg0 两条 —— Cilium 重建 FORWARD 链时丢掉了外来规则
+    #         （本集群 kube-proxy-replacement=true + enable-ipv4-masquerade=true，
+    #          Cilium 全权管 iptables）；
+    #      3. 而 FORWARD policy 本就是 ACCEPT（上一条任务），这两条纯属冗余。
+    #    结论：pod↔pod 转发靠的是 policy ACCEPT + Cilium 自己的 CILIUM_FORWARD，
+    #    不是这两条。要验证只需看 policy，`just verify-node` 已覆盖。
 
     - name: Persist iptables rules across reboots
       ansible.builtin.shell: |
@@ -164,6 +168,14 @@
         sysctl_file: /etc/sysctl.d/99-no-hugepages.conf
         state: present
         reload: true
+
+  # firewalld reload 是**动作**不是状态：写成普通任务的话每次 `--check` 都报 changed，
+  # 两条就足以把 `just check-node-drift` 的信号淹掉。改 handler 后只在真有规则变更时触发。
+  handlers:
+    - name: Reload firewalld
+      ansible.builtin.service:
+        name: firewalld
+        state: reloaded
 
 - name: Write K3s config file
   hosts: oracle_masters
