@@ -149,6 +149,22 @@
   ⚠️ `ignoreFile` 按 **CVE ID 全集群**生效，不能限定镜像：给 A 镜像写的豁免会连带
   掩盖 B 镜像上同 ID 的问题。所以每条 statement 要写清适用镜像，并注明
   "若在别处又出现说明镜像回退了"（现有条目已按此口径写）。
+- **⚠️ 两类"扫不到"会静默变成 0（2026-08-05 oracle 实测，各有实例）**——都表现为
+  **没有报告**，而告警只数现存报告，于是漏扫 == 已清零：
+  1. **arm64-only 镜像扫不了**。扫描 Job 跑的是 `trivy image <ref>`，**不带 `--platform`**，
+     trivy 远程解析默认 `linux/amd64`；镜像索引里没有 amd64 子项就直接 FATAL：
+     `no child with platform linux/amd64 in index …`。本集群是 arm64 单节点，
+     `ghcr.io/meirongdev/trends:main` 只出 arm64 → **从未被扫过**。
+     多架构镜像（it-tools / squoosh 都是 amd64+arm64）不受影响，所以这个坑只咬自建的单架构镜像。
+     chart 0.33.1 **没有**平台开关（`extraEnv` 只作用于 operator 自身，不进扫描 Job；
+     trivy 插件配置里也没有 platform 键）→ 想修只能让镜像出多架构，
+     或接受该镜像不被扫描。**自建 arm64 镜像时顺手加 amd64，扫描才有覆盖。**
+  2. **Docker Hub 匿名拉取限流**。`TOOMANYREQUESTS: You have reached your unauthenticated
+     pull rate limit` 会让扫描 FATAL（实测命中 browserless/chrome、stirlingtools/stirling-pdf、
+     docker.redpanda.com/redpandadata/connect）。**强制批量重扫最容易触发**——删一批报告
+     再重启 operator 会短时间打出几十次 manifest 请求，配额瞬间见底。
+     限流是按小时恢复的，所以这类缺口会自愈；但"自愈前"的窗口里计数偏低，
+     别在这个窗口下结论说"已清零"。
 - **接入可观测**：ServiceMonitor（带 `release:kube-prometheus-stack`，仅 homelab）→ Prometheus 抓 `trivy_image_vulnerabilities` 等；告警 `manifests/monitoring/alerts/trivy-alerts.yaml`（critical CVE→warning、暴露密钥 High/Critical→**critical**、absent 元告警）经 Telegram；看板 Grafana `Security` 文件夹。
 - **扫描覆盖率体检**（两个数字应接近，差得多 = 队列被堵或扫描在失败）：
 
@@ -158,6 +174,28 @@
     | grep -vE '^(kube-system|kube-public|kube-node-lease|trivy-system)' | wc -l   # 应扫工作负载数
   kubectl get jobs -n trivy-system                                  # 滞留的 Complete Job = 堵点
   ```
+
+  ⚠️ **别按报告名 grep 判断"某负载有没有被扫"**：报告名超过 63 字符时 trivy-operator
+  会把它压成纯哈希（实测 `replicaset-5c4986ccc7` / `statefulset-78579cd8ff` 分别是
+  argocd 的 applicationset-controller 和 application-controller）—— 按名字 grep 会把
+  这些误判成"没扫"。要认哪个负载就看 **label**。精确到容器级的缺口清单：
+
+  ```bash
+  kubectl get vulnerabilityreports -A -o json | jq -r '.items[] |
+    "\(.metadata.namespace)|\(.metadata.labels."trivy-operator.resource.name")|\(.metadata.labels."trivy-operator.container.name")"' \
+    | sort -u > /tmp/have.txt
+  kubectl get pods -A -o json | jq -r '.items[]
+    | select(.metadata.namespace|test("^(kube-system|kube-public|kube-node-lease|trivy-system)$")|not)
+    | select(.status.phase=="Running") | .metadata.namespace as $ns
+    | (.metadata.ownerReferences[0].name // .metadata.name) as $o
+    | .spec.containers[] | "\($ns)|\($o)|\(.name)"' | sort -u > /tmp/want.txt
+  comm -23 /tmp/want.txt /tmp/have.txt          # 真正没有报告的容器
+  ```
+
+  该比对对 CNPG 有一个已知假阳性：pod 的 ownerReference 是 Cluster（`zitadel-pg`），
+  而报告 label 记的是实例名（`zitadel-pg-1`）—— 出现 `zitadel-pg` 时按实例名再核一次。
+  查到缺口后**必须看扫描 Job 的报错原文**定因（上面那两类静默失败都只在日志里）：
+  `kubectl -n trivy-system logs deploy/trivy-operator --since=30m | grep -i 'scan job container'`
 
 ## 7. CIS 合规与节点加固
 
