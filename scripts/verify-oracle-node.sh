@@ -40,6 +40,7 @@ echo "dispatcher=$(systemctl is-enabled networkd-dispatcher 2>/dev/null)"
 echo "gro_script=$([ -x /etc/networkd-dispatcher/routable.d/50-tailscale-ethtool ] && echo yes || echo no)"
 echo "ipfwd=$(sysctl -n net.ipv4.ip_forward 2>/dev/null)"
 echo "guard=$(sudo firewall-cmd --permanent --direct --get-all-rules 2>/dev/null | grep -c 41641)"
+echo "fwdpolicy=$(sudo iptables -S FORWARD 2>/dev/null | awk "/^-P FORWARD/{print \$3}")"
 echo "fallbackdns=$(grep -h FallbackDNS /etc/systemd/resolved.conf.d/*.conf 2>/dev/null | head -1 | cut -d= -f2)"
 echo "ts_routes=$(sudo tailscale debug prefs 2>/dev/null | tr -d " \n" | grep -o "\"AdvertiseRoutes\":\[[^]]*\]")"
 echo "k3s=$(systemctl is-active k3s)"
@@ -65,6 +66,11 @@ if [ -n "$HOST" ]; then
   [ "$(g ipfwd)" = "1" ] && ok "net.ipv4.ip_forward = 1" || bad "ip_forward = $(g ipfwd)"
   [ "$(g guard)" -ge 2 ] 2>/dev/null && ok "firewalld 递归防护规则在（$(g guard) 条 41641）" \
     || bad "firewalld 递归防护缺失（$(g guard) 条）—— 可能出现 WireGuard-over-VXLAN-over-WireGuard"
+  # pod↔pod 转发靠的是 policy ACCEPT（+ Cilium 自己的 CILIUM_FORWARD 链），不是显式
+  # 的 -A FORWARD ACCEPT 规则 —— 那两条 2026-08-05 已从 playbook 删除：Cilium 重建
+  # FORWARD 链时必然把它们丢掉，永远无法收敛。所以这里只查 policy。
+  [ "$(g fwdpolicy)" = "ACCEPT" ] && ok "iptables FORWARD policy = ACCEPT" \
+    || bad "FORWARD policy = $(g fwdpolicy)（期望 ACCEPT）—— pod↔pod 转发会断"
   [ -n "$(g fallbackdns)" ] && ok "DNS 备用上游已配：$(g fallbackdns)" \
     || bad "无 FallbackDNS —— 单点 169.254.169.254 曾致全网 ~20min 不可达"
   # ⚠️ 期望**只有**本节点 /32：Pod CIDR 子网路由 2026-07-07 已移除，跨集群走 ClusterMesh VXLAN
