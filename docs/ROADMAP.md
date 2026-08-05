@@ -35,32 +35,26 @@
 
 ### 已知问题（不阻塞，无人认领）
 
-- **Cilium ClusterMesh 控制面已断约一个月，2026-08-05 才发现**。两集群都报
-  `0/1 remote clusters ready` + `0 reconnections (last: never)`。根因是
-  `cilium-clustermesh` secret 里的 endpoint 写成了**集群内 DNS 名**，两边对称地在连自己：
+- **ClusterMesh 静默断开无人知晓（已修，但监测缺口仍在）**。2026-08-05 缩容验收时发现
+  两集群都是 `0/1 remote clusters ready`；当天用
+  `just connect-clustermesh 100.94.186.7:32379 100.107.166.37:32379` 修好，双向
+  `retrieved=true` + 数据同步全 true（oracle 见 homelab 33 endpoints，homelab 见 oracle 48）。
+  机制、正确的诊断判据、以及两个 secret 的分工见
+  [reference/tailscale-network.md](reference/tailscale-network.md#两个-secret别把正常的当成配错了2026-08-05-踩过)。
 
-  ```
-  endpoints: [https://clustermesh-apiserver.kube-system.svc:2379]   # 错
-  ```
+  **剩下两个真缺口：**
+  1. **无告警**：Cilium 的 `cilium_clustermesh_*` 指标**当前完全没被抓**（Prometheus 里
+     `count(cilium_clustermesh_remote_cluster_readiness)` 为空）。这就是它能静默断开的原因，
+     也是为什么断了多久都查不出来。补抓 + 一条 readiness 告警。
+  2. **oracle 侧配置未固化**：homelab 的 peer 配置在 `k8s/cilium/values.yaml`
+     （`clustermesh.config.clusters[].ips`），但那份 values 只服务 homelab
+     （`ctx := "k3s-homelab"`）。oracle 的 cluster-id/cluster-name/peer 只存在于 live Helm
+     release，仓库无副本 → 在 oracle 上重装或升级 Cilium 就会丢，且**不会有任何报错**。
 
-  按 [reference/tailscale-network.md](reference/tailscale-network.md) 应该是对端的
-  **Tailscale IP + NodePort 32379**。homelab 侧 cilium-agent 自 2026-07-07 起未重启却
-  `last: never`，说明**至少从 7 月 7 日就断了**（正是 ClusterMesh underlay 那次改造的日期，
-  疑似当时重写 secret 时写错），与 2026-08-05 的缩容/重启无关。
-
-  **为什么一个月没人发现**：两集群 `service.cilium.io/global` 注解的 Service **数量都是 0**
-  —— 没有任何工作负载在用跨集群服务发现。遥测（otel remote-write）、ArgoCD→homelab
-  apiserver 走的都是 Tailscale + NodePort 直连，不经 ClusterMesh。**当前实际影响为零。**
-
-  修法（`k8s/helm/`，两个端点参数不能省）：
-  ```bash
-  just connect-clustermesh 100.94.186.7:32379 100.107.166.37:32379
-  # 两侧各自复核：
-  kubectl --context oracle-k3s exec -n kube-system ds/cilium -c cilium-agent -- cilium-dbg status | grep -A3 ClusterMesh
-  ```
-  ⚠️ 修之前先想清楚**要不要修**：没有 global service 的话它是纯待命能力。要么接上并加一条
-  告警（Cilium 的 `cilium_clustermesh_*` 指标**当前没被抓**，这也是它能静默一个月的原因），
-  要么明确决定退役 ClusterMesh、把跨集群一律走 NodePort。别留着半连状态。
+  **优先级判断**：两集群 `service.cilium.io/global` 的 Service 数量**都是 0**，没有工作负载
+  在用跨集群服务发现（遥测与 ArgoCD→homelab 走 Tailscale + NodePort 直连）。所以它目前是
+  **纯待命能力**，缺口 1 比缺口 2 值得先做——没有监测的话，下次断了同样没人知道。
+  另一条路是明确决定退役 ClusterMesh、跨集群一律走 NodePort，那两个缺口一起消失。
 
 - **这台 Mac 上 `terraform plan/apply` 连 `192.168.50.4:8006`（Proxmox API）100% `no route to host`**，但 `ping`/`curl`/`ssh` 到同一地址全部正常（curl 有响应，偏慢 ~3s）。**已排除 Tailscale**——整个 `tailscale down` 后仍 100% 复现。当前无阻塞（VM 变更改走 `qm`/SSH）。若日后要用 terraform 管 Proxmox，从 provider 的 HTTP client 行为或本机残留 utun0-3/网络扩展查起，不是标准路由表问题。
 

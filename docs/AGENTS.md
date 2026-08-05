@@ -77,7 +77,10 @@ homelab/
 - **跨集群**: Tailscale 只做**节点级 underlay**（各节点自己的 /32 + NodePort），
   pod↔pod 走 Cilium ClusterMesh VXLAN。⚠️ **Pod CIDR 子网路由已于 2026-07-07 移除**，
   别再照旧图去查 `10.52.0.0/16` 有没有广播（`AdvertiseRoutes` 只该有本节点 /32）。
-  ⚠️ ClusterMesh 控制面**当前是断的**（见 ROADMAP 已知问题），无 global service 故无影响。
+  ⚠️ ClusterMesh 排障别看 `cilium-clustermesh` secret 的 endpoint（指向本集群自己是
+  **正常的**，KVStoreMesh 设计如此）；对端配置在 `cilium-kvstoremesh` + clustermesh-apiserver
+  的 `hostAliases`。判据是 `cilium-dbg status --all-clusters` 里的 `retrieved=true`。
+  **它没有任何告警**（`cilium_clustermesh_*` 指标未被抓），2026-08-05 就这样静默断过。
 - **外部流量**: Internet → Cloudflare DNS → Cloudflare Tunnel → Cilium Gateway → Service
 - **homelab node**: 10.10.10.10 / TS 100.94.186.7 (Ryzen 5600H 笔记本)
 - **oracle-k3s node**: 10.0.0.26 / TS 100.107.166.37 (Oracle Cloud Free Tier)
