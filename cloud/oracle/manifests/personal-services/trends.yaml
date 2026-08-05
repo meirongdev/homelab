@@ -1,5 +1,9 @@
 # trends — GitHub 趋势追踪(单 Go 二进制:cron 采集/评分 worker + 只读 API + 内嵌 SPA + SQLite/WAL)
-# 镜像由 trends 仓库 CI 推到 ghcr;tag 由 argocd-image-updater 跟踪 :main 的 digest 写回(见 oracle-k3s Application 注解)。
+# 镜像由 trends 仓库 CI 推到 ghcr,固定用可变 tag `:main` + imagePullPolicy: Always(见下方容器注释)。
+# ⚠️ 2026-08-05 更正:原注释说"tag 由 argocd-image-updater 跟踪 :main 的 digest 写回
+# (见 oracle-k3s Application 注解)"——**该机制并不存在**:集群里没有 argocd-image-updater
+# 部署(`kubectl -n argocd get deploy | grep image-updater` 为空),任何 Application 上
+# 也没有 image-updater 注解。别再照这句去找 digest 写回逻辑。
 # ns 复用 personal-services(由 uptime-kuma/namespace.yaml 创建);HTTPRoute 经 ReferenceGrant allow-gateway-to-personal-services 放行。
 # 暴露:trends.meirong.dev —— 需在 cloud/oracle/cloudflare/terraform.tfvars 的 ingress_rules 加 "trends" 后 terraform apply(建隧道路由 + DNS)。
 ---
@@ -69,6 +73,14 @@ spec:
       containers:
         - name: trends
           image: ghcr.io/meirongdev/trends:main
+          # 2026-08-05: `:main` 是**可变 tag**,而 tag 形式的镜像默认 imagePullPolicy
+          # 是 IfNotPresent —— 节点一旦缓存过 :main 就永远不再拉,CI 重建等于不生效
+          # (实测:节点在跑 sha256:ca7436c5,而 registry 的 :main 已是 sha256:4873f5e3)。
+          # 同 it-tools / squoosh 的既有做法,显式 Always。
+          # ⚠️ 这条对"漏洞报告是否可信"直接相关:trivy 按 pod spec 里的**引用**去远端
+          # 解析,即扫的是 registry 上当前的 :main;若节点还在跑旧 digest,
+          # 报告描述的就不是实际运行的镜像。
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
               name: http
