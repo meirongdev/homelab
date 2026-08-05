@@ -1,0 +1,134 @@
+---
+# Cilium ClusterMesh alerting.
+#
+# Why this file exists: on 2026-08-05 ClusterMesh was found broken in BOTH directions
+# during unrelated work. Nothing fired, and afterwards it was impossible to establish how
+# long it had been down — `cilium_kvstoremesh_*` was not scraped at all. Losing a standby
+# capability silently is bad; not being able to date the loss is worse. See
+# docs/reference/tailscale-network.md and the ROADMAP known-issues entry.
+#
+# Metrics come from the clustermesh-apiserver's **kvstoremesh** container (:9964) on BOTH
+# clusters — that is the hop that actually crosses Tailscale (cilium-agent only talks to
+# its own local cache, so agent-side metrics would NOT have caught the 2026-08-05 outage):
+#   - homelab:    manifests/monitoring/clustermesh-servicemonitor.yaml (cluster=homelab
+#                 via the Prometheus scrapeClasses relabel)
+#   - oracle-k3s: OTel Collector `prometheus/clustermesh` receiver → remote-write with
+#                 cluster=oracle-k3s
+# Every rule below therefore covers both clusters; {{ $labels.cluster }} disambiguates.
+#
+# Three DISTINCT failure modes, deliberately separate rules — one does not imply the others:
+#   1. peer configured but not connecting     → readiness_status == 0
+#   2. peer config vanished entirely          → remote_clusters == 0   (series for
+#      target_cluster disappears, so rule 1 canNOT fire — this is the oracle-side
+#      "config not codified in git" risk, see tailscale-network.md)
+#   3. we stopped being able to see anything  → absent(...)             (the 2026-08-05
+#      blind spot itself: kvstoremesh gone, scrape broken, or remote-write down)
+#
+# severity warning → routed by Alertmanager (see values/kube-prometheus-stack.yaml). The
+# `release` label is REQUIRED so the kube-prometheus-stack ruleSelector adopts this rule.
+#
+# ⚠️ Nothing consumes ClusterMesh today (`service.cilium.io/global` Service count is 0 on
+# both clusters), so these are all `warning`, not `critical` — a real outage degrades a
+# standby capability, not live traffic. Revisit the severity if a global Service is added.
+#
+# Deployed via the ArgoCD `monitoring-dashboards` Application (git push → 3-min sync).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: clustermesh-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: clustermesh
+      rules:
+        # (1) Peer IS configured, but kvstoremesh cannot establish/keep the connection.
+        # This is what a broken Tailscale underlay, a CA mismatch, or a wrong hostAliases
+        # entry looks like. 10m tolerates a normal rollout of either clustermesh-apiserver.
+        - alert: ClusterMeshRemoteClusterNotReady
+          expr: cilium_kvstoremesh_remote_cluster_readiness_status == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ClusterMesh: {{ $labels.cluster }} cannot reach remote cluster {{ $labels.target_cluster }}"
+            description: >-
+              kvstoremesh on {{ $labels.cluster }} has had readiness_status=0 for
+              remote cluster {{ $labels.target_cluster }} for >10m. Cross-cluster pod
+              routing and service discovery are degraded. Diagnose with
+              `kubectl --context <ctx> exec -n kube-system ds/cilium -c cilium-agent --
+              cilium-dbg status --all-clusters` and check `retrieved=` (retrieved=false
+              with etcd connected means this kvstoremesh hop, not the agent). Fix per
+              docs/reference/tailscale-network.md → ClusterMesh Reconnect After Rebuild.
+
+        # (2) The peer configuration itself is GONE — kvstoremesh has zero remote clusters.
+        # Rule (1) cannot catch this: with no peer configured there is no
+        # readiness_status{target_cluster=...} series to be 0.
+        # Most likely cause: Cilium was reinstalled/upgraded on that cluster and dropped the
+        # ad-hoc clustermesh config. oracle-k3s is especially exposed — its peer config is
+        # NOT codified in git (homelab's lives in k8s/cilium/values.yaml).
+        - alert: ClusterMeshPeerConfigMissing
+          expr: cilium_kvstoremesh_remote_clusters == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ClusterMesh: {{ $labels.cluster }} has NO remote cluster configured"
+            description: >-
+              cilium_kvstoremesh_remote_clusters == 0 on {{ $labels.cluster }} for >15m —
+              the peer config was lost, not merely disconnected (a Cilium reinstall/upgrade
+              wipes the ad-hoc clustermesh config and does not error). Re-run
+              `cd k8s/helm && just connect-clustermesh 100.94.186.7:32379 100.107.166.37:32379`.
+
+        # (3) The blind spot itself. If these metrics stop arriving we are back to
+        # 2026-08-05: mesh could be down for weeks with nothing to show it. Fires when
+        # kvstoremesh is gone, the scrape broke, or (for oracle) remote-write stopped.
+        # 30m so it does not flap on a node reboot or an OTel Collector rollout.
+        - alert: ClusterMeshMetricsAbsentHomelab
+          expr: absent(cilium_kvstoremesh_remote_cluster_readiness_status{cluster="homelab"})
+          for: 30m
+          labels:
+            severity: warning
+            cluster: homelab
+          annotations:
+            summary: "ClusterMesh metrics missing from homelab — mesh health is unobservable"
+            description: >-
+              No cilium_kvstoremesh_remote_cluster_readiness_status series with
+              cluster=homelab for >30m. Either kvstoremesh is not running or the
+              ServiceMonitor stopped matching. While this fires, ClusterMesh could be
+              down without any other alert — this is exactly the gap that let the
+              2026-08-05 outage go unnoticed. Check
+              `kubectl --context k3s-homelab -n kube-system get svc clustermesh-apiserver-metrics`
+              and the ServiceMonitor's `release: kube-prometheus-stack` label.
+
+        - alert: ClusterMeshMetricsAbsentOracle
+          expr: absent(cilium_kvstoremesh_remote_cluster_readiness_status{cluster="oracle-k3s"})
+          for: 30m
+          labels:
+            severity: warning
+            cluster: oracle-k3s
+          annotations:
+            summary: "ClusterMesh metrics missing from oracle-k3s — mesh health is unobservable"
+            description: >-
+              No cilium_kvstoremesh_remote_cluster_readiness_status series with
+              cluster=oracle-k3s for >30m. oracle has no Prometheus Operator, so this
+              path is OTel Collector (prometheus/clustermesh receiver) → remote-write;
+              a collector crash or a Tailscale break shows up here. Check
+              `kubectl --context oracle-k3s -n monitoring logs ds/otel-collector`.
+
+        # Connection is flapping rather than flat-down: readiness may read 1 between
+        # retries, so (1) can miss it. Distinct signal, kept cheap.
+        - alert: ClusterMeshRemoteClusterFlapping
+          expr: increase(cilium_kvstoremesh_remote_cluster_failures[30m]) > 3
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ClusterMesh: {{ $labels.cluster }} → {{ $labels.target_cluster }} connection is flapping"
+            description: >-
+              cilium_kvstoremesh_remote_cluster_failures rose by >3 in 30m on
+              {{ $labels.cluster }} for remote {{ $labels.target_cluster }}. The mesh may
+              read "ready" between retries while cross-cluster state is repeatedly
+              resynced. Usual suspects are the Tailscale underlay (WireGuard path flapping
+              to relay) or clustermesh-apiserver restarts/OOM.
