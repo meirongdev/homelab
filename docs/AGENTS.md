@@ -74,7 +74,10 @@ homelab/
   ——遥测不是单向的。见 `docs/runbooks/argocd-control-plane-on-oracle.md`
 - **CNI**: 双集群 Cilium eBPF + VXLAN
 - **Ingress**: Cilium Gateway API (唯一入口)
-- **跨集群**: Tailscale Pod CIDR 路由 + Cilium ClusterMesh
+- **跨集群**: Tailscale 只做**节点级 underlay**（各节点自己的 /32 + NodePort），
+  pod↔pod 走 Cilium ClusterMesh VXLAN。⚠️ **Pod CIDR 子网路由已于 2026-07-07 移除**，
+  别再照旧图去查 `10.52.0.0/16` 有没有广播（`AdvertiseRoutes` 只该有本节点 /32）。
+  ⚠️ ClusterMesh 控制面**当前是断的**（见 ROADMAP 已知问题），无 global service 故无影响。
 - **外部流量**: Internet → Cloudflare DNS → Cloudflare Tunnel → Cilium Gateway → Service
 - **homelab node**: 10.10.10.10 / TS 100.94.186.7 (Ryzen 5600H 笔记本)
 - **oracle-k3s node**: 10.0.0.26 / TS 100.107.166.37 (Oracle Cloud Free Tier)
