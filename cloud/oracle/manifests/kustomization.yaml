@@ -89,6 +89,11 @@ resources:
   - personal-services/timeslot.yaml
   - personal-services/trends.yaml
   - personal-services/excalidraw.yaml
+  # readlist（技术书评分/书单站，2026-08-05 上线）。它是本 ns 里**唯一跨应用读别人卷**的
+  # 工作负载：snapshot CronJob 挂 calibre-books-local(RW，WAL 要写 -shm) 与
+  # calibre-web-automated-config-local(只读)，故必须排在 calibre-web.yaml 之后理解——
+  # 但 kustomize 不按列表顺序 apply，真正的依赖是那两个 PVC 存在（已存在）。
+  - personal-services/readlist.yaml
 
 # ⚠️ otel-collector 的配置必须走 configMapGenerator，不能写成普通 ConfigMap 资源。
 # 2026-08-02 实测踩坑：把配置改成写 oracle 本地 Loki 后，ConfigMap 更新了、
