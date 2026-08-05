@@ -47,6 +47,11 @@ data:
         {"name": "Timeslot",       "url": "http://timeslot.personal-services.svc:8080/api/slots"},
         # Trends: GitHub 趋势追踪, /healthz returns 200
         {"name": "Trends",         "url": "http://trends.personal-services.svc:8080/healthz"},
+        # readlist: 技术书评分/书单, /healthz returns 200。
+        # ⚠️ 这条只证明 web pod 活着 —— readlist 是夜间管道服务，三个 CronJob 全挂了它
+        # 照样绿（用最后一次发布的 run 服务）。数据新鲜度只有指标能看见，见
+        # k8s/helm/manifests/monitoring/alerts/readlist-alerts.yaml。
+        {"name": "readlist",       "url": "http://readlist.personal-services.svc:8080/healthz"},
         # Jobs SG: 在 homelab，故走公网 URL（与上面 Grafana/Vault 同理）。
         # 探 /healthz 而不是 / —— / 服务的是 report/latest.html，第一份周报出来前是 404，
         # 拿它当探针会让监控在首周一直红。/healthz 只验 DB 能打开。

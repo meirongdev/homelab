@@ -206,6 +206,40 @@ spec:
       targetPort: http
       name: http
 ---
+# readlist.meirong.dev -> readlist:8080
+#
+# ⚠️ 用 **readlist.** 而不是 books./book. —— 与私有书库 book.meirong.dev 只差一个字母，
+# 误配代价太高（一个是只发元数据与评分的公开站，一个是书库本身）。
+#
+# 通配隧道 + external-dns 会自动建 CNAME，**不需要**改 cloudflare/terraform。
+# ReferenceGrant 不需要：base/gateway.yaml 的 allow-gateway-to-personal-services 已覆盖本 ns。
+# external-dns 是 upsert-only —— 日后退役这个服务，删掉本段**不会**删掉 DNS 记录，要手工清。
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: readlist
+  namespace: personal-services
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: oracle-gateway
+      namespace: kube-system
+      port: 80
+  hostnames:
+    - "readlist.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: readlist
+          port: 8080
+          weight: 1
+---
 # ── 快照：唯一接触 calibre 的工作负载 ────────────────────────────────────
 # 秒级短命 Job，**无网络出口**（见下面的 NetworkPolicy）。
 apiVersion: batch/v1

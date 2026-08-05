@@ -1,6 +1,6 @@
 # Observability — 告警、看板组织与 SLO
 
-> Last updated: 2026-08-03
+> Last updated: 2026-08-05
 > Status: 生效事实
 >
 > 遥测的**消费侧**：告警路由与覆盖盲区、Grafana 看板组织约定、SLI/SLO 体系。
@@ -41,6 +41,19 @@
   三种**互不蕴含**的故障各一条规则：`readiness_status == 0`（配了连不上）·
   `remote_clusters == 0`（**peer 配置整个消失**——此时前者无序列可判，故必须单列）·
   `absent(...)`（看不见了，即 2026-08-05 那个盲区本身）。
+
+- **readlist 数据新鲜度告警**（`manifests/monitoring/alerts/readlist-alerts.yaml`，2026-08-05 随上线新增）:
+  readlist 是**夜间管道**服务（snapshot 01:05 → ingest 01:20 → score 01:40）。三个 CronJob
+  全挂之后 web pod 仍用最后一次发布的 run 一直返回 200 —— 探针绿、Uptime Kuma 绿、首页绿，
+  榜单在悄悄变旧。**这类失效原理上只有指标能看见**，HTTP 探测看不到。
+  指标经 oracle otel `prometheus/readlist` 抓 `readlist.personal-services.svc:8080`
+  （300s；该 Service 是普通 ClusterIP，不踩 trivy 那个 headless 80→8080 的坑）→ remote-write。
+  四条规则：`last_score_unix` 距今 >36h（主判据，容一晚失败）· `works_total == 0`
+  （空库自愈发布 0 本书的 run——这是上游部署文档 §4.1 明确警告的失效）·
+  全部 works 为 D 级持续 3d（v0.1.0 唯一能拿到的 ingest 健康信号）· `absent(...)`（盲区本身）。
+  ⚠️ **刻意缺两条**：`last_snapshot_unix`（陈旧语料 + 打分照常成功，score 覆盖不了）与
+  `orphan_rows`（book id 漂移）—— 上游工作区已实现但**尚未提交、不在 v0.1.0 镜像里**，
+  给不存在的序列写规则等于永不触发而看起来一切正常。补齐条件写在该文件文末。
 
 ### ⚠️ 告警覆盖 ≠ 抓取覆盖（2026-08-02 核实）
 

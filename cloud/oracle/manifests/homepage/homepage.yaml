@@ -128,6 +128,17 @@ data:
             href: https://notebook.meirong.dev
             description: AI 研读笔记本（本地模型）
 
+        # 只发元数据与评分，**不发书** —— 与 Calibre-Web(book.meirong.dev) 是两个东西，
+        # 域名刻意用 readlist. 而不是 books.，差一个字母的误配代价太高。
+        - readlist:
+            icon: mdi-book-open-page-variant
+            href: https://readlist.meirong.dev
+            description: 技术书多维评分与书单（下一本读什么）
+            kubernetes:
+              namespace: personal-services
+              container: readlist
+              label_selector: app=readlist
+
         - Stirling-PDF:
             icon: stirling-pdf.png
             href: https://pdf.meirong.dev
