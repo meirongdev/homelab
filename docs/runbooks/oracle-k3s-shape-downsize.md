@@ -110,9 +110,25 @@ sudo sysctl -p /etc/sysctl.d/99-no-hugepages.conf
 # 把 kubelet-arg 两行加进 /etc/rancher/k3s/config.yaml（内容见 setup-k3s.yaml）
 ```
 
-⚠️ **`vm.nr_hugepages=0` 生效不等于 node capacity 变了** —— capacity 来自 kubelet
-启动时的 cAdvisor machine info，必须重启 kubelet（= 重启 k3s）才刷新。下一步的
-停机重启正好覆盖，所以这里**不要**单独重启 k3s。
+两件事的生效时机**不一样**，别混：
+
+- **内核层立刻生效**：`vm.nr_hugepages=0` 一执行，那 2GiB 马上回到可用内存。
+  2026-08-05 实测 `free -m` 的 `available` 从 3303Mi 跳到 **5388Mi**，
+  `HugePages_Total` 从 1024 变 0。**这一步无需重启、无中断，越早做越好。**
+- **k8s 侧要重启 kubelet 才认**：`node.status.capacity` / `allocatable` 来自 kubelet
+  启动时缓存的 cAdvisor machine info。不重启的话 `hugepages-2Mi` 仍显示 `2Gi`、
+  allocatable 仍在扣那 2GiB。`kubelet-arg`（system-reserved / eviction-hard）同理。
+
+所以：**按本文顺序走（步骤 4 会停机重启）时这里不要单独重启 k3s**；但如果 shape 已经
+改完了才补做本步（见步骤 5 的「手工改 shape」分支），就必须单独重启一次：
+
+```bash
+ssh -i ~/.ssh/vgio ubuntu@100.107.166.37 'sudo systemctl restart k3s'
+```
+
+⚠️ 这会重建全集群 pod（~2-3 分钟），**SSO 会再断一次**。在此之前的中间状态是
+**安全但不理想**的：allocatable 偏保守（白扣 2GiB），而 `eviction-hard` 还是默认
+100Mi —— 12GB 机器上这个阈值太晚，内核 OOM killer 往往先于 kubelet 的有序驱逐动手。
 
 ### 3. 静音告警 + 通告停机面
 
@@ -153,6 +169,27 @@ make apply
 ```
 
 开机（`--action START`），等 SSH 起来。
+
+#### 分支：如果 shape 是在 OCI Console 手工改的
+
+2026-08-05 实际就是这么做的。完全可以，但**必须回来把 terraform state 补账**，
+否则 state 里长期记着旧 shape：
+
+```bash
+cd /Users/matthew/projects/homelab/cloud/oracle/terraform
+make plan     # plan 每次都 refresh，所以会显示"零基础设施变更"，看着像没事
+terraform state show oci_core_instance.k3s | grep -E "ocpus|memory_in_gbs"
+#   ← 这里才照出真相：refresh 是**内存里**的，不落盘。手工改完这里仍是旧值 4/24
+make apply    # 0 added, 0 changed, 0 destroyed —— 只把 refresh 结果和 outputs 落盘
+```
+
+为什么要管：`plan` 自带 refresh 所以不会误判，但 `terraform state show` 和任何直读
+state 的东西会给出错误数字；而 `apply -refresh=false` 会拿 state 里的旧值去和 config
+比，可能对一台已经是目标形状的实例再发一次 shape 变更（=白重启一次）。
+
+另外手工改 shape 时**别忘了步骤 2**（hugepages + kubelet-arg）—— 它不在 OCI Console
+的流程里，最容易漏。漏了的症状：节点 `hugepages-2Mi` 仍是 `2Gi`，且
+`capacity − allocatable` 的差额恰好等于 2048Mi（说明 system-reserved 一条没生效）。
 
 ### 6. 验证
 
