@@ -14,6 +14,40 @@
 > **集群**：oracle-k3s · ns `personal-services` · 清单
 > [`cloud/oracle/manifests/personal-services/readlist.yaml`](../../cloud/oracle/manifests/personal-services/readlist.yaml)
 
+## ☠️ 先看这条：不要用 `readlist init` 去"初始化"
+
+`init` 在幂等检查**之前**无条件调 `corpus.Seed(db)`，而 seed 是**演示语料** ——
+写死的假 Google/OpenLibrary 评分、假 HN 提及次数、假 depth/level 标注、假个人星级。
+Seed 自带「editions 非空则跳过」，所以它**只在空库上开火** —— 也就是本 runbook
+适用的每一种场景（首次部署、PVC 重建、从残缺备份恢复）。
+
+2026-08-05 实测踩过：当时给 Deployment 加了 `init` initContainer，结果 ingest 明确报
+「HN 提及 0 条」，站上却显示 Fluent Python「HN 提及 5 次(2018–2025)」、
+Python Crash Course「HN 提及 3 次」—— 全是 `seedBooks` 里写死的数。被污染的
+`timeless`/`deep-dive`/`to-read-next` 榜看上去完全正常（7/3/9 条），
+清库重打之后才现出真相：**这三个榜本该是 0 条**。
+
+判据（清库后应当如此）：`证据徽章 A=0 B=0 C=0 D=<全部>`，且除 `publisher-picks`
+与 `library-hygiene` 外所有榜都是 0 条 —— 外部证据要等 ingest。看到 A/B/C 非 0
+而 ingest 还没跑过，就是被 seed 污染了，只能清库重来（下面第 0 步）。
+
+### 第 0 步（仅在库已被污染时）：清库
+
+```bash
+K="kubectl --context oracle-k3s -n personal-services"
+$K scale deploy/readlist --replicas=0
+$K wait --for=delete pod -l app=readlist --timeout=120s
+# 用一次性 busybox Job 挂 readlist-data 删掉 db 与 snapshot 目录
+#   （readlist 镜像是 distroless，没有 shell，进不去）
+#   rm -f /data/readlist.db /data/readlist.db-wal /data/readlist.db-shm
+#   rm -rf /data/snapshot
+# 跑完删掉该 Job，然后让 ArgoCD 把 replicas 恢复成 1（或手动 scale 回 1），
+# ⚠️ 确认 Deployment 里**没有** initContainer 之后再起 pod，否则又会 seed 一遍：
+$K get deploy readlist -o jsonpath='{.spec.template.spec.initContainers[*].name}'   # 期望为空
+```
+
+清库会连 ingest 的**缓存一起丢**（外部证据要重新烧配额）。这是代价，但污染的库不能留。
+
 ## 为什么需要手动引导
 
 清单一同步，`serve`（和它的 `init` initContainer）会在空库上**自愈发布一个 0 本书的 run**。
