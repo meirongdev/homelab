@@ -31,6 +31,27 @@
 
 - **这台 Mac 上 `terraform plan/apply` 连 `192.168.50.4:8006`（Proxmox API）100% `no route to host`**，但 `ping`/`curl`/`ssh` 到同一地址全部正常（curl 有响应，偏慢 ~3s）。**已排除 Tailscale**——整个 `tailscale down` 后仍 100% 复现。当前无阻塞（VM 变更改走 `qm`/SSH）。若日后要用 terraform 管 Proxmox，从 provider 的 HTTP client 行为或本机残留 utun0-3/网络扩展查起，不是标准路由表问题。
 
+- **oracle-k3s：3 个 Docker Hub 镜像仍未被 Trivy 扫过，等配额恢复后重试一次**（2026-08-05）。
+  `rsshub-browserless`(browserless/chrome)、`stirling-pdf`(stirlingtools/stirling-pdf)、
+  `redpanda-connect`(docker.redpanda.com/redpandadata/connect) 三者的扫描 Job 均因
+  `TOOMANYREQUESTS: unauthenticated pull rate limit` FATAL。配额是 Docker Hub 匿名的
+  **100 pulls / 6h / IP**，当天被清 73 条 Critical 时的强制重扫（删 6 份报告 + 3 次
+  operator 重启）打空了。**失败的扫描不会自动重试**（详见
+  `reference/security.md` §6），所以配额恢复后必须人工推一次：
+
+  ```bash
+  kubectl --context oracle-k3s -n trivy-system rollout restart deploy/trivy-operator
+  # 6-8 分钟后回查（这 3 个镜像都很大，单个扫描要几分钟）
+  kubectl --context oracle-k3s get vulnerabilityreports -A -o json | jq -r \
+    '.items[] | select(.metadata.labels."trivy-operator.resource.name"
+     | test("browserless|stirling|redpanda")) | "\(.metadata.labels."trivy-operator.resource.name") crit=\(.report.summary.criticalCount)"'
+  ```
+
+  ⚠️ 在此之前 `TrivyImageCriticalVulnerabilities` 读到的 0 **不覆盖这 3 个镜像**——
+  告警只数现存报告，缺报告按 0 计入。根治办法（给扫描 Job 配 Docker Hub 认证，
+  `trivy.privateRegistryScanSecretsNames`）已评估但**刻意没做**：需要新增 Docker Hub
+  凭据，当前判断不值得为 3 个镜像引入。
+
 ---
 
 ## 不做 / 已取消
