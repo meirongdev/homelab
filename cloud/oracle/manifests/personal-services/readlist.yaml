@@ -115,27 +115,17 @@ spec:
       securityContext:
         # distroless nonroot 的 uid/gid；让进程对 local-path 卷可写。
         fsGroup: 65532
-      initContainers:
-        # 建库 + 保证有一份**可服务的**榜单。上游参照件把这个 initContainer 丢了，
-        # 这里补回来 —— 它是 kind 端到端实际验过的形状，且是幂等的（已发布过 run 就
-        # 跳过打分，不会每次重启都换 run_id 把 matrix 的 immutable 缓存打空）。
-        # 少了它，pod 在空库上重启只能靠 serve 自愈发布一个 0 本书的 run。
-        - name: init-data
-          image: ghcr.io/meirongdev/readlist:v0.1.0
-          command: ["readlist", "init"]
-          envFrom:
-            - configMapRef:
-                name: readlist-config
-          resources:
-            requests:
-              cpu: 15m
-              memory: 64Mi
-            limits:
-              cpu: 500m
-              memory: 256Mi
-          volumeMounts:
-            - name: data
-              mountPath: /data
+      # ☠️ **不要加 `readlist init` 的 initContainer。** 上游参照件把它去掉是**对的**，
+      # 我在 2026-08-05 自作聪明加回来过，代价是污染了一次生产库：
+      #   `init` 在幂等检查**之前**无条件调 `corpus.Seed(db)`，而 seed 是**演示语料**
+      #   ——写死的假 Google/OpenLibrary 评分、假 HN 提及次数、假 depth/level 标注、
+      #   假个人星级。空库上它会真的写进去，然后被当成真证据打分并公开。
+      #   实测证据：ingest 报「HN 提及 0 条」，站上却显示 Fluent Python「HN 提及 5 次」
+      #   ——正是 seedBooks 里那条 `mentions: {1,2,3,6,8}`。
+      # Seed 自带「editions 非空则跳过」的保护，所以它只在**空库**上开火 ——
+      # 这恰恰是最危险的时刻：PVC 重建、从残缺备份恢复、首次部署。
+      # 生产不需要它：内容本来就来自 snapshot + score，且 serve 在空库上会自愈
+      # 发布一个**0 本书**的 run（诚实的空站），引导按 runbooks/readlist-bootstrap.md 走。
       containers:
         - name: readlist
           # 版本化 tag（多架构 index digest sha256:63c8b612…d12e4a8c2，含 linux/arm64——
@@ -206,39 +196,50 @@ spec:
       targetPort: http
       name: http
 ---
-# readlist.meirong.dev -> readlist:8080
+# ☠️ 公开入口已于 2026-08-05 摘除 —— **重新加回来之前必须先解决下面这件事**。
 #
-# ⚠️ 用 **readlist.** 而不是 books./book. —— 与私有书库 book.meirong.dev 只差一个字母，
-# 误配代价太高（一个是只发元数据与评分的公开站，一个是书库本身）。
+# 实测发现：`/api/v1/catalog` 会把全部 2046 个 work 的 **title + author 原样公开**，
+# 而这个 calibre 书库里混着**非书的私人文档**。实测至少一条是第三方的简历：
+# `(BHRC) Backend Engineer - 吳幸慈, Mint Wu - 202603`（author 字段还是另一个人名）。
+# 也就是说「只发元数据不发书」这条护栏对**书**成立，对**误入库的私人文件**不成立
+# ——简历的"元数据"本身就是真人姓名。这不是本仓库能单方面修的：
 #
-# 通配隧道 + external-dns 会自动建 CNAME，**不需要**改 cloudflare/terraform。
-# ReferenceGrant 不需要：base/gateway.yaml 的 allow-gateway-to-personal-services 已覆盖本 ns。
-# external-dns 是 upsert-only —— 日后退役这个服务，删掉本段**不会**删掉 DNS 记录，要手工清。
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: readlist
-  namespace: personal-services
-spec:
-  parentRefs:
-    - group: gateway.networking.k8s.io
-      kind: Gateway
-      name: oracle-gateway
-      namespace: kube-system
-      port: 80
-  hostnames:
-    - "readlist.meirong.dev"
-  rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /
-      backendRefs:
-        - group: ""
-          kind: Service
-          name: readlist
-          port: 8080
-          weight: 1
+#   选项 A（最省事）：把这类非书文档从 calibre 里挪走/删掉，再重跑 snapshot。
+#   选项 B：在 readlist 侧加准入过滤（按 tag/书架/格式排除），属上游改动。
+#   选项 C：公开面只发榜单、不发全量 catalog（上游改动）。
+#
+# 决定并落实之后，把下面这段 HTTPRoute 取消注释即可重新公开（域名 readlist.
+# 而不是 books./book.——与私有书库 book.meirong.dev 只差一个字母，误配代价太高）。
+# 通配隧道 + external-dns 会自动建 CNAME，不需要改 cloudflare/terraform；
+# ReferenceGrant 也不需要（base/gateway.yaml 已有覆盖本 ns 的通配授权）。
+# ⚠️ external-dns 是 upsert-only：摘掉路由**不会**删 CNAME，
+#    readlist.meirong.dev 的记录仍在（会指到 gateway 然后 404），要清得手工删。
+#
+# apiVersion: gateway.networking.k8s.io/v1
+# kind: HTTPRoute
+# metadata:
+#   name: readlist
+#   namespace: personal-services
+# spec:
+#   parentRefs:
+#     - group: gateway.networking.k8s.io
+#       kind: Gateway
+#       name: oracle-gateway
+#       namespace: kube-system
+#       port: 80
+#   hostnames:
+#     - "readlist.meirong.dev"
+#   rules:
+#     - matches:
+#         - path:
+#             type: PathPrefix
+#             value: /
+#       backendRefs:
+#         - group: ""
+#           kind: Service
+#           name: readlist
+#           port: 8080
+#           weight: 1
 ---
 # ── 快照：唯一接触 calibre 的工作负载 ────────────────────────────────────
 # 秒级短命 Job，**无网络出口**（见下面的 NetworkPolicy）。
