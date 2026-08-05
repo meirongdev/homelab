@@ -35,7 +35,7 @@
 | system-reserved | 200m / 2560Mi |
 | eviction-hard | memory.available<500Mi |
 | **allocatable** | **1800m / ~8925Mi** |
-| CPU requests 合计 | ~1290m（71%），CronJob 峰值另计 ~200m |
+| CPU requests 合计 | **1372m（76%）**，CronJob 峰值另计 ~200m |
 | 内存 requests 合计 | ~5800Mi（65%） |
 | 内存实际峰值（pod 部分） | ~6.0GiB |
 
@@ -43,9 +43,9 @@
 
 | # | 改什么 | 在哪 | 怎么生效 |
 |---|--------|------|---------|
-| 1 | CPU requests 2712m → ~1290m（43 处） | `cloud/oracle/manifests/**`、`k8s/helm/values/{loki,tempo,falco,cnpg-operator,opencost-oracle,trivy-operator-oracle}.yaml` | `git push` → ArgoCD |
+| 1 | CPU requests 2712m → **1372m**（43 处） | `cloud/oracle/manifests/**`、`k8s/helm/values/{loki,tempo,falco,cnpg-operator,opencost-oracle,trivy-operator-oracle}.yaml` | `git push` → ArgoCD |
 | 2 | argocd-server 50→25m、argocd-redis 25→15m | `k8s/helm/values/argocd.yaml` | **`cd k8s/helm && just deploy-argocd`**（manual-helm，push 不生效） |
-| 3 | `meirong-bulk`(-10) PriorityClass + 10 个可牺牲应用挂上 | `cloud/oracle/manifests/base/priorityclasses.yaml` 等 | `git push` → ArgoCD |
+| 3 | `meirong-bulk`(-10) PriorityClass + 9 个可牺牲应用挂上 | `cloud/oracle/manifests/base/priorityclasses.yaml` 等 | `git push` → ArgoCD |
 | 4 | LimitRange `defaultRequest.cpu` 50m→15m | `cloud/oracle/manifests/personal-services/personal-services-limits.yaml` | `git push`（**要重建 timeslot pod 才吃到新默认值**） |
 | 5 | 清 hugepages + 配 `system-reserved`/`eviction-hard` | `cloud/oracle/ansible/playbooks/setup-k3s.yaml` | 见下面步骤 2 |
 
@@ -75,7 +75,7 @@ cd k8s/helm && just deploy-argocd           # 前置改动 2（manual-helm）
 
 ```bash
 kubectl --context oracle-k3s describe node oracle-k3s | sed -n '/Allocated resources/,/Events/p'
-# 期望：cpu requests ≈ 1290m。此时仍是 4 OCPU，所以显示的百分比是 /4000m。
+# 期望：cpu requests ≈ 1372m。此时仍是 4 OCPU，所以显示的百分比是 /4000m（34%）。
 ```
 
 **这一步不过就不要往下走**——shape 改完再发现 requests 没降，节点已经在 Pending 了。
@@ -168,7 +168,7 @@ kubectl $CTX get pods -A --field-selector=status.phase=Pending
 
 # ③ requests 占比
 kubectl $CTX describe node oracle-k3s | sed -n '/Allocated resources/,/Events/p'
-#    期望 cpu ≈ 1290m (72%)、memory ≈ 5800Mi (65%)
+#    期望 cpu ≈ 1372m (76%)、memory ≈ 5800Mi (65%)
 
 # ④ 优先级真的挂上了
 kubectl $CTX get pods -A -o custom-columns=P:.spec.priority,NS:.metadata.namespace,N:.metadata.name \
@@ -208,6 +208,56 @@ reconcile，撞上只剩 2 核。表现是 app 短暂 `Unknown`/`Progressing`、
 
 **别指望把负载挪去 homelab**：那台是 13.5GiB 可见内存的笔记本 VM，7d 最低可用
 只有 3.31G。缩容的余量只能从 oracle 自己身上找。
+
+### 步骤 1 实际踩到的：loki-gateway 滚动更新死锁（已修，但机制要懂）
+
+改 gateway 的 requests 触发滚动更新后，新副本**永久 Pending 25 分钟**，无自愈迹象。
+三层原因，逐个都会单独咬人：
+
+1. **单节点 + 硬性 anti-affinity + replicas=1 = 结构性死锁。**
+   chart 默认给 gateway 配 `requiredDuringSchedulingIgnoredDuringExecution`
+   （`topologyKey: kubernetes.io/hostname`），为多节点 HA 设计。replicas=1 时
+   `maxUnavailable` 25% 向下取整为 **0** → 旧 pod 不许先走；`maxSurge` 起的新 pod
+   又撞旧 pod 的 anti-affinity → 不可调度。两边互等。
+   修复：`k8s/helm/values/loki.yaml` 的 `gateway.affinity: null`。
+
+2. **`affinity: {}` 不生效，必须写 `null`。** 模板是 `{{- with .Values.gateway.affinity }}`，
+   直觉上 `{}` 是假值该跳过；但 Helm 合并 values 时**空 map 不覆盖非空的 chart 默认值**
+   （`coalesceTables` 既定行为）。第一次修就写成 `{}`，结果 ArgoCD 报 **Synced**、
+   revision 也对、渲染结果一字未变、pod 继续 Pending。
+   > ⚠️ **"Synced" 只保证 live == 渲染结果，不保证渲染结果 == 你的意图。**
+   > 这类 nested map 覆盖推之前先本地核对：
+   > `helm template loki grafana/loki --version <v> -f k8s/helm/values/loki.yaml`
+
+3. **改掉 affinity 是必要不充分——pod anti-affinity 是对称的。** 新 pod 自己没规则了，
+   但**还在跑的旧 pod 带着规则**，禁止同节点再来一个 gateway。报错措辞会从
+   `didn't match pod anti-affinity rules` 变成 `didn't satisfy **existing pods**
+   anti-affinity rules`（这个词的变化就是判据）。而 Deployment 控制器又不肯把旧 RS
+   缩到 0（`maxUnavailable`=0）。只能人工打破一次：
+
+   ```bash
+   # 删 pod 没用 —— 旧 RS 仍是 replicas=1，会按旧模板再建一个
+   kubectl --context oracle-k3s -n monitoring delete rs <旧 RS 名> <中间那个 RS 名>
+   ```
+
+   删掉过期 ReplicaSet 后新 pod 立刻调度成功。**配置修好之后**这一步只需做一次，
+   后续滚动更新不会再死锁。
+
+**同类风险已扫过**：两集群里另一个带硬性 anti-affinity 的 Deployment 是
+`cilium-operator`，但它 `maxUnavailable: 100%`（Cilium chart 刻意设的，旧 pod 先走），
+无此问题。扫法：
+
+```bash
+kubectl get deploy -A -o json | jq -r '.items[]
+  | select(.spec.template.spec.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution)
+  | "\(.metadata.namespace)/\(.metadata.name) replicas=\(.spec.replicas) \(.spec.strategy.rollingUpdate)"'
+```
+
+### 为什么实测 1372m 比预估的 1287m 多 100m
+
+`cilium` 的 **initContainer 要 100m**，而 `cilium-agent` 本身没写 requests。调度器算
+pod 有效 request 用 `max(sum(常规容器), max(initContainer))` → 这个 pod 记 100m，
+而按容器求和的口径会算成 0。**核对 requests 账目要用 `describe node`，别自己 sum 容器。**
 
 ## 相关
 
