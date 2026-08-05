@@ -1,0 +1,153 @@
+---
+# readlist alerting — the "site returns 200 but the data is a month old" class of failure.
+#
+# Why this file exists: readlist is a **nightly-pipeline** service. Its three CronJobs
+# (snapshot 01:05 → ingest 01:20 → score 01:40) can all stop working while the web pod
+# keeps serving HTTP 200 from the last published run, forever. Probes pass, Uptime Kuma is
+# green, the homepage tile is green — and the rankings quietly rot. Uptime monitoring
+# cannot see this by construction; only these metrics can.
+#
+# Same lesson as clustermesh-alerts.yaml (2026-08-05): losing a capability silently is bad,
+# being unable to date the loss afterwards is worse.
+#
+# Metrics come from the readlist web pod's /metrics on oracle-k3s, scraped by that
+# cluster's OTel Collector (`prometheus/readlist` receiver in
+# cloud/oracle/manifests/monitoring/otel-collector-config.yaml) and remote-written to the
+# homelab Prometheus with cluster="oracle-k3s" — same path as opencost/trivy/clustermesh.
+# There is no Prometheus Operator on oracle-k3s, so no ServiceMonitor.
+#
+# ⚠️ **These rules use only the 5 metric families that image v0.1.0 actually emits**
+# (verified 2026-08-05 by curling the running pod, not by reading source):
+#     readlist_works_total · readlist_lists_total · readlist_runs_retained
+#     readlist_last_score_unix · readlist_grade_counts{grade}
+#   The readlist working tree has a richer set on the way — `readlist_last_snapshot_unix`,
+#   `readlist_last_ingest_unix`, `readlist_orphan_rows`, `readlist_dim_measured{dim}`,
+#   `readlist_pubdate_source{source}` — but they are **uncommitted upstream** and are NOT
+#   in v0.1.0. Two rules that would be much better than what is possible today are
+#   therefore deliberately absent; see "WHEN THE NEXT IMAGE SHIPS" at the bottom.
+#   Do not add rules for those series before confirming the deployed image emits them —
+#   a rule on a non-existent series never fires and looks identical to "all healthy".
+#
+# ⚠️ The freshness metric reads the **run table**, not the CronJob's exit status. That is
+# deliberate and stronger: a Job that "succeeded" but wrote nothing still shows as stale.
+# Do not replace it with kube_job_* rules.
+#
+# All `warning`: a public but non-critical personal site — stale rankings are not an
+# outage. The `release` label is REQUIRED for the kube-prometheus-stack ruleSelector.
+#
+# Deployed via the ArgoCD `monitoring-dashboards` Application (git push → 3-min sync).
+# Runbook for every alert below: docs/runbooks/readlist-bootstrap.md
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: readlist-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: readlist
+      rules:
+        # (1) Rankings are stale. THE alert for this service — per the upstream spec
+        # (FR-60) this is the only signal separating "fine" from "silently frozen".
+        # 36h tolerates one missed night (transient 429/OOM retries next night) and fires
+        # on two consecutive misses. A value of 0 = never scored, which also fires — right.
+        #
+        # ⚠️ This does NOT cover a stale *corpus*: `score` will happily re-score a
+        # month-old snapshot every night and keep this metric fresh. Catching that needs
+        # readlist_last_snapshot_unix, which v0.1.0 does not emit. Known gap, see bottom.
+        - alert: ReadlistScoreStale
+          expr: time() - readlist_last_score_unix > 129600
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "readlist: 榜单已 >36h 未重算（站点仍返回 200）"
+            description: >-
+              readlist_last_score_unix 距今 >36h（0 = 从未成功打分）。公开站会继续用
+              最后一次发布的 run 正常服务，探针与 Uptime Kuma 全绿，但榜单不再更新。
+              查 `kubectl --context oracle-k3s -n personal-services get cronjob
+              readlist-score` 与最近一个 Job 的日志。引导/重建见
+              docs/runbooks/readlist-bootstrap.md。
+
+        # (2) Published an EMPTY library. Exactly the failure §4.1 of the upstream deploy
+        # doc warns about: on an empty DB, init/serve self-heals by publishing a 0-book
+        # run — nothing crashes, everything returns 200, the site is just blank. Also
+        # covers "readlist-data was recreated and lost its contents".
+        - alert: ReadlistPublishedEmptyLibrary
+          expr: readlist_works_total == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "readlist: 已发布的 run 里有 0 本书 —— 站点是空的"
+            description: >-
+              readlist_works_total == 0。空库上 init/serve 会自愈发布一个 0 本书的 run，
+              不崩、全部 200，但站点没有内容。最可能是 readlist-data 被重建或清空。
+              按 docs/runbooks/readlist-bootstrap.md 重新引导，别等次日凌晨。
+
+        # (3) Nothing external has EVER landed — the only ingest-health signal available
+        # from v0.1.0's metric set. Grade D means "no external evidence"; if literally
+        # every work is D for 3 days straight, ingest has contributed nothing at all
+        # (no Google Books key, quota wall, egress blocked, or the Job never running).
+        #
+        # Deliberately `== works_total` (all of them) rather than a ratio: ~1,000–1,300
+        # books in this library have neither ISBN nor google id and are **intentionally
+        # skipped** upstream, so a high-but-not-total D share is normal and a ratio
+        # threshold would be guesswork. Total D is unambiguous.
+        # 3d because the first full ingest legitimately spans 2 nights (INGEST_BUDGET=800
+        # per run vs 1,000–1,500 requests needed).
+        - alert: ReadlistNoExternalEvidence
+          expr: readlist_grade_counts{grade="D"} >= readlist_works_total
+          for: 3d
+          labels:
+            severity: warning
+          annotations:
+            summary: "readlist: 全部 works 仍是 D 级 —— ingest 三天没产出任何外部证据"
+            description: >-
+              每一本书的证据等级都是 D（无外部证据）已持续 3 天，说明 ingest 完全没有
+              产出：GOOGLE_BOOKS_KEY 失效/未注入、配额撞墙、出网被拦，或 Job 根本没跑。
+              后果是 A 维(读者评分)与 F 维(时效)全空，依赖它们的榜单静默为空。
+              先看 `kubectl --context oracle-k3s -n personal-services logs
+              job/<最近的 readlist-ingest-*>`，再核对 Secret readlist-secrets。
+              注意：D 占比高本身是正常的（约 1,000–1,300 本无 ISBN 也无 google id，
+              上游刻意跳过）——只有**全部**为 D 才异常。
+
+        # (4) The blind spot itself — no readlist metrics arriving at all. Without this,
+        # rules 1-3 go silent exactly when things are most broken (pod gone, scrape
+        # misconfigured, oracle→homelab remote-write down). 30m so it does not flap on a
+        # Recreate rollout or an OTel Collector restart.
+        - alert: ReadlistMetricsAbsent
+          expr: absent(readlist_works_total{cluster="oracle-k3s"})
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "readlist: 指标完全没上来 —— 上面 3 条告警此刻是瞎的"
+            description: >-
+              readlist_works_total{cluster="oracle-k3s"} 缺失 >30m。可能是 web pod 挂了、
+              OTel Collector 的 prometheus/readlist 抓取坏了，或 oracle→homelab 的
+              remote-write 断了。先看 `kubectl --context oracle-k3s -n personal-services
+              get pods -l app=readlist`，再看 monitoring ns 里 otel-collector 的日志。
+
+# ── WHEN THE NEXT IMAGE SHIPS ────────────────────────────────────────────────
+# The readlist working tree already implements the metrics below. Once an image that emits
+# them is deployed (confirm with `curl <pod>:8080/metrics | grep readlist_`), add:
+#
+#   ReadlistSnapshotStale     time() - readlist_last_snapshot_unix > 129600
+#     Catches a stale CORPUS while scoring still succeeds nightly — i.e. the snapshot Job
+#     losing access to the calibre volumes (books PVC detached, metadata.db remounted
+#     read-only → "attempt to write a readonly database", since WAL reads write -shm).
+#     Rule (1) provably cannot catch this. This is the most valuable missing rule.
+#
+#   ReadlistOrphanRowsHigh    readlist_orphan_rows > 10
+#     calibre book id drift: reading-status rows that no longer join to a work, which
+#     silently distorts to-read-next / read-and-loved. Baseline measured 2026-08-05 was
+#     **3** orphans out of 63 reading rows, so >10 is a meaningful step change — but
+#     re-check the baseline before trusting the threshold.
+#
+#   ReadlistPubdateFallbackRising   readlist_pubdate_source{source="mtime-fallback"}
+#     The PRD §5 guardrail metric (should trend to 0). Measured 2026-08-05: 37 mtime
+#     fallback + 5 missing/placeholder — far below the 477 the upstream data-baseline doc
+#     still claims, because the calibre-metadata enrich runs have since repaired most of
+#     them. Set the threshold from fresh data, not from that doc.
