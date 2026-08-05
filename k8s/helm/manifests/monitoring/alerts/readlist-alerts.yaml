@@ -97,8 +97,14 @@ spec:
         # threshold would be guesswork. Total D is unambiguous.
         # 3d because the first full ingest legitimately spans 2 nights (INGEST_BUDGET=800
         # per run vs 1,000–1,500 requests needed).
+        # ⚠️ `ignoring(grade)` 是**必须的**，不是风格问题：`readlist_grade_counts` 带
+        # `grade` 标签而 `readlist_works_total` 不带，默认的 vector matching 要求两边
+        # 标签集完全一致 → 不加就永远匹配不上、**永远返回空、永远不触发**，
+        # 而那看起来和"一切正常"一模一样。2026-08-05 实测确认：
+        #   `D <= works_total`          → 0 results（假的"没问题"）
+        #   `D <= ignoring(grade) works` → 1 result（真的比较）
         - alert: ReadlistNoExternalEvidence
-          expr: readlist_grade_counts{grade="D"} >= readlist_works_total
+          expr: readlist_grade_counts{grade="D"} >= ignoring(grade) readlist_works_total
           for: 3d
           labels:
             severity: warning
