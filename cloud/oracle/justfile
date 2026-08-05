@@ -213,6 +213,14 @@ deploy-cloudflare-connector:
 verify-node:
     bash ../../scripts/verify-oracle-node.sh
 
+# 漂移检测：live 节点 vs ansible 里固化的状态。**只读**（--check 从不改机器）。
+# `changed=0` = 无漂移。任何一条 changed 都是真漂移 —— 2026-08-05 把两个结构性
+# 假阳性清掉了（firewalld reload 改成 handler；两条永远无法收敛的 FORWARD 规则删除，
+# 因为 Cilium 会重建 FORWARD 链把它们丢掉），所以这个信号现在可信。
+# 与 verify-node 互补：这个查「配置有没有漂移」，那个查「结果对不对」。
+check-node-drift:
+    cd ansible && ansible-playbook --check --diff playbooks/setup-k3s.yaml
+
 # Show cluster status
 status:
     @echo "=== Pods ==="
