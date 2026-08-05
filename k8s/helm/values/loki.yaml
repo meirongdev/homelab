@@ -124,7 +124,15 @@ gateway:
   # match pod anti-affinity rules"，卡了 5 分钟没有自愈迹象）。
   # 置空而不是改 strategy: Recreate —— 后者在 live Deployment 上会报
   # "rollingUpdate: Forbidden"，得额外加 Replace=true sync-option。
-  affinity: {}
+  #
+  # ⚠️⚠️ 必须写 `null`，写 `{}` **不生效**。模板是 `{{- with .Values.gateway.affinity }}`，
+  # 看着 `{}` 是假值就该跳过，但 Helm 合并 values 时**空 map 不覆盖非空的 chart 默认值**
+  # （coalesceTables 的既定行为），`.Values.gateway.affinity` 拿到的仍是 chart 那份
+  # 硬编码 anti-affinity。只有显式 `null` 才会删掉这个键。
+  # 2026-08-05 先写了 `{}`，ArgoCD 报 Synced、渲染结果一字未变、pod 继续 Pending ——
+  # **"Synced" 只保证 live == 渲染结果，不保证渲染结果 == 你的意图**。
+  # 改这类 nested map 覆盖后一定先 `helm template ... -f values/loki.yaml` 本地渲染核对。
+  affinity: null
 
 # 明确禁用分布式组件（重要！）
 ingester:
