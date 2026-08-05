@@ -1,6 +1,6 @@
 # jobs-sg — 新加坡 SWE 岗位趋势周报（架构事实）
 
-> Last updated: 2026-08-03
+> Last updated: 2026-08-05
 > Status: 生效事实
 > Scope: jobs-sg 在 homelab 集群的部署形态、镜像固定方式、备份口径、首次上线依赖顺序
 > —— source of truth。应用代码在 [meirongdev/jobs-sg](https://github.com/meirongdev/jobs-sg)。
@@ -173,7 +173,8 @@ baseline 归档是**单个文件**、88,258 条、解压 402MB，平均记录在
 （`if err != nil { return 0,0,1 }`，没有任何日志），所以归档不可读时表现为
 CPU 满载、无日志、无进度 —— 和「慢」完全无法区分。现在两层都会计数并告警式记日志。
 
-另一个误导信号：`jobs_sg_enrich_backlog` 只统计缺 `source='llm'` 的岗位，
+另一个误导信号：`jobs_sg_enrich_backlog` 统计的是 LLM 层**尚未处理**的岗位
+（缺 `source='llm'` 行**且**缺 `enrich_done` 标记，上游 ff5e24e 起），
 所以**整个规则层阶段它一动不动**，看着像完全卡住。判断进度要看
 `job_tech` 的 `source='llm'` 行数或 `enrich_cache`，别只看这个指标。
 
@@ -320,6 +321,32 @@ homelab（2026-08-02 只迁了 ArgoCD/Loki/Tempo 去 oracle），故监控对象
 
 最重要的告警是 `JobsSgIngestStale`（增量停滞 >36h）：这类应用**静默失效比崩溃更危险**
 —— 上线前实测发现的两个 bug 都属此类（见下）。
+
+## 已修复：/daily 天天 partial 的两个根因（2026-08-05，上游 ff5e24e）
+
+上线后头三天（08-03~05）`/daily` 日状态全是 `partial`、`llm_cached` 每晚恒 ≈1.4k。
+两个独立 bug，都是**静默失效**型（fixture 与实现错得一致，CI 全绿）：
+
+1. **增量早停是死代码**：MCF 的 `newPostingDate` 是纯日期 `"2026-08-03"`，
+   而 watermark 与逐条停止条件都按 RFC3339 解析 → 双双静默失败 → 每晚扫满
+   300 页熔断（`ErrCircuitOpen`）→ `errors=1` + `partial`。
+   修复：`mcf.ParsePostingDate`（纯日期优先、RFC3339 回退）。
+   **实测**：修复后增量 **130 页 / 6m48s / success**（修复前 300 页 / 8m46s / partial）。
+2. **零命中岗位永留积压**：LLM 结果全落 `unmapped_tech` 的岗位不写任何
+   `job_tech` 行 → 永远在 backlog 里、每晚被 `enrich_cache` 重放
+   （`llm_cached ≈ backlog` 是这个 bug 的指纹）。
+   修复：新表 `enrich_done`（Migrate 幂等建），`writeTech` 同事务恒写；
+   积压口径改为双 NOT EXISTS，存量免回填。
+   **实测**：部署后首个 enrich run **53s / cached=1425 / calls=0**，
+   `jobs_sg_enrich_backlog` 1425 → **0**。
+
+**数据零丢失**：300 页窗口实际回溯约 8 天（MCF 日新帖仅 ~5k，周末 ~1.4k），
+新帖按 `sortBy=new_posting_date` 永远在前几十页；加上 08-03 baseline 全量，
+头三天每条岗位都归档过（多数重复多次）。
+
+⚠️ 两条不自愈的残留：**历史三天的 partial 不追溯变绿**（run 状态是当时事实）；
+08-03 下钻页有几条回填实验被 kill 留下的孤儿 `running` 行（只写了 StartRun），
+无害，介意的话手工 UPDATE。
 
 ## 上线前实测发现的两个应用 bug（2026-08-03，已修）
 
