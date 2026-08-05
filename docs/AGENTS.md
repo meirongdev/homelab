@@ -94,7 +94,7 @@ homelab/
 - **SSH**: 全舰队用 key `~/.ssh/vgio`。
 - **新增服务**: 走 skill `.claude/skills/add-service/SKILL.md`（manifest → HTTPRoute →
   homepage → Uptime Kuma monitor 全流程）。默认仍落 **oracle-k3s**，但 ⚠️ **它不再"容量
-  宽裕"**——2026-08-05 缩到 **2 OCPU / 12GB**，CPU requests 已占 allocatable ~72%、
+  宽裕"**——2026-08-05 缩到 **2 OCPU / 12GB**，CPU requests 已占 allocatable ~76%（实测 1372m/1800m）、
   内存峰值 ~70%。新服务的 requests 要按实测填（CPU 多数应用 10–25m 足够），非核心的
   挂 `priorityClassName: meirong-bulk`；⚠️ arm64，先确认镜像有 `linux/arm64`；
   跨 ns 引用要 ReferenceGrant（**`v1beta1`**）；PVC 一律 `local-path`；oracle 服务的
