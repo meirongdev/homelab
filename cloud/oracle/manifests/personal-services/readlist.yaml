@@ -1,0 +1,403 @@
+# readlist —— 技术书多维评分 + 公开书单站（单 Go 二进制:只读 API + 内嵌 SPA + SQLite/WAL）
+#
+# 需求/评分标准/源码的真相源在 meirongdev/readlist；**部署清单的真相源是本文件**。
+# 上游 `deploy/oracle/readlist.yaml` 只是参照件，抄过来时按本集群实际改了 4 处，
+# 每一处都别改回去：
+#   1. Gateway 是 `oracle-gateway`/ns `kube-system`/port 80 —— 参照件写的
+#      `cilium-gateway`/ns `gateway` 在本集群**不存在**，照抄会得到 ResolvedRefs=False；
+#   2. 登记进 `cloud/oracle/manifests/kustomization.yaml`（**根**那一份）——
+#      参照件说的 `personal-services/kustomization.yaml` 在本仓库不存在；
+#   3. requests 按本集群实测下调（见下方各容器注释）—— 2026-08-05 缩到 2 OCPU 后
+#      节点只有 1800m 可分配，实测已占 1372m(76%)，参照件的 50m/100m 太阔；
+#   4. 补回 `readlist init` initContainer —— 参照件把它丢了，见 Deployment 处注释。
+#
+# ns `personal-services` 由 uptime-kuma/namespace.yaml 创建，这里不建（H1）。
+# ReferenceGrant 不需要：base/gateway.yaml 的 allow-gateway-to-personal-services 已覆盖本 ns。
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: readlist-config
+  namespace: personal-services
+data:
+  DB_PATH: /data/readlist.db
+  API_LISTEN_ADDR: ":8080"
+  STANDARD_VERSION: "1.0"
+  # 保留的历史 run 数(回滚窗口)。每夜一个 run ≈ 1.5 万行，不回收会写满 PVC。
+  KEEP_RUNS: "5"
+  # 阅读轨迹公开（2026-08-05 确认）：「下一本读什么」= 高分 ∩ 未读 是本站最有用的榜，
+  # 它需要这个。改 "false" 即刻转私有，to-read-next / read-and-loved 两榜随之为空。
+  EXPOSE_READ_STATUS: "true"
+  # snapshot 的输入：calibre 的两个源库（只有 snapshot CronJob 挂这两个卷）。
+  SOURCE_METADATA_DB: /library-src/metadata.db
+  SOURCE_APP_DB: /config-src/app.db
+  SNAPSHOT_DIR: /data/snapshot
+  # calibre-web app.db 里的用户 id。首次 snapshot 必须核对它报出的 reading 行数——
+  # id 填错的表现不是报错，而是**静默 0 行**（阅读状态本就只覆盖 23 本，很容易看漏）。
+  CALIBRE_USER_ID: "1"
+  # ingest 每次运行的外部请求预算。打满就干净停下，次日接着跑（NFR-9）。
+  # 首轮全量约需 1,000–1,500 次请求 → 分 2 晚跑完。
+  INGEST_BUDGET: "800"
+---
+# Google Books API key。⚠️ 不是可选的锦上添花：实测 2026-08-05 匿名配额按**共享项目**计，
+# 一次探测请求就直接 429 → A 维(读者评分)与 F 维(时效)基本拿不到数据，而 ingest 拿到的
+# publishedDate 又是**修 pubdate 污染的唯一来源**（snapshot 那三种来源一律记 unknown）。
+# Vault: secret/oracle-k3s/readlist，key GOOGLE_BOOKS_KEY（2026-08-05 已写入）。
+#   kubectl --context k3s-homelab exec -n vault vault-0 -- \
+#     sh -c 'VAULT_TOKEN=<root> vault kv put secret/oracle-k3s/readlist GOOGLE_BOOKS_KEY=xxx'
+#   ⚠️ `VAULT_TOKEN=$VAULT_TOKEN` 那种写法在本集群 403（pod 内该变量是空的），要用 root token。
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: readlist-secrets
+  namespace: personal-services
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: readlist-secrets
+    creationPolicy: Owner
+  data:
+    - secretKey: google-books-key
+      remoteRef:
+        key: oracle-k3s/readlist
+        property: GOOGLE_BOOKS_KEY
+---
+# SQLite 落节点本地盘（local-path，单节点无冗余）；Prune=false 护栏防 ArgoCD 误删。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: readlist-data
+  namespace: personal-services
+  labels:
+    # 备份归属。⚠️ 这个 label 只是标记，**真正生效的是**
+    # backup/overlays/oracle/backup-script.yaml 里 `for pat in ...` 那份显式白名单
+    # （已加 readlist-data）。CI 规则 H4 卡的是白名单，不是这个 label。
+    backup.homelab/sqlite: "true"
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      # 卷上有不可再生数据：evidence（重建要烧 2–3 天 Google Books 配额）、
+      # publisher_map、overrides、title_whitelist —— 人工投入或昂贵缓存，丢了要重来。
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: readlist
+  namespace: personal-services
+  labels:
+    app: readlist
+spec:
+  replicas: 1
+  # SQLite 单写锁：滚动更新会让新旧 pod 抢同一个 db 文件的写锁（同 trends）。
+  # rollingUpdate: null 是防 ArgoCD OutOfSync 漂移，别删。
+  strategy:
+    type: Recreate
+    rollingUpdate: null
+  selector:
+    matchLabels:
+      app: readlist
+  template:
+    metadata:
+      labels:
+        app: readlist
+        readlist.role: web
+    spec:
+      priorityClassName: meirong-bulk
+      securityContext:
+        # distroless nonroot 的 uid/gid；让进程对 local-path 卷可写。
+        fsGroup: 65532
+      initContainers:
+        # 建库 + 保证有一份**可服务的**榜单。上游参照件把这个 initContainer 丢了，
+        # 这里补回来 —— 它是 kind 端到端实际验过的形状，且是幂等的（已发布过 run 就
+        # 跳过打分，不会每次重启都换 run_id 把 matrix 的 immutable 缓存打空）。
+        # 少了它，pod 在空库上重启只能靠 serve 自愈发布一个 0 本书的 run。
+        - name: init-data
+          image: ghcr.io/meirongdev/readlist:v0.1.0
+          command: ["readlist", "init"]
+          envFrom:
+            - configMapRef:
+                name: readlist-config
+          resources:
+            requests:
+              cpu: 15m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      containers:
+        - name: readlist
+          # 版本化 tag（多架构 index digest sha256:63c8b612…d12e4a8c2，含 linux/arm64——
+          # 本集群是 ARM，2026-08-05 核对过 registry 确有 arm64 变体）。
+          # 用不可变 tag 而非 `:main`，所以**不需要** imagePullPolicy: Always。
+          image: ghcr.io/meirongdev/readlist:v0.1.0
+          command: ["readlist", "serve"]
+          envFrom:
+            - configMapRef:
+                name: readlist-config
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              # 15m 与 trends 同口径（同样是 Go + SQLite + 内嵌 SPA 的只读站）。
+              # 参照件写 50m —— 节点只剩约 428m 可分配，不值当。
+              cpu: 15m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            # readOnlyRootFilesystem 下 SQLite 仍可能要落临时文件（排序/VACUUM 的
+            # temp b-tree）。kind 的清单没开只读根，等于**这条路径没被验过**，
+            # 给个 emptyDir 兜住，成本为零。
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        # ⚠️ Web pod **永不挂 calibre 的任何卷**。公开应用的任何 bug 都碰不到书库，
+        # 也碰不到 app.db 里的密码 hash / OIDC 凭据（blast radius 论证见上游 architecture §2）。
+        - name: data
+          persistentVolumeClaim:
+            claimName: readlist-data
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: readlist
+  namespace: personal-services
+spec:
+  type: ClusterIP
+  selector:
+    app: readlist
+  ports:
+    - port: 8080
+      targetPort: http
+      name: http
+---
+# ── 快照：唯一接触 calibre 的工作负载 ────────────────────────────────────
+# 秒级短命 Job，**无网络出口**（见下面的 NetworkPolicy）。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: readlist-snapshot
+  namespace: personal-services
+spec:
+  schedule: "5 1 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: readlist
+            readlist.role: snapshot
+        spec:
+          restartPolicy: OnFailure
+          priorityClassName: meirong-bulk
+          securityContext:
+            fsGroup: 65532
+          containers:
+            - name: snapshot
+              image: ghcr.io/meirongdev/readlist:v0.1.0
+              command: ["readlist", "snapshot"]
+              envFrom:
+                - configMapRef:
+                    name: readlist-config
+              resources:
+                requests:
+                  cpu: 25m
+                  memory: 64Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+                - name: library
+                  mountPath: /library-src
+                - name: config
+                  mountPath: /config-src
+                  readOnly: true
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: readlist-data
+            # RWO 在单节点上可被多 pod 挂载 —— RWO 是**节点级**语义，
+            # calibre-web / open-notebook-ingest 已有同样论证。
+            # metadata.db 是 WAL，**必须 RW 挂载**：WAL 的读路径也要写 -shm，
+            # 只读挂载会得到 "attempt to write a readonly database"。
+            # readlist 只做 VACUUM INTO，不改书目。
+            - name: library
+              persistentVolumeClaim:
+                claimName: calibre-books-local
+            # ☠️ app.db 含密码 hash / 会话 / OIDC 凭据 → 只读挂载，且 readlist 只导出
+            # 3 张表的少数几列（有测试断言凭据不出现在产物里）。绝不整库快照。
+            - name: config
+              persistentVolumeClaim:
+                claimName: calibre-web-automated-config-local
+---
+# 能碰书库的容器，连不出去。这是标准 networking.k8s.io NetworkPolicy——
+# 本集群没有自建 CiliumNetworkPolicy，但 Cilium 会正常执行标准 NetworkPolicy。
+# ⚠️ 空 egress = 全部拒绝，**含 DNS**。snapshot 只读本地文件，不需要解析任何域名。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: readlist-snapshot-no-egress
+  namespace: personal-services
+spec:
+  podSelector:
+    matchLabels:
+      readlist.role: snapshot
+  policyTypes: ["Egress"]
+  egress: []
+---
+# ── 摄入外部证据：唯一需要出网的工作负载 ─────────────────────────────────
+# 与 snapshot 分开，正是为了让「碰书库」和「能出网」永不出现在同一个 pod 里。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: readlist-ingest
+  namespace: personal-services
+spec:
+  schedule: "20 1 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 1 # 配额受限，失败别急着重试
+      template:
+        metadata:
+          labels:
+            app: readlist
+            readlist.role: ingest
+        spec:
+          restartPolicy: OnFailure
+          priorityClassName: meirong-bulk
+          securityContext:
+            fsGroup: 65532
+          containers:
+            - name: ingest
+              image: ghcr.io/meirongdev/readlist:v0.1.0
+              command: ["readlist", "ingest"]
+              envFrom:
+                - configMapRef:
+                    name: readlist-config
+              env:
+                # optional: true 是刻意的 —— ESO 挂了的话 ingest 应该降级跑
+                # （OpenLibrary + HN 仍可用），而不是起不来。
+                - name: GOOGLE_BOOKS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: readlist-secrets
+                      key: google-books-key
+                      optional: true
+              resources:
+                requests:
+                  # 网络 IO 为主 + 礼貌限速，不吃 CPU。
+                  cpu: 25m
+                  memory: 64Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: readlist-data
+---
+# ── 重算评分：纯离线（score 禁止发起网络请求，上游 system-design §9）─────────
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: readlist-score
+  namespace: personal-services
+spec:
+  schedule: "40 1 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: readlist
+            readlist.role: score
+        spec:
+          restartPolicy: OnFailure
+          priorityClassName: meirong-bulk
+          securityContext:
+            fsGroup: 65532
+          containers:
+            - name: score
+              image: ghcr.io/meirongdev/readlist:v0.1.0
+              command: ["readlist", "score"]
+              envFrom:
+                - configMapRef:
+                    name: readlist-config
+              resources:
+                requests:
+                  # 三个 Job 里最重的一个（2,054 本 × 7 维），但仍是秒到分钟级。
+                  cpu: 50m
+                  memory: 96Mi
+                limits:
+                  cpu: 1
+                  memory: 384Mi
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: readlist-data
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: readlist-score-no-egress
+  namespace: personal-services
+spec:
+  podSelector:
+    matchLabels:
+      readlist.role: score
+  policyTypes: ["Egress"]
+  egress: []
