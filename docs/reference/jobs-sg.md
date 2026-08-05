@@ -344,9 +344,14 @@ homelab（2026-08-02 只迁了 ArgoCD/Loki/Tempo 去 oracle），故监控对象
 新帖按 `sortBy=new_posting_date` 永远在前几十页；加上 08-03 baseline 全量，
 头三天每条岗位都归档过（多数重复多次）。
 
-⚠️ 两条不自愈的残留：**历史三天的 partial 不追溯变绿**（run 状态是当时事实）；
-08-03 下钻页有几条回填实验被 kill 留下的孤儿 `running` 行（只写了 StartRun），
-无害，介意的话手工 UPDATE。
+⚠️ 一条不自愈的残留：**历史三天（08-03~05）的 partial 不追溯变绿**——run 状态是
+当时事实，日状态取当天最差 run，08-06 起才是第一个可能全绿的行。
+
+08-03 曾另有 4 条回填实验被 kill 留下的孤儿 `running` 行（只写了 StartRun、
+`ended_at` 全 NULL）。2026-08-05 已手工清理：确认集群无活跃 run 后，节点上
+python3 直删 `DELETE FROM ingest_run WHERE status='running' AND ended_at IS NULL`
+（删前备份 `/tmp/jobs.db.bak-20260805`，节点重启即失效，属临时保险非长期备份）。
+若日后再手动 kill enrich/ingest Job，会再产生这类行，同法清理。
 
 ## 上线前实测发现的两个应用 bug（2026-08-03，已修）
 
