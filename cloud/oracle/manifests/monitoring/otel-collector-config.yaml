@@ -194,6 +194,27 @@ receivers:
               labels:
                 cluster: oracle-k3s
 
+  # readlist 数据新鲜度 → homelab Prometheus (cluster=oracle-k3s)。2026-08-05 随上线新增。
+  #
+  # 为什么必须抓：readlist 是**夜间管道**服务，三个 CronJob 全挂掉之后 web pod 仍会用
+  # 最后一次发布的 run 一直返回 200 —— 探针绿、Uptime Kuma 绿、首页绿，榜单却在悄悄
+  # 变旧。这类失效**只有指标能看见**，HTTP 探测在原理上就看不到。
+  # 消费方 k8s/helm/manifests/monitoring/alerts/readlist-alerts.yaml。
+  #
+  # 只有 5 个指标族（v0.1.0 实测），量极小，不需要 metric_relabel_configs 裁剪。
+  # 端口写 8080：readlist 的 Service 是**普通 ClusterIP**（不是 headless），
+  # port 8080 == targetPort 8080，所以不会踩 trivy 那个 80→8080 映射失效的坑。
+  # 300s 足够：数据一天才变一次，抓太密纯属浪费跨 Tailscale 的 remote-write 带宽。
+  prometheus/readlist:
+    config:
+      scrape_configs:
+        - job_name: 'readlist'
+          scrape_interval: 300s
+          static_configs:
+            - targets: ['readlist.personal-services.svc.cluster.local:8080']
+              labels:
+                cluster: oracle-k3s
+
   # kubelet cAdvisor 容器用量 → homelab Prometheus (cluster=oracle-k3s)。
   # 唯一消费者是 KRR（robusta-dev/krr），它只查这两个指标：
   #   container_cpu_usage_seconds_total / container_memory_working_set_bytes
@@ -346,5 +367,9 @@ service:
       exporters: [prometheusremotewrite]
     metrics/cadvisor:
       receivers: [prometheus/cadvisor]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheusremotewrite]
+    metrics/readlist:
+      receivers: [prometheus/readlist]
       processors: [memory_limiter, resource, batch]
       exporters: [prometheusremotewrite]
