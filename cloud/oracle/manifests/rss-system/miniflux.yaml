@@ -71,7 +71,7 @@ spec:
                   key: oauth-client-secret
           resources:
             requests:
-              cpu: 50m
+              cpu: 15m
               memory: 64Mi
             limits:
               cpu: 500m
@@ -150,7 +150,7 @@ spec:
               mountPath: /var/lib/postgresql/data
           resources:
             requests:
-              cpu: 50m
+              cpu: 25m
               memory: 128Mi
             limits:
               cpu: 500m

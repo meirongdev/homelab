@@ -17,3 +17,16 @@ metadata:
 value: 900
 globalDefault: false
 description: "核心网络/编排负载（external-dns/cloudflared）—— 高于普通应用"
+---
+# 2026-08-05 缩容到 2 OCPU / 12GB 时新增。节点内存峰值从占 24GB 的 43% 变成占 12GB 的
+# ~70%，「谁先被驱逐」第一次成为真问题：kubelet 先按 QoS 分档，档内按 **Pod Priority**
+# 排序。此前非关键应用与 zitadel/argocd 一样都是 0，撞上内存压力时谁死纯看用量排名。
+# 负值让这批「个人玩具」在任何有优先级的东西之前出局，且**不会**抢占其它 pod。
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: meirong-bulk
+value: -10
+globalDefault: false
+preemptionPolicy: Never
+description: "可牺牲的个人应用（calibre/stirling/karakeep/browserless 等）—— 内存压力时最先被驱逐"

@@ -34,7 +34,7 @@ spec:
               value: ws://rsshub-browserless:3000
           resources:
             requests:
-              cpu: 100m
+              cpu: 25m
               memory: 256Mi
             limits:
               cpu: 500m
@@ -91,7 +91,7 @@ spec:
               name: redis
           resources:
             requests:
-              cpu: 50m
+              cpu: 15m
               memory: 64Mi
             limits:
               cpu: 200m
@@ -128,6 +128,7 @@ spec:
       labels:
         app: rsshub-browserless
     spec:
+      priorityClassName: meirong-bulk
       containers:
         - name: browserless
           image: browserless/chrome@sha256:57d19e414d9fe4ae9d2ab12ba768c97f38d51246c5b31af55a009205c136012f  # 当前运行 digest 固定（原 :latest）
@@ -139,7 +140,7 @@ spec:
               value: "10"
           resources:
             requests:
-              cpu: 100m
+              cpu: 25m
               memory: 256Mi
             limits:
               cpu: 1000m

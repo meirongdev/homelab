@@ -187,7 +187,7 @@ repoServer:
 server:
   resources:
     requests:
-      cpu: 50m
+      cpu: 25m
       memory: 64Mi
     limits:
       cpu: 250m
@@ -199,7 +199,7 @@ redis:
     tag: 8.6.4-alpine
   resources:
     requests:
-      cpu: 25m
+      cpu: 15m
       memory: 32Mi
     limits:
       cpu: 100m

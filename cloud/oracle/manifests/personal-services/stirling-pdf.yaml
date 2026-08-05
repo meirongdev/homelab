@@ -72,6 +72,7 @@ spec:
       labels:
         app: stirling-pdf
     spec:
+      priorityClassName: meirong-bulk
       containers:
         - name: stirling-pdf
           image: stirlingtools/stirling-pdf@sha256:74c9ad9e280087f0652bfc98c9b5524b03ea5c138050406d2e3936f9cd60906f
@@ -127,7 +128,7 @@ spec:
               mountPath: /configs
           resources:
             requests:
-              cpu: 100m
+              cpu: 25m
               memory: 256Mi
             limits:
               cpu: 1000m

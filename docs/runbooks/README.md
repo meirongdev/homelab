@@ -14,6 +14,7 @@
 | [oracle-k3s-rebuild.md](oracle-k3s-rebuild.md) | oracle-k3s 节点不可恢复时重建（OCI 终止/OS 损坏）；含数据盘点、ArgoCD 控制面重装、ClusterMesh 重连 |
 | [argocd-control-plane-on-oracle.md](argocd-control-plane-on-oracle.md) | 重装/升级 ArgoCD、集群凭据过期、回滚控制面、`argocd.meirong.dev` 跨集群搬家 |
 | [stateful-service-cross-cluster-migration.md](stateful-service-cross-cluster-migration.md) | 把带 PVC 的服务在 homelab ↔ oracle 之间搬家（两遍 rsync、域名两步切换、退役与残余清扫） |
+| [oracle-k3s-shape-downsize.md](oracle-k3s-shape-downsize.md) | 改 A1 shape（`ocpus`/`memory_gb`）；含 requests 右尺寸前置、hugepages 回收、system-reserved、停机面与验证 |
 
 > 故障复盘见 [records/](../records/README.md)；非基础设施的工具流程见 [guides/](../guides/README.md)
 > （`hermes-agent.md` 于 2026-07-31 按此规则迁去 guides/）。

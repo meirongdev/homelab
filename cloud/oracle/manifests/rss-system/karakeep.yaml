@@ -57,6 +57,7 @@ spec:
       labels:
         app: karakeep
     spec:
+      priorityClassName: meirong-bulk
       containers:
         # KaraKeep Web 应用
         - name: karakeep
@@ -112,7 +113,7 @@ spec:
                   key: oauth-client-secret
           resources:
             requests:
-              cpu: 100m
+              cpu: 25m
               memory: 256Mi
             limits:
               cpu: 500m
@@ -149,7 +150,7 @@ spec:
               name: chrome
           resources:
             requests:
-              cpu: 100m
+              cpu: 25m
               memory: 256Mi
             limits:
               cpu: 1000m
@@ -172,7 +173,7 @@ spec:
               value: "1"
           resources:
             requests:
-              cpu: 100m
+              cpu: 25m
               memory: 256Mi
             limits:
               cpu: 500m

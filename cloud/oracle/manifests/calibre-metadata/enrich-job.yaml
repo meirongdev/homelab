@@ -24,6 +24,13 @@ spec:
             - name: TZ
               value: "Asia/Shanghai"
           resources:
+            # ⚠️ 2026-08-05 缩容那轮把全集群 CPU requests 砍了一遍，**这里刻意维持 200m**：
+            # 本文件是裸 `kind: Job`（不是 CronJob），`spec.template` 在 API server 层
+            # 不可变。集群里 `calibre-metadata-enrich` 还在（Complete，`ttlSecondsAfterFinished`
+            # 7 天），改这个值 → apply 报 `field is immutable` → calibre-metadata App
+            # 永久 OutOfSync，且失败的 sync 会把 revision 钉住、后续修复提交一起卡住。
+            # 一次性 Job 不常驻，200m 只在它真正运行的几秒钟内占坑，不值得为它冒这个险。
+            # 真要改：先 `kubectl delete job calibre-metadata-enrich`——但那会让它**重跑一遍**富集。
             requests:
               cpu: 200m
               memory: 256Mi
