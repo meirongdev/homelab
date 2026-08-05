@@ -155,12 +155,19 @@ kill %1
 ⚠️ API 前缀是 **`/api/v1/`**，不是 `/api/`：可用的是 `meta` · `lists` · `lists/{id}` ·
 `works/{id}` · `matrix/{run}` · `catalog`（全部只读，非 GET 一律 405）。
 
-v0.1.0 的 `/metrics` **只有 5 个指标族**：`readlist_works_total` ·
-`readlist_lists_total` · `readlist_runs_retained` · `readlist_last_score_unix` ·
-`readlist_grade_counts{grade}`。上游工作区已经写了更多（snapshot/ingest 新鲜度、
-孤儿行、pubdate 来源分布），但**尚未提交、不在 v0.1.0 里** —— 告警侧的取舍见
-[`alerts/readlist-alerts.yaml`](../../k8s/helm/manifests/monitoring/alerts/readlist-alerts.yaml)
-文末的 "WHEN THE NEXT IMAGE SHIPS"。
+v0.2.0 的 `/metrics` 有 **14 个指标族**（v0.1.0 只有 5 个）：三个作业各自的新鲜度
+（`last_score_unix` / `last_snapshot_unix` / `last_ingest_unix`）· `works_total` ·
+`lists_total` · `runs_retained` · `grade_counts{grade}` · `orphan_rows` ·
+`pubdate_source{source}` · `dim_measured{dim}` · 四个 `ingest_*`。
+哪些接了告警、哪些**刻意没接**，见
+[`alerts/readlist-alerts.yaml`](../../k8s/helm/manifests/monitoring/alerts/readlist-alerts.yaml)。
+
+⚠️ 写告警前先 `curl` 实际跑着的 pod 确认指标存在，**别照上游源码写** —— 工作区
+经常跑在已发布 tag 前面。2026-08-05 就是这么吃过亏：源码里有的指标 v0.1.0 镜像
+里没有，规则挂上去永不触发，而那和「一切正常」在界面上一模一样。
+
+另：v0.2.0 起存活探针是 `/livez`（**不碰数据库**），`/healthz` 只做就绪探针。
+排障时想区分「进程死了」和「库慢/没打分」，分别打这两个端点。
 
 榜里出得来书、出版社名字不是一堆重复变体 → 可以放 ingest。出不来就别烧配额，先查聚类。
 
