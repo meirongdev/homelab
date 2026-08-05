@@ -97,9 +97,19 @@ spec:
         # that got revoked or an egress block should not stay invisible for a week.
         # Distinct from ReadlistNoExternalEvidence below: this fires when ingest stops
         # succeeding at all; that one fires when it succeeds but yields nothing.
+        # `for: 3h` (not 1h) on purpose. Two reasons, both about avoiding a false page:
+        #   - On a 3-DAY staleness threshold the debounce is free — delaying detection by
+        #     a couple of hours costs nothing, while a tight `for` buys nothing.
+        #   - `last_ingest_unix == 0` means "never succeeded", which legitimately fires.
+        #     But right after the v0.1.0→v0.2.0 upgrade it reads 0 as an ARTIFACT: v0.1.0
+        #     never wrote the ingest run row that v0.2.0's metric reads, so the value stays
+        #     0 until the first ingest run **under v0.2.0** (verified 2026-08-06: the job
+        #     had succeeded hours earlier, yet the metric was 0). 1h would have paged ~30min
+        #     before the nightly 01:20 UTC run cleared it; 3h rides that out and still fires
+        #     if the run genuinely fails to land.
         - alert: ReadlistIngestStale
           expr: time() - readlist_last_ingest_unix > 259200
-          for: 1h
+          for: 3h
           labels:
             severity: warning
           annotations:
