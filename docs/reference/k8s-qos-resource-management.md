@@ -49,22 +49,25 @@ Homelab 由两个集群组成：
 四档（定义：`cloud/oracle/manifests/base/priorityclasses.yaml` 与 homelab 侧
 `k8s/helm/manifests/namespace-guardrails/priorityclasses.yaml`，两边取值一致）：
 
-> **2026-08-06 改名**：`meirong-critical/high/bulk` → 无前缀的 `critical`/`high`/`bulk`。
-> git 里的引用**已全部切换**（33 处），旧名作为 deprecated 定义暂时并存。
+> **2026-08-06 改名（已完成）**：`meirong-critical/high/bulk` → 无前缀的
+> `critical`/`high`/`bulk`。三步走：加新 class → 改全部引用（33 处）→ 删旧 class。
 >
-> **删旧 class（第③步）的前置条件——三项都做完才能删**：
+> 分步是必须的：PriorityClass 与引用它的工作负载分属不同 ArgoCD App、**同步无先后
+> 保证**；引用先于 class 生效时 API server 直接拒绝建 pod，而旧 pod 已被滚动删除 →
+> 静默下线。当天 21:57 就这样让 homelab 的 opencost/trivy 下线 25 分钟。
 >
-> | 还挂在旧 class 上 | 为什么没跟着 GitOps 滚 | 怎么切 | 影响 |
-> |---|---|---|---|
-> | `vault-0` + `vault-agent-injector`（homelab） | Vault 是 manual-helm | `just deploy-vault` | Vault 重启并短暂 seal，lifecycle hook 会从 `vault-auto-unseal` secret 自动解封（已实测） |
-> | ArgoCD 全家 ×5（oracle） | ArgoCD 刻意不自管自己 | `just deploy-argocd` | **GitOps 控制面重启** |
-> | `zitadel-pg-1`（oracle） | Cluster spec 已是 `critical`，但 **CNPG 不把 `priorityClassName` 变更当作需要滚动的理由**，pod 保持旧值直到因别的原因重启 | CNPG 重启该 Cluster | 单实例 → SSO 登录短暂不可用 |
+> 收尾时有**三处不跟着 GitOps 滚**，各需单独处理（均已完成）：
 >
-> 另有若干 Job pod（trivy 扫描、readlist CronJob）仍带旧值，它们是**一次性的**，
-> 下一轮自然用新值，不必处理。
+> | 对象 | 为什么不滚 | 怎么切的 |
+> |---|---|---|
+> | `vault-0` + `vault-agent-injector` | Vault 是 manual-helm，**且 STS 是 `OnDelete`**——`helm upgrade` 只改 spec，pod 不动 | `just deploy-vault` 后**手动删 pod**；重启后 lifecycle hook 从 `vault-auto-unseal` 自动解封（实测 Sealed=false） |
+> | ArgoCD 全家 ×5 | 刻意不自管自己 | `just deploy-argocd`（STS 是 RollingUpdate，自动滚完） |
+> | `zitadel-pg-1` | Cluster spec 已改，但 **CNPG 不把 `priorityClassName` 变更当作需要滚动的理由** | 删 pod，operator 按当前 spec 重建 |
 >
-> ⚠️ **在上表三项做完之前删 `meirong-critical`，ArgoCD/Vault/SSO 库的 pod 一旦被重新
-> 调度就会被 API server 拒绝而起不来。** 保留三个 deprecated class 不花任何成本，不要抢跑。
+> ⚠️ **遗留影响**：改名前创建的 ReplicaSet 修订版本里仍写着 `meirong-*`
+> （`revisionHistoryLimit` 保留的历史，desired 均为 0，实测 homelab 5 个 / oracle 25 个）。
+> 对这些 Deployment 执行 `kubectl rollout undo` 回滚到那些修订会**建不出 pod**。
+> 往前修，别回滚；这些旧 RS 也会随后续发布自然淘汰出保留窗口。
 >
 > ⚠️ 为什么必须分步：PriorityClass 与引用它的工作负载分属不同的 ArgoCD App，**同步无先后
 > 保证**。引用先于 class 生效时 API server 直接拒绝建 pod，而旧 pod 已被滚动删除 →
