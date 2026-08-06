@@ -1,0 +1,91 @@
+---
+# 修正作业。同 backfill-job.yaml，**刻意用挂起的 CronJob 而非裸 Job**：
+# 本作业按类分批推进（DO_AUTHOR / DO_PUBDATE / ... 四个开关），要反复改参数跑，
+# 而裸 Job 的 spec.template 不可变，改一次就得 delete 重建 → 会从头重跑一遍。
+#
+# 手动派生一次运行：
+#   kubectl --context oracle-k3s -n personal-services create job correct-dry-1 \
+#     --from=cronjob/calibre-metadata-correct
+#   kubectl --context oracle-k3s -n personal-services logs -f job/correct-dry-1
+#   kubectl --context oracle-k3s -n personal-services delete job correct-dry-1
+#
+# ☠️ **本作业会覆盖已有值**（与只填空的 backfill 不同）。跑写入模式前先备份：
+#   kubectl --context oracle-k3s -n personal-services exec deploy/calibre-web -c calibre-web -- \
+#     sh -c 'sqlite3 /calibre-library/metadata.db ".backup /calibre-library/metadata.db.bak-$(date +%Y%m%d-%H%M%S)"'
+# 回滚用 scripts 里同款的按-id 还原法（见 docs/reference/calibre-metadata.md）。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: calibre-metadata-correct
+  namespace: personal-services
+spec:
+  suspend: true
+  schedule: "0 5 31 2 *" # 永不存在的日期
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0 # 覆盖型作业不自动重试：失败要人看过再决定
+      ttlSecondsAfterFinished: 259200
+      template:
+        metadata:
+          labels:
+            app: calibre-metadata
+            role: correct
+        spec:
+          restartPolicy: Never
+          priorityClassName: meirong-bulk
+          containers:
+            - name: correct
+              image: crocodilestick/calibre-web-automated@sha256:4ff5be5cd6f18d91cc72bf316260d8c34c980f09a862372bc77d25c9ddb0efef
+              command: ["python3", "/scripts/correct_metadata.py"]
+              env:
+                - name: LD_LIBRARY_PATH
+                  value: "/app/calibre/lib"
+                - name: TZ
+                  value: "Asia/Shanghai"
+                # ⚠️ 覆盖型作业。2026-08-06 以 DRY_RUN=1 LIMIT=25 核对过输出后才置 0：
+                #   A 作者 6 / B 日期 14 / C 文件名书名 2 / D 括号 2 / ISBN 无结果 8。
+                #   逐条人工核对无误（含 D 类两例：删的确实是 (Dmitry Galkin) 与
+                #   (Casey Sisterson's Library)，不是书名的一部分）。
+                # **改判据、换数据源、换库之后先翻回 "1" 重跑一轮**再置 0。
+                - name: DRY_RUN
+                  value: "0"
+                # 命中判据的书实测 456 本，约 3s/本 ≈ 23 分钟。
+                - name: LIMIT
+                  value: "1000"
+                # 四类开关，可分批推进
+                - name: DO_AUTHOR
+                  value: "1"
+                - name: DO_PUBDATE
+                  value: "1"
+                - name: DO_FILENAME_TITLE
+                  value: "1"
+                - name: DO_PAREN_TITLE
+                  value: "1"
+                # #pubdate_src 自定义列的编号（calibredb add_custom_column 分配的是 1）
+                - name: PUBDATE_SRC_COL
+                  value: "1"
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 1Gi
+              volumeMounts:
+                - name: calibre-library
+                  mountPath: /calibre-library
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: calibre-library
+              persistentVolumeClaim:
+                claimName: calibre-books-local
+            - name: scripts
+              configMap:
+                name: metadata-correct-script
+                defaultMode: 0755
