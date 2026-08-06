@@ -97,7 +97,22 @@ data:
     def author_known(a):
         return bool(a) and a.strip().lower() not in ("unknown", "")
 
+    # ⚠️ **Google Books 会限流，失败长得和「查无此书」一模一样。** 见
+    # metadata-backfill.yaml 里的长注释：同一 ISBN 批量跑时返回空、单独查立刻就有。
+    # 本作业首轮报的「ISBN 查无结果 115」因此偏高。ISBN 路径重试 + 空结果单独记日志。
+    ISBN_RETRIES = int(os.environ.get("ISBN_RETRIES", "2"))
+    RETRY_BACKOFF = float(os.environ.get("RETRY_BACKOFF", "4.0"))
+
     def run_fetch_isbn(isbn):
+        for attempt in range(ISBN_RETRIES + 1):
+            got = _fetch_isbn_once(isbn)
+            if got:
+                return got
+            if attempt < ISBN_RETRIES:
+                time.sleep(RETRY_BACKOFF * (attempt + 1))
+        return None
+
+    def _fetch_isbn_once(isbn):
         try:
             r = subprocess.run(
                 [FETCH, "--opf", "--allowed-plugin", "Google",
