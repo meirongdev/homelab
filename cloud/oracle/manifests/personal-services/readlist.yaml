@@ -138,7 +138,7 @@ spec:
         app: readlist
         readlist.role: web
     spec:
-      priorityClassName: meirong-bulk
+      priorityClassName: bulk
       securityContext:
         # distroless nonroot 的 uid/gid；让进程对 local-path 卷可写。
         fsGroup: 65532
@@ -306,7 +306,7 @@ spec:
             readlist.role: snapshot
         spec:
           restartPolicy: OnFailure
-          priorityClassName: meirong-bulk
+          priorityClassName: bulk
           securityContext:
             fsGroup: 65532
           containers:
@@ -387,7 +387,7 @@ spec:
             readlist.role: ingest
         spec:
           restartPolicy: OnFailure
-          priorityClassName: meirong-bulk
+          priorityClassName: bulk
           securityContext:
             fsGroup: 65532
           containers:
@@ -444,7 +444,7 @@ spec:
             readlist.role: score
         spec:
           restartPolicy: OnFailure
-          priorityClassName: meirong-bulk
+          priorityClassName: bulk
           securityContext:
             fsGroup: 65532
           containers:

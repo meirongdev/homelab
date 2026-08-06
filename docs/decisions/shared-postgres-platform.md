@@ -61,14 +61,14 @@ Deployment + PVC + Service + exporter。
 但**内存上限恰好是这个节点最现实的那个**：
 
 - 实测节点内存 **87%**（7730Mi / 8867Mi allocatable），limits 已超卖 **224%**
-- `zitadel-pg` 带 `priorityClassName: meirong-critical`，清单原注释：
+- `zitadel-pg` 带 `priorityClassName: critical`，清单原注释：
   "SSO 的库被驱逐 = 全站登录挂，值得最高一档"
 
 合库 = 让 RSS 刷新风暴 / 未来租户的批量导入，和 SSO 的库抢同一个 memory limit。
 收益是省一个 postmaster（~60-80Mi，约节点内存的 0.9%）。不值。
 
-`apps-pg` 刻意**不设** `priorityClassName`（默认 0）：`meirong-bulk`(-10) 会让**库比用库的
-应用更容易被驱逐**，方向反了；`meirong-critical`(1000) 是留给控制面的。默认档正好落在
+`apps-pg` 刻意**不设** `priorityClassName`（默认 0）：`bulk`(-10) 会让**库比用库的
+应用更容易被驱逐**，方向反了；`critical`(1000) 是留给控制面的。默认档正好落在
 bulk 应用之上、控制面之下。
 
 ## 决策三：不开超级用户口令，备份改逐库 `pg_dump`
@@ -100,8 +100,10 @@ bulk 应用之上、控制面之下。
   > zitadel-pg（`rss` 41Mi / `workingSet` 117Mi）还低。当时的虚高是验证工作本身造成的
   > （往该实例恢复了 29MB 对账转储 + ANALYZE），稳态应向 zitadel-pg 那档靠拢。
   > 判断 postgres 容器的真实占用要看 `rssBytes`，别只看 `top`。
-- `apps-pg` 的 `externalClusters`/`import` 段在旧库销毁后就指向不存在的 Service 了。
-  它**只在 bootstrap 时用一次**，留着无害；想清理可连同 `import` 段一起删，不会触发重建。
+- `apps-pg` 的 `externalClusters`/`import` 段在旧库销毁后就指向不存在的 Service 了，
+  是**刻意保留的死引用**：`bootstrap` 只在建库时读一次，集群 initialized 之后 CNPG 不再看它。
+  ⚠️ 不要为了"清理干净"去删它——那是在动一个有数据的库的 bootstrap 配置，收益纯属美观，
+  而 CNPG 对 bootstrap 变更的处理**没在本环境验证过**。真要动，先拿一次性测试 Cluster 验。
 - CNPG 的 Barman 备份**没启用**（本环境没有对象存储，备份走 restic → 106 sftp），
   与 `zitadel-pg` 同口径。
 

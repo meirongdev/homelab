@@ -67,7 +67,7 @@ spec:
       labels:
         app: trends
     spec:
-      priorityClassName: meirong-bulk
+      priorityClassName: bulk
       securityContext:
         # distroless nonroot 的 uid/gid;让进程对 local-path 卷可写
         fsGroup: 65532

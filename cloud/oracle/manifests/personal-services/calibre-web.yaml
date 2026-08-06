@@ -79,7 +79,7 @@ spec:
       labels:
         app: calibre-web
     spec:
-      priorityClassName: meirong-bulk
+      priorityClassName: bulk
       securityContext:
         fsGroup: 1000
       initContainers:

@@ -13,7 +13,7 @@ spec:
       labels:
         app: squoosh
     spec:
-      priorityClassName: meirong-bulk
+      priorityClassName: bulk
       containers:
         - name: squoosh
           # 2026-08-05: dko0/squoosh:1.12.0 → 自建镜像。原镜像上游 2022-07 停更，入口是
