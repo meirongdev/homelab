@@ -1,0 +1,393 @@
+# Calibre 元数据回补（只填空字段版）
+#
+# 与它取代的 metadata-enrich.yaml 的**根本区别**，每一条都对应一个已发生的后果：
+#
+#   1. **不盲取搜索第一条。** 旧脚本用 `openlibrary/search.json?...&limit=1` 直接拿
+#      docs[0]，等于「搜到什么算什么」。本脚本改走 calibre 自带的 Google 插件
+#      (`fetch-ebook-metadata --allowed-plugin Google`)，它自己做相关性排序；
+#      再叠一道 token 覆盖率门（见 GATE_*），不过门的**不写**，只记进待人工清单。
+#      实测依据 2026-08-06：干净桶 10/10 命中且全部正确；脏输入时它返回**空**
+#      而不是返回错的书 —— 这个失败模式正是盲取第一条给不了的。
+#
+#   2. **不用 mtime 兜底。** 旧脚本查不到就拿文件 mtime 当出版日期。后果已经落库：
+#      实测 487 本 pubdate 是 `MM-DD=01-01`，其中 193 本年份 ≥2024（下载时间冒充
+#      出版日期）。readlist 源码已把这事写成结论：`SourceCalibre —— 看不出是不是
+#      mtime 兜底，**不可信**`，且它只认得出 37 本（pubdate 与文件 mtime 同一天），
+#      其余被洗成「看起来像真数据」。**造出来的日期比缺失更糟**，缺失至少是诚实的。
+#
+#   3. **只写当前为空的字段**，且只写这四类：identifiers / comments / tags / publisher。
+#      `pubdate`、`title`、`authors` **一律不碰**：
+#        · pubdate —— 本轮范围之外（修污染是另一件事，要单独决定）；
+#        · title —— 实测返回的是带副标题的长书名（"Learning eBPF" →
+#          "Learning eBPF: Programming the Linux Kernel for Enhanced Observability..."），
+#          改了是上千处可见变更；
+#        · authors —— CWA 自己那套 `metadata_helper.py` 的 authors 分支**没有**
+#          smart_application 保护，永远 `clear()` 后替换；这里干脆不进这个雷区。
+#
+# ⚠️ 为什么不用 CWA 自带的 auto_metadata_fetch（2026-08-06 查证后否决）：
+#      · `cps/auto_metadata.py` 是 `metadata = results[0]` —— 同样盲取第一条，无匹配校验；
+#      · 唯一调用点是 `scripts/ingest_processor.py`，**只对新导入的书生效**，回补不了历史书。
+#    该开关维持 `auto_metadata_fetch_enabled=0`。
+#
+# 直接 sqlite3 写库**不会**触发 CWA 的元数据强制回写：`metadata-change-detector`
+# 监视的是 `metadata_change_logs/` 目录（calibre-web 自己编辑时才写日志），
+# 所以不会引发 24G 书库的电子书文件重写与备份 churn。已于 2026-08-06 查证。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metadata-backfill-script
+  namespace: personal-services
+data:
+  backfill_metadata.py: |
+    #!/usr/bin/env python3
+    """Calibre 元数据回补 —— 只填空字段，绝不覆盖，绝不编造。"""
+    import os
+    import re
+    import sqlite3
+    import subprocess
+    import sys
+    import time
+    import unicodedata
+    import xml.etree.ElementTree as ET
+
+    CALIBRE_LIBRARY = "/calibre-library"
+    METADATA_DB = os.path.join(CALIBRE_LIBRARY, "metadata.db")
+    FETCH = "/app/calibre/bin/fetch-ebook-metadata"
+
+    # DRY_RUN 默认 **开**：第一次跑必须是报告，看过命中率和样例再翻成 "0" 落库。
+    DRY_RUN = os.environ.get("DRY_RUN", "1") != "0"
+    # 单次处理上限。1,700 本 × 约 4s ≈ 2 小时；分批跑可控，也便于中途看结果。
+    LIMIT = int(os.environ.get("LIMIT", "200"))
+    # 每本之间的礼貌间隔（fetch 自身约 3s，已经不快，这里只是加一点余量）。
+    DELAY = float(os.environ.get("DELAY", "1.0"))
+    PLUGIN = os.environ.get("PLUGIN", "Google")
+    FETCH_TIMEOUT = int(os.environ.get("FETCH_TIMEOUT", "60"))
+
+    # 匹配门：我方标题的 token 有多大比例出现在对方标题里。
+    # 命中时对方通常是我方的**超集**（多了副标题），所以用「我方被覆盖的比例」而不是
+    # Jaccard —— 后者会因对方副标题很长而被稀释，把正确的匹配判成不匹配。
+    GATE_WITH_AUTHOR = float(os.environ.get("GATE_WITH_AUTHOR", "0.60"))
+    # 作者未知时没有第二重证据，门槛抬高。
+    GATE_NO_AUTHOR = float(os.environ.get("GATE_NO_AUTHOR", "0.75"))
+
+    NS = {"dc": "http://purl.org/dc/elements/1.1/",
+          "opf": "http://www.idpf.org/2007/opf"}
+
+    def log(msg):
+        print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+    def norm_tokens(s):
+        s = unicodedata.normalize("NFKD", s or "").lower()
+        s = re.sub(r"[^a-z0-9\s]", " ", s)
+        return {t for t in s.split() if t}
+
+    def coverage(ours, theirs):
+        a, b = norm_tokens(ours), norm_tokens(theirs)
+        if not a:
+            return 0.0
+        return len(a & b) / len(a)
+
+    def author_known(a):
+        return bool(a) and a.strip().lower() not in ("unknown", "")
+
+    def surname_hit(our_author, their_creators):
+        """我方作者的任一 token 出现在对方任一 creator 里即算命中（姓氏/名字顺序不稳）。"""
+        if not author_known(our_author):
+            return False
+        ours = norm_tokens(our_author)
+        theirs = set()
+        for c in their_creators:
+            theirs |= norm_tokens(c)
+        return bool(ours & theirs)
+
+    def title_variants(title, author):
+        """返回 [(title, author), ...]，按尝试顺序。
+
+        括号在本库里有三种互斥含义，实测都存在，所以只能都试一遍取过门的那个：
+          · 括号里是作者     —— id=84  "...Best Practices (Md Johirul Islam)" → 去掉才命中
+          · 括号是收藏标记   —— id=21  "...(Casey Sisterson's Library)"       → 保留原样才命中
+          · 括号是书名的一部分 —— id=295 "What to Do (and NOT Do) in 75+..."  → 去掉会毁掉它
+        """
+        out = [(title, author if author_known(author) else None)]
+        m = re.match(r"^(.*?)\s*\(([^()]*)\)\s*$", title or "")
+        if m:
+            base, paren = m.group(1).strip(), m.group(2).strip()
+            if base and len(base) >= 8:
+                alt = author if author_known(author) else paren
+                out.append((base, alt))
+        return out
+
+    def run_fetch(title=None, author=None, isbn=None):
+        cmd = [FETCH, "--opf", "--allowed-plugin", PLUGIN, "--timeout", "30"]
+        if isbn:
+            cmd += ["--isbn", isbn]
+        if title:
+            cmd += ["--title", title]
+        if author:
+            cmd += ["--authors", author]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=FETCH_TIMEOUT)
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        if r.returncode != 0 or "<package" not in r.stdout:
+            return None
+        return parse_opf(r.stdout)
+
+    def parse_opf(xml_text):
+        start = xml_text.find("<?xml")
+        if start > 0:
+            xml_text = xml_text[start:]
+        try:
+            root = ET.fromstring(xml_text)
+        except ET.ParseError:
+            return None
+        md = root.find("opf:metadata", NS)
+        if md is None:
+            return None
+
+        def one(tag):
+            el = md.find(f"dc:{tag}", NS)
+            return (el.text or "").strip() if el is not None and el.text else ""
+
+        ids = {}
+        for el in md.findall("dc:identifier", NS):
+            scheme = el.get("{http://www.idpf.org/2007/opf}scheme", "").lower()
+            val = (el.text or "").strip()
+            # calibre / uuid 是本次抓取产生的临时 id，不是书的标识符，丢掉。
+            if scheme and val and scheme not in ("calibre", "uuid"):
+                ids[scheme] = val
+        return {
+            "title": one("title"),
+            "creators": [(e.text or "").strip()
+                         for e in md.findall("dc:creator", NS) if e.text],
+            "description": one("description"),
+            "publisher": one("publisher"),
+            "subjects": [(e.text or "").strip()
+                         for e in md.findall("dc:subject", NS) if e.text],
+            "identifiers": ids,
+        }
+
+    # ── 写入：每个函数都自己再确认一次「当前为空」，不依赖调用方的判断 ──
+    def write_identifiers(conn, book_id, ids):
+        n = 0
+        for typ in ("isbn", "google"):
+            val = ids.get(typ)
+            if not val:
+                continue
+            exists = conn.execute(
+                "SELECT 1 FROM identifiers WHERE book=? AND type=?",
+                (book_id, typ)).fetchone()
+            if exists:
+                continue
+            conn.execute(
+                "INSERT INTO identifiers (book, type, val) VALUES (?,?,?)",
+                (book_id, typ, val))
+            n += 1
+        return n
+
+    def write_comment(conn, book_id, text):
+        if not text:
+            return 0
+        row = conn.execute(
+            "SELECT id, COALESCE(text,'') FROM comments WHERE book=?",
+            (book_id,)).fetchone()
+        if row and row[1].strip():
+            return 0
+        if row:
+            conn.execute("UPDATE comments SET text=? WHERE id=?", (text, row[0]))
+        else:
+            conn.execute("INSERT INTO comments (book, text) VALUES (?,?)",
+                         (book_id, text))
+        return 1
+
+    def write_tags(conn, book_id, subjects):
+        if not subjects:
+            return 0
+        has = conn.execute(
+            "SELECT 1 FROM books_tags_link WHERE book=?", (book_id,)).fetchone()
+        if has:
+            return 0
+        n = 0
+        for name in subjects[:12]:  # Google 的 categories 常有十几条，截断避免噪声
+            name = name.strip()
+            if not name:
+                continue
+            row = conn.execute(
+                "SELECT id FROM tags WHERE name=?", (name,)).fetchone()
+            if row:
+                tag_id = row[0]
+            else:
+                cur = conn.execute("INSERT INTO tags (name) VALUES (?)", (name,))
+                tag_id = cur.lastrowid
+            conn.execute(
+                "INSERT OR IGNORE INTO books_tags_link (book, tag) VALUES (?,?)",
+                (book_id, tag_id))
+            n += 1
+        return n
+
+    def write_publisher(conn, book_id, name):
+        if not name:
+            return 0
+        has = conn.execute(
+            "SELECT 1 FROM books_publishers_link WHERE book=?",
+            (book_id,)).fetchone()
+        if has:
+            return 0
+        row = conn.execute(
+            "SELECT id FROM publishers WHERE name=?", (name,)).fetchone()
+        if row:
+            pub_id = row[0]
+        else:
+            cur = conn.execute("INSERT INTO publishers (name) VALUES (?)", (name,))
+            pub_id = cur.lastrowid
+        conn.execute(
+            "INSERT OR IGNORE INTO books_publishers_link (book, publisher) VALUES (?,?)",
+            (book_id, pub_id))
+        return 1
+
+    CANDIDATES_SQL = """
+        SELECT * FROM (
+          SELECT b.id AS id, b.title AS title,
+                 (SELECT GROUP_CONCAT(a.name, ' | ')
+                    FROM books_authors_link bal JOIN authors a ON bal.author = a.id
+                   WHERE bal.book = b.id) AS authors,
+                 (SELECT val FROM identifiers
+                   WHERE book = b.id AND type = 'isbn' LIMIT 1) AS isbn,
+                 EXISTS(SELECT 1 FROM identifiers WHERE book = b.id) AS has_id,
+                 EXISTS(SELECT 1 FROM comments
+                         WHERE book = b.id AND TRIM(COALESCE(text,'')) <> '') AS has_comment,
+                 EXISTS(SELECT 1 FROM books_tags_link WHERE book = b.id) AS has_tags,
+                 EXISTS(SELECT 1 FROM books_publishers_link WHERE book = b.id) AS has_pub
+            FROM books b
+        )
+        WHERE NOT (has_id AND has_comment AND has_tags AND has_pub)
+        ORDER BY id
+        LIMIT ?
+    """
+
+    def main():
+        mode = "DRY-RUN（只报告，不写库）" if DRY_RUN else "写入模式"
+        log("=" * 68)
+        log(f"Calibre 元数据回补 —— {mode}")
+        log(f"数据源: {PLUGIN} 插件 | 上限 {LIMIT} 本 | 门槛 "
+            f"有作者 {GATE_WITH_AUTHOR} / 无作者 {GATE_NO_AUTHOR}")
+        log("写入字段: identifiers / comments / tags / publisher（仅当为空）")
+        log("不碰字段: pubdate / title / authors")
+        log("=" * 68)
+
+        if not os.path.exists(METADATA_DB):
+            log(f"ERROR: 找不到 {METADATA_DB}")
+            sys.exit(1)
+
+        conn = sqlite3.connect(METADATA_DB, timeout=60)
+        # calibre 的 metadata.db 在触发器/默认值里用到这两个函数；不注册会在写入时报错。
+        conn.create_function("title_sort", 1, lambda x: x)
+        conn.create_function("uuid4", 0,
+                             lambda: "00000000-0000-0000-0000-000000000000")
+
+        rows = conn.execute(CANDIDATES_SQL, (LIMIT,)).fetchall()
+        total = len(rows)
+        log(f"待处理 {total} 本")
+
+        st = {"queried": 0, "by_isbn": 0, "hit": 0, "rejected": 0, "no_result": 0,
+              "w_id": 0, "w_comment": 0, "w_tags": 0, "w_pub": 0}
+        review = []
+
+        for i, (bid, title, authors, isbn, has_id, has_comment,
+                has_tags, has_pub) in enumerate(rows, 1):
+            first_author = (authors or "").split(" | ")[0]
+            log(f"[{i}/{total}] id={bid} {(title or '')[:60]}")
+
+            meta, how, cov = None, "", 0.0
+
+            # 策略 1：已有 ISBN → 按标识符精确查，无需过标题门。
+            if isbn:
+                st["queried"] += 1
+                meta = run_fetch(isbn=isbn)
+                if meta:
+                    st["by_isbn"] += 1
+                    how, cov = f"ISBN:{isbn}", 1.0
+                time.sleep(DELAY)
+
+            # 策略 2：按标题+作者查，多变体，过门才收。
+            if not meta:
+                for vt, va in title_variants(title, first_author):
+                    st["queried"] += 1
+                    cand = run_fetch(title=vt, author=va)
+                    time.sleep(DELAY)
+                    if not cand:
+                        continue
+                    c = coverage(title, cand["title"])
+                    gate = (GATE_WITH_AUTHOR if author_known(first_author)
+                            else GATE_NO_AUTHOR)
+                    ok = c >= gate
+                    # 作者对上了可以补偿一点标题差异（副标题重排、出版社改名等）。
+                    if not ok and surname_hit(first_author, cand["creators"]):
+                        ok = c >= gate - 0.15
+                    if ok:
+                        meta, how, cov = cand, f"title[{vt[:28]}]", c
+                        break
+                    log(f"    ✗ 覆盖率 {c:.2f} < {gate} 弃用: {cand['title'][:60]}")
+
+            if not meta:
+                st["no_result"] += 1
+                review.append((bid, title, first_author, "无结果或未过门"))
+                log("    ❌ 无可用结果")
+                continue
+
+            st["hit"] += 1
+            log(f"    ✅ [{how}] cov={cov:.2f} -> {meta['title'][:60]}")
+
+            if DRY_RUN:
+                would = []
+                if not has_id and meta["identifiers"]:
+                    would.append(f"id={list(meta['identifiers'])}")
+                if not has_comment and meta["description"]:
+                    would.append(f"简介({len(meta['description'])}字)")
+                if not has_tags and meta["subjects"]:
+                    would.append(f"标签×{len(meta['subjects'][:12])}")
+                if not has_pub and meta["publisher"]:
+                    would.append(f"出版社={meta['publisher'][:30]}")
+                log(f"    [dry] 将写入: {', '.join(would) if would else '（无空缺可填）'}")
+                continue
+
+            st["w_id"] += write_identifiers(conn, bid, meta["identifiers"])
+            st["w_comment"] += write_comment(conn, bid, meta["description"])
+            st["w_tags"] += write_tags(conn, bid, meta["subjects"])
+            st["w_pub"] += write_publisher(conn, bid, meta["publisher"])
+            # 只更 last_modified；pubdate/title/authors 不动。
+            conn.execute(
+                "UPDATE books SET last_modified=CURRENT_TIMESTAMP WHERE id=?", (bid,))
+            conn.commit()
+
+        log("")
+        log("=" * 68)
+        log(f"完成（{mode}）")
+        log(f"  处理:        {total}")
+        log(f"  外部查询数:  {st['queried']}")
+        log(f"  命中:        {st['hit']}（其中按 ISBN 精确命中 {st['by_isbn']}）")
+        log(f"  无结果/未过门: {st['no_result']}")
+        if not DRY_RUN:
+            log(f"  写入 identifier: {st['w_id']}")
+            log(f"  写入 简介:       {st['w_comment']}")
+            log(f"  写入 标签:       {st['w_tags']}")
+            log(f"  写入 出版社:     {st['w_pub']}")
+        remaining = conn.execute(
+            "SELECT COUNT(*) FROM (" + CANDIDATES_SQL.replace("LIMIT ?", "LIMIT -1")
+            + ")").fetchone()[0]
+        log(f"  仍有 {remaining} 本存在空字段")
+        log("=" * 68)
+
+        if review:
+            log("")
+            log(f"待人工确认 {len(review)} 本（书名多为主副标题连成一串、无标点，"
+                f"Google 匹不上；需抽版权页辨认）:")
+            for bid, t, a, why in review[:60]:
+                log(f"  id={bid} [{why}] {(t or '')[:62]} — {a or 'Unknown'}")
+            if len(review) > 60:
+                log(f"  …… 另有 {len(review) - 60} 本")
+        conn.close()
+
+    if __name__ == "__main__":
+        main()
