@@ -35,7 +35,7 @@
 | system-reserved | 200m / 2560Mi |
 | eviction-hard | memory.available<500Mi |
 | **allocatable** | **1800m / ~8925Mi** |
-| CPU requests 合计 | **1372m（76%）**，CronJob 峰值另计 ~200m |
+| CPU requests 合计 | **1372m（76%）**，CronJob 峰值另计 ~200m ← 缩容当时的快照，会随新负载上涨（2026-08-06 已 1477m/82%） |
 | 内存 requests 合计 | ~5800Mi（65%） |
 | 内存实际峰值（pod 部分） | ~6.0GiB |
 
@@ -230,7 +230,10 @@ kubectl $CTX get pods -A --field-selector=status.phase=Pending
 
 # ③ requests 占比
 kubectl $CTX describe node oracle-k3s | sed -n '/Allocated resources/,/Events/p'
-#    期望 cpu ≈ 1372m (76%)、memory ≈ 5800Mi (65%)
+#    ⚠️ 别拿 1372m(76%)/5800Mi(65%) 当验收线——那是 2026-08-05 缩容**当时**的基线，
+#    不是不变量：之后每加一个负载它就往上走（2026-08-06 晚已到 1477m/82%）。
+#    这里要看的是「没有 Pending、requests 没超 allocatable」，不是对上某个数字。
+#    当前值以实测为准，解读见 reference/k8s-qos-resource-management.md。
 
 # ④ 优先级真的挂上了
 kubectl $CTX get pods -A -o custom-columns=P:.spec.priority,NS:.metadata.namespace,N:.metadata.name \
