@@ -27,7 +27,14 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
-      backoffLimit: 0 # 覆盖型作业不自动重试：失败要人看过再决定
+      # 2026-08-06：本来写 0（「覆盖型作业失败要人看过再决定」），实测那是**错的**——
+      # correct-pass2 在节点内存 93% 时被驱逐，backoffLimit=0 让整个 Job 直接判死，
+      # 131 本只处理了几本，pod 被清除后连日志都拿不到。
+      # 本脚本是**幂等**的：每次运行重新查「还有缺陷的书」，已修好的不再命中，
+      # 所以重启只是接着做剩下的，不会把半成品叠加一遍。
+      # 而它跑在 meirong-bulk(-10)，在这台 2 OCPU / 内存常年 90%+ 的节点上
+      # **本来就该**被优先牺牲 —— 正确做法不是提优先级，是让它可重启。
+      backoffLimit: 2
       ttlSecondsAfterFinished: 259200
       template:
         metadata:
@@ -67,6 +74,12 @@ spec:
                   value: "1"
                 # #pubdate_src 自定义列的编号（calibredb add_custom_column 分配的是 1）
                 - name: PUBDATE_SRC_COL
+                  value: "1"
+                # 本作业的剩余批次实测**以真没收录为主**（Apress 1484 电子版号段，
+                # Google 与 OpenLibrary 都查不到），重试救不了它们，只会把
+                # 3s/本 拖成 17s/本、并把作业暴露在驱逐窗口里更久。
+                # 限流恢复的主战场是 backfill（那里默认 2 次重试），不是这里。
+                - name: ISBN_RETRIES
                   value: "1"
               resources:
                 requests:

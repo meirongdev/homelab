@@ -34,7 +34,10 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
-      backoffLimit: 0 # 写库作业不自动重试：失败要人看过再决定，重试可能把半成品叠加一遍
+      # 2026-08-06 从 0 改成 2，理由同 correct-job.yaml：脚本**幂等**（每次重新查
+      # 「还有空字段的书」，已填好的不再命中），而作业跑在 meirong-bulk(-10)、
+      # 节点内存常年 90%+，被驱逐是常态。backoffLimit=0 会让一次驱逐判死整个作业。
+      backoffLimit: 2
       ttlSecondsAfterFinished: 259200 # 3 天
       template:
         metadata:
