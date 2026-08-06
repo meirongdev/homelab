@@ -49,10 +49,19 @@ data:
     import time
     import unicodedata
     import xml.etree.ElementTree as ET
+    import zipfile
 
     CALIBRE_LIBRARY = "/calibre-library"
     METADATA_DB = os.path.join(CALIBRE_LIBRARY, "metadata.db")
     FETCH = "/app/calibre/bin/fetch-ebook-metadata"
+    PDFTOTEXT = "/app/calibre/bin/pdftotext"
+    # ⚠️ calibre 的二进制都要这个，否则起不来（libcalibre-launcher.so 找不到）。
+    # 2026-08-06 的探测脚本漏了它，10 个 PDF 全被误判成「无文本层」——
+    # 表现是静默空输出，和真的没有文本层一模一样。
+    CALIBRE_ENV = dict(os.environ, LD_LIBRARY_PATH="/app/calibre/lib")
+    # 版权页在最前面；扫太多页会捞到参考文献里**引用的书**的 ISBN。
+    PDF_PAGES = int(os.environ.get("PDF_PAGES", "16"))
+    SPINE_HEAD = int(os.environ.get("SPINE_HEAD", "6"))
 
     # DRY_RUN 默认 **开**：第一次跑必须是报告，看过命中率和样例再翻成 "0" 落库。
     DRY_RUN = os.environ.get("DRY_RUN", "1") != "0"
@@ -69,6 +78,11 @@ data:
     GATE_WITH_AUTHOR = float(os.environ.get("GATE_WITH_AUTHOR", "0.60"))
     # 作者未知时没有第二重证据，门槛抬高。
     GATE_NO_AUTHOR = float(os.environ.get("GATE_NO_AUTHOR", "0.75"))
+    # 从书**自己**的版权页挖到的 ISBN 是 ground truth，比我们库里那个书名可信得多
+    # （库里不少书名是 "FINAL eBOOKS" / "B09RHP5H81 EBOK" 这种），所以门槛放很低，
+    # 只用来挡住量级错误 —— 例如把参考文献里引用的《Pragmatic Programmer》
+    # 认成本书（实测 id=168 会这样，覆盖率约 0，0.35 足以拦下）。
+    GATE_ISBN_CONTENT = float(os.environ.get("GATE_ISBN_CONTENT", "0.35"))
 
     NS = {"dc": "http://purl.org/dc/elements/1.1/",
           "opf": "http://www.idpf.org/2007/opf"}
@@ -116,6 +130,106 @@ data:
                 alt = author if author_known(author) else paren
                 out.append((base, alt))
         return out
+
+    # ── 从书自身内容里挖 ISBN ────────────────────────────────────────────────
+    # 实测 2026-08-06（各 40 本样本，均为库中当前无 isbn 标识符的书）：
+    #   PDF  16/17 ≈ 94% 能挖到「ISBN 字样邻近」的强信号；
+    #   EPUB 21/40 ≈ 52%（其中 16 本的 ISBN 一直躺在 OPF 元数据里，
+    #        calibre 导入时没认 —— 写法是 urn:isbn: 之类，不是 scheme="ISBN"）。
+    #   挖不到的多是自出版/Kindle 独占（B09RHP5H81 EBOK 之类），本就没有 ISBN。
+    ISBN_RAW = re.compile(r"97[89][-\s]?\d[-\s\d]{8,16}[\dX]", re.I)
+    ISBN_LABELED = re.compile(
+        r"ISBN[^\n]{0,40}?(97[89][-\s]?\d[-\s\d]{8,16}[\dX])", re.I)
+
+    def isbn13_ok(s):
+        d = re.sub(r"[^0-9]", "", s)
+        if len(d) != 13:
+            return None
+        tot = sum(int(c) * (1 if i % 2 == 0 else 3) for i, c in enumerate(d[:12]))
+        return d if (10 - tot % 10) % 10 == int(d[12]) else None
+
+    def valid_isbns(seq):
+        out = []
+        for m in seq:
+            v = isbn13_ok(m)
+            if v and v not in out:
+                out.append(v)
+        return out
+
+    def pdf_front_text(path):
+        try:
+            r = subprocess.run(
+                [PDFTOTEXT, "-f", "1", "-l", str(PDF_PAGES), path, "-"],
+                capture_output=True, text=True, timeout=120, env=CALIBRE_ENV)
+            return r.stdout or ""
+        except Exception:
+            return ""
+
+    def epub_opf_and_front(path):
+        """返回 (OPF 原文, spine 前部正文)。
+
+        **按 spine 阅读顺序取，不能按文件名字母序** —— EPUB 的文件可以叫
+        bm01/ch10/pt02 任意名字，字母序取到的往往不是版权页。
+        """
+        try:
+            z = zipfile.ZipFile(path)
+        except Exception:
+            return "", ""
+        opf_name = next(
+            (n for n in z.namelist() if n.lower().endswith(".opf")), None)
+        if not opf_name:
+            return "", ""
+        raw = z.read(opf_name).decode("utf-8", "ignore")
+        base = os.path.dirname(opf_name)
+        order = []
+        try:
+            root = ET.fromstring(raw.encode("utf-8"))
+            ids = {}
+            for it in root.iter():
+                if it.tag.endswith("item"):
+                    i, h = it.get("id"), it.get("href")
+                    if i and h:
+                        ids[i] = os.path.normpath(
+                            os.path.join(base, h)) if base else h
+            for it in root.iter():
+                if it.tag.endswith("itemref"):
+                    t = ids.get(it.get("idref"))
+                    if t:
+                        order.append(t)
+        except ET.ParseError:
+            pass
+        parts = []
+        for n in order[:SPINE_HEAD]:
+            try:
+                parts.append(re.sub(
+                    r"<[^>]+>", " ", z.read(n).decode("utf-8", "ignore")))
+            except KeyError:
+                continue
+        return raw, " ".join(parts)
+
+    def extract_isbns(book_dir):
+        """返回本书自身声明的 ISBN 候选（强信号优先）。"""
+        if not os.path.isdir(book_dir):
+            return []
+        files = os.listdir(book_dir)
+        pdfs = [f for f in files if f.lower().endswith(".pdf")]
+        epubs = [f for f in files if f.lower().endswith(".epub")]
+        found = []
+        if epubs:
+            opf, body = epub_opf_and_front(os.path.join(book_dir, epubs[0]))
+            found += valid_isbns(ISBN_RAW.findall(opf))          # OPF 元数据最可信
+            found += valid_isbns(ISBN_LABELED.findall(body))
+        if pdfs and not found:
+            txt = pdf_front_text(os.path.join(book_dir, pdfs[0]))
+            found += valid_isbns(ISBN_LABELED.findall(txt))
+            if not found:
+                # 退而求其次：前几页里的裸号段（版权页有时不写 "ISBN" 字样）
+                found += valid_isbns(ISBN_RAW.findall(txt))
+        out = []
+        for x in found:
+            if x not in out:
+                out.append(x)
+        return out[:3]
 
     def run_fetch(title=None, author=None, isbn=None):
         cmd = [FETCH, "--opf", "--allowed-plugin", PLUGIN, "--timeout", "30"]
@@ -248,7 +362,7 @@ data:
 
     CANDIDATES_SQL = """
         SELECT * FROM (
-          SELECT b.id AS id, b.title AS title,
+          SELECT b.id AS id, b.title AS title, b.path AS path,
                  (SELECT GROUP_CONCAT(a.name, ' | ')
                     FROM books_authors_link bal JOIN authors a ON bal.author = a.id
                    WHERE bal.book = b.id) AS authors,
@@ -290,18 +404,19 @@ data:
         total = len(rows)
         log(f"待处理 {total} 本")
 
-        st = {"queried": 0, "by_isbn": 0, "hit": 0, "rejected": 0, "no_result": 0,
+        st = {"queried": 0, "by_isbn": 0, "by_content": 0, "hit": 0,
+              "rejected": 0, "no_result": 0,
               "w_id": 0, "w_comment": 0, "w_tags": 0, "w_pub": 0}
         review = []
 
-        for i, (bid, title, authors, isbn, has_id, has_comment,
+        for i, (bid, title, path, authors, isbn, has_id, has_comment,
                 has_tags, has_pub) in enumerate(rows, 1):
             first_author = (authors or "").split(" | ")[0]
             log(f"[{i}/{total}] id={bid} {(title or '')[:60]}")
 
             meta, how, cov = None, "", 0.0
 
-            # 策略 1：已有 ISBN → 按标识符精确查，无需过标题门。
+            # 策略 1：库里已有 ISBN → 按标识符精确查，无需过标题门。
             if isbn:
                 st["queried"] += 1
                 meta = run_fetch(isbn=isbn)
@@ -310,7 +425,28 @@ data:
                     how, cov = f"ISBN:{isbn}", 1.0
                 time.sleep(DELAY)
 
-            # 策略 2：按标题+作者查，多变体，过门才收。
+            # 策略 2：库里没 ISBN → **从书自己的版权页/OPF 里挖**，再按 ISBN 精确查。
+            # 这条专治「书名把主副标题连成一串、没有标点」那批 —— 标题搜索对它们
+            # 完全无效（实测返回空），但书里印着的 ISBN 一查就中。
+            # 仍过一道很低的标题门，用来挡参考文献里引用的书被误认（见 GATE_ISBN_CONTENT）。
+            if not meta and not isbn:
+                for cand in extract_isbns(os.path.join(CALIBRE_LIBRARY, path or "")):
+                    st["queried"] += 1
+                    got = run_fetch(isbn=cand)
+                    time.sleep(DELAY)
+                    if not got:
+                        continue
+                    c = coverage(title, got["title"])
+                    if c >= GATE_ISBN_CONTENT:
+                        meta, how, cov = got, f"内容ISBN:{cand}", c
+                        st["by_content"] += 1
+                        # 书里印的 ISBN 是 ground truth，补进候选元数据一并落库。
+                        meta["identifiers"].setdefault("isbn", cand)
+                        break
+                    log(f"    ✗ 内容ISBN {cand} 覆盖率 {c:.2f} 弃用: "
+                        f"{got['title'][:50]}")
+
+            # 策略 3：按标题+作者查，多变体，过门才收。（最不可靠，放最后）
             if not meta:
                 for vt, va in title_variants(title, first_author):
                     st["queried"] += 1
@@ -366,7 +502,11 @@ data:
         log(f"完成（{mode}）")
         log(f"  处理:        {total}")
         log(f"  外部查询数:  {st['queried']}")
-        log(f"  命中:        {st['hit']}（其中按 ISBN 精确命中 {st['by_isbn']}）")
+        log(f"  命中:        {st['hit']}")
+        log(f"    ├ 库内 ISBN 精确:   {st['by_isbn']}")
+        log(f"    ├ 书内挖出 ISBN:    {st['by_content']}")
+        log(f"    └ 标题+作者匹配:    "
+            f"{st['hit'] - st['by_isbn'] - st['by_content']}")
         log(f"  无结果/未过门: {st['no_result']}")
         if not DRY_RUN:
             log(f"  写入 identifier: {st['w_id']}")
