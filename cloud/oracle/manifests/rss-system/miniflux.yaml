@@ -6,10 +6,7 @@ metadata:
   labels:
     app: miniflux
 spec:
-  # ⏸ 2026-08-06 迁库期间临时停机（**下一个 commit 就改回 1**）。
-  # 目的：让 CNPG apps-pg 的 import 对着一个**静止**的源库做 pg_dump，
-  # 避免 dump 快照之后、cutover 之前 miniflux 又往旧库写入而丢掉那段数据。
-  replicas: 0
+  replicas: 1
   selector:
     matchLabels:
       app: miniflux
