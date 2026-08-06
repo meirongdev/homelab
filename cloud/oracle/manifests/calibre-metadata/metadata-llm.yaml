@@ -1,0 +1,447 @@
+# Calibre 元数据 LLM 生成 —— 只用于「外部数据库里根本没有」的那批书
+#
+# ☠️ **本作业与前面所有作业性质不同：它生成内容，而不是查回权威数据。**
+# 因此每一条写入都打 `#meta_src = llm-from-content` 标记。这不是锦上添花：
+# 本库已经吃过一次「编出来的值被下游当成证据」的亏 —— 2026-07 那轮回补用文件 mtime
+# 冒充出版日期，487 本被洗成看起来像真数据，readlist 只认得出其中 37 本
+# （详见本目录 metadata-backfill.yaml 头部与 docs/reference/calibre-metadata.md）。
+# 同样的错不能犯第二次：**生成的元数据必须自带出处，且与查回来的可区分**。
+#
+# 适用范围（2026-08-07 实测 234 本）：无 identifier + 无简介 + 无标签的书。
+# 四轮外部回补、三个数据源（Google Books / OpenLibrary / 书内 ISBN 提取）都查不到，
+# 因为它们客观上不在任何公开书目数据库里：自出版、Kindle 独占、zine
+# （如 wizardzines 的 `Networking ACK (Julia Evans)`）。
+# 但**书本身是完整的** —— 扉页有真实书名与作者，前言/封底可作简介，目录可提炼标签。
+#
+# LLM：DGX Spark 的 vLLM `deepseek-v4-flash`，经 dgx-proxy 跨集群访问。
+# ⚠️ oracle 直连不到 DGX（tagged 设备拿不到用户级节点共享），必须走
+# `dgx-proxy.bifrost.svc.cluster.local:8080`（Cilium 全局服务）。
+# 完整原委见 docs/reference/tailscale-network.md 的「Tagged devices cannot reach
+# shared nodes」一节。实测该链路 /v1/models 200、真实推理 2.7s。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metadata-llm-script
+  namespace: personal-services
+data:
+  llm_metadata.py: |
+    #!/usr/bin/env python3
+    """从书的内容生成元数据。默认 DRY_RUN。生成物一律标 #meta_src。"""
+    import json
+    import os
+    import re
+    import sqlite3
+    import ssl
+    import subprocess
+    import sys
+    import time
+    import unicodedata
+    import urllib.request
+    import zipfile
+    from xml.etree import ElementTree as ET
+
+    ssl._create_default_https_context = ssl._create_unverified_context
+
+    LIB = "/calibre-library"
+    DB = os.path.join(LIB, "metadata.db")
+    PDFTOTEXT = "/app/calibre/bin/pdftotext"
+    CALIBRE_ENV = dict(os.environ, LD_LIBRARY_PATH="/app/calibre/lib")
+
+    LLM_URL = os.environ.get(
+        "LLM_URL", "http://dgx-proxy.bifrost.svc.cluster.local:8080/v1/chat/completions")
+    LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-v4-flash")
+    LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "300"))
+
+    DRY_RUN = os.environ.get("DRY_RUN", "1") != "0"
+    LIMIT = int(os.environ.get("LIMIT", "20"))
+    DELAY = float(os.environ.get("DELAY", "0.5"))
+    META_SRC_COL = os.environ.get("META_SRC_COL", "2")   # custom_column_N
+    META_SRC_VALUE = "llm-from-content"
+    # 送进模型的正文上限。扉页+版权页+目录开头足够，再多只是烧 token。
+    MAX_CHARS = int(os.environ.get("MAX_CHARS", "6000"))
+    PDF_PAGES = int(os.environ.get("PDF_PAGES", "12"))
+    SPINE_HEAD = int(os.environ.get("SPINE_HEAD", "5"))
+
+    def log(m):
+        print(f"[{time.strftime('%H:%M:%S')}] {m}", flush=True)
+
+    # ── 与 metadata-backfill 同口径的垃圾作者判据 ──
+    GARBAGE_AUTHORS = {
+        "unknown", "user", "admin", "anonymous", "confidential",
+        "n/a", "na", "none", "null", "author", "calibre", "unknown author",
+    }
+
+    def author_garbage(a):
+        s = (a or "").strip().lower()
+        if not s or s in GARBAGE_AUTHORS:
+            return True
+        if "@" in s:
+            return True
+        if " " not in s and "." in s and s == s.lower():
+            return True
+        return False
+
+    FILENAME_PATTERNS = [
+        re.compile(r"^[^\s]*\.[^\s]*\.[^\s]*\."),
+        re.compile(r"\bB0[A-Z0-9]{8}\b"),
+        re.compile(r"^[A-Z0-9]{10,}(\s+EBOK)?$"),
+    ]
+
+    def looks_like_filename(t):
+        t = (t or "").strip()
+        return bool(t) and any(p.search(t) for p in FILENAME_PATTERNS)
+
+    def title_sort(t):
+        m = re.match(r"^(the|a|an)\s+(.*)$", (t or "").strip(), re.I)
+        return f"{m.group(2)}, {m.group(1)}" if m else (t or "").strip()
+
+    def author_sort(name):
+        parts = (name or "").strip().split()
+        return f"{parts[-1]}, {' '.join(parts[:-1])}" if len(parts) >= 2 else (name or "")
+
+    # ── 取正文 ──
+    def pdf_text(path):
+        try:
+            r = subprocess.run(
+                [PDFTOTEXT, "-f", "1", "-l", str(PDF_PAGES), path, "-"],
+                capture_output=True, text=True, timeout=120, env=CALIBRE_ENV)
+            return r.stdout or ""
+        except Exception:
+            return ""
+
+    def epub_text(path):
+        try:
+            z = zipfile.ZipFile(path)
+        except Exception:
+            return ""
+        opf = next((n for n in z.namelist() if n.lower().endswith(".opf")), None)
+        if not opf:
+            return ""
+        raw = z.read(opf).decode("utf-8", "ignore")
+        base = os.path.dirname(opf)
+        order = []
+        try:
+            root = ET.fromstring(raw.encode("utf-8"))
+            ids = {}
+            for it in root.iter():
+                if it.tag.endswith("item"):
+                    i, h = it.get("id"), it.get("href")
+                    if i and h:
+                        ids[i] = os.path.normpath(os.path.join(base, h)) if base else h
+            for it in root.iter():
+                if it.tag.endswith("itemref"):
+                    t = ids.get(it.get("idref"))
+                    if t:
+                        order.append(t)
+        except ET.ParseError:
+            pass
+        parts = []
+        for n in order[:SPINE_HEAD]:
+            try:
+                parts.append(re.sub(r"<[^>]+>", " ",
+                                    z.read(n).decode("utf-8", "ignore")))
+            except KeyError:
+                continue
+        return " ".join(parts)
+
+    def book_text(book_dir):
+        if not os.path.isdir(book_dir):
+            return ""
+        files = os.listdir(book_dir)
+        for ext, fn in (("epub", epub_text), ("pdf", pdf_text)):
+            m = [f for f in files if f.lower().endswith("." + ext)]
+            if m:
+                t = fn(os.path.join(book_dir, m[0]))
+                if len(t) > 200:
+                    return re.sub(r"[ \t]+", " ", t)[:MAX_CHARS]
+        return ""
+
+    # ── LLM ──
+    PROMPT = """You are extracting bibliographic metadata from the opening pages of an ebook.
+    
+    RULES — follow exactly:
+    - Use ONLY information visible in the excerpt. Do NOT use outside knowledge.
+    - If a field is not clearly stated in the excerpt, return null for it. Guessing is worse than null.
+    - "title": the book's title as printed on the title page, including subtitle if shown.
+    - "authors": list of person names printed as the author(s). Exclude publishers, series editors, and "Unknown".
+    - "description": 2-4 sentences describing what the book covers, grounded in the excerpt. No marketing language.
+    - "tags": 3-8 short topical tags (technologies, domains). No generic tags like "Book" or "Computers".
+    
+    Return ONLY a JSON object, no prose, no code fence:
+    {"title": string|null, "authors": [string]|null, "description": string|null, "tags": [string]|null}
+    
+    EXCERPT:
+    """
+
+    def call_llm(text):
+        body = json.dumps({
+            "model": LLM_MODEL,
+            "messages": [{"role": "user", "content": PROMPT + text}],
+            "max_tokens": 800,
+            "temperature": 0,
+        }).encode()
+        req = urllib.request.Request(
+            LLM_URL, data=body, headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=LLM_TIMEOUT) as r:
+                d = json.load(r)
+        except Exception as e:
+            log(f"    LLM 调用失败: {str(e)[:80]}")
+            return None
+        try:
+            c = d["choices"][0]["message"]["content"]
+        except (KeyError, IndexError):
+            return None
+        # 模型偶尔会裹 ``` 或前后带解释，取第一个完整 JSON 对象。
+        m = re.search(r"\{.*\}", c, re.S)
+        if not m:
+            log(f"    输出里没有 JSON: {c[:70]}")
+            return None
+        try:
+            return json.loads(m.group(0))
+        except json.JSONDecodeError:
+            log(f"    JSON 解析失败: {m.group(0)[:70]}")
+            return None
+
+    # ── 写入 ──
+    def set_meta_src(conn, book_id):
+        col, link = f"custom_column_{META_SRC_COL}", \
+                    f"books_custom_column_{META_SRC_COL}_link"
+        row = conn.execute(f"SELECT id FROM {col} WHERE value=?",
+                           (META_SRC_VALUE,)).fetchone()
+        vid = row[0] if row else conn.execute(
+            f"INSERT INTO {col} (value) VALUES (?)", (META_SRC_VALUE,)).lastrowid
+        conn.execute(f"DELETE FROM {link} WHERE book=?", (book_id,))
+        conn.execute(f"INSERT OR IGNORE INTO {link} (book, value) VALUES (?,?)",
+                     (book_id, vid))
+
+    def write_comment(conn, book_id, text):
+        row = conn.execute("SELECT id, COALESCE(text,'') FROM comments WHERE book=?",
+                           (book_id,)).fetchone()
+        if row and row[1].strip():
+            return 0
+        if row:
+            conn.execute("UPDATE comments SET text=? WHERE id=?", (text, row[0]))
+        else:
+            conn.execute("INSERT INTO comments (book, text) VALUES (?,?)",
+                         (book_id, text))
+        return 1
+
+    def write_tags(conn, book_id, tags):
+        if conn.execute("SELECT 1 FROM books_tags_link WHERE book=?",
+                        (book_id,)).fetchone():
+            return 0
+        n = 0
+        for name in tags[:8]:
+            name = (name or "").strip()
+            if not name:
+                continue
+            row = conn.execute("SELECT id FROM tags WHERE name=?", (name,)).fetchone()
+            tid = row[0] if row else conn.execute(
+                "INSERT INTO tags (name) VALUES (?)", (name,)).lastrowid
+            conn.execute(
+                "INSERT OR IGNORE INTO books_tags_link (book, tag) VALUES (?,?)",
+                (book_id, tid))
+            n += 1
+        return n
+
+    def write_authors(conn, book_id, names):
+        conn.execute("DELETE FROM books_authors_link WHERE book=?", (book_id,))
+        for nm in names[:3]:
+            nm = (nm or "").strip()
+            if not nm:
+                continue
+            row = conn.execute("SELECT id FROM authors WHERE name=?", (nm,)).fetchone()
+            aid = row[0] if row else conn.execute(
+                "INSERT INTO authors (name, sort) VALUES (?,?)",
+                (nm, author_sort(nm))).lastrowid
+            conn.execute(
+                "INSERT OR IGNORE INTO books_authors_link (book, author) VALUES (?,?)",
+                (book_id, aid))
+        conn.execute("UPDATE books SET author_sort=? WHERE id=?",
+                     (author_sort(names[0]) if names else "Unknown", book_id))
+
+    SQL = """
+        SELECT b.id, b.title, b.path,
+               COALESCE((SELECT a.name FROM books_authors_link l
+                           JOIN authors a ON l.author=a.id
+                          WHERE l.book=b.id LIMIT 1), '')
+          FROM books b
+         WHERE NOT EXISTS(SELECT 1 FROM identifiers WHERE book=b.id)
+           AND NOT EXISTS(SELECT 1 FROM comments
+                           WHERE book=b.id AND TRIM(COALESCE(text,'')) <> '')
+           AND NOT EXISTS(SELECT 1 FROM books_tags_link WHERE book=b.id)
+         ORDER BY b.id
+         LIMIT ?
+    """
+
+    def main():
+        mode = "DRY-RUN（只报告）" if DRY_RUN else "写入模式"
+        log("=" * 70)
+        log(f"Calibre 元数据 LLM 生成 —— {mode}")
+        log(f"模型 {LLM_MODEL} @ {LLM_URL}")
+        log(f"写入: comments/tags（仅当为空）· title（仅当像文件名）·"
+            f" authors（仅当是垃圾值）")
+        log(f"每条写入都打 #meta_src = {META_SRC_VALUE}")
+        log("=" * 70)
+
+        conn = sqlite3.connect(DB, timeout=60)
+        conn.create_function("title_sort", 1, title_sort)
+        conn.create_function("uuid4", 0,
+                             lambda: "00000000-0000-0000-0000-000000000000")
+
+        rows = conn.execute(SQL, (LIMIT,)).fetchall()
+        log(f"待处理 {len(rows)} 本")
+        st = {"notext": 0, "llm_fail": 0, "w_title": 0, "w_author": 0,
+              "w_cmt": 0, "w_tags": 0, "touched": 0}
+
+        for i, (bid, title, path, author) in enumerate(rows, 1):
+            log(f"[{i}/{len(rows)}] id={bid} {(title or '')[:52]}")
+            text = book_text(os.path.join(LIB, path or ""))
+            if not text:
+                st["notext"] += 1
+                log("    取不到正文（无文本层/无文件）")
+                continue
+            meta = call_llm(text)
+            time.sleep(DELAY)
+            if not meta:
+                st["llm_fail"] += 1
+                continue
+
+            changes = []
+            new_title = (meta.get("title") or "").strip()
+            new_authors = [a for a in (meta.get("authors") or []) if (a or "").strip()]
+            new_desc = (meta.get("description") or "").strip()
+            new_tags = [t for t in (meta.get("tags") or []) if (t or "").strip()]
+
+            # title：只在现有书名像文件名时替换。正常书名一律不碰 ——
+            # LLM 从扉页读出的可能是丛书名或副标题，风险不对称。
+            do_title = bool(new_title) and looks_like_filename(title)
+            # authors：只在现有是垃圾值时写。
+            do_author = bool(new_authors) and author_garbage(author)
+
+            if do_title:
+                changes.append(("title", (title or "")[:34], new_title[:44]))
+            if do_author:
+                changes.append(("authors", author or "(空)",
+                                " + ".join(new_authors[:3])))
+            if new_desc:
+                changes.append(("简介", "", f"{len(new_desc)}字"))
+            if new_tags:
+                changes.append(("标签", "", ",".join(new_tags[:6])))
+
+            if not changes:
+                log("    模型未给出可用字段")
+                continue
+            for what, old, new in changes:
+                log(f"    {'[dry] ' if DRY_RUN else ''}{what}: "
+                    f"{old + ' -> ' if old else ''}{new}")
+            if DRY_RUN:
+                continue
+
+            if do_title:
+                conn.execute("UPDATE books SET title=?, sort=? WHERE id=?",
+                             (new_title, title_sort(new_title), bid))
+                st["w_title"] += 1
+            if do_author:
+                write_authors(conn, bid, new_authors)
+                st["w_author"] += 1
+            if new_desc:
+                st["w_cmt"] += write_comment(conn, bid, new_desc)
+            if new_tags:
+                st["w_tags"] += write_tags(conn, bid, new_tags)
+            set_meta_src(conn, bid)
+            conn.execute(
+                "UPDATE books SET last_modified=CURRENT_TIMESTAMP WHERE id=?", (bid,))
+            conn.commit()
+            st["touched"] += 1
+
+        log("")
+        log("=" * 70)
+        log(f"完成（{mode}）")
+        log(f"  取不到正文:   {st['notext']}")
+        log(f"  LLM 失败:     {st['llm_fail']}")
+        if not DRY_RUN:
+            log(f"  改书名:       {st['w_title']}")
+            log(f"  补作者:       {st['w_author']}")
+            log(f"  写简介:       {st['w_cmt']}")
+            log(f"  写标签:       {st['w_tags']}")
+            log(f"  标记 #meta_src: {st['touched']}")
+        log("=" * 70)
+        conn.close()
+
+    if __name__ == "__main__":
+        main()
+---
+# 挂起的 CronJob，同本目录其它作业。手动派生：
+#   kubectl --context oracle-k3s -n personal-services create job llm-1 \
+#     --from=cronjob/calibre-metadata-llm
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: calibre-metadata-llm
+  namespace: personal-services
+spec:
+  suspend: true
+  schedule: "0 5 31 2 *" # 永不存在的日期
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      # 幂等：每次重新查「三样全无」的书，处理过的会因为有了简介/标签而不再命中。
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 259200
+      template:
+        metadata:
+          labels:
+            app: calibre-metadata
+            role: llm
+        spec:
+          restartPolicy: Never
+          priorityClassName: bulk
+          containers:
+            - name: llm
+              image: crocodilestick/calibre-web-automated@sha256:4ff5be5cd6f18d91cc72bf316260d8c34c980f09a862372bc77d25c9ddb0efef
+              command: ["python3", "/scripts/llm_metadata.py"]
+              env:
+                - name: TZ
+                  value: "Asia/Shanghai"
+                # ⚠️ 生成型作业，DRY_RUN 默认 "1"。核对过样本输出再置 0。
+                - name: DRY_RUN
+                  value: "1"
+                - name: LIMIT
+                  value: "20"
+                # ⚠️ 必须走 dgx-proxy：oracle 直连不到 DGX（见文件头）。
+                - name: LLM_URL
+                  value: "http://dgx-proxy.bifrost.svc.cluster.local:8080/v1/chat/completions"
+                - name: LLM_MODEL
+                  value: "deepseek-v4-flash"
+                # 与 jobs-sg 同口径；nginx 代理侧也是 300s，两边要一致，
+                # 否则代理先断会让客户端看到不完整响应而非超时。
+                - name: LLM_TIMEOUT
+                  value: "300"
+                - name: META_SRC_COL
+                  value: "2"
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 1Gi
+              volumeMounts:
+                - name: calibre-library
+                  mountPath: /calibre-library
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: calibre-library
+              persistentVolumeClaim:
+                claimName: calibre-books-local
+            - name: scripts
+              configMap:
+                name: metadata-llm-script
+                defaultMode: 0755
