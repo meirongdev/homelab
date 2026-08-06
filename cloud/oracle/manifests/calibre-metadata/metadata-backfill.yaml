@@ -272,7 +272,19 @@ data:
                 out.append(x)
         return out[:3]
 
-    def run_fetch(title=None, author=None, isbn=None):
+    # ⚠️ **Google Books 会限流，而失败长得和「查无此书」一模一样。**
+    # 2026-08-06 实测：同一个 ISBN（9781803249902 / 9781484290569）在批量跑时
+    # 返回空，跑完之后单独查立刻就有。readlist 的清单注释早记过这事
+    # （「匿名配额按共享项目计，一次探测请求就直接 429」），当时没算进来，
+    # 结果是回补/修正报出的「无结果」数**全部偏高**，混着真没收录和被限流两种。
+    #
+    # 对策：ISBN 路径**重试**（标识符已知为真，空结果更可能是瞬时的），
+    # 且把空结果单独记日志 —— 静默 continue 让这两种情况根本无法区分。
+    # 标题路径不重试：那里的空结果多半是真匹配不上，重试只是三倍浪费。
+    ISBN_RETRIES = int(os.environ.get("ISBN_RETRIES", "2"))
+    RETRY_BACKOFF = float(os.environ.get("RETRY_BACKOFF", "4.0"))
+
+    def _fetch_once(title, author, isbn):
         cmd = [FETCH, "--opf", "--allowed-plugin", PLUGIN, "--timeout", "30"]
         if isbn:
             cmd += ["--isbn", isbn]
@@ -288,6 +300,19 @@ data:
         if r.returncode != 0 or "<package" not in r.stdout:
             return None
         return parse_opf(r.stdout)
+
+    def run_fetch(title=None, author=None, isbn=None):
+        tries = (ISBN_RETRIES + 1) if isbn else 1
+        for attempt in range(tries):
+            got = _fetch_once(title, author, isbn)
+            if got:
+                return got
+            if attempt < tries - 1:
+                time.sleep(RETRY_BACKOFF * (attempt + 1))
+        if isbn:
+            log(f"    · ISBN {isbn} 查询 {tries} 次均空"
+                f"（真没收录 或 仍在限流）")
+        return None
 
     def parse_opf(xml_text):
         start = xml_text.find("<?xml")
