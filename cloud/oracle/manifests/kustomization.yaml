@@ -70,7 +70,6 @@ resources:
   - argocd/namespace.yaml
   - argocd/homelab-cluster-external-secret.yaml
   - argocd/argocd-oidc-external-secret.yaml
-  - argocd/image-updater-secrets.yaml
   # 入口路由。2026-08-02 按 runbook 的顺序挂上：先摘 homelab 侧路由 → 删 Cloudflare 的
   # CNAME(argocd) 与 owner TXT(cname-argocd) → 才挂这一行。顺序反了会建出重复 CNAME
   # （两侧 external-dns 都是 upsert-only 且 owner TXT 不同，谁也删不掉对方的记录）。

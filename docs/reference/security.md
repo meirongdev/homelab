@@ -173,8 +173,10 @@
      `kubectl -n trivy-system rollout restart deploy/trivy-operator` 重新排队。
      想根治要给扫描 Job 配 Docker Hub 认证（chart 值
      `trivy.privateRegistryScanSecretsNames`，形如 `{"命名空间":"secret名"}`）——
-     集群现有的那个 dockerconfigjson（`argocd/argocd-image-updater-secret`）
-     **只含 ghcr.io**，覆盖不到 Docker Hub，所以这条目前是**未修**状态。
+     ⚠️ 曾经可以拿来复用的那个 dockerconfigjson（`argocd/argocd-image-updater-secret`）
+     **已于 2026-08-06 随 image-updater 的残留凭据一并删除**（它只含 ghcr.io，
+     本来也覆盖不到 Docker Hub）。要修这条得**新建**一个带 Docker Hub 凭据的 secret。
+     当前仍是**未修**状态。
 - **接入可观测**：ServiceMonitor（带 `release:kube-prometheus-stack`，仅 homelab）→ Prometheus 抓 `trivy_image_vulnerabilities` 等；告警 `manifests/monitoring/alerts/trivy-alerts.yaml`（critical CVE→warning、暴露密钥 High/Critical→**critical**、absent 元告警）经 Telegram；看板 Grafana `Security` 文件夹。
 - **扫描覆盖率体检**（两个数字应接近，差得多 = 队列被堵或扫描在失败）：
 

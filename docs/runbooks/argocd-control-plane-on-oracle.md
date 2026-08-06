@@ -27,7 +27,9 @@
 
 - homelab 的负载**必须**写 `https://100.94.186.7:6443`（19 个）
 - oracle 自己的负载写 `https://kubernetes.default.svc`（7 个）
-- `root` 与 `argocd-image-updater` 跟着控制面走，保持 in-cluster（2 个）
+- `root` 跟着控制面走，保持 in-cluster
+  （2026-08-02 迁移当时这里是 2 个——另一个是 `argocd-image-updater`，已于
+  2026-08-03 退役，其残留的两个 ExternalSecret 也在 2026-08-06 一并清除）
 
 在 destination 尚未重写时对新控制面 `kubectl apply -f argocd/applications/`，
 会把整套 homelab 负载（Vault/Kyverno/Prometheus/personal-services…）**部署到 oracle 上**。
