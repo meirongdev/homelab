@@ -21,3 +21,7 @@ resources:
   # 括号杂讯），且只处理有 ISBN 的书。同样 ConfigMap 排在 CronJob 前面。
   - metadata-correct.yaml
   - correct-job.yaml
+  # 封面在线补全（2026-08-06）：只处理 metadata-updater 拿不到的那批
+  # （电子书文件里本来就没有内嵌封面）。ConfigMap 与 CronJob 同文件，
+  # 顺序天然保证，不必像上面几个那样拆两份。
+  - metadata-covers.yaml
