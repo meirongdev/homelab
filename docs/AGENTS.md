@@ -104,9 +104,13 @@ homelab/
 - **SSH**: 全舰队用 key `~/.ssh/vgio`。
 - **新增服务**: 走 skill `.claude/skills/add-service/SKILL.md`（manifest → HTTPRoute →
   homepage → Uptime Kuma monitor 全流程）。默认仍落 **oracle-k3s**，但 ⚠️ **它不再"容量
-  宽裕"**——2026-08-05 缩到 **2 OCPU / 12GB**（已 apply 并核实），CPU requests 已占 allocatable
-  **~77%**（2026-08-06 实测 1387m/1800m，只剩约 400m）、
-  内存峰值 ~70%。新服务的 requests 要按实测填（CPU 多数应用 10–25m 足够），非核心的
+  宽裕"**——2026-08-05 缩到 **2 OCPU / 12GB**（已 apply 并核实）。真正的紧箍咒是
+  **CPU requests：1477m/1800m = 82%**（2026-08-06 晚实测，只剩约 320m），
+  limits 已超卖到 **1167%**。
+  ⚠️ **内存别信 `kubectl top node`**：它报 92%，但那是 workingSet（含可回收页缓存）；
+  节点 `free -m` 的 available 是 **4.3GB / 11.9GB**，requests 才 69%——离驱逐阈值很远。
+  判断内存余量看 available 或 `rssBytes`，不看 top。
+  新服务的 requests 要按实测填（CPU 多数应用 10–25m 足够），非核心的
   挂 `priorityClassName: bulk`；⚠️ arm64，先确认镜像有 `linux/arm64`；
   跨 ns 引用要 ReferenceGrant（**`v1beta1`**）；PVC 一律 `local-path`；oracle 服务的
   密钥放 `secret/oracle-k3s/<service>`，不放 `secret/homelab/*`。

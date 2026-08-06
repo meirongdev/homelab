@@ -12,7 +12,8 @@ Prometheus/Grafana/Alertmanager 仍在 **homelab**。排查时别默认「所有
 - **指标** → 仍汇聚在 homelab：oracle 跨 Tailscale `prometheusremotewrite` 写入（方向未变）
 - **Grafana** 留在 homelab（贴着 Prometheus），经 NodePort 跨 Tailscale 查询 oracle 的 Loki/Tempo
 
-搬 Loki/Tempo 的理由：homelab 是 12GB 笔记本 VM（内存实测 76%、磁盘 66%），
+搬 Loki/Tempo 的理由：homelab 是 12GB 笔记本 VM，**迁移当时（2026-08-02）**内存实测 76%、
+磁盘 66%（⚠️ 那两个数字是**当时的迁移动机**，不是现状——搬走后已回落到内存 46% / 磁盘 23%），
 而 Loki/Tempo 是纯「写入-存储」组件，不像 Prometheus 需要贴着抓取目标 —— 是 LGTM 里
 唯一可安全切分出去的子集。附带收益：homelab 整机故障时**故障前的日志与追踪还在**，
 此前它们和被观测对象同归于尽（PVC 在同一块盘上）。
