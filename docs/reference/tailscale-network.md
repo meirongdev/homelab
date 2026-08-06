@@ -126,6 +126,63 @@ the user account in `autoApprovers` for node0's route instead.
 ACL policy (`tailscale/terraform/main.tf`): members and both tags can reach any
 destination (`*:*`).
 
+### ☠️ Tagged devices cannot reach *shared* nodes — this is not an ACL problem
+
+The two **DGX Spark** boxes (`100.97.87.120` = V4-Flash head, `100.67.164.92` = TP
+worker) live in **someone else's tailnet** (`*.tailf63175.ts.net`, owner
+`kaixinhuang3307@`) and enter ours via **Tailscale node sharing**.
+
+**Node sharing is granted to a *person*, not to a tailnet.** Devices owned by
+`meirongdev@` (k8s-node, both Macs, pve) get the shared peers in their netmap;
+`node0` is `tagged-devices` — owned by the tailnet, not a user — and does not.
+
+Measured twice (2026-08-01 open-notebook, 2026-08-07 calibre metadata):
+
+```
+oracle node0 → tailscale ping 100.97.87.120 → "no matching peer"
+oracle node0 → tailscale status → 6 peers, 0 of them shared
+homelab k8s-node → curl 100.97.87.120:8000/v1/models → 200
+```
+
+The ACL already allows `tag:oracle` to `*:*`, so **widening the ACL changes
+nothing** — the peer isn't in oracle's netmap at all.
+
+⚠️ **Untagging `node0` is not a small fix.** Tailscale **OAuth clients can only
+create tagged devices**, and node0 was authenticated with an OAuth-client preauth
+key (`tags = ["tag:oracle"]` in `main.tf`). Making it user-owned requires
+re-authenticating the node with a *user* key, which means:
+
+- it drops off the tailnet during re-auth → **cross-cluster ClusterMesh underlay
+  breaks**;
+- user devices get a **180-day key expiry** (tagged devices never expire), which
+  must then be disabled in the console — miss that and the node silently falls off
+  the tailnet months later, with no obvious link back to this change.
+
+The autoApprovers entry survives untagging (`"10.0.0.26/32"` lists both
+`tag:oracle` **and** `meirongdev@gmail.com`), so that particular worry — raised in
+the 2026-08-01 plan — is unfounded. Key expiry is the real hazard.
+
+**Adopted workaround: proxy the capability instead of moving the node.**
+`k8s/helm/manifests/bifrost/dgx-proxy.yaml` runs an nginx on homelab (which *can*
+reach the Sparks) and publishes it as a Cilium **global Service**, so oracle pods
+reach the DGX vLLM cross-cluster:
+
+```
+oracle pod → ClusterMesh VXLAN → dgx-proxy (homelab) → Tailscale → DGX vLLM
+```
+
+Verified 2026-08-07 end to end from an oracle pod: `/v1/models` → 200, a real
+`/v1/chat/completions` → 2.7 s.
+
+⚠️ **A Cilium global Service needs a Service object in BOTH clusters.** Annotating
+only the homelab side made `cilium-dbg status --all-clusters` report `1 services`
+on oracle (so propagation worked), yet oracle pods got
+`curl: (6) Could not resolve host`. DNS records and backend merging are separate
+concerns: Cilium merges remote backends into a *local* Service, but the
+`*.svc.cluster.local` record still comes from the local cluster's CoreDNS reading
+the local Service object. The oracle half is a backend-less shadow Service —
+`cloud/oracle/manifests/bifrost/dgx-proxy-service.yaml`.
+
 ## Cluster DNS on the homelab node (related, bit us 2026-07-07)
 
 The 10.10.10.0/24 segment cannot reach ANY public resolver on port 53 — only the
