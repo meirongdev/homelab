@@ -10,3 +10,9 @@ resources:
   # 从 Git 重建集群时 Job 会因缺 ConfigMap 起不来。
   - metadata-enrich.yaml
   - enrich-job.yaml
+  # 回补作业（2026-08-06）。同上：ConfigMap 必须排在使用它的 CronJob 前面。
+  # metadata-enrich.yaml 那套是**被取代**的（盲取搜索第一条 + mtime 兜底造数据），
+  # 保留只因为它的 Job 已 Complete 且 spec.template 不可变，删了会触发重跑。
+  # 新的回补一律走 metadata-backfill.yaml。
+  - metadata-backfill.yaml
+  - backfill-job.yaml
