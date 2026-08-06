@@ -142,8 +142,30 @@ data:
         n = min(len(a), len(b))
         return a[:n] == b[:n]
 
+    # ⚠️ 2026-08-06 实测：**垃圾作者值会让查询彻底查不到**，而不是被忽略。
+    #   "Netty in Action" + 作者 "User"  → 无结果
+    #   "Netty in Action" 仅标题          → Netty in Action ✓（Manning 的真书）
+    # 库里这类值有 User / Confidential / amy.chang 等，此前一律被当成「作者可用」
+    # 拼进查询，反而干扰匹配。它们是导入时的产物，不是真作者。
+    GARBAGE_AUTHORS = {
+        "unknown", "user", "admin", "anonymous", "confidential",
+        "n/a", "na", "none", "null", "author", "calibre", "unknown author",
+    }
+
+    def author_garbage(a):
+        """判断作者字段是否是垃圾值（而非真实姓名）。"""
+        s = (a or "").strip().lower()
+        if not s or s in GARBAGE_AUTHORS:
+            return True
+        if "@" in s:                       # 邮箱
+            return True
+        # amy.chang 这种：全小写、无空格、带点 —— 是账号名不是人名
+        if " " not in s and "." in s and s == s.lower():
+            return True
+        return False
+
     def author_known(a):
-        return bool(a) and a.strip().lower() not in ("unknown", "")
+        return not author_garbage(a)
 
     def surname_hit(our_author, their_creators):
         """我方作者的任一 token 出现在对方任一 creator 里即算命中（姓氏/名字顺序不稳）。"""
@@ -170,6 +192,15 @@ data:
             if base and len(base) >= 8:
                 alt = author if author_known(author) else paren
                 out.append((base, alt))
+        # 兜底：**仅标题**。只在作者字段是垃圾值时才加 —— 那种情况下带着它查
+        # 必然失败（实测 Netty in Action + "User" 返回空，去掉 User 立刻命中）。
+        # ⚠️ 不对「作者正常」的书加这条：短书名 + 仅标题很容易前缀匹到别的书
+        # （"Machine Learning" 是 "Machine Learning Yearning" 的前缀），
+        # 而作者正常时那条信息本来就在帮我们排除误配，不该丢掉。
+        # 同理要求标题至少 3 个 token，太短的判据不足。
+        if author_garbage(author) and len((title or "").split()) >= 3:
+            if (title, None) not in out:
+                out.append((title, None))
         return out
 
     # ── 从书自身内容里挖 ISBN ────────────────────────────────────────────────
