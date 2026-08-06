@@ -1,0 +1,23 @@
+# ⚠️ Namespace 单独成文件，**不要**把它塞回其他清单里。
+# 2026-08-03 事故教训：`personal-services` 的 Namespace 当时内嵌在 calibre-web.yaml
+# 顶部，`git rm` 掉那个文件 → ArgoCD prune 掉 Namespace → 级联删除了同 ns 下毫不相关的
+# open-notebook 全部数据（PVC 上的 Prune=false 护栏无效，因为被 prune 的是 ns 不是 PVC）。
+# 复盘见 docs/records/2026-08-03-namespace-prune-cascade.md
+#
+# 共享数据库平台（2026-08-06 新建）。承载 CNPG Cluster `apps-pg`——应用不再各自起
+# postgres，只声明 Database/DatabaseRole CR + 一条 ESO 模板拿连接串。
+# 设计与「为什么不把 zitadel-pg 并进来」见 apps-pg-cluster.yaml 文件头。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: databases
+  labels:
+    name: databases
+    # PSA restricted —— 迁移前实测 CNPG 的 postgres 容器与 bootstrap-controller init
+    # 容器**均已满足** restricted（runAsNonRoot + seccompProfile RuntimeDefault +
+    # capabilities.drop[ALL] + allowPrivilegeEscalation:false + readOnlyRootFilesystem）。
+    # 数据库 ns 用最严一档，不跟着 rss-system/opencost 降到 baseline。
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
