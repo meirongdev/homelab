@@ -57,7 +57,7 @@ spec:
       labels:
         app: karakeep
     spec:
-      priorityClassName: meirong-bulk
+      priorityClassName: bulk
       containers:
         # KaraKeep Web 应用
         - name: karakeep

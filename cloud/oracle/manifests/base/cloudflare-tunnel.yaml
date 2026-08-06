@@ -44,7 +44,7 @@ spec:
                   matchLabels:
                     app: cloudflared
                 topologyKey: kubernetes.io/hostname
-      priorityClassName: meirong-high
+      priorityClassName: high
       containers:
         - name: cloudflared
           # 2026-08-04 digest 刷新（原 sha256:404528c1…，已落后 upstream :latest）。

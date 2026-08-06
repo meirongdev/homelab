@@ -13,7 +13,7 @@ spec:
       labels:
         app: it-tools
     spec:
-      priorityClassName: meirong-bulk
+      priorityClassName: bulk
       containers:
         - name: it-tools
           # 2026-08-05: sha-749c71f → sha-ffb28a7。旧镜像几个月没重建，Trivy 报 3 条

@@ -30,9 +30,9 @@ spec:
 
   # 2026-08-05 缩容到 12GB 时加。SSO 的库被驱逐 = 全站登录挂，值得最高一档。
   # ⚠️ ZITADEL 应用本身**设不了**——chart 9.34.1 没有 priorityClassName 这个 values 键
-  # （逐键确认过），塞进去会被静默忽略。它留在 priority 0，靠 meirong-bulk(-10)
+  # （逐键确认过），塞进去会被静默忽略。它留在 priority 0，靠 bulk(-10)
   # 把可牺牲的应用压到它下面来保证相对次序。
-  priorityClassName: meirong-critical
+  priorityClassName: critical
 
   storage:
     storageClass: local-path

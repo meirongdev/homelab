@@ -10,7 +10,7 @@
 # 为什么不把 zitadel-pg 一起并进来（2026-08-06 决策）：
 #   两个库本来就在同一个单节点，"故障域隔离"是虚的；真正剩下的隔离只对 postgres 级
 #   故障有效——而**内存上限恰好是这个节点最现实的那个**：实测内存 87%、limits 超卖 224%，
-#   且 zitadel-pg 带 priorityClassName: meirong-critical（"SSO 的库被驱逐 = 全站登录挂"）。
+#   且 zitadel-pg 带 priorityClassName: critical（"SSO 的库被驱逐 = 全站登录挂"）。
 #   合库 = 让 RSS 刷新风暴 / karakeep 批量导入和 SSO 抢同一个 memory limit。
 #   省下的只有一个 postmaster（~60-80Mi）。不值。两个 Cluster、一套模式即可。
 #
@@ -77,8 +77,8 @@ spec:
   # 备份走应用用户的 pg_dump —— 同 backup-script.yaml 里 zitadel 那行的口径。
   enableSuperuserAccess: false
 
-  # 刻意不设 priorityClassName（默认 0）：meirong-bulk(-10) 会让**库比用库的应用
-  # 更容易被驱逐**，方向反了；meirong-critical(1000) 是留给控制面的。
+  # 刻意不设 priorityClassName（默认 0）：bulk(-10) 会让**库比用库的应用
+  # 更容易被驱逐**，方向反了；critical(1000) 是留给控制面的。
   # 默认档正好落在 bulk 应用之上、控制面之下。
   storage:
     storageClass: local-path
