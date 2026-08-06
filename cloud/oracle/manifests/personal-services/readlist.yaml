@@ -214,50 +214,50 @@ spec:
       targetPort: http
       name: http
 ---
-# ☠️ 公开入口已于 2026-08-05 摘除 —— **重新加回来之前必须先解决下面这件事**。
+# readlist.meirong.dev -> readlist:8080（2026-08-06 公开；与本 ns 其它公开服务同形状）
 #
-# 实测发现：`/api/v1/catalog` 会把全部 2046 个 work 的 **title + author 原样公开**，
-# 而这个 calibre 书库里混着**非书的私人文档**。实测至少一条是第三方的简历：
-# `(BHRC) Backend Engineer - 吳幸慈, Mint Wu - 202603`（author 字段还是另一个人名）。
-# 也就是说「只发元数据不发书」这条护栏对**书**成立，对**误入库的私人文件**不成立
-# ——简历的"元数据"本身就是真人姓名。这不是本仓库能单方面修的：
-#
-#   选项 A（最省事）：把这类非书文档从 calibre 里挪走/删掉，再重跑 snapshot。
-#   选项 B：在 readlist 侧加准入过滤（按 tag/书架/格式排除），属上游改动。
-#   选项 C：公开面只发榜单、不发全量 catalog（上游改动）。
-#
-# 决定并落实之后，把下面这段 HTTPRoute 取消注释即可重新公开（域名 readlist.
-# 而不是 books./book.——与私有书库 book.meirong.dev 只差一个字母，误配代价太高）。
-# 通配隧道 + external-dns 会自动建 CNAME，不需要改 cloudflare/terraform；
+# ⚠️ 域名用 **readlist.** 而不是 books./book. —— 与私有书库 book.meirong.dev 只差
+# 一个字母，误配代价太高（一个只发元数据与评分，一个是书库本身）。
+# 通配隧道 + external-dns 自动建 CNAME，**不需要**改 cloudflare/terraform；
 # ReferenceGrant 也不需要（base/gateway.yaml 已有覆盖本 ns 的通配授权）。
-# ⚠️ external-dns 是 upsert-only：摘掉路由**不会**删 CNAME，
-#    readlist.meirong.dev 的记录仍在（会指到 gateway 然后 404），要清得手工删。
+# external-dns 是 upsert-only：日后再摘路由**不会**删 CNAME，要清得手工删。
 #
-# apiVersion: gateway.networking.k8s.io/v1
-# kind: HTTPRoute
-# metadata:
-#   name: readlist
-#   namespace: personal-services
-# spec:
-#   parentRefs:
-#     - group: gateway.networking.k8s.io
-#       kind: Gateway
-#       name: oracle-gateway
-#       namespace: kube-system
-#       port: 80
-#   hostnames:
-#     - "readlist.meirong.dev"
-#   rules:
-#     - matches:
-#         - path:
-#             type: PathPrefix
-#             value: /
-#       backendRefs:
-#         - group: ""
-#           kind: Service
-#           name: readlist
-#           port: 8080
-#           weight: 1
+# ☠️ 已知且**已被接受**的暴露面（2026-08-06 由库主人决定照常公开）：
+#   `/api/v1/catalog` 把全部 2046 个 work 的 title+author 原样发给浏览器，而书库里
+#   混着非书的私人文档 —— 实测有 1 条第三方简历
+#   `(BHRC) Backend Engineer - 吳幸慈, Mint Wu - 202603`（author 字段是另一个人名）。
+#   「只发元数据不发书」这条护栏对**书**成立，对误入库的私人文件不成立：
+#   简历的元数据本身就是真人姓名。清理办法（任一，随时可做，不必先下线）：
+#     A. 把该文档从 calibre 挪走 → 重跑 snapshot（最省事，约两分钟）；
+#     B. readlist 侧加准入过滤（按 tag/书架/格式），属上游改动；
+#     C. 公开面只发榜单、不发全量 catalog，属上游改动。
+#   ⚠️ 上游 review-2026-08-05-b 的 C1 提议给 catalog 做 SSR + sitemap。**那个落地前
+#      务必先做 A/B/C 之一**，否则这条会从「悄悄可见」变成「被搜索引擎收录」。
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: readlist
+  namespace: personal-services
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: oracle-gateway
+      namespace: kube-system
+      port: 80
+  hostnames:
+    - "readlist.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: readlist
+          port: 8080
+          weight: 1
 ---
 # ── 快照：唯一接触 calibre 的工作负载 ────────────────────────────────────
 # 秒级短命 Job，**无网络出口**（见下面的 NetworkPolicy）。
