@@ -1,8 +1,17 @@
 # readlist —— 技术书多维评分 + 公开书单站（单 Go 二进制:只读 API + 内嵌 SPA + SQLite/WAL）
 #
 # 需求/评分标准/源码的真相源在 meirongdev/readlist；**部署清单的真相源是本文件**。
-# 当前部署版本：**v0.2.0**（2026-08-06 升级；v0.1.0 → v0.2.0 的部署侧改动是
-# livenessProbe 切 /livez、两个探针显式 timeoutSeconds、三个 CronJob 加 timeZone）。
+# 当前部署版本：**v0.3.0**（2026-08-06 升级；**部署侧零改动**——上游
+# `deploy/oracle/readlist.yaml` 在 v0.2.0→v0.3.0 之间一行没动，无 schema 迁移，
+# 只换 4 处 image tag。v0.1.0 → v0.2.0 的部署侧改动是 livenessProbe 切 /livez、
+# 两个探针显式 timeoutSeconds、三个 CronJob 加 timeZone）。
+#
+# ⚠️ v0.3.0 是 **breaking**（`feat(api)!`），改的是**公开面口径**，不是部署形状：
+#   · `/api/v1/catalog` 从「全库约 2,000 本」收窄成「**公开榜单的并集**」（约百余本）；
+#     internal 榜（publisher-picks / library-hygiene）不算公开。
+#   · `/api/v1/matrix/{run}` **已删除**（原按任意历史 run 寻址）。引用它的地方要一并清。
+#   · 不按 grade 过滤这条**保留**：上榜但缺维的书照样列出并标注缺哪几维。
+#   指标口径**没变**（`readlist_works_total` 仍是全库数），故 readlist-alerts.yaml 无需改。
 #
 # 上游 `deploy/oracle/readlist.yaml` 只是参照件，抄过来时按本集群实际改了 4 处，
 # 每一处都别改回去：
@@ -17,7 +26,8 @@
 #
 # ☠️ 还有一处是**不要改回去**的删除：参照件与 kind 清单里的 `readlist init`
 #    initContainer 在本集群**故意不加**，原因见下方 Deployment 处的长注释
-#    （它会把演示语料写进空库）。v0.2.0 里 init 的 seed 行为**没变**，别被
+#    （它会把演示语料写进空库）。v0.3.0 里 init 仍在幂等检查**之前**无条件调
+#    `corpus.Seed(db)`（v0.3.0 只改了那几行的注释措辞），行为一如既往，别被
 #    上游 kind 清单带跑偏。
 #
 # ns `personal-services` 由 uptime-kuma/namespace.yaml 创建，这里不建（H1）。
@@ -140,7 +150,7 @@ spec:
           # 版本化不可变 tag（多架构 index，含 linux/arm64——本集群是 ARM，每次升级
           # 都要核对 registry 确有 arm64 变体）。用 tag 而非 `:main`，故**不需要**
           # imagePullPolicy: Always。
-          image: ghcr.io/meirongdev/readlist:v0.2.0
+          image: ghcr.io/meirongdev/readlist:v0.3.0
           command: ["readlist", "serve"]
           envFrom:
             - configMapRef:
@@ -222,21 +232,23 @@ spec:
 # ReferenceGrant 也不需要（base/gateway.yaml 已有覆盖本 ns 的通配授权）。
 # external-dns 是 upsert-only：日后再摘路由**不会**删 CNAME，要清得手工删。
 #
-# ⚠️ 公开面会把**全部** work 的 title+author 原样发给浏览器（`/api/v1/catalog`，
-#   以及 `/api/v1/matrix/{run}`）。「只发元数据不发书」这条护栏对**书**成立，对
-#   误入书库的私人文件**不成立** —— 那种东西的"元数据"本身就是真人姓名。
+# 公开面发的是 work 的 title+author（不发书本身）。**v0.3.0 起暴露面已大幅收窄**：
+#   行集合 = 7 个公开榜的并集（约百余本），不再是全库约 2,000 本；`/api/v1/matrix/{run}`
+#   已删除。这就是 ROADMAP #11 说的「修法 C」，2026-08-06 随 v0.3.0 落地。
+#   两个 internal 榜（publisher-picks / library-hygiene，`visibility: internal`）不进
+#   公开集合 —— 注意 library-hygiene 恰恰是「元数据最差的书」，正好是最不该外发的那批。
 #
-#   2026-08-06 实例已清理：一条第三方简历（BHRC / Mint Wu）此前出现在公开 catalog 里；
-#   该文档已从 calibre 移除，重跑 score 后全部公开端点核验为 0 命中（含历史 run ——
-#   matrix 的标题是**现连 works 表**取的，所以 work 一删，历史 run 也跟着不再暴露）。
+#   ☠️ **残余风险仍在，别当成已解决**：准入过滤（修法 B）**没做**——`internal/calibre`
+#   读了 tags 但不据此筛选。所以丢进 calibre 的非书文档照样参与打分，只要它**碰巧上了
+#   任一公开榜**，title+author 就仍会上公网；那种东西的"元数据"本身就是真人姓名。
+#   收窄只是把命中概率从「必然」降到「偶然」，判据依旧只有人眼。
+#   往书库里放简历/合同/发票之前先想一下。
 #
-#   ☠️ **机制本身没修**：readlist 没有任何准入过滤（`internal/calibre` 读了 tags 但
-#   不据此筛选），所以**往后任何丢进 calibre 的非书文档都会自动上公网**。
-#   往书库里放简历/合同/发票之类的东西之前先想一下。彻底修法见 ROADMAP #11：
-#     B. readlist 侧加准入过滤（按 tag/书架/格式），属上游改动；
-#     C. 公开面只发榜单、不发全量 catalog，属上游改动。
-#   ⚠️ 上游 review-2026-08-05-b 的 C1 提议给 catalog 做 SSR + sitemap。**那个落地前
-#      务必先做 B 或 C**，否则这类泄漏会从「悄悄可见」变成「被搜索引擎收录」。
+#   2026-08-06 历史实例：一条第三方简历（BHRC / Mint Wu）此前出现在公开 catalog 里，
+#   已从 calibre 移除并重跑 score，全部公开端点核验 0 命中。
+#
+#   ⚠️ 上游 review-2026-08-05-b 的 C1 提议给 catalog 做 SSR + sitemap。C 已落地，
+#      这道硬前置解除；但**做 SSR 前仍建议先补 B**，否则偶发泄漏会被搜索引擎收录固化。
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -291,7 +303,7 @@ spec:
             fsGroup: 65532
           containers:
             - name: snapshot
-              image: ghcr.io/meirongdev/readlist:v0.2.0
+              image: ghcr.io/meirongdev/readlist:v0.3.0
               command: ["readlist", "snapshot"]
               envFrom:
                 - configMapRef:
@@ -372,7 +384,7 @@ spec:
             fsGroup: 65532
           containers:
             - name: ingest
-              image: ghcr.io/meirongdev/readlist:v0.2.0
+              image: ghcr.io/meirongdev/readlist:v0.3.0
               command: ["readlist", "ingest"]
               envFrom:
                 - configMapRef:
@@ -429,7 +441,7 @@ spec:
             fsGroup: 65532
           containers:
             - name: score
-              image: ghcr.io/meirongdev/readlist:v0.2.0
+              image: ghcr.io/meirongdev/readlist:v0.3.0
               command: ["readlist", "score"]
               envFrom:
                 - configMapRef:
