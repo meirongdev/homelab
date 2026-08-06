@@ -142,6 +142,34 @@ data:
         n = min(len(a), len(b))
         return a[:n] == b[:n]
 
+    def title_gate(ours, theirs, our_author, their_creators):
+        """前缀 + 方向感知的判据。返回 (ok, 原因)。
+
+        ⚠️ 2026-08-06 第四轮实测暴露：**单用覆盖率是「只误伤好的、拦不住坏的」**。
+          · 误伤：我方 "Coding Interview Patterns Nail Your Next Coding Interview"
+            对方 "Coding Interview Patterns"（规范短名）→ 覆盖率 0.50 被弃用，
+            但这是**正确匹配**。我方书名是主副标题连成一串时，「我方 token 有多少
+            出现在对方里」这个方向天然吃亏。
+          · 拦不住：我方 "Machine Learning" 对方 "Machine Learning Yearning"
+            覆盖率 1.00 照样放行，而那是两本书。
+        所以改成按**长度方向**分情况，覆盖率不再单独作为判据：
+          · 我方更长 → 对方是规范短名，我方多的是副标题 → 安全，收。
+          · 我方更短 → 对方多出后缀，可能是副标题（对）也可能是另一本更具体的书
+            （错）。标题本身无法区分，只能看作者：
+              - 我方 ≥4 token：够长，误配概率低，收；
+              - 更短：要作者佐证，否则宁可漏。
+        """
+        if not title_prefix_ok(ours, theirs):
+            return False, "非前缀"
+        a, b = norm_title_seq(ours), norm_title_seq(theirs)
+        if len(a) >= len(b):
+            return True, "我方更长(对方为规范短名)"
+        if len(a) >= 4:
+            return True, "我方为对方前缀且够长"
+        if surname_hit(our_author, their_creators):
+            return True, "短标题+作者佐证"
+        return False, f"短标题({len(a)}token)且无作者佐证"
+
     # ⚠️ 2026-08-06 实测：**垃圾作者值会让查询彻底查不到**，而不是被忽略。
     #   "Netty in Action" + 作者 "User"  → 无结果
     #   "Netty in Action" 仅标题          → Netty in Action ✓（Manning 的真书）
@@ -551,17 +579,14 @@ data:
                     time.sleep(DELAY)
                     if not cand:
                         continue
-                    c = coverage(title, cand["title"])
-                    gate = (GATE_WITH_AUTHOR if author_known(first_author)
-                            else GATE_NO_AUTHOR)
-                    # 两道都要过：前缀门管「是不是同一本书」，覆盖率门管「像不像」。
-                    # 前缀门是主判据 —— 覆盖率单独用会放过「对方开头多了限定词」那类错。
-                    if title_prefix_ok(title, cand["title"]) and c >= gate:
-                        meta, how, cov = cand, f"title[{vt[:28]}]", c
+                    ok, why = title_gate(title, cand["title"],
+                                         first_author, cand["creators"])
+                    if ok:
+                        meta = cand
+                        how = f"title[{vt[:26]}]({why})"
+                        cov = coverage(title, cand["title"])  # 仅用于日志
                         break
-                    why = ("非前缀" if not title_prefix_ok(title, cand["title"])
-                           else f"覆盖率 {c:.2f} < {gate}")
-                    log(f"    ✗ {why} 弃用: {cand['title'][:60]}")
+                    log(f"    ✗ {why} 弃用: {cand['title'][:58]}")
 
             if not meta:
                 st["no_result"] += 1
