@@ -77,7 +77,11 @@ TREE_BACKUP_OVERLAY = {
 # 加豁免比加白名单更需要理由：这是唯一能让数据合法地不进 restic 的出口。
 BACKUP_EXEMPT = {
     "meilisearch-data": "搜索索引，可由 karakeep 全量重建（backup-script.yaml 开头已声明不备份）",
-    "miniflux-db-pvc": "PostgreSQL 数据目录，由 pg_dumpall 逻辑导出覆盖，不做文件级拷贝",
+    # miniflux-db-pvc 于 2026-08-06 随 rss-postgres 退役删除，故移除其豁免条目——
+    # 留着会让将来任何同名 PVC 被静默豁免。miniflux 现在住在 CNPG 的 apps-pg。
+    # ⚠️ 注意 H4 看不到 CNPG 的 PVC（apps-pg-1 / zitadel-pg-1 由 operator 动态创建，
+    #    不在任何清单里）。那两个库的备份归属靠 backup-script.yaml 里的逐库 pg_dump 行，
+    #    加租户必须手工加一行，本检查器不会提醒。见 decisions/shared-postgres-platform.md。
     "open-notebook-surreal-local": "SurrealDB 数据目录，由 HTTP /export 逻辑导出覆盖（见 runbooks/backup-recovery.md）",
     "calibre-books-local": "23G 书库，由 backup-script.yaml 的 BOOKS_DIR 整目录纳入 restic，不走 sqlite 白名单",
 }
