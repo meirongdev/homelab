@@ -97,3 +97,8 @@ opencost:
 
   ui:
     enabled: true
+
+# 2026-08-06：同 opencost-oracle.yaml —— 纯观测组件归 bulk，理由见那份注释。
+# homelab 侧内存压力比 oracle 更紧（7d 最低 MemAvailable 3.31G/12.66G）。
+# ⚠️ 键在**顶层**（chart 2.5.28 values 第 115 行），不是 opencost.* 下面。
+priorityClassName: meirong-bulk
