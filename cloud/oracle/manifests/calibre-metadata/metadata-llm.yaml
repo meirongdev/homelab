@@ -91,6 +91,32 @@ data:
         t = (t or "").strip()
         return bool(t) and any(p.search(t) for p in FILENAME_PATTERNS)
 
+    # 纯标识符类 token（ASIN / 长串 ID / EBOK 后缀），本身不含书名信息。
+    ID_TOKEN = re.compile(r"^(b0[a-z0-9]{8}|[a-z0-9]{10,}|ebok)$")
+
+    def title_tokens(t):
+        t = unicodedata.normalize("NFKD", t or "").lower()
+        t = re.sub(r"[^a-z0-9]+", " ", t)      # 点分文件名在这里被拆成词
+        return [w for w in t.split() if w]
+
+    def title_replacement_ok(old_title, new_title):
+        """LLM 给的书名能不能替换掉旧的？返回 (ok, 原因)。
+
+        ⚠️ 2026-08-07 首轮 DRY-RUN 抓到的错：
+          Reciprocity.Evolution.and.Decision.Games.in.Network... -> "Basic Game Theory"
+        模型读的是**章节标题**而不是扉页书名。点分文件名里其实含着真实书名的词，
+        可以拿来校验；而纯 ASIN（B09RHP5H81 EBOK）里什么都没有，无从校验。
+        所以分两种情况：
+          · 旧书名有实义词 → 要求新旧有足够词重叠，挡住"读错了页"这类；
+          · 旧书名只有 ID  → 没有可比对的东西，且现状已经毫无信息，接受。
+        """
+        a = {w for w in title_tokens(old_title) if not ID_TOKEN.match(w)}
+        b = set(title_tokens(new_title))
+        if not a:
+            return True, "旧书名只有 ID，无从比对"
+        ov = len(a & b) / len(a)
+        return ov >= 0.4, f"新旧词重叠 {ov:.2f}"
+
     def title_sort(t):
         m = re.match(r"^(the|a|an)\s+(.*)$", (t or "").strip(), re.I)
         return f"{m.group(2)}, {m.group(1)}" if m else (t or "").strip()
@@ -333,6 +359,11 @@ data:
             # title：只在现有书名像文件名时替换。正常书名一律不碰 ——
             # LLM 从扉页读出的可能是丛书名或副标题，风险不对称。
             do_title = bool(new_title) and looks_like_filename(title)
+            if do_title:
+                ok_t, why_t = title_replacement_ok(title, new_title)
+                if not ok_t:
+                    log(f"    ✗ 书名替换弃用（{why_t}）: {new_title[:46]}")
+                    do_title = False
             # authors：只在现有是垃圾值时写。
             do_author = bool(new_authors) and author_garbage(author)
 
