@@ -1,0 +1,94 @@
+---
+# 回补作业。**刻意用「挂起的 CronJob」而不是裸 Job**，这是从 enrich-job.yaml 那个
+# 坑里学到的：裸 `kind: Job` 的 `spec.template` 在 API server 层不可变，改任何一个
+# 字段（哪怕只是 requests 或一个 env）都会 apply 报 `field is immutable`
+# → calibre-metadata App 永久 OutOfSync，且失败的 sync 会把 revision 钉住、
+# 后续修复提交一起卡住（enrich-job.yaml 里有整段注释在讲这个代价）。
+#
+# 而本作业**天生就要改参数反复跑**：先 DRY_RUN=1 看命中率，再 DRY_RUN=0 小批试写，
+# 最后分批推进 LIMIT。用裸 Job 等于每改一次就要 `kubectl delete job` —— 而删掉重建
+# 会让它**从头再跑一遍**。CronJob 的 jobTemplate 是可变的，改完 git push 即可。
+#
+# suspend: true —— 永不自动触发。每次要跑就手动派生一个 Job：
+#   kubectl --context oracle-k3s -n personal-services create job backfill-dry-1 \
+#     --from=cronjob/calibre-metadata-backfill
+# 看日志：
+#   kubectl --context oracle-k3s -n personal-services logs -f job/backfill-dry-1
+# 跑完自己清：
+#   kubectl --context oracle-k3s -n personal-services delete job backfill-dry-1
+#
+# ⚠️ 手动派生的 Job 不在 git 里，ArgoCD 不认识它，也不会 prune 它 —— 记得自己删，
+#    否则完成的 Job pod 会一直占着 `personal-services` 的 pod 配额视图。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: calibre-metadata-backfill
+  namespace: personal-services
+spec:
+  # 永不自动跑；schedule 是 CronJob 的必填字段，写个远期占位值。
+  suspend: true
+  schedule: "0 5 31 2 *" # 2 月 31 日 —— 永不存在的日期，双保险
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0 # 写库作业不自动重试：失败要人看过再决定，重试可能把半成品叠加一遍
+      ttlSecondsAfterFinished: 259200 # 3 天
+      template:
+        metadata:
+          labels:
+            app: calibre-metadata
+            role: backfill
+        spec:
+          restartPolicy: Never
+          priorityClassName: meirong-bulk
+          containers:
+            - name: backfill
+              image: crocodilestick/calibre-web-automated@sha256:4ff5be5cd6f18d91cc72bf316260d8c34c980f09a862372bc77d25c9ddb0efef
+              command: ["python3", "/scripts/backfill_metadata.py"]
+              env:
+                # ⚠️ 没有它 calibre 的二进制起不来（libcalibre-launcher.so 找不到）。
+                - name: LD_LIBRARY_PATH
+                  value: "/app/calibre/lib"
+                - name: TZ
+                  value: "Asia/Shanghai"
+                # ── 这两个按需改，改完 git push 即可（CronJob 模板可变，这正是不用裸 Job 的原因）──
+                # "1" = 只报告不写库。
+                # 已于 2026-08-06 完成两轮验证后才置 0：
+                #   · DRY_RUN=1 LIMIT=8  → 8/8 命中、cov 全 1.00、ISBN 路径走通；
+                #   · DRY_RUN=0 LIMIT=3  → 逐字段比对确认只补空缺（id=3 已有 tags 被正确跳过），
+                #     pubdate/title/authors/comment/publisher 逐字节未变。
+                # 换库、换数据源或改匹配门之后，**先翻回 "1" 重跑一轮**再置 0。
+                - name: DRY_RUN
+                  value: "0"
+                # 单次处理上限。候选池实测 1,746 本 × 约 3.5s ≈ 1.7 小时。
+                # 脚本每本一次 commit，中途被杀不会回滚已完成的部分，重跑会自然跳过已补好的。
+                - name: LIMIT
+                  value: "2000"
+              resources:
+                requests:
+                  # 主要是等网络（每本约 3s），CPU 只在 fetch 起进程的瞬间用。
+                  # 节点 2 OCPU、requests 已占约 77%，这里克制一点。
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  # 写 "1" 而非 1000m：API server 会把 1000m 规范化成 1，
+                  # 不一致会让 SSA diff 永久 OutOfSync（同 enrich-job.yaml 的教训）。
+                  cpu: "1"
+                  memory: 1Gi
+              volumeMounts:
+                - name: calibre-library
+                  mountPath: /calibre-library
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: calibre-library
+              persistentVolumeClaim:
+                claimName: calibre-books-local
+            - name: scripts
+              configMap:
+                name: metadata-backfill-script
+                defaultMode: 0755
