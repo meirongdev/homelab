@@ -25,3 +25,23 @@ metadata:
 value: 900
 globalDefault: false
 description: "核心网络/编排负载（external-dns/cloudflared）—— 高于普通应用"
+---
+# 2026-08-06 补。此前只有 oracle 侧定义了这个 class（cloud/oracle/manifests/base/
+# priorityclasses.yaml，2026-08-05 随缩容加入），homelab 这份漏了 ——
+# 而 c6ff325/e1599bf 给 **共享的** values（k8s/helm/values/{opencost,trivy-operator}.yaml）
+# 标了 priorityClassName: meirong-bulk 且注明「两集群」。
+# 后果：homelab 的 opencost 与 trivy-operator/trivy-server 滚动更新时旧 pod 被删、
+# 新 pod 被 API server 拒绝（`no PriorityClass with name meirong-bulk was found`），
+# 两个组件静默下线约 25 分钟。ArgoCD 那边显示 **Synced**（清单确实下发了），
+# 只有 health 是 Degraded —— 又一例「Synced ≠ 在跑」。
+#
+# ⚠️ 两份 PriorityClass 清单必须保持同步：值/名字任何一边变了，另一边也要改，
+# 否则跨集群共享的 values 就会在缺失的那一侧炸。
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: meirong-bulk
+value: -10
+globalDefault: false
+preemptionPolicy: Never
+description: "可牺牲的个人应用（calibre/stirling/karakeep/browserless 等）—— 内存压力时最先被驱逐"
