@@ -101,6 +101,47 @@ data:
             return 0.0
         return len(a & b) / len(a)
 
+    # ── 标题前缀门（策略 3 用）─────────────────────────────────────────────
+    # ⚠️ 2026-08-06 第一轮全量跑完后审计发现的**盲区**，别改回覆盖率：
+    #   覆盖率只问「我方 token 是否都在对方里」，于是**我方书名是对方书名的子串、
+    #   但根本是另一本书**时会拿到 cov=1.00 照样放行。实测 757 条标题匹配里
+    #   58 条是这样错的（约 7.7%）：
+    #     Machine Learning                        -> Grokking Machine Learning
+    #     Android Studio Chipmunk Essentials--Java -> ...Chipmunk Essentials - Kotlin
+    #     Android Studio Electric Eel Essentials  -> Android Studio Dolphin Essentials
+    #     macOS Ventura For Dummies               -> macOS Tahoe for Dummies
+    #     Hands-on Rust                           -> Advanced Hands-On Rust
+    #     Modern Enterprise Architecture          -> Modern Oracle Enterprise Architecture
+    #   共同形态是**对方在开头多了限定词**（Grokking/Advanced/Oracle），那恰恰改变了
+    #   书的身份。所以改成要求「我方是对方的前缀」。
+    #
+    # ⚠️ 作者相同**救不了**这个判断：Hands-on Rust 与 Advanced Hands-On Rust
+    #    是同一个作者（Herbert Wolverson）。所以这条路上不做任何基于作者的放宽。
+    #
+    # 代价是会漏掉一些真匹配（"Pro Angular" vs "Pro Angular 9"、
+    # "Do This, Not That" vs "Do This, Not That: Career"），它们会落进待人工清单。
+    # 这个方向的错（漏补）比反方向（补错书）便宜得多，且多数还能被策略 2 捞回来。
+    TITLE_NOISE = re.compile(
+        r"\b(\d+(st|nd|rd|th)\s+edition|edition|ed\.?|volume|vol\.?)\b")
+
+    def norm_title_seq(s):
+        s = (s or "").lower().replace("&", " and ")
+        s = TITLE_NOISE.sub(" ", s)
+        s = re.sub(r"[^a-z0-9 ]", " ", s)
+        t = s.split()
+        while t and t[0] in ("the", "a", "an"):
+            t = t[1:]
+        return t
+
+    def title_prefix_ok(ours, theirs, min_tokens=2):
+        a, b = norm_title_seq(ours), norm_title_seq(theirs)
+        # 单 token 书名（"GoLang"）判据太弱，直接不收 —— 实测它匹到了
+        # "Software Productivity With Go"。
+        if len(a) < min_tokens or len(b) < min_tokens:
+            return False
+        n = min(len(a), len(b))
+        return a[:n] == b[:n]
+
     def author_known(a):
         return bool(a) and a.strip().lower() not in ("unknown", "")
 
@@ -457,14 +498,14 @@ data:
                     c = coverage(title, cand["title"])
                     gate = (GATE_WITH_AUTHOR if author_known(first_author)
                             else GATE_NO_AUTHOR)
-                    ok = c >= gate
-                    # 作者对上了可以补偿一点标题差异（副标题重排、出版社改名等）。
-                    if not ok and surname_hit(first_author, cand["creators"]):
-                        ok = c >= gate - 0.15
-                    if ok:
+                    # 两道都要过：前缀门管「是不是同一本书」，覆盖率门管「像不像」。
+                    # 前缀门是主判据 —— 覆盖率单独用会放过「对方开头多了限定词」那类错。
+                    if title_prefix_ok(title, cand["title"]) and c >= gate:
                         meta, how, cov = cand, f"title[{vt[:28]}]", c
                         break
-                    log(f"    ✗ 覆盖率 {c:.2f} < {gate} 弃用: {cand['title'][:60]}")
+                    why = ("非前缀" if not title_prefix_ok(title, cand["title"])
+                           else f"覆盖率 {c:.2f} < {gate}")
+                    log(f"    ✗ {why} 弃用: {cand['title'][:60]}")
 
             if not meta:
                 st["no_result"] += 1
