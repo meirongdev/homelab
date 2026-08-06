@@ -100,3 +100,19 @@ spec:
       - group: ""
         kind: PersistentVolumeClaim
         name: "data-trivy-server-0"
+      # 同上,Vault StatefulSet 的两个 volumeClaimTemplate(data / audit)产物。
+      # 2026-08-06 复跑孤儿分析时补 —— 它们与 data-trivy-server-0 同类,此前漏了。
+      # 依旧是**具名**豁免,不豁免 PVC 整类。
+      - group: ""
+        kind: PersistentVolumeClaim
+        name: "data-vault-0"
+      - group: ""
+        kind: PersistentVolumeClaim
+        name: "audit-vault-0"
+      # CNPG operator 在每个含 Cluster 的 ns 里自动创建的默认监控查询 ConfigMap
+      # (标签 app.kubernetes.io/managed-by=cloudnative-pg)。删了会被立即重建。
+      # 2026-08-06 补:apps-pg 上线后它出现在 databases 与 zitadel 两个 ns。
+      # ignore 的 schema 没有 namespace 字段,按名字豁免正好覆盖全部 ns。
+      - group: ""
+        kind: ConfigMap
+        name: "cnpg-default-monitoring"
