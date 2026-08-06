@@ -12,17 +12,21 @@
 #
 # ⚠️ **本文件与 cloud/oracle/manifests/base/priorityclasses.yaml 必须逐字段同步。**
 # 两边由不同的 ArgoCD App 下发，但 k8s/helm/values/ 下的多份 values 是**两集群共用**的
-# ——名字/值任一边漂了，缺失的那一侧就会在下次滚动时炸（见下方 2026-08-06 的事故记录）。
+# ——名字/值任一边漂了，缺失的那一侧就会在下次滚动时炸。
 #
-# ── 命名迁移中（2026-08-06）─────────────────────────────────────────────────
-# `meirong-*` → 无前缀的 `critical` / `high` / `bulk`。
-# 新旧**并存**是刻意的，删旧的是三步走的最后一步：
-#   ① 两集群加新 class（本步，不动任何引用）
-#   ② 确认两集群都已下发后，改全部 priorityClassName 引用
-#   ③ 引用清零后才删 meirong-*
-# 不能合并成一步：PriorityClass 与引用它的工作负载分属不同 ArgoCD App，**同步无先后
-# 保证**；引用先于 class 生效时，API server 直接拒绝建 pod（旧 pod 已被删 → 静默下线）。
-# ───────────────────────────────────────────────────────────────────────────
+# 2026-08-06 这条警告是拿一次真实下线换来的：homelab 这份当时漏了 `meirong-bulk`
+# （oracle 那份 2026-08-05 已加），而共享 values 标了它并注明「两集群」→ homelab 的
+# opencost 与 trivy-operator/trivy-server 旧 pod 被滚动删除、新 pod 被 API server 拒绝
+# （`no PriorityClass with name ... was found`），静默下线约 25 分钟。
+# 全程 ArgoCD 显示 **Synced**（清单确实下发成功了），只有 health 是 Degraded
+# —— 又一例「Synced ≠ 在跑」。恢复后 ReplicaSet 的失败退避还会再拖几分钟，
+# 删掉卡住的 RS 可立即重置。
+#
+# 同日完成 `meirong-*` → 无前缀的改名（三步走：加新 class → 改全部引用 → 删旧）。
+# ⚠️ **删旧 class 的遗留影响**：2026-08-06 之前创建的 ReplicaSet 修订版本里仍写着
+# `meirong-*`（`revisionHistoryLimit` 保留的历史，desired 均为 0）。对这些 Deployment
+# 执行 `kubectl rollout undo` 回滚到那些旧修订会**建不出 pod**（同上面的报错）。
+# 正确做法是往前修而不是回滚；这些旧 RS 也会随后续发布自然淘汰出保留窗口。
 ---
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
@@ -50,37 +54,3 @@ value: -10
 globalDefault: false
 preemptionPolicy: Never
 description: "可牺牲的个人应用（calibre/stirling/karakeep/browserless 等）—— 内存压力时最先被驱逐"
----
-# ── 以下三个是迁移中的旧名，第 ③ 步删除。别在新清单里引用它们。────────────────
-apiVersion: scheduling.k8s.io/v1
-kind: PriorityClass
-metadata:
-  name: meirong-critical
-value: 1000
-globalDefault: false
-description: "[deprecated 2026-08-06 → critical] 控制面关键负载"
----
-apiVersion: scheduling.k8s.io/v1
-kind: PriorityClass
-metadata:
-  name: meirong-high
-value: 900
-globalDefault: false
-description: "[deprecated 2026-08-06 → high] 核心网络/编排负载"
----
-# 这个 class 直到 2026-08-06 才在 homelab 侧存在：oracle 那份 2026-08-05 随缩容加了，
-# homelab 这份漏了，而 c6ff325/e1599bf 给**共享的** values
-# （k8s/helm/values/{opencost,trivy-operator}.yaml）标了它并注明「两集群」。
-# 后果：homelab 的 opencost 与 trivy-operator/trivy-server 滚动时旧 pod 被删、新 pod 被
-# API server 拒绝（`no PriorityClass with name meirong-bulk was found`），静默下线约 25 分钟。
-# ArgoCD 全程显示 **Synced**（清单确实下发成功），只有 health 是 Degraded
-# —— 又一例「Synced ≠ 在跑」。恢复后 ReplicaSet 的失败退避还会再拖几分钟，
-# 删掉卡住的 RS 可立即重置。
-apiVersion: scheduling.k8s.io/v1
-kind: PriorityClass
-metadata:
-  name: meirong-bulk
-value: -10
-globalDefault: false
-preemptionPolicy: Never
-description: "[deprecated 2026-08-06 → bulk] 可牺牲的个人应用"
