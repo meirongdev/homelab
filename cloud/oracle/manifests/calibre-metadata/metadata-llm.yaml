@@ -177,7 +177,11 @@ data:
         body = json.dumps({
             "model": LLM_MODEL,
             "messages": [{"role": "user", "content": PROMPT + text}],
-            "max_tokens": 800,
+            # ⚠️ deepseek-v4-flash 是**推理模型**：它先产出 reasoning_content，
+            # 再产出 content。800 在 6000 字摘录下会被推理阶段吃光，
+            # 结果是 finish_reason=length 且 **content 为 null**（不是报错、不是空串）。
+            # 2026-08-07 首次 DRY-RUN 就是这样崩的。2000 给推理留够余量。
+            "max_tokens": 2000,
             "temperature": 0,
         }).encode()
         req = urllib.request.Request(
@@ -189,9 +193,21 @@ data:
             log(f"    LLM 调用失败: {str(e)[:80]}")
             return None
         try:
-            c = d["choices"][0]["message"]["content"]
+            ch = d["choices"][0]
         except (KeyError, IndexError):
             return None
+        msg = ch.get("message") or {}
+        c = msg.get("content")
+        # ☠️ `content` 键**存在但为 None** —— 所以 KeyError 捕不到它，
+        # 直接丢给 re.search 会 TypeError 把整个作业带崩（实测踩过）。
+        # 推理模型耗尽 max_tokens 时就是这个形状。
+        if not c:
+            # 有时 JSON 落在推理段里，捞一把再说；捞不到就如实报告原因。
+            c = msg.get("reasoning_content") or ""
+            if not c:
+                log(f"    模型没有输出内容（finish_reason="
+                    f"{ch.get('finish_reason')}）—— 多半是 max_tokens 被推理吃光")
+                return None
         # 模型偶尔会裹 ``` 或前后带解释，取第一个完整 JSON 对象。
         m = re.search(r"\{.*\}", c, re.S)
         if not m:
