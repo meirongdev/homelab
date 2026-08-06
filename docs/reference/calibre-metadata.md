@@ -46,9 +46,24 @@
 `Passive Income Business…`），**本就没有 ISBN、也从未进过任何书目数据库**。
 Google Books 与 OpenLibrary 都查不到，书里也挖不出号段。
 
-⚠️ **封面那 54 本回补作业不管**：`calibre-metadata-updater` CronJob 每夜只从
-**电子书文件内嵌**提取封面，这 54 本是文件里也没有的。要补得走在线抓
-（Google Books `imageLinks` 或 calibre 的 Google Images 源），尚未做。
+### 封面：三个作业的分工
+
+| 作业 | 来源 | 覆盖 |
+|---|---|---|
+| `calibre-metadata-updater`（每夜） | 电子书文件**内嵌**封面，零网络 | 绝大多数 |
+| `calibre-metadata-covers`（挂起，手动触发） | Google Books `imageLinks` | 补上 **13 本** |
+| —— | 无 | 仍缺 **41 本** |
+
+2026-08-06 跑完后缺封面 **54 → 41**。剩下的 41 本：34 本**没有任何标识符**（查不了），
+7 本 Google 侧也没有图。
+
+⚠️ 两个实测要点（写在 `metadata-covers.yaml` 里，别重新发现一遍）：
+
+1. **`fetch-ebook-metadata --cover` 在本环境拿不到封面** —— Google 与 Google Images
+   两种源、150s 超时都试过，产出为空。只能走 Google Books API 直取 `imageLinks`。
+2. **默认 `thumbnail` 只有约 16KB（~128px 宽）**，在 calibre-web 网格里明显发虚。
+   同一张图把 URL 参数改成 `zoom=4` 或 `w=800` 能拿到 **45–64KB**，约 5 倍 ——
+   不需要换源，只是参数问题。
 
 语言分布 **eng 1725 / zho 20**（余数为无语言标注）。**豆瓣类中文源对本库基本无用**，
 Google Books / OpenLibrary 才对路。
@@ -243,8 +258,27 @@ GraphQL 也不 select，指望它拿评分是空的。
 ## 评分与书评：calibre 的能力边界
 
 - **「评价」（书评正文）calibre 没有对应字段。** `comments` 存的是出版社简介（blurb）。
-- **原生 `rating` 是「你自己的星级」**（0–5 存 0–10），不是公众评分。要存公众评分
-  应建自定义列 —— `custom_columns` 当前为**空**。
+- **原生 `rating` 是「你自己的星级」**（0–5 存 0–10），不是公众评分。
+
+### ❌ 公众评分：不是抓不到，是数据不存在（2026-08-06 实测后放弃）
+
+两个免费源对本库的覆盖率**都是零**：
+
+| 源 | 样本 | 有评分 |
+|---|---|---|
+| Google Books（带 API key，无 429） | 25 本 | **0** |
+| OpenLibrary `/ratings.json` | 8 本（其中 3 本有 work 记录） | **0** |
+
+与 readlist 的独立测量互相印证：`readlist_dim_measured{dim="A"}` = **39 / 2045（1.9%）**。
+
+根因是**书目结构**而非技术：本库 1725/2053 是英文技术书，而 Google Books 与
+OpenLibrary 的评分主要来自大众读物。建这一列会得到一个 **98% 为空**的字段，
+还要为它维护一个夜间作业 —— 因此**刻意不建**，`custom_columns` 里只有 `pubdate_src`。
+
+唯一可能可行的路是 **Hardcover.app**（Goodreads 的开放替代，免费 GraphQL API，
+技术书覆盖较好），但需要账号 token；**在拿到 token 实测覆盖率之前不要动手建列**，
+否则重复一次同样的空字段。⚠️ 注意 CWA 自带的 `cps/metadata_provider/hardcover.py`
+帮不上忙：它有 `rating` 字段但**代码从不赋值**、GraphQL 也不 select（见下节）。
 - calibre 内置源里只有 Amazon 提供 rating，实测在本集群 **120s 超时无结果**（反爬）。
   CWA 网页端那套 provider（`google.py:83` `match.rating = volume_info["averageRating"]`）
   能拿到，但只在编辑页一本本点，无批量入口。
