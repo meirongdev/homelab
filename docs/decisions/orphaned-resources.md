@@ -103,6 +103,36 @@ manual-helm，设计如此，见 [`external-dns-adoption.md`](external-dns-adopt
 注解，它没有）—— 从 Git 重建集群时 `calibre-metadata-enrich` Job 会因缺 ConfigMap 起不来，
 正落在 `runbooks/homelab-rebuild-ubuntu-24-04.md` 那条路径上。已在同批提交修复。
 
+## 2026-08-06 复跑
+
+控制面已于 2026-08-02 迁 oracle，两集群各跑一遍同一判定逻辑。信号面**各 6 条**：
+
+**捞到并清除的真孤儿：0 条。**（同批另行清掉的 `argocd-image-updater` 两个 ExternalSecret
+不是靠本机制发现的——它们**在 Git 里**，属于「组件退役了但清单没删」，是 kor 那一侧的问题。
+这正好印证决策一的取舍：两个工具找的是相反的东西，本机制天然看不见这类。）
+
+12 条信号全部是**应该存在**的，分三类：
+
+| 类 | 对象 | 处理 |
+|---|---|---|
+| StatefulSet 的 volumeClaimTemplate 产物 | `data-vault-0`、`audit-vault-0` | 与 `data-trivy-server-0` 同类，**已补进 ignore**（仍是具名） |
+| operator 自动生成 | `cnpg-default-monitoring`（databases + zitadel 两个 ns） | 删了会被 CNPG 立即重建，**已补进 ignore** |
+| k8s 内置 | `kube-public/system:controller:bootstrap-signer` Role+RoleBinding | controller-manager 建的，`kube-public` 也不是任何 App 的 destination，不处理 |
+
+### 永久孤儿：不入 Git 的 bootstrap 依赖（**不要清理**）
+
+剩下 4 条是**刻意不进 Git** 的手工前置。它们会永远显示为孤儿，而这恰恰有用——
+**这份清单就是「从 Git 重建集群时会缺什么」**。此前它散落在 8 个文件的注释里，汇总于此：
+
+| 对象 | 作用 | 删掉的后果 |
+|---|---|---|
+| `rss-system/Secret/vault-token` | `ClusterSecretStore vault-backend` 的 token（`base/vault-store.yaml`） | oracle 全部 ESO 停摆 |
+| `zitadel/Secret/login-client` | Login V2 PAT，从 homelab 拷入（setup job 在已恢复的 DB 上会跳过创建） | 实测正被 `zitadel-login` pod 挂载 → SSO 登录页挂 |
+| `vault/Secret/vault-auto-unseal` | `just vault-setup-auto-unseal` 建；Vault 的 lifecycle hook 读它自动解封 | Vault 重启后保持 sealed，需人工解封 |
+| `vault/Secret/vault-backup-keys` | unseal keys 备份 | 灾难恢复时无法解封 |
+
+⚠️ **这 4 条刻意不进 ignore 列表**：让它们持续可见，比让列表"干净"更有价值。
+
 ## 后果
 
 - ⚠️ **AppProject 不归 `root` App 同步**（root 只 watch `argocd/applications/`），改完
