@@ -137,3 +137,16 @@ serviceMonitor:
   enabled: true
   labels:
     release: kube-prometheus-stack
+
+# 2026-08-06：此前无 priorityClass，落在默认档 0 —— 比标了 meirong-bulk(-10) 的个人应用
+# 还高。CLAUDE.md 的硬约束写着「所有安全组件 fail-open + 控 CPU」，而被驱逐正是 fail-open：
+# 扫描停一会儿只是报告变旧，不影响任何运行时管控。归 bulk 与该约束一致。
+#
+# ⚠️ **两个键都要设，层级不同**（chart 0.33.1 逐键确认过）：
+#   · 顶层 priorityClassName                    -> operator 本体（常驻，内存小头）
+#   · trivyOperator.scanJobPodPriorityClassName -> **扫描 Job pod**，真正的瞬时内存消费者
+#     只设前者等于漏掉了要管的那个。
+priorityClassName: meirong-bulk
+
+trivyOperator:
+  scanJobPodPriorityClassName: meirong-bulk

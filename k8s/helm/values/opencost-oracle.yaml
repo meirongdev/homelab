@@ -87,3 +87,9 @@ opencost:
 
   ui:
     enabled: true
+
+# 2026-08-06：此前无 priorityClass，等于落在默认档 0 —— 比标了 meirong-bulk(-10) 的
+# 个人应用还高。成本看板是纯观测组件，被驱逐只丢一段成本采样，不影响任何运行时依赖，
+# 归 bulk 才符合四档模型的本意（见 docs/reference/k8s-qos-resource-management.md）。
+# ⚠️ 键在**顶层**（chart 2.5.28 values 第 115 行），不是 opencost.* 下面。
+priorityClassName: meirong-bulk
