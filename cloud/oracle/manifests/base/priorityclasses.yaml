@@ -1,22 +1,30 @@
 # 集群级 PriorityClass —— 给控制面关键负载（ArgoCD/external-dns-oracle/cloudflared）驱逐优先级。
 # 值/设计与 homelab 侧 k8s/helm/manifests/namespace-guardrails/priorityclasses.yaml 保持一致，
 # 详见该文件头部注释。本目录经 oracle-k3s App (Kustomize) 同步到 oracle 集群。
+#
+# ⚠️ **两份清单必须逐字段同步**（k8s/helm/values/ 下多份 values 是两集群共用的）。
+# 2026-08-06 就因为 homelab 那份漏了 meirong-bulk，害 homelab 的 opencost 与
+# trivy-operator 静默下线 25 分钟——细节见那个文件里的记录。
+#
+# ── 命名迁移中（2026-08-06）：`meirong-*` → 无前缀的 critical / high / bulk ──
+# 新旧并存是刻意的，三步走：① 两集群加新 class（本步）② 改全部引用 ③ 删旧。
+# 不能合并：PriorityClass 与引用它的工作负载分属不同 ArgoCD App，同步无先后保证。
 ---
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
-  name: meirong-critical
+  name: critical
 value: 1000
 globalDefault: false
-description: "控制面关键负载（Vault/ArgoCD）—— 节点内存压力时优先保留"
+description: "控制面关键负载（Vault/ArgoCD/zitadel-pg）—— 节点内存压力时优先保留"
 ---
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
-  name: meirong-high
+  name: high
 value: 900
 globalDefault: false
-description: "核心网络/编排负载（external-dns/cloudflared）—— 高于普通应用"
+description: "核心网络/编排负载（external-dns/cloudflared/otel）—— 高于普通应用"
 ---
 # 2026-08-05 缩容到 2 OCPU / 12GB 时新增。节点内存峰值从占 24GB 的 43% 变成占 12GB 的
 # ~70%，「谁先被驱逐」第一次成为真问题：kubelet 先按 QoS 分档，档内按 **Pod Priority**
@@ -25,8 +33,34 @@ description: "核心网络/编排负载（external-dns/cloudflared）—— 高�
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
-  name: meirong-bulk
+  name: bulk
 value: -10
 globalDefault: false
 preemptionPolicy: Never
 description: "可牺牲的个人应用（calibre/stirling/karakeep/browserless 等）—— 内存压力时最先被驱逐"
+---
+# ── 以下三个是迁移中的旧名，第 ③ 步删除。别在新清单里引用它们。────────────────
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: meirong-critical
+value: 1000
+globalDefault: false
+description: "[deprecated 2026-08-06 → critical] 控制面关键负载"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: meirong-high
+value: 900
+globalDefault: false
+description: "[deprecated 2026-08-06 → high] 核心网络/编排负载"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: meirong-bulk
+value: -10
+globalDefault: false
+preemptionPolicy: Never
+description: "[deprecated 2026-08-06 → bulk] 可牺牲的个人应用"
