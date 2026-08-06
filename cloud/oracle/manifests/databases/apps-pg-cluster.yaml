@@ -55,9 +55,12 @@ spec:
         postImportApplicationSQL:
           - ANALYZE
 
-  # 迁移源：rss-system 里待退役的 rss-postgres（无 TLS，故 sslmode: disable）。
-  # ⚠️ 旧库销毁后这段就指向不存在的 Service 了，但它**只在 bootstrap 时用一次**，
-  #    留着无害；想清理可以连同上面的 import 段一起删，不会触发重建。
+  # 迁移源：rss-postgres（已于 2026-08-06 销毁，无 TLS 故 sslmode: disable）。
+  # ⚠️ 这里指向的 Service **已经不存在了**，是刻意保留的死引用：
+  #    `bootstrap` 只在建库时读一次，集群 initialized 之后 CNPG 不再看它，所以不影响运行。
+  #    **不要为了"清理干净"去删这段**——那是在动一个有数据的库的 bootstrap 配置，
+  #    收益纯属美观，而 CNPG 对 bootstrap 变更的处理没在本环境验证过。
+  #    真要动，先在一次性的测试 Cluster 上验证，别拿这个库试。
   externalClusters:
     - name: rss-postgres
       connectionParameters:
