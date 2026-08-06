@@ -122,8 +122,10 @@ homelab 负载必须显式写 `https://100.94.186.7:6443`，写错会把整套 h
 ### oracle-k3s App（kustomize 树）的专有事实
 
 - `cloud/oracle/manifests/` 自 2026-06-04 进 GitOps；auto-sync + selfHeal + **prune** 全开。
-  有状态 PVC（`miniflux-db-pvc`、`karakeep-data`、`meilisearch-data`、`uptime-kuma-data`、
+  有状态 PVC（`karakeep-data`、`meilisearch-data`、`uptime-kuma-data-v2`、
   `stirling-pdf-configs`）带 `argocd.argoproj.io/sync-options: Prune=false`。
+  ⚠️ CNPG 的卷（`apps-pg-1`、`zitadel-pg-1`）**不在这个名单里也不需要**——它们由 operator
+  按 `Cluster` 生成，不是清单对象，ArgoCD 的 prune 根本看不到。删 `Cluster` 才会连带删卷。
 - **不入 git 的 bootstrap 依赖**: `argocd-manager` SA + cluster-admin 在
   `cloud/oracle/bootstrap/argocd-manager.yaml`，手工 apply 一次、**刻意留在 kustomize 树外**；
   `vault-token` Secret（`rss-system`）同为手工前置（不被 prune，见 `base/vault-store.yaml`）。

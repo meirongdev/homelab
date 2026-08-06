@@ -20,12 +20,18 @@
 
 ## 0. 数据盘点（先做，别跳过）
 
-oracle-k3s 的 local-path PVC（14 个）：
+oracle-k3s 的 local-path PVC（15 个，2026-08-06 对着 live 集群重新生成——上一版有三处漂移：
+`uptime-kuma-data` 实为 `uptime-kuma-data-v2`、漏了 `readlist-data`、`miniflux-db-pvc` 已退役）：
 
 `storage-loki-0` · `storage-tempo-0` · `opencost-pvc` · `calibre-books-local` ·
 `calibre-web-automated-config-local` · `stirling-pdf-configs` · `timeslot-pvc` ·
-`trends-data` · `uptime-kuma-data` · `karakeep-data` · `meilisearch-data` ·
-`miniflux-db-pvc` · `data-trivy-server-0` · `zitadel-pg-1`
+`trends-data` · `uptime-kuma-data-v2` · `karakeep-data` · `meilisearch-data` ·
+`readlist-data` · `data-trivy-server-0` · `apps-pg-1` · `zitadel-pg-1`
+
+> **两个 CNPG 卷（`apps-pg-1` / `zitadel-pg-1`）的恢复方式不同**：它们由 operator 按
+> `Cluster` CR 自动创建，**不要试图把 PVC 内容拷回去**。正确做法是让 ArgoCD 同步出
+> `Cluster` 对象（空库自动起来），再把 restic 里的 `miniflux.sql` / `zitadel.sql`
+> 用 `psql` 灌进去。核对清单用 `kubectl --context oracle-k3s get pvc -A`。
 
 - 若 **boot volume 保留**（VM 只是 OS 层损坏/重装、或从 OCI 快照恢复）：
   `local-path` 数据在 `/var/lib/rancher/k3s/storage/` 还在 → 不需要恢复，跳过第 7 步。

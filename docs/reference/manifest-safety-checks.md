@@ -104,7 +104,6 @@ kind: ReferenceGrant
 
 | PVC | 靠什么保住 |
 |---|---|
-| `miniflux-db-pvc` | PostgreSQL 数据目录，由 `pg_dumpall` 逻辑导出覆盖 |
 | `open-notebook-surreal-local` | SurrealDB，由 HTTP `/export` 逻辑导出覆盖 |
 | `calibre-books-local` | 23G 书库，由 `BOOKS_DIR` 整目录纳入 restic，不走 sqlite 白名单 |
 | `meilisearch-data` | 搜索索引，可由 karakeep 全量重建，**刻意不备份** |
@@ -126,6 +125,8 @@ kind: ReferenceGrant
 | 改了配置但 Pod 不重启 | 清单本身没错，错在下发机制 | oracle otel-collector 是裸 manifest，ConfigMap 更新不改 DaemonSet spec → Pod 不重启，而 Collector 只在启动时读一次配置。**此前对该配置的任何修改都是静默无效的**。已改用 kustomize `configMapGenerator` |
 | ReferenceGrant 寄生在别人的文件里 | 语法与作用都正确，问题是**位置** | `allow-gateway-to-calibre` 没限定 Service 名（作用于整个 ns），却住在 `route-calibre-web.yaml` 里 → 删 calibre 路由会连带断掉 `notebook.meirong.dev`。现改为每个 route 文件各带一条自己的 grant（Gateway API 是累加式授权），删任一文件都不影响另一个 |
 | 文档与集群漂移 | 文档格式可以完美而内容全错 | 2026-07-31 那次 NFS 描述格式合规、内容过期，是 `kubectl` 照出来的 |
+| **operator 动态创建的 PVC 逃出 H4** | H4 只扫**清单里声明**的 PVC；CNPG 的卷由 operator 按 `Cluster` 的 `instances` 生成，仓库里没有对应的 PVC 对象 | `apps-pg-1` / `zitadel-pg-1` 两个库的备份归属完全靠 `backup/overlays/oracle/backup-script.yaml` 里的逐库 `pg_dump` 行。**apps-pg 上加一个租户就必须手工加一行**，H4 不会提醒——性质等同于 sqlite 白名单，而那份白名单曾让 `trends-data` 静默漏备两个月。见 [decisions/shared-postgres-platform.md](../decisions/shared-postgres-platform.md) |
+| CRD 字段放错层级 | `kubectl apply --validate=strict` 对 CRD **照样放行**，多余的键要到 ArgoCD 用 ServerSideApply 建 typed patch 时才炸 | 2026-08-06 把 `postImportApplicationSQL` 写在 `bootstrap.initdb` 下（正确位置是 `initdb.import`）→ 客户端校验通过，同步时报 `field not declared in schema` 并进入重试（重试会钉住 revision，修复 commit 得先 terminate operation）。预检要用 `kubectl apply --server-side --dry-run=server`，字段位置以 `kubectl explain` 为准 |
 
 **删任何清单文件前**，先 `grep '^kind:' <file>`，确认没有作用域大于该文件的资源
 （H1 覆盖了 Namespace/CRD，但 ReferenceGrant 这类「语法对、位置错」的仍要靠眼睛）。

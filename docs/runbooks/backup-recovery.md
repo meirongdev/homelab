@@ -10,7 +10,8 @@
 
 - 清单：kustomize base+overlay `backup/`（2026-07-07 双集群合并；共用骨架在 `backup/base`）。
 - homelab: `backup/overlays/homelab`（ArgoCD `backup` App，CronJob 03:00）— Vault raft snapshot + zitadel `pg_dump` + sqlite。
-- oracle-k3s: `backup/overlays/oracle`（随 ArgoCD `oracle-k3s` App 同步，CronJob 03:30）— `pg_dumpall`(miniflux+karakeep) + sqlite。
+- oracle-k3s: `backup/overlays/oracle`（随 ArgoCD `oracle-k3s` App 同步，CronJob 03:30）— 逐库 `pg_dump`（`apps-pg`/miniflux → `miniflux.sql`，`zitadel-pg`/zitadel → `zitadel.sql`）+ sqlite + 书库整目录。
+  ⚠️ 2026-08-06 前是 `pg_dumpall` 出 `pg_all.sql`；**恢复更早的快照时找的是那个文件名**。改成逐库 dump 的原因见 [decisions/shared-postgres-platform.md](../decisions/shared-postgres-platform.md)。
 - 手动触发：`just backup-run`（homelab）/ `kubectl --context oracle-k3s -n backup create job --from=cronjob/restic-backup <name>`。
 - 查快照（在 106）：`RESTIC_PASSWORD=… restic -r /storage/restic snapshots`。
 
