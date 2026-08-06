@@ -455,11 +455,19 @@ spec:
               env:
                 - name: TZ
                   value: "Asia/Shanghai"
-                # ⚠️ 生成型作业，DRY_RUN 默认 "1"。核对过样本输出再置 0。
+                # ⚠️ 生成型作业。2026-08-07 跑了**三轮** DRY-RUN 才置 0：
+                #   轮1 崩在 content=None（推理模型 max_tokens 被吃光）；
+                #   轮2 20/20 有产出，但审计抓到 id=246 把章节标题当书名
+                #       （Reciprocity.Evolution... -> "Basic Game Theory"）；
+                #   轮3 加护栏后复验：246 被拦、87 与 416 两处真实替换仍通过。
+                # 逐条核过的还有：作者补全 5 处全对、标签无一句废话、
+                # 模型在拿不准时确实返回 null（id=157 未替换）。
+                # **改提示词、换模型、改判据之后先翻回 "1" 重跑一轮**再置 0。
                 - name: DRY_RUN
-                  value: "1"
+                  value: "0"
+                # 候选池 234 本，实测约 10s/本 ≈ 40 分钟。
                 - name: LIMIT
-                  value: "20"
+                  value: "300"
                 # ⚠️ 必须走 dgx-proxy：oracle 直连不到 DGX（见文件头）。
                 - name: LLM_URL
                   value: "http://dgx-proxy.bifrost.svc.cluster.local:8080/v1/chat/completions"
