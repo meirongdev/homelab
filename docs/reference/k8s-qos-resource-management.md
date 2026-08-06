@@ -62,15 +62,21 @@ opencost 是纯观测组件，掉线只丢一段成本采样；trivy-operator �
 不影响任何运行时管控 —— 后者与 CLAUDE.md「所有安全组件 fail-open + 控 CPU」的硬约束一致，
 **被驱逐正是 fail-open**。
 
-⚠️ trivy-operator **两个键都要设，层级不同**（chart 0.33.1 逐键确认 + `helm template` 实证）：
+⚠️ trivy-operator 有 **三个**互不相干的键，层级各不相同，漏一个就留一个 priority 0 的缺口
+（chart 0.33.1 逐键确认 + `helm template` 实证，2026-08-06）：
 
-| 键 | 作用对象 |
-|---|---|
-| 顶层 `priorityClassName` | operator 本体（常驻，内存小头） |
-| `trivyOperator.scanJobPodPriorityClassName` | **扫描 Job pod** —— 真正的瞬时内存消费者 |
+| 键 | 作用对象 | 渲染到哪 |
+|---|---|---|
+| 顶层 `priorityClassName` | operator 本体（常驻，内存小头） | Deployment |
+| `trivyOperator.scanJobPodPriorityClassName` | **扫描 Job pod** —— 真正的瞬时内存消费者 | **ConfigMap** |
+| `trivy.priorityClassName` | **trivy-server**（builtInTrivyServer 的 StatefulSet） | StatefulSet |
 
-只设前者等于漏掉了要管的那个。后者渲染进 ConfigMap 的 `scanJob.podPriorityClassName`，
-不在 Deployment 里，`kubectl get deploy -o yaml` 看不到，别据此判断没生效。
+- 第二个渲染进 ConfigMap 的 `scanJob.podPriorityClassName`，**不在任何 Deployment 里**，
+  `kubectl get deploy -o yaml` 看不到，别据此判断没生效 —— 看实际 Job pod 的 `.spec.priority`。
+- 第三个最容易漏：只设前两个的话，一个**纯粹为 operator 服务**的组件反而比 operator 优先级高。
+- ⚠️ `trivy:` 段在两份 values 里**都已存在**（装着 severity / ignoreUnfixed / accepted-risk 列表），
+  必须插进现有段内。另起一个 `trivy:` 块 = YAML 重复键 = 后者静默覆盖前者，
+  那批 CVE 抑制会无声消失。
 
 ⚠️ **两处设不了，不是漏配**：
 
