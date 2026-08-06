@@ -1,0 +1,167 @@
+# dgx-proxy —— 把「能连 DGX vLLM」这个能力代理给 oracle 集群
+#
+# 为什么需要它（2026-08-07，第二次撞上同一堵墙）：
+#   oracle 的 pod 和**节点**都到不了 DGX Spark。根因不是 ACL、不是路由：
+#   两台 spark 属于 `kaixinhuang3307@` 的 tailnet（`*.tailf63175.ts.net`），
+#   靠 **node sharing** 共享进来，而 **Tailscale 的节点共享是按「人」授予的** ——
+#   `meirongdev@` 名下的设备（k8s-node / 两台 Mac / pve）在 netmap 里有它，
+#   `node0` 是 `tagged-devices`（归 tailnet 不归用户），拿不到共享。
+#   实测：oracle `tailscale ping 100.97.87.120` → "no matching peer"，peer 列表 6 个、
+#   共享节点 0 个；homelab k8s-node 同一地址 curl → 200。
+#
+#   2026-08-01 的 open-notebook 方案已记录过同一约束，当时的处置是「把服务放 homelab」。
+#   这次不行 —— 需要 DGX 的作业要读 calibre 书库 PVC，那个 PVC 在 oracle，搬不动。
+#
+# 为什么不去掉 node0 的 tag（那样它就能拿到共享）：
+#   **Tailscale 的 OAuth client 只能创建 tagged 设备**，而 node0 正是用 OAuth client
+#   生成的预授权密钥认证的（`tailscale/terraform/main.tf` 的 `tags = ["tag:oracle"]`）。
+#   摘 tag 不是改个字段，得用**用户级密钥重新认证**整个节点，代价：
+#     · 重新认证期间掉出 tailnet → 跨集群 ClusterMesh underlay 中断；
+#     · 用户设备默认 180 天密钥过期（tagged 设备永不过期），必须同时在控制台关掉，
+#       漏了就是几个月后无关联地断网 —— 延迟爆炸型故障。
+#   为了给一批书生成元数据而重新认证生产节点，不划算。
+#
+# ⚠️ **这是本仓库第一个 `service.cilium.io/global` 服务。** 此前两个集群的
+#   全局 Service 计数都是 0（见 monitoring/alerts/clustermesh-alerts.yaml 的注释），
+#   ClusterMesh 一直是「建好了没人用」的备用能力。本服务上线后它开始承载实时流量，
+#   那份告警的 severity 已随之从 warning 提到 critical（同一提交）。
+#
+# 数据路径：
+#   oracle pod → (Cilium ClusterMesh VXLAN) → 本代理(homelab) → (Tailscale) → DGX vLLM
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dgx-proxy-conf
+  namespace: bifrost
+data:
+  nginx.conf: |
+    worker_processes 1;
+    error_log /dev/stderr warn;
+    pid /tmp/nginx.pid;
+    events { worker_connections 256; }
+    http {
+      access_log off;
+      # nginx 默认往 /var/... 写临时文件，只读根文件系统下会失败。
+      client_body_temp_path /tmp/client_body;
+      proxy_temp_path       /tmp/proxy;
+      fastcgi_temp_path     /tmp/fastcgi;
+      uwsgi_temp_path       /tmp/uwsgi;
+      scgi_temp_path        /tmp/scgi;
+
+      upstream dgx {
+        # DGX Spark 1 = V4-Flash 的 head 节点（spark-2 是 TP worker，不监听 8000）。
+        # 与 jobs-sg/cronjob-enrich.yaml 同一地址，别改成 spark-2。
+        server 100.97.87.120:8000;
+        keepalive 8;
+      }
+
+      server {
+        listen 8080;
+
+        # 只读探针，不打扰上游。
+        location = /healthz { return 200 "ok\n"; }
+
+        location / {
+          proxy_pass http://dgx;
+          proxy_http_version 1.1;
+          proxy_set_header Connection "";
+          proxy_set_header Host $host;
+
+          # ⚠️ LLM 生成是分钟级的。默认 60s 会在长回答上静默截断，
+          # 表现为客户端拿到不完整 JSON —— 与「模型输出坏了」难以区分。
+          # 300s 与 jobs-sg 的 LLM_TIMEOUT 同口径。
+          proxy_connect_timeout 15s;
+          proxy_send_timeout    300s;
+          proxy_read_timeout    300s;
+
+          # SSE / 流式响应必须关缓冲，否则 token 会攒到最后一次性吐出。
+          proxy_buffering off;
+        }
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dgx-proxy
+  namespace: bifrost
+  labels:
+    app: dgx-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dgx-proxy
+  template:
+    metadata:
+      labels:
+        app: dgx-proxy
+    spec:
+      # 纯转发，掉了只影响元数据生成这类离线作业，不影响任何在线服务。
+      priorityClassName: bulk
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 101 # nginx 镜像里的 nginx 用户
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /var/cache/nginx
+      volumes:
+        - name: conf
+          configMap:
+            name: dgx-proxy-conf
+        - name: tmp
+          emptyDir: {}
+        - name: cache
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dgx-proxy
+  namespace: bifrost
+  annotations:
+    # ⚠️ 这一行是整个方案的关键，也是本仓库第一次真正使用 ClusterMesh。
+    # 加上它之后，oracle 集群的 pod 可以用同名同 ns 解析到本服务：
+    #   http://dgx-proxy.bifrost.svc.cluster.local:8080
+    # 前提是两个集群的 ClusterMesh 处于 retrieved=true（判据见 CLAUDE.md）。
+    service.cilium.io/global: "true"
+spec:
+  type: ClusterIP
+  selector:
+    app: dgx-proxy
+  ports:
+    - port: 8080
+      targetPort: http
+      name: http
