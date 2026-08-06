@@ -7,8 +7,16 @@
 # 两个探针显式 timeoutSeconds、三个 CronJob 加 timeZone）。
 #
 # ⚠️ v0.3.0 是 **breaking**（`feat(api)!`），改的是**公开面口径**，不是部署形状：
-#   · `/api/v1/catalog` 从「全库约 2,000 本」收窄成「**公开榜单的并集**」（约百余本）；
+#   · `/api/v1/catalog` 从「全库约 2,000 本」收窄成「**公开榜单的并集**」；
 #     internal 榜（publisher-picks / library-hygiene）不算公开。
+#     ⚠️ 升级后实测并集只有 **22 本**（2,045 → 22），因为 7 个公开榜里 5 个是**空的**：
+#     C/D/P 三维实测覆盖为 0（`readlist_dim_measured` 实测：A=39 C=0 D=0 F=338 T=1334），
+#     而 timeless 需 A+C、deep-dive 需 D、ship-this-week 需 F+P、read-and-loved 需 A+T+D、
+#     ai-llm 的主题分类同样依赖 LLM 标注。**这不是 v0.3.0 造成的**——那 5 个榜升级前就是空的，
+#     v0.3.0 只是不再拿全库目录把它盖住。要让站上有内容，得先补证据两头：
+#     D/P/topic 的 LLM 标注上线（上游），以及 A（口碑）所需的 calibre 标识符/简介补全
+#     （2026-08-06 实测：2,053 本里仅 990 本有任意 identifier、980 本有简介，
+#      ingest 因此「无标识符跳过 1,055 个版次」）。
 #   · `/api/v1/matrix/{run}` **已删除**（原按任意历史 run 寻址）。引用它的地方要一并清。
 #   · 不按 grade 过滤这条**保留**：上榜但缺维的书照样列出并标注缺哪几维。
 #   指标口径**没变**（`readlist_works_total` 仍是全库数），故 readlist-alerts.yaml 无需改。
