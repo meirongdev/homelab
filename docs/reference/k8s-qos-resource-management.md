@@ -50,11 +50,21 @@ Homelab 由两个集群组成：
 `k8s/helm/manifests/namespace-guardrails/priorityclasses.yaml`，两边取值一致）：
 
 > **2026-08-06 改名**：`meirong-critical/high/bulk` → 无前缀的 `critical`/`high`/`bulk`。
-> 旧名作为 deprecated 定义**暂时并存**，删除是三步走的最后一步，且**卡在一个前置条件上**：
-> ArgoCD 是 manual-helm 部署（`just deploy-argocd`），它的 pod 现在仍跑着
-> `meirong-critical`；在跑过一次 `just deploy-argocd` 让它换到 `critical` 之前，
-> **绝不能删 `meirong-critical`**——否则 ArgoCD pod 一旦被重新调度就会被 API server 拒绝，
-> 而它正是 GitOps 控制面。
+> git 里的引用**已全部切换**（33 处），旧名作为 deprecated 定义暂时并存。
+>
+> **删旧 class（第③步）的前置条件——三项都做完才能删**：
+>
+> | 还挂在旧 class 上 | 为什么没跟着 GitOps 滚 | 怎么切 | 影响 |
+> |---|---|---|---|
+> | `vault-0` + `vault-agent-injector`（homelab） | Vault 是 manual-helm | `just deploy-vault` | Vault 重启并短暂 seal，lifecycle hook 会从 `vault-auto-unseal` secret 自动解封（已实测） |
+> | ArgoCD 全家 ×5（oracle） | ArgoCD 刻意不自管自己 | `just deploy-argocd` | **GitOps 控制面重启** |
+> | `zitadel-pg-1`（oracle） | Cluster spec 已是 `critical`，但 **CNPG 不把 `priorityClassName` 变更当作需要滚动的理由**，pod 保持旧值直到因别的原因重启 | CNPG 重启该 Cluster | 单实例 → SSO 登录短暂不可用 |
+>
+> 另有若干 Job pod（trivy 扫描、readlist CronJob）仍带旧值，它们是**一次性的**，
+> 下一轮自然用新值，不必处理。
+>
+> ⚠️ **在上表三项做完之前删 `meirong-critical`，ArgoCD/Vault/SSO 库的 pod 一旦被重新
+> 调度就会被 API server 拒绝而起不来。** 保留三个 deprecated class 不花任何成本，不要抢跑。
 >
 > ⚠️ 为什么必须分步：PriorityClass 与引用它的工作负载分属不同的 ArgoCD App，**同步无先后
 > 保证**。引用先于 class 生效时 API server 直接拒绝建 pod，而旧 pod 已被滚动删除 →
