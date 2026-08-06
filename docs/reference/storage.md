@@ -1,6 +1,6 @@
 # Storage & Backup — 存储与备份
 
-> Last updated: 2026-08-03
+> Last updated: 2026-08-06
 > Status: 生效事实
 >
 > 双集群存储布局（全部 `local-path`）、NFS 退役事实、PVC 迁移程序，以及 restic 备份体系。
@@ -46,16 +46,17 @@ sqlite 依赖 POSIX 字节区间锁（`fcntl`）+ 同步小写入；NFS 的 NLM 
 
 ## 当前 PVC 清单（全部 `local-path`）
 
-2026-08-03 对**两个 live 集群**重新生成（上一版 07-31 已含两处过期）。
+2026-08-06 对**两个 live 集群**重新生成（上一版 08-03 的 oracle 行已有两处过期：
+漏了 `readlist-data`，且把 `uptime-kuma-data-v2` 写成了 `uptime-kuma-data`）。
 **集群里没有 `nfs-client` StorageClass** —— 引用它的 PVC 会永久 Pending。
 
 - **homelab（11 个）**: `data-vault-0`、`audit-vault-0`、`bifrost-data-local`、`data-trivy-server-0`、
   `alertmanager-…-db`、`prometheus-…-db`、`kube-prometheus-stack-grafana`、`opencost-pvc`、
   `open-notebook-data-local`、`open-notebook-surreal-local`、`jobs-sg-data`（2026-08-03 新增）
-- **oracle-k3s（14 个）**: `storage-loki-0`、`storage-tempo-0`、`opencost-pvc`、`calibre-books-local`、
+- **oracle-k3s（15 个）**: `storage-loki-0`、`storage-tempo-0`、`opencost-pvc`、`calibre-books-local`、
   `calibre-web-automated-config-local`、`stirling-pdf-configs`、`timeslot-pvc`、`trends-data`、
-  `uptime-kuma-data`、`karakeep-data`、`meilisearch-data`、`miniflux-db-pvc`、`data-trivy-server-0`、
-  `zitadel-pg-1`
+  `uptime-kuma-data-v2`、`karakeep-data`、`meilisearch-data`、`miniflux-db-pvc`、`data-trivy-server-0`、
+  `zitadel-pg-1`、`readlist-data`（2026-08-05 新增，已进夜备白名单）
 
 ⚠️ 这份清单**天然会漂移**（docs-check 只查结构，查不出内容与集群不符——2026-07-31 那次 NFS
 描述就是格式完美而内容全错）。改集群存储后重新生成：`kubectl --context <ctx> get pvc -A`。

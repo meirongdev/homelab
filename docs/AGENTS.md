@@ -82,7 +82,9 @@ homelab/
   的 `hostAliases`。判据是 `cilium-dbg status --all-clusters` 里的 `retrieved=true`。
   典型故障是 **up-but-stuck 且不自愈**，重建 clustermesh-apiserver pod 即可（配置往往没坏
   ——下根因结论前先查 helm release 历史）。已有 5 条告警兜底（2026-08-05 补）。
-- **oracle 重启/改 shape 后**跑 `cd cloud/oracle && just verify-node`（23 条不变量一次核完）。
+- **oracle 重启/改 shape 后**跑 `cd cloud/oracle && just verify-node`（一次核完全部不变量，
+  只读；脚本结尾自己报「N 项通过 / M 项失败」——**别在文档里写死条数**，它是循环里动态累加的，
+  2026-08-06 已从 23 漂到 24）。
 - **外部流量**: Internet → Cloudflare DNS → Cloudflare Tunnel → Cilium Gateway → Service
 - **homelab node**: 10.10.10.10 / TS 100.94.186.7 (Ryzen 5600H 笔记本)
 - **oracle-k3s node**: 10.0.0.26 / TS 100.107.166.37 (Oracle Cloud Free Tier)
@@ -102,7 +104,8 @@ homelab/
 - **SSH**: 全舰队用 key `~/.ssh/vgio`。
 - **新增服务**: 走 skill `.claude/skills/add-service/SKILL.md`（manifest → HTTPRoute →
   homepage → Uptime Kuma monitor 全流程）。默认仍落 **oracle-k3s**，但 ⚠️ **它不再"容量
-  宽裕"**——2026-08-05 缩到 **2 OCPU / 12GB**，CPU requests 已占 allocatable ~76%（实测 1372m/1800m）、
+  宽裕"**——2026-08-05 缩到 **2 OCPU / 12GB**（已 apply 并核实），CPU requests 已占 allocatable
+  **~77%**（2026-08-06 实测 1387m/1800m，只剩约 400m）、
   内存峰值 ~70%。新服务的 requests 要按实测填（CPU 多数应用 10–25m 足够），非核心的
   挂 `priorityClassName: meirong-bulk`；⚠️ arm64，先确认镜像有 `linux/arm64`；
   跨 ns 引用要 ReferenceGrant（**`v1beta1`**）；PVC 一律 `local-path`；oracle 服务的
@@ -135,7 +138,7 @@ homelab/
 
 纵深防御 11 层: Cloudflare WAF → ZITADEL OIDC → Vault+ESO → PSA → Kyverno → Trivy → kube-bench → 节点 CIS → 网络(见下) → Tetragon/Falco → restic 备份。
 
-⚠️ **第 9 层网络只到"可见性"**：Hubble 已开，但集群内**没有任何自建 `CiliumNetworkPolicy`**（`kubectl get cnp,ccnp -A` 为空；`argocd` ns 里那几条 NetworkPolicy 是 argo-cd chart 自带的）。网络默认拒绝是**刻意延后**的（单用户威胁模型下收益边际低、debug 成本高），不要把它当成已生效的管控。逐层状态与灰度路径见 `docs/reference/security.md`。
+⚠️ **第 9 层网络基本只到"可见性"**：Hubble 已开，但集群内**没有任何 `CiliumNetworkPolicy`**（`kubectl get cnp,ccnp -A` 两个集群都为空）。标准 NetworkPolicy 只有 6 条：`argocd` ns 里 4 条是 argo-cd chart 自带的，另 2 条是 readlist 的 `readlist-{snapshot,score}-no-egress`（2026-08-05 自建，空 egress = 全拒绝，把"能碰 calibre 卷的容器"与"能出网的容器"隔开——**这是目前唯一自建的网络管控，只覆盖两个短命 Job**）。集群级网络默认拒绝仍是**刻意延后**的（单用户威胁模型下收益边际低、debug 成本高），不要把它当成已生效的管控。逐层状态与灰度路径见 `docs/reference/security.md`。
 
 **硬约束**: homelab 是 Ryzen 5600H 单节点笔记本 (idle ~74°C)。所有安全组件 **fail-open + 控 CPU**。
 

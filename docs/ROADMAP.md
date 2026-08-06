@@ -11,11 +11,12 @@
 
 ## 开放项
 
-> 🔥 **进行中（不在下表，因为不是待排期的 backlog）**：oracle-k3s 缩容 4 OCPU/24GB →
-> **2/12**（vendor 回收额度）。前置改动（requests 2712m→1372m 实测、`meirong-bulk` 分档、
-> hugepages 回收、`system-reserved`）**已进 git**，**shape 尚未 apply**。
-> 步骤、验证、回滚全在 [runbooks/oracle-k3s-shape-downsize.md](runbooks/oracle-k3s-shape-downsize.md)。
-> ⚠️ 缩容按**单向**操作对待：ap-osaka-1 的 A1 长期没容量，涨回去不保证做得到。
+> ✅ **已完成（2026-08-05/06）**：oracle-k3s 缩容 4 OCPU/24GB → **2/12** 已 apply 并核实
+> （实测 `capacity.cpu=2`、`allocatable.cpu=1800m`、`capacity.memory≈11.6Gi`）。
+> 前置改动（requests 2712m→1372m、`meirong-bulk` 分档、hugepages 回收、`system-reserved`）也已生效。
+> 过程/验证/回滚留档在 [runbooks/oracle-k3s-shape-downsize.md](runbooks/oracle-k3s-shape-downsize.md)。
+> ⚠️ **这是单向操作**：ap-osaka-1 的 A1 长期没容量，涨回去不保证做得到 —— 所以
+> **新服务别再按"容量宽裕"来规划**，requests 按实测填，非核心的挂 `meirong-bulk`。
 
 按优先级排列。括号内是出处文档。
 
@@ -32,7 +33,7 @@
 | 9 | **PriorityClass 覆盖不全（homelab 侧）** | oracle 侧 2026-08-05 随缩容做完了四档（`meirong-critical`/`high`/默认/新增 `meirong-bulk` -10），**homelab 只有 5/38 运行 pod 有优先级**（Vault ×2、external-dns、cloudflared×2），Prometheus/Grafana/Alertmanager 仍在 priority 0，与个人服务同级。homelab 内存压力比 oracle 更紧（7d 最低 MemAvailable 3.31G / 12.66G），照 oracle 的分档补一遍即可。两处**设不了**已确认并记录：ZITADEL（chart 9.34.1 无此 values 键）、timeslot（仓库外手工 Helm release）。模型见 [reference/k8s-qos-resource-management.md](reference/k8s-qos-resource-management.md)。 |
 | 10 | **jobs-sg 收尾（2026-08-03 上线）** | 三项，均不阻塞服务：① **周报 Telegram 已接好**（bot token 复用 `secret/homelab/telegram`、chat id 与 thread id 明文，投群里的 `jobs-sg` 话题 thread 552）；尚未做的只是**端到端实测一次推送**——首次由周一 01:00 UTC 的 CronJob 触发。② **Grafana 面板未做**（`jobs_sg_*` 已在采，可用 Explore）。③ **`classify.WorkMode` 分类法缺口** —— 只认 `remote/hybrid/onsite`，MCF 真实标签是 "Creative Scheduling"/"Flexi-place"，故所有岗位 `work_mode` 都是 `Onsite`（上游应用问题，非部署问题；三项里只有这条有实际产品影响）。（[reference/jobs-sg.md](reference/jobs-sg.md)） |
 | 11 | **readlist 公开面缺准入过滤（具体那条简历已清理，机制未修）** | 2026-08-06 `readlist.meirong.dev` 已公开。**已处理**：此前出现在公开 catalog 里的第三方简历（BHRC / Mint Wu）已从 calibre 移除，重跑 score 后全部公开端点核验 0 命中——含历史 run，因为 `/api/v1/matrix/{run}` 的标题是现连 `works` 表取的，work 一删历史 run 也不再暴露（`/api/v1/meta` 也不列历史 run id）。**未处理的是机制**：readlist 没有任何准入过滤（`internal/calibre` 读了 tags 但不据此筛选），公开面照发全部 work 的 title+author，所以**往后任何丢进 calibre 的非书文档（简历/合同/发票）都会自动上公网**，且没有静态判据、只能靠人看。两条修法：① readlist 侧加准入过滤（按 tag/书架/格式，上游改动）· ② 公开面只发榜单、不发全量 catalog（上游改动）。⚠️ **硬前置**：上游 `review-2026-08-05-b` 的 C1 提议给 catalog 做 SSR + sitemap —— 那个落地前必须先做①或②，否则这类泄漏会从「悄悄可见」变成「被搜索引擎收录」。 |
-| 12 | **readlist 边缘限流（受 Cloudflare Free 限制）** | 上游 NFR-14 要求分档限流（页面一档、`/api/` 更严一档），**Free 计划只允许 1 条 rate limiting 规则**，而那唯一一条已被 auth 端点 + Excalidraw collab relay 占用且共享计数器（见 [`waf.tf`](../cloudflare/terraform/waf.tf) 注释）。所以「分档」在 Free 上做不到。三选一：把 `readlist.meirong.dev/api/` 并入现有那条（单档、共享计数、30 req/10s，改动会影响全站 auth 防爆破的语义）· 升 Pro（另见第 11 项母条目里的 Cloudflare Pro WAF）· 或先不做（只读站 + 500m CPU 上限，风险可接受）。与第 11 项一并决定，因为在重新公开之前都不紧急。 |
+| 12 | **readlist 边缘限流（受 Cloudflare Free 限制）** | 上游 NFR-14 要求分档限流（页面一档、`/api/` 更严一档），**Free 计划只允许 1 条 rate limiting 规则**，而那唯一一条已被 auth 端点 + Excalidraw collab relay 占用且共享计数器（见 [`waf.tf`](../cloudflare/terraform/waf.tf) 注释）。所以「分档」在 Free 上做不到。三选一：把 `readlist.meirong.dev/api/` 并入现有那条（单档、共享计数、30 req/10s，改动会影响全站 auth 防爆破的语义）· 升 Pro（另见第 11 项母条目里的 Cloudflare Pro WAF）· 或先不做（**当前选择**）。理由：v0.2.0 已在应用侧堵掉自伤路径——published_run 进程内缓存、ETag/304（实测经 Cloudflare 仍回 304/0 字节）、不碰库的 `/livez` 存活探针、HTTP 读写超时；边缘限流原本主要就是防那条。站点只读、单副本 500m CPU 上限，剩余风险可接受。 |
 | 13 | **低优先 / 可选** | Renovate（chart/image 版本自动 PR）· MacBook `TargetDown` 静默规则 · Vault Dynamic Secrets（PostgreSQL 动态凭据，规模不需要）· Cloudflare Pro WAF（Managed Ruleset + OWASP CRS）。（母文档 P2） |
 
 ### 已知问题（不阻塞，无人认领）

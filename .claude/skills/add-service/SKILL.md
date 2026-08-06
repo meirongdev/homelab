@@ -30,7 +30,9 @@ Ask the user (or infer from context) the following:
 | Needs persistent storage? | yes/no |
 | Needs external secrets? | yes/no |
 
-**Cluster choice matters** — the two have different file layouts, gateways, and registration steps (table below). Prefer **oracle-k3s** for stateless personal services: it has spare capacity (4 OCPU/24GB), and homelab is a thermally-constrained single laptop node. Choose **homelab** only when the service needs homelab-local data (Calibre library), the Vault/Prometheus stack, or GPU/LAN access.
+**Cluster choice matters** — the two have different file layouts, gateways, and registration steps (table below). Default to **oracle-k3s** for stateless personal services; choose **homelab** only when the service needs homelab-local data, the Vault/Prometheus stack, or GPU/LAN access (homelab is also a thermally-constrained single laptop node).
+
+⚠️ **oracle-k3s is NOT roomy any more.** It was downsized 4 OCPU/24GB → **2 OCPU / 12GB** on 2026-08-05, and that is a one-way move (ap-osaka-1 A1 Free Tier has no capacity to grow back). Only **1800m** is allocatable and CPU requests already sit around **76%** of it. So: set `requests` from measured usage (10–25m covers most apps — compare `trends`, which runs on 15m), and put non-core services on `priorityClassName: meirong-bulk`. Do not copy the 50m–100m figures that upstream reference manifests tend to use.
 
 ⚠️ **oracle-k3s is arm64.** Verify the image publishes a `linux/arm64` variant before choosing it. When pinning by digest, use the **multi-arch manifest-list digest**, not an amd64 image digest.
 

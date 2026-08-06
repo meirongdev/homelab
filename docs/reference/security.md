@@ -1,6 +1,6 @@
 # K3s 集群安全架构 (Security Architecture)
 
-> Last updated: 2026-08-04
+> Last updated: 2026-08-06
 > Status: 生效事实
 > Scope: 双集群（homelab + oracle-k3s）的纵深防御模型 —— source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
@@ -216,7 +216,14 @@
 
 - **数据面**：双集群 Cilium（eBPF + VXLAN），具备 `CiliumNetworkPolicy` L3/L4/L7 能力；ClusterMesh 经 Tailscale 互联。
 - **当前态：默认放行 + Hubble 可见性**。Hubble 已启用（relay 开），可 `hubble observe` 回答"谁在跟谁通信"——这是日后做默认拒绝的安全前置。
-- **默认拒绝刻意延后**：见 §11。已有的 argocd chart 自带 NetworkPolicy 提供部分隔离。
+- **默认拒绝刻意延后**：见 §11。已有的 argocd chart 自带 NetworkPolicy（4 条）提供部分隔离。
+- **唯一自建的网络管控**（2026-08-05，oracle）：`readlist-snapshot-no-egress` /
+  `readlist-score-no-egress` —— 标准 `networking.k8s.io/v1` NetworkPolicy（Cilium 照常执行，
+  不需要 CNP），`egress: []` 即**全部拒绝含 DNS**。目的不是横向移动，而是把
+  「能读 calibre 书库与 `app.db`（含密码 hash/OIDC 凭据）的容器」和「能出网的容器」
+  **在同一个应用内切开**：snapshot/score 零出口，只有 ingest 能出网且挂不到 calibre 卷。
+  这是「按数据敏感度切分工作负载」的样板，可复用到其它碰敏感卷的 Job；但注意它
+  **只覆盖两个短命 Job**，不代表 ns 级或集群级有默认拒绝。
 
 ## 8.5 运行时检测 (Runtime detection) — 按集群分别选型
 

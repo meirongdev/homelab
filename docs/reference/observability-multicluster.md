@@ -1,6 +1,6 @@
 # Multi-Cluster Observability Architecture
 
-> Last updated: 2026-08-03
+> Last updated: 2026-08-06
 > Status: 生效事实
 
 ## Overview
@@ -54,7 +54,8 @@ All metrics carry a `cluster` label for multi-cluster dashboard queries:
 
 ### Oracle k3s → Homelab Loki
 
-**Component:** `cloud/oracle/manifests/monitoring/otel-collector.yaml`
+**Component:** `cloud/oracle/manifests/monitoring/otel-collector-config.yaml`（receivers/pipelines
+全在这里；同目录的 `otel-collector.yaml` 只有 RBAC/Service/DaemonSet，**没有**管道配置）
 
 **Pipeline:** `filelog → k8sattributes → resource → batch → otlphttp`
 
@@ -96,7 +97,8 @@ OTel resource attributes are converted to Loki stream labels (dots replaced with
 
 ### Oracle k3s → Homelab Prometheus (push via OTel)
 
-**Component:** `cloud/oracle/manifests/monitoring/otel-collector.yaml`
+**Component:** `cloud/oracle/manifests/monitoring/otel-collector-config.yaml`（receivers/pipelines
+全在这里；同目录的 `otel-collector.yaml` 只有 RBAC/Service/DaemonSet，**没有**管道配置）
 
 **Mechanism:** OTel Collector scrapes local exporters and pushes via `prometheusremotewrite` to homelab Prometheus over Tailscale. No prometheus-agent needed.
 
@@ -343,28 +345,28 @@ Oracle-k3s metrics are pushed (not scraped). Check the OTel Collector:
 > 例外：`additionalScrapeConfigs` 是原样注入的，**scrapeClasses 不作用于它们**，
 > 必须在每个 target 上显式写 `labels: {cluster: …}`（见 dgx-spark / macbook / storage-106 各 job）。
 
-### otel-collector 配置改了不生效
+### otel-collector 配置改了不生效 —— ✅ 已根治（2026-08-02），别再手动重启
 
-**症状：** 改了 `cloud/oracle/manifests/monitoring/otel-collector.yaml` 的 ConfigMap 并推送，
-ArgoCD 显示 **Synced / Healthy**，但新的 receiver / pipeline 没有任何数据。
+**曾经的症状：** 改了 oracle 的 otel ConfigMap 并推送，ArgoCD 显示 **Synced / Healthy**，
+但新的 receiver / pipeline 一条数据都没有。**原因**是 DaemonSet 的 pod template 没有 config
+checksum 注解，ConfigMap 内容变了**不会**触发滚动，Pod 继续挂着旧配置跑；ArgoCD 只比对对象
+本身，看不出这层。2026-07 引入 OpenCost 和 KRR 时各踩了一次（homelab 侧没这问题——Helm chart
+会自动打 checksum 注解）。
 
-**原因：** DaemonSet 的 pod template 没有 config checksum 注解，ConfigMap 内容变化
-**不会**触发滚动重启；Pod 继续挂载旧配置运行。ArgoCD 只比对对象本身，看不出这层。
-**这是静默失败** —— 2026-07 引入 OpenCost 和 KRR 时各踩了一次。
+**根治做法（已生效）：** 配置改由根 `cloud/oracle/manifests/kustomization.yaml` 的
+**`configMapGenerator`** 生成 —— 生成的 ConfigMap 名字带内容哈希后缀，并自动重写 DaemonSet 的
+volume 引用，所以**内容一变名字就变，DaemonSet 随之滚动**。改配置只需编辑
+`cloud/oracle/manifests/monitoring/otel-collector-config.yaml` 后 push，**不需要任何手动重启**。
 
-**Fix:**
+2026-08-06 实测复核：新增 `prometheus/readlist` receiver 后，ConfigMap 名变成
+`otel-collector-config-2g4gm5979k`，DaemonSet 自动滚动、Pod age 归零、新指标立即上来。
+
+**要守住的不变量：** 那份配置**必须**留在 `configMapGenerator` 里。谁要是把它改回普通
+ConfigMap 资源（比如为了"看起来整齐"），上面那个静默失败立刻回来，而且照样是 Synced/Healthy。
 
 ```bash
-kubectl --context oracle-k3s rollout restart daemonset/otel-collector -n monitoring
-kubectl --context oracle-k3s rollout status  daemonset/otel-collector -n monitoring
+# 只在怀疑没生效时核对：ConfigMap 名应带哈希后缀，且 DS 引用的就是它
+kubectl --context oracle-k3s -n monitoring get cm | grep otel-collector-config
+kubectl --context oracle-k3s -n monitoring get ds otel-collector \
+  -o jsonpath='{.spec.template.spec.volumes[?(@.name=="config")].configMap.name}{"\n"}'
 ```
-
-**确认 Pod 确实换了**（不是看 ArgoCD）：
-
-```bash
-kubectl --context oracle-k3s get pods -n monitoring -l app=otel-collector
-# AGE 应当是秒级；若还是几天前的 Pod，说明没重启
-```
-
-**根治建议（未做）：** 给 DaemonSet pod template 加 config checksum 注解，
-让 ConfigMap 变更自动触发滚动。
