@@ -102,127 +102,15 @@ spec:
     - port: 8080
       targetPort: 8080
       name: http
----
-# 共享 PostgreSQL 实例 — miniflux + karakeep 共用
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: rss-postgres
-  namespace: rss-system
-  labels:
-    app: rss-postgres
-  annotations:
-    # RollingUpdate->Recreate migration: ArgoCD's apply can't drop the API-defaulted
-    # spec.strategy.rollingUpdate block (fails validation), so replace (PUT) the object.
-    argocd.argoproj.io/sync-options: Replace=true
-spec:
-  replicas: 1
-  # Single-writer RWO PVC (miniflux-db-pvc). Default RollingUpdate would start a 2nd
-  # postmaster on the same data dir; Recreate stops the old pod first.
-  strategy:
-    type: Recreate
-  selector:
-    matchLabels:
-      app: rss-postgres
-  template:
-    metadata:
-      labels:
-        app: rss-postgres
-    spec:
-      containers:
-        - name: postgres
-          image: postgres:15-alpine
-          env:
-            - name: POSTGRES_USER
-              value: miniflux
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: miniflux-db-secret
-                  key: password
-            - name: POSTGRES_DB
-              value: miniflux
-          ports:
-            - containerPort: 5432
-              name: postgres
-          volumeMounts:
-            - name: postgres-data
-              mountPath: /var/lib/postgresql/data
-          resources:
-            requests:
-              cpu: 25m
-              memory: 128Mi
-            limits:
-              cpu: 500m
-              memory: 512Mi
-        - name: postgres-exporter
-          image: prometheuscommunity/postgres-exporter:v0.16.0
-          ports:
-            - containerPort: 9187
-              name: metrics
-          env:
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: miniflux-db-secret
-                  key: password
-            - name: DATA_SOURCE_NAME
-              value: "postgresql://miniflux:$(POSTGRES_PASSWORD)@localhost:5432/miniflux?sslmode=disable"
-          resources:
-            requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              cpu: 50m
-              memory: 64Mi
-      volumes:
-        - name: postgres-data
-          persistentVolumeClaim:
-            claimName: miniflux-db-pvc
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: rss-postgres
-  namespace: rss-system
-spec:
-  type: ClusterIP
-  selector:
-    app: rss-postgres
-  ports:
-    - port: 5432
-      targetPort: 5432
-      name: postgres
----
-# Separate service for postgres-exporter metrics endpoint
-# Exposed as NodePort so homelab Prometheus can scrape via Tailscale
-apiVersion: v1
-kind: Service
-metadata:
-  name: rss-postgres-metrics
-  namespace: rss-system
-  labels:
-    app: rss-postgres
-spec:
-  type: NodePort
-  selector:
-    app: rss-postgres
-  ports:
-    - port: 9187
-      targetPort: 9187
-      nodePort: 31087
-      name: metrics
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: miniflux-db-pvc
-  namespace: rss-system
-  annotations:
-    argocd.argoproj.io/sync-options: Prune=false
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 5Gi
+# ─────────────────────────────────────────────────────────────────────────────
+# rss-postgres（手搓 Deployment + PG15 + postgres-exporter sidecar + NodePort 31087
+# + miniflux-db-pvc）已于 2026-08-06 退役，数据迁入 CNPG 共享集群：
+#     apps-pg-rw.databases.svc.cluster.local:5432/miniflux   (PG17)
+# 清单见 cloud/oracle/manifests/databases/，设计见
+# docs/decisions/shared-postgres-platform.md。
+# miniflux 的连接串由 rss-system/secrets.yaml 的 ExternalSecret 模板拼出。
+#
+# ⚠️ 以后本 ns 的应用**不要**再在这里内联一个 postgres：加 Database/DatabaseRole CR
+# 到 databases ns 即可（那两种 CR 的 spec.cluster 没有 namespace 字段，必须与
+# Cluster 同 ns）。
+# ─────────────────────────────────────────────────────────────────────────────

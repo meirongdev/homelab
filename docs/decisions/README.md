@@ -14,6 +14,7 @@
 | [opencost-krr-data-sources](opencost-krr-data-sources.md) | 同一个 cAdvisor 缺口，OpenCost 走 collector 旁路、KRR 补窄口径采集。含 krr-enforcer 否决 |
 | [orphaned-resources](orphaned-resources.md) | 配置漂移体检否决 kor（信噪比 0.6%，误判 `argocd-secret`/`vault-token`），改用 ArgoCD 原生 `orphanedResources` + `warn: false` |
 | [argocd-image-updater](argocd-image-updater.md) | CRD 模型与约束（⚠️ 当前闲置，集群内无 `ImageUpdater` CR） |
+| [shared-postgres-platform](shared-postgres-platform.md) | 手搓 `rss-postgres` → CNPG `apps-pg` 共享库；**不**并入 `zitadel-pg`（节点内存 87% + SSO 带 critical 优先级）。含备份从 `pg_dumpall` 改逐库 `pg_dump` 的连带影响 |
 
 ## 写新 ADR
 

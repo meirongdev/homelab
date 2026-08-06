@@ -1,6 +1,6 @@
 # Services — 服务清单
 
-> Last updated: 2026-08-05
+> Last updated: 2026-08-06
 > Status: 生效事实
 >
 > **这张表是服务清单的唯一真相源** —— `docs/README.md`、`docs/ARCHITECTURE.md` 与各 runbook
@@ -30,8 +30,8 @@
 | ArgoCD | **oracle-k3s** | `argocd` | `argocd.meirong.dev`（2026-08-02 控制面迁 oracle，经 Tailscale 纳管 homelab） |
 | ZITADEL (SSO) | oracle-k3s | `zitadel` | `auth.meirong.dev` |
 | Bifrost (LLM gateway) | homelab | `bifrost` | `llm.meirong.dev` (inference API + ZITADEL-gated admin UI) |
-| PostgreSQL (`rss-postgres`, Miniflux) | oracle-k3s | `rss-system` | Internal only |
-| PostgreSQL (`zitadel-pg`, CNPG) | oracle-k3s | `zitadel` | Internal only |
+| PostgreSQL (`apps-pg`, CNPG 共享应用库) | oracle-k3s | `databases` | Internal only（2026-08-06 取代手搓的 `rss-postgres`；当前租户只有 miniflux。加库见 [decisions/shared-postgres-platform.md](../decisions/shared-postgres-platform.md)） |
+| PostgreSQL (`zitadel-pg`, CNPG) | oracle-k3s | `zitadel` | Internal only（身份面**刻意独立**，不并入 `apps-pg`） |
 
 ## 运维备忘（按服务）
 

@@ -55,8 +55,15 @@ sqlite 依赖 POSIX 字节区间锁（`fcntl`）+ 同步小写入；NFS 的 NLM 
   `open-notebook-data-local`、`open-notebook-surreal-local`、`jobs-sg-data`（2026-08-03 新增）
 - **oracle-k3s（15 个）**: `storage-loki-0`、`storage-tempo-0`、`opencost-pvc`、`calibre-books-local`、
   `calibre-web-automated-config-local`、`stirling-pdf-configs`、`timeslot-pvc`、`trends-data`、
-  `uptime-kuma-data-v2`、`karakeep-data`、`meilisearch-data`、`miniflux-db-pvc`、`data-trivy-server-0`、
-  `zitadel-pg-1`、`readlist-data`（2026-08-05 新增，已进夜备白名单）
+  `uptime-kuma-data-v2`、`karakeep-data`、`meilisearch-data`、`data-trivy-server-0`、
+  `zitadel-pg-1`、`readlist-data`（2026-08-05 新增，已进夜备白名单）、
+  `apps-pg-1`（2026-08-06 新增，CNPG 共享库；同日 `miniflux-db-pvc` 随 `rss-postgres`
+  退役删除，见 [decisions/shared-postgres-platform.md](../decisions/shared-postgres-platform.md)）
+
+⚠️ **CNPG 的 PVC（`apps-pg-1`、`zitadel-pg-1`）由 operator 动态创建，不在任何清单里
+声明 → CI 的 H4 规则看不见它们。** 这两个库的备份归属靠
+`backup/overlays/oracle/backup-script.yaml` 里的逐库 `pg_dump` 行保证，
+**加新租户必须手工加一行**，没有任何检查会提醒你。
 
 ⚠️ 这份清单**天然会漂移**（docs-check 只查结构，查不出内容与集群不符——2026-07-31 那次 NFS
 描述就是格式完美而内容全错）。改集群存储后重新生成：`kubectl --context <ctx> get pvc -A`。
