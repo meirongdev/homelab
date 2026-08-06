@@ -13,6 +13,13 @@ resources:
   # argocd/applications/external-dns-oracle.yaml + k8s/helm/values/external-dns-oracle.yaml)
   - base/namespace-external-dns.yaml
   - base/external-dns.yaml
+  # 共享数据库平台（2026-08-06）。CNPG Cluster `apps-pg` —— 应用不再各自起 postgres，
+  # 加 Database/DatabaseRole CR 即可（必须与 Cluster 同 ns，见 apps-pg-cluster.yaml）。
+  # cnpg-operator 本身是独立 ArgoCD App（argocd/applications/cnpg-operator.yaml）。
+  # ⚠️ 排在 rss-system 之前只是可读性——kustomize 不按列表顺序 apply。
+  - databases/namespace.yaml
+  - databases/apps-pg-secrets.yaml
+  - databases/apps-pg-cluster.yaml
   # RSS system
   - rss-system/namespace.yaml
   - rss-system/secrets.yaml
