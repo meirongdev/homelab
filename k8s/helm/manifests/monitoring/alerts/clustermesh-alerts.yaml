@@ -27,9 +27,17 @@
 # severity warning → routed by Alertmanager (see values/kube-prometheus-stack.yaml). The
 # `release` label is REQUIRED so the kube-prometheus-stack ruleSelector adopts this rule.
 #
-# ⚠️ Nothing consumes ClusterMesh today (`service.cilium.io/global` Service count is 0 on
-# both clusters), so these are all `warning`, not `critical` — a real outage degrades a
-# standby capability, not live traffic. Revisit the severity if a global Service is added.
+# ⚠️ **2026-08-07: ClusterMesh now carries live traffic — severities raised to `critical`.**
+# The long-standing note here said these were `warning` because nothing consumed
+# ClusterMesh (`service.cilium.io/global` Service count was 0 on both clusters) and an
+# outage would only degrade a standby capability. That stopped being true when
+# `dgx-proxy` (bifrost ns, homelab) became the **first** global Service: oracle-side jobs
+# resolve it cross-cluster to reach the DGX vLLM, because oracle's node is
+# `tagged-devices` and therefore cannot receive the user-scoped Tailscale node share for
+# the Spark boxes (full reasoning in k8s/helm/manifests/bifrost/dgx-proxy.yaml).
+# A ClusterMesh break now means those jobs fail outright, not "a standby is degraded".
+# If dgx-proxy is ever retired and the global-Service count returns to 0, drop these
+# back to `warning` — a permanently-critical alert for an unused capability is noise.
 #
 # Deployed via the ArgoCD `monitoring-dashboards` Application (git push → 3-min sync).
 apiVersion: monitoring.coreos.com/v1
@@ -50,7 +58,7 @@ spec:
           expr: cilium_kvstoremesh_remote_cluster_readiness_status == 0
           for: 10m
           labels:
-            severity: warning
+            severity: critical
           annotations:
             summary: "ClusterMesh: {{ $labels.cluster }} cannot reach remote cluster {{ $labels.target_cluster }}"
             description: >-
@@ -72,7 +80,7 @@ spec:
           expr: cilium_kvstoremesh_remote_clusters == 0
           for: 15m
           labels:
-            severity: warning
+            severity: critical
           annotations:
             summary: "ClusterMesh: {{ $labels.cluster }} has NO remote cluster configured"
             description: >-
@@ -89,7 +97,7 @@ spec:
           expr: absent(cilium_kvstoremesh_remote_cluster_readiness_status{cluster="homelab"})
           for: 30m
           labels:
-            severity: warning
+            severity: critical
             cluster: homelab
           annotations:
             summary: "ClusterMesh metrics missing from homelab — mesh health is unobservable"
@@ -106,7 +114,7 @@ spec:
           expr: absent(cilium_kvstoremesh_remote_cluster_readiness_status{cluster="oracle-k3s"})
           for: 30m
           labels:
-            severity: warning
+            severity: critical
             cluster: oracle-k3s
           annotations:
             summary: "ClusterMesh metrics missing from oracle-k3s — mesh health is unobservable"
@@ -123,7 +131,7 @@ spec:
           expr: increase(cilium_kvstoremesh_remote_cluster_failures[30m]) > 3
           for: 15m
           labels:
-            severity: warning
+            severity: critical
           annotations:
             summary: "ClusterMesh: {{ $labels.cluster }} → {{ $labels.target_cluster }} connection is flapping"
             description: >-
