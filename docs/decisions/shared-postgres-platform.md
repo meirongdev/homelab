@@ -92,6 +92,14 @@ bulk 应用之上、控制面之下。
   + 应用侧一条 ESO 模板 + 备份脚本加一行。
 - 内存基本持平：少一个 exporter sidecar，多一个 CNPG instance manager。本次不是为省内存做的
   （省内存的真正大头是应用侧，例如 stirling-pdf 实测 633Mi）。
+
+  > ⚠️ **读 `kubectl top pod` 会被误导。** 迁移刚完成时 apps-pg 显示 209Mi，是旧库
+  > (101Mi) 的两倍——但那是 working set，其中绝大部分是 `shared_buffers`（128MB，
+  > 与 postgres:15-alpine 默认值相同）被完整触达后计入的**共享内存/页缓存，可回收**。
+  > 看 kubelet summary 的分项：apps-pg `rssBytes` 只有 **25Mi**，比跑了 18 天的
+  > zitadel-pg（`rss` 41Mi / `workingSet` 117Mi）还低。当时的虚高是验证工作本身造成的
+  > （往该实例恢复了 29MB 对账转储 + ANALYZE），稳态应向 zitadel-pg 那档靠拢。
+  > 判断 postgres 容器的真实占用要看 `rssBytes`，别只看 `top`。
 - `apps-pg` 的 `externalClusters`/`import` 段在旧库销毁后就指向不存在的 Service 了。
   它**只在 bootstrap 时用一次**，留着无害；想清理可连同 `import` 段一起删，不会触发重建。
 - CNPG 的 Barman 备份**没启用**（本环境没有对象存储，备份走 restic → 106 sftp），
