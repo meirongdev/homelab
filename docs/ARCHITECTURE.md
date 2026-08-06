@@ -47,6 +47,7 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 | 子域名 DNS | external-dns (HTTPRoute 声明式，取代 Terraform 手管) | [`decisions/external-dns-adoption.md`](decisions/external-dns-adoption.md) |
 | 成本/右尺寸 | OpenCost 走 collector 旁路 + KRR 窄口径采集 | [`decisions/opencost-krr-data-sources.md`](decisions/opencost-krr-data-sources.md) |
 | 配置漂移体检 | ArgoCD 原生 `orphanedResources` (否决 kor) | [`decisions/orphaned-resources.md`](decisions/orphaned-resources.md) |
+| 关系型数据库 | CNPG 一套模式、**两个** Cluster：`apps-pg`(共享应用库) + `zitadel-pg`(身份面独立)。应用不再自带 postgres，加 `Database`/`DatabaseRole` CR 即可 | [`decisions/shared-postgres-platform.md`](decisions/shared-postgres-platform.md) |
 | 备份工具 | restic (非 Kopia)，无 server 直推 106 | [`plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md`](plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md) |
 | SSO | 应用原生 OIDC, 非共享入口层 SSO | [`plans/security/2026-03-08-cilium-zitadel-sso-plan.md`](plans/security/2026-03-08-cilium-zitadel-sso-plan.md) |
 | 跨集群网络 | Tailscale Pod CIDR + Cilium ClusterMesh | [`reference/tailscale-network.md`](reference/tailscale-network.md) |
