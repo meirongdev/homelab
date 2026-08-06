@@ -46,10 +46,14 @@ spec:
           - miniflux
         source:
           externalCluster: rss-postgres
-      # 旧库从没 ANALYZE 过（迁移前实测 pg_stat_user_tables 里 users/categories 的
-      # n_live_tup 都是 0，而实际有 2/8 行）——导入后补一次统计。
-      postImportApplicationSQL:
-        - ANALYZE
+        # 旧库从没 ANALYZE 过（迁移前实测 pg_stat_user_tables 里 users/categories 的
+        # n_live_tup 都是 0，而实际有 2/8 行）——导入后补一次统计。
+        # ⚠️ 这个字段属于 `import` 段，**不是** `initdb` 段（2026-08-06 踩过：
+        # 写在 initdb 下时 `kubectl apply --validate=strict` 照样通过，但 ArgoCD 的
+        # ServerSideApply 建 typed patch 时报 "field not declared in schema" 同步失败。
+        # CRD 的客户端校验拦不住放错层级的字段，以 `kubectl explain` 为准）。
+        postImportApplicationSQL:
+          - ANALYZE
 
   # 迁移源：rss-system 里待退役的 rss-postgres（无 TLS，故 sslmode: disable）。
   # ⚠️ 旧库销毁后这段就指向不存在的 Service 了，但它**只在 bootstrap 时用一次**，
