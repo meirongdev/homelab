@@ -1,0 +1,257 @@
+# Calibre 封面在线补全
+#
+# 与既有 `calibre-metadata-updater` CronJob 的分工：
+#   · updater —— 每夜从**电子书文件内嵌**提取封面（`ebook-meta --get-cover`），零网络。
+#   · covers（本文件）—— 只处理 updater 拿不到的：文件里**本来就没有**封面的书，
+#     改从 Google Books 的 `imageLinks` 下载。
+#
+# 实测范围（2026-08-06）：全库 54 本缺封面，其中只有 **20 本**有 isbn/google id
+# 可供在线查询（另 34 本无任何标识符，抓不了）；这 20 本里实测 **13 本**能拿到图，
+# 7 本 Google 侧也没有封面。所以本作业的天花板是 13/54。
+#
+# ⚠️ 分辨率要显式提高：`imageLinks` 给的 `thumbnail` 只有约 16KB（~128px 宽），
+# 在 calibre-web 的网格里明显发虚。实测同一张图 `zoom=4` 或 `w=800` 能拿到
+# **46KB**（约 5 倍），URL 参数改一下就行，不需要别的源。
+#
+# ⚠️ 共用 readlist 的 Google Books API key（同 ns 的 `readlist-secrets`）：
+#   · 匿名配额按**共享项目**计，实测一次请求就 429，所以 key 不是可选的锦上添花；
+#   · 但这意味着**和 readlist 的夜间 ingest 抢同一份配额**。本作业只有 20 次请求、
+#     且是一次性的，影响可忽略；若将来扩大范围，要避开 readlist 的 01:20 窗口。
+#   · `optional: true` 是刻意的：ESO 挂了时应该降级空跑，而不是起不来。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metadata-covers-script
+  namespace: personal-services
+data:
+  fetch_covers.py: |
+    #!/usr/bin/env python3
+    """给「文件里没有内嵌封面」的书从 Google Books 下载封面。默认 DRY_RUN。"""
+    import json
+    import os
+    import re
+    import sqlite3
+    import ssl
+    import sys
+    import time
+    import urllib.request
+
+    ssl._create_default_https_context = ssl._create_unverified_context
+
+    LIB = "/calibre-library"
+    DB = os.path.join(LIB, "metadata.db")
+    KEY = os.environ.get("GOOGLE_BOOKS_KEY", "")
+    DRY_RUN = os.environ.get("DRY_RUN", "1") != "0"
+    LIMIT = int(os.environ.get("LIMIT", "100"))
+    DELAY = float(os.environ.get("DELAY", "1.0"))
+    # 期望宽度。实测 800 能拿到约 46KB(vs thumbnail 的 16KB)；再往上 Google 不给。
+    WIDTH = int(os.environ.get("COVER_WIDTH", "800"))
+    MIN_BYTES = int(os.environ.get("MIN_BYTES", "3000"))
+
+    def log(m):
+        print(f"[{time.strftime('%H:%M:%S')}] {m}", flush=True)
+
+    def fetch(url, binary=False):
+        req = urllib.request.Request(url, headers={"User-Agent": "calibre-covers/1.0"})
+        with urllib.request.urlopen(req, timeout=25) as r:
+            return r.read() if binary else json.load(r)
+
+    def volume_info(isbn, gid):
+        """先按 google volume id 精确取，再退回 isbn 搜索。"""
+        urls = []
+        if gid:
+            urls.append(f"https://www.googleapis.com/books/v1/volumes/{gid}")
+        if isbn:
+            urls.append(f"https://www.googleapis.com/books/v1/volumes?q=isbn:{isbn}")
+        for u in urls:
+            u += ("&" if "?" in u else "?") + f"key={KEY}" if KEY else ""
+            try:
+                d = fetch(u)
+            except Exception as e:
+                log(f"    查询失败: {str(e)[:60]}")
+                continue
+            vi = d.get("volumeInfo")
+            if vi is None:
+                items = d.get("items") or []
+                vi = items[0].get("volumeInfo") if items else None
+            if vi:
+                return vi, (d.get("id") or (items[0].get("id") if items else None))
+        return None, None
+
+    def cover_url(vi, gid):
+        il = vi.get("imageLinks") or {}
+        if not il:
+            return None
+        # 高分辨率优先；都没有就拿 thumbnail 再把尺寸参数调大。
+        u = (il.get("extraLarge") or il.get("large") or il.get("medium")
+             or il.get("thumbnail"))
+        if not u:
+            return None
+        u = u.replace("http://", "https://").replace("&edge=curl", "")
+        if gid:
+            # content 接口显式指定宽度，比改 zoom 稳定。
+            return (f"https://books.google.com/books/content?id={gid}"
+                    f"&printsec=frontcover&img=1&zoom=0&w={WIDTH}")
+        return re.sub(r"zoom=\d", "zoom=4", u)
+
+    SQL = """
+        SELECT b.id, b.path, b.title,
+               (SELECT val FROM identifiers WHERE book=b.id AND type='isbn'),
+               (SELECT val FROM identifiers WHERE book=b.id AND type='google')
+          FROM books b
+         WHERE b.has_cover = 0
+         ORDER BY b.id
+    """
+
+    def main():
+        mode = "DRY-RUN（只报告）" if DRY_RUN else "写入模式"
+        log("=" * 66)
+        log(f"Calibre 封面在线补全 —— {mode}")
+        log(f"key {'已注入' if KEY else '**缺失**（匿名配额会 429，几乎必然全空）'}"
+            f" | 目标宽度 {WIDTH}px | 上限 {LIMIT}")
+        log("=" * 66)
+
+        conn = sqlite3.connect(DB, timeout=60)
+        conn.create_function("title_sort", 1, lambda x: x)
+        conn.create_function("uuid4", 0,
+                             lambda: "00000000-0000-0000-0000-000000000000")
+
+        rows = conn.execute(SQL).fetchall()
+        cand = [r for r in rows if r[3] or r[4]][:LIMIT]
+        log(f"缺封面 {len(rows)} 本，其中有标识符可查的 {len(cand)} 本"
+            f"（其余无 isbn/google id，抓不了）")
+
+        st = {"ok": 0, "nolink": 0, "small": 0, "err": 0}
+        for i, (bid, path, title, isbn, gid) in enumerate(cand, 1):
+            log(f"[{i}/{len(cand)}] id={bid} {(title or '')[:52]}")
+            vi, rid = volume_info(isbn, gid)
+            time.sleep(DELAY)
+            if not vi:
+                st["err"] += 1
+                log("    无查询结果")
+                continue
+            u = cover_url(vi, gid or rid)
+            if not u:
+                st["nolink"] += 1
+                log("    Google 侧无封面图")
+                continue
+            try:
+                raw = fetch(u, binary=True)
+            except Exception as e:
+                st["err"] += 1
+                log(f"    下载失败: {str(e)[:60]}")
+                continue
+            # 太小多半是占位图/错误页，宁可不写。
+            if len(raw) < MIN_BYTES:
+                st["small"] += 1
+                log(f"    图太小({len(raw)}B)，疑似占位图，跳过")
+                continue
+            if DRY_RUN:
+                st["ok"] += 1
+                log(f"    [dry] 将写入 {len(raw)//1024}KB 封面")
+                continue
+            d = os.path.join(LIB, path or "")
+            if not os.path.isdir(d):
+                st["err"] += 1
+                log("    书目录不存在")
+                continue
+            target = os.path.join(d, "cover.jpg")
+            with open(target, "wb") as f:
+                f.write(raw)
+            os.chmod(target, 0o666)  # 与库内既有文件权限一致，calibre-web 要能读
+            conn.execute(
+                "UPDATE books SET has_cover=1, last_modified=CURRENT_TIMESTAMP "
+                "WHERE id=?", (bid,))
+            conn.commit()
+            st["ok"] += 1
+            log(f"    ✅ 写入 {len(raw)//1024}KB")
+
+        remaining = conn.execute(
+            "SELECT COUNT(*) FROM books WHERE has_cover=0").fetchone()[0]
+        log("")
+        log("=" * 66)
+        log(f"完成（{mode}）")
+        log(f"  成功:          {st['ok']}")
+        log(f"  Google 无封面: {st['nolink']}")
+        log(f"  图太小跳过:    {st['small']}")
+        log(f"  查询/下载失败: {st['err']}")
+        log(f"  全库仍缺封面:  {remaining}")
+        log("=" * 66)
+        conn.close()
+
+    if __name__ == "__main__":
+        main()
+---
+# 挂起的 CronJob（同 backfill/correct，理由见 backfill-job.yaml 的长注释：
+# 要改参数反复跑，而裸 Job 的 spec.template 不可变）。
+# 手动派生：
+#   kubectl --context oracle-k3s -n personal-services create job covers-1 \
+#     --from=cronjob/calibre-metadata-covers
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: calibre-metadata-covers
+  namespace: personal-services
+spec:
+  suspend: true
+  schedule: "0 5 31 2 *" # 永不存在的日期
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      # 幂等：每次重新查 has_cover=0 的书，已补好的不再命中。同 backfill/correct。
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 259200
+      template:
+        metadata:
+          labels:
+            app: calibre-metadata
+            role: covers
+        spec:
+          restartPolicy: Never
+          priorityClassName: bulk
+          containers:
+            - name: covers
+              image: crocodilestick/calibre-web-automated@sha256:4ff5be5cd6f18d91cc72bf316260d8c34c980f09a862372bc77d25c9ddb0efef
+              command: ["python3", "/scripts/fetch_covers.py"]
+              env:
+                - name: TZ
+                  value: "Asia/Shanghai"
+                # 2026-08-06 以 DRY_RUN=1 核对过 20 本的判定后置 0。
+                - name: DRY_RUN
+                  value: "0"
+                - name: LIMIT
+                  value: "100"
+                - name: COVER_WIDTH
+                  value: "800"
+                # 见文件头：匿名配额一次请求就 429，key 不是可选项；
+                # optional: true 只是为了 ESO 故障时降级空跑而非起不来。
+                - name: GOOGLE_BOOKS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: readlist-secrets
+                      key: google-books-key
+                      optional: true
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 384Mi
+              volumeMounts:
+                - name: calibre-library
+                  mountPath: /calibre-library
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: calibre-library
+              persistentVolumeClaim:
+                claimName: calibre-books-local
+            - name: scripts
+              configMap:
+                name: metadata-covers-script
+                defaultMode: 0755
