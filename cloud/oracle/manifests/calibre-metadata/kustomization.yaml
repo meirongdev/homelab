@@ -25,3 +25,7 @@ resources:
   # （电子书文件里本来就没有内嵌封面）。ConfigMap 与 CronJob 同文件，
   # 顺序天然保证，不必像上面几个那样拆两份。
   - metadata-covers.yaml
+  # LLM 从书的内容生成元数据（2026-08-07）。☠️ 与其它作业性质不同：**生成**内容
+  # 而非查回权威数据，只用于外部数据库根本没有的那 234 本，每条写入都打
+  # #meta_src = llm-from-content。ConfigMap 与 CronJob 同文件。
+  - metadata-llm.yaml
