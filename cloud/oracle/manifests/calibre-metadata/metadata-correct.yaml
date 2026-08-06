@@ -1,0 +1,302 @@
+# Calibre 元数据**修正**（区别于回补：这个会覆盖已有值）
+#
+# 与 metadata-backfill 的分工：
+#   · backfill —— 只填**空**字段，绝不覆盖。已跑完两轮。
+#   · correct（本文件）—— 覆盖**已知错误**的值。每一类都有独立的准入判据，
+#     且**只处理有 ISBN 的书**：修改锚在标识符上，不依赖模糊匹配。
+#     这正是当初把 pubdate/title/authors 划在回补范围外的原因；ISBN 覆盖率
+#     从 715 涨到 1571 之后，那个理由才部分不成立。
+#
+# 四类修正（2026-08-06 实测口径）：
+#   A. authors = Unknown/空 → 真实作者          143 本  （Unknown 不是数据而是缺失，风险最低）
+#   B. pubdate 的 MM-DD = 01-01 → 权威日期      343 本  （mtime 冒充出版日期的那批）
+#   C. 书名像文件名 → 真实书名                  约 50 本
+#   D. 书名尾部括号杂讯 → 去掉                  190 本  （判据见下，不能盲删）
+#
+# ☠️ **D 类绝不能盲删括号**：实测本库里尾括号有三种互斥含义 ——
+#      (Md Johirul Islam)          是作者名        → 该删
+#      (Casey Sisterson's Library) 是收藏标记      → 该删
+#      (and NOT Do)                是书名的一部分  → **删了就毁了书名**
+#    判据只能是数据驱动的：拿 ISBN 查回的权威书名，若其中**不含**括号内容才删。
+#
+# ⚠️ ISBN 不是 100% 可信：实测 229 条内容挖出的 ISBN 里有 1 条错（Springer 丛书页
+#    会列同系列其它卷的 ISBN）。所以每类都另有一道该类自己的护栏，且全程记日志。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metadata-correct-script
+  namespace: personal-services
+data:
+  correct_metadata.py: |
+    #!/usr/bin/env python3
+    """按 ISBN 锚定修正 calibre 元数据。默认 DRY_RUN。"""
+    import os
+    import re
+    import sqlite3
+    import subprocess
+    import sys
+    import time
+    import unicodedata
+    import xml.etree.ElementTree as ET
+
+    LIB = "/calibre-library"
+    DB = os.path.join(LIB, "metadata.db")
+    FETCH = "/app/calibre/bin/fetch-ebook-metadata"
+    ENV = dict(os.environ, LD_LIBRARY_PATH="/app/calibre/lib")
+
+    DRY_RUN = os.environ.get("DRY_RUN", "1") != "0"
+    LIMIT = int(os.environ.get("LIMIT", "50"))
+    DELAY = float(os.environ.get("DELAY", "1.0"))
+    # 四类开关，便于分批推进、出问题时只回滚一类。
+    DO_AUTHOR = os.environ.get("DO_AUTHOR", "1") == "1"
+    DO_PUBDATE = os.environ.get("DO_PUBDATE", "1") == "1"
+    DO_FILENAME_TITLE = os.environ.get("DO_FILENAME_TITLE", "1") == "1"
+    DO_PAREN_TITLE = os.environ.get("DO_PAREN_TITLE", "1") == "1"
+    PUBDATE_SRC_COL = os.environ.get("PUBDATE_SRC_COL", "1")  # custom_column_N
+
+    NS = {"dc": "http://purl.org/dc/elements/1.1/",
+          "opf": "http://www.idpf.org/2007/opf"}
+
+    def log(m):
+        print(f"[{time.strftime('%H:%M:%S')}] {m}", flush=True)
+
+    def norm_tokens(s):
+        s = unicodedata.normalize("NFKD", s or "").lower()
+        s = re.sub(r"[^a-z0-9\s]", " ", s)
+        return {t for t in s.split() if t}
+
+    def coverage(ours, theirs):
+        a, b = norm_tokens(ours), norm_tokens(theirs)
+        return len(a & b) / len(a) if a else 0.0
+
+    # ── 什么样的书名算「文件名式」——只认明显特征，宁可漏 ──
+    FILENAME_PATTERNS = [
+        re.compile(r"^[^\s]*\.[^\s]*\.[^\s]*\."),   # 三个以上点分隔且无空格段
+        re.compile(r"\bB0[A-Z0-9]{8}\b"),           # 亚马逊 ASIN
+        re.compile(r"^[A-Z0-9]{10,}(\s+EBOK)?$"),   # 纯大写数字 ID
+    ]
+
+    def looks_like_filename(t):
+        t = (t or "").strip()
+        if not t:
+            return False
+        return any(p.search(t) for p in FILENAME_PATTERNS)
+
+    def title_sort(t):
+        """calibre 的排序名：把前导冠词挪到末尾。"""
+        m = re.match(r"^(the|a|an)\s+(.*)$", (t or "").strip(), re.I)
+        return f"{m.group(2)}, {m.group(1)}" if m else (t or "").strip()
+
+    def author_sort(name):
+        """calibre 的作者排序名：Last, First。"""
+        parts = (name or "").strip().split()
+        if len(parts) < 2:
+            return (name or "").strip()
+        return f"{parts[-1]}, {' '.join(parts[:-1])}"
+
+    def author_known(a):
+        return bool(a) and a.strip().lower() not in ("unknown", "")
+
+    def run_fetch_isbn(isbn):
+        try:
+            r = subprocess.run(
+                [FETCH, "--opf", "--allowed-plugin", "Google",
+                 "--timeout", "30", "--isbn", isbn],
+                capture_output=True, text=True, timeout=60, env=ENV)
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        if r.returncode != 0 or "<package" not in r.stdout:
+            return None
+        s = r.stdout[r.stdout.find("<?xml"):]
+        try:
+            root = ET.fromstring(s)
+        except ET.ParseError:
+            return None
+        md = root.find("opf:metadata", NS)
+        if md is None:
+            return None
+        def one(tag):
+            el = md.find(f"dc:{tag}", NS)
+            return (el.text or "").strip() if el is not None and el.text else ""
+        return {
+            "title": one("title"),
+            "creators": [(e.text or "").strip()
+                         for e in md.findall("dc:creator", NS) if e.text],
+            "date": one("date"),
+        }
+
+    def parse_date(s):
+        """返回 'YYYY-MM-DD 00:00:00+00:00'；只接受带月日的完整日期。
+
+        只有年份的（'2019'）**不收** —— 那正是我们要修掉的那种粒度，
+        用它覆盖等于把一个猜测换成另一个猜测。
+        """
+        m = re.match(r"(\d{4})-(\d{2})-(\d{2})", (s or "").strip())
+        if not m:
+            return None
+        y, mo, d = m.groups()
+        if mo == "01" and d == "01":
+            return None  # 对方也是年份粒度，换了没意义
+        return f"{y}-{mo}-{d} 00:00:00+00:00"
+
+    def set_pubdate_src(conn, book_id, src):
+        col = f"custom_column_{PUBDATE_SRC_COL}"
+        link = f"books_custom_column_{PUBDATE_SRC_COL}_link"
+        row = conn.execute(f"SELECT id FROM {col} WHERE value=?", (src,)).fetchone()
+        vid = row[0] if row else conn.execute(
+            f"INSERT INTO {col} (value) VALUES (?)", (src,)).lastrowid
+        conn.execute(f"DELETE FROM {link} WHERE book=?", (book_id,))
+        conn.execute(
+            f"INSERT OR IGNORE INTO {link} (book, value) VALUES (?,?)",
+            (book_id, vid))
+
+    def set_authors(conn, book_id, names):
+        conn.execute("DELETE FROM books_authors_link WHERE book=?", (book_id,))
+        for n in names:
+            n = n.strip()
+            if not n:
+                continue
+            row = conn.execute("SELECT id FROM authors WHERE name=?", (n,)).fetchone()
+            aid = row[0] if row else conn.execute(
+                "INSERT INTO authors (name, sort) VALUES (?,?)",
+                (n, author_sort(n))).lastrowid
+            conn.execute(
+                "INSERT OR IGNORE INTO books_authors_link (book, author) VALUES (?,?)",
+                (book_id, aid))
+        conn.execute("UPDATE books SET author_sort=? WHERE id=?",
+                     (author_sort(names[0]) if names else "Unknown", book_id))
+
+    def set_title(conn, book_id, t):
+        conn.execute("UPDATE books SET title=?, sort=? WHERE id=?",
+                     (t, title_sort(t), book_id))
+
+    SQL = """
+        SELECT b.id, b.title, b.pubdate,
+               (SELECT val FROM identifiers WHERE book=b.id AND type='isbn') AS isbn,
+               (SELECT GROUP_CONCAT(a.name, ' | ')
+                  FROM books_authors_link l JOIN authors a ON l.author=a.id
+                 WHERE l.book=b.id) AS authors
+          FROM books b
+         WHERE isbn IS NOT NULL
+         ORDER BY b.id
+    """
+
+    def main():
+        mode = "DRY-RUN（只报告）" if DRY_RUN else "写入模式"
+        log("=" * 70)
+        log(f"Calibre 元数据修正 —— {mode}")
+        log(f"启用: 作者={DO_AUTHOR} 日期={DO_PUBDATE} "
+            f"文件名书名={DO_FILENAME_TITLE} 括号清理={DO_PAREN_TITLE}")
+        log("只处理**有 ISBN** 的书；每类各有独立准入判据")
+        log("=" * 70)
+
+        conn = sqlite3.connect(DB, timeout=60)
+        conn.create_function("title_sort", 1, title_sort)
+        conn.create_function("uuid4", 0,
+                             lambda: "00000000-0000-0000-0000-000000000000")
+
+        rows = conn.execute(SQL).fetchall()
+        st = {"scanned": 0, "queried": 0, "author": 0, "pubdate": 0,
+              "fname": 0, "paren": 0, "skip_nomatch": 0}
+        todo = []
+        for bid, title, pubdate, isbn, authors in rows:
+            first = (authors or "").split(" | ")[0]
+            need = []
+            if DO_AUTHOR and not author_known(first):
+                need.append("A")
+            if DO_PUBDATE and (pubdate or "")[5:10] == "01-01":
+                need.append("B")
+            if DO_FILENAME_TITLE and looks_like_filename(title):
+                need.append("C")
+            if DO_PAREN_TITLE and re.search(r"\([^()]*\)\s*$", title or ""):
+                need.append("D")
+            if need:
+                todo.append((bid, title, pubdate, isbn, first, need))
+        log(f"命中判据的书: {len(todo)}（本次上限 {LIMIT}）")
+        todo = todo[:LIMIT]
+
+        for i, (bid, title, pubdate, isbn, first, need) in enumerate(todo, 1):
+            st["scanned"] += 1
+            log(f"[{i}/{len(todo)}] id={bid} [{''.join(need)}] {(title or '')[:52]}")
+            st["queried"] += 1
+            meta = run_fetch_isbn(isbn)
+            time.sleep(DELAY)
+            if not meta or not meta["title"]:
+                log(f"    ISBN {isbn} 无结果，跳过")
+                st["skip_nomatch"] += 1
+                continue
+
+            changes = []
+
+            # A. 作者：只在当前是 Unknown/空时写。不覆盖任何真实作者名。
+            if "A" in need and meta["creators"]:
+                changes.append(("author", first or "(空)",
+                                " + ".join(meta["creators"][:3])))
+                if not DRY_RUN:
+                    set_authors(conn, bid, meta["creators"][:3])
+                st["author"] += 1
+
+            # B. 日期：只在当前是年份粒度、且对方给出带月日的完整日期时写。
+            if "B" in need:
+                nd = parse_date(meta["date"])
+                if nd:
+                    changes.append(("pubdate", (pubdate or "")[:10], nd[:10]))
+                    if not DRY_RUN:
+                        conn.execute("UPDATE books SET pubdate=? WHERE id=?",
+                                     (nd, bid))
+                        set_pubdate_src(conn, bid, "google-isbn")
+                    st["pubdate"] += 1
+
+            # C. 文件名式书名：直接换成权威书名。
+            if "C" in need:
+                changes.append(("title", (title or "")[:40], meta["title"][:52]))
+                if not DRY_RUN:
+                    set_title(conn, bid, meta["title"])
+                st["fname"] += 1
+                title = meta["title"]
+
+            # D. 括号清理：**只有权威书名里不含括号内容时才删**。
+            #    这道判据是唯一能区分「(作者名)」与「(书名的一部分)」的东西。
+            if "D" in need and "C" not in need:
+                m = re.search(r"^(.*?)\s*\(([^()]*)\)\s*$", title or "")
+                if m:
+                    base, paren = m.group(1).strip(), m.group(2).strip()
+                    ptoks = norm_tokens(paren)
+                    ttoks = norm_tokens(meta["title"])
+                    inside = ptoks & ttoks
+                    # 括号内容在权威书名里出现过一半以上 → 它是书名的一部分，保留。
+                    if base and len(base) >= 8 and (
+                            not ptoks or len(inside) / len(ptoks) < 0.5):
+                        changes.append(("title(去括号)", (title or "")[:40], base[:52]))
+                        if not DRY_RUN:
+                            set_title(conn, bid, base)
+                        st["paren"] += 1
+                    else:
+                        log(f"    括号 '{paren[:28]}' 出现在权威书名里 → 保留")
+
+            if not changes:
+                log("    无需修改")
+                continue
+            for what, old, new in changes:
+                log(f"    {'[dry] ' if DRY_RUN else ''}{what}: {old} -> {new}")
+            if not DRY_RUN:
+                conn.execute(
+                    "UPDATE books SET last_modified=CURRENT_TIMESTAMP WHERE id=?",
+                    (bid,))
+                conn.commit()
+
+        log("")
+        log("=" * 70)
+        log(f"完成（{mode}）")
+        log(f"  扫描:            {st['scanned']}")
+        log(f"  外部查询:        {st['queried']}")
+        log(f"  A 作者已补:      {st['author']}")
+        log(f"  B 日期已修:      {st['pubdate']}")
+        log(f"  C 文件名书名已换: {st['fname']}")
+        log(f"  D 括号已清:      {st['paren']}")
+        log(f"  ISBN 查无结果:   {st['skip_nomatch']}")
+        log("=" * 70)
+        conn.close()
+
+    if __name__ == "__main__":
+        main()

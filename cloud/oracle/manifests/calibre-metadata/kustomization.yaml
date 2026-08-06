@@ -16,3 +16,8 @@ resources:
   # 新的回补一律走 metadata-backfill.yaml。
   - metadata-backfill.yaml
   - backfill-job.yaml
+  # 修正作业（2026-08-06）：与 backfill 分工不同 —— backfill 只填空，
+  # correct 覆盖已知错误值（作者 Unknown / mtime 冒充的 pubdate / 文件名式书名 /
+  # 括号杂讯），且只处理有 ISBN 的书。同样 ConfigMap 排在 CronJob 前面。
+  - metadata-correct.yaml
+  - correct-job.yaml
