@@ -1,0 +1,86 @@
+# 共享应用数据库 —— CNPG Cluster（2026-08-06 建，取代 rss-system 里手搓的
+# rss-postgres Deployment）。
+#
+# 定位：**应用不再各自起 postgres**。要库就加一个 Database CR + 一个 DatabaseRole CR，
+# 再在应用侧加一条 ESO 模板拼连接串。
+# ⚠️ Database/DatabaseRole 的 `spec.cluster` 是 **LocalObjectReference（只有 name，
+#    没有 namespace 字段）** → 这两种 CR 必须和本 Cluster 同在 `databases` ns，
+#    不能放到应用自己的 ns 里。加新租户时别搞错位置。
+#
+# 为什么不把 zitadel-pg 一起并进来（2026-08-06 决策）：
+#   两个库本来就在同一个单节点，"故障域隔离"是虚的；真正剩下的隔离只对 postgres 级
+#   故障有效——而**内存上限恰好是这个节点最现实的那个**：实测内存 87%、limits 超卖 224%，
+#   且 zitadel-pg 带 priorityClassName: meirong-critical（"SSO 的库被驱逐 = 全站登录挂"）。
+#   合库 = 让 RSS 刷新风暴 / karakeep 批量导入和 SSO 抢同一个 memory limit。
+#   省下的只有一个 postmaster（~60-80Mi）。不值。两个 Cluster、一套模式即可。
+#
+# 首批租户只有 miniflux。karakeep 虽然在旧库里有个同名库，但迁移前实测是 **0 张表**——
+# 它早就是 sqlite（DATA_DIR=/data + karakeep-data PVC），那个空库是历史残留，不迁；
+# miniflux.yaml 里"miniflux + karakeep 共用"的注释是过期的。
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: apps-pg
+  namespace: databases
+spec:
+  instances: 1 # 单人 homelab 单节点，HA 无意义（同 zitadel-pg）
+
+  # 与 zitadel-pg 同一镜像：裸 `17.x` tag 是 bullseye(deb11) 底、带 6 条 Critical，
+  # `-standard-bookworm` 已实测干净。理由详见 zitadel/zitadel-pg-cluster.yaml。
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.10-standard-bookworm
+
+  bootstrap:
+    initdb:
+      database: miniflux
+      owner: miniflux
+      secret:
+        name: apps-pg-miniflux-app
+      # 从旧库逻辑迁入（pg_dump | pg_restore）。microservice 模式 = 单库导入，
+      # 目标库 owner 取 initdb.owner，源库的属主/权限不带过来。
+      # 逻辑迁移顺带跨过 PG15 → PG17（旧库 postgres:15-alpine，15 在 2027-11 EOL）。
+      # ⚠️ 这是**一次性 bootstrap**：Cluster 建好之后改这段不会重新导入，
+      #    要重导只能删掉整个 Cluster（连 PVC）再来。
+      import:
+        type: microservice
+        databases:
+          - miniflux
+        source:
+          externalCluster: rss-postgres
+      # 旧库从没 ANALYZE 过（迁移前实测 pg_stat_user_tables 里 users/categories 的
+      # n_live_tup 都是 0，而实际有 2/8 行）——导入后补一次统计。
+      postImportApplicationSQL:
+        - ANALYZE
+
+  # 迁移源：rss-system 里待退役的 rss-postgres（无 TLS，故 sslmode: disable）。
+  # ⚠️ 旧库销毁后这段就指向不存在的 Service 了，但它**只在 bootstrap 时用一次**，
+  #    留着无害；想清理可以连同上面的 import 段一起删，不会触发重建。
+  externalClusters:
+    - name: rss-postgres
+      connectionParameters:
+        host: rss-postgres.rss-system.svc.cluster.local
+        user: miniflux
+        dbname: miniflux
+        sslmode: disable
+      password:
+        name: apps-pg-miniflux-app
+        key: password
+
+  # 不开超级用户口令登录：运维要 psql 就 `kubectl exec -it apps-pg-1 -- psql`
+  # （容器内本地 socket，peer auth 直接是 postgres），不必再往 Vault 塞一份超管口令。
+  # 备份走应用用户的 pg_dump —— 同 backup-script.yaml 里 zitadel 那行的口径。
+  enableSuperuserAccess: false
+
+  # 刻意不设 priorityClassName（默认 0）：meirong-bulk(-10) 会让**库比用库的应用
+  # 更容易被驱逐**，方向反了；meirong-critical(1000) 是留给控制面的。
+  # 默认档正好落在 bulk 应用之上、控制面之下。
+  storage:
+    storageClass: local-path
+    size: 5Gi # 旧 PVC 同为 5Gi；实际库 102MB，WAL 与数据同卷
+
+  resources:
+    requests:
+      cpu: 25m
+      memory: 192Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
