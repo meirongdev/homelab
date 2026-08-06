@@ -153,7 +153,10 @@ kill %1
 ```
 
 ⚠️ API 前缀是 **`/api/v1/`**，不是 `/api/`：可用的是 `meta` · `lists` · `lists/{id}` ·
-`works/{id}` · `matrix/{run}` · `catalog`（全部只读，非 GET 一律 405）。
+`works/{id}` · `catalog`（全部只读，非 GET 一律 405）。
+**`matrix/{run}` 已于 v0.3.0 删除**，别再照旧文档去探它——现在返回 404。
+同批变更：`catalog` 从「全库」收窄成「7 个公开榜的并集」，所以它的 `total`
+（约百余）**不再等于**藏书数，也不再等于 `readlist_works_total`（那个仍是全库数）。
 
 v0.2.0 的 `/metrics` 有 **14 个指标族**（v0.1.0 只有 5 个）：三个作业各自的新鲜度
 （`last_score_unix` / `last_snapshot_unix` / `last_ingest_unix`）· `works_total` ·
