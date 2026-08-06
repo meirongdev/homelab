@@ -70,6 +70,12 @@ trivy:
   ignoreUnfixed: true
   severity: "HIGH,CRITICAL"
 
+  # trivy-server（builtInTrivyServer 的 StatefulSet，共享漏洞库）。2026-08-06 补。
+  # ⚠️ 这是**第三个**位置：顶层 priorityClassName 管 operator、
+  # trivyOperator.scanJobPodPriorityClassName 管扫描 Job、这个管 server。
+  # 漏了它的话，一个纯粹为 operator 服务的组件反而比 operator 优先级高。
+  priorityClassName: meirong-bulk
+
   # trivy ≥0.72.0 必须：0.71 的临时目录名会让多容器 workload 的扫描 100% 撞名互删。
   image:
     tag: "0.72.0"
