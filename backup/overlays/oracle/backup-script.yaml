@@ -7,13 +7,13 @@ data:
   backup.sh: |
     #!/bin/sh
     # oracle-k3s nightly backup → restic 仓库 (106 ZFS, sftp over Tailscale)
-    # PG=pg_dumpall(miniflux+karakeep+postgres+roles)；sqlite=local-path hostPath 原样拷贝。
+    # PG=逐库 pg_dump(apps-pg/miniflux + zitadel-pg/zitadel)；sqlite=local-path hostPath 原样拷贝。
     # meilisearch 索引(可由 karakeep 重建)不备份。
     # calibre 书库(2026-08-02 从 homelab 迁入，~23G)以目录整体纳入 restic
     # ——增量去重，首晚全量后每晚近零成本。做法与迁移前 homelab 侧一致。
     set -eu
     echo "[backup] installing tools..."
-    # postgresql17-client 显式钉版:zitadel DB 是 PG17(CNPG),pg_dump 必须 ≥17
+    # postgresql17-client 显式钉版:两个库都是 PG17(CNPG),pg_dump 必须 ≥17
     apk add --no-cache restic openssh-client postgresql17-client findutils >/dev/null
 
     install -d -m 700 /root/.ssh
@@ -33,11 +33,17 @@ data:
     rm -rf /work/* 2>/dev/null || true
     mkdir -p /work/pvc
 
-    # --- 1) PG pg_dumpall（共享实例的全部 DB + roles）---
-    echo "[backup] pg_dumpall (rss-postgres)..."
-    PGPASSWORD="$(cat /creds/PG_PASSWORD)" pg_dumpall \
-      -h rss-postgres.rss-system.svc -p 5432 -U miniflux -f /work/pg_all.sql
-    echo "[backup]   pg_all.sql = $(wc -c < /work/pg_all.sql) bytes"
+    # --- 1) PG 逐库 pg_dump ---
+    # ⚠️ 2026-08-06 起这是**显式清单**（同下面 sqlite 白名单的性质）：apps-pg 上每加一个
+    # 租户，就必须在这里加一行 pg_dump，否则该库静默不备份。
+    # 从 pg_dumpall 改成逐库 pg_dump 的原因：旧的 rss-postgres 里 miniflux 恰好是超级
+    # 用户，pg_dumpall 才跑得通；apps-pg 是 CNPG 且 enableSuperuserAccess: false，
+    # 应用用户只能 dump 自己的库。角色/权限已由 git 里的 Database/DatabaseRole CR 声明，
+    # 不再需要 pg_dumpall 的 globals。
+    echo "[backup] miniflux pg_dump (apps-pg)..."
+    PGPASSWORD="$(cat /creds/PG_PASSWORD)" pg_dump \
+      -h apps-pg-rw.databases.svc -p 5432 -U miniflux -d miniflux --no-owner --no-privileges -f /work/miniflux.sql
+    echo "[backup]   miniflux.sql = $(wc -c < /work/miniflux.sql) bytes"
     # ZITADEL PG（CNPG 集群 zitadel-pg，2026-07-18 起；旧 bitnami zitadel-db 已退役）
     echo "[backup] zitadel pg_dump..."
     PGPASSWORD="$(cat /creds/ZITADEL_PG_PASSWORD)" pg_dump \

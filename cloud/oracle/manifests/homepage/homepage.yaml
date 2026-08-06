@@ -211,14 +211,15 @@ data:
     - 基础设施:
         - PostgreSQL:
             icon: postgres.png
-            description: 关系型数据库 (Miniflux)
+            description: 共享应用库 apps-pg (CNPG, PG17)
             kubernetes:
-              namespace: rss-system
+              # 2026-08-06：rss-system/rss-postgres（手搓 Deployment, PG15）退役，
+              # 迁入 databases ns 的 CNPG 共享集群 apps-pg。
+              # 2026-08-03 那次修正的教训仍适用：选择器必须指到**数据库 pod**，
+              # 不是应用 pod —— 后者里没有名为 postgres 的容器，状态会一直取不到。
+              namespace: databases
               container: postgres
-              # 2026-08-03 修正：原为 app=miniflux —— 那是 **Miniflux 应用** 的 pod，
-              # 不是数据库；而且它里面没有名为 postgres 的容器，所以这块状态一直取不到。
-              # 真正的 PG pod 是 app=rss-postgres（容器 postgres + postgres-exporter）。
-              label_selector: app=rss-postgres
+              label_selector: cnpg.io/cluster=apps-pg
 
         - HashiCorp Vault:
             icon: vault.png
