@@ -49,12 +49,25 @@ Homelab 由两个集群组成：
 四档（定义：`cloud/oracle/manifests/base/priorityclasses.yaml` 与 homelab 侧
 `k8s/helm/manifests/namespace-guardrails/priorityclasses.yaml`，两边取值一致）：
 
+> **2026-08-06 改名**：`meirong-critical/high/bulk` → 无前缀的 `critical`/`high`/`bulk`。
+> 旧名作为 deprecated 定义**暂时并存**，删除是三步走的最后一步，且**卡在一个前置条件上**：
+> ArgoCD 是 manual-helm 部署（`just deploy-argocd`），它的 pod 现在仍跑着
+> `meirong-critical`；在跑过一次 `just deploy-argocd` 让它换到 `critical` 之前，
+> **绝不能删 `meirong-critical`**——否则 ArgoCD pod 一旦被重新调度就会被 API server 拒绝，
+> 而它正是 GitOps 控制面。
+>
+> ⚠️ 为什么必须分步：PriorityClass 与引用它的工作负载分属不同的 ArgoCD App，**同步无先后
+> 保证**。引用先于 class 生效时 API server 直接拒绝建 pod，而旧 pod 已被滚动删除 →
+> 静默下线。2026-08-06 21:57 就这样让 homelab 的 opencost/trivy 下线 25 分钟
+> （当时是 homelab 侧漏了 `meirong-bulk` 定义），ArgoCD 全程显示 **Synced**、只有 health
+> 是 Degraded。恢复后 ReplicaSet 的失败退避还会再拖几分钟，删掉卡住的 RS 可立即重置。
+
 | 档 | 值 | 谁在里面 |
 |---|---|---|
-| `meirong-critical` | 1000 | Vault、ArgoCD 全家、zitadel-pg |
-| `meirong-high` | 900 | external-dns、cloudflared、otel-collector(oracle) |
+| `critical` | 1000 | Vault、ArgoCD 全家、zitadel-pg |
+| `high` | 900 | external-dns、cloudflared、otel-collector(oracle) |
 | （默认） | 0 | 其余，含 **ZITADEL 应用本身** |
-| `meirong-bulk` | -10 | 可牺牲的个人应用（calibre-web/stirling-pdf/karakeep/browserless 等）+ **非关键观测/扫描组件**（opencost、trivy-operator，2026-08-06 补） |
+| `bulk` | -10 | 可牺牲的个人应用（calibre-web/stirling-pdf/karakeep/browserless 等）+ **非关键观测/扫描组件**（opencost、trivy-operator，2026-08-06 补） |
 
 **opencost / trivy-operator 归 bulk 的理由**（2026-08-06）：两者此前无 `priorityClassName`，
 落在默认档 0 —— 比标了 `bulk`(-10) 的个人应用还高，与「谁该先被牺牲」的直觉相反。
@@ -82,11 +95,11 @@ opencost 是纯观测组件，掉线只丢一段成本采样；trivy-operator �
 
 - **ZITADEL 应用**：chart 9.34.1 没有 `priorityClassName` 这个 values 键（逐键确认过），
   写进 `valuesContent` 会被 Helm 静默忽略——看起来像配了，实际没有，比不配更危险。
-  改用相对次序保证：`meirong-bulk`(-10) 把可牺牲的应用压到它下面。
+  改用相对次序保证：`bulk`(-10) 把可牺牲的应用压到它下面。
 - **timeslot**：本仓库之外的手工 Helm release（chart `timeslot-0.1.0`，无 ArgoCD
   tracking-id），只能靠 ns 的 LimitRange 给默认 request，动不了它的 pod spec。
 
-`meirong-bulk` 是 2026-08-05 oracle 缩容到 12GB 时加的——内存峰值从占 24GB 的 43%
+`bulk` 是 2026-08-05 oracle 缩容到 12GB 时加的——内存峰值从占 24GB 的 43%
 变成占 12GB 的 ~70% 后，「谁先死」第一次成为真问题。
 
 ### 节点级预留：调度器看不见的那一块

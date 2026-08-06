@@ -93,7 +93,7 @@ spec:
       labels:
         app: otel-collector
     spec:
-      priorityClassName: meirong-high
+      priorityClassName: high
       serviceAccountName: otel-collector
       containers:
         - name: otel-collector

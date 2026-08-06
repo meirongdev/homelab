@@ -35,7 +35,7 @@ spec:
   jobTemplate:
     spec:
       # 2026-08-06 从 0 改成 2，理由同 correct-job.yaml：脚本**幂等**（每次重新查
-      # 「还有空字段的书」，已填好的不再命中），而作业跑在 meirong-bulk(-10)、
+      # 「还有空字段的书」，已填好的不再命中），而作业跑在 bulk(-10)、
       # 节点内存常年 90%+，被驱逐是常态。backoffLimit=0 会让一次驱逐判死整个作业。
       backoffLimit: 2
       ttlSecondsAfterFinished: 259200 # 3 天
@@ -46,7 +46,7 @@ spec:
             role: backfill
         spec:
           restartPolicy: Never
-          priorityClassName: meirong-bulk
+          priorityClassName: bulk
           containers:
             - name: backfill
               image: crocodilestick/calibre-web-automated@sha256:4ff5be5cd6f18d91cc72bf316260d8c34c980f09a862372bc77d25c9ddb0efef

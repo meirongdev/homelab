@@ -45,21 +45,21 @@
 |---|--------|------|---------|
 | 1 | CPU requests 2712m → **1372m**（43 处） | `cloud/oracle/manifests/**`、`k8s/helm/values/{loki,tempo,falco,cnpg-operator,opencost-oracle,trivy-operator-oracle}.yaml` | `git push` → ArgoCD |
 | 2 | argocd-server 50→25m、argocd-redis 25→15m | `k8s/helm/values/argocd.yaml` | **`cd k8s/helm && just deploy-argocd`**（manual-helm，push 不生效） |
-| 3 | `meirong-bulk`(-10) PriorityClass + 9 个可牺牲应用挂上 | `cloud/oracle/manifests/base/priorityclasses.yaml` 等 | `git push` → ArgoCD |
+| 3 | `bulk`(-10) PriorityClass + 9 个可牺牲应用挂上 | `cloud/oracle/manifests/base/priorityclasses.yaml` 等 | `git push` → ArgoCD |
 | 4 | LimitRange `defaultRequest.cpu` 50m→15m | `cloud/oracle/manifests/personal-services/personal-services-limits.yaml` | `git push`（**要重建 timeslot pod 才吃到新默认值**） |
 | 5 | 清 hugepages + 配 `system-reserved`/`eviction-hard` | `cloud/oracle/ansible/playbooks/setup-k3s.yaml` | 见下面步骤 2 |
 
 ### 关于优先级分档
 
-`meirong-critical`(1000) ArgoCD 全家 + zitadel-pg ·
-`meirong-high`(900) cloudflared / external-dns / otel-collector ·
-`(0)` 其余含 **ZITADEL 应用本身** · `meirong-bulk`(-10) calibre-web / stirling-pdf /
+`critical`(1000) ArgoCD 全家 + zitadel-pg ·
+`high`(900) cloudflared / external-dns / otel-collector ·
+`(0)` 其余含 **ZITADEL 应用本身** · `bulk`(-10) calibre-web / stirling-pdf /
 squoosh / it-tools / excalidraw×2 / trends / karakeep / rsshub-browserless。
 
 ⚠️ **ZITADEL 应用设不了 priorityClassName**：chart 9.34.1 没有这个 values 键（逐键
 确认过），写进 `valuesContent` 会被静默忽略——比不配更糟，因为看起来像配了。
-它留在 0，靠 `meirong-bulk` 把可牺牲的应用压到它下面来保证相对次序。
-它的库（CNPG Cluster）能设，已设成 `meirong-critical`。
+它留在 0，靠 `bulk` 把可牺牲的应用压到它下面来保证相对次序。
+它的库（CNPG Cluster）能设，已设成 `critical`。
 
 ## 切换步骤
 
@@ -249,7 +249,7 @@ kubectl $CTX -n argocd get app -A | grep -cv "Synced.*Healthy"   # 期望 0
 max_over_time((node_memory_MemTotal_bytes{cluster="oracle-k3s"}
   - node_memory_MemAvailable_bytes{cluster="oracle-k3s"})[24h:5m]) / 1024/1024/1024
 ```
-超过 **10 GiB** 就说明余量不够，回头砍 `meirong-bulk` 那一档里的东西。
+超过 **10 GiB** 就说明余量不够，回头砍 `bulk` 那一档里的东西。
 
 ## 踩坑与回滚
 

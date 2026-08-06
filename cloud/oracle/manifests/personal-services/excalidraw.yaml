@@ -46,7 +46,7 @@ spec:
       labels:
         app: excalidraw
     spec:
-      priorityClassName: meirong-bulk
+      priorityClassName: bulk
       containers:
         - name: excalidraw
           # excalidraw/excalidraw:latest — 多架构 manifest-list digest(2026-07-26),节点解析 arm64。
@@ -116,7 +116,7 @@ spec:
       labels:
         app: excalidraw-room
     spec:
-      priorityClassName: meirong-bulk
+      priorityClassName: bulk
       containers:
         - name: excalidraw-room
           # 自建多架构镜像(images/excalidraw-room),arm64+amd64 manifest-list digest。

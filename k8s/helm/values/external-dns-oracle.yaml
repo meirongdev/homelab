@@ -13,7 +13,7 @@
 provider:
   name: cloudflare
 
-priorityClassName: meirong-high
+priorityClassName: high
 
 env:
   - name: CF_API_TOKEN

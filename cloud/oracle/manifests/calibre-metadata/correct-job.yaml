@@ -32,7 +32,7 @@ spec:
       # 131 本只处理了几本，pod 被清除后连日志都拿不到。
       # 本脚本是**幂等**的：每次运行重新查「还有缺陷的书」，已修好的不再命中，
       # 所以重启只是接着做剩下的，不会把半成品叠加一遍。
-      # 而它跑在 meirong-bulk(-10)，在这台 2 OCPU / 内存常年 90%+ 的节点上
+      # 而它跑在 bulk(-10)，在这台 2 OCPU / 内存常年 90%+ 的节点上
       # **本来就该**被优先牺牲 —— 正确做法不是提优先级，是让它可重启。
       backoffLimit: 2
       ttlSecondsAfterFinished: 259200
@@ -43,7 +43,7 @@ spec:
             role: correct
         spec:
           restartPolicy: Never
-          priorityClassName: meirong-bulk
+          priorityClassName: bulk
           containers:
             - name: correct
               image: crocodilestick/calibre-web-automated@sha256:4ff5be5cd6f18d91cc72bf316260d8c34c980f09a862372bc77d25c9ddb0efef
