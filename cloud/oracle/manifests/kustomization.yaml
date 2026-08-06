@@ -9,6 +9,11 @@ resources:
   - base/gateway.yaml
   # PriorityClasses（控制面驱逐优先级，见 base/priorityclasses.yaml）
   - base/priorityclasses.yaml
+  # dgx-proxy 的影子 Service（2026-08-07）：本集群无后端，只为让 Cilium 全局服务
+  # 在 oracle 的 CoreDNS 里有一条记录。实体在 homelab 的 k8s/helm/manifests/bifrost/。
+  # 缺了这一半的表现是 pod 侧 "Could not resolve host"，而 cilium-dbg 却显示服务已同步。
+  - bifrost/namespace.yaml
+  - bifrost/dgx-proxy-service.yaml
   # external-dns: ns + Cloudflare token ExternalSecret (chart is ArgoCD-managed, see
   # argocd/applications/external-dns-oracle.yaml + k8s/helm/values/external-dns-oracle.yaml)
   - base/namespace-external-dns.yaml

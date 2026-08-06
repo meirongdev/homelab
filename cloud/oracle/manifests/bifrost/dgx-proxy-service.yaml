@@ -1,0 +1,30 @@
+# dgx-proxy 的**影子 Service** —— 本集群没有后端，后端全在 homelab。
+#
+# 为什么需要它（2026-08-07 实测踩出来的）：
+# Cilium 的全局服务**不是**「一边标注、另一边自动可见」。annotate 之后
+# `cilium-dbg status --all-clusters` 里 oracle 确实看到 homelab 的 `1 services`
+# （证明跨集群传播是通的），但 **oracle 的 CoreDNS 里没有任何记录**，
+# pod 侧表现是 `curl: (6) Could not resolve host`。
+#
+# 原因是 DNS 与服务合并是两回事：Cilium 负责把远端后端合并进本地服务，
+# 但那条 `*.svc.cluster.local` 记录仍然由本集群的 CoreDNS 依据**本集群的
+# Service 对象**产生。所以两边都要有同名同 ns 同端口的 Service，
+# 且都标 `service.cilium.io/global: "true"`。
+#
+# 本文件就是 oracle 侧那一半：有 selector 但本集群无匹配 pod（Endpoints 为空），
+# Cilium 把 homelab 的后端补进来。
+apiVersion: v1
+kind: Service
+metadata:
+  name: dgx-proxy
+  namespace: bifrost
+  annotations:
+    service.cilium.io/global: "true"
+spec:
+  type: ClusterIP
+  selector:
+    app: dgx-proxy # 本集群无此 pod，故意的
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
