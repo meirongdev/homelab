@@ -54,7 +54,23 @@ Homelab 由两个集群组成：
 | `meirong-critical` | 1000 | Vault、ArgoCD 全家、zitadel-pg |
 | `meirong-high` | 900 | external-dns、cloudflared、otel-collector(oracle) |
 | （默认） | 0 | 其余，含 **ZITADEL 应用本身** |
-| `meirong-bulk` | -10 | 可牺牲的个人应用（calibre-web/stirling-pdf/karakeep/browserless 等） |
+| `meirong-bulk` | -10 | 可牺牲的个人应用（calibre-web/stirling-pdf/karakeep/browserless 等）+ **非关键观测/扫描组件**（opencost、trivy-operator，2026-08-06 补） |
+
+**opencost / trivy-operator 归 bulk 的理由**（2026-08-06）：两者此前无 `priorityClassName`，
+落在默认档 0 —— 比标了 `bulk`(-10) 的个人应用还高，与「谁该先被牺牲」的直觉相反。
+opencost 是纯观测组件，掉线只丢一段成本采样；trivy-operator 掉线只是报告变旧，
+不影响任何运行时管控 —— 后者与 CLAUDE.md「所有安全组件 fail-open + 控 CPU」的硬约束一致，
+**被驱逐正是 fail-open**。
+
+⚠️ trivy-operator **两个键都要设，层级不同**（chart 0.33.1 逐键确认 + `helm template` 实证）：
+
+| 键 | 作用对象 |
+|---|---|
+| 顶层 `priorityClassName` | operator 本体（常驻，内存小头） |
+| `trivyOperator.scanJobPodPriorityClassName` | **扫描 Job pod** —— 真正的瞬时内存消费者 |
+
+只设前者等于漏掉了要管的那个。后者渲染进 ConfigMap 的 `scanJob.podPriorityClassName`，
+不在 Deployment 里，`kubectl get deploy -o yaml` 看不到，别据此判断没生效。
 
 ⚠️ **两处设不了，不是漏配**：
 
