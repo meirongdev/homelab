@@ -128,17 +128,16 @@ data:
             href: https://notebook.meirong.dev
             description: AI 研读笔记本（本地模型）
 
-        # readlist 的首页条目**暂缓** —— 公开入口已于 2026-08-05 摘除（`/api/v1/catalog`
-        # 会公开书库里误入的第三方简历的姓名，见 personal-services/readlist.yaml 的说明）。
-        # 那边的 HTTPRoute 恢复之后再把下面这段取消注释，否则首页会是个死链。
-        # - readlist:
-        #     icon: mdi-book-open-page-variant
-        #     href: https://readlist.meirong.dev
-        #     description: 技术书多维评分与书单（下一本读什么）
-        #     kubernetes:
-        #       namespace: personal-services
-        #       container: readlist
-        #       label_selector: app=readlist
+        # 只发元数据与评分，**不发书** —— 与 Calibre-Web(book.meirong.dev) 是两个东西，
+        # 域名刻意用 readlist. 而不是 books.，差一个字母的误配代价太高。
+        - readlist:
+            icon: mdi-book-open-page-variant
+            href: https://readlist.meirong.dev
+            description: 技术书多维评分与书单（下一本读什么）
+            kubernetes:
+              namespace: personal-services
+              container: readlist
+              label_selector: app=readlist
 
         - Stirling-PDF:
             icon: stirling-pdf.png
