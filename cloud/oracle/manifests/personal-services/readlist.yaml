@@ -222,17 +222,21 @@ spec:
 # ReferenceGrant 也不需要（base/gateway.yaml 已有覆盖本 ns 的通配授权）。
 # external-dns 是 upsert-only：日后再摘路由**不会**删 CNAME，要清得手工删。
 #
-# ☠️ 已知且**已被接受**的暴露面（2026-08-06 由库主人决定照常公开）：
-#   `/api/v1/catalog` 把全部 2046 个 work 的 title+author 原样发给浏览器，而书库里
-#   混着非书的私人文档 —— 实测有 1 条第三方简历
-#   `(BHRC) Backend Engineer - 吳幸慈, Mint Wu - 202603`（author 字段是另一个人名）。
-#   「只发元数据不发书」这条护栏对**书**成立，对误入库的私人文件不成立：
-#   简历的元数据本身就是真人姓名。清理办法（任一，随时可做，不必先下线）：
-#     A. 把该文档从 calibre 挪走 → 重跑 snapshot（最省事，约两分钟）；
+# ⚠️ 公开面会把**全部** work 的 title+author 原样发给浏览器（`/api/v1/catalog`，
+#   以及 `/api/v1/matrix/{run}`）。「只发元数据不发书」这条护栏对**书**成立，对
+#   误入书库的私人文件**不成立** —— 那种东西的"元数据"本身就是真人姓名。
+#
+#   2026-08-06 实例已清理：一条第三方简历（BHRC / Mint Wu）此前出现在公开 catalog 里；
+#   该文档已从 calibre 移除，重跑 score 后全部公开端点核验为 0 命中（含历史 run ——
+#   matrix 的标题是**现连 works 表**取的，所以 work 一删，历史 run 也跟着不再暴露）。
+#
+#   ☠️ **机制本身没修**：readlist 没有任何准入过滤（`internal/calibre` 读了 tags 但
+#   不据此筛选），所以**往后任何丢进 calibre 的非书文档都会自动上公网**。
+#   往书库里放简历/合同/发票之类的东西之前先想一下。彻底修法见 ROADMAP #11：
 #     B. readlist 侧加准入过滤（按 tag/书架/格式），属上游改动；
 #     C. 公开面只发榜单、不发全量 catalog，属上游改动。
 #   ⚠️ 上游 review-2026-08-05-b 的 C1 提议给 catalog 做 SSR + sitemap。**那个落地前
-#      务必先做 A/B/C 之一**，否则这条会从「悄悄可见」变成「被搜索引擎收录」。
+#      务必先做 B 或 C**，否则这类泄漏会从「悄悄可见」变成「被搜索引擎收录」。
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
