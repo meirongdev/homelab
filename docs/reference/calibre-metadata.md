@@ -9,18 +9,23 @@
 
 ## 覆盖率现状
 
-2026-08-06 实测（`sqlite3 file:/calibre-library/metadata.db?mode=ro`，共 **2053** 本）：
+2026-08-06 实测（`sqlite3 file:/calibre-library/metadata.db?mode=ro`，共 **2053** 本）。
+「回补前」是两轮 backfill 之前的基线，留着是因为它解释了为什么后来的修正才成为可能：
 
-| 字段 | 有 | 缺 |
-|---|---|---|
-| pubdate | 2048 | 5 |
-| 封面 | 1999 | 54 |
-| publisher | 1356 | 697 |
-| 任意 identifier | 990 | **1063** |
-| comments（简介） | 980 | 1073 |
-| tags | 457 | **1596** |
-| rating | 14 | 2039 |
-| series | 1 | 2052 |
+| 字段 | 回补前 | **现在** | 缺 |
+|---|---|---|---|
+| 任意 identifier | 990 | **1740** | 313 |
+| ISBN | 715 | **1571** | 482 |
+| comments（简介） | 980 | **1596** | 457 |
+| tags | 457 | **1477** | 576 |
+| publisher | 1356 | **1736** | 317 |
+| 封面 | 1999 | 1999 | 54 |
+| pubdate | 2048 | 2048 | 5 |
+| rating | 14 | 14 | 2039 |
+| series | 1 | 1 | 2052 |
+
+**ISBN 从 35% 涨到 77% 是关键**：它把「只能模糊匹配」变成「可按标识符精确查」，
+修正作业（见下）才有了锚。
 
 语言分布 **eng 1725 / zho 20**（余数为无语言标注）。**豆瓣类中文源对本库基本无用**，
 Google Books / OpenLibrary 才对路。
@@ -151,6 +156,51 @@ kubectl --context oracle-k3s -n personal-services delete job backfill-1   # 手�
 ```
 
 改数据源 / 换库 / 调匹配门之后，**先把 `DRY_RUN` 翻回 `"1"` 重跑一轮**再置 `0`。
+
+## 修正作业 `calibre-metadata-correct`
+
+清单 `cloud/oracle/manifests/calibre-metadata/{metadata-correct,correct-job}.yaml`。
+
+**与 backfill 的分工**：backfill 只填**空**字段、绝不覆盖；correct **覆盖已知错误值**，
+且**只处理有 ISBN 的书** —— 修改锚在标识符上，不靠模糊匹配。当初把
+pubdate/title/authors 划在回补范围外正是因为没有这个锚；ISBN 覆盖率
+从 715 涨到 1571 之后，这条路才成立。
+
+四类，各有独立准入判据：
+
+| 类 | 判据 | 只在什么条件下写 |
+|---|---|---|
+| A 作者 | `authors ∈ {Unknown, 空}` | 不覆盖任何真实作者名（Unknown 是缺失不是数据） |
+| B 日期 | `pubdate` 的 `MM-DD = 01-01` | **对方必须给出带月日的完整日期**；对方也只有年份的不换 —— 那是拿一个猜测换另一个猜测 |
+| C 书名 | 像文件名 | 只认三点分隔 / ASIN `B0XXXXXXXX` / 纯大写 ID，宁漏不错 |
+| D 书名 | 尾部括号杂讯 | 见下 |
+
+### ☠️ D 类不能盲删括号
+
+本库尾括号有**三种互斥含义**，实测都存在：
+
+| 例 | 含义 | 该不该删 |
+|---|---|---|
+| `…Best Practices (Md Johirul Islam)` | 作者名 | 删 |
+| `…Organizations (Casey Sisterson's Library)` | 收藏标记 | 删 |
+| `What to Do (and NOT Do) in 75+…` | **书名的一部分** | **删了就毁了书名** |
+
+唯一可靠判据是数据驱动的：拿 ISBN 查回权威书名，**括号内容在权威书名里出现过半就保留**。
+
+### `#pubdate_src` 自定义列
+
+`calibredb --with-library=/calibre-library add_custom_column pubdate_src "出版日期来源" text`
+（分配到 **id=1**，normalized 型 → `custom_column_1` + `books_custom_column_1_link`）。
+
+建它的原因：**calibre 原生没有 provenance 字段**，这正是当初 mtime 污染能被
+「洗成真数据」的根本原因 —— readlist 只能靠猜 `MM-DD` 是不是 `01-01` 来判断可信度，
+且只认得出 37/487。修过的日期标 `google-isbn`，以后可直接区分。
+
+### 已知限制
+
+约 **32%** 的 ISBN 在 Google Books 查无结果，实测集中在 Apress 的 `1484` 号段
+（电子版 ISBN）—— **OpenLibrary 也查不到**（2026-08-06 实测三例均无）。
+这些书安全跳过，不做任何修改。
 
 ## ❌ 为什么不用 CWA 自带的 auto_metadata_fetch
 
