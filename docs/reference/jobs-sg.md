@@ -492,8 +492,36 @@ CI 当时是绿的：`testdata/fixture/jobs.jsonl` 由 `scripts/genfixture` 从*
 
 ## 已知缺口
 
-- `classify.WorkMode` 只匹配 `remote`/`hybrid`/`onsite`，而 MCF 的真实标签是
-  "Creative Scheduling"、"Flexi-place" 之类 → 目前所有职位的 `work_mode` 都是 `Onsite`。
-  属分类法缺口，非解码错误。
+- ~~`classify.WorkMode` 只匹配 `remote`/`hybrid`/`onsite` → 所有职位都是 `Onsite`~~
+  **已修（2026-08-08，上游 `af34eed`）**，详见下节。
 - Grafana 面板未做（`jobs_sg_*` 指标已在采，用 Explore 可查）。
 - 恢复演练未做：实际 restore + `PRAGMA integrity_check` 应作为下一步 DoD。
+
+## work_mode 的口径：Unknown 是一等状态（2026-08-08 起）
+
+MCF 的 `flexibleWorkArrangements` 回答的是**什么时候上班**，不是**在哪上班**。
+2026-08-08 抓 500 条实测（全行业）：
+
+| 次数 | 取值 | 性质 |
+|---|---|---|
+| 19 | `Flexi-Hours` | 排班 |
+| 13 | `Employees Choice of Days Off` | 排班 |
+| 4 | `Compressed Work Schedule` | 排班 |
+| 3 | `Telecommuting` | **地点** → Remote |
+| 2 | `Staggered Time` | 排班 |
+
+**500 条里只有 37 条（7.4%）带这个字段**，唯一的地点信号占 3 条（0.6%）。旧实现匹配的
+`remote`/`hybrid`/`onsite` MCF 一个都不吐，于是全部落到兜底 `Onsite` —— 首页
+（`internal/view/market.go`）与周报（`internal/report/render.go`）上那个「办公模式分布」
+是编造的，性质等同「值缺失就填 0」，而上游 `docs/04 §3.1` 恰恰明令禁止。
+
+修复后：只有地点类 arrangement 产生地点结论（`Telecommuting`→Remote、
+`Flexi-Place`→Hybrid），排班类一律不产生，**没有地点信号就是 `Unknown`**。
+所以现在看到「Unknown 占九成」不是故障，是这个数据源本来就只知道这么多。
+
+⚠️ **两条数据连续性的坑**：
+
+1. **换镜像不会立刻改变页面**。`work_mode` 由 ingest 的 upsert 重写，web 只读 ——
+   要等下一轮抓取；**周日那轮 reconcile 走全 board**，会把所有在架岗位一次性刷新。
+2. **历史不会追溯变对**。已关闭/归档的行保留旧的 `Onsite`，`weekly_metric` 里已物化的
+   历史周同理。跨越 2026-08-08 做同比时，两侧的 `work_mode` 口径是**不同**的。
