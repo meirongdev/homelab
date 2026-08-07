@@ -25,9 +25,19 @@ metadata:
   name: calibre-metadata-backfill
   namespace: personal-services
 spec:
-  # 永不自动跑；schedule 是 CronJob 的必填字段，写个远期占位值。
-  suspend: true
-  schedule: "0 5 31 2 *" # 2 月 31 日 —— 永不存在的日期，双保险
+  # 2026-08-08 从「永不自动跑」改成**每周日 06:00 UTC**。
+  # 起因：新导入的书此前只能拿到夜间 updater 从文件内嵌抠的封面，
+  # 标识符/简介/标签/出版社全都要人手动跑一次才有 —— 等于整条流水线只对存量有效。
+  #
+  # 只有本作业适合自动跑，判据是「**只填空、绝不覆盖、幂等**」：
+  #   · correct 会覆盖已有值 → 保持挂起，跑前要人备份并核对；
+  #   · covers  产出低（13/54）且要烧 Google 配额 → 保持挂起；
+  #   · llm     生成内容而非查证 → 保持挂起，必须人工核样本。
+  #
+  # 06:00 UTC 刻意避开三个窗口：readlist ingest 01:20（**共用同一份
+  # Google Books 配额**）、restic 备份 03:00、calibre-metadata-updater 04:00。
+  suspend: false
+  schedule: "0 6 * * 0" # 每周日 06:00 UTC
   timeZone: Etc/UTC
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
@@ -66,10 +76,26 @@ spec:
                 # 换库、换数据源或改匹配门之后，**先翻回 "1" 重跑一轮**再置 0。
                 - name: DRY_RUN
                   value: "0"
-                # 单次处理上限。候选池实测 1,746 本 × 约 3.5s ≈ 1.7 小时。
-                # 脚本每本一次 commit，中途被杀不会回滚已完成的部分，重跑会自然跳过已补好的。
+                # ⚠️ 定时跑的三个参数是一套，别单独改其中一个：
+                #
+                # ORDER_MODE=newest —— **不加这个定时就是空转**。默认的 `ORDER BY id`
+                #   升序配上 LIMIT，每次都是同一批最低 id 的老书（那批恰恰是反复
+                #   失败的硬骨头），新导入的书 id 最大、永远轮不到。
+                # RECENT_DAYS=30 —— 只看最近 30 天加入的。不加的话每周都会在那批
+                #   查不到的老书上重烧 Google Books 配额，而那份配额和 readlist 的
+                #   夜间 ingest 是共用的。
+                # LIMIT=150 —— 约 25–30 分钟。一次导入几百本的话，剩下的下周继续
+                #   （只要还在 30 天窗口内）。
+                #
+                # 脚本每本一次 commit，中途被杀不回滚已完成的部分，重跑自然跳过已补好的。
+                # 要**手动全量**跑存量时，派生后把这三个改成 ORDER_MODE=id、
+                # RECENT_DAYS=0、LIMIT 给足。
+                - name: ORDER_MODE
+                  value: "newest"
+                - name: RECENT_DAYS
+                  value: "30"
                 - name: LIMIT
-                  value: "2000"
+                  value: "150"
               resources:
                 requests:
                   # 主要是等网络（每本约 3s），CPU 只在 fetch 起进程的瞬间用。
