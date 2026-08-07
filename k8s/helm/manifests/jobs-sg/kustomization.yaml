@@ -31,7 +31,14 @@ resources:
 #     -H 'Accept: application/vnd.oci.image.index.v1+json' \
 #     https://ghcr.io/v2/meirongdev/jobs-sg/manifests/sha-<short12> | grep -i docker-content-digest
 #
-# 当前 = jobs-sg b6a3aaa（2026-08-08）：镜像里多了第 5 个二进制
+# 当前 = jobs-sg eaf5db1（2026-08-08）：修 reclassify 的缺口指标口径。
+# 线上首次 dry-run 报「archived but not in jobs.db 190418」，看着像丢了 19 万条，
+# 实际一条没丢 —— ingest 归档整块板但只有 IsCandidate 的才入库，那 19 万是新加坡
+# 市场里的非 SWE 岗位，本来就不该入库；而且数的是**记录**不是岗位（每轮 reconcile
+# 重归档整板，同一岗位出现几十次）。现在分成两行、按 uuid 去重：非候选（预期）与
+# **候选却不在库里**（真缺口，另给警告）。后者才是「partial 那几轮丢了什么」的答案。
+#
+# 其前身 b6a3aaa（2026-08-08）：镜像里多了第 5 个二进制
 # `jobs-sg-reclassify` —— 运维工具，**没有任何 CronJob 跑它**，靠一次性 Job 手动起。
 # 它把 raw 归档重放一遍、用当前分类器重算 work_mode / role_family / seniority /
 # is_swe / company_type，零 API 调用。之所以必须进镜像：要 replay 的归档在节点
@@ -104,4 +111,4 @@ resources:
 # 三个坑的实测数据都在 docs/reference/jobs-sg.md。
 images:
   - name: ghcr.io/meirongdev/jobs-sg
-    digest: sha256:4f2f8d97417e5047efcbf83ef8781e10db57a8e529c2720ac02a756277adcecd
+    digest: sha256:abc10e64824909a7f1e914534dee3e574e80986f83750569e175dbf364c8ce28
