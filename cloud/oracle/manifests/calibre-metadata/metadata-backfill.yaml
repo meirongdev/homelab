@@ -485,9 +485,31 @@ data:
             (book_id, pub_id))
         return 1
 
-    CANDIDATES_SQL = """
+    # ⚠️ **排序决定这个作业能不能自动化。**
+    # 原先固定 `ORDER BY id`（升序）。手动全量跑没问题，但配上 `LIMIT` 之后
+    # 每次都是同一批**最低 id 的老书** —— 那批恰恰是反复失败的硬骨头，
+    # 而新导入的书 id 最大、**永远轮不到**。2026-08-08 要把它挂上周调度时才发现。
+    #
+    # ORDER_MODE:
+    #   "id"     —— 升序。手动全量跑用（LIMIT 给足，顺序无所谓，日志好对照）。
+    #   "newest" —— 按加入时间倒序。**定时跑必须用这个**，新书优先。
+    # RECENT_DAYS:
+    #   0  —— 不限（手动全量）。
+    #   N  —— 只看最近 N 天加入的书。定时跑用，避免每周都在那批查不到的老书上
+    #         重烧 Google Books 配额（那份配额还和 readlist 的夜间 ingest 共用）。
+    ORDER_MODE = os.environ.get("ORDER_MODE", "id")
+    RECENT_DAYS = int(os.environ.get("RECENT_DAYS", "0"))
+
+    def candidates_sql():
+        where = "WHERE NOT (has_id AND has_comment AND has_tags AND has_pub)"
+        if RECENT_DAYS > 0:
+            where += f" AND added > datetime('now', '-{RECENT_DAYS} days')"
+        order = ("ORDER BY added DESC, id DESC" if ORDER_MODE == "newest"
+                 else "ORDER BY id")
+        return f"""
         SELECT * FROM (
           SELECT b.id AS id, b.title AS title, b.path AS path,
+                 b.timestamp AS added,
                  (SELECT GROUP_CONCAT(a.name, ' | ')
                     FROM books_authors_link bal JOIN authors a ON bal.author = a.id
                    WHERE bal.book = b.id) AS authors,
@@ -500,10 +522,10 @@ data:
                  EXISTS(SELECT 1 FROM books_publishers_link WHERE book = b.id) AS has_pub
             FROM books b
         )
-        WHERE NOT (has_id AND has_comment AND has_tags AND has_pub)
-        ORDER BY id
+        {where}
+        {order}
         LIMIT ?
-    """
+        """
 
     def main():
         mode = "DRY-RUN（只报告，不写库）" if DRY_RUN else "写入模式"
@@ -525,16 +547,18 @@ data:
         conn.create_function("uuid4", 0,
                              lambda: "00000000-0000-0000-0000-000000000000")
 
-        rows = conn.execute(CANDIDATES_SQL, (LIMIT,)).fetchall()
+        rows = conn.execute(candidates_sql(), (LIMIT,)).fetchall()
         total = len(rows)
-        log(f"待处理 {total} 本")
+        log(f"待处理 {total} 本"
+            + (f"，只看最近 {RECENT_DAYS} 天加入的" if RECENT_DAYS else "")
+            + ("，新书优先" if ORDER_MODE == "newest" else ""))
 
         st = {"queried": 0, "by_isbn": 0, "by_content": 0, "hit": 0,
               "rejected": 0, "no_result": 0,
               "w_id": 0, "w_comment": 0, "w_tags": 0, "w_pub": 0}
         review = []
 
-        for i, (bid, title, path, authors, isbn, has_id, has_comment,
+        for i, (bid, title, path, added, authors, isbn, has_id, has_comment,
                 has_tags, has_pub) in enumerate(rows, 1):
             first_author = (authors or "").split(" | ")[0]
             log(f"[{i}/{total}] id={bid} {(title or '')[:60]}")
@@ -636,7 +660,7 @@ data:
             log(f"  写入 标签:       {st['w_tags']}")
             log(f"  写入 出版社:     {st['w_pub']}")
         remaining = conn.execute(
-            "SELECT COUNT(*) FROM (" + CANDIDATES_SQL.replace("LIMIT ?", "LIMIT -1")
+            "SELECT COUNT(*) FROM (" + candidates_sql().replace("LIMIT ?", "LIMIT -1")
             + ")").fetchone()[0]
         log(f"  仍有 {remaining} 本存在空字段")
         log("=" * 68)

@@ -6,7 +6,29 @@
 用哪个、什么时候停**。
 
 书库在 oracle-k3s `personal-services`，PVC `calibre-books-local`。
-所有作业都是**挂起的 CronJob**，永不自动触发，手动派生一次运行。
+
+## 新导入的书会自动补吗？
+
+**部分会。** 分界是「**只填空、绝不覆盖、幂等**的可以自动跑；会覆盖或会生成的必须手动」：
+
+| 作业 | 自动 | 说明 |
+|---|---|---|
+| `calibre-metadata-updater` | ✅ 每夜 04:00 UTC | 只从**文件内嵌**抠封面，零网络 |
+| `calibre-metadata-backfill` | ✅ **每周日 06:00 UTC** | 标识符/简介/标签/出版社，新书优先 |
+| `calibre-metadata-correct` | ❌ 挂起 | 会覆盖已有值，跑前要人备份并核对 |
+| `calibre-metadata-covers` | ❌ 挂起 | 产出低（13/54）且烧配额 |
+| `calibre-metadata-llm` | ❌ 挂起 | 生成内容而非查证，必须人工核样本 |
+| CWA `auto_metadata_fetch` | ❌ 关闭 | 盲取第一条无校验，见 reference |
+
+⚠️ **定时跑的 backfill 用的是另一套参数**（`ORDER_MODE=newest` / `RECENT_DAYS=30`
+/ `LIMIT=150`），三个是一套，别单独改：默认的 `ORDER BY id` 升序配上 `LIMIT`，
+每次都是同一批最低 id 的老书 —— 那批恰恰是反复失败的硬骨头，**新导入的书 id 最大、
+永远轮不到**，定时就成了空转。手动全量跑存量时才用 `ORDER_MODE=id` + `RECENT_DAYS=0`。
+
+06:00 UTC 避开了 readlist ingest 01:20（**共用同一份 Google Books 配额**）、
+restic 备份 03:00、updater 04:00。
+
+下面各层仍可随时手动派生一次运行。
 
 ---
 
