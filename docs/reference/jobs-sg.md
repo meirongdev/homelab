@@ -256,8 +256,20 @@ web 正在渲染聚合页时，写者等不到锁，`busy_timeout=10s` 一过就
 （`database is locked (5)`），该轮记成 **`partial` / `errors=1`**（上游 `78b88e9` 起
 「丢了岗位就不算 success」）。丢的那条会被下一轮增量或周日的全量 reconcile 捞回来。
 
-结论：**手动 ingest 挑没人访问站点的时候跑**；看到一条 SQLITE_BUSY 导致的 partial
-不必当故障查，但也别把它和真的抓取失败混为一谈。
+**已缓解（2026-08-08，上游 `730c6f3`）**：写事务撞锁现在会**重跑整个事务**
+（退避 25/50/100/200/400ms），不再把整轮标成 partial。
+
+⚠️ 修的方式**不是**加大 `busy_timeout` —— 那在这个场景下根本不被调用：rollback journal
+下写者提交要把 RESERVED 升级成 EXCLUSIVE，此刻若仍有读者持 SHARED，SQLite **立即**返回
+SQLITE_BUSY 而不进 busy handler（在那儿睡可能死锁，因为读者也许正等着这个写者）。
+我们设的是 10s，照样输。所以以后再看到 `database is locked`，别去调那个 pragma。
+
+代价不对称是这个修复的理由：任何 error 都把该轮标 partial，而 **partial 的 reconcile
+会整个跳过关闭逻辑**（`ingest.go:280`）—— 周日那轮 20 分钟全 board walk 撞一次锁，就
+静默损失一周的岗位寿命数据。
+
+历史上那条 partial 记录（`/ops/2026-08-08` 的 01:09 那行，`errors=1`）**保留不动**：
+它是当时的事实，改库等于篡改记录。
 
 ## 只读挂载要求 rollback journal，不能是 WAL
 

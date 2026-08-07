@@ -31,7 +31,16 @@ resources:
 #     -H 'Accept: application/vnd.oci.image.index.v1+json' \
 #     https://ghcr.io/v2/meirongdev/jobs-sg/manifests/sha-<short12> | grep -i docker-content-digest
 #
-# 当前 = jobs-sg af34eed（2026-08-08）：在 90cd4e8 之上只多一个修复 ——
+# 当前 = jobs-sg 730c6f3（2026-08-08）：写事务撞锁会重跑，不再把整轮标成 partial。
+# 一次手动 ingest 里 13600 条只有 1 条 upsert 撞上 SQLITE_BUSY（对手是**只读**的
+# web pod，它正在渲染聚合页），整轮就成了 partial。**加大 busy_timeout 没用**：
+# rollback journal 下写者提交要把 RESERVED 升级成 EXCLUSIVE，此刻若仍有读者持
+# SHARED，SQLite 立即返回 SQLITE_BUSY 而**不调用 busy handler**（在那儿睡可能死锁）
+# —— 我们设的是 10s，照样输，唯一出路是重跑整个事务。
+# 代价不对称才是重点：partial 的 reconcile 会**整个跳过关闭逻辑**，周日那轮 20 分钟
+# 全 board walk 撞一次锁就静默损失一周的岗位寿命数据。
+#
+# 其前身 af34eed（2026-08-08）：在 90cd4e8 之上只多一个修复 ——
 # work_mode 不再拿排班字段冒充办公地点。MCF 的 flexibleWorkArrangements 是**排班**
 # 字段（500 条实测样本里只有 37 条带它，唯一的地点信号 Telecommuting 占 3 条，其余
 # 全是 Flexi-Hours / Employees Choice of Days Off 之类），而旧代码匹配的
@@ -86,4 +95,4 @@ resources:
 # 三个坑的实测数据都在 docs/reference/jobs-sg.md。
 images:
   - name: ghcr.io/meirongdev/jobs-sg
-    digest: sha256:7edd67bbe3852f70689313e0094cd1c6738d5d5bd872bbd14f3fbab985b6943a
+    digest: sha256:b9003a2cb1852c8f82c64a68ae8daa0548b249a2b90d84ba539009ab3f8ef534
