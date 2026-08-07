@@ -509,6 +509,45 @@ CI 当时是绿的：`testdata/fixture/jobs.jsonl` 由 `scripts/genfixture` 从*
 - Grafana 面板未做（`jobs_sg_*` 指标已在采，用 Explore 可查）。
 - 恢复演练未做：实际 restore + `PRAGMA integrity_check` 应作为下一步 DoD。
 
+## 重放归档重算分类（`jobs-sg-reclassify`，2026-08-08 起）
+
+分类结论（`is_swe` / `role_family` / `seniority` / `work_mode` / `company_type`）是
+ingest 当时算好**存在行上**的。修了分类器，只有管线**再次看见**的岗位会被修正 ——
+**已经下架的岗位永远保留错误结论**，历史周报也就一直错着。
+
+归档存着每一条见过的岗位，而分类规则是该 JSON 的**纯函数**，所以整段历史可以离线重算：
+
+| | 强制 reconcile | `reclassify` |
+|---|---|---|
+| MCF API | ~867 页 × 1.5s | **零** |
+| 耗时 | 20–25 分钟 | 扫一遍归档 |
+| 覆盖 | 只有**还在架**的 | **每一条归档过的，含已下架** |
+
+镜像里的第 5 个二进制（`b6a3aaa` 起），**没有 CronJob 跑它**，手动起一次性 Job：
+
+```sh
+# 1) 先 dry-run：只报告 old->new 迁移矩阵，不写库
+kubectl --context k3s-homelab -n jobs-sg create job reclassify-dry --dry-run=client -o yaml \
+  --image=ghcr.io/meirongdev/jobs-sg@sha256:<当前digest> -- \
+  /usr/local/bin/jobs-sg-reclassify --data-dir /data > /tmp/j.yaml
+# 补上 PVC 挂载后 apply（PVC: jobs-sg-data，挂 /data，**可写**）
+# 2) 看完矩阵再决定是否加 --apply 重跑一次
+```
+
+⚠️ 三条必须知道的：
+
+1. **默认 dry-run**，`--apply` 才写。先看迁移矩阵，尤其是 `is_swe` 的增减 ——
+   它移动的是**所有指标的统计口径**，不只是一列，报告里单独高亮。
+2. **只写派生列**。`closed_at` / `last_seen_at` / `first_seen_at` / `miss_count`
+   在 SQL 里根本不出现 —— 重放归档说明不了岗位是否还在架，碰 `last_seen_at`
+   会让岗位显得被重新看见、悄悄撤销一次关闭。上游有单测和真库验证钉住这条。
+3. **归档里有、库里没有的 uuid 只计数不插入**（那种行没有诚实的 `first_seen_at`
+   可填）。这个计数顺带就是「partial 那几轮到底漏了几条」的答案。
+
+它**不重跑 LLM**。技术栈（`job_tech`）是 enrich 那层，本来就只读归档，但重跑 enrich
+只处理积压（`NOT EXISTS job_tech AND NOT EXISTS enrich_done`），做过的不会重算 ——
+要强制重算得另加清标记的开关，目前没有。
+
 ## work_mode 的口径：Unknown 是一等状态（2026-08-08 起）
 
 MCF 的 `flexibleWorkArrangements` 回答的是**什么时候上班**，不是**在哪上班**。
