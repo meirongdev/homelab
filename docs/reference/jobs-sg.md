@@ -33,7 +33,8 @@ ServiceMonitor 抓的是 Service 的 `port: metrics`，**改名或改回 `http` 
 | `report` | 周一 01:00 UTC（09:00 SGT） | 出 HTML/MD + 推 Telegram |
 | `jobs-sg-web` | 常驻 | 只读挂载 PVC，服务周报 + 抓取统计 + Prometheus 指标 |
 
-对外路由（2026-08-08 升级后重排，`/` 与 `/daily` 都换了含义）：
+对外路由（2026-08-08 升级后重排，`/` 与 `/daily` 都换了含义；全部实测 200，耗时见
+下文「聚合页的 5s 预算」）：
 
 | 路径 | 内容 |
 |---|---|
@@ -212,6 +213,51 @@ kubectl --context k3s-homelab -n jobs-sg logs -f job/ingest-bootstrap
 
 `/` 服务的是 `report/latest.html` —— 第一份周报出来前它是 404。存活探针和 Uptime Kuma
 都打 `/healthz`（只验 DB 能打开），不要拿 `/` 当探针。
+
+## ⚠️ 聚合页的 5s 预算 vs CPU 上限（2026-08-08 实测）
+
+上游给所有聚合页写死了 `dailyTimeout = 5s`（`internal/web/daily.go:24`）：查询超时就是
+**500**，不是慢。而 web 容器的 CPU 上限直接决定这 5 秒够不够 —— 单线程 SQLite 被
+CFS 节流到 0.2 核时 `/tech` 必然超时。
+
+升到 `90cd4e8` 当天：`/tech` 稳定 500，其余页面都在预算内。把上限 200m → **1000m**
+后 `/tech` 1.63s 通过。各页实测（1000m 上限、11184 在架岗位）：
+
+| 页面 | 耗时 |
+|---|---|
+| `/reports` | 0.10s（静态文件） |
+| `/` | 0.33s |
+| `/ops` | 0.38s |
+| `/companies` | 0.49s |
+| `/tech` | 1.63s（200m 上限时 >5s 超时 500） |
+| `/pay` | 2.01s |
+
+☠️ **判 CPU 节流不要用 `kubectl top`**：它报 25m，看着离 200m 上限还很远，于是很容易
+误判成「不是 CPU 问题」。metrics-server 的采样窗口是几十秒，**5 秒的突发被平掉了**。
+判据是 cAdvisor 的节流计数器：
+
+```sh
+# 在 homelab 的 Prometheus 上查（port-forward svc/kube-prometheus-stack-prometheus）
+rate(container_cpu_cfs_throttled_periods_total{namespace="jobs-sg",container="web"}[5m])
+  / rate(container_cpu_cfs_periods_total{namespace="jobs-sg",container="web"}[5m])
+```
+
+修之前 **61%** 的周期被掐，修之后 9%。requests 保持 25m（上限不预留资源），节点
+requests 当时仅 27%。⚠️ 不要再往上加：homelab 是笔记本（idle ~74°C），真需要更多
+就该去修上游查询或那个 5s 预算。
+
+## ⚠️ 手动跑 ingest 会和 web 抢锁（rollback journal 的代价）
+
+`db.go` 的注释说「写入由 cron 排班串行化，所以只读 web 可以直接开库」——**这只在没人
+手动插一轮的时候成立**。DELETE journal 下写者要 EXCLUSIVE 锁，而读者持 SHARED 锁：
+web 正在渲染聚合页时，写者等不到锁，`busy_timeout=10s` 一过就 `SQLITE_BUSY`。
+
+2026-08-08 手动跑 `ingest-migrate-90cd4e8` 建索引时实测：一条 upsert 失败
+（`database is locked (5)`），该轮记成 **`partial` / `errors=1`**（上游 `78b88e9` 起
+「丢了岗位就不算 success」）。丢的那条会被下一轮增量或周日的全量 reconcile 捞回来。
+
+结论：**手动 ingest 挑没人访问站点的时候跑**；看到一条 SQLITE_BUSY 导致的 partial
+不必当故障查，但也别把它和真的抓取失败混为一谈。
 
 ## 只读挂载要求 rollback journal，不能是 WAL
 
