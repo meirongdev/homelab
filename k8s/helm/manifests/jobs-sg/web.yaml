@@ -43,7 +43,13 @@ spec:
         - name: web
           image: ghcr.io/meirongdev/jobs-sg
           command: ["/usr/local/bin/jobs-sg-web"]
-          args: ["--data-dir", "/data", "--addr", ":8080"]
+          # 2026-08-08 起 `/metrics` 绑在**独立监听器 9090**，公共站点仍是 8080
+          # （上游 ce82abb）。`--metrics-addr` 的默认值就是 `:9090`，这里显式写出来
+          # 是为了让「公网端口上没有 /metrics」这件事在清单里看得见 ——
+          # HTTPRoute 只指向 http(8080)，所以 https://jobs.meirong.dev/metrics
+          # 现在**必须返回 404**，那是端口拆分生效的判据，不是故障。
+          args:
+            ["--data-dir", "/data", "--addr", ":8080", "--metrics-addr", ":9090"]
           # SQLite 排序/分组溢出到临时文件时要一个**可写**目录。unix VFS 依次试
           # $SQLITE_TMPDIR → $TMPDIR → /var/tmp → /usr/tmp → /tmp，全都不可写就返回
           # SQLITE_IOERR_GETTEMPPATH（扩展码 6410）。显式指到挂上来的 emptyDir，
@@ -54,6 +60,8 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            - name: metrics
+              containerPort: 9090
           resources:
             requests: { cpu: 25m, memory: 64Mi }
             limits: { cpu: 200m, memory: 192Mi }
@@ -100,11 +108,19 @@ metadata:
 spec:
   selector: { app: jobs-sg-web }
   ports:
-    # 端口名 http 是 monitoring.yaml 里 ServiceMonitor 抓取的目标，别改名。
+    # http 是 HTTPRoute 的后端端口（公网只走这个）。
     - name: http
       protocol: TCP
       port: 80
       targetPort: 8080
+    # metrics 是 monitoring.yaml 里 ServiceMonitor 抓取的目标，**别改名**：
+    # operator 靠端口名匹配，名字对不上就静默不抓 —— 与漏掉
+    # `release: kube-prometheus-stack` 是同一种失败模式（无任何报错）。
+    # 没有任何 HTTPRoute 指向它，所以 9090 只在集群内可达。
+    - name: metrics
+      protocol: TCP
+      port: 9090
+      targetPort: 9090
 ---
 # jobs.meirong.dev —— 写这条路由就是建 DNS：external-dns 从 HTTPRoute 建 proxied
 # CNAME + 归属 TXT，隧道已有 *.meirong.dev 通配路由。**不要**改 cloudflare/terraform。
