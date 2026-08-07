@@ -4,6 +4,7 @@
 
 | 日期 | 方案 | 状态 |
 |------|------|------|
+| 2026-08-08 | [jobs-sg 三处问题诊断](2026-08-08-jobs-sg-three-defect-diagnosis.md) | 🔍 诊断完成，两处修复待合并（各在分支上，未部署） |
 | 2026-08-01 | [LiteLLM LLM 网关迁移（替换 Bifrost）](2026-08-01-litellm-gateway-migration.md) | 📐 设计 |
 | 2026-08-01 | [Open Notebook 部署（homelab k3s）](2026-08-01-open-notebook-homelab.md) | ✅ 已完成（现状见 reference/open-notebook.md） |
 | 2026-07-05 | [Calibre 元数据补全](2026-07-05-calibre-metadata-enrichment.md) | ⚠️ 已被取代（mtime 兜底有害，见 [guides/calibre-metadata-enrichment.md](../../guides/calibre-metadata-enrichment.md)） |
