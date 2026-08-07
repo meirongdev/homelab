@@ -44,12 +44,29 @@ spec:
         # 每周误报约 12 小时（周日 06:45 UTC 到当日 18:15 UTC 下一轮增量）。
         # `min without(kind)` = 取两者中最近的一次成功，语义即「任何形式的采集
         # 都超过 36h 没成功过」。
+        #
+        # 2026-08-08 二修：补上与 JobsSgReconcileStale 同一个洞。上面那个减法在
+        # 两条 series **都不存在**时（空库、web 起不来、指标查询整体失败）同样是
+        # `<no data>` → 这条「最重要的告警」在最彻底的故障下反而最安静。第二个
+        # 分支用 absent_over_time 补这一格，`and on()` 是冷启动闸门，理由与量纲
+        # 见下面 JobsSgReconcileStale 的长注释（36h 满窗 = 2160 样本，取 80%）。
+        # ⚠️ 同样**必须 sum()**，否则 count_over_time 按 pod 分裂，门槛永远够不着。
+        #
+        # 实测（2026-08-08）：sum(count_over_time(up[36h])) = 2159（闸门已开）；
+        # 真选择器下 absent 分支 = no data（不误报）；换成不存在的 kind = 1
+        # （分支活着，不是死代码）。
         - alert: JobsSgIngestStale
-          expr: 'min without(kind) (time() - jobs_sg_last_success_timestamp_seconds{kind=~"incremental|full_reconcile"}) > 36 * 3600'
+          expr: |
+            (min without(kind) (time() - jobs_sg_last_success_timestamp_seconds{kind=~"incremental|full_reconcile"}) > 36 * 3600)
+            or
+            (
+              absent_over_time(jobs_sg_last_success_timestamp_seconds{kind=~"incremental|full_reconcile"}[36h])
+              and on() (sum(count_over_time(up{job="jobs-sg-web"}[36h])) > 1728)
+            )
           for: 30m
           labels: { severity: warning }
           annotations:
-            summary: jobs-sg 抓取已停滞 >36h（增量与 reconcile 都没成功）—— 可能静默失效
+            summary: jobs-sg 抓取已停滞 >36h 或指标整体消失（增量与 reconcile 都没成功）—— 可能静默失效
         # ☠️ 2026-08-08 修**结构性哑火**：原表达式只有 `time() - <series>`，而
         # `kind="full_reconcile"` 这条 series 在「reconcile 一次都没成功过」时
         # **根本不存在** —— `time() - <no data>` 算不出结果，于是这条告警在它最
