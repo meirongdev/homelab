@@ -62,9 +62,19 @@ spec:
               containerPort: 8080
             - name: metrics
               containerPort: 9090
+          # CPU 上限 200m → 1000m（2026-08-08 实测，上游给的是 200m）。
+          # 升到 90cd4e8 后 `/tech` 稳定 500：上游给聚合页的预算是写死的
+          # `dailyTimeout = 5s`，而 200m 把单线程 SQLite 节流到 0.2 核 ——
+          # cAdvisor 判据 `container_cpu_cfs_throttled_periods_total /
+          # container_cpu_cfs_periods_total = 61%`，请求期间被 CFS 掐住 6 成周期。
+          # ⚠️ **别用 `kubectl top` 判这个**：它报 25m，看着离 200m 还很远 ——
+          # metrics-server 的窗口是几十秒，5 秒的突发被平掉了。节流计数器才是判据。
+          # 限额不预留资源（requests 仍 25m），只是允许每次请求突发几百毫核几秒；
+          # 节点当时 requests 才 27%，够。⚠️ 但 homelab 是笔记本（idle ~74°C），
+          # 不要再往上加 —— 真需要更多就该去修上游查询或那个 5s 预算。
           resources:
             requests: { cpu: 25m, memory: 64Mi }
-            limits: { cpu: 200m, memory: 192Mi }
+            limits: { cpu: 1000m, memory: 192Mi }
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
