@@ -1,6 +1,6 @@
 # jobs-sg — 新加坡 SWE 岗位趋势周报（架构事实）
 
-> Last updated: 2026-08-05
+> Last updated: 2026-08-08
 > Status: 生效事实
 > Scope: jobs-sg 在 homelab 集群的部署形态、镜像固定方式、备份口径、首次上线依赖顺序
 > —— source of truth。应用代码在 [meirongdev/jobs-sg](https://github.com/meirongdev/jobs-sg)。
@@ -21,6 +21,11 @@
 四个二进制、一个镜像：`ingest`（抓取）、`enrich`（技术栈富化）、`report`（周报 +
 Telegram）、`web`（只读服务 + `/metrics`）。三个 CronJob + 一个 Deployment。
 
+⚠️ **`web` 监听两个端口**（2026-08-08 起）：`8080` 服务公共站点、`9090` 只服务
+`/metrics`（`--metrics-addr`）。HTTPRoute 只指向 8080，所以
+`https://jobs.meirong.dev/metrics` **必须是 404** —— 那是端口拆分生效的判据。
+ServiceMonitor 抓的是 Service 的 `port: metrics`，**改名或改回 `http` 都会静默不抓**。
+
 | 组件 | 触发 | 说明 |
 |---|---|---|
 | `ingest` | 每日 18:15 UTC（02:15 SGT） | 增量；程序按 SGT 判断周日自动转全量 reconcile |
@@ -28,23 +33,29 @@ Telegram）、`web`（只读服务 + `/metrics`）。三个 CronJob + 一个 Dep
 | `report` | 周一 01:00 UTC（09:00 SGT） | 出 HTML/MD + 推 Telegram |
 | `jobs-sg-web` | 常驻 | 只读挂载 PVC，服务周报 + 抓取统计 + Prometheus 指标 |
 
-对外路由（全部 200 实测）：
+对外路由（2026-08-08 升级后重排，`/` 与 `/daily` 都换了含义）：
 
 | 路径 | 内容 |
 |---|---|
-| `/` | 最新周报（`report/latest.html`）—— **第一份周报出来前是 404** |
+| `/` | **实时市场快照**（随请求渲染）—— 不再是周报，也不再有「第一份周报前 404」 |
+| `/tech` | 技术栈榜与动量（历史不足 5 周时显示「需 5 周历史」，是一等状态不是空图） |
+| `/pay` | 薪资分位与溢价（样本不足的格子显示 `—(n=3)`，刻意抑制而非伪精度） |
+| `/companies` | 雇主、在架时长、竞争度 |
+| `/reports` | 最新周报（原来的 `/`） |
 | `/w/{YYYY-Www}` | 指定周的周报 |
-| `/daily` | 每日抓取统计：按 SGT 日历日一行（run 类型/状态/页数/归档数/新增/SWE/错误/LLM 调用） |
-| `/daily/{YYYY-MM-DD}` | 当日下钻：逐 run 记录、角色与资历分布、技术栈、当天首见岗位（上限 200） |
+| `/ops` | 每日抓取统计：按 SGT 日历日一行（run 类型/状态/页数/归档数/新增/SWE/错误/LLM 调用） |
+| `/ops/{YYYY-MM-DD}` | 当日下钻：逐 run 记录、角色与资历分布、技术栈、当天首见岗位（上限 200） |
+| `/daily`、`/daily/{date}` | **301 → `/ops`**（兼容旧链接；新地方别再写旧路径） |
 | `/healthz` | 只验 DB 能打开 —— 存活探针与 Uptime Kuma 用这个 |
-| `/metrics` | `jobs_sg_*` |
 | `/robots.txt` | — |
+| ~~`/metrics`~~ | **公网 404**；只在集群内 `svc/jobs-sg-web:9090` 可达 |
 
-`/daily` 系列是随请求渲染（不经 CronJob 落文件）：ingest 约 02:20 SGT 落地，数字必须
-当场就是最新的。周报仍是静态文件 —— 它要归档、要推 Telegram。
+`/`、`/tech`、`/pay`、`/companies`、`/ops` 全是随请求渲染（不经 CronJob 落文件）：
+ingest 约 02:20 SGT 落地，数字必须当场就是最新的。周报仍是静态文件 —— 它要归档、
+要推 Telegram。
 
-⚠️ 上表的「200 实测」是**空库/小库时**的结果。`/daily` 与当天的 `/daily/{date}` 在数据
-量涨上来后需要可写 `/tmp` 才不 500，见下文「只读根文件系统还要一个可写 `/tmp`」。
+⚠️ 数据量涨上来后，聚合页需要可写 `/tmp` 才不 500，见下文「只读根文件系统还要一个
+可写 `/tmp`」。
 
 ## LLM 富化：直连 DGX，不经 Bifrost
 
@@ -236,6 +247,28 @@ Kyverno `disallow-latest-tag` 在 homelab 是 **Enforce**，策略 digest-aware�
 **不启用 ArgoCD Image Updater**：集群当前 0 个 ImageUpdater CR，为一个应用引入需补
 CR + git write-back 凭据，收益不抵复杂度。手动更新 digest。
 
+⚠️ **「只改 digest 一行」不总是够**。2026-08-08 从 `ff5e24e` 升到 `90cd4e8`（跨 81 个
+commit）时，同批必须改 `web.yaml` + `monitoring.yaml`：新镜像把 `/metrics` 挪到 9090，
+只换 digest 会让 ServiceMonitor 继续抓 8080 → **指标全断且不报错，所有告警一起变瞎**。
+升级前先看上游 `git diff <旧sha>..<新sha> -- deploy/`，那是「清单要跟着改什么」的清单；
+上游 `docs/09-deploy-runbook.md` 是配套的踩坑册。
+
+### schema 迁移：web 只读，索引靠写侧进程建
+
+上游 schema 全是 `CREATE TABLE / CREATE INDEX IF NOT EXISTS`，由 `ingest`/`enrich`/
+`report` 启动时 `Migrate()` 幂等执行。**`web` 用 `mode=ro` 打开库、从不 Migrate**，所以
+新版镜像带来的新表/新索引在下一次写侧进程跑起来之前**不存在**：
+
+- 只加索引（如 `90cd4e8` 的 4 条）→ 页面仍正确，但在 ~86k 行上全表扫、且 web 限
+  200m CPU，聚合页会明显变慢。
+- 若某版真加了**新表**且 web 要查它 → 那就是 500，直到写侧进程建表。
+
+升级后不想等 18:15 UTC 那轮 ingest，就手动补一次（增量 2–4 分钟）：
+
+```sh
+kubectl --context k3s-homelab -n jobs-sg create job --from=cronjob/ingest ingest-migrate-1
+```
+
 ## 备份口径（两条路径，缺一不可）
 
 `local-path` 无冗余无快照，备份是强制项。`backup/overlays/homelab/backup-script.yaml`
@@ -314,13 +347,34 @@ Job —— 同 `backup/overlays/homelab/open-notebook-external-secret.yaml` 的�
 
 ## 可观测
 
-`web` 的 `/metrics` 暴露 `jobs_sg_*`，状态算自 DB 而非进程内存，故 web 重启不丢指标。
-ServiceMonitor + PrometheusRule 都带 `release: kube-prometheus-stack` —— **漏了会被
-operator 静默忽略**，指标不采、告警不生效且无任何报错。Prometheus/Alertmanager 仍在
-homelab（2026-08-02 只迁了 ArgoCD/Loki/Tempo 去 oracle），故监控对象跟着落 homelab。
+`web` 的 `/metrics`（**容器 9090**，见上「web 监听两个端口」）暴露 `jobs_sg_*`，状态算自
+DB 而非进程内存，故 web 重启不丢指标。ServiceMonitor + PrometheusRule 都带
+`release: kube-prometheus-stack` —— **漏了会被 operator 静默忽略**，指标不采、告警不生效
+且无任何报错。**端口名对不上是同一种失败模式**：ServiceMonitor 必须抓 `port: metrics`。
+Prometheus/Alertmanager 仍在 homelab（2026-08-02 只迁了 ArgoCD/Loki/Tempo 去 oracle），
+故监控对象跟着落 homelab。
 
-最重要的告警是 `JobsSgIngestStale`（增量停滞 >36h）：这类应用**静默失效比崩溃更危险**
-—— 上线前实测发现的两个 bug 都属此类（见下）。
+最重要的告警是 `JobsSgIngestStale`（任何形式的采集停滞 >36h）：这类应用**静默失效比
+崩溃更危险** —— 上线前实测发现的两个 bug 都属此类（见下）。
+
+2026-08-08 升级同批改的两条告警，各自修掉一种「训练你忽略告警」的误报：
+
+| 告警 | 变化 | 为什么 |
+|---|---|---|
+| `JobsSgIngestStale` | 从只匹配 `kind="incremental"` 改为 `min without(kind) (…{kind=~"incremental\|full_reconcile"})` | 周日那轮把自己记成 `full_reconcile`，`incremental` 系列每周固定断档 48h > 36h → 每周误报约 12 小时，而这恰是最不该被噪音淹没的一条 |
+| `JobsSgEnrichBacklog` → `JobsSgEnrichBacklogGrowing` | 从绝对值 `>2000` 改为**地板抬升** `min_over_time([1d]) - min_over_time([1d] offset 1d) > 500`，`for: 2h` | 首跑基线一次性灌入 ≈11k 候选，LLM 每晚排 ~420、每天进 ~300 → 绝对阈值上线第一晚就响并持续一两个月。稳态积压是锯齿形，**每日低谷**才是「管线还跟不跟得上」的信号 |
+
+指标改名（同批，上游 `docs/04-operations.md` §3.1）：`jobs_sg_jobs_total` → `jobs_sg_jobs`、
+`jobs_sg_jobs_new_total{week=}` → `jobs_sg_jobs_new`（**去掉 `week` 标签** —— 每周新增一条
+永不退休的 series 是撑爆 Prometheus 的标准做法，周次让 Prometheus 自己的时间轴回答）、
+`jobs_sg_unmapped_tech_total` → `jobs_sg_unmapped_tech`（`_total` 后缀只给 counter，这些是
+双向变动的 gauge）。homelab 侧没有任何查询引用这三个（告警只用 `last_success` /
+`ingest_errors_total` / `enrich_backlog`，Grafana 面板本来就没做），故改名无影响 ——
+**但以后建面板要用新名**。
+
+另两条约定值得记住：**无值即不输出、绝不补 0**（首次 report 前就没有 `jobs_sg_jobs_new`，
+补 0 会让「还没有数据」和「真的是 0」不可区分）；**任何 DB 错误 → 整个抓取 500**，让
+Prometheus 把 target 标 down（`up == 0` 本身就是信号），而不是吞掉错误输出假的 0。
 
 ## 已修复：/daily 天天 partial 的两个根因（2026-08-05，上游 ff5e24e）
 
