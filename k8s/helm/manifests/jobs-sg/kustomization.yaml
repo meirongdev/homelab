@@ -31,7 +31,16 @@ resources:
 #     -H 'Accept: application/vnd.oci.image.index.v1+json' \
 #     https://ghcr.io/v2/meirongdev/jobs-sg/manifests/sha-<short12> | grep -i docker-content-digest
 #
-# 当前 = jobs-sg 730c6f3（2026-08-08）：写事务撞锁会重跑，不再把整轮标成 partial。
+# 当前 = jobs-sg b6a3aaa（2026-08-08）：镜像里多了第 5 个二进制
+# `jobs-sg-reclassify` —— 运维工具，**没有任何 CronJob 跑它**，靠一次性 Job 手动起。
+# 它把 raw 归档重放一遍、用当前分类器重算 work_mode / role_family / seniority /
+# is_swe / company_type，零 API 调用。之所以必须进镜像：要 replay 的归档在节点
+# local-path 卷上、几百 MB，"拷到本地跑"不是真选项。
+# **默认 dry-run**，`--apply` 才写；只写派生列，生命周期四列（closed_at /
+# last_seen_at / first_seen_at / miss_count）绝不触碰。用法见
+# docs/reference/jobs-sg.md 的「重放归档重算分类」。
+#
+# 其前身 730c6f3（2026-08-08）：写事务撞锁会重跑，不再把整轮标成 partial。
 # 一次手动 ingest 里 13600 条只有 1 条 upsert 撞上 SQLITE_BUSY（对手是**只读**的
 # web pod，它正在渲染聚合页），整轮就成了 partial。**加大 busy_timeout 没用**：
 # rollback journal 下写者提交要把 RESERVED 升级成 EXCLUSIVE，此刻若仍有读者持
@@ -95,4 +104,4 @@ resources:
 # 三个坑的实测数据都在 docs/reference/jobs-sg.md。
 images:
   - name: ghcr.io/meirongdev/jobs-sg
-    digest: sha256:b9003a2cb1852c8f82c64a68ae8daa0548b249a2b90d84ba539009ab3f8ef534
+    digest: sha256:4f2f8d97417e5047efcbf83ef8781e10db57a8e529c2720ac02a756277adcecd
