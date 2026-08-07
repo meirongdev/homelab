@@ -92,7 +92,10 @@ data:
         return bool(t) and any(p.search(t) for p in FILENAME_PATTERNS)
 
     # 纯标识符类 token（ASIN / 长串 ID / EBOK 后缀），本身不含书名信息。
-    ID_TOKEN = re.compile(r"^(b0[a-z0-9]{8}|[a-z0-9]{10,}|ebok)$")
+    # ⚠️ **必须含数字**。最初写成 `[a-z0-9]{10,}` 会把 understanding(13)/
+    # kubernetes(10)/programming(11) 这类普通长单词当成 ID 滤掉，
+    # 于是比对时少了最关键的词。真 ID 都是字母数字混合。
+    ID_TOKEN = re.compile(r"^(b0[a-z0-9]{8}|ebok|(?=.*\d)[a-z0-9]{8,})$")
 
     def title_tokens(t):
         t = unicodedata.normalize("NFKD", t or "").lower()
@@ -110,12 +113,38 @@ data:
           · 旧书名有实义词 → 要求新旧有足够词重叠，挡住"读错了页"这类；
           · 旧书名只有 ID  → 没有可比对的东西，且现状已经毫无信息，接受。
         """
-        a = {w for w in title_tokens(old_title) if not ID_TOKEN.match(w)}
-        b = set(title_tokens(new_title))
+        a_seq = [w for w in title_tokens(old_title) if not ID_TOKEN.match(w)]
+        b_seq = title_tokens(new_title)
+        a, b = set(a_seq), set(b_seq)
         if not a:
             return True, "旧书名只有 ID，无从比对"
         ov = len(a & b) / len(a)
-        return ov >= 0.4, f"新旧词重叠 {ov:.2f}"
+        if ov < 0.4:
+            return False, f"新旧词重叠 {ov:.2f}"
+        # ⚠️ 只看重叠**不够**。2026-08-08 实测漏网：
+        #   Understanding.Kubernetes.in.a.visual.way -> "Understand in g in a visual Kubernetes way"
+        # 词被打乱成病句，但重叠度 0.83 照样过关。重叠只回答"是不是同一本书"，
+        # 不回答"这书名通不通"。所以再验一道**共有词的相对顺序**：
+        # 模型可以补词（加副标题）、可以去词，但不该把原有的词重排。
+        common = a & b
+        oa = [w for w in a_seq if w in common]
+        ob = [w for w in b_seq if w in common]
+        # 去掉各自的连续重复，避免 "in ... in" 这类干扰
+        def dedup(seq):
+            out = []
+            for w in seq:
+                if not out or out[-1] != w:
+                    out.append(w)
+            return out
+        oa, ob = dedup(oa), dedup(ob)
+        # 判据是「一个是另一个的**前缀**」而不是「完全相等」：模型可以在末尾补
+        # 副标题、也可以截短，但不该把已有的词重排。
+        # （实测 "Two Scoops of Django 3.x: Best Practices for Django" 末尾重复出现
+        #  django，完全相等的判据会误杀这类正确匹配。）
+        n = min(len(oa), len(ob))
+        if oa[:n] != ob[:n]:
+            return False, f"共有词顺序被打乱（{' '.join(oa[:5])} vs {' '.join(ob[:5])}）"
+        return True, f"重叠 {ov:.2f} 且词序一致"
 
     def title_sort(t):
         m = re.match(r"^(the|a|an)\s+(.*)$", (t or "").strip(), re.I)
