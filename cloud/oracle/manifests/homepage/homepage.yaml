@@ -113,14 +113,16 @@ data:
         - Jobs SG:
             icon: mdi-briefcase-search
             href: https://jobs.meirong.dev
-            description: 新加坡 SWE 岗位趋势周报
+            description: 新加坡 SWE 岗位市场（实时快照 + 周报）
 
-        # `/` 是周报（周一 09:00 SGT 才更新的静态文件），`/daily` 是随请求渲染的
-        # 抓取统计——每天 02:20 SGT ingest 落地后就能看。两者更新节奏差一周，
+        # 2026-08-08 升级后路径变了：`/` 从「周报静态文件」变成**实时市场快照**
+        # （周报移到 `/reports` 与 `/w/{YYYY-Www}`），运维统计从 `/daily` 改名
+        # `/ops`（`/daily` 仍 301 过去，但别再往新地方写旧路径）。
+        # 两者更新节奏不同：快照随请求渲染、`/ops` 每天 02:20 SGT ingest 落地后刷新，
         # 各给一个入口，不要合并。
-        - Jobs SG · Daily:
+        - Jobs SG · Ops:
             icon: mdi-chart-line
-            href: https://jobs.meirong.dev/daily
+            href: https://jobs.meirong.dev/ops
             description: 每日抓取统计（SGT 日历日）
 
         - Open Notebook:
