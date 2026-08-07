@@ -1,11 +1,15 @@
 # Calibre 元数据 — 覆盖率、污染与回补机制（架构事实）
 
-> Last updated: 2026-08-06
+> Last updated: 2026-08-07
 > Status: 生效事实
 > Scope: calibre 书库（oracle-k3s `personal-services`）的元数据现状、已知污染、
 > 回补作业的设计与判据 —— source of truth。书库本身的存储/备份口径见
 > [storage.md](storage.md)；下游消费者见 readlist（本文只讲 calibre 侧）。
 > 同步电子书的操作走 skill `.claude/skills/sync-ebooks/`。
+>
+> 🔧 **要动手补元数据看
+> [guides/calibre-metadata-enrichment.md](../guides/calibre-metadata-enrichment.md)**
+> —— 那里是「用哪一层、怎么跑、什么时候停」；本文是「现状是什么、判据为什么这么定」。
 
 ## 覆盖率现状
 

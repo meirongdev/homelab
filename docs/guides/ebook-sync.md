@@ -45,4 +45,10 @@ git push   # ArgoCD 3 分钟内自动同步
 
 ## 元数据补全
 
-参考 `docs/plans/apps/2026-07-05-calibre-metadata-enrichment.md`。
+导进来的书元数据往往不全（书名是文件名、无简介无标签、作者 Unknown）。
+补全走 **[calibre-metadata-enrichment.md](calibre-metadata-enrichment.md)** ——
+四层手段、各自实测产出率、以及什么时候该停。
+
+> ⚠️ 此前这里指向 `plans/apps/2026-07-05-calibre-metadata-enrichment.md`。
+> 那是**写完即冻结的历史快照**，且其「环境」一节已过期（书库早已不在 NFS 上），
+> 更重要的是它描述的做法（查不到就拿文件 mtime 当出版日期）**已被证明有害**并弃用。

@@ -1,9 +1,19 @@
 # Calibre 元数据补全方案
 
-> **状态: ✅ 已实施** —— 由 ArgoCD `calibre-metadata` App 交付
-> （`k8s/helm/manifests/calibre-metadata/`：metadata-updater + enrich 脚本 ConfigMap + Job）。
-> ⚠️ **下文"环境"一节已过期**：Calibre 库不再在 NFS 上，2026-07-11 起书库和 config 都在 `local-path`
-> （见 [reference/storage.md](../../reference/storage.md)）。
+> **状态: ⚠️ 已被取代**（2026-08-07）——替代文档：
+> [guides/calibre-metadata-enrichment.md](../../guides/calibre-metadata-enrichment.md)（怎么做）
+> 与 [reference/calibre-metadata.md](../../reference/calibre-metadata.md)（现状与判据）。
+>
+> ☠️ **本方案的「阶段三：文件时间戳兜底」被证明有害，已弃用。** 用文件 mtime 当出版日期
+> 造成 487 本 pubdate 被写成看起来像真数据的值；calibre 没有 provenance 字段，事后
+> 无从分辨，下游 readlist 2,045 本里只认得出 37 本，其余全被标记为「不可信」。
+> 教训：**查不到就留空。编出来的值会被下游当成证据**——留空是诚实的缺失。
+> 现行做法不做任何兜底，且生成型写入一律带 `#meta_src` 出处列。
+>
+> ⚠️ 下文"环境"一节也已过期：Calibre 库不再在 NFS 上，2026-07-11 起书库和 config
+> 都在 `local-path`（见 [reference/storage.md](../../reference/storage.md)）。
+>
+> 保留本文只为记录当时的场景与取舍，**不代表现状**。
 
 > 清理 Calibre 图库时发现约 1,500+ 本书缺少发布年份（pubdate=0101-01-01）。本方案旨在系统性地补全所有电子书的元数据。
 
