@@ -31,7 +31,18 @@ resources:
 #     -H 'Accept: application/vnd.oci.image.index.v1+json' \
 #     https://ghcr.io/v2/meirongdev/jobs-sg/manifests/sha-<short12> | grep -i docker-content-digest
 #
-# 当前 = jobs-sg 90cd4e8（2026-08-08 升级，跨 81 个 commit 从 ff5e24e 跳上来）。
+# 当前 = jobs-sg af34eed（2026-08-08）：在 90cd4e8 之上只多一个修复 ——
+# work_mode 不再拿排班字段冒充办公地点。MCF 的 flexibleWorkArrangements 是**排班**
+# 字段（500 条实测样本里只有 37 条带它，唯一的地点信号 Telecommuting 占 3 条，其余
+# 全是 Flexi-Hours / Employees Choice of Days Off 之类），而旧代码匹配的
+# remote/hybrid/onsite 一个都不存在，于是全部落到兜底 Onsite —— 首页与周报上那个
+# 「办公模式分布」是编造出来的，等同于「值缺失就填 0」。现在没有地点信号就返回
+# **Unknown**。
+# ⚠️ 上线后**不会立刻变**：work_mode 由 ingest 的 upsert 重写，web 只读。要等下一轮
+# 抓取；周日那轮 reconcile 走全board，会把所有在架岗位一次性刷新。已关闭/归档的
+# 历史行与 weekly_metric 里已物化的历史周**不会追溯变对**。
+#
+# 其前身 90cd4e8（2026-08-08 升级，跨 81 个 commit 从 ff5e24e 跳上来）。
 # 这一跳**不是只换镜像**，同批必须改的两处（漏了就是静默故障）：
 #   ① `/metrics` 拆到独立监听器 9090 —— web.yaml 加 `--metrics-addr :9090` 与
 #     `metrics` 端口、Service 开 9090、monitoring.yaml 的 ServiceMonitor 抓
@@ -75,4 +86,4 @@ resources:
 # 三个坑的实测数据都在 docs/reference/jobs-sg.md。
 images:
   - name: ghcr.io/meirongdev/jobs-sg
-    digest: sha256:3bb93bf8c9a9a588148c6292f99441347231c9b8d66e168fca86e0b461cc0b7a
+    digest: sha256:7edd67bbe3852f70689313e0094cd1c6738d5d5bd872bbd14f3fbab985b6943a
