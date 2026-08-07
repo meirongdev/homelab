@@ -50,12 +50,41 @@ spec:
           labels: { severity: warning }
           annotations:
             summary: jobs-sg 抓取已停滞 >36h（增量与 reconcile 都没成功）—— 可能静默失效
+        # ☠️ 2026-08-08 修**结构性哑火**：原表达式只有 `time() - <series>`，而
+        # `kind="full_reconcile"` 这条 series 在「reconcile 一次都没成功过」时
+        # **根本不存在** —— `time() - <no data>` 算不出结果，于是这条告警在它最
+        # 该响的场景下永远沉默（实测 `absent(...)` = 1，原式 = no data）。
+        #
+        # 这不是理论风险：关岗位只在周日 SGT 那轮做，且**被 `status==success`
+        # 与 deviation<2% 双重门控**（上游 ingest.go:280）。reconcile 扫 ~867 页
+        # 要 20 分钟，期间 web 只要在渲染聚合页就可能撞 SQLITE_BUSY（DELETE
+        # journal，读者持 SHARED 锁挡住写者，2026-08-08 实测复现过一次）→ 该轮
+        # 记成 partial → 关闭逻辑整个跳过 → 不写 full_reconcile 成功 → series
+        # 仍不存在 → 告警继续哑火。失败会自我掩盖。
+        #
+        # 第二个分支补上「从来没成功过」这一格。`and on()` 那半是**冷启动闸门**：
+        # 不能一上线就响（应用 08-03 才上线，首个周日是 08-09）。用累计抓取样本数
+        # 当「我们已经观察了多久」的代理：60s 间隔满 10 天 = 14400，取 80% = 11520。
+        # ⚠️ 必须 `sum()`：`count_over_time(up[10d])` 按 pod 实例分裂，pod 一滚动
+        # 每条都只有几十到几千，不聚合的话这个门槛**永远够不着**，分支就成了死代码
+        # ——那等于用一个新的哑火去修旧的哑火。
+        #
+        # 实测（2026-08-08，Prometheus 上跑过两个方向）：
+        #   sum(count_over_time(up{job="jobs-sg-web"}[10d])) = 6267（≈4.4 天）
+        #   门槛 11520 → no data（现在不触发，无冷启动误报）✅
+        #   门槛 5000  → 1（分支活着，不是死代码）✅
         - alert: JobsSgReconcileStale
-          expr: 'time() - jobs_sg_last_success_timestamp_seconds{kind="full_reconcile"} > 10 * 24 * 3600'
+          expr: |
+            (time() - jobs_sg_last_success_timestamp_seconds{kind="full_reconcile"} > 10 * 24 * 3600)
+            or
+            (
+              absent_over_time(jobs_sg_last_success_timestamp_seconds{kind="full_reconcile"}[10d])
+              and on() (sum(count_over_time(up{job="jobs-sg-web"}[10d])) > 11520)
+            )
           for: 30m
           labels: { severity: warning }
           annotations:
-            summary: jobs-sg 全量 reconcile 已停滞 >10d —— 在架职位数可能失真
+            summary: jobs-sg 全量 reconcile >10d 没成功过（含从未成功）—— 在架职位数可能失真
         - alert: JobsSgIngestErrors
           expr: 'increase(jobs_sg_ingest_errors_total[1d]) > 20'
           for: 5m
