@@ -17,7 +17,10 @@ spec:
   selector:
     matchLabels: { app: jobs-sg-web }
   endpoints:
-    - port: http
+    # ⚠️ 是 `metrics` 不是 `http`：2026-08-08 起 `/metrics` 绑在容器 9090 的独立
+    # 监听器上，8080 只服务公共站点（web.yaml 的 `--metrics-addr`）。改回 http
+    # 会静默不抓 —— 端口名对不上和漏 label 一样，operator 不报错。
+    - port: metrics
       path: /metrics
       interval: 60s
 ---
@@ -34,12 +37,19 @@ spec:
       rules:
         # 最重要的一条：静默失效比崩溃更危险。ingest panic 了一整天也不会有人发现，
         # 除非有人盯着"最后一次成功"的时间戳 —— 这正是 2026-08-03 上线前踩到的坑。
+        #
+        # 2026-08-08：改成同时匹配两个 kind。周日那轮 ingest 把自己记成
+        # `full_reconcile`（按 SGT 星期几判定），于是 `incremental` 系列每周固定断档
+        # 48h > 36h 阈值 —— 只匹配 incremental 会让这条**最不该被噪音淹没**的告警
+        # 每周误报约 12 小时（周日 06:45 UTC 到当日 18:15 UTC 下一轮增量）。
+        # `min without(kind)` = 取两者中最近的一次成功，语义即「任何形式的采集
+        # 都超过 36h 没成功过」。
         - alert: JobsSgIngestStale
-          expr: 'time() - jobs_sg_last_success_timestamp_seconds{kind="incremental"} > 36 * 3600'
+          expr: 'min without(kind) (time() - jobs_sg_last_success_timestamp_seconds{kind=~"incremental|full_reconcile"}) > 36 * 3600'
           for: 30m
           labels: { severity: warning }
           annotations:
-            summary: jobs-sg 增量抓取已停滞 >36h —— 可能静默失效
+            summary: jobs-sg 抓取已停滞 >36h（增量与 reconcile 都没成功）—— 可能静默失效
         - alert: JobsSgReconcileStale
           expr: 'time() - jobs_sg_last_success_timestamp_seconds{kind="full_reconcile"} > 10 * 24 * 3600'
           for: 30m
@@ -52,12 +62,21 @@ spec:
           labels: { severity: warning }
           annotations:
             summary: jobs-sg 抓取错误上升 —— 可能是 MCF API 字段形状又变了
-        - alert: JobsSgEnrichBacklog
-          expr: 'jobs_sg_enrich_backlog > 2000'
-          for: 30m
+        # 2026-08-08：看**地板抬升**，不看绝对值（旧规则 `backlog > 2000` 已删）。
+        # 绝对阈值在这里必然误报：首跑基线一次性把全部在架候选岗位（≈11k）灌进来，
+        # 而 LLM 每晚只排掉约 420 条、每天又新进约 300 条 —— 上线第一晚就响，
+        # 并持续响一到两个月直到烧完，正是 JobsSgIngestStale 那种「训练你忽略告警」。
+        #
+        # 稳态下积压是锯齿形（02:15 ingest 加、03:10 enrich 减），**每日低谷**才是
+        # 信号：拿今天的低谷比昨天的低谷，问的是「管线还跟不跟得上」。DGX 停机、
+        # 虚拟密钥过期、enrich 没跑都会把地板顶高一天的进量；正在稳步排空的大积压
+        # 会把地板压低，保持安静。
+        - alert: JobsSgEnrichBacklogGrowing
+          expr: 'min_over_time(jobs_sg_enrich_backlog[1d]) - min_over_time(jobs_sg_enrich_backlog[1d] offset 1d) > 500'
+          for: 2h
           labels: { severity: warning }
           annotations:
-            summary: jobs-sg 富化积压 >2000 —— Bifrost/LLM 可能不可用
+            summary: jobs-sg 富化积压地板每日抬升 >500 —— LLM 不可用或跟不上进量
         - alert: JobsSgCronJobFailed
           expr: 'kube_job_status_failed{namespace="jobs-sg"} > 0'
           for: 10m

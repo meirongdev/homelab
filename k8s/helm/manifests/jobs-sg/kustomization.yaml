@@ -31,16 +31,37 @@ resources:
 #     -H 'Accept: application/vnd.oci.image.index.v1+json' \
 #     https://ghcr.io/v2/meirongdev/jobs-sg/manifests/sha-<short12> | grep -i docker-content-digest
 #
-# 当前 = jobs-sg ff5e24e（修「/daily 天天 partial」两个根因）：
-#   ① mcf.ParsePostingDate —— API 的 newPostingDate 是纯日期 "2026-08-03"，
-#     旧代码按 RFC3339 解析全部静默失败 → 增量早停成死代码 → 每晚扫满
-#     300 页熔断标 partial。修好后增量 ~100 页早停。
-#   ② enrich_done 完成标记表 —— LLM 结果零命中的职位从不写 job_tech 行，
-#     ~1.4k 条永留积压、每晚被 enrich_cache 空转重放（llm_cached ≈ backlog）。
-#     首个 enrich run 会经缓存命中一次性排空，无需回填。
-#   历史三天的 partial 是当时的事实记录，不会追溯变绿。
+# 当前 = jobs-sg 90cd4e8（2026-08-08 升级，跨 81 个 commit 从 ff5e24e 跳上来）。
+# 这一跳**不是只换镜像**，同批必须改的两处（漏了就是静默故障）：
+#   ① `/metrics` 拆到独立监听器 9090 —— web.yaml 加 `--metrics-addr :9090` 与
+#     `metrics` 端口、Service 开 9090、monitoring.yaml 的 ServiceMonitor 抓
+#     `port: metrics`。只换 digest 会让 8080 上的 /metrics 变 404 →
+#     operator 照旧抓 http → **指标全断且不报错**，所有告警一起变瞎。
+#     副作用是好的：https://jobs.meirong.dev/metrics 从此**必须**是 404。
+#   ② 两条告警随上游改：JobsSgIngestStale 同时匹配 incremental|full_reconcile
+#     （周日那轮记成 full_reconcile，旧规则每周误报 ~12h）；
+#     JobsSgEnrichBacklog（绝对值 >2000）→ JobsSgEnrichBacklogGrowing（地板抬升）。
 #
-# 其前身 8259cba（Telegram message_thread_id 改发数字）、d45c8f6（/daily 统计页）。
+# 指标改名（上游 04-operations §3.1）：`jobs_sg_jobs_total`→`jobs_sg_jobs`、
+# `jobs_sg_jobs_new_total{week=}`→`jobs_sg_jobs_new`（去掉 week 标签，否则每周新增
+# 一条永不退休的 series）、`jobs_sg_unmapped_tech_total`→`jobs_sg_unmapped_tech`。
+# homelab 侧没有任何查询引用这三个（告警只用 last_success / ingest_errors_total /
+# enrich_backlog，Grafana 面板本来就没做），所以改名无影响 —— 但**以后建面板用新名**。
+#
+# 内容上带来求职者向站点：`/` 实时市场快照、`/companies`、`/pay`、`/tech`、`/daily`，
+# 周报重建在 metric 层；顺带修 store 重复关闭 MCF 仍在挂的岗位、回架岗位 reopen、
+# 周日 reconcile 不再重归档整块板、丢岗位记 partial、web 并发构同页合并。
+#
+# schema 变化只有 4 条 `CREATE INDEX IF NOT EXISTS`（无新表/新列），**但 web 是
+# 只读挂载、不跑 Migrate**：索引由下一次 ingest/enrich/report 建。sync 后到
+# 18:15 UTC(02:15 SGT) 那轮 ingest 之间，新页面在 ~86k 行上全表扫且 CPU 限 200m
+# → 手动补一次 `kubectl -n jobs-sg create job --from=cronjob/ingest ingest-migrate-1`
+# 即可提前建好索引。
+#
+# 其前身 ff5e24e（修「/daily 天天 partial」两个根因：newPostingDate 是纯日期、
+# 按 RFC3339 解析全部静默失败使增量早停成死代码；enrich_done 完成标记表补上
+# 「处理过但零命中」的表达，~1.4k 条永久积压随首个 enrich run 经缓存排空）、
+# 8259cba（Telegram message_thread_id 改发数字）、d45c8f6（/daily 统计页）。
 #
 # 其前身 472aaf5 加了 LLM_THINKING 开关。清单里**不设** LLM_THINKING
 # （= 默认开 reasoning，保精度）；啃积压走一次性 Job，
@@ -54,4 +75,4 @@ resources:
 # 三个坑的实测数据都在 docs/reference/jobs-sg.md。
 images:
   - name: ghcr.io/meirongdev/jobs-sg
-    digest: sha256:48e12b200750dbd47bd2476889dac9e478ec48e6456955264e0b8f2a708b253d
+    digest: sha256:3bb93bf8c9a9a588148c6292f99441347231c9b8d66e168fca86e0b461cc0b7a
