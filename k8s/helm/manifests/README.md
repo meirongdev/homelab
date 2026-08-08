@@ -10,7 +10,6 @@
 
 | 目录 | ArgoCD App | 目标 ns | 内容 |
 |------|-----------|---------|------|
-| `bifrost/` | `bifrost` | `bifrost` | LLM 网关 + oauth2-proxy（PVC 带 `Prune=false`） |
 | `calibre-metadata/` | `calibre-metadata` | `personal-services` | 元数据补全 Job/CronJob。⚠️ **kustomize**：新文件必须登记进 `kustomization.yaml` |
 | `cloudflare/` | `cloudflare` | `cloudflare` | Cloudflare Tunnel（cloudflared） |
 | `external-dns/` | `external-dns` | `external-dns` | Cloudflare token 的 ExternalSecret（chart 本体 2026-07-31 采纳进 ArgoCD：multi-source chart + `values/external-dns.yaml` + 本目录 ExternalSecret） |

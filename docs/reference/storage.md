@@ -50,7 +50,7 @@ sqlite 依赖 POSIX 字节区间锁（`fcntl`）+ 同步小写入；NFS 的 NLM 
 漏了 `readlist-data`，且把 `uptime-kuma-data-v2` 写成了 `uptime-kuma-data`）。
 **集群里没有 `nfs-client` StorageClass** —— 引用它的 PVC 会永久 Pending。
 
-- **homelab（11 个）**: `data-vault-0`、`audit-vault-0`、`bifrost-data-local`、`data-trivy-server-0`、
+- **homelab（10 个）**: `data-vault-0`、`audit-vault-0`、`data-trivy-server-0`、
   `alertmanager-…-db`、`prometheus-…-db`、`kube-prometheus-stack-grafana`、`opencost-pvc`、
   `open-notebook-data-local`、`open-notebook-surreal-local`、`jobs-sg-data`（2026-08-03 新增）
 - **oracle-k3s（15 个）**: `storage-loki-0`、`storage-tempo-0`、`opencost-pvc`、`calibre-books-local`、

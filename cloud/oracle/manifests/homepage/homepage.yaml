@@ -238,11 +238,6 @@ data:
             href: https://auth.meirong.dev
             description: 单点登录 / 身份中心 (Homelab)
 
-        - Bifrost:
-            icon: mdi-robot
-            href: https://llm.meirong.dev
-            description: LLM 网关 admin (Homelab)
-
   widgets.yaml: |
     - datetime:
         text_size: xl

@@ -74,10 +74,8 @@ vLLM 忽略；`deepseek-v4-flash`（1M ctx）返回的正是 enrich 要的严格
 
 **取舍**：省掉 VK 与 Vault 依赖，但没有 Bifrost 的 `custom_m2` 回退，也没有用量计量；
 DGX 是跨 tailnet 共享的境内机器（RTT 66–83ms），不可用时 enrich fail-open 退回纯规则。
-**切回 Bifrost**（三处，缺一不可）：① `LLM_BASE_URL` 改回
-`http://bifrost.bifrost.svc.cluster.local:8080` ② 删掉 `LLM_MODELS`（默认链即 Bifrost
-形式）③ 在 `external-secret.yaml` 补回 `bifrost-vk` 一项、`cronjob-enrich.yaml` 补回
-`BIFROST_VK` env，并把 VK 写进 Vault。当前这两处**都已删除**，因为直连 DGX 用不到。
+（此前“切回 Bifrost”的三处改法已随 **bifrost 2026-08-08 退役**一并失效——直连 DGX
+是当前唯一形态，后续换 LLM 网关时另行规划。）
 
 **单次调用实测 66.5s**（2,326 字描述 / 497 prompt tokens / 937 completion tokens，
 reasoning 占大头）。短 prompt 只要 15s —— 别拿短 prompt 的数字做容量规划。
