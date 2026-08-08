@@ -13,8 +13,13 @@
 #     read-and-loved、publisher-picks 已删）——删掉的正是 v0.3.0 时实测为空的那几个。
 #   · 证据徽章改按「**实际参与排序的维度**」评（`score.GradedDims`：只有在某份 preset
 #     里占非零权重的维度才算数）。D/P 两维权重摘掉后不再拖累评级，grade 分布会右移。
+#     ⚠️ 但**换镜像当天不会看到右移**：徽章是 score 作业算完写进 run 的，web 只读
+#     已发布 run。升级完 `readlist_grade_counts` 仍是旧值，要等下一次 score
+#     （01:40 UTC）用新镜像重算才变——别据此判断"升级没生效"。
 #     升级前基线（2026-08-08 实测）：works_total=2035，A=0 B=22 C=273 D=1740；
 #     dim_measured：A=80 C=0 D=0 F=295 P=0 T=1736 readability=2035。
+#     公开面即时可见的变化：catalog 22 → **15** 本（timeless 0 / fresh-releases 3
+#     / to-read-next 12），榜单数 7 → 3。
 #   · SPA 撤掉权重滑块回到纯展示层，另加「关于」页。
 #
 # v0.3.0 起仍然成立的口径（别当成已废）：
