@@ -1,26 +1,34 @@
 # readlist —— 技术书多维评分 + 公开书单站（单 Go 二进制:只读 API + 内嵌 SPA + SQLite/WAL）
 #
 # 需求/评分标准/源码的真相源在 meirongdev/readlist；**部署清单的真相源是本文件**。
-# 当前部署版本：**v0.4.0**（2026-08-08 升级；**部署侧零改动**——上游
-# `deploy/oracle/readlist.yaml` 在 v0.3.0→v0.4.0 之间一行没动，无 schema 迁移
-# （`0001_schema.sql` 只改了一行注释，而 store.go 的迁移器按**文件名**记录、不校验
-# checksum，不会因此报 dirty），只换 4 处 image tag。v0.1.0 → v0.2.0 的部署侧改动
-# 是 livenessProbe 切 /livez、两个探针显式 timeoutSeconds、三个 CronJob 加 timeZone）。
+# 当前部署版本：**v0.4.0**（2026-08-08 升级；**本清单只换了 4 处 image tag**——
+# 上游 `deploy/oracle/readlist.yaml` 在 v0.3.0→v0.4.0 之间确实动过，但改的只是它
+# 自己那 4 行 image tag（v0.1.0→v0.3.0，commit f0abb9e，是参照件补自己的版本号），
+# 没有形状改动；无 schema 迁移（`0001_schema.sql` 只改了一行注释，而 store.go 的
+# 迁移器按**文件名**记录、不校验 checksum，不会因此报 dirty）。
+# v0.1.0 → v0.2.0 的部署侧改动是 livenessProbe 切 /livez、两个探针显式
+# timeoutSeconds、三个 CronJob 加 timeZone）。
 #
 # ⚠️ v0.4.0 的三个 breaking 全落在**公开面口径与前端**，不在部署形状：
 #   · 公开榜从 7 份收敛到 **3 份**：timeless / fresh-releases / to-read-next
 #     （internal 只剩 library-hygiene；ship-this-week、deep-dive、ai-llm、
 #     read-and-loved、publisher-picks 已删）——删掉的正是 v0.3.0 时实测为空的那几个。
 #   · 证据徽章改按「**实际参与排序的维度**」评（`score.GradedDims`：只有在某份 preset
-#     里占非零权重的维度才算数）。D/P 两维权重摘掉后不再拖累评级，grade 分布会右移。
-#     ⚠️ 但**换镜像当天不会看到右移**：徽章是 score 作业算完写进 run 的，web 只读
-#     已发布 run。升级完 `readlist_grade_counts` 仍是旧值，要等下一次 score
-#     （01:40 UTC）用新镜像重算才变——别据此判断"升级没生效"。
+#     里占非零权重的维度才算数）。按 v0.4.0 的 presets.yaml 权重推出，graded 集 =
+#     **{A, C, T, readability}**；D / P / **F** 三维没有任何榜给权重，从此不影响徽章。
+#     ⚠️ **换镜像当天 `readlist_grade_counts` 不会动**：徽章是 score 作业算完写进 run
+#     的，web 只读已发布 run。要等下一次 score（01:40 UTC）用新镜像重算才变——
+#     别据此判断"升级没生效"。
 #     升级前基线（2026-08-08 实测）：works_total=2035，A=0 B=22 C=273 D=1740；
 #     dim_measured：A=80 C=0 D=0 F=295 P=0 T=1736 readability=2035。
-#     公开面即时可见的变化：catalog 22 → **15** 本（timeless 0 / fresh-releases 3
-#     / to-read-next 12），榜单数 7 → 3。
+#     ⚠️ 升级后的分布**尚未观测，别预设方向**：F 退出评级往好处走，但 C 进了 graded
+#     集而它的 measured 是 **0**，两者反向。（F 的 measured=295 恰好等于 2035−1740，
+#     **疑似**旧 D 级的主因，未验证。）今晚 score 跑完照实回填这里。
 #   · SPA 撤掉权重滑块回到纯展示层，另加「关于」页。
+#   公开面即时可见的变化（2026-08-08 升级后**实测**）：`/api/v1/catalog` = **15** 本
+#   （timeless 0 / fresh-releases 3 / to-read-next 12），榜单 7 → 3 份。作对照的
+#   「v0.3.0 时 22 本」是 2026-08-06 的记录，那时全库 2,045 本、与今天的 2,035 不是
+#   同一快照，两个数不构成严格的前后对比。
 #
 # v0.3.0 起仍然成立的口径（别当成已废）：
 #   · `/api/v1/catalog` 是「**公开榜单的并集**」而非全库；internal 榜不算公开。
