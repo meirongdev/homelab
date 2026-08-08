@@ -12,8 +12,8 @@
   全局 oauth2-proxy 链已移除——省掉每个请求的第二跳认证）。每个服务三选一：
   **公开**、**原生 ZITADEL OIDC**、或**自带认证**（如 Vault、Timeslot admin Basic Auth）。
 - **方向约定**: `HTTPRoute` 保持 controller-neutral，认证放应用层。优先原生 OIDC；
-  应用不会说 OIDC 时才用 per-app `oauth2-proxy` 反代（现有实例：**只剩 Bifrost admin UI**
-  —— Excalidraw 那个 2026-08-04 拆了，服务端不存画布数据，SSO 没有可保护的对象）。
+  应用不会说 OIDC 时才用 per-app `oauth2-proxy` 反代（当前**无实例**：Excalidraw 那个
+  2026-08-04 拆了，Bifrost 2026-08-08 退役）。
 
 ## ZITADEL 部署形态（oracle-k3s）
 
@@ -79,10 +79,10 @@
 
 ## 无法直连 OIDC 的应用：per-app oauth2-proxy
 
-**Bifrost** 是该模式的样板：OSS admin UI / config-API 无认证，所以放在 `bifrost` ns 的
-per-app `oauth2-proxy`（反代模式，ZITADEL OIDC）后面；推理 API（`/v1`,`/openai`,`/anthropic`,`/genai`）
-直连 Bifrost、由 Bifrost virtual key 把关。OIDC client 由 `zitadel/scripts/configure-bifrost-oauth.sh`
-下发；creds 在 Vault `secret/homelab/bifrost-oauth2-proxy` → ESO。
+**Bifrost** 曾是样板（OSS admin UI / config-API 无认证 → per-app `oauth2-proxy` 反代 +
+ZITADEL OIDC；推理 API 直连 + virtual key 把关），**2026-08-08 已随整个 `bifrost`
+ArgoCD App 退役**。`zitadel/scripts/configure-bifrost-oauth.sh` 与 Vault
+`secret/homelab/bifrost-oauth2-proxy` 已无消费者（保留作历史）。
 
 **Excalidraw**（`draw`）曾用同模式，**2026-08-04 移除**：画布只存浏览器 localStorage、服务端
 无状态，那层 SSO 保护不了任何东西，只是登录摩擦；现在 HTTPRoute 直接分流到前端与协作 room，

@@ -1,9 +1,0 @@
-# ns `bifrost` 在 oracle 上**没有任何工作负载** —— 它只为承载 dgx-proxy 的影子 Service，
-# 好让 Cilium 全局服务在本集群有一条 DNS 记录。真正的 Bifrost 与 dgx-proxy 都在 homelab。
-# H1：Namespace 独占文件。
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: bifrost
-  labels:
-    pod-security.kubernetes.io/enforce: restricted

@@ -10,7 +10,7 @@ NFS 已退役，106 只做**冷备份目标**，不再是运行时依赖。
 backup/
 ├── base/                    # 共享：CronJob + namespace（kustomize base）
 └── overlays/
-    ├── homelab/             # Vault raft snapshot + bifrost/open-notebook 的 sqlite/json
+    ├── homelab/             # Vault raft snapshot + open-notebook 的 sqlite/json
     │                        #   + Open Notebook 的 SurrealDB 逻辑导出(/export)
     └── oracle/              # PG pg_dumpall + 各 sqlite/config PVC + calibre 书库(BOOKS_DIR)
 ```

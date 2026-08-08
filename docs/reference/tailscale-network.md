@@ -163,9 +163,9 @@ The autoApprovers entry survives untagging (`"10.0.0.26/32"` lists both
 the 2026-08-01 plan — is unfounded. Key expiry is the real hazard.
 
 **Adopted workaround: proxy the capability instead of moving the node.**
-`k8s/helm/manifests/bifrost/dgx-proxy.yaml` runs an nginx on homelab (which *can*
-reach the Sparks) and publishes it as a Cilium **global Service**, so oracle pods
-reach the DGX vLLM cross-cluster:
+`k8s/helm/manifests/bifrost/dgx-proxy.yaml` ran an nginx on homelab (which *can*
+reach the Sparks) and published it as a Cilium **global Service**, so oracle pods
+reached the DGX vLLM cross-cluster:
 
 ```
 oracle pod → ClusterMesh VXLAN → dgx-proxy (homelab) → Tailscale → DGX vLLM
@@ -173,6 +173,11 @@ oracle pod → ClusterMesh VXLAN → dgx-proxy (homelab) → Tailscale → DGX v
 
 Verified 2026-08-07 end to end from an oracle pod: `/v1/models` → 200, a real
 `/v1/chat/completions` → 2.7 s.
+
+⚠️ **2026-08-08 retired with the `bifrost` ArgoCD App**（LLM 网关将由 Rust litellm 接替）。
+本集群 global-Service 计数回到 0，ClusterMesh 回到纯备用能力；oracle 侧
+`calibre-metadata-llm` 当前 suspend（其 `LLM_URL` 仍指向 `dgx-proxy.bifrost.svc`，
+litellm 落地时一并改指向）。
 
 ⚠️ **A Cilium global Service needs a Service object in BOTH clusters.** Annotating
 only the homelab side made `cilium-dbg status --all-clusters` report `1 services`

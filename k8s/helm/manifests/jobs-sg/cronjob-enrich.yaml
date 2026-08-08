@@ -11,8 +11,8 @@
 #
 # 代价：没有 Bifrost 的 custom_m2 回退，也没有用量计量；DGX 是跨 tailnet 共享的
 # 境内机器（RTT 66–83ms），不可用时 enrich fail-open 退回纯规则模式。
-# 想切回 Bifrost：把 LLM_BASE_URL 改回 http://bifrost.bifrost.svc.cluster.local:8080
-# 并删掉 LLM_MODELS（默认链就是 Bifrost 的），再往 Vault 写 bifrost-vk。
+# （此前“切回 Bifrost”的改法已随 bifrost 2026-08-08 退役一并失效——直连 DGX 是当前
+# 唯一形态，后续换 LLM 网关时另行规划。）
 #
 # BIFROST_VK 保留且标 optional：走 DGX 时它是空值且无害（vLLM 忽略该头），
 # 留着让切回 Bifrost 只需改 base URL。Vault 未写时也不会 CreateContainerConfigError

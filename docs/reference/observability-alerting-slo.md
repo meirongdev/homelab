@@ -149,8 +149,8 @@ recurse 目录源）：
   `sloth.extraLabels.release=kube-prometheus-stack` 让生成的 PrometheusRule 被 operator 选中；
   `defaultSloPeriod=30d`；关 commonPlugins 的 git-sync sidecar。
 - **SLO 定义**: `manifests/monitoring/slos.yaml` —— 两个 `PrometheusServiceLevel`：
-  `homelab-gateway-availability`（grafana/vault/bifrost）+ `oracle-gateway-availability`
-  （zitadel/calibre-web/argocd——后两个 2026-08-02/03 随迁移移入），共 6 服务 99%/30d
+  `homelab-gateway-availability`（grafana/vault）+ `oracle-gateway-availability`
+  （zitadel/calibre-web/argocd——后两个 2026-08-02/03 随迁移移入），共 5 服务 99%/30d
   （error=5xx, total=全部）。**新增/改**: 在对应 `spec.slos[]` 追加
   （`errorQuery`/`totalQuery` 用 `envoy_cluster_name=~".*/<ns>_<svc>_.*"`；oracle 侧记得
   `_total` 指标名 + `cluster="oracle-k3s"`）→ `git push`。
