@@ -69,7 +69,7 @@ data:
       # jobs-sg-data：只捞走 jobs.db(+journal)。raw/ 归档是 *.jsonl.gz，**匹配不上**
       # 下面这组文件名模式 —— 它由第 3 步的 JOBS_ARCHIVE_DIR 整目录纳入，别以为这行
       # 就把 jobs-sg 备全了（上游 docs/04 §4 只写了加这一行，那是不够的）。
-      for pat in bifrost-data open-notebook-data jobs-sg-data; do
+      for pat in open-notebook-data jobs-sg-data; do
         for d in "$base"/*"$pat"*; do
           [ -d "$d" ] || continue
           dest="/work/pvc/$(basename "$d")"

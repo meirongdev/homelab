@@ -145,7 +145,9 @@ D 类那条判据不能省：本库尾括号有三种互斥含义（作者名 / 
 `calibre-metadata-llm`：只用于**外部数据库里根本没有**的书——自出版、Kindle 独占、
 zine（如 wizardzines）。前三层都查不到它们，因为它们客观上不在任何公开书目库里。
 
-**前置：DGX vLLM 必须活着。** oracle 直连不到 DGX，走 `dgx-proxy` 跨集群：
+**前置：DGX vLLM 必须活着。** oracle 直连不到 DGX，此前走 `dgx-proxy` 跨集群
+（**2026-08-08 已随 bifrost 退役**，`calibre-metadata-llm` 已 suspend；等 Rust litellm
+落地后改为指向新网关，再恢复验证）：
 
 ```bash
 # 先确认通，502 就是 DGX 那边 vLLM 没起
