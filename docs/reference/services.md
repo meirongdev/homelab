@@ -37,6 +37,10 @@
 - **Homepage 配置更新**: 配置 ConfigMap 用 `subPath` 挂载、**不会热加载** —— `git push` 让 ArgoCD
   同步 ConfigMap 后，必须 `kubectl --context oracle-k3s rollout restart deployment/homepage -n homepage`
   才生效。不要 `kubectl delete configmap`（会和 ArgoCD 冲突）。
+  判据（2026-08-08 拆 bifrost 时实踩）：ConfigMap 已是新版但 UI 还显示旧磁贴时，**先别改清单**——
+  ① `kubectl --context oracle-k3s get cm homepage-config -n homepage -o jsonpath='{.data.services.yaml}'`
+  确认内容已更新；② 再看运行中 Pod 的挂载 `kubectl --context oracle-k3s exec -n homepage deploy/homepage
+  -- grep -ri <关键词> /app/config/`；subPath 会让 ① 与 ② 不一致，属正常——以 `rollout restart` 收尾。
 - **Uptime Kuma monitors**: 全部声明式定义在 `cloud/oracle/manifests/uptime-kuma/provisioner.yaml`
   的 `uptime-kuma-provisioner` ConfigMap 的 `MONITORS` 列表（oracle 本地服务用集群内 Service URL，
   homelab 服务用公网 URL）。`git push` → ArgoCD PostSync hook 自动重跑 provisioner Job；
