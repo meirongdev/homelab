@@ -142,7 +142,7 @@ oracle-k3s 在 2026-08-05 之前一条都没配（`capacity − allocatable` 的
 | 数据库 | `500m` | postgres |
 | 可观测性 | `300m–500m` | Loki, Tempo, Prometheus, Grafana |
 | 后台/轻量服务 | `100m–200m` | alertmanager, kube-state-metrics, oauth2-proxy |
-| 极轻量 sidecar | `10–100m` | log-exporter, permission-fixer, argocd-image-updater |
+| 极轻量 sidecar | `10–100m` | log-exporter, permission-fixer |
 | Batch/CronJob | `200m–300m` | restic-backup, kube-bench |
 | 元数据处理 | `1000m` | calibre-metadata（每日凌晨） |
 
@@ -231,6 +231,11 @@ max by (cluster,namespace,pod,container) (kube_pod_container_resource_limits{res
 - 标 `(No data)` / `(Not enough data)` 的是当前没有运行 Pod 的 Job/CronJob，忽略即可
 - 内存推荐取 **7 天**窗口内的 max（对齐 Prometheus retention），跨周尖峰
   （如每周备份 CronJob）可能落在窗口外，这类工作负载要自行留余量
+
+⚠️ **内存余量别看 `kubectl top node`**：它报的是 workingSet（含可回收页缓存），会虚高到 90%+
+让人误判要驱逐。判余量看节点 `free -m` 的 **available**（或 Prometheus 按容器 `rssBytes`
+聚合）——2026-08-06 实测 top 报 92% 时 available 还有 4.3GB / 11.9GB、requests 仅 69%，
+离驱逐阈值很远。
 
 ---
 

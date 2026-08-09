@@ -1,7 +1,7 @@
 # Homelab Architecture
 
 > 单页架构总览，双集群 homelab（homelab + oracle-k3s）。
-> Last updated: 2026-08-03
+> Last updated: 2026-08-09
 
 ## Network Topology
 
@@ -54,11 +54,8 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 
 ## Service Inventory
 
-完整清单（含 namespace、内部服务、认证方式）在 [reference/services.md](reference/services.md) —
+完整清单（含集群/namespace、域名、运维备忘）见 [reference/services.md](reference/services.md) —
 **唯一真相源，此处不复制**。
-
-分布速览（2026-08 大调整后）: homelab 跑 **Open Notebook / Prometheus / Grafana / Alertmanager / Vault**；oracle-k3s 跑 **ArgoCD 控制面 / Loki / Tempo / Calibre-Web**，其余（ZITADEL、Homepage、
-Uptime Kuma、Miniflux、KaraKeep、IT-Tools、Stirling-PDF、Squoosh、Excalidraw、Trends、Timeslot）都在 oracle-k3s。
 
 ## Security (Defense in Depth)
 

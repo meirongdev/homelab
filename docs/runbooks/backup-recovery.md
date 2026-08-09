@@ -1,6 +1,6 @@
 # Backup & Recovery Runbook
 
-> Last updated: 2026-07-06
+> Last updated: 2026-08-10
 > 设计与执行: [../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md](../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md)
 
 ## Status
@@ -9,7 +9,7 @@
 **离站（Phase 5）仍待做** —— 当前仅本地仓库（raidz1 + sanoid 保护），无异地副本；屋内灾难仍是敞口，属计划 Phase 5。
 
 - 清单：kustomize base+overlay `backup/`（2026-07-07 双集群合并；共用骨架在 `backup/base`）。
-- homelab: `backup/overlays/homelab`（ArgoCD `backup` App，CronJob 03:00）— Vault raft snapshot + zitadel `pg_dump` + sqlite。
+- homelab: `backup/overlays/homelab`（ArgoCD `backup` App，CronJob 03:00）— Vault raft snapshot + sqlite（open-notebook / jobs-sg）。
 - oracle-k3s: `backup/overlays/oracle`（随 ArgoCD `oracle-k3s` App 同步，CronJob 03:30）— 逐库 `pg_dump`（`apps-pg`/miniflux → `miniflux.sql`，`zitadel-pg`/zitadel → `zitadel.sql`）+ sqlite + 书库整目录。
   ⚠️ 2026-08-06 前是 `pg_dumpall` 出 `pg_all.sql`；**恢复更早的快照时找的是那个文件名**。改成逐库 dump 的原因见 [decisions/shared-postgres-platform.md](../decisions/shared-postgres-platform.md)。
 - 手动触发：`just backup-run`（homelab）/ `kubectl --context oracle-k3s -n backup create job --from=cronjob/restic-backup <name>`。
@@ -31,11 +31,11 @@
 | Vault (raft) | homelab | `vault operator raft snapshot save`（network API）|
 | ZITADEL PG | oracle（迁移后）| `pg_dump`（network）|
 | Miniflux PG | oracle | `pg_dump`（network）|
-| sqlite: bifrost / calibre-config / open-notebook checkpoints | homelab | 特权 CronJob hostPath 读 local-path + `sqlite3 ".backup"`（在线 API）|
-| sqlite: karakeep / uptime-kuma / timeslot | oracle | 同上 |
-| meilisearch | oracle | dump / tar |
+| sqlite: open-notebook checkpoints / jobs-sg | homelab | 特权 CronJob hostPath 读 local-path + `sqlite3 ".backup"`（在线 API）|
+| sqlite: karakeep / uptime-kuma / timeslot / stirling-pdf / calibre-web-config / readlist | oracle | 同上（白名单见 `backup/overlays/oracle/backup-script.yaml`）|
+| meilisearch | oracle | **不备份** —— 索引可由 karakeep 重建（2026-08-06 起显式排除）|
 | SurrealDB: open-notebook | homelab | HTTP `GET /export` 逻辑导出 → `open-notebook.surql`（rocksdb 是活进程持有的 `.sst/MANIFEST`，热拷不一致）。口令走 optional 卷，缺失时只 warn 不中断夜备 |
-| **Calibre 书库** | homelab | **已进 restic**（2026-07-11 起）：`calibre-books-local`（~24G）目录整体纳入，增量去重。⚠️ 本行原写"不进 restic，留 NFS/ZFS"，NFS 退役后已不成立 |
+| **Calibre 书库** | oracle（2026-08-03 迁入）| **已进 restic**：`calibre-books-local`（~23G）目录整体纳入，增量去重。⚠️ 本行原写"不进 restic，留 NFS/ZFS"，NFS 退役后已不成立 |
 
 **为什么 sqlite 走 hostPath**：local-path 卷是 RWO、被 app 占用，旁路 Pod 无法挂载。单节点场景用特权 CronJob 直接读节点 `/var/lib/rancher/k3s/storage/`，对 sqlite 用在线 `.backup` API（读活库安全），无需改任何 app。
 

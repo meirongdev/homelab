@@ -1,6 +1,6 @@
 # Observability — 告警、看板组织与 SLO
 
-> Last updated: 2026-08-06
+> Last updated: 2026-08-10
 > Status: 生效事实
 >
 > 遥测的**消费侧**：告警路由与覆盖盲区、Grafana 看板组织约定、SLI/SLO 体系。
@@ -34,10 +34,10 @@
   当天发现跨集群 mesh 双向断开且**零告警**，事后连"断了多久"都无法确定——`cilium_kvstoremesh_*`
   一条都没被抓。抓的是 clustermesh-apiserver 的 **kvstoremesh** 容器 `:9964`
   （homelab 走 `clustermesh-servicemonitor.yaml`，oracle 走 otel `prometheus/clustermesh`），
-  **刻意不抓 cilium-agent 的同类指标**：那要开 `prometheus.enabled` 即对 Cilium 做 helm
-  upgrade，而 oracle 侧 peer 配置未固化在仓库、升级会静默抹掉（见
-  [tailscale-network.md](tailscale-network.md)）；且 agent 只连本集群缓存，
-  真正断掉的那一跳恰恰是 kvstoremesh。
+  **刻意不抓 cilium-agent 的同类指标**：那要开 `prometheus.enabled` 对 Cilium 做 helm
+  upgrade，而 agent 只连本集群缓存，真正断掉的那一跳恰恰是 kvstoremesh
+  （早期还担心升级会抹掉 oracle 未固化的 peer 配置——2026-08-05 已固化进
+  `cilium-values.yaml`，见 [tailscale-network.md](tailscale-network.md)）。
   三种**互不蕴含**的故障各一条规则：`readiness_status == 0`（配了连不上）·
   `remote_clusters == 0`（**peer 配置整个消失**——此时前者无序列可判，故必须单列）·
   `absent(...)`（看不见了，即 2026-08-05 那个盲区本身）。
@@ -160,7 +160,7 @@ recurse 目录源）：
   `_total` 指标名 + `cluster="oracle-k3s"`）→ `git push`。
 - **⚠️ errorQuery 末尾必须 `OR on() vector(0)`（2026-07-12 踩坑）**: envoy 按响应码类
   **惰性创建**序列——服务从未返回过 5xx（或 envoy 重启计数器重置）时 errorQuery 为空集，
-  SLI 除法整体消失 → **SLO 序列与燃尽率告警静默失效**。现有 6 条已统一加固，新增必须沿用
+  SLI 除法整体消失 → **SLO 序列与燃尽率告警静默失效**。现有 5 条已统一加固，新增必须沿用
   （见 slos.yaml 头部注释）。
 - **告警**: 每个 SLO 生成多窗口燃尽率告警，`pageAlert→critical` / `ticketAlert→warning`，
   经现有 Alertmanager 路由到 Telegram。

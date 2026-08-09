@@ -1,6 +1,6 @@
 # Homelab Docs Portal
 
-> Last updated: 2026-08-03
+> Last updated: 2026-08-09
 > 这是**索引 + 文档规则**。运行态事实都在下面链接的文档里，本页不复制副本。
 
 ## 从哪里开始

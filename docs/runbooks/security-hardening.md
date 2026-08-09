@@ -55,8 +55,9 @@ just psa-status                       # 看各 ns enforce/warn 等级
 git push                              # oracle：kustomize 树标签随 ArgoCD 同步
 ```
 
-- baseline ns（实测零特权工作负载）：`default vault bifrost personal-services cloudflare external-secrets argocd kyverno`
-- privileged ns（显式豁免，warn/audit 仍记 baseline）：`kube-system monitoring trivy-system tetragon kube-bench`
+- baseline ns：`default vault personal-services cloudflare external-secrets kyverno`（2026-08-02 起 argocd 迁 oracle、bifrost 退役，均不在列；清单由 justfile `psa_baseline_ns` 驱动）
+- restricted ns：`jobs-sg`（homelab）· `databases`（oracle）
+- privileged ns（显式豁免，warn/audit 仍记 baseline）：`kube-system monitoring trivy-system tetragon kube-bench backup`（oracle 侧：`monitoring` `falco` `backup`，标签在各 `*/namespace.yaml`）
 - PSA 仅在 Pod **创建/更新**时评估，不杀已运行 Pod。
 
 **验证**：

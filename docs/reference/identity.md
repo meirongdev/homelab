@@ -1,6 +1,6 @@
 # Identity — ZITADEL / OIDC 接入
 
-> Last updated: 2026-08-04
+> Last updated: 2026-08-09
 > Status: 生效事实
 >
 > 身份面的部署形态与各应用接入细节。安全视角的摘要在 [security.md §3](security.md)；

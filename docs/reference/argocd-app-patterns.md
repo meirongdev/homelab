@@ -1,6 +1,6 @@
 # ArgoCD Application Patterns
 
-> Last updated: 2026-08-03
+> Last updated: 2026-08-09
 > Status: 生效事实
 >
 > 当前 ArgoCD 管理模式分析、可选 pattern 对比与取舍建议。
@@ -80,11 +80,11 @@ homelab 负载必须显式写 `https://100.94.186.7:6443`，写错会把整套 h
 核对: `kubectl --context oracle-k3s -n argocd get app`。源→目录映射见上方树；这里只记
 **destination 与踩过坑的备注**。
 
-**目标 homelab（显式 `https://100.94.186.7:6443`，17 个）**:
+**目标 homelab（显式 `https://100.94.186.7:6443`，18 个）**:
 `backup` · `cloudflare` · `external-dns` · `gateway` · `kube-bench` ·
 `kube-prometheus-stack` · `kyverno` · `kyverno-policies` · `monitoring-dashboards` ·
 `namespace-guardrails` · `opencost` · `otel-collector` · `personal-services` · `sloth` ·
-`tetragon` · `trivy-operator` · `vault-eso`
+`tetragon` · `trivy-operator` · `vault-eso` · `jobs-sg`（2026-08-03 上线，kustomize 目录）
 
 **目标 oracle-k3s（in-cluster `kubernetes.default.svc`，10 个）**:
 `root` · `oracle-k3s` · `calibre-metadata` · `cnpg-operator` · `external-dns-oracle` ·
