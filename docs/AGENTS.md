@@ -124,9 +124,10 @@ homelab/
 文件里的**全部**对象；内嵌的 `Namespace` 会连带删光同 ns 下**其它应用**的数据
 （PVC 的 `Prune=false` 拦不住，被 prune 的是 ns）。2026-08-03 就这样删过一次。
 
-`scripts/check-manifests.py` 在 CI 上强制 4 条**由真实事故反推**的规则：
+`scripts/check-manifests.py` 在 CI 上强制 5 条**由真实事故反推**的规则：
 **H1** Namespace/CRD 独占文件 · **H2** Application 的 `path` 与 `destination` 同集群 ·
-**H3** ReferenceGrant 必须 `v1beta1` · **H4** 新增 PVC 必须有备份归属（白名单或写明豁免理由）。
+**H3** ReferenceGrant 必须 `v1beta1` · **H4** 新增 PVC 必须有备份归属（白名单或写明豁免理由）·
+**H5** Namespace 必须显式写 PSA 等级（漏写 = 静默吃默认 `privileged` 且无 warn/audit）。
 规则全文 + **静态查不出、只能靠人的那几类** → `docs/reference/manifest-safety-checks.md`。
 搬有状态服务照 `docs/runbooks/stateful-service-cross-cluster-migration.md` 走。
 

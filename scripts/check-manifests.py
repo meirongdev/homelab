@@ -5,6 +5,7 @@
     H2  Application 的 path 与 destination 必须同集群  ← AGENTS.md 的 ☠️ 警告
     H3  ReferenceGrant 必须声明 v1beta1   ← 声明 v1 会炸掉整个 App
     H4  清单里的 PVC 必须有备份归属        ← 备份脚本是显式白名单，漏了静默无声
+    H5  Namespace 必须显式声明 PSA 等级    ← 漏写 = 静默吃内置默认 privileged，且无 warn/audit
 
 设计原则（与 check-docs.py 同）: **本脚本能查的，和
 docs/reference/manifest-safety-checks.md 写的规则必须一一对应。**
@@ -65,6 +66,15 @@ PATH_CLUSTER = [
 # ReferenceGrant 至今未晋升到 v1。声明 v1 → 整个 App ComparisonError
 # "unable to resolve parseableType"，不是单个对象失败，是整个 App 不可用。
 REFERENCEGRANT_APIVERSION = "gateway.networking.k8s.io/v1beta1"
+
+# ── H5 ────────────────────────────────────────────────────────────────────
+# 无标签的 ns 不是「没定级」，是**定成了最宽的那档**：PSA 内置默认 enforce=privileged，
+# 且 warn/audit 一并为空 → 连审计线索都没有。zitadel ns 就这样敞了一个多月
+# （2026-07-06 迁入 → 2026-08-10 才补），期间 server dry-run 一个
+# hostPID+hostNetwork+privileged+hostPath:/ 的 Pod 能建成且零 warning。
+# 三个等级都算「显式声明」——privileged 是显式豁免，写出来就有人能审。
+PSA_ENFORCE_LABEL = "pod-security.kubernetes.io/enforce"
+PSA_LEVELS = {"privileged", "baseline", "restricted"}
 
 # ── H4 ────────────────────────────────────────────────────────────────────
 # 清单树 → 负责备份它的 overlay。
@@ -169,6 +179,28 @@ def check_h3(p, docs):
             )
 
 
+def check_h5(p, docs):
+    """H5 —— Namespace 必须显式声明 PSA enforce 等级。"""
+    for d in docs:
+        if d.get("kind") != "Namespace":
+            continue
+        meta = d.get("metadata") or {}
+        name = meta.get("name", "?")
+        level = (meta.get("labels") or {}).get(PSA_ENFORCE_LABEL)
+        if level is None:
+            fail(
+                "H5",
+                p,
+                f"Namespace `{name}` 没有 `{PSA_ENFORCE_LABEL}` 标签——"
+                f"这不是「没定级」，是**静默吃 PSA 内置默认 privileged**，且 warn/audit 一并为空"
+                f"（连审计线索都没有）。三档任选其一显式写出来，privileged 也行（那是显式豁免）。"
+                f"收紧前先跑 `kubectl label ns {name} {PSA_ENFORCE_LABEL}=<档> --overwrite --dry-run=server`"
+                f"，它会列出现存违规 Pod。",
+            )
+        elif level not in PSA_LEVELS:
+            fail("H5", p, f"Namespace `{name}` 的 PSA 等级 `{level}` 不是 {sorted(PSA_LEVELS)} 之一。")
+
+
 def backup_patterns(rel_script):
     """从备份脚本里取出 sqlite/config 白名单（`for pat in ... ; do`）。
 
@@ -224,6 +256,7 @@ RULES = [
     ("H2", "Application path ↔ destination 同集群", "控制面 2026-08-02 迁 oracle 后，kubernetes.default.svc 改指 oracle；写错会把 homelab 全套装到 oracle"),
     ("H3", "ReferenceGrant 必须 v1beta1", "从未晋升 v1，写 v1 会让整个 App ComparisonError 不可用"),
     ("H4", "PVC 必须有备份归属", "备份脚本是显式白名单；trends-data 曾因此静默未备份 2 个月（45MB）"),
+    ("H5", "Namespace 必须显式声明 PSA 等级", "漏写不是没定级，是静默吃内置默认 privileged；zitadel ns 就这样敞了一个多月（2026-07-06→08-10）"),
 ]
 
 
@@ -236,17 +269,20 @@ def main():
         print("规则全文见 docs/reference/manifest-safety-checks.md")
         print("\n⚠️ 这些是**结构**检查。查不出的：配置值写错层级（tempo persistence）、")
         print("   ConfigMap 改了但 Pod 不重启、文档与集群漂移——那几类只能实测。")
+        print("   H5 同理只看**清单里声明的** ns：Helm / ArgoCD CreateNamespace 建出来的")
+        print("   （external-secrets、cnpg-system、trivy-system…）没有清单，扫不到。")
         return 0
 
     for p, docs in iter_manifests():
         check_h1(p, docs)
         check_h2(p, docs)
         check_h3(p, docs)
+        check_h5(p, docs)
     check_h4()
 
     total = sum(len(v) for v in violations.values())
     if not total:
-        print("✅ 清单安全检查通过（H1-H4）")
+        print("✅ 清单安全检查通过（H1-H5）")
         print("   注意：结构合规 ≠ 行为正确。值写错层级、改了不生效这类问题只能实测。")
         return 0
 
