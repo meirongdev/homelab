@@ -1,7 +1,17 @@
 # readlist —— 技术书多维评分 + 公开书单站（单 Go 二进制:只读 API + 内嵌 SPA + SQLite/WAL）
 #
 # 需求/评分标准/源码的真相源在 meirongdev/readlist；**部署清单的真相源是本文件**。
-# 当前部署版本：**v0.4.0**（2026-08-08 升级；**本清单只换了 4 处 image tag**——
+# 当前部署版本：**v0.5.0**（2026-08-09 升级）。上游修三个结构性缺陷（snapshot 覆写
+# ingest 写回的外部 pubdate / HN 拿含副标题的整名匹配 / mentions 被 editions 烧光预算），
+# 它们共同让 timeless 与 fresh-releases 两个旗舰榜恒为空。部署侧改动 = 4 处 image tag
+# + `TITLE_WHITELIST_FILE` env + `readlist-title-whitelist` ConfigMap 挂进 ingest
+# CronJob（v0.4.0 忽略该 env，清单先于镜像推送是安全的）。无 schema 迁移。
+# 升级后判读：C 维第一晚就该非 0、F 维单调爬升不再隔夜归零；HN 查询标记带 matcher
+# 版本，旧标记自动重查——**无需清库、无需手动引导**。兜底告警见 readlist-alerts.yaml
+# 的 ReadlistCommunityDimEmpty / ReadlistFreshnessEvidenceLost；判读细节见
+# docs/runbooks/readlist-bootstrap.md 第 3 步。
+#
+# ── 以下 v0.4.0 段落保留作历史口径（2026-08-08 升级；**那次只换了 4 处 image tag**——
 # 上游 `deploy/oracle/readlist.yaml` 在 v0.3.0→v0.4.0 之间确实动过，但改的只是它
 # 自己那 4 行 image tag（v0.1.0→v0.3.0，commit f0abb9e，是参照件补自己的版本号），
 # 没有形状改动；无 schema 迁移（`0001_schema.sql` 只改了一行注释，而 store.go 的
@@ -55,8 +65,8 @@
 # ☠️ 还有一处是**不要改回去**的删除：参照件与 kind 清单里的 `readlist init`
 #    initContainer 在本集群**故意不加**，原因见下方 Deployment 处的长注释
 #    （它会把演示语料写进空库）。v0.4.0 里 init 仍在幂等检查**之前**无条件调
-#    `corpus.Seed(db)`（`cmd/readlist/main.go:63`，v0.4.0 已复核），行为一如既往，
-#    别被上游 kind 清单带跑偏。
+#    `corpus.Seed(db)`（`cmd/readlist/main.go:63`，v0.4.0 已复核；v0.5.0 未改 init，
+#    2026-08-09 复核结论不变），行为一如既往，别被上游 kind 清单带跑偏。
 #
 # ns `personal-services` 由 uptime-kuma/namespace.yaml 创建，这里不建（H1）。
 # ReferenceGrant 不需要：base/gateway.yaml 的 allow-gateway-to-personal-services 已覆盖本 ns。
@@ -83,8 +93,35 @@ data:
   # id 填错的表现不是报错，而是**静默 0 行**（阅读状态本就只覆盖 23 本，很容易看漏）。
   CALIBRE_USER_ID: "1"
   # ingest 每次运行的外部请求预算。打满就干净停下，次日接着跑（NFR-9）。
-  # 首轮全量约需 1,000–1,500 次请求 → 分 2 晚跑完。
+  # 首轮全量 editions 约需 1,000–1,500 次请求、HN 声量再加一批 → 3 晚上下跑完。
+  # v0.5.0 起每晚有 MENTIONS_RESERVE（默认 Budget/4=200）给 HN 保底：editions 烧到
+  # 只剩保底线就让位 —— 否则 C 维（技术圈声量）在 bootstrap 后头几晚恒为 0，
+  # timeless 榜（needs C:measured）持续为空（2026-08-05→08 生产实测）。
   INGEST_BUDGET: "800"
+  # 主标题白名单文件（v0.5.0 起生效；v0.4.0 忽略此变量）。见下方同名 ConfigMap。
+  TITLE_WHITELIST_FILE: /whitelist/main-titles.txt
+---
+# ── HN 主标题白名单 ─────────────────────────────────────────────────────────
+# 主标题（第一个冒号前）≤2 词的书默认不查 HN —— "Clean Code" 这类短语会把大量
+# 泛指帖误认成对这本书的提及，而误认会污染整个 C 维（R-3 宁少不多）。
+# 想让这类书拿到声量维，把主标题加进下面的名单（每行一个，# 注释）。
+# ⚠️ 加名单前先想清楚误认代价：白名单放行后按词边界短语匹配，"clean code" 会命中
+#   一切标题里含这个短语的 HN 帖（含泛指用法）。命中可逐条否决（mention_overrides，
+#   按 objectID），但那是手工活。只放「短语用法几乎只指这本书」的标题。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: readlist-title-whitelist
+  namespace: personal-services
+data:
+  main-titles.txt: |
+    # 每行一个主标题；# 开头为注释。改这个文件 = git push，次日 01:20 ingest 生效。
+    # 候选（刻意先不启用 —— 逐个评估误认率后再放行）：
+    #   Clean Code
+    #   Effective Java
+    #   Refactoring
+    #   Code Complete
+    #   Fluent Python
 ---
 # Google Books API key。⚠️ 不是可选的锦上添花：实测 2026-08-05 匿名配额按**共享项目**计，
 # 一次探测请求就直接 429 → A 维(读者评分)与 F 维(时效)基本拿不到数据，而 ingest 拿到的
@@ -178,7 +215,7 @@ spec:
           # 版本化不可变 tag（多架构 index，含 linux/arm64——本集群是 ARM，每次升级
           # 都要核对 registry 确有 arm64 变体）。用 tag 而非 `:main`，故**不需要**
           # imagePullPolicy: Always。
-          image: ghcr.io/meirongdev/readlist:v0.4.0
+          image: ghcr.io/meirongdev/readlist:v0.5.0
           command: ["readlist", "serve"]
           envFrom:
             - configMapRef:
@@ -331,7 +368,7 @@ spec:
             fsGroup: 65532
           containers:
             - name: snapshot
-              image: ghcr.io/meirongdev/readlist:v0.4.0
+              image: ghcr.io/meirongdev/readlist:v0.5.0
               command: ["readlist", "snapshot"]
               envFrom:
                 - configMapRef:
@@ -412,7 +449,7 @@ spec:
             fsGroup: 65532
           containers:
             - name: ingest
-              image: ghcr.io/meirongdev/readlist:v0.4.0
+              image: ghcr.io/meirongdev/readlist:v0.5.0
               command: ["readlist", "ingest"]
               envFrom:
                 - configMapRef:
@@ -437,10 +474,18 @@ spec:
               volumeMounts:
                 - name: data
                   mountPath: /data
+                # 主标题白名单（TITLE_WHITELIST_FILE 指向这里）。挂 ConfigMap 保证
+                # 文件一定存在 —— v0.5.0 起「配了路径却读不到」会让 ingest 大声失败。
+                - name: title-whitelist
+                  mountPath: /whitelist
+                  readOnly: true
           volumes:
             - name: data
               persistentVolumeClaim:
                 claimName: readlist-data
+            - name: title-whitelist
+              configMap:
+                name: readlist-title-whitelist
 ---
 # ── 重算评分：纯离线（score 禁止发起网络请求，上游 system-design §9）─────────
 apiVersion: batch/v1
@@ -469,7 +514,7 @@ spec:
             fsGroup: 65532
           containers:
             - name: score
-              image: ghcr.io/meirongdev/readlist:v0.4.0
+              image: ghcr.io/meirongdev/readlist:v0.5.0
               command: ["readlist", "score"]
               envFrom:
                 - configMapRef:

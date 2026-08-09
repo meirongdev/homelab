@@ -43,7 +43,7 @@
   `absent(...)`（看不见了，即 2026-08-05 那个盲区本身）。
 
 - **readlist 数据新鲜度告警**（`manifests/monitoring/alerts/readlist-alerts.yaml`，2026-08-05 新增，
-  2026-08-06 随 v0.2.0 补到 7 条）:
+  2026-08-06 随 v0.2.0 补到 7 条，2026-08-09 再补 2 条判别力规则，共 9 条）:
   readlist 是**夜间管道**服务（snapshot 01:05 → ingest 01:20 → score 01:40，UTC）。三个 CronJob
   全挂之后 web pod 仍用最后一次发布的 run 一直返回 200 —— 探针绿、Uptime Kuma 绿、首页绿，
   榜单在悄悄变旧。**这类失效原理上只有指标能看见**，HTTP 探测看不到。
@@ -55,6 +55,10 @@
   窗口宽是因为证据本身 ~180 天刷新周期）。另四条：`works_total == 0`（空库自愈发布 0 本书的
   run）· 全部 works 为 D 级持续 3d（ingest 跑通了却什么也没产出）· `orphan_rows > 10`
   （book id 漂移，基线 3）· `absent(...)`（盲区本身）。
+  2026-08-09 补两条**判别力**规则（起因：C 维上线四天恒为 0、F 维被 snapshot 覆写
+  回归清零，两个旗舰榜结构性为空却全站绿灯）：`dim_measured{dim="C"} == 0` 达 3d ·
+  `dim_measured{dim="F"} == 0` 达 24h（都用 `and ignoring(dim) works_total > 0` 兜掉
+  空库场景；D/P/A 三维仍刻意不告警——前两者没有生产数据源，A 的阈值只能拍脑袋）。
   ⚠️ 两条**踩过的坑**，改这个文件前先读：① 跨指标比较必须 `ignoring(grade)` —— 
   `grade_counts` 带 `grade` 标签而 `works_total` 不带，默认 vector matching 匹配不上、
   **永远返回空**，和"一切正常"长得一模一样；② **只对实际部署镜像 `curl` 过的指标写规则**，
