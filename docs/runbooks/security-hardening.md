@@ -1,6 +1,6 @@
 # Security Hardening Runbook — 集群内部安全（Phase 0 + 1）
 
-> Last updated: 2026-06-16
+> Last updated: 2026-08-10
 
 ## Overview
 
@@ -8,7 +8,7 @@
 
 | 层 | 组件 | 部署方式 | 集群 | 常驻开销 |
 |----|------|----------|------|----------|
-| Pod 安全基线 | Pod Security Admission (内置) | `just harden-psa`（homelab）+ kustomize 标签（oracle） | 双 | 零 |
+| Pod 安全基线 | Pod Security Admission (内置) | 清单内 ns 走 ArgoCD（CI H5 强制）+ 清单外 ns 走 `just harden-psa`（两集群各一份） | 双 | 零 |
 | 准入策略 | Kyverno（先 Audit） | ArgoCD Helm App | homelab | 低（webhook + 24h 后台扫描） |
 | 供应链/CVE | Trivy Operator | ArgoCD Helm App | homelab | 低（串行扫描 + DB 缓存） |
 | 节点基线 | k3s `protect-kernel-defaults` + sysctl | ansible（需重启） | homelab | 零 |
@@ -50,21 +50,31 @@ kubectl --context k3s-homelab apply -f argocd/projects/homelab.yaml
 ### 1. PSA Pod 安全基线（最先，最低风险）
 
 ```bash
-cd k8s/helm && just harden-psa        # homelab：幂等打标签
-just psa-status                       # 看各 ns enforce/warn 等级
-git push                              # oracle：kustomize 树标签随 ArgoCD 同步
+cd k8s/helm     && just harden-psa && just psa-check   # homelab：清单外 ns 打标签 + 漂移哨兵
+cd cloud/oracle && just harden-psa && just psa-check   # oracle：同上（各自的列表与 ctx）
+git push                                               # 清单内的 ns：标签随 ArgoCD 同步
 ```
 
-- baseline ns：`default vault personal-services cloudflare external-secrets kyverno`（2026-08-02 起 argocd 迁 oracle、bifrost 退役，均不在列；清单由 justfile `psa_baseline_ns` 驱动）
-- restricted ns：`jobs-sg`（homelab）· `databases`（oracle）
-- privileged ns（显式豁免，warn/audit 仍记 baseline）：`kube-system monitoring trivy-system tetragon kube-bench backup`（oracle 侧：`monitoring` `falco` `backup`，标签在各 `*/namespace.yaml`）
+**两条下发路径，按「ns 是谁建的」分**（等级矩阵的唯一真相源在
+[reference/security.md §5.1](../reference/security.md)，这里不重复维护清单）：
+
+| ns 由谁创建 | 谁打标签 | 兜底 |
+|---|---|---|
+| 仓库清单 `*/namespace.yaml` | ArgoCD | CI 的 **H5**（漏写等级直接失败） |
+| Helm chart / k3s 自建 | `just harden-psa`（两集群各一份 `psa_*` 列表） | **`just psa-check`**（有 Pod 却无标签 → 非零退出） |
+
+- 一个 ns 只能有一个写者：`kube-bench` 归清单管，故不在 `psa_privileged_ns` 里。
+- 命令式标签**不跟着 ns 重建复活**（`personal-services` 在 2026-08-03 级联删除后重建就丢了标签，
+  近一周无人发现）→ ns 被重建过、或新建了 ns，就该跑一次 `harden-psa` + `psa-check`。
 - PSA 仅在 Pod **创建/更新**时评估，不杀已运行 Pod。
 
 **验证**：
 ```bash
-kubectl --context k3s-homelab get ns -L pod-security.kubernetes.io/enforce
+just psa-check     # 两集群各跑一次；只剩 cilium-secrets/kube-node-lease/kube-public 无标签属正常（不跑 Pod）
 # baseline 拦截冒烟测试（应被拒绝）：
 kubectl --context k3s-homelab -n personal-services run psa-test --image=busybox --privileged --rm -it --restart=Never -- true
+# 收紧某个 ns 前先问准入：会列出现存违规 Pod（⚠️ 只看当下存在的 Pod，周期性 Job 不在场）
+kubectl --context <ctx> label ns <ns> pod-security.kubernetes.io/enforce=restricted --overwrite --dry-run=server
 ```
 
 ### 2. kube-bench CIS 巡检
