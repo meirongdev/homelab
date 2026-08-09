@@ -189,6 +189,60 @@ spec:
               read-and-loved 会失真而不会报错。核对 CALIBRE_USER_ID 与最近一次
               calibre 元数据导入（`calibre-metadata` App 的 enrich Job）。
 
+        # (3c) The COMMUNITY dimension has no evidence at all. Unlike D/P (no production
+        # data source until LLM labelling ships), C has one — HN Algolia — and `timeless`,
+        # the site's flagship list, hard-gates on it (needs C:measured). It sat at 0 for the
+        # service's ENTIRE first four days (2026-08-05→09, verified in Prometheus history)
+        # while every dashboard stayed green: v1's HN matcher phrase-matched full titles
+        # (subtitle included) so nothing could ever match, and the 800/night budget was
+        # eaten by editions before mentions ran even once. Fixed upstream in v0.5.0
+        # (main-title matcher + MENTIONS_RESERVE); this rule exists so that class of
+        # silent zero can never run for days again.
+        # `for: 3d` rides out a wipe + re-bootstrap (C legitimately reads 0 until the
+        # nightly ingest lands mentions; with v0.5.0's reserve that is night 1, pre-v0.5.0
+        # it took 2-3 nights just to reach the HN phase).
+        # ⚠️ `ignoring(dim)` for the same reason as `ignoring(grade)` in rule (3): without
+        # it the works_total guard never matches and the rule is silently dead.
+        # Verified live 2026-08-09 on the v0.4.0 pod: expr returns 1 series today (C=0,
+        # works=2035) and returns empty with dim="F" (F=280) — fires-and-clears both proven.
+        - alert: ReadlistCommunityDimEmpty
+          expr: readlist_dim_measured{dim="C"} == 0 and ignoring(dim) readlist_works_total > 0
+          for: 3d
+          labels:
+            severity: warning
+          annotations:
+            summary: "readlist: C 维（HN 声量）全库为 0 已 3 天 —— timeless 榜此刻是空的"
+            description: >-
+              readlist_dim_measured{dim="C"} == 0 持续 3 天。C 维是有生产数据源（HN
+              Algolia）的，全库为 0 说明 mentions 管道没有产出：预算被 editions 烧光
+              （看 ingest 日志的 MENTIONS_RESERVE 让位行）、HN 匹配器回归、或 ingest
+              根本没跑到 mentions 阶段。timeless 榜 needs C:measured，此刻结构性为空。
+              引导后的前两晚为 0 是正常的（for: 3d 已覆盖）。
+
+        # (3d) FRESHNESS evidence vanished. F comes ONLY from externally-sourced pubdates
+        # (google/openlibrary — the snapshot-side sources are untrusted by design), and
+        # `fresh-releases` hard-gates on it (needs F:measured). The 2026-08-08 regression:
+        # snapshot's upsert clobbered every ingest-written pubdate back to `calibre`, and
+        # since ingest never rewrites cache-fresh books, one snapshot+score took F from
+        # 338 → 0 for the rest of the day — zero errors anywhere. Fixed upstream in v0.5.0
+        # (corpus.resolveExternalCarryOver; the snapshot log now prints 「外部 pubdate
+        # 保留: N」— N collapsing to 0 is this same regression coming back).
+        # `for: 24h` rides out the bootstrap window (snapshot→score publishes F=0 until
+        # the first ingest lands) and a single missed night.
+        - alert: ReadlistFreshnessEvidenceLost
+          expr: readlist_dim_measured{dim="F"} == 0 and ignoring(dim) readlist_works_total > 0
+          for: 24h
+          labels:
+            severity: warning
+          annotations:
+            summary: "readlist: F 维（时效）全库为 0 已 24h —— fresh-releases 榜此刻是空的"
+            description: >-
+              readlist_dim_measured{dim="F"} == 0 持续 24h。F 只认外部来源的 pubdate，
+              全库为 0 的已知成因是 snapshot 覆写回归（2026-08-08 实测 338→0）：
+              对照 snapshot 日志的「外部 pubdate 保留: N」与
+              readlist_pubdate_source{source="google"} 是否骤降。fresh-releases 榜
+              needs F:measured，此刻结构性为空。刚 wipe 重引导的第一晚为 0 是正常的。
+
         # (4) The blind spot itself — no readlist metrics arriving at all. Without this,
         # rules 1-3 go silent exactly when things are most broken (pod gone, scrape
         # misconfigured, oracle→homelab remote-write down). 30m so it does not flap on a
@@ -218,8 +272,13 @@ spec:
 #     dashboard; alert only if a calibre re-import makes it jump.
 #
 #   readlist_dim_measured{dim}   (per-dimension discriminating power)
-#     Genuinely useful, but "a dimension is thin" is a product judgement with no obvious
-#     threshold — D/P legitimately sit at 0 until LLM labelling ships. Would fire forever.
+#     "A dimension is thin" is a product judgement with no obvious threshold — D/P
+#     legitimately sit at 0 until LLM labelling ships and would fire forever; A is thin
+#     (22-80 works) by upstream data-source reality, any threshold is guesswork.
+#     ⚠️ Partially superseded 2026-08-09: C and F got dedicated ==0 rules above (3c/3d).
+#     Those two dims HAVE production data sources, hard-gate the two flagship lists, and
+#     each spent days at literal zero in production without anything firing. Zero is not
+#     a "thin" judgement call — it is unambiguous, same reasoning as rule (3)'s total-D.
 #
 #   readlist_ingest_{requests,cache_hits,throttled,budget_exhausted}
 #     budget_exhausted is EXPECTED nightly during the initial backfill, and throttled>0 is

@@ -98,6 +98,7 @@ snapshot: run=snap-… works=2046 editions=2054
 | `阅读状态镜像` | **63 行** | **0 = `CALIBRE_USER_ID` 填错**（app.db 里的用户 id）。静默失败，不报错 |
 | `孤儿行(book id 漂移)` | 3 | 突增到几十 = calibre 重导元数据改写了 book id |
 | `pubdate 判为 mtime 兜底` | 37（+5 缺失） | 已知污染，代码强制记 `unknown`，**不是** bug |
+| `外部 pubdate 保留`（v0.5.0+） | 引导后首晚 0，ingest 追平后 ≈ 外部覆盖总数（数百） | 从稳定值掉回 0 = snapshot 覆写回归复发，F 维一天内归零（2026-08-08 实测 338→0，v0.5.0 修复） |
 
 ⚠️ 两处**上游文档已过期**，别拿它当期望值：
 `meirongdev/readlist` 的 `docs/data-baseline.md` 说阅读状态只覆盖 23 本、pubdate 污染 477 本。
@@ -182,9 +183,18 @@ $K wait --for=condition=complete job/bootstrap-ingest --timeout=1800s
 $K logs job/bootstrap-ingest | tail -30
 ```
 
-`INGEST_BUDGET=800` 是**每次运行**的上限；全库约需 1,000–1,500 次请求，
-所以首轮要 **2 晚**跑完（次日 01:20 的 CronJob 会自动跳过已缓存的，只补没查过的）。
-日志里看 `缓存命中` 与 `本次预算已用完` 判断进度。
+`INGEST_BUDGET=800` 是**每次运行**的上限；全库 editions 约需 1,000–1,500 次请求，
+HN 声量再加一批，所以首轮要 **3 晚上下**跑完（次日 01:20 的 CronJob 会自动跳过
+已缓存的，只补没查过的）。日志里看 `缓存命中` 与 `本次预算已用完` 判断进度。
+
+v0.5.0 起有两个行为变化，引导判读要跟着变：
+- **HN 有保底预算**（`MENTIONS_RESERVE`，默认 Budget/4=200）：editions 烧到只剩
+  保底线就让位，所以 **C 维从第一晚就该非 0**（旧版要等 editions 全查完才轮到 HN，
+  timeless 榜前几晚必空）。第一晚过后 C 仍为 0 → 查 HN 匹配/白名单，别干等。
+- **editions 按 pubdate 新→旧**查：新书最先拿到外部证据，fresh-releases 通常
+  第一晚就有候选；最老的书最后补齐。
+兜底告警：`ReadlistCommunityDimEmpty`（C 维为 0 达 3 天）与
+`ReadlistFreshnessEvidenceLost`（F 维为 0 达 24h），见 readlist-alerts.yaml。
 
 看到大量 429 → Google Books key 没生效，回前置检查第 1 条。
 
