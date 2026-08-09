@@ -215,6 +215,39 @@ receivers:
               labels:
                 cluster: oracle-k3s
 
+  # Falco 引擎自身 → homelab Prometheus (cluster=oracle-k3s)。2026-08-10 新增。
+  #
+  # 为什么必须抓：Falco 此前**没有任何健康信号**。它挂掉、规则加载失败、驱动没起来，
+  # 症状都是「Telegram 安静」——而安静在修掉 systemd 误报（同日）之后正是**正常状态**。
+  # 这里真正吃重的其实是抓取本身产生的 `up` 序列：告警靠 up==0 / absent(up)，
+  # 不依赖任何业务计数器有没有增长（Falco 长期零告警是好事，不能当成死亡判据）。
+  # 前置：values/falco.yaml 里 metrics.enabled=true（渲染出 falco-metrics Service）
+  # **且** falco.webserver.prometheus_metrics_enabled=true（只开前者端点不出数据）。
+  prometheus/falco:
+    config:
+      scrape_configs:
+        - job_name: 'falco'
+          scrape_interval: 60s
+          static_configs:
+            - targets: ['falco-metrics.falco.svc.cluster.local:8765']
+              labels:
+                cluster: oracle-k3s
+
+  # falcosidekick → homelab Prometheus。与上面互补：falco job 证明**引擎**活着，
+  # 这个证明**投递链路**通（falcosecurity_falcosidekick_outputs_total{destination="telegram",
+  # status="ok|error"}）。推送失败时 Falco 照常检测、Loki 照常留证，但 Telegram 那头
+  # 什么都收不到——这是最隐蔽的一种失效，只有这个计数器看得见。
+  # 端点无需额外开关：falcosidekick 默认就在 2801 上服务 /metrics（已实测三个指标族）。
+  prometheus/falcosidekick:
+    config:
+      scrape_configs:
+        - job_name: 'falcosidekick'
+          scrape_interval: 60s
+          static_configs:
+            - targets: ['falco-falcosidekick.falco.svc.cluster.local:2801']
+              labels:
+                cluster: oracle-k3s
+
   # kubelet cAdvisor 容器用量 → homelab Prometheus (cluster=oracle-k3s)。
   # 唯一消费者是 KRR（robusta-dev/krr），它只查这两个指标：
   #   container_cpu_usage_seconds_total / container_memory_working_set_bytes
@@ -371,5 +404,13 @@ service:
       exporters: [prometheusremotewrite]
     metrics/readlist:
       receivers: [prometheus/readlist]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheusremotewrite]
+    metrics/falco:
+      receivers: [prometheus/falco]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheusremotewrite]
+    metrics/falcosidekick:
+      receivers: [prometheus/falcosidekick]
       processors: [memory_limiter, resource, batch]
       exporters: [prometheusremotewrite]
