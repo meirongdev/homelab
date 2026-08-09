@@ -59,19 +59,43 @@
 
 ### 5.1 Pod Security Admission（基线地板，永远在线）
 - 内置准入，零运行时开销，**即使 Kyverno 宕也生效**。
-- **下发**：homelab 用 `just harden-psa`（幂等 `kubectl label`，**刻意不走 ArgoCD**——渲染 Namespace 对象的 App 配 prune+selfHeal 有"误同步删 ns + 级联删 PVC"的致命风险）；oracle 在 kustomize 树各 `*/namespace.yaml` 声明。
+- **下发**：homelab 用 `just harden-psa`（幂等 `kubectl label`，**刻意不走 ArgoCD**——渲染 Namespace 对象的 App 配 prune+selfHeal 有"误同步删 ns + 级联删 PVC"的致命风险）；oracle 在 kustomize 树各 `*/namespace.yaml` 声明（**漏写标签由 CI 的 H5 拦**，
+  见 [manifest-safety-checks.md](manifest-safety-checks.md)——但它只看清单里声明的 ns，
+  Helm/`CreateNamespace` 建出来的那些扫不到）。
 - **等级矩阵**：
 
   | enforce | namespace |
   |---------|-----------|
-  | `baseline` | default, vault, personal-services, cloudflare, external-secrets, kyverno（homelab）；argocd, cloudflare, external-dns, homepage, personal-services, rss-system, opencost（oracle） |
-  | `restricted` | jobs-sg（homelab）；databases（oracle，CNPG apps-pg/zitadel-pg 所在地） |
+  | `baseline` | default, vault, personal-services, cloudflare, external-secrets, kyverno（homelab）；argocd, cloudflare, external-dns, homepage, personal-services, rss-system, opencost, **zitadel**（oracle） |
+  | `restricted` | jobs-sg（homelab）；databases（oracle，CNPG **apps-pg** 所在地） |
   | `privileged`（显式豁免, warn/audit 仍记 baseline） | kube-system, monitoring, trivy-system, tetragon, kube-bench, backup（homelab）；monitoring, falco, backup（oracle） |
 
-  ⚠️ `zitadel`（oracle）namespace 清单里**没有 PSA 标签** —— 吃集群默认（privileged，无限制）。
-  收紧前需先验证 ZITADEL 在 baseline 下能正常起（若做，改 `cloud/oracle/manifests/zitadel/namespace.yaml`）。
+  ⚠️ **`zitadel-pg` 不在 `databases` ns**，它在 `zitadel` ns（`cloud/oracle/manifests/zitadel/zitadel-pg-cluster.yaml`）。
+  `databases` 是 2026-08-06 新建的共享库平台，只承载 `apps-pg`；zitadel 的库刻意没并进去。
+  也就是说**身份库吃的是 `zitadel` ns 的档，不是 `databases` 的 restricted**。
 
-- 不做 `restricted`（grafana 跑 root）；PSA 仅在 Pod 创建/更新时评估，不杀已运行 Pod。
+- **`zitadel` ns 的 PSA 缺口已于 2026-08-10 补上**（此前清单里一个标签都没有 → 吃 PSA 内置默认
+  `privileged` 且 warn/audit 全空；实测 server dry-run 一个 hostPID+hostNetwork+privileged+hostPath:/
+  的 Pod 能建成、零 warning）。现为 `enforce: baseline` + `warn/audit: restricted`。
+  **还差一步到 restricted**：chart 渲的 4 个 Pod 缺 `allowPrivilegeEscalation:false` /
+  `capabilities.drop[ALL]` / `seccompProfile`（zitadel-pg 由 CNPG 渲，已达标）。
+  顺序必须是**先补 chart values 再翻 enforce** —— 反过来当下无感，但下次 chart 升级时
+  `zitadel-init`/`zitadel-setup` Job 会被挡在准入外，升级卡在 DB 迁移中途。见 [ROADMAP](../ROADMAP.md) 开放项 #13。
+
+- **收紧前先用 dry-run 问准入自己**（比翻文档/读 values 可靠，PSA 会把现存违规 Pod 全列出来）：
+
+  ```bash
+  kubectl --context oracle-k3s label ns <ns> \
+      pod-security.kubernetes.io/enforce=restricted --overwrite --dry-run=server
+  # 没 warning = 现存 Pod 全过；有则逐条列出 Pod 名与缺的字段
+  ```
+
+  ⚠️ 它只评估**当下存在的** Pod。周期性 Job（如 trivy 的 node-collector 要 hostPath）
+  当时不在，dry-run 干净不等于收紧安全 —— 这也是 `trivy-system` 在 homelab 定 privileged 的原因。
+
+- 不做**全局** `restricted`（monitoring 的 grafana 跑 root）；按 ns 逐个上（已上：jobs-sg、databases）。
+  PSA 仅在 Pod 创建/更新时评估，**不杀已运行 Pod** —— 所以翻标签当下总是"看着没事"，
+  代价要到下一次 Pod 重建（升级/驱逐/重启）才兑现。
 
 ### 5.2 Kyverno（策略即代码，homelab）
 - 拆分 controller 各 `replicas:1`、`backgroundScanInterval:24h`、**所有策略 `failurePolicy:Ignore`（fail-open）** —— 单节点上 fail-closed = Kyverno 没起来时全集群无法调度，与恢复路径冲突。
@@ -286,7 +310,10 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 
 ### 常用核查命令（context: `k3s-homelab`）
 ```bash
-just psa-status                                            # PSA 标签现状
+just psa-status                                            # PSA 标签现状（**仅 homelab**）
+kubectl --context oracle-k3s get ns \
+  -L pod-security.kubernetes.io/enforce,pod-security.kubernetes.io/warn,pod-security.kubernetes.io/audit
+                                                           # oracle 侧：三列全空 = 吃默认 privileged
 kubectl get cpol                                           # Kyverno 策略
 kubectl get polr -A                                        # Kyverno Audit 违规
 kubectl get vulnerabilityreports,exposedsecretreports -A   # Trivy 发现
