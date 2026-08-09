@@ -64,6 +64,28 @@
   **永远返回空**，和"一切正常"长得一模一样；② **只对实际部署镜像 `curl` 过的指标写规则**，
   别照上游源码写——工作区常跑在已发布 tag 前面（v0.1.0 源码有 14 个指标族，镜像只emit 5 个）。
 
+- **Falco 自身健康告警**（`manifests/monitoring/alerts/falco-alerts.yaml`，2026-08-10 新增，5 条）:
+  在此之前 Falco **既没被抓指标也没有任何规则** —— 引擎死、驱动没起来、规则解析失败、
+  falcosidekick 推不动 Telegram，症状都只是「Telegram 安静」。而这原本被一个巧合掩盖着：
+  Falco 每天在刷约 500 条 systemd 误报，「今天有 Falco 消息」实际充当了心跳。
+  同日修掉那条误报（见 `values/falco.yaml`）等于拆掉假心跳，所以这 5 条必须同批落地。
+  指标经 oracle otel 两个 job 抓：`falco`（falco-metrics:8765，需 **同时**开
+  `metrics.enabled` 与 `falco.webserver.prometheus_metrics_enabled`，只开前者端点没数据）
+  与 `falcosidekick`（:2801，默认就有）→ remote-write，`cluster=oracle-k3s`。
+  两条存活（`FalcoDown` critical / `FalcosidekickDown` warning，**分开报**是因为处置不同：
+  后者不影响检测与 Loki 取证，只是没人会被叫醒）+ 一条投递失败（Telegram `status="error"`）
+  + 两条静默失真：`scap_n_drops_total`（内核缓冲丢事件 = 那些 syscall 永不被评估）与
+  `falco_outputs_queue_num_drops_total`（看见了但没送出去）。
+  ⚠️ 三条**踩过/绕过的坑**：① 存活规则一律写成 `up == 0 or absent(up{...})` —— 采集端
+  （OTel Collector）挂掉时序列**整体消失**，`up == 0` 匹配的是空向量、永不触发；
+  ② 两个前缀不可混用：引擎是 `falcosecurity_falco_*`/`falcosecurity_scap_*`，转发器是
+  `falcosecurity_falcosidekick_*`；③ `status="error"` 序列**首次失败后才存在**，
+  「查不到数据」= 正常，存活性不靠这个计数器兜底。
+  上线前逐条在 live Prometheus 上**双向**验过（`absent()` 对存在的序列返回空、对不存在的
+  返回 1；标签选择器确实选得中 —— 选不中的规则和"一切正常"长得一模一样），
+  并用 `promtool check rules` 过了语法（Prometheus 容器是 distroless，无 `sh`，
+  得用 `kubectl exec -i … promtool check rules /dev/stdin` 喂进去）。
+
 ### ⚠️ 告警覆盖 ≠ 抓取覆盖（2026-08-02 核实）
 
 kube-prometheus-stack 的 node-exporter mixin 规则（`NodeMemoryHighUtilization` /

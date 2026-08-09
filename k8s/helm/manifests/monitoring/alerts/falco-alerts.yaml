@@ -1,0 +1,130 @@
+---
+# Falco alerting — "the runtime detector is dead and nobody noticed".
+#
+# Why this file exists (2026-08-10): Falco had **no metrics scraped and no alert rules at
+# all**. If the engine died, the driver failed to load, rules failed to parse, or
+# falcosidekick could not reach Telegram, the only symptom was *silence in the Telegram
+# topic* — and silence was indistinguishable from "nothing happened".
+#
+# That was survivable only by accident: Falco was emitting ~500 false positives/day
+# (host systemd reading /etc/shadow, see k8s/helm/values/falco.yaml), so "there are Falco
+# messages today" was doing the job of a heartbeat. Killing that false positive the same
+# day removed the accidental heartbeat, which is exactly why these rules had to land with
+# it. A detector nobody can tell is dead is not a control, it is a decoration.
+#
+# Metrics path: Falco (falco-metrics:8765, needs BOTH metrics.enabled and
+# falco.webserver.prometheus_metrics_enabled) and falcosidekick (:2801, on by default) are
+# scraped by the oracle OTel Collector (`prometheus/falco` + `prometheus/falcosidekick`
+# receivers in cloud/oracle/manifests/monitoring/otel-collector-config.yaml) and
+# remote-written to the homelab Prometheus with cluster="oracle-k3s". No Prometheus
+# Operator on oracle-k3s → no ServiceMonitor. Falco runs ONLY on oracle (homelab uses
+# Tetragon), so every rule here is scoped to that cluster.
+#
+# ⚠️ Every expression below was checked against live Prometheus **in both directions**
+# before commit — a rule that never fires looks exactly like a healthy system:
+#   · `absent(up{...job="falco"})`                    → empty  (series present = healthy)
+#   · `absent(up{...job="falco-does-not-exist"})`     → 1      (proves absent() fires)
+# The `or absent(...)` half is not decoration: if the OTel Collector stops pushing, the
+# series disappears entirely and `up == 0` can never match — an empty vector is not zero.
+#
+# ⚠️ Metric names are what the DEPLOYED build emits (curl'd off falco-metrics, 63 series),
+# not what upstream docs describe. Note the two prefixes are NOT interchangeable:
+# engine internals are `falcosecurity_falco_*` / `falcosecurity_scap_*`, while the
+# forwarder's are `falcosecurity_falcosidekick_*`.
+#
+# The `release` label is REQUIRED for the kube-prometheus-stack ruleSelector.
+# Deployed via the ArgoCD `monitoring-dashboards` Application (git push → 3-min sync).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: falco-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: falco
+      rules:
+        # (1) THE rule. Engine unreachable or its series gone → runtime detection on
+        # oracle is off. critical because layer 10 of the defence model is simply absent
+        # while this fires, and nothing else in the stack notices.
+        # 10m tolerates a DaemonSet rollout and a node reboot (that node rebooted 4× in
+        # the 4 days before this was written — do not tighten below 10m without checking
+        # that history again).
+        - alert: FalcoDown
+          expr: up{cluster="oracle-k3s", job="falco"} == 0 or absent(up{cluster="oracle-k3s", job="falco"})
+          for: 10m
+          labels:
+            severity: critical
+            cluster: oracle-k3s
+          annotations:
+            summary: "Falco 引擎在 oracle-k3s 上不可达（运行时检测已失效）"
+            description: >-
+              抓取 falco-metrics:8765 失败或该序列整体消失超过 10 分钟。此期间 oracle 上
+              **没有任何运行时威胁检测**（纵深防御第 10 层），Telegram 的安静不代表安全。
+              序列消失还有一种可能是 oracle OTel Collector 挂了，那样 Loki 侧的取证线索
+              也会一并断掉，先查采集端：
+              `kubectl --context oracle-k3s get pods -n falco -n monitoring`。
+              驱动/规则加载失败看 `kubectl --context oracle-k3s logs -n falco ds/falco -c falco`。
+
+        # (2) 引擎活着但投递链路死了。分开报是因为处置完全不同：这条不影响检测与 Loki
+        # 取证，只影响 Telegram 推送——即"事件仍在被记录，但没人会被叫醒"。
+        - alert: FalcosidekickDown
+          expr: up{cluster="oracle-k3s", job="falcosidekick"} == 0 or absent(up{cluster="oracle-k3s", job="falcosidekick"})
+          for: 10m
+          labels:
+            severity: warning
+            cluster: oracle-k3s
+          annotations:
+            summary: "falcosidekick 不可达 —— Falco 告警推不到 Telegram"
+            description: >-
+              falcosidekick:2801 抓取失败超过 10 分钟。Falco 本身照常检测、日志照常进 Loki
+              （`{namespace="falco"}`），但**主动推送这条路断了**。查
+              `kubectl --context oracle-k3s logs -n falco deploy/falco-falcosidekick`。
+
+        # (3) 推送在失败。⚠️ status="error" 这个序列**只有第一次失败之后才存在**，所以
+        # "查不到数据"= 正常，不是规则哑火（存活性由上面两条 up 规则兜底，不靠这个计数器）。
+        # 最典型的成因是 Telegram token 过期/被撤、或 thread id 失效。
+        - alert: FalcoTelegramDeliveryFailing
+          expr: increase(falcosecurity_falcosidekick_outputs_total{cluster="oracle-k3s", destination="telegram", status="error"}[15m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+            cluster: oracle-k3s
+          annotations:
+            summary: "Falco → Telegram 投递失败（15 分钟内 {{ $value | printf \"%.0f\" }} 次）"
+            description: >-
+              falcosidekick 把告警发往 Telegram 时收到错误。告警仍在 Loki 里，但不会有人
+              被通知到。先看 secret `falcosidekick-telegram` 的 token 是否还有效、
+              chatid/thread id 是否仍存在（配置见 k8s/helm/values/falco.yaml）。
+
+        # (4) 内核缓冲区丢事件 = **检测盲区**，且是静默的：Falco 照常运行、照常报别的规则，
+        # 只是丢掉的那些 syscall 永远不会被评估。任何非零增长都值得看一眼，所以阈值是 >0。
+        - alert: FalcoKernelEventDrops
+          expr: increase(falcosecurity_scap_n_drops_total{cluster="oracle-k3s"}[30m]) > 0
+          for: 10m
+          labels:
+            severity: warning
+            cluster: oracle-k3s
+          annotations:
+            summary: "Falco 丢内核事件（30 分钟内 {{ $value | printf \"%.0f\" }} 个）"
+            description: >-
+              scap 环形缓冲区溢出，丢掉的 syscall **不会被任何规则评估** —— 这是检测盲区，
+              不是性能问题的附带损失。常见诱因是节点瞬时高负载或 Falco 被 CPU limit 卡住
+              （当前 limit 1 core）。按 drop 类型细分看
+              `falcosecurity_scap_n_drops_buffer_total{drop=...}`。
+
+        # (5) 事件产生了、却在送出去之前被丢掉（输出队列满）。与 (4) 是不同的失效阶段：
+        # (4) 是没看见，(5) 是看见了但没送出去。同样静默。
+        - alert: FalcoOutputQueueDrops
+          expr: increase(falcosecurity_falco_outputs_queue_num_drops_total{cluster="oracle-k3s"}[30m]) > 0
+          for: 10m
+          labels:
+            severity: warning
+            cluster: oracle-k3s
+          annotations:
+            summary: "Falco 输出队列丢弃告警（30 分钟内 {{ $value | printf \"%.0f\" }} 条）"
+            description: >-
+              规则匹配成功、但告警在输出队列里被丢弃 —— 已发生的检测结果丢失，
+              stdout(Loki) 与 falcosidekick(Telegram) 两条出口都可能缺条目。
+              通常意味着输出端反压（falcosidekick 慢/挂）或告警瞬时暴涨。
