@@ -122,8 +122,42 @@ spec:
           cpu: 25m
           memory: 96Mi
         limits:
-          cpu: 250m
+          # 2026-08-09: 250m → 500m。见下面探针注释:chart **不允许**改
+          # timeoutSeconds(恒为 API 默认 1s),所以让它在争抢时也能 1 秒内答上探针的
+          # 唯一杠杆就是给足 CPU。requests 不动(25m)→ 不占节点可调度额度。
+          cpu: 500m
           memory: 192Mi
+      # ☠️ 2026-08-09:补 startupProbe + 放宽 liveness。zitadel-login 累计重启 27 次,
+      # 其中 08-09 00:33 那半小时内连崩 6 次 —— 全部挤在节点重启之后。
+      # 判据:lastState 是 exitCode **0** / reason=Completed。这不是"正常退出",
+      # 是 Next.js 优雅处理了 liveness 杀进程发来的 SIGTERM(uptime-kuma 那次记的是
+      # 143,因为它不处理 SIGTERM)。**别被 exit 0 骗过去以为应用是自己退的。**
+      # 原配置:无 startupProbe、liveness initialDelaySeconds=0 + periodSeconds=5
+      # × failureThreshold=3 → 容器一起来 15 秒内就可能被杀;而节点重启后整机争抢,
+      # 250m 上限下 Next.js 答不上 1 秒超时的探针。应用本身 "Ready in 2.5s",
+      # 不是启动慢,是探针太急。
+      #
+      # ⚠️ **`timeoutSeconds` 写了也没用**(2026-08-09 用 `helm template` 实测):
+      # chart 9.34.1 的模板只渲染 initialDelaySeconds / periodSeconds /
+      # failureThreshold 三个键,timeoutSeconds **被静默丢弃**,探针恒为 API 默认 1s。
+      # 这是本次最关键的旋钮却拧不动 —— 所以改用「多容忍几次」+「给足 CPU」两条路
+      # 绕过去。要改这段前先 `helm template` 渲一遍确认键真的落地,别照 values 猜。
+      startupProbe:
+        # 存在期间 liveness/readiness 被挂起。45×2s=90s 冷启预算(实测 2.5s,~36x 余量)。
+        enabled: true
+        periodSeconds: 2
+        failureThreshold: 45
+      livenessProbe:
+        # 6×10s=60s 连续失败才杀(原为 3×5s=15s)。节点重启的争抢风暴要持续整整一分钟
+        # 才会误杀,而正常抖动几秒就过去了。
+        enabled: true
+        periodSeconds: 10
+        failureThreshold: 6
+      readinessProbe:
+        # 保持不变:readiness 失败只是摘出 Service,不重启容器,本来就该敏感。
+        enabled: true
+        periodSeconds: 5
+        failureThreshold: 3
       ingress:
         enabled: false
       service:
