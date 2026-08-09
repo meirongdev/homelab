@@ -111,4 +111,10 @@ resources:
 # 三个坑的实测数据都在 docs/reference/jobs-sg.md。
 images:
   - name: ghcr.io/meirongdev/jobs-sg
-    digest: sha256:abc10e64824909a7f1e914534dee3e574e80986f83750569e175dbf364c8ce28
+    # 4af8944 (2026-08-10)：修全量 reconcile 的偏差守卫 —— 它拿全程峰值比逐页
+    # 累加和，把关闭流程整个卡死，导致 11580 条岗位一条没关（2770 条早已过期）。
+    # 本版起 ingest_run 会多写 5 列（jobs_scanned/total_reported/total_min/
+    # total_max/close_skipped），由 store.addedColumns 在写者启动时 ALTER 补上。
+    # ⚠️ 回滚到早于此版的镜像是安全的（多出来的列不会碍着旧代码），但那 5 列
+    # 会停止更新，/metrics 的 reconcile 偏差指标随之消失。
+    digest: sha256:aa071e9eedd4eb3f77eac40637b18ce36d3518ac2a2eb6b27676f9af0509e1e4
