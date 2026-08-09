@@ -36,6 +36,27 @@ customRules:
       condition: and not (k8s.ns.name = "backup" and proc.name = adduser)
       override:
         condition: append
+  # 宿主 systemd 拉起单元时的 NSS/PAM 查表 —— 2026-08-10 加。
+  # 现象：**近 25 小时里 Falco 的全部 135 条告警都是这一条**（同一规则、同一进程、
+  # 全部 Warning，因此全部越过 falcosidekick 的 minimumpriority=warning 推进 Telegram），
+  # 约 21 条/小时 ≈ 500 条/天。真实威胁真来的时候，没人会在这种噪音里看见它。
+  # 判据（都是 live 抓的，不是推断）：
+  #   proc.exepath=/usr/lib/systemd/systemd-executor · proc.pname=systemd · container.id=host
+  #   fd.name 只有 7 个值：/etc/shadow 与 /etc/pam.d/{common-{account,auth,password,session,
+  #   session-noninteractive},other}，每次单元启动成组出现（15 组 × 9 次读 = 135）
+  #   节点侧对得上：fwupd-refresh.timer 每约 43 分钟一次，外加 logrotate / dpkg-db-backup /
+  #   podman-auto-update / motd-news / apt-daily 等 Ubuntu 维护 timer；单元带 User= 时
+  #   systemd-executor 必然要查 NSS/PAM，读这几个文件是它的正常工作。
+  # 为什么上游那一长串 proc.name 白名单接不住它：规则按 **proc.name** 排除，而
+  # systemd-executor 的 comm 是**一个纯数字**（实测 proc.name="9"，cmdline="9 --deserialize 276 …"），
+  # 跟 user_mgmt_binaries / userexec_binaries 里任何名字都不匹配 —— 所以只能按 proc.exepath 排。
+  # 放行面刻意收窄到宿主：container.id=host + 父进程 systemd + 精确 exepath。
+  # 容器里冒充 systemd 读 /etc/shadow **照样告警**（已在部署后用容器内 cat /etc/shadow 复验）。
+  override-host-systemd.yaml: |-
+    - rule: Read sensitive file untrusted
+      condition: and not (container.id = host and proc.pname = systemd and proc.exepath = /usr/lib/systemd/systemd-executor)
+      override:
+        condition: append
 # Falco DaemonSet 资源（oracle 有余量，但仍设上限）
 resources:
   requests:
