@@ -222,6 +222,75 @@ verify-node:
 check-node-drift:
     cd ansible && ansible-playbook --check --diff playbooks/setup-k3s.yaml
 
+# ─── PSA（Pod Security Admission）─────────────────────────────────
+# 本集群的 PSA 标签**绝大多数写在清单里**（manifests/*/namespace.yaml，CI 的 H5 强制），
+# 这里只管**清单管不到的那几个** —— Helm chart / k3s 自建的 ns，仓库里根本没有对应对象。
+# 刻意不为它们补 Namespace 清单：那等于把 ns 交给 ArgoCD prune，正是 2026-08-03
+# 级联删除事故的成因（见 manifests/zitadel/namespace.yaml 文件头）。
+#
+# ⚠️ trivy-system 必须 privileged，别照 dry-run 的干净结果给 baseline：
+# operator ConfigMap 的 nodeCollector.volumes 挂 /var/lib/etcd 等 hostPath，
+# node-collector 是**周期 Job**，dry-run 那一刻不在场——给 baseline 会让它静默扫不了。
+psa_baseline_ns := "default external-secrets cnpg-system"
+psa_privileged_ns := "kube-system trivy-system"
+
+# 给清单外的 ns 打 PSA 标签（幂等）
+harden-psa:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "▶ enforce=baseline (+ warn/audit=baseline)"
+    for ns in {{psa_baseline_ns}}; do
+        kubectl --context {{ctx}} get ns "$ns" >/dev/null 2>&1 || { echo "  ⏭ $ns 不存在，跳过"; continue; }
+        kubectl --context {{ctx}} label namespace "$ns" \
+            pod-security.kubernetes.io/enforce=baseline \
+            pod-security.kubernetes.io/enforce-version=latest \
+            pod-security.kubernetes.io/warn=baseline \
+            pod-security.kubernetes.io/warn-version=latest \
+            pod-security.kubernetes.io/audit=baseline \
+            pod-security.kubernetes.io/audit-version=latest \
+            --overwrite
+    done
+    echo "▶ enforce=privileged (显式豁免, warn/audit 仍记 baseline)"
+    for ns in {{psa_privileged_ns}}; do
+        kubectl --context {{ctx}} get ns "$ns" >/dev/null 2>&1 || { echo "  ⏭ $ns 不存在，跳过"; continue; }
+        kubectl --context {{ctx}} label namespace "$ns" \
+            pod-security.kubernetes.io/enforce=privileged \
+            pod-security.kubernetes.io/warn=baseline \
+            pod-security.kubernetes.io/warn-version=latest \
+            pod-security.kubernetes.io/audit=baseline \
+            pod-security.kubernetes.io/audit-version=latest \
+            --overwrite
+    done
+    echo ""
+    echo "✅ 清单外 ns 的 PSA 标签已应用。清单内的由 ArgoCD 同步（改 manifests/*/namespace.yaml）"
+
+# PSA 漂移检查：跑着 Pod 却没有 enforce 标签的 ns → 非零退出（判据与 homelab 侧同）
+psa-check:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    bad=0
+    for ns in $(kubectl --context {{ctx}} get ns -L pod-security.kubernetes.io/enforce --no-headers | awk 'NF<4 {print $1}'); do
+        n=$(kubectl --context {{ctx}} get pods -n "$ns" --no-headers 2>/dev/null | grep -c . || true)
+        if [ "${n:-0}" -gt 0 ]; then
+            echo "  ❌ $ns —— 无 enforce 标签却跑着 $n 个 Pod（静默吃默认 privileged，且无 warn/audit）"
+            bad=$((bad+1))
+        else
+            echo "  ·  $ns —— 无标签，但也没有 Pod，忽略"
+        fi
+    done
+    if [ "$bad" -gt 0 ]; then
+        echo ""
+        echo "❌ $bad 个 namespace 存在 PSA 漂移。修法二选一："
+        echo "   · ns 由清单创建 → 改 manifests/<app>/namespace.yaml（CI 的 H5 会盯着）"
+        echo "   · ns 由 Helm/k3s 创建 → 加进本 justfile 的 psa_* 列表再跑 just harden-psa"
+        exit 1
+    fi
+    echo "✅ 所有跑着 Pod 的 namespace 都有 PSA enforce 标签"
+
+# PSA 标签现状
+psa-status:
+    @kubectl --context {{ctx}} get ns -L pod-security.kubernetes.io/enforce,pod-security.kubernetes.io/warn,pod-security.kubernetes.io/audit
+
 # Show cluster status
 status:
     @echo "=== Pods ==="

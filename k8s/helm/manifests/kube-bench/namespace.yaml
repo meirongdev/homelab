@@ -25,6 +25,15 @@ metadata:
   name: kube-bench
   labels:
     # kube-bench 需 hostPID + hostPath 检视节点 → 显式 privileged 豁免
+    # warn/audit 仍记 baseline（2026-08-10 从 privileged 改回）：三档全 privileged 等于
+    # **连审计线索都没有**，与 monitoring/falco/backup 的口径相反，也和 security.md 矩阵里
+    # 「privileged（显式豁免, warn/audit 仍记 baseline）」那句直接矛盾。
+    # 代价是每周那个 Job 会打一条已知的 baseline warning —— 换来的是**新混进来的**特权 Pod
+    # 能被看见，monitoring/falco 早就在付同样的代价。
+    # ⚠️ 本 ns 的标签**只有这个文件说了算**：ArgoCD selfHeal 会盖掉 `just harden-psa` 打的，
+    # 所以 kube-bench 已于同日从 psa_privileged_ns 列表移除，避免两个写者抢同一组标签。
     pod-security.kubernetes.io/enforce: privileged
-    pod-security.kubernetes.io/warn: privileged
-    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: baseline
+    pod-security.kubernetes.io/warn-version: latest
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/audit-version: latest

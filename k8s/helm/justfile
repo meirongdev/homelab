@@ -454,7 +454,7 @@ homelab-recover:
     set -euo pipefail
     ctx="{{ctx}}"
 
-    echo "▶ [1/5] Vault: wait for pod + API, then unseal only if sealed..."
+    echo "▶ [1/4] Vault: wait for pod + API, then unseal only if sealed..."
     # keys file must be reachable (just runs recipes from k8s/helm, so relative path is fine)
     [ -f vault-keys.json ] || { echo "  ❌ vault-keys.json not found in $(pwd) — run from k8s/helm/"; exit 1; }
 
@@ -493,7 +493,7 @@ homelab-recover:
         echo "  ❌ Vault API never became reachable after 150s — aborting (check: kubectl logs vault-0 -n {{vault_ns}})"; exit 1
     fi
 
-    echo "▶ [2/5] checking ClusterSecretStore validation..."
+    echo "▶ [2/4] checking ClusterSecretStore validation..."
     if kubectl --context "$ctx" get clustersecretstore vault-backend -o jsonpath='{.status.conditions[0].status}' 2>/dev/null | grep -q "False"; then
         echo "  ClusterSecretStore is invalid, restarting ESO"
         kubectl --context "$ctx" rollout restart deployment external-secrets -n external-secrets
@@ -503,7 +503,7 @@ homelab-recover:
         echo "  ✓ ClusterSecretStore already valid"
     fi
 
-    echo "▶ [3/5] re-applying CoreDNS public upstreams (k3s addon reverts forward to MagicDNS-tainted /etc/resolv.conf on restart; Tailscale MagicDNS can't resolve public names)..."
+    echo "▶ [3/4] re-applying CoreDNS public upstreams (k3s addon reverts forward to MagicDNS-tainted /etc/resolv.conf on restart; Tailscale MagicDNS can't resolve public names)..."
     cf=$(kubectl --context "$ctx" -n kube-system get configmap coredns -o jsonpath='{.data.Corefile}')
     newcf=$(printf '%s' "$cf" | sed 's|forward \. .*|forward . 1.1.1.1 8.8.8.8|')
     if [ "$cf" != "$newcf" ]; then
@@ -515,12 +515,12 @@ homelab-recover:
         echo "  ✓ CoreDNS forward already public"
     fi
 
-    echo "▶ [4/5] restarting argocd-repo-server (defensive — first sync after VM reboot tends to hang on DNS)..."
-    kubectl --context "$ctx" rollout restart deployment/argocd-repo-server -n {{argocd_ns}}
-    kubectl --context "$ctx" rollout status deployment/argocd-repo-server -n {{argocd_ns}} --timeout=90s
-    echo "  ✓ argocd-repo-server restarted"
-
-    echo "▶ [5/5] waiting for ExternalSecrets to converge..."
+    # ☠️ 原 [4/5] 是 `rollout restart deployment/argocd-repo-server -n argocd`——**这条早就必炸**：
+    # ArgoCD 控制面 2026-08-02 迁去 oracle-k3s，homelab 侧连 argocd namespace 都没有了，
+    # kubectl 报 NotFound → `set -euo pipefail` → 整个 recover 在这里中止，
+    # 后面的 ExternalSecrets 收敛等待**根本跑不到**。2026-08-10 删除该步并重新编号。
+    # （homelab 重启不会动到 oracle 上的 repo-server，本就不该在这条恢复路径里。）
+    echo "▶ [4/4] waiting for ExternalSecrets to converge..."
     # kubectl get externalsecret columns: NAMESPACE NAME STORETYPE STORE REFRESH STATUS READY
     for i in $(seq 1 12); do
         bad=$(kubectl --context "$ctx" get externalsecret -A --no-headers 2>/dev/null | awk '$6!="SecretSynced"' | wc -l | tr -d ' ')
@@ -564,16 +564,28 @@ homelab-recover:
 # 注：PSA 仅在 Pod 创建/更新时评估，不影响已运行的 Pod；不在本阶段尝试 restricted（grafana 跑 root）。
 # （zitadel/kopia ns 已随迁移/退役删除，2026-07-12 从名单移除；backup ns 未实测特权情况，暂未纳入）
 # argocd 已于 2026-08-02 从本集群退役（控制面迁 oracle-k3s），故不在列表内。
-psa_baseline_ns := "default vault personal-services cloudflare external-secrets kyverno"
+#
+# ⚠️ 本列表是**命令式**下发，有两个已经咬过人的失效模式（2026-08-10 各修一次）：
+#   1. 标签不跟着 ns 重建复活 —— personal-services 在 08-03 那次 prune 级联里被删了又重建，
+#      列表里明明有它、文档也写着 baseline，live 却是空的，一直到 08-10 才被查出来。
+#   2. 新建 ns 不会自己进列表 —— external-dns(21d)/opencost(10d) 建好后没人回来加，
+#      于是静默吃 PSA 内置默认 privileged（还没有 warn/audit）。
+# 所以有了 `just psa-check`：跑着 Pod 却没标签的 ns 直接报错。改完列表跑 harden-psa。
+psa_baseline_ns := "default vault personal-services cloudflare external-secrets kyverno external-dns opencost"
 # trivy-system 保守标 privileged：扫描 Job 的 securityContext 由 operator 动态生成、不完全可控，
 # 先不冒险 enforce baseline；warn/audit=baseline 会显示它是否其实合规，确认后可改 baseline。
-psa_privileged_ns := "kube-system monitoring trivy-system tetragon kube-bench"
+# （已复核 2026-08-10：operator ConfigMap 的 nodeCollector.volumes 挂 /var/lib/etcd 等 hostPath，
+#  node-collector 是周期 Job —— 那份 clusterinfraassessmentreport 就是它产的，privileged 是对的。）
+# kube-bench **刻意不在列表里**：它的 ns 由清单声明（k8s/helm/manifests/kube-bench/namespace.yaml，
+# ArgoCD selfHeal 会盖掉这里打的标签），两个写者抢同一组标签只会让人误判现状。清单归清单，CI 的 H5 盯着。
+psa_privileged_ns := "kube-system monitoring trivy-system tetragon"
 
 harden-psa:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "▶ 应用 namespace → enforce=baseline (+ warn/audit=baseline)"
     for ns in {{psa_baseline_ns}}; do
+        kubectl --context {{ctx}} get ns "$ns" >/dev/null 2>&1 || { echo "  ⏭ $ns 不存在，跳过"; continue; }
         kubectl --context {{ctx}} label namespace "$ns" \
             pod-security.kubernetes.io/enforce=baseline \
             pod-security.kubernetes.io/enforce-version=latest \
@@ -585,6 +597,7 @@ harden-psa:
     done
     echo "▶ 系统 namespace → enforce=privileged (显式豁免, warn/audit 仍记 baseline)"
     for ns in {{psa_privileged_ns}}; do
+        kubectl --context {{ctx}} get ns "$ns" >/dev/null 2>&1 || { echo "  ⏭ $ns 不存在，跳过"; continue; }
         kubectl --context {{ctx}} label namespace "$ns" \
             pod-security.kubernetes.io/enforce=privileged \
             pod-security.kubernetes.io/warn=baseline \
@@ -600,3 +613,29 @@ harden-psa:
 psa-status:
     @echo "=== Namespace PSA enforce/warn 等级 ==="
     @kubectl --context {{ctx}} get ns -L pod-security.kubernetes.io/enforce,pod-security.kubernetes.io/warn
+
+# PSA 漂移检查：**跑着 Pod 却没有 enforce 标签**的 ns → 非零退出
+# 无标签 ≠ 没定级，是定成了最宽的那档（内置默认 privileged，且 warn/audit 一并为空）。
+# 判据刻意用「有没有 Pod」而不是维护一份系统 ns 白名单：kube-public / kube-node-lease /
+# cilium-secrets 天生不跑 Pod，报它们就是误报，而**误报会让整个检查被无视**（同 H1-H5 的设计原则）。
+psa-check:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    bad=0
+    for ns in $(kubectl --context {{ctx}} get ns -L pod-security.kubernetes.io/enforce --no-headers | awk 'NF<4 {print $1}'); do
+        n=$(kubectl --context {{ctx}} get pods -n "$ns" --no-headers 2>/dev/null | grep -c . || true)
+        if [ "${n:-0}" -gt 0 ]; then
+            echo "  ❌ $ns —— 无 enforce 标签却跑着 $n 个 Pod（静默吃默认 privileged，且无 warn/audit）"
+            bad=$((bad+1))
+        else
+            echo "  ·  $ns —— 无标签，但也没有 Pod，忽略"
+        fi
+    done
+    if [ "$bad" -gt 0 ]; then
+        echo ""
+        echo "❌ $bad 个 namespace 存在 PSA 漂移。修法二选一："
+        echo "   · ns 由清单创建 → 改它的 namespace.yaml（CI 的 H5 会盯着）"
+        echo "   · ns 由 Helm/k3s 创建 → 加进 psa_baseline_ns / psa_privileged_ns 再跑 just harden-psa"
+        exit 1
+    fi
+    echo "✅ 所有跑着 Pod 的 namespace 都有 PSA enforce 标签"
