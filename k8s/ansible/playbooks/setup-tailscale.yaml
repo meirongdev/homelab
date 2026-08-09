@@ -60,6 +60,58 @@
         state: started
         daemon_reload: true
 
+    # --- Cilium identity-mark ↔ Tailscale fwmark 位段冲突（2026-08-09 定性）---
+    # ☠️ 症状：**某一个 pod** 到整个 100.64/10 全超时（连关闭端口也不回 RST），
+    # 同节点其它 pod 全部正常。抓包显示它的包从 eth0 出去 SNAT 成 10.10.10.10，
+    # 而正常 pod 从 tailscale0 出去 SNAT 成 100.94.186.7 —— CGNAT 地址被扔进 LAN
+    # 默认网关，出公网即死。
+    #
+    # 根因：**Cilium 把 endpoint 的安全身份编码进 skb->mark 的高位**
+    # （mark 高 16 位 = identity）。而上面 `--netfilter-mode=off` 只让 Tailscale
+    # 不装 iptables/nft 规则，**它照样装 ip rule** —— 那三条
+    # `from all fwmark 0x80000/0xff0000 lookup main|default|unreachable`
+    # 检查的正是 mark 的 bit16-23，即 `identity & 0xFF == 0x08`。
+    # 于是**任何 identity 低字节恰为 0x08 的 pod**，出向流量都在 5210 处被劫持进
+    # main 表，绕过了 5270（`lookup 52` = tailscale0）。这是 **1/256 的抽签**，
+    # identity 由标签算出，任何 pod 改一次标签都可能中招。
+    #
+    # 实测证据链（A/B/A）：monitoring/alertmanager identity=108040，
+    # 108040 & 0xFF = 8 → 全 100.64/10 不可达；给 pod 加一个无关标签使
+    # identity 变 95821（低字节 77）→ 立刻通；撤掉标签回到 108040 → 立刻又断。
+    # 全集群扫描：当时只有它一个真实负载的低字节是 0x08，也只有它坏。
+    #
+    # 为什么这样修：本节点 netfilter-mode=off，**没有任何东西会合法地设置 0x80000**
+    # （已核：nft / iptables-nft / iptables-legacy 三处含 0x80000 的规则均为 0 条），
+    # 所以 5210-5250 在这里只会因位段碰撞而误伤，不承担真实的防环职责。
+    # 把 100.64/10 在 5200（早于 5210）钉死到 table 52，对所有 pod 一次性免疫。
+    # 形状与上面 5260 那条完全一致。
+    # ⚠️ 别改成"给 alertmanager 换标签"：那只躲开这一次抽签，下一个中签的 pod 照样断。
+    - name: Install tailscale-cgnat-route systemd unit (immune to Cilium identity-mark collision)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/tailscale-cgnat-route.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Pin 100.64.0.0/10 (Tailscale CGNAT) to table 52, bypassing Tailscale's fwmark rules that collide with Cilium's identity mark
+          After=tailscaled.service network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/bin/sh -c "ip rule del to 100.64.0.0/10 lookup 52 priority 5200 2>/dev/null; ip rule add to 100.64.0.0/10 lookup 52 priority 5200"
+          ExecStop=/bin/sh -c "ip rule del to 100.64.0.0/10 lookup 52 priority 5200 2>/dev/null || true"
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start tailscale-cgnat-route unit
+      ansible.builtin.systemd:
+        name: tailscale-cgnat-route.service
+        enabled: true
+        state: started
+        daemon_reload: true
+
     # --- Tailscale/CNI recursion guard (2026-07-07) ---
     # tailscaled advertises ALL local addresses as candidate WireGuard endpoints,
     # including Cilium's cilium_host IP. The peer cluster's node can then "reach"

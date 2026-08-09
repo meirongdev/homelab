@@ -41,3 +41,42 @@
         name: firewalld
         state: reloaded
       when: fw_in.changed or fw_out.changed
+
+    # --- Cilium identity-mark ↔ Tailscale fwmark 位段冲突（2026-08-09）---
+    # 与 homelab 那条同因同治，全文根因见
+    # k8s/ansible/playbooks/setup-tailscale.yaml 里的长注释。摘要：
+    # Cilium 把 endpoint 身份编码进 skb->mark 高位；Tailscale 即使
+    # `--netfilter-mode=off`（不装 iptables/nft）**仍会装 ip rule**，那三条
+    # `fwmark 0x80000/0xff0000` 检查的正是 mark bit16-23 = `identity & 0xFF == 0x08`
+    # → 中签的 pod 出向被劫持进 main 表、绕过 table 52(tailscale0)、CGNAT 包
+    # 被扔进默认网关而黑洞。1/256 抽签，改标签就可能中。
+    #
+    # ⚠️ oracle 目前**还没中签**（2026-08-09 扫 52 个 endpoint，低字节 0x08 的只有
+    # 保留身份 8，无真实负载），但规则集与 homelab 完全一致 —— 即同样暴露，
+    # 只是运气好。中签的后果不小：oracle 的 otel-collector remote-write 与 krr 都
+    # 靠 100.94.186.7 打回 homelab，一断就是跨集群遥测停摆。故预防性一并钉死。
+    - name: Install tailscale-cgnat-route systemd unit (immune to Cilium identity-mark collision)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/tailscale-cgnat-route.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Pin 100.64.0.0/10 (Tailscale CGNAT) to table 52, bypassing Tailscale's fwmark rules that collide with Cilium's identity mark
+          After=tailscaled.service network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/bin/sh -c "ip rule del to 100.64.0.0/10 lookup 52 priority 5200 2>/dev/null; ip rule add to 100.64.0.0/10 lookup 52 priority 5200"
+          ExecStop=/bin/sh -c "ip rule del to 100.64.0.0/10 lookup 52 priority 5200 2>/dev/null || true"
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start tailscale-cgnat-route unit
+      ansible.builtin.systemd:
+        name: tailscale-cgnat-route.service
+        enabled: true
+        state: started
+        daemon_reload: true
