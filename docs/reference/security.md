@@ -280,6 +280,16 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 - **oracle → Falco + Falcosidekick → Telegram**（`values/falco.yaml`，ns `falco`，Helm App 部署到 oracle 集群）。规则库开箱即用；oracle VM CPU 余量大。`driver: modern_ebpf`(CO-RE 无需内核模块)。**双出口**：① Falco JSON→stdout→OTel→Loki（always-on，零依赖）；② Falcosidekick→Telegram（原生 output，warning+，併入群 MatthewDaily「🚨 Homelab 告警」话题——2026-07 前曾经 Gotify 转发，已随其下线迁移，见 `decisions/alerting-telegram-migration.md`）。
   - **Telegram 推送前置（一次性）**：token 走 Vault `secret/homelab/telegram`（与 homelab Alertmanager 共用同一个 bot，跨集群读取）→ ESO(`cloud/oracle/manifests/falco/falcosidekick-secret.yaml`)生成 `falcosidekick-telegram` secret(key `TELEGRAM_TOKEN`)；chatid/messagethreadid 明文配在 `values/falco.yaml`。token 未配好不影响 Falco→Loki 检测，只是 falcosidekick 推送失败。
   - falco ns（含 PSA privileged 标签 + ESO secret）由 oracle-k3s kustomize App 拥有；Falco 工作负载由独立 `falco` Helm App 部署（`CreateNamespace=false`）。
+  - **⚠️ 规则误报会吃掉整条通道**：2026-08-10 复核发现，近 25 小时 Falco 的**全部 135 条告警
+    都是同一条误报**（`Read sensitive file untrusted`，宿主 systemd 拉起带 `User=` 的单元时
+    查 NSS/PAM 读 `/etc/shadow` + `/etc/pam.d/*`），约 500 条/天全部推进 Telegram。
+    上游那串 `proc.name` 白名单接不住它，因为 `systemd-executor` 的 comm 是**一个纯数字**
+    （实测 `proc.name="9"`）—— 只能按 `proc.exepath` 排除，见 `values/falco.yaml` 的 override。
+  - **自身健康告警（2026-08-10 补齐，5 条）**：在此之前 Falco **没有任何指标被抓、没有任何规则**，
+    死了也没人知道；而上面那条误报恰好在**冒充心跳**（「今天有 Falco 消息」）。修误报等于拆心跳，
+    所以同批接入了 `falco`(falco-metrics:8765) 与 `falcosidekick`(:2801) 两个 otel 抓取 job
+    → homelab Prometheus，规则见 [observability-alerting-slo.md](observability-alerting-slo.md)
+    与 `manifests/monitoring/alerts/falco-alerts.yaml`。
   - **⚠️ falco 依赖 inotify**：oracle 节点必须 `fs.inotify.max_user_instances=8192`（Ubuntu 默认 128 会被占满，falco 启动即 `could not initialize inotify handler` CrashLoop——2026-07-12 发现时已崩 23 天/2000+ 次重启；sysctl 已固化于 `cloud/oracle/ansible/playbooks/setup-k3s.yaml`）。教训：期间 `KubePodCrashLooping`(warning) 一直在触发但淹没在噪音里——**长期 Progressing/慢性 warning 需要人定期扫一眼兜底**。
 
 ## 9. 安全可观测与告警
