@@ -46,5 +46,6 @@ spec:
       allowedRoutes:
         namespaces:
           from: All
-# auth.meirong.dev (ZITADEL) + notify.meirong.dev (Gotify) 路由已随其迁移到 oracle-k3s 移除
-# （2026-07-06，见 cloud/oracle/manifests/base/gateway.yaml）。
+# auth.meirong.dev (ZITADEL) 路由已随其迁移到 oracle-k3s 移除（2026-07-06）；
+# notify.meirong.dev (Gotify) 已彻底退役（2026-07，见 docs/decisions/alerting-telegram-migration.md）。
+# 都在 cloud/oracle/manifests/base/gateway.yaml。
