@@ -66,7 +66,22 @@ spec:
           for: 30m
           labels: { severity: warning }
           annotations:
-            summary: jobs-sg 抓取已停滞 >36h 或指标整体消失（增量与 reconcile 都没成功）—— 可能静默失效
+            summary: jobs-sg >36h 没有一次**干净**成功（增量与 reconcile 都没有）—— 可能静默失效，也可能只是某轮被标 partial
+            # ⚠️ 措辞别改回"抓取已停滞"（2026-08-09 修）。这条烧起来有**两种**成因，
+            # 而旧措辞只描述了其中一种，会把人引去查错方向：
+            #   ① 真停摆：CronJob 没跑 / panic / 指标整体消失 —— 查 Job 与 pod 日志。
+            #   ② 跑了但被标 partial：`last_success` 只在干净结束时才写，任何
+            #      `errors>0` 都不写 —— **数据其实是新的**。
+            # 2026-08-09 实测的就是 ②：08-08 18:15Z 那轮 full_reconcile 跑满
+            # 856 页、scanned 85487、new 81、updated 8977（数据完全刷新了），
+            # 只因偏差守卫 `dev=4.5% > 2%`（seen 85487 / total 89531）拒绝关闭
+            # 那 4044 个未见岗位 → errors=1 → status=partial → 不写 last_success
+            # → 停在上一轮(42h 前)→ 击穿 36h。下一轮增量成功即自愈，
+            # 所以历史上它总是烧 5~8h 就消失（08-05 烧 8.5h、08-09 烧 5.4h）。
+            # ⚠️ 别为了消音把 36h 放宽：一个 partial 之夜会把间隔顶到 48h，要吞下它
+            # 得放到 >48h，那等于把"这条最重要的告警"的探测延迟翻倍。②
+            # 反复出现是**上游 jobs-sg 应用**的事（扫描为何少见 4.5%），
+            # 且已有 JobsSgReconcileStale(10d) 专门盯 reconcile 长期失败，不必在此重复。
         # ☠️ 2026-08-08 修**结构性哑火**：原表达式只有 `time() - <series>`，而
         # `kind="full_reconcile"` 这条 series 在「reconcile 一次都没成功过」时
         # **根本不存在** —— `time() - <no data>` 算不出结果，于是这条告警在它最
