@@ -58,7 +58,9 @@ oracle 用牌价而非 0：看板的价值是「工作负载该放哪个集群�
 > 的余量确实少了一半。缩容始末见
 > [runbooks/oracle-k3s-shape-downsize.md](../runbooks/oracle-k3s-shape-downsize.md)。
 
-> ⚠️ 当前 homelab 单价是**占位推导值**（假设整机 45W），尚未用实测功耗校准。
+> ⚠️ 当前 homelab 单价是**占位推导值**（按整机 45W 估算，偏保守）。2026-08-09 已实测空闲功耗：
+> CPU RAPL ~5W + iGPU ~4W + 外设/风扇 ~15–20W ≈ **整机空闲 ~25W**（满载会更高）。
+> 功耗/散热细节见 [homelab-host-power-thermal.md](homelab-host-power-thermal.md)。
 > 校准步骤见下方「运维操作」。
 
 ### 指标语义（写 PromQL 前必读）
@@ -142,6 +144,10 @@ oracle 的这两个指标由 otel `prometheus/cadvisor` receiver 提供（见
 ## 运维操作
 
 ### 校准 homelab 定价（首次上线后 / 硬件变更后）
+
+> ⚠️ 2026-08-09 确认：下方查询当前**查不到数据**——proxmox 的 node_exporter 未开 RAPL
+> collector，Prometheus 里没有 `node_rapl_package_joules_total{cluster="homelab"}`。
+> 要跑通校准，先给 proxmox 的 node_exporter 加 `--collector.rapl`。
 
 ```bash
 # 1. 取近 7 天 RAPL 实测功耗（CPU package + DRAM）
