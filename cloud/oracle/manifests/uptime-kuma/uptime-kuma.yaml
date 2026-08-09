@@ -114,7 +114,14 @@ spec:
               cpu: 20m
               memory: 128Mi
             limits:
-              cpu: 200m
+              # 2026-08-09: 200m → 500m。稳态只用 21m，抬上限纯粹是为**冷启**：
+              # 200m = 单核 20%，实测 Node 的 "Loading modules" 一步就耗 25s
+              # （16:04:35→16:05:00），把冷启整体拖到 39s 才 listening，正是探针
+              # 误杀的土壤。requests 不动（20m）→ 不占节点可调度额度（当前 76%），
+              # 只抬 limits 的超卖比（1111%→约 1128%），代价可忽略。
+              # ⚠️ oracle 侧没有 cadvisor 节流指标（container_cpu_cfs_throttled_*
+              # 只在 homelab 有 37 条序列），所以这条是按日志时序推断、非实测节流率。
+              cpu: 500m
               memory: 256Mi
           env:
             # Oracle Cloud VMs have no IPv6 internet. Cloudflare domains return AAAA
@@ -125,18 +132,40 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /app/data
+          # ⚠️ startupProbe 不是可有可无（2026-08-09 定性，别删）：
+          # 4 天 11 次重启**全是探针自杀，不是应用崩溃**。判据链：
+          #   ① lastState.exitCode = 143（SIGTERM，kubelet 杀的；OOM 会是 137）
+          #   ② 容器存活恰好 50s（startedAt 16:03:34 → finishedAt 16:04:24）
+          #   ③ 原 liveness = initialDelaySeconds:30 + periodSeconds:10
+          #      × failureThreshold:3(默认) ≈ 50s 处开杀 —— 与 ② 完全吻合
+          #   ④ 而下一个容器的日志显示端口 **39s 才 listening**
+          #      （16:04:26 Env:production → 16:05:05 Listening on :3001）
+          # 即冷启比开杀时刻只早 11s，节点稍有争抢就必被杀 → 反复重启 →
+          # 网关 503 no healthy upstream → Alertmanager 的 watchdog 心跳失败 →
+          # 误报 AlertmanagerFailedToSendAlerts(critical)。
+          # startupProbe 存在期间 liveness/readiness 被**挂起**，故两者不再需要
+          # initialDelaySeconds（已删，留着只会让人误以为还有第二道延迟）。
+          startupProbe:
+            httpGet:
+              path: /
+              port: 3001
+            periodSeconds: 5
+            failureThreshold: 30   # 30 × 5s = 150s 冷启预算（实测 39s，留 ~4x 余量）
+            timeoutSeconds: 3
           livenessProbe:
             httpGet:
               path: /
               port: 3001
-            initialDelaySeconds: 30
             periodSeconds: 10
+            # ⚠️ timeoutSeconds 不写就是 **1s**（API 默认）——对 Node SPA 在 CPU
+            # 受限的 arm64 上不现实，正是让探针连续失败的第二个诱因。显式放到 5s。
+            timeoutSeconds: 5
           readinessProbe:
             httpGet:
               path: /
               port: 3001
-            initialDelaySeconds: 10
             periodSeconds: 5
+            timeoutSeconds: 3
       # ⚠️ push-shim(nginx POST→GET 边车)已于 2026-08-05 随 v2 升级一并删除。
       # 它存在的唯一理由是 v1 的推送端点是 `router.get("/api/push/:token")`、只收 GET，
       # 而 Alertmanager 的 webhook 只会 POST。v2 改成了 `router.all(...)`
