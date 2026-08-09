@@ -59,16 +59,33 @@
 
 ### 5.1 Pod Security Admission（基线地板，永远在线）
 - 内置准入，零运行时开销，**即使 Kyverno 宕也生效**。
-- **下发**：homelab 用 `just harden-psa`（幂等 `kubectl label`，**刻意不走 ArgoCD**——渲染 Namespace 对象的 App 配 prune+selfHeal 有"误同步删 ns + 级联删 PVC"的致命风险）；oracle 在 kustomize 树各 `*/namespace.yaml` 声明（**漏写标签由 CI 的 H5 拦**，
-  见 [manifest-safety-checks.md](manifest-safety-checks.md)——但它只看清单里声明的 ns，
-  Helm/`CreateNamespace` 建出来的那些扫不到）。
-- **等级矩阵**：
+- **下发有两条路，按「ns 是谁建的」分**（2026-08-10 理清并各自补齐）：
+
+  | ns 由谁创建 | 谁打标签 | 兜底 |
+  |---|---|---|
+  | 仓库清单（`*/namespace.yaml`） | ArgoCD 同步该文件 | **CI 的 H5**：清单里的 Namespace 漏写等级直接失败 |
+  | Helm chart / k3s 自建（`kube-system`、`external-secrets`、`cnpg-system`、`trivy-system`、`default`…） | `just harden-psa`（两集群各一份列表：`k8s/helm/justfile` 与 `cloud/oracle/justfile`） | **`just psa-check`**：跑着 Pod 却没标签的 ns → 非零退出 |
+
+  **刻意不给第二类补 Namespace 清单**：那等于把 ns 交给 ArgoCD prune，正是 2026-08-03
+  级联删除事故的成因（渲染 Namespace 的 App 配 prune+selfHeal → 误同步删 ns → 连带删光 PVC）。
+  代价是命令式标签**不跟着 ns 重建复活**——`personal-services` 就是这么丢的（08-03 被级联删掉后
+  重建，列表里明明有它，live 却空了近一周），`psa-check` 就是为这个失效模式加的哨兵。
+  ⚠️ 一个 ns 只能有一个写者：`kube-bench` 的标签归清单管，故已从 `psa_privileged_ns` 移除。
+
+- **等级矩阵**（2026-08-10 全量核对过 live，两集群一致）：
 
   | enforce | namespace |
   |---------|-----------|
-  | `baseline` | default, vault, personal-services, cloudflare, external-secrets, kyverno（homelab）；argocd, cloudflare, external-dns, homepage, personal-services, rss-system, opencost, **zitadel**（oracle） |
+  | `baseline` | default, vault, personal-services, cloudflare, external-secrets, kyverno, external-dns, opencost（homelab）；argocd, cloudflare, external-dns, homepage, personal-services, rss-system, opencost, zitadel, default, external-secrets, cnpg-system（oracle） |
   | `restricted` | jobs-sg（homelab）；databases（oracle，CNPG **apps-pg** 所在地） |
-  | `privileged`（显式豁免, warn/audit 仍记 baseline） | kube-system, monitoring, trivy-system, tetragon, kube-bench, backup（homelab）；monitoring, falco, backup（oracle） |
+  | `privileged`（显式豁免, warn/audit 仍记 baseline） | kube-system, monitoring, trivy-system, tetragon, kube-bench, backup（homelab）；kube-system, monitoring, trivy-system, falco, backup（oracle） |
+
+  只剩 `cilium-secrets` / `kube-node-lease` / `kube-public` 三个无标签——它们**天生不跑 Pod**，
+  `psa-check` 据此放行（判据用「有没有 Pod」而不是维护系统 ns 白名单，白名单会漂）。
+
+  ⚠️ `trivy-system` 两集群都是 `privileged`，**别照 dry-run 的干净结果降成 baseline**：
+  operator 的 `nodeCollector.volumes` 挂 `/var/lib/etcd` 等 hostPath，而 node-collector 是
+  周期 Job，dry-run 那一刻不在场；降档的症状是基础设施合规扫描**静默停更**。
 
   ⚠️ **`zitadel-pg` 不在 `databases` ns**，它在 `zitadel` ns（`cloud/oracle/manifests/zitadel/zitadel-pg-cluster.yaml`）。
   `databases` 是 2026-08-06 新建的共享库平台，只承载 `apps-pg`；zitadel 的库刻意没并进去。
@@ -310,10 +327,9 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 
 ### 常用核查命令（context: `k3s-homelab`）
 ```bash
-just psa-status                                            # PSA 标签现状（**仅 homelab**）
-kubectl --context oracle-k3s get ns \
-  -L pod-security.kubernetes.io/enforce,pod-security.kubernetes.io/warn,pod-security.kubernetes.io/audit
-                                                           # oracle 侧：三列全空 = 吃默认 privileged
+just psa-status                                            # PSA 标签现状（仅 homelab）
+just psa-check                                             # PSA 漂移哨兵：有 Pod 却无标签 → 非零退出
+cd ../../cloud/oracle && just psa-status && just psa-check # oracle 侧同两条（各自的 ctx 与列表）
 kubectl get cpol                                           # Kyverno 策略
 kubectl get polr -A                                        # Kyverno Audit 违规
 kubectl get vulnerabilityreports,exposedsecretreports -A   # Trivy 发现
