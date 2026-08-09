@@ -169,6 +169,49 @@
         state: present
         reload: true
 
+    # ☠️ 2026-08-09：本节点 **5 天内非正常重启 3 次**（08-06 04:39、08-08 09:32、
+    # 08-08 23:58，`last -x` 里都没有对应的 shutdown 记录），而每次都查不出原因 ——
+    # 因为 journald 默认 `#Storage=auto`，且 `/var/log/journal` 不存在，
+    # auto 在这种情况下退化为 **volatile（只写 /run，重启即蒸发）**。
+    # 实测判据：`journalctl --list-boots` 只有 **1 条**记录，`journalctl -b -1` 空。
+    # 对照组：两台 DGX 有持久 journal，所以 08-07 那串重启一登上去就能确认
+    # 是内核升级链（有干净 shutdown），而 oracle 这边只能靠猜。
+    # ⚠️ 只建目录还不够也不会立刻生效：Storage=auto 要**目录先存在**才落盘，
+    # 且 journald 需要重启才会改用新路径 —— 故三步齐全（建目录 + 显式 persistent + 重启）。
+    # 保留量给 200M：12GB 小盘，够覆盖数次重启的回溯窗口而不占地方。
+    - name: Ensure persistent journal directory exists
+      ansible.builtin.file:
+        path: /var/log/journal
+        state: directory
+        owner: root
+        group: systemd-journal
+        mode: '2755'
+
+    # ⚠️ 这一步不能省：OCI 的 Ubuntu 镜像**没有** /etc/systemd/journald.conf.d/
+    # （只有 resolved.conf.d），而 ansible 的 copy 模块不会建父目录 ——
+    # 2026-08-09 首次跑就是栽在这里：
+    # `Destination directory /etc/systemd/journald.conf.d does not exist`。
+    - name: Ensure /etc/systemd/journald.conf.d exists
+      ansible.builtin.file:
+        path: /etc/systemd/journald.conf.d
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Configure journald to keep logs across reboots
+      ansible.builtin.copy:
+        dest: /etc/systemd/journald.conf.d/10-persistent.conf
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          # Managed by ansible (setup-k3s.yaml) —— 见该文件内注释里的重启复盘理由。
+          [Journal]
+          Storage=persistent
+          SystemMaxUse=200M
+      notify: Restart journald
+
   # firewalld reload 是**动作**不是状态：写成普通任务的话每次 `--check` 都报 changed，
   # 两条就足以把 `just check-node-drift` 的信号淹掉。改 handler 后只在真有规则变更时触发。
   handlers:
@@ -176,6 +219,21 @@
       ansible.builtin.service:
         name: firewalld
         state: reloaded
+
+    # ⚠️ 两步缺一不可（2026-08-09 实测踩过）：只 restart **不会**迁移到 /var。
+    # 重启后 `journalctl --header` 仍指向 /run/log/journal、`/var/log/journal/` 空着，
+    # 看起来配置生效了其实没有。journald 要收到 SIGUSR1 才会把 /run 刷到 /var
+    # 并切换活动日志 —— 那正是 `journalctl --flush` 做的事。
+    # （boot 时由 systemd-journal-flush.service 负责；但那时 /var/log/journal
+    #  还不存在，所以它报 success 也没用，必须在建完目录后再刷一次。）
+    - name: Restart journald
+      ansible.builtin.service:
+        name: systemd-journald
+        state: restarted
+
+    - name: Flush journal from /run to /var (journald 需 SIGUSR1 才切换存储)
+      ansible.builtin.command: journalctl --flush
+      changed_when: false
 
 - name: Write K3s config file
   hosts: oracle_masters
