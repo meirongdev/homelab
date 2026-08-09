@@ -38,6 +38,34 @@ spec:
             value: KubeletDown
           - name: cluster
             value: oracle-k3s
+      # ☠️ 死人开关自己的投递失败**不是**"告警链路坏了"(2026-08-09 加)。
+      # 2026-08-02~09 七天里这两条烧了 13 次(含 critical 🆘),而同期 Telegram
+      # 投递 **186 条 0 失败** —— 报的全是 watchdog webhook:
+      #   webhook 216 失败 / 13553 发送 = 1.6%,错误只有两种
+      #   `530 error code:1033`(Cloudflare 隧道不可用)与 `503 no healthy upstream`
+      #   (oracle 网关后面 uptime-kuma 正在重启)。
+      # 即这条心跳 30s 一发、途经 公网→Cloudflare 边缘→隧道→oracle 网关→uptime-kuma,
+      # 任一跳抖一下失败率就破 1% 阈值,于是"告警链路坏了"被喊出来 —— 而它恰恰是
+      # 唯一健康的那条链路。**语义是反的**。
+      #
+      # 为什么可以直接丢:死人开关是**自检**的 —— 心跳停 → oracle 的 Uptime Kuma
+      # push monitor(60s interval)转 DOWN → 它自己的「Telegram (dead-man)」通知
+      # 从 oracle 直连 api.telegram.org 报警,完全不依赖 homelab。
+      # 2026-08-09 查库实测过这条兜底是活的:monitor id=1 active=1、
+      # push_token=alertmanager-watchdog-homelab、notification 已挂(is_default=1)、
+      # 心跳每 45s 一条全 UP。所以 Alertmanager 这侧再喊一遍纯属重复且标签错误。
+      #
+      # ⚠️ 只按 `integration="webhook"` 收窄(告警标签里没有 receiver 名,这已是最细粒度)。
+      # 当前 **watchdog-webhook 是唯一的 webhook 接收器** —— 将来若再加 webhook 接收器,
+      # 它的投递失败会被这条一并静默,那时必须改成别的判别方式。
+      # `integration="telegram"` 的失败**不受影响**,照常按 critical/warning 报。
+      - receiver: "null"
+        matchers:
+          - name: alertname
+            matchType: "=~"
+            value: "AlertmanagerFailedToSendAlerts|AlertmanagerClusterFailedToSendAlerts"
+          - name: integration
+            value: webhook
       # Critical → 更快重复(30m vs 4h)。同一 telegram 接收器,模板按 severity 标记
       # 🆘/⚠️(Telegram 无 Gotify 那种数字优先级,用 emoji + 更快 repeat 区分紧急度)。
       - receiver: telegram
