@@ -268,20 +268,99 @@ spec:
               不是 ARC 占着。106 内存不足会拖慢 restic 夜备与 ZFS。
               Check: `ssh root@192.168.50.106 'free -h; arc_summary | head -30'`。
 
-        # DGX：模型常驻显存/内存，低可用是常态——同样用绝对下限。
-        # 2026-08-02 实测 9.9G / 11.2G 可用（共 121G），4GiB 触发有余量。
-        - alert: DgxSparkMemoryLow
-          expr: node_memory_MemAvailable_bytes{job="node-exporter-dgx-spark"} < 4 * 1024 * 1024 * 1024
-          for: 30m
+        # ☠️ 2026-08-09：删掉 `DgxSparkMemoryLow`（MemAvailable < 4GiB / for 30m）。
+        # 它 7 天烧了约 10 个窗口（3h~30h 不等），是当期最大的单一噪声源，而**它警示的
+        # 危害一次都没发生**。7 天实测：
+        #   MemAvailable 低于 4GiB 的采样占比：.120 = 48%、.92 = 32%
+        #     （.120 min 0.8G / p25 1.6G / p50 7.3G；.92 min 1.8G / p25 2.6G / p50 9.8G）
+        #   同期 node_vmstat_oom_kill 增量 = **0**
+        #   同期 PSI 内存停顿 rate(node_pressure_memory_waiting_seconds_total[5m])
+        #     p99 = 0.0000、max = 0.0010（即最坏时刻也只有 0.1% 的时间在等内存）
+        # 结论：阈值压在正常工作带正中间。GB10 是 **128GB 统一内存**，模型常驻会把
+        # MemAvailable 长期压低，但那既不产生内存压力也不触发 OOM ——
+        # 在这台机器上 MemAvailable **对"会不会 OOM"没有预测力**，再怎么调低阈值
+        # 都只是在挑一个不那么频繁的误报点。
+        # ⚠️ 原注释「2026-08-02 实测 9.9G/11.2G，4GiB 有余量」是**单点采样**：
+        # 它取到的是 p50 附近的一个瞬时值，看不见 p25 已经到 1.6G。
+        # 定阈值要看分布，别看一次 `free -h`。
+        #
+        # 换成两条**有预测力**的规则，阈值同样由上面那份 7 天实测反推：
+        - alert: DgxSparkMemoryPressure
+          # 领先指标：任务真的在等内存。观测到的最大值是 0.0010，取 0.10 =
+          # 高出实测天花板 100 倍 → 正常态绝不触发，触发即真有内存瓶颈。
+          expr: rate(node_pressure_memory_waiting_seconds_total{job="node-exporter-dgx-spark"}[5m]) > 0.10
+          for: 15m
           labels:
             severity: warning
             component: infrastructure
           annotations:
-            summary: "{{ $labels.nodename }} 可用内存 < 4GiB"
+            summary: "{{ $labels.nodename }} 内存压力持续 >10%（PSI stall）"
             description: |
-              DGX Spark（GB10，128GB）可用内存偏低，新的推理请求可能 OOM。
-              Check: `ssh <dgx> 'free -h'`，看是否有该卸载的模型常驻。
+              DGX Spark（GB10，128GB 统一内存）任务在等内存，推理吞吐会掉。
+              ⚠️ 别再看 `MemAvailable` 判断（模型常驻使其长期低位，与压力无关），
+              看 PSI：`ssh <dgx> 'cat /proc/pressure/memory'`。
+              Check: `ssh <dgx> 'free -h; nvidia-smi'`，看是否有该卸载的模型常驻。
+        - alert: DgxSparkOOMKill
+          # 确定性指标：真的被杀了。0 容忍——7 天基线就是 0。
+          expr: increase(node_vmstat_oom_kill{job="node-exporter-dgx-spark"}[1h]) > 0
+          labels:
+            severity: warning
+            component: infrastructure
+          annotations:
+            summary: "{{ $labels.nodename }} 发生 OOM kill"
+            description: |
+              过去 1 小时内核 OOM killer 杀掉了进程（7 天基线为 0，任何一次都是异常）。
+              Check: `ssh <dgx> 'dmesg -T | grep -i "killed process" | tail'`。
               ⚠️ DGX 没有 node_filesystem_* 指标（容器化 node_exporter 未挂宿主根），磁盘只能看 SMART。
+
+        # ☠️ 覆盖盲区（2026-08-09 补）：**两个集群在 08-08 各重启过一次，告警一声没吭**。
+        #   oracle-k3s  boot 08-08 23:57 (+08)  —— zitadel/zitadel-pg 同秒 exit=255
+        #                                          reason=Unknown，uptime-kuma/cloudflared 连带重启
+        #   homelab     boot 08-08 15:01 (+08)
+        # 而 `last -x` 显示 oracle **5 天重启 5 次**，其中 08-06 04:39、08-08 09:32、
+        # 08-08 23:58 三次**没有对应的 shutdown 记录 = 非正常关机**（只有 08-05 20:39
+        # 那次是干净的，对应已知的 shape 缩容）。
+        # 为什么以前看不见：节点回来得快，KubeletDown/TargetDown 要么没到 for 时长，
+        # 要么（oracle 的 KubeletDown）本来就被路由到 null 丢弃了 —— 于是"机器重启过"
+        # 这件事**原理上没有任何一条规则在看**。重启会重置一切内存态（连带把
+        # AlertmanagerFailedToSendAlerts 那串误报也一起制造出来），必须显式盯。
+        #
+        # ⚠️ 这里用统一的 `job=~...` 是**故意的**，与本文件上方"刻意不统一放宽 job"
+        # 那条注释不冲突：那条讲的是**内存阈值**，几台机的正常态差别太大；
+        # 而"开机时长"没有这种个体差异，重启就是重启。
+        # 覆盖六台：两个 k3s 节点（job=node-exporter，homelab 与 oracle 共用此 job 名）
+        # + pve/106（node-exporter-metal-nodes）+ 两台 DGX。
+        # ⚠️ DGX **本来想排除**（"按需开关机的工作站"），2026-08-09 查完推翻了这个假设：
+        # dgx-spark-2 七天缺席 56.3h 看着像关机，但登上去 `last -x` 显示它
+        # **从 Jun 4 连续运行到 Aug 7 从没关过**。那 48h 是**网络断了**——
+        # 断线期间 tailscaled 记的是 `netcheck: UDP is blocked` +
+        # `report: udp=false v4=false icmpv4=false derp=0` +
+        # `derp-20(hkg): network is unreachable`，即该站点整条出网路径不可达。
+        # 所以两台 DGX 也是"应当长期在线"的（历史 uptime 60+ 天），纳入覆盖。
+        # 它们 08-07 那串重启是**内核升级链**（6.11.0-1014 → 6.17.0-1014 → 6.17.0-1029，
+        # 每次都有干净的 shutdown 记录），这种事值得在 Telegram 留一行。
+        # macbook 仍排除：它是真正按需开合盖的笔记本。
+        # 📌 dgx-spark-2 的登录方式是 `ssh -i ~/.ssh/vgio admin@100.67.164.92`
+        # （用户名 **admin**，不是 ubuntu/matthew；它在另一个 tailnet
+        # `kaixinhuang3307@gmail.com` / tailf63175.ts.net 下）。
+        - alert: NodeRebooted
+          # 窗口取 30m 而非更短：oracle 的指标要经 otel-collector 重新起来才 remote-write，
+          # 开机头几分钟可能没有样本，窗口太窄会整个错过。
+          expr: (time() - node_boot_time_seconds{job=~"node-exporter|node-exporter-metal-nodes|node-exporter-dgx-spark"}) < 1800
+          for: 5m
+          labels:
+            severity: warning
+            component: infrastructure
+          annotations:
+            summary: "{{ $labels.cluster }} / {{ $labels.instance }} 刚重启（开机不足 30 分钟）"
+            description: |
+              节点重启了。若非你主动操作，就是**非正常关机**，需要查原因。
+              ⚠️ oracle 的 journald 是 volatile（`#Storage=auto` 且 `/var/log/journal`
+              不存在）→ **上一次启动的日志在重启时就没了**，事后无法复盘。
+              要查崩溃原因得先让日志活过重启：`sudo mkdir -p /var/log/journal &&
+              sudo systemd-tmpfiles --create --prefix /var/log/journal &&
+              sudo systemctl restart systemd-journald`，之后 `journalctl -b -1` 才有内容。
+              重启后按 runbook 核不变量：`cd cloud/oracle && just verify-node`（只读）。
 
     - name: multicluster-telemetry
       rules:
