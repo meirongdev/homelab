@@ -144,7 +144,7 @@ homelab/
 
 ⚠️ **第 9 层网络基本只到"可见性"**：Hubble 已开，但集群内**没有任何 `CiliumNetworkPolicy`**（`kubectl get cnp,ccnp -A` 两个集群都为空）。标准 NetworkPolicy 只有 6 条：`argocd` ns 里 4 条是 argo-cd chart 自带的，另 2 条是 readlist 的 `readlist-{snapshot,score}-no-egress`（2026-08-05 自建，空 egress = 全拒绝，把"能碰 calibre 卷的容器"与"能出网的容器"隔开——**这是目前唯一自建的网络管控，只覆盖两个短命 Job**）。集群级网络默认拒绝仍是**刻意延后**的（单用户威胁模型下收益边际低、debug 成本高），不要把它当成已生效的管控。逐层状态与灰度路径见 `docs/reference/security.md`。
 
-**硬约束**: homelab 是 Ryzen 5600H 单节点笔记本 (idle ~74°C)。所有安全组件 **fail-open + 控 CPU**。
+**硬约束**: homelab 是 Ryzen 5600H 单节点热笔记本（空闲 ~60–62°C；功耗/散热细节与降温度抓手见 [reference/homelab-host-power-thermal.md](reference/homelab-host-power-thermal.md)）。所有安全组件 **fail-open + 控 CPU**。
 
 ## Storage Notes
 

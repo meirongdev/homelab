@@ -27,6 +27,10 @@
 - [k8s-qos-resource-management.md](k8s-qos-resource-management.md) — 资源配额与 QoS 约定
 - [cost-and-rightsizing.md](cost-and-rightsizing.md) — OpenCost 成本归因 + KRR 右尺寸（定价模型、指标语义、运维操作）
 
+### 硬件与功耗
+
+- [homelab-host-power-thermal.md](homelab-host-power-thermal.md) — homelab 宿主（5600H 笔记本）功耗/散热事实 + 降温度抓手（AGENTS/security 硬约束的唯一真相源）
+
 ### 安全与身份
 
 - [security.md](security.md) — 纵深防御 11 层逐层状态 + 威胁覆盖矩阵。⚠️ 第 9 层网络**只到可见性**，无自建 CiliumNetworkPolicy
