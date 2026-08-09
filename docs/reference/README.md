@@ -16,7 +16,7 @@
 ### 网络
 
 - [networking-ingress.md](networking-ingress.md) — 入口链路（Tunnel → Cilium Gateway）、HTTPRoute 约定、external-dns DNS 自动化、节点地址速查
-- [tailscale-network.md](tailscale-network.md) — 双集群互联模型（Tailscale 只做 node underlay，pod 流量走 ClusterMesh VXLAN）+ 路由踩坑
+- [tailscale-network.md](tailscale-network.md) — 双集群互联模型（Tailscale 只做 node underlay，pod 流量走 ClusterMesh VXLAN）+ 路由踩坑（含「单个 pod 到 100.64/10 全超时」那条 Cilium identity 撞 Tailscale fwmark 的 1/256 抽签）
 - [cloudflare-tunnel-observability.md](cloudflare-tunnel-observability.md) — Tunnel + Gateway 流量可观测（能看到什么、看不到什么）
 
 ### 可观测
