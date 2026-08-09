@@ -310,39 +310,19 @@ Managed by `k8s/ansible/playbooks/fix-dns-fallback.yaml`. Public resolvers in
 
 | File | Node | Advertised routes |
 |------|------|------------------|
-| `k8s/ansible/playbooks/setup-tailscale.yaml` | Homelab | 10.42/16 |
-| `cloud/oracle/ansible/playbooks/setup-tailscale.yaml` | Oracle | 10.52/16 |
+| `k8s/ansible/playbooks/setup-tailscale.yaml` | Homelab | **无**（`""`；2026-07-07 起 pod CIDR 与自身 IP 都不广播） |
+| `cloud/oracle/ansible/playbooks/setup-tailscale.yaml` | Oracle | `10.0.0.26/32`（自身 VCN IP，作 VXLAN 外层目的；Pod CIDR 不广播） |
 
 两个 playbook 是共享 role `tailscale/ansible/roles/tailscale_node` 的薄封装（2026-07-07 合并），
 集群差异（up 参数、firewalld、UDP GRO、对端 CIDR）走 playbook vars；roles_path 见各自 ansible.cfg。
 
-## Initial Setup
+## Initial Setup（一次性，已完成）
 
-```bash
-# 1. Import existing Tailscale ACL into Terraform state (required if tailnet already has a policy)
-cd tailscale/terraform
-export $(grep -v '^#' .env | xargs)
-terraform import \
-  -var="tailscale_oauth_client_id=$TAILSCALE_OAUTH_CLIENT_ID" \
-  -var="tailscale_oauth_client_secret=$TAILSCALE_OAUTH_CLIENT_SECRET" \
-  tailscale_acl.main acl
-
-# 2. Generate pre-auth keys
-just init
-just apply
-
-# 3. Reinstall Oracle K3s with non-default CIDRs (one-time, destructive)
-cd cloud/oracle/ansible
-just cleanup-k3s
-just setup-k3s
-
-# 4. Install Tailscale — Oracle node
-just setup-tailscale $(cd ../../../tailscale/terraform && just oracle-authkey)
-
-# 5. Install Tailscale — homelab node (must be on LAN, or use Oracle as jump host)
-cd k8s/ansible
-just setup-tailscale $(cd ../../tailscale/terraform && just homelab-authkey)
-```
+tailnet 已建好，日常不需要重跑。重建任一集群时走
+[runbooks/oracle-k3s-rebuild.md](../runbooks/oracle-k3s-rebuild.md)
+与 [runbooks/homelab-rebuild-ubuntu-24-04.md](../runbooks/homelab-rebuild-ubuntu-24-04.md)
+（`just setup-tailscale`）；预授权密钥轮换见下文「Pre-auth Key Renewal」；
+ACL 的首次 terraform import 见下方 Troubleshooting #1。
 
 ## Verification
 

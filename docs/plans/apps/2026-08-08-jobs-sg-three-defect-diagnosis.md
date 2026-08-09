@@ -1,8 +1,9 @@
 # jobs-sg 三处问题诊断（2026-08-08）
 
-> 状态: 🔍 **诊断完成，修复待合并**。两处修复已写好并验证，各在一个分支上，**均未推 main、未部署**；
-> 第三处不是缺陷，是"还没到时候"，且它的口径**需要你拍板**。
-> **本文是冻结的诊断快照**——现状事实看 [reference/jobs-sg.md](../../reference/jobs-sg.md)。
+> 状态: ✅ **已完成（2026-08-08/09）** —— 三处疑点核实完毕；两处真缺陷的修复已合入 main 并部署
+> （`JobsSgReconcileStale` 盲点 97ad3fc、work_mode 分类 7dfd873、撞锁重跑 80c91cb、
+> `JobsSgIngestStale` 同类哑火 7dfd873/35b3c69）。下文是冻结的诊断快照；现状事实看
+> [reference/jobs-sg.md](../../reference/jobs-sg.md)。
 > 日期: 2026-08-08
 > 范围: 升级到上游 `90cd4e8` 之后，对 `closed` 恒为 0、reconcile 告警、work_mode 三个疑点的核实与处置。
 

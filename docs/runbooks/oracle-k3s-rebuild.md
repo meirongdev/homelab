@@ -71,7 +71,7 @@ Gateway API CRD v1.2.1（standard channel）、falco 依赖的 `fs.inotify.max_u
 
 ```bash
 cd cloud/oracle
-just setup-tailscale <authkey>    # 加入 tailnet + 广播 10.52.0.0/16 Pod CIDR
+just setup-tailscale <authkey>    # 加入 tailnet + 只广播自身 VCN IP /32（10.0.0.26/32，VXLAN 外层目的；Pod CIDR 不广播）
 ```
 
 验证：homelab 上 `tailscale status` 能看到 `100.107.166.37`。

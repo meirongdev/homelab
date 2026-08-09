@@ -74,14 +74,10 @@ homelab/
   ——遥测不是单向的。见 `docs/runbooks/argocd-control-plane-on-oracle.md`
 - **CNI**: 双集群 Cilium eBPF + VXLAN
 - **Ingress**: Cilium Gateway API (唯一入口)
-- **跨集群**: Tailscale 只做**节点级 underlay**（各节点自己的 /32 + NodePort），
-  pod↔pod 走 Cilium ClusterMesh VXLAN。⚠️ **Pod CIDR 子网路由已于 2026-07-07 移除**，
-  别再照旧图去查 `10.52.0.0/16` 有没有广播（`AdvertiseRoutes` 只该有本节点 /32）。
-  ⚠️ ClusterMesh 排障别看 `cilium-clustermesh` secret 的 endpoint（指向本集群自己是
-  **正常的**，KVStoreMesh 设计如此）；对端配置在 `cilium-kvstoremesh` + clustermesh-apiserver
-  的 `hostAliases`。判据是 `cilium-dbg status --all-clusters` 里的 `retrieved=true`。
-  典型故障是 **up-but-stuck 且不自愈**，重建 clustermesh-apiserver pod 即可（配置往往没坏
-  ——下根因结论前先查 helm release 历史）。已有 5 条告警兜底（2026-08-05 补）。
+- **跨集群**: Tailscale 只做**节点级 underlay**（各节点自己的 /32 + NodePort），pod↔pod 走
+  Cilium ClusterMesh VXLAN。⚠️ **Pod CIDR 子网路由已于 2026-07-07 移除**，`AdvertiseRoutes`
+  只该有本节点 /32。ClusterMesh 排障判据与告警兜底（`retrieved=true`、两个 secret 分工、
+  up-but-stuck 不自愈）→ [tailscale-network.md](reference/tailscale-network.md)。
 - **oracle 重启/改 shape 后**跑 `cd cloud/oracle && just verify-node`（一次核完全部不变量，
   只读；脚本结尾自己报「N 项通过 / M 项失败」——**别在文档里写死条数**，它是循环里动态累加的，
   2026-08-06 已从 23 漂到 24）。
@@ -104,16 +100,12 @@ homelab/
 - **SSH**: 全舰队用 key `~/.ssh/vgio`。
 - **新增服务**: 走 skill `.claude/skills/add-service/SKILL.md`（manifest → HTTPRoute →
   homepage → Uptime Kuma monitor 全流程）。默认仍落 **oracle-k3s**，但 ⚠️ **它不再"容量
-  宽裕"**——2026-08-05 缩到 **2 OCPU / 12GB**（已 apply 并核实）。真正的紧箍咒是
-  **CPU requests：1477m/1800m = 82%**（2026-08-06 晚实测，只剩约 320m），
-  limits 已超卖到 **1167%**。
-  ⚠️ **内存别信 `kubectl top node`**：它报 92%，但那是 workingSet（含可回收页缓存）；
-  节点 `free -m` 的 available 是 **4.3GB / 11.9GB**，requests 才 69%——离驱逐阈值很远。
-  判断内存余量看 available 或 `rssBytes`，不看 top。
-  新服务的 requests 要按实测填（CPU 多数应用 10–25m 足够），非核心的
-  挂 `priorityClassName: bulk`；⚠️ arm64，先确认镜像有 `linux/arm64`；
-  跨 ns 引用要 ReferenceGrant（**`v1beta1`**）；PVC 一律 `local-path`；oracle 服务的
-  密钥放 `secret/oracle-k3s/<service>`，不放 `secret/homelab/*`。
+  宽裕"**（2026-08-05 缩到 **2 OCPU / 12GB**；CPU requests 已占 allocatable 82%、limits
+  超卖；内存余量**看 `free -m` available 或 `rssBytes`，别信 `kubectl top node`**——
+  实测数值与判据见 [k8s-qos-resource-management.md](reference/k8s-qos-resource-management.md)）。
+  新服务 requests 按实测填（CPU 多数应用 10–25m 足够），非核心挂 `priorityClassName: bulk`；
+  ⚠️ arm64 先确认镜像有 `linux/arm64`；跨 ns 引用要 ReferenceGrant（**`v1beta1`**）；
+  PVC 一律 `local-path`；oracle 密钥放 `secret/oracle-k3s/<service>`，不放 `secret/homelab/*`。
   改 shape 走 `docs/runbooks/oracle-k3s-shape-downsize.md`。
 
 ## Documentation Rules
@@ -142,7 +134,9 @@ homelab/
 
 纵深防御 11 层: Cloudflare WAF → ZITADEL OIDC → Vault+ESO → PSA → Kyverno → Trivy → kube-bench → 节点 CIS → 网络(见下) → Tetragon/Falco → restic 备份。
 
-⚠️ **第 9 层网络基本只到"可见性"**：Hubble 已开，但集群内**没有任何 `CiliumNetworkPolicy`**（`kubectl get cnp,ccnp -A` 两个集群都为空）。标准 NetworkPolicy 只有 6 条：`argocd` ns 里 4 条是 argo-cd chart 自带的，另 2 条是 readlist 的 `readlist-{snapshot,score}-no-egress`（2026-08-05 自建，空 egress = 全拒绝，把"能碰 calibre 卷的容器"与"能出网的容器"隔开——**这是目前唯一自建的网络管控，只覆盖两个短命 Job**）。集群级网络默认拒绝仍是**刻意延后**的（单用户威胁模型下收益边际低、debug 成本高），不要把它当成已生效的管控。逐层状态与灰度路径见 `docs/reference/security.md`。
+⚠️ **第 9 层网络基本只到"可见性"**：集群内没有自建 `CiliumNetworkPolicy`，唯一自建的网络管控
+是 readlist 两个短命 Job 的 `readlist-{snapshot,score}-no-egress`（2026-08-05）；集群级默认拒绝
+**刻意延后**，别当成已生效。逐层状态与灰度路径见 `docs/reference/security.md`。
 
 **硬约束**: homelab 是 Ryzen 5600H 单节点热笔记本（空闲 ~60–62°C；功耗/散热细节与降温度抓手见 [reference/homelab-host-power-thermal.md](reference/homelab-host-power-thermal.md)）。所有安全组件 **fail-open + 控 CPU**。
 

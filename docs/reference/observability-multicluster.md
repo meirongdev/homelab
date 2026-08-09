@@ -1,6 +1,6 @@
 # Multi-Cluster Observability Architecture
 
-> Last updated: 2026-08-06
+> Last updated: 2026-08-10
 > Status: 生效事实
 
 ## Overview
@@ -53,7 +53,7 @@ All metrics carry a `cluster` label for multi-cluster dashboard queries:
 
 ## Log Pipeline
 
-### Oracle k3s → Homelab Loki
+### Oracle k3s → Loki（集群内直达）
 
 **Component:** `cloud/oracle/manifests/monitoring/otel-collector-config.yaml`（receivers/pipelines
 全在这里；同目录的 `otel-collector.yaml` 只有 RBAC/Service/DaemonSet，**没有**管道配置）
@@ -75,24 +75,16 @@ All metrics carry a `cluster` label for multi-cluster dashboard queries:
 
 > **Bug fixed 2026-02-22:** The original config did not promote filepath-extracted attributes to resource attributes, so `k8sattributes` could never find the pod (all identifier values were empty strings). Logs arrived in Loki as `unknown_service` with no namespace/pod labels.
 
-### Homelab → Loki (built-in)
+### Homelab → Loki（oracle，跨 Tailscale）
 
 **Component:** `opentelemetry-collector-agent` DaemonSet (deployed via Helm `opentelemetry-collector` chart)
 
-Uses the `container` operator type which automatically handles filepath parsing and k8s attribute association. Exports directly to `loki-gateway.monitoring.svc.cluster.local`.
+Uses the `container` operator type which automatically handles filepath parsing and k8s attribute association. Exports to oracle `http://100.107.166.37:31080/otlp`（2026-08-02 起 Loki 在 oracle，跨 Tailscale）。
 
 ### Loki Label Mapping
 
-OTel resource attributes are converted to Loki stream labels (dots replaced with underscores):
-
-| OTel Resource Attribute | Loki Label |
-|------------------------|------------|
-| `cluster` | `cluster` |
-| `k8s.namespace.name` | `k8s_namespace_name` |
-| `k8s.pod.name` | `k8s_pod_name` |
-| `k8s.deployment.name` | `k8s_deployment_name` |
-| `k8s.container.name` | `k8s_container_name` |
-| `service.name` | `service_name` |
+OTel resource attributes 转 Loki stream labels（点转下划线）的映射与实测 label 全集见
+[observability-otel-logging.md](observability-otel-logging.md#loki-3x-otlp-支持)——唯一真相源，此处不复制。
 
 ## Metrics Pipeline
 

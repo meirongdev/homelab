@@ -1,6 +1,6 @@
 # Networking & Ingress — 入口链路与 DNS 自动化
 
-> Last updated: 2026-08-03
+> Last updated: 2026-08-10
 > Status: 生效事实
 >
 > 南北向入口（Cloudflare → Cilium Gateway）与 DNS 自动化（external-dns）。
@@ -78,5 +78,6 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 | oracle-k3s node | `10.0.0.26` | `100.107.166.37` |
 | storage-106 | `192.168.50.106` | `100.110.27.111` |
 
-Pod CIDR: homelab `10.42.0.0/16`、oracle `10.52.0.0/16`（Tailscale 只路由 Pod CIDR；
-ClusterMesh 连接命令与验证见 [tailscale-network.md](tailscale-network.md)）。
+Pod CIDR: homelab `10.42.0.0/16`、oracle `10.52.0.0/16`。⚠️ Tailscale **不**路由 Pod CIDR
+（2026-07-07 起只做节点级 underlay，各节点只广播自身 /32）；跨集群 pod 流量走 Cilium
+ClusterMesh VXLAN——连接命令与验证见 [tailscale-network.md](tailscale-network.md)。

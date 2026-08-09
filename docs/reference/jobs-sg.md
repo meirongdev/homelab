@@ -241,7 +241,8 @@ rate(container_cpu_cfs_throttled_periods_total{namespace="jobs-sg",container="we
 ```
 
 修之前 **61%** 的周期被掐，修之后 9%。requests 保持 25m（上限不预留资源），节点
-requests 当时仅 27%。⚠️ 不要再往上加：homelab 是笔记本（idle ~74°C），真需要更多
+requests 当时仅 27%。⚠️ 不要再往上加：homelab 是笔记本（idle ~60–62°C，见
+[homelab-host-power-thermal.md](homelab-host-power-thermal.md)），真需要更多
 就该去修上游查询或那个 5s 预算。
 
 ## ⚠️ 手动跑 ingest 会和 web 抢锁（rollback journal 的代价）

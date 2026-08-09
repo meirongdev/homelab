@@ -16,7 +16,7 @@
 ### 1.1 现在是什么
 
 - **Bifrost**（`maximhq/bifrost`）在 homelab `bifrost` 命名空间运行，`llm.meirong.dev`（ArgoCD `bifrost` App，见
-  [bifrost.yaml](../../../k8s/helm/manifests/bifrost/bifrost.yaml)）。
+  [bifrost plan](./2026-06-07-bifrost-llm-gateway.md)；该 App 已于 2026-08-08 退役，本方案即其接替设计）。
 - 架构：Cloudflare Tunnel → Cilium Gateway → HTTPRoute（`/v1,/openai,/anthropic,/genai` 直连 Bifrost +
   virtual-key 门；其余 → oauth2-proxy → ZITADEL 登录）。
 - Bifrost 上游：`http://100.97.87.120:8000`（DGX Spark vLLM `deepseek-v4-flash`），pod → tailnet 直连已实测可行。

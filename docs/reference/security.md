@@ -1,6 +1,6 @@
 # K3s 集群安全架构 (Security Architecture)
 
-> Last updated: 2026-08-06
+> Last updated: 2026-08-10
 > Status: 生效事实
 > Scope: 双集群（homelab + oracle-k3s）的纵深防御模型 —— source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
@@ -64,8 +64,12 @@
 
   | enforce | namespace |
   |---------|-----------|
-  | `baseline` | default, vault, personal-services, cloudflare, external-secrets, argocd, kyverno（homelab）；rss-system, homepage, personal-services, cloudflare（oracle） |
-  | `privileged`（显式豁免, warn/audit 仍记 baseline） | kube-system, monitoring, trivy-system, tetragon, kube-bench（homelab）；monitoring（oracle） |
+  | `baseline` | default, vault, personal-services, cloudflare, external-secrets, kyverno（homelab）；argocd, cloudflare, external-dns, homepage, personal-services, rss-system, opencost（oracle） |
+  | `restricted` | jobs-sg（homelab）；databases（oracle，CNPG apps-pg/zitadel-pg 所在地） |
+  | `privileged`（显式豁免, warn/audit 仍记 baseline） | kube-system, monitoring, trivy-system, tetragon, kube-bench, backup（homelab）；monitoring, falco, backup（oracle） |
+
+  ⚠️ `zitadel`（oracle）namespace 清单里**没有 PSA 标签** —— 吃集群默认（privileged，无限制）。
+  收紧前需先验证 ZITADEL 在 baseline 下能正常起（若做，改 `cloud/oracle/manifests/zitadel/namespace.yaml`）。
 
 - 不做 `restricted`（grafana 跑 root）；PSA 仅在 Pod 创建/更新时评估，不杀已运行 Pod。
 

@@ -145,19 +145,16 @@ D 类那条判据不能省：本库尾括号有三种互斥含义（作者名 / 
 `calibre-metadata-llm`：只用于**外部数据库里根本没有**的书——自出版、Kindle 独占、
 zine（如 wizardzines）。前三层都查不到它们，因为它们客观上不在任何公开书目库里。
 
-**前置：DGX vLLM 必须活着。** oracle 直连不到 DGX，此前走 `dgx-proxy` 跨集群
-（**2026-08-08 已随 bifrost 退役**，`calibre-metadata-llm` 已 suspend；等 Rust litellm
-落地后改为指向新网关，再恢复验证）：
-
-```bash
-# 先确认通，502 就是 DGX 那边 vLLM 没起
-kubectl --context oracle-k3s -n personal-services exec deploy/calibre-web -c calibre-web -- \
-  curl -s -m 20 -o /dev/null -w '%{http_code}\n' \
-  http://dgx-proxy.bifrost.svc.cluster.local:8080/v1/models
-```
+**前置：DGX vLLM 必须活着，且跨集群入口已恢复。** oracle 直连不到 DGX，此前走
+`dgx-proxy`（**2026-08-08 已随 bifrost 退役**，`calibre-metadata-llm` 已 suspend，
+其 `LLM_URL` 还指着已删除的 `dgx-proxy.bifrust.svc`）。恢复步骤：LiteLLM 网关落地 →
+把 `calibre-metadata-llm` 的 `LLM_URL` 指到新网关 → 解除 suspend → 先跑一轮
+`DRY_RUN=1`（见下节）。**入口没恢复前不要直接 create job**，这条链路跑不了。
 
 原委见 [reference/tailscale-network.md](../reference/tailscale-network.md)
 的「Tagged devices cannot reach shared nodes」。
+
+恢复后手动跑一轮：
 
 ```bash
 kubectl --context oracle-k3s -n personal-services create job llm-1 \
@@ -218,5 +215,5 @@ kubectl --context oracle-k3s -n personal-services create job llm-1 \
 - [reference/calibre-metadata.md](../reference/calibre-metadata.md) —— 覆盖率现状、
   已知污染、各作业内部设计与判据全文
 - [guides/ebook-sync.md](ebook-sync.md) —— 把书导进书库（本文的上游）
-- [reference/tailscale-network.md](../reference/tailscale-network.md) —— 为什么
-  第 4 层要经 dgx-proxy
+- [reference/tailscale-network.md](../reference/tailscale-network.md) —— 第 4 层
+  跨集群入口的机制与退役经过
