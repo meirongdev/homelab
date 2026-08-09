@@ -1,6 +1,6 @@
 # Tailscale Cross-Cluster Networking
 
-> Last updated: 2026-07-31
+> Last updated: 2026-08-09
 > Status: 生效事实
 >
 > Rewritten 2026-07-07 after the topology review. The original design (each K3s node
@@ -60,6 +60,103 @@ segment. Non-destructive test on `k8s-node` 2026-07-19 (drop the rule → read t
 route → restore immediately): without the rule, traffic to 192.168.50.x
 immediately switches to `dev tailscale0` — an extra hop through the tunnel to
 reach a host that is one LAN hop away. Keep the rule on **both** nodes.
+
+### `tailscale-cgnat-route` ip-rule —— Cilium 身份标记撞上 Tailscale 的 fwmark
+
+两台节点在优先级 **5200** 各有一条 `to 100.64.0.0/10 lookup 52`。它挡的是一个
+Cilium 与 Tailscale 之间的位段冲突，2026-08-09 定位并修复。
+
+#### 症状
+
+**某一个 pod** 到整个 `100.64.0.0/10` 全部超时，同节点、同 namespace 的其它 pod 全部正常。
+两个特征让它很容易被误判：
+
+- 打一个**没人监听的端口**同样是超时，而不是 `connection refused`。看着像防火墙丢包，
+  其实是路由把包送错了出口，压根没到对端。
+- 删掉 pod 重建**不管用**（新 IP、新 endpoint，照样坏）。看着像应用或镜像的问题。
+
+#### 原理
+
+两个软件在同一个 `skb->mark` 字段上用了重叠的位段。
+
+- **Cilium** 把 endpoint 的安全身份（identity）编码进 mark 的高位。
+- **Tailscale** 用 `0x80000` 标记"这个包我已经处理过，别再送回 tailscale0"，并为此装了
+  三条 ip rule（5210/5230/5250）。
+
+那三条规则写的是 `fwmark 0x80000/0xff0000` —— 掩码只看 mark 的 **bit16-23**。而这一段
+正好压在 Cilium 写身份的位置上，于是判据退化成一句话：
+
+```
+identity & 0xFF == 0x08   →   命中 Tailscale 的规则
+```
+
+命中之后包被送去 `lookup main`，绕过了排在后面的 `5270: from all lookup 52` ——
+**table 52 才是 tailscale0 的路由表**。main 表里没有 `100.64/10`，包就落到默认路由，
+于是一个 CGNAT 地址被从 `eth0` 扔给了 LAN 网关，出了网关就没了。没有人回 RST，
+所以任何端口都表现为超时。
+
+抓包并排看最直观（同一秒、同一目标）：
+
+```
+坏: lxcXXX In  10.42.0.142 > 100.107.166.37:31080  │  eth0       Out  10.10.10.10  > 100.107.166.37:31080
+好: lxcYYY In  10.42.0.114 > 100.107.166.37:31080  │  tailscale0 Out  100.94.186.7 > 100.107.166.37:31080
+```
+
+#### 为什么它看起来像随机
+
+**这是 1/256 的抽签**。identity 由 pod 的标签算出来，低字节恰好是 `0x08` 的那个中签。
+改标签会重算 identity，所以**任何一次改标签都可能让一个一直正常的服务突然连不上跨集群**，
+也可能让中签的服务自己好起来。中签与否跟这个服务本身没有半点关系。
+
+实测的因果链（改标签 → 换 identity → 立刻换行为，来回各一次）：
+
+| identity | `& 0xFF` | 结果 |
+|---|---|---|
+| 108040（`monitoring/alertmanager` 原身份） | 8 | 全 `100.64/10` 不可达 |
+| 95821（临时加一个无关标签） | 77 | 立刻全通 |
+| 108040（撤掉标签） | 8 | 立刻又断 |
+
+当时全集群扫描，只有它一个真实负载的低字节是 `0x08`，也只有它坏。
+
+#### ⚠️ 别往这些方向查
+
+都验过是死路，按下面的顺序反而两三步就能定位：
+
+1. `cilium-dbg endpoint list -o json` 取该 pod 的 identity，算 `identity & 0xFF`，
+   是 8 就基本确诊。
+2. 节点上 `tcpdump -ni any` 看出接口：坏的走 `eth0`，好的走 `tailscale0`。
+3. `kubectl label pod <p> x=1` 改一次 identity，通了就是它。记得撤掉。
+
+死路清单：重建 pod、`runAsUser`、容器镜像、netns（同 netns 的 ephemeral container 表现一致）、
+NetworkPolicy/CNP/CCNP（两个集群都是空的）、ipcache 缺条目、ClusterMesh 健康度。
+
+**尤其别去 grep Tailscale 的 netfilter 规则找"谁打的 mark"。** 本舰队两台节点都用
+`--netfilter-mode=off`（见两个 `setup-tailscale.yaml` 的 `tailscale_up_extra_args`），
+它**一条 netfilter 规则都不装**，但**照样装 ip rule** —— 这是最容易走岔的一步。
+实测 nft、iptables-nft、iptables-legacy 三处含 `0x80000` 的规则均为 **0 条**。
+答案不在 netfilter 里，在 Cilium。
+
+> 补一句证据强度：mark 没有从包上直接读出来（节点没装 `conntrack` 命令，
+> `/proc/net/nf_conntrack` 也不可读）。上面的结论由三件事共同钉死：规则的掩码语义、
+> 全集群 identity 与故障的一一对应、以及 A/B/A 的因果实验。
+
+#### 修法与安全性
+
+在 **5200**（早于 5210）把 `100.64.0.0/10` 钉死到 table 52，对所有 pod 一次性免疫。
+落在 `tailscale-cgnat-route.service`，两个 playbook 各一份：
+`k8s/ansible/playbooks/setup-tailscale.yaml` 与
+`cloud/oracle/ansible/playbooks/setup-tailscale.yaml`。形状与上面 5260 那条完全一致。
+
+绕过 Tailscale 的防环规则之所以安全：本舰队 `netfilter-mode=off`，**没有任何东西会合法地
+设置 `0x80000`**（就是上面那 0 条）。5210-5250 在这里不承担真实的防环职责，只会因位段
+碰撞误伤。换句话说，这条规则挡掉的全是误判。
+
+⚠️ **别改用"给中签的 pod 换个标签"** —— 那只躲开这一次抽签，下一个中签的 pod 照样断。
+
+⚠️ **oracle 是预防性加的。** 定位当天扫它 52 个 endpoint，低字节 `0x08` 的只有保留身份 8，
+没有真实负载中签，但它的规则集与 homelab 一模一样（同样 `netfilter-mode=off`、同样缺这条
+保护规则），即同样暴露，只是运气好。中签的代价不小：oracle 的 otel remote-write 与 krr
+都靠 `100.94.186.7` 打回 homelab。
 
 ## How It Works
 
