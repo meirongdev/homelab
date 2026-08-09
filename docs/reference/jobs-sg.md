@@ -433,6 +433,52 @@ Prometheus/Alertmanager 仍在 homelab（2026-08-02 只迁了 ArgoCD/Loki/Tempo 
 补 0 会让「还没有数据」和「真的是 0」不可区分）；**任何 DB 错误 → 整个抓取 500**，让
 Prometheus 把 target 标 down（`up == 0` 本身就是信号），而不是吞掉错误输出假的 0。
 
+## 已修复：全量 reconcile 从来没成功过，2770 条过期岗位一条没关（2026-08-10，上游 4af8944）
+
+`JobsSgIngestStale` 2026-08-09 06:49Z 烧起来。**排查方向别从「抓取停了」开始** —— 那轮
+数据其实完全刷新了（856 页 / scanned 85487 / new 81 / updated 8977），是被判定逻辑
+标成 partial 的。
+
+**症状**：`jobs_sg_last_success_timestamp_seconds{kind="full_reconcile"}` 这条 series
+**从来不存在**；`ingest_run` 全表只有一次 reconcile（08-08，partial）；**11580 条岗位
+`closed_at` 全为 NULL，其中 2770 条早已过 `expiry_date`**。关闭流程一次都没跑过。
+
+三个叠在一起的根因：
+
+1. **偏差拿峰值比累加和**（真正的 bug）。`mcf.Summary.Total` 取全程 `max(page.Total)`，
+   而 `Jobs` 是逐页累加；扫描要 25 分钟，`total` 在底下一直动 —— 峰值除以累加和，量纲
+   就不对，任何瞬时抬升被永久固化。那轮算出 `dev=4.5%`（85487 vs 早已回落的 89531）
+   ≥ 2% 阈值 → 拒绝关闭。**平静时段实测 MCF 的 `total` 精确可信**：
+   page 864 满 100 条、page 865 剩 10 条、page 866 空，865×100+10 = 86510 = `total`，
+   分毫不差，且 100 秒采样纹丝不动。所以那 4.5% 不是常态。
+   修法：`Total` 改取**最后一页**读数，另存 `MinTotal`/`MaxTotal`。
+2. **偏差高时把到期关闭也一起停了**。`expiry_date` 是 MCF 自己公布的下架日期，不是从
+   「没见到」推断出来的，本就不该受扫描完整度门控。于是一个谨慎的夜晚停掉了整条生命线。
+3. **跳闸算进了 `errors++`**，污染 `jobs_sg_ingest_errors_total`（那条告警的语义是
+   「MCF 字段形状变了」），让谨慎但健康的一晚和真坏了的一晚长得一模一样。
+
+**告警时间点对得上到秒**，可以当排查模板用：最后一次 incremental 成功
+`08-07T18:19:53Z` + 36h = `08-09T06:19:53Z` + `for: 30m` = `08-09T06:49:53Z`，
+实际 `startsAt` = `08-09T06:49:57Z`（差 4s = 抓取间隔对齐）。
+
+⚠️ **36h 阈值只有在「reconcile 能成功」的前提下才成立**。UTC 周六 18:15 = SGT 周日
+02:15 那轮转成 reconcile，当天**没有 incremental**，所以 incremental 的成功间隔跨
+reconcile 之夜天然是 **48h > 36h**。`min without(kind)` 靠 reconcile 的成功戳补这一格
+—— 补不上就每周准点误报。所以修法是让 reconcile 能成功，**不是**放宽阈值
+（monitoring.yaml 里那段长注释已经写明不许放宽，理由一致）。
+
+**新增的排查抓手**（以前证据只在一行容器日志里，事后只能 SSH 上节点翻 gzip）：
+`ingest_run` 加了 `jobs_scanned` / `total_reported` / `total_min` / `total_max` /
+`close_skipped`；指标加了 `jobs_sg_reconcile_scan_deviation_ratio` 与
+`jobs_sg_reconcile_close_skipped_total`。注意 `jobs_seen` 记的是本轮**归档**了多少
+（reconcile 只归档没存过的），`jobs_scanned` 才是走过的条数 —— 两个数不等不是故障。
+
+补列走 `store.addedColumns` 的 `ALTER TABLE`：`schema` 是 `CREATE TABLE IF NOT EXISTS`，
+对已存在的表是空操作，只加在建表语句里等于只对全新部署生效。`/metrics` 侧用
+`HasColumn` 兜住「新 web 镜像撞上还没被写者迁移过的库」那段窗口 —— 那里的设计是
+**DB 出错就整个 scrape 500**，不兜的话 jobs-sg 全部告警会连同那条本该发现故障的
+staleness 一起哑掉。
+
 ## 已修复：/daily 天天 partial 的两个根因（2026-08-05，上游 ff5e24e）
 
 上线后头三天（08-03~05）`/daily` 日状态全是 `partial`、`llm_cached` 每晚恒 ≈1.4k。
