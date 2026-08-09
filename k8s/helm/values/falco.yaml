@@ -20,6 +20,23 @@ falco:
   json_output: true          # 结构化告警（利于 Loki 查询）
   json_include_output_property: true
   priority: notice           # 上报 notice 及以上
+  webserver:
+    # 开放 Prometheus 端点（默认 false，只开 metrics.enabled 是**不够的**）。
+    # 端口沿用 webserver 的 8765，metrics.enabled 会一并渲染出 falco-metrics Service。
+    prometheus_metrics_enabled: true
+
+# 自身可观测性 —— 2026-08-10 加。动因见下：
+# 在此之前 Falco **既没被抓指标、也没有任何告警规则**：它死了 / 规则加载失败 /
+# falcosidekick 推不动 Telegram，全都不会有人知道。以前这不明显是因为**噪音本身充当了心跳**
+# （每天约 500 条 systemd 误报），而同日修掉那条误报后，「安静」同时意味着「一切正常」和
+# 「Falco 挂了」—— 假心跳一拆，就必须补真心跳。
+# 采集路径：oracle OTel Collector 抓 → remote-write 到 homelab Prometheus（oracle 侧指标
+# 一律 push 模式，不需要 NodePort）。消费方 k8s/helm/manifests/monitoring/alerts/falco-alerts.yaml。
+metrics:
+  enabled: true
+  # chart 建议的生产档位是 15m/30m/1h。取 15m：这些是引擎内部快照（事件数/丢包/资源占用），
+  # 抓得再密也不会更新得更快；而「Falco 是否活着」靠的是抓取本身产生的 up 序列，与本值无关。
+  interval: 15m
 
 # 应用白名单例外：backup ns 的 restic 备份容器（alpine）运行时 apk 装 postgresql-client，
 # 再执行 pg_dump/pg_dumpall 备份 CNPG —— 触发 "Drop and execute new binary in container"；
