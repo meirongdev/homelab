@@ -1,8 +1,8 @@
 # 清单安全规则 (Manifest Safety Checks)
 
-> Last updated: 2026-08-03
+> Last updated: 2026-08-10
 > Status: 生效事实
-> Scope: `scripts/check-manifests.py` 强制的 H1-H4 —— source of truth。
+> Scope: `scripts/check-manifests.py` 强制的 H1-H5 —— source of truth。
 > 每条规则都对应一次**真实发生过的事故或静默失效**，不是风格偏好。
 > 检查器由 [static-checks.yml](../../.github/workflows/static-checks.yml) 在 PR 与 main 上运行。
 
@@ -115,6 +115,35 @@ kind: ReferenceGrant
 白名单直接从脚本正则解析，**不维护副本** —— 副本会漂移，而漂移的检查器比没有更糟。
 解析不到就报错，宁可吵也不静默放行。
 
+### H5 —— 每个 `Namespace` 必须显式声明 PSA 等级
+
+**没有 PSA 标签不是「没定级」，是定成了最宽的那档**：PSA 内置默认 `enforce=privileged`，
+而且 `warn`/`audit` 一并为空 —— 既不拦，也不记，连事后审计的线索都没有。
+这比一个写着 `privileged` 的显式豁免更危险：后者至少有人能在 review 里看见。
+
+```yaml
+metadata:
+  name: <ns>
+  labels:
+    pod-security.kubernetes.io/enforce: baseline   # ← 三档任选，privileged 也行（显式豁免）
+```
+
+**这条规则来自一次真实的静默失效**：`zitadel` ns（oracle，装着 SSO 与身份库 `zitadel-pg`）
+自 2026-07-06 迁入起清单里**一个 PSA 标签都没有**，敞了一个多月到 2026-08-10。
+期间实测 `kubectl apply --dry-run=server` 一个 `hostPID + hostNetwork + privileged + hostPath:/`
+的 Pod，**在该 ns 建得成，且不产生任何 warning**；同一个 Pod 打到 `databases` ns 直接 Forbidden。
+`security.md` 的等级矩阵旁边一直挂着「⚠️ zitadel 没标签」的注释 —— 又一次印证注释不拦人。
+
+三个等级都算通过（`privileged` 是显式豁免，写出来就有人能审），写错值（拼错、写成 `restrict`）
+同样报错 —— PSA 对无法识别的等级值不会报错，它只是**不生效**。
+
+> 收紧前先问准入自己，别靠读 values 猜：
+> ```bash
+> kubectl label ns <ns> pod-security.kubernetes.io/enforce=restricted --overwrite --dry-run=server
+> ```
+> 它会把现存违规 Pod 连同缺失字段一起列出来。⚠️ 只评估**当下存在的** Pod ——
+> 周期性 Job（trivy 的 node-collector 要 hostPath）当时不在场，dry-run 干净 ≠ 收紧安全。
+
 ## 查不出来的那些（仍需人判断）
 
 写下来是为了不让「CI 绿了」被误当成「安全了」。
@@ -126,6 +155,7 @@ kind: ReferenceGrant
 | ReferenceGrant 寄生在别人的文件里 | 语法与作用都正确，问题是**位置** | `allow-gateway-to-calibre` 没限定 Service 名（作用于整个 ns），却住在 `route-calibre-web.yaml` 里 → 删 calibre 路由会连带断掉 `notebook.meirong.dev`。现改为每个 route 文件各带一条自己的 grant（Gateway API 是累加式授权），删任一文件都不影响另一个 |
 | 文档与集群漂移 | 文档格式可以完美而内容全错 | 2026-07-31 那次 NFS 描述格式合规、内容过期，是 `kubectl` 照出来的 |
 | **operator 动态创建的 PVC 逃出 H4** | H4 只扫**清单里声明**的 PVC；CNPG 的卷由 operator 按 `Cluster` 的 `instances` 生成，仓库里没有对应的 PVC 对象 | `apps-pg-1` / `zitadel-pg-1` 两个库的备份归属完全靠 `backup/overlays/oracle/backup-script.yaml` 里的逐库 `pg_dump` 行。**apps-pg 上加一个租户就必须手工加一行**，H4 不会提醒——性质等同于 sqlite 白名单，而那份白名单曾让 `trends-data` 静默漏备两个月。见 [decisions/shared-postgres-platform.md](../decisions/shared-postgres-platform.md) |
+| **清单外创建的 ns 逃出 H5** | H5 只扫**清单里声明**的 Namespace；Helm chart 自带的 ns、ArgoCD 的 `CreateNamespace=true`、operator 自建的 ns 在仓库里根本没有对象 | oracle 的 `external-secrets` / `cnpg-system` / `trivy-system` / `default` / `cilium-secrets` 至今无 PSA 标签，CI 全绿也照样查不到。**只能靠 `kubectl get ns -L pod-security.kubernetes.io/enforce` 眼看**（`just psa-status` 打的就是这条，但它固定 `k3s-homelab` 上下文，oracle 要手工加 `--context`）。补齐路径见 [ROADMAP](../ROADMAP.md) 开放项 #13 |
 | CRD 字段放错层级 | `kubectl apply --validate=strict` 对 CRD **照样放行**，多余的键要到 ArgoCD 用 ServerSideApply 建 typed patch 时才炸 | 2026-08-06 把 `postImportApplicationSQL` 写在 `bootstrap.initdb` 下（正确位置是 `initdb.import`）→ 客户端校验通过，同步时报 `field not declared in schema` 并进入重试（重试会钉住 revision，修复 commit 得先 terminate operation）。预检要用 `kubectl apply --server-side --dry-run=server`，字段位置以 `kubectl explain` 为准 |
 
 **删任何清单文件前**，先 `grep '^kind:' <file>`，确认没有作用域大于该文件的资源

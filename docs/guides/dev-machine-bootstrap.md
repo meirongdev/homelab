@@ -52,7 +52,7 @@ kubectl --context oracle-k3s get nodes
 ```bash
 python3 scripts/check-docs.py                # 文档规则 R1-R7 里可自动查的部分（纯标准库）
 python3 scripts/check-docs.py --list         # 看哪几条是脚本查不了、只能靠人的
-uv run --with pyyaml python scripts/check-manifests.py   # 清单安全 H1-H4
+uv run --with pyyaml python scripts/check-manifests.py   # 清单安全 H1-H5
 ```
 
 ## 5. 需要从旧机器带过来的东西（gitignored，新 clone 没有）
