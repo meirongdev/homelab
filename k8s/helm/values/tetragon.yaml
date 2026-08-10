@@ -10,17 +10,28 @@
 # + Prometheus 指标。自定义 TracingPolicy（敏感文件/提权/异常外联检测）与基于其指标的告警留作
 # 后续调优（避免一上来写错 kprobe 语法或加 CPU）。
 
-# --- agent DaemonSet 资源（热节点严格受限）---
-resources:
-  requests:
-    cpu: 50m
-    memory: 128Mi
-  limits:
-    cpu: 500m
-    memory: 256Mi
+# ⚠️ 2026-08-10 修：**顶层 `resources:` 是死配置** —— chart 1.7.0 根本没有这个键
+# （`helm show values` 逐键确认：顶层无 `resources`，agent 的是 `tetragon.resources`，
+# stdout 导出器的是 `export.resources`——注意**不是** `export.stdout.resources`）。
+# 写错层级 Helm 静默忽略、不报错，于是 tetragon DaemonSet 一直是 **BestEffort**：
+# 上一行注释写着「热节点严格受限」，而这台 5600H 笔记本上的 tetragon **从来没有过
+# CPU limit**，与 CLAUDE.md「所有安全组件 fail-open + 控 CPU」的硬约束正好相反。
+# 同类坑：kube-prometheus-stack.yaml 的 kubeStateMetrics/nodeExporter（2026-08-10 同日修）、
+# kyverno.yaml 的 reportsController。发现途径与验证方法见
+# docs/runbooks/krr-report-triage.md § 3。
 
 # 进程事件已默认开启；保持精简，先不开 enableProcessCred/enableProcessNs（额外开销）。
 tetragon:
+  # --- agent DaemonSet 资源（热节点严格受限）---
+  # 实测 7d 峰值 181Mi（超过原先想给的 128Mi request），故 request 给到 224Mi、
+  # limit 384Mi。CPU 维持 50m/500m：沿用上面那条注释的原意，这次是真的生效了。
+  resources:
+    requests:
+      cpu: 50m
+      memory: 224Mi
+    limits:
+      cpu: 500m
+      memory: 384Mi
   # Prometheus 指标（:2112）+ ServiceMonitor。labelsOverride 注入 release 让 kube-prometheus-stack 采纳。
   prometheus:
     enabled: true
@@ -29,7 +40,17 @@ tetragon:
       labelsOverride:
         release: kube-prometheus-stack
 
-# --- operator 资源 ---
+# --- stdout 导出器资源（实测 7d 峰值仅 2Mi，纯转发）---
+# ⚠️ 键是 `export.resources`，**不是** `export.stdout.resources`（后者写了不生效）。
+export:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 64Mi
+
+# --- operator 资源（本段键名一直是对的，operator 也确实是 Burstable）---
 tetragonOperator:
   resources:
     requests:
