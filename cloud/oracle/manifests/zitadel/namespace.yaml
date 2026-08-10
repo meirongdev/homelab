@@ -15,28 +15,26 @@ kind: Namespace
 metadata:
   name: zitadel
   labels:
-    # PSA baseline —— 2026-08-10 补。**此前本文件一个 PSA 标签都没有**，于是吃 PSA 内置
-    # 默认：enforce=privileged 且 warn/audit 全空。实测（server dry-run）一个
-    # hostPID+hostNetwork+privileged+hostPath:/ 的 Pod 在本 ns 能建成、且零 warning ——
-    # 全 oracle 唯一连审计线索都没有的 ns，偏偏装着 SSO 与身份库 zitadel-pg。
-    # 没有别的东西兜底：`just harden-psa` 只跑 k3s-homelab 上下文且列表里没有 zitadel，
-    # 集群也没配 AdmissionConfiguration 默认档。
+    # PSA restricted —— 2026-08-10 分两步走完（ROADMAP #13 已关闭）。
     #
-    # baseline 是零风险档：现存 5 个 Pod（zitadel / login / init / setup / zitadel-pg）
-    # 无 hostNetwork/hostPID/hostPath/privileged，
-    # `kubectl label ns zitadel …enforce=baseline --overwrite --dry-run=server` 无任何 warning。
+    # 起点很糟：**本文件此前一个 PSA 标签都没有**，于是吃 PSA 内置默认 enforce=privileged
+    # 且 warn/audit 全空。实测（server dry-run）一个 hostPID+hostNetwork+privileged+hostPath:/
+    # 的 Pod 在本 ns 能建成、且零 warning —— 全 oracle 唯一连审计线索都没有的 ns，
+    # 偏偏装着 SSO 与身份库 zitadel-pg（Cluster 就在本 ns，不在 databases）。
+    # 也没有任何东西兜底：`just harden-psa` 只跑 k3s-homelab 上下文，集群没配
+    # AdmissionConfiguration 默认档，当时 CI 也没有对应规则（现已补 H5）。
     #
-    # ⚠️ **暂不上 restricted**：同一条 dry-run 打 restricted 会列出 4 个违规 Pod（chart 渲的
-    # 那批缺 allowPrivilegeEscalation:false / capabilities.drop[ALL] / seccompProfile；
-    # zitadel-pg 由 CNPG 渲，四样齐全，已达标）。顺序**必须**是先补 zitadel.yaml 的
-    # valuesContent（securityContext + podSecurityContext，chart 9.34.1 实测会落到全部
-    # 9 个容器上，不是 timeoutSeconds 那种被静默丢弃的键）→ 再翻 enforce。
-    # 反过来做当下无感（PSA 不动运行中的 Pod），但下次 chart 升级时 zitadel-init /
-    # zitadel-setup Job 会被挡在准入外 → 升级卡在 DB 迁移中途。见 ROADMAP 开放项 #13。
+    # 第一步先落 baseline（零风险：现存 Pod 无 hostNetwork/hostPID/hostPath/privileged），
+    # 第二步在 zitadel.yaml 补齐 securityContext 三项后翻 restricted。
+    # 翻之前照例先问准入本人，而不是读 values 猜：
+    #   kubectl label ns zitadel pod-security.kubernetes.io/enforce=restricted --overwrite --dry-run=server
+    # 补齐前它点名 4 个违规 Pod，补齐后零 warning —— 才真正翻的。
     #
-    # warn/audit 直接给 restricted：**在此期间每次建 Pod 都会打 restricted warning，这是
-    # 刻意的**（那 3 个缺口的持续可见性），别靠把标签降回 baseline 来"消噪音"。
-    pod-security.kubernetes.io/enforce: baseline
+    # ☠️ **zitadel.yaml 里那段 securityContext 现在是承重墙**：本 ns 是 restricted，一旦那段
+    # 被删/被 chart 大版本升级冲掉，下一次 helm upgrade 的 zitadel-init / zitadel-setup Job
+    # 会被准入直接拒掉，症状是"升级卡在 DB 迁移中途"——而**运行中的 Pod 毫无异样**，
+    # 因为 PSA 只在创建/更新时评估。改那段前先 `helm template` 渲一遍再 dry-run 问一次准入。
+    pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/enforce-version: latest
     pod-security.kubernetes.io/warn: restricted
     pod-security.kubernetes.io/audit: restricted
