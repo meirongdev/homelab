@@ -84,11 +84,16 @@ spec:
             # ✅ 那个 4.5% 已定位并修复（2026-08-10，上游 4af8944）：偏差是拿
             # `max(page.Total)` 这个全程峰值去比逐页累加的 scanned，量纲不对，
             # 扫描 25 分钟里任何瞬时抬升都被永久固化 —— 那轮其实已翻到最后一页。
-            # 现在 Total 取最后一页读数，且到期关闭不再受偏差门控。
             # 根因全文与实测数据（含平静时段 865×100+10=86510=total 的精确核对）
             # → docs/reference/jobs-sg.md「全量 reconcile 从来没成功过」。
             # 阈值维持 36h：修好后 reconcile 能落成功戳，min without(kind) 自然补上
             # 周日那格；JobsSgReconcileStale(10d) 仍专盯 reconcile 长期失败。
+            #
+            # 二修（2026-08-10 晚，上游 4b91fe8）把 ② 收窄到只剩「真错误」：
+            # 闸门改读覆盖率 scanned/max(total) ≥ 80%（total 噪声带实测 ±10%，
+            # 2% 的紧判定量级不配），且干净扫描的对账轮即使放弃关闭（close_skipped）
+            # 也照常盖 incremental 新鲜戳 —— 数据刚被全量刷新，凭什么喊停滞。
+            # 从此这条烧起来 = 增量与对账**双双**出真故障，别再往闸门方向查。
         # ☠️ 2026-08-08 修**结构性哑火**：原表达式只有 `time() - <series>`，而
         # `kind="full_reconcile"` 这条 series 在「reconcile 一次都没成功过」时
         # **根本不存在** —— `time() - <no data>` 算不出结果，于是这条告警在它最
@@ -124,6 +129,30 @@ spec:
           labels: { severity: warning }
           annotations:
             summary: jobs-sg 全量 reconcile >10d 没成功过（含从未成功）—— 在架职位数可能失真
+        # report 是四个 kind 里最后一个裸奔的（2026-08-10 补）。JobsSgCronJobFailed
+        # 只抓「跑了但失败」，抓不到「根本没被调度」——suspend 忘了恢复、schedule 写错、
+        # CronJob 对象被误删，这三种都是静默的。周报每周一 01:00Z 跑一次，健康间隔
+        # 恰好 7d；阈值 8d 给一天余量：周一那轮失败或没跑，周二 01:30Z 左右烧起来。
+        # absent 分支与冷启动闸门的方法论同上两条（8d 满窗 = 11520 样本，取 80% = 9216；
+        # ⚠️ 同样必须 sum()，否则按 pod 分裂永远够不着）。
+        #
+        # 实测（2026-08-10 02:30Z，port-forward 到 Prometheus 逐条跑过）：
+        #   time() - last_success{kind="report"} = 5319（当天 01:00Z 刚跑完 W32）✅
+        #   sum(count_over_time(up{job="jobs-sg-web"}[8d])) = 9557 > 9216（闸门已开）✅
+        #   absent 分支真选择器 = no data（不误报）✅
+        #   absent 分支换不存在的 kind + 低门槛 = 1（分支活着，不是死代码）✅
+        - alert: JobsSgReportStale
+          expr: |
+            (time() - jobs_sg_last_success_timestamp_seconds{kind="report"} > 8 * 24 * 3600)
+            or
+            (
+              absent_over_time(jobs_sg_last_success_timestamp_seconds{kind="report"}[8d])
+              and on() (sum(count_over_time(up{job="jobs-sg-web"}[8d])) > 9216)
+            )
+          for: 30m
+          labels: { severity: warning }
+          annotations:
+            summary: jobs-sg 周报 >8d 没成功过 —— 周一 01:00Z 那轮失败或根本没被调度（suspend/排期/对象被删）
         - alert: JobsSgIngestErrors
           expr: 'increase(jobs_sg_ingest_errors_total[1d]) > 20'
           for: 5m
