@@ -13,6 +13,12 @@ grafana:
   #    grafana_folder 注解分文件夹（sidecar 写入 /tmp/dashboards/<注解值>/）
   #  - annotations.grafana_folder: chart 自带的内置面板统一归档，避免污染顶层
   sidecar:
+    # 2026-08-10：两个 sidecar 此前都没有 resources（KRR 报告里的 "unset" 行）。
+    # 本块对 dashboards + datasources **同时**生效（helm template 实证命中 2 处）。
+    # 实测 7d 峰值 dashboard 98Mi / datasource 91Mi，CPU p95 ≤4m。
+    resources:
+      requests: { cpu: 10m, memory: 96Mi }
+      limits: { memory: 192Mi }
     dashboards:
       enabled: true
       label: grafana_dashboard
@@ -107,13 +113,17 @@ grafana:
     size: 1Gi
 
   # 资源限制
+  # 2026-08-10 抬内存：实测 7d 峰值 503Mi / limit 512Mi = **98%**，是全集群离
+  # OOMKill 最近的容器（判据见 reference/k8s-qos-resource-management.md 的 >80% 规则）。
+  # 面板数量随 sidecar 自动发现增长，峰值只会往上走，故给到 768Mi。
+  # requests 同步抬到 256Mi：128Mi 与稳态严重不符，驱逐排序时算「大幅超 request」。
   resources:
     requests:
       cpu: 100m                 # ✅ 从默认值降低
-      memory: 128Mi
+      memory: 256Mi
     limits:
       cpu: 500m
-      memory: 512Mi
+      memory: 768Mi
   
   # 给 Loki/Tempo 赋稳定 uid 以支持 trace↔log↔metric 关联。
   # 关键坑（2026-06-15）：本集群 Grafana 用 NFS PVC 持久化，库里已有按 name 自动生成
@@ -270,13 +280,19 @@ prometheus:
     #      30d 需 ~25-27GiB 磁盘 + 3~4Gi 内存，这台 5600H 笔记本的内存扛不住，故维持 7d）。
     # requests 保持 512Mi：单节点无调度竞争，不预留过多；如将来出现节点内存压力驱逐，
     #   再把 requests 提到接近稳态 RSS 以改善 eviction 排序。
+    #   （2026-08-10 复核：节点 memory requests 仅 39%、无驱逐压力，**上面这条触发
+    #   条件仍未满足**，故 requests 维持 512Mi 不动。但注意稳态 RSS 已到 ~2.3Gi，
+    #   真出现节点压力时它是「超 request 最多」的那个，届时按上文抬。）
+    # 2026-08-10 抬 limit：实测 7d 峰值 2320Mi / limit 2560Mi = **93%**。
+    #   与上面 1.5Gi→2560Mi 那次同因（堆压满 → GC 抖动 → 查询雪崩），只是被 series
+    #   自然增长又推了上来。给到 3Gi，节点 available 仍有余量。
     resources:
       requests:
         cpu: 200m
         memory: 512Mi
       limits:
         cpu: 1000m
-        memory: 2560Mi
+        memory: 3Gi
 
 
     # 添加额外的抓取配置
@@ -462,29 +478,43 @@ alertmanager:
       type: None
 
 # 默认会安装很多 ServiceMonitors，如果资源有限可以禁用一些
+#
+# ⚠️ 键名分层（2026-08-10 修）：`kubeStateMetrics:` / `nodeExporter:` 是**父 chart 的开关键**，
+# 只读 `enabled`/`operatingSystem` 这类本 chart 自己的字段。resources 属于**子 chart**，
+# 必须挂在子 chart 名下（`kube-state-metrics:` / `prometheus-node-exporter:`）。
+# 此前把 resources 写在开关键里，chart 87.6.0 **静默忽略**，两个组件一直是
+# BestEffort —— `helm template` 渲染出的容器 spec 是 `resources: {}`，而不是报错。
+# 同类坑见 kyverno.yaml 的 reportsController 注释。
 kubeStateMetrics:
   enabled: true
-  resources:
-    requests:
-      cpu: 50m
-      memory: 64Mi
-    limits:
-      cpu: 200m
-      memory: 128Mi
 nodeExporter:
   enabled: true
-  resources:
-    requests:
-      cpu: 50m
-      memory: 64Mi
-    limits:
-      cpu: 200m
-      memory: 128Mi
   operatingSystem:
     aix:
       enabled: false       # AIX 节点，不适用
     darwin:
       enabled: false       # macOS 节点，不适用
+
+# ↓ 子 chart 别名段 —— resources 只有写在这里才生效（见上方键名分层说明）。
+#   数值按 Prometheus 实测 7d 峰值 + CPU p95 填，不用 KRR 报告里的 100Mi
+#   —— 那是 KRR 的内存地板值，对这两个组件分别虚高 2 倍和 3 倍。
+kube-state-metrics:
+  resources:                       # 实测：峰值 52Mi，CPU p95 3m
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+prometheus-node-exporter:
+  resources:                       # 实测：峰值 29Mi，CPU p95 5m
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 64Mi
 
 prometheusOperator:
   resources:
@@ -494,6 +524,18 @@ prometheusOperator:
     limits:
       cpu: 500m
       memory: 256Mi
+  # config-reloader 由 **operator 在运行时注入**，不经 Helm 渲染 —— 本段实际转成
+  # operator 的 `--config-reloader-*` 启动参数（默认全是 0 = 无 request/limit，
+  # 这就是 Prometheus/Alertmanager 那两个 config-reloader 容器缺 request 的原因）。
+  # 因此 `helm template` 里搜不到它的 resources，只能看 operator Deployment 的 args。
+  # 实测峰值 41Mi。CPU limit 保持 0（上游明确建议不给 reloader 设 CPU 上限）。
+  prometheusConfigReloader:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 48Mi
+      limits:
+        memory: 96Mi
 
 kubeProxy:
   enabled: false             # Cilium kube-proxy replacement，无 kube-proxy 指标

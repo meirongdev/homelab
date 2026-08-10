@@ -33,6 +33,19 @@ backgroundController:
   replicas: 1
   antiAffinity:
     enabled: false
+  # 2026-08-10 补 resources：此前本段没有 resources，吃 chart 默认 limit 128Mi，
+  # 实测 7d 峰值 117Mi = **91%**，一次尖峰就 OOMKill（而 OOM 后干净重启，
+  # KubePodCrashLooping 抓不到 → 会静默复发）。
+  # ⚠️ 键名：backgroundController 是 `resources:` 直挂，没有 admissionController
+  # 那样的 `container:` 包装层 —— 已用 `helm template --set` 实证命中（chart 3.8.1）。
+  # CPU request 维持 100m：KRR 对本容器的建议是 **抬到 120m**（它是四个 controller 里
+  # 唯一 CPU 吃紧的），不能跟着其它几个一起下调。
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
   serviceMonitor:
     enabled: true
     additionalLabels:
@@ -61,6 +74,16 @@ cleanupController:
   replicas: 1
   antiAffinity:
     enabled: false
+  # 2026-08-10 补 resources：同 backgroundController，此前吃 chart 默认 limit 128Mi，
+  # 实测 7d 峰值 **127Mi / 128Mi = 98%** —— 全集群离 OOMKill 最近的两个之一。
+  # CPU 从默认 100m 降到 25m：实测 p95 远低于此，且它与 background 不同，不是
+  # CPU 吃紧的那个。
+  resources:
+    requests:
+      cpu: 25m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
 
 # 后台扫描间隔拉长，降低热节点常驻 CPU（默认 1h）
 features:
