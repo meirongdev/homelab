@@ -111,13 +111,17 @@ spec:
                 secretKeyRef:
                   name: karakeep-secret
                   key: oauth-client-secret
+          # 2026-08-10: memory limit 512Mi→768Mi、request 256Mi→384Mi。
+          # 实测 7d 峰值 456Mi / 512Mi = **89%**，过 80% 判据。
+          # request 同步抬：稳态就在 400Mi 上下，256Mi 让它在 kubelet 驱逐排序里
+          # 常态「超 request 150Mi+」，而 oracle 是真会碰到内存压力的集群。
           resources:
             requests:
-              cpu: 25m
-              memory: 256Mi
+              cpu: 21m
+              memory: 384Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 768Mi
           volumeMounts:
             - name: data
               mountPath: /data

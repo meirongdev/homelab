@@ -36,12 +36,15 @@ opencost:
       accessMode: ReadWriteOnce
       size: 2Gi
 
+    # 2026-08-10: memory limit 384Mi→512Mi。实测 7d 峰值 338Mi = **88%**，
+    # 过了 reference/k8s-qos-resource-management.md 的 80% 判据。
+    # opencost 的内存随被观测对象数增长，而 oracle 的 pod 数还在涨。
     resources:
       requests:
         cpu: 10m
         memory: 200Mi
       limits:
-        memory: 384Mi
+        memory: 512Mi
 
   mcp:
     enabled: false

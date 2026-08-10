@@ -74,11 +74,16 @@ customRules:
       condition: and not (container.id = host and proc.pname = systemd and proc.exepath = /usr/lib/systemd/systemd-executor)
       override:
         condition: append
-# Falco DaemonSet 资源（oracle 有余量，但仍设上限）
+# Falco DaemonSet 资源
+# ⚠️ 「oracle 有余量」这句 2026-08-05 缩容到 2 OCPU / 12GB 后已不成立，2026-08-10 改：
+#   CPU request 50m→30m —— 实测 7d p95 28m（四舍五入留一点余量）。**刻意不降到 10m**：
+#     falco 是唯一 CPU 真在干活的安全组件，降过头会在事件尖峰时被同节点邻居挤掉。
+#   memory request 256Mi→160Mi —— 实测 7d 峰值仅 127Mi，256Mi 白占 oracle 的调度预算。
+# 保留 CPU limit "1"：符合 CLAUDE.md「所有安全组件 fail-open + 控 CPU」的硬约束。
 resources:
   requests:
-    cpu: 50m
-    memory: 256Mi
+    cpu: 30m
+    memory: 160Mi
   limits:
     cpu: "1"
     memory: 512Mi

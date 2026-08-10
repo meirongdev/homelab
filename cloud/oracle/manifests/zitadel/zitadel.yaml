@@ -137,9 +137,12 @@ spec:
       fsGroup: 1000
       seccompProfile:
         type: RuntimeDefault
+    # 2026-08-10: CPU request 50m→10m。实测 7d p95 仅 8m —— ZITADEL 稳态几乎不吃 CPU
+    # （登录是低频突发，limit 500m 足够 burst）。oracle allocatable 只有 1800m，
+    # 补完 BestEffort 后 requests 一度 83%，这类纯占位的 request 是首要回收对象。
     resources:
       requests:
-        cpu: 50m
+        cpu: 10m
         memory: 192Mi
       limits:
         cpu: 500m

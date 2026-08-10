@@ -70,13 +70,17 @@ spec:
                 secretKeyRef:
                   name: redpanda-connect-secret
                   key: karakeep-api-key
+          # 2026-08-10: memory limit 128Mi→256Mi、request 64Mi→112Mi。
+          # 实测 7d 峰值 122Mi / 128Mi = **94%**，是双集群离 OOMKill 最近的容器。
+          # OOM 后干净重启、不进 CrashLoopBackOff，KubePodCrashLooping 抓不到 ——
+          # 也就是说它可能已经悄悄被杀过而无人知晓（OOMKill 告警是 ROADMAP #4）。
           resources:
             requests:
-              cpu: 15m
-              memory: 64Mi
+              cpu: 10m
+              memory: 112Mi
             limits:
               cpu: 200m
-              memory: 128Mi
+              memory: 256Mi
           volumeMounts:
             - name: config
               mountPath: /config

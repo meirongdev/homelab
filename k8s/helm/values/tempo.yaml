@@ -18,12 +18,14 @@ tempo:
         path: /var/tempo/traces
 
   # 资源限制
+  # 2026-08-10：CPU request 50m→10m。实测 7d p95 仅 2m —— tempo 在本环境写入量极小，
+  # 50m 是纯占位，而 oracle 的 allocatable 只有 1800m，每一份 request 都是调度预算。
   resources:
     requests:
-      cpu: 50m               
-      memory: 128Mi           
+      cpu: 10m
+      memory: 128Mi
     limits:
-      cpu: 300m              
+      cpu: 300m
       memory: 384Mi
 
 # 启用查询前端(镜像键同样是扁平的 repository/tag,与 tempo 版本保持一致)
