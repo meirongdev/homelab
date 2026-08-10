@@ -110,7 +110,7 @@ cd k8s/helm
 just grafana
 # Open: http://localhost:3000
 # Username: admin
-# Password: (from your .env file)
+# Password: (run 'just get-grafana-password' to retrieve)
 
 # Prometheus
 just prometheus

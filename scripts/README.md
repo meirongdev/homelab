@@ -3,7 +3,7 @@
 | 脚本 | 用途 |
 |------|------|
 | [`check-docs.py`](check-docs.py) | 文档组织规则检查器（强制 [R1-R7](../docs/README.md)）。`python3 scripts/check-docs.py`，CI 每次 PR/push 跑 |
-| [`verify-oracle-node.sh`](verify-oracle-node.sh) | oracle-k3s 重启/变更后的巡检，24 条不变量（主机层 sysctl/GRO/firewalld/DNS + 节点预留账目 + pod/App + ClusterMesh `retrieved=true` + 数据面）。只读，任一条不成立即非零退出。`cd cloud/oracle && just verify-node`。**配套** `just check-node-drift`（`ansible-playbook --check`）查「配置有没有漂移」，本脚本查「结果对不对」 |
+| [`verify-oracle-node.sh`](verify-oracle-node.sh) | oracle-k3s 重启/变更后的巡检（主机层 sysctl/GRO/firewalld/DNS + 节点预留账目 + pod/App + ClusterMesh `retrieved=true` + 数据面）。只读，任一条不成立即非零退出；条数是循环动态累加的，结尾自报「N 项通过 / M 项失败」——别在文档里写死条数。`cd cloud/oracle && just verify-node`。**配套** `just check-node-drift`（`ansible-playbook --check`）查「配置有没有漂移」，本脚本查「结果对不对」 |
 | `sync-ebooks.sh` | calibre-web 电子书同步（下详） |
 | `cleanup-duplicates.sh` | 清理重复书目 |
 
