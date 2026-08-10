@@ -513,7 +513,15 @@ prometheus-node-exporter:
       cpu: 10m
       memory: 32Mi
     limits:
-      cpu: 200m
+      # ⚠️ **刻意不设 CPU limit**（2026-08-10 当天加上又撤掉，有实测）：
+      # node-exporter 的采集是**亚秒级突发** —— 1m 粒度看到的峰值只有 3m，
+      # 但在 CFS 的 100ms 周期内会瞬间要远超 200m。加 200m limit 后实测节流率
+      # **31%**，`CPUThrottlingHigh` 当场告警；而加之前它没有 limit、不可能被节流。
+      # 节流的后果是抓取延迟/不全 → 节点指标出现毛刺，得不偿失。
+      # 同一条原则写在 manifests/namespace-guardrails/namespace-guardrails.yaml：
+      # 「不设 cpu limit 以避免 CPU 节流」。
+      # ⚠️ 判断这类问题**不能看 `kubectl top` 或 1m 粒度的 rate**，只能看
+      #    container_cpu_cfs_throttled_periods_total / ..._periods_total。
       memory: 64Mi
 
 prometheusOperator:

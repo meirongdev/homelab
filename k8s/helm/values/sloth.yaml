@@ -19,10 +19,17 @@ metrics:
   prometheusLabels:
     release: kube-prometheus-stack
 
+# 2026-08-10: CPU limit 50m→200m、request 5m→10m。
+# 实测节流率 **20%**（非本次引入，是既有状态；当天查 node-exporter 回归时顺带发现）。
+# sloth 的工作是「按 SLO CR 生成 recording rules」——变更时短促突发、平时接近 0，
+# 50m 的天花板正好卡在突发上，把生成拖慢。200m 给 4 倍头寸，仍保留上限
+# （符合 CLAUDE.md 热笔记本「控 CPU」的约束，它不是常驻负载）。
+# ⚠️ 这类问题 `kubectl top` 和 1m 粒度的 rate 都看不出来（平均值极低），
+#    只能看 container_cpu_cfs_throttled_periods_total / ..._periods_total。
 resources:
   requests:
-    cpu: 5m
+    cpu: 10m
     memory: 75Mi
   limits:
-    cpu: 50m
+    cpu: 200m
     memory: 150Mi
