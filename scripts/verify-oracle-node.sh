@@ -13,6 +13,18 @@
 #
 # 相关：docs/runbooks/oracle-k3s-shape-downsize.md（缩容 SOP，步骤 6 是本脚本的来源）
 #      docs/reference/tailscale-network.md（跨集群网络的判据）
+# 静态检查豁免（2026-08-10 补）。⚠️ 说明行不能以「# shellcheck」开头——那样会被当成
+# 指令去解析（SC1072/1073），真正的 disable 指令在本段最后一行。
+# 本文件加进来时 CI 的 shellcheck 步骤就红了，
+# 一直没人注意到——22 条命中全在这一个文件，且全是最低的 note 级。逐条理由：
+#   SC2015 (17处) `[ cond ] && ok "…" || bad "…"` 是本脚本的核心写法。该模式的陷阱是
+#           「B 失败时 C 也会跑」，而 ok()/bad() 只做 printf+计数、恒返回 0，不成立。
+#           改写成 17 个 if/else 只会让每条不变量从 1 行变 3 行，反而更难读。
+#   SC2001  `sed 's/^/       /'` 是给多行输出整体加缩进，${var//} 干不了这个。
+#   SC2016  第 32 行单引号包的是**要送到远端执行**的脚本，本地不展开正是本意。
+#   SC2153  ALLOC_CPU 由 eval 从 python 输出里赋值，shellcheck 看不见，误报。
+# ⚠️ 不要在这里加 SC2086——CI 特意跑默认全等级就是为了抓未加引号的变量。
+# shellcheck disable=SC2015,SC2001,SC2016,SC2153
 set -uo pipefail
 
 CTX="${ORACLE_CTX:-oracle-k3s}"
@@ -86,8 +98,12 @@ fi
 # ── 节点账目 ───────────────────────────────────────────────────────────
 head_ "节点账目 (context ${CTX})"
 NJ=$(kubectl --context "$CTX" get node "$NODE" -o json 2>/dev/null)
+# apiserver 可达性作为下游检查的前置条件。2026-08-10 踩到：关掉云侧 6443 后本机
+# kubeconfig（当年按公网 IP 生成）连不上，而「工作负载」那几项是
+# `kubectl ... 2>/dev/null` 后判断输出**是否为空**——连不上时输出也是空，于是
+# 报了 3 个假绿灯。静默失败和「一切正常」长得一模一样，必须显式区分。
 if [ -z "$NJ" ]; then
-  bad "取不到 node ${NODE} —— apiserver 不可达？"
+  bad "取不到 node ${NODE} —— apiserver 不可达？（context ${CTX} 的 server: $(kubectl config view -o jsonpath="{.clusters[?(@.name=='${CTX}')].cluster.server}" 2>/dev/null)）"
 else
   eval "$(echo "$NJ" | python3 -c "
 import json,sys
@@ -123,13 +139,25 @@ print('READY=%s' % next((x['status'] for x in n['status']['conditions'] if x['ty
 fi
 
 # ── 工作负载 ───────────────────────────────────────────────────────────
+# ⚠️ 这三项以前写成 `kubectl ... 2>/dev/null` 再判断输出是否为空 —— apiserver
+# 连不上时输出同样是空，于是**报绿**。2026-08-10 关掉云侧 6443 后本机 kubeconfig
+# 失联，就是这么骗过巡检的（3 个假绿灯）。现在一律先看命令退出码，拿不到列表就
+# 明确记失败，而不是当成「一切正常」。
 head_ "工作负载"
-BADPODS=$(kubectl --context "$CTX" get pods -A --no-headers 2>/dev/null | awk '$4!="Running" && $4!="Completed"')
-[ -z "$BADPODS" ] && ok "所有 pod Running/Completed" || { bad "异常 pod:"; echo "$BADPODS" | sed 's/^/       /'; }
-PENDING=$(kubectl --context "$CTX" get pods -A --field-selector=status.phase=Pending --no-headers 2>/dev/null | wc -l | tr -d ' ')
-[ "$PENDING" = "0" ] && ok "无 Pending pod" || bad "${PENDING} 个 Pending —— 通常是 requests 装不下或 anti-affinity 死锁"
-APPBAD=$(kubectl --context "$CTX" -n argocd get app -A --no-headers 2>/dev/null | awk '$3!="Synced" || $4!="Healthy"')
-[ -z "$APPBAD" ] && ok "全部 ArgoCD App Synced/Healthy" || { bad "App 异常:"; echo "$APPBAD" | sed 's/^/       /'; }
+if PODS=$(kubectl --context "$CTX" get pods -A --no-headers 2>/dev/null) && [ -n "$PODS" ]; then
+  BADPODS=$(echo "$PODS" | awk '$4!="Running" && $4!="Completed"')
+  [ -z "$BADPODS" ] && ok "所有 pod Running/Completed" || { bad "异常 pod:"; echo "$BADPODS" | sed 's/^/       /'; }
+  PENDING=$(echo "$PODS" | awk '$4=="Pending"' | wc -l | tr -d ' ')
+  [ "$PENDING" = "0" ] && ok "无 Pending pod" || bad "${PENDING} 个 Pending —— 通常是 requests 装不下或 anti-affinity 死锁"
+else
+  bad "取不到 pod 列表 —— apiserver 不可达，pod/Pending 两项无法判定（不等于正常）"
+fi
+if APPS=$(kubectl --context "$CTX" -n argocd get app -A --no-headers 2>/dev/null) && [ -n "$APPS" ]; then
+  APPBAD=$(echo "$APPS" | awk '$3!="Synced" || $4!="Healthy"')
+  [ -z "$APPBAD" ] && ok "全部 ArgoCD App Synced/Healthy" || { bad "App 异常:"; echo "$APPBAD" | sed 's/^/       /'; }
+else
+  bad "取不到 ArgoCD App 列表 —— apiserver 不可达或 argocd ns 为空（不等于正常）"
+fi
 
 # ── ClusterMesh ────────────────────────────────────────────────────────
 # 判据是 `retrieved=true`，不是摘要行的 "N/1 ready" —— 见 tailscale-network.md
