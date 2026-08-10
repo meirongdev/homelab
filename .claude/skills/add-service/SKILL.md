@@ -17,7 +17,8 @@ Ask the user (or infer from context) the following:
 
 | Field | Example |
 |-------|---------|
-| **Cluster** | `oracle-k3s` (default for new personal services) / `homelab` |
+| **Cluster** | `homelab` (compute-heavy / high-traffic / amd64-only) / `oracle-k3s` (default for lightweight stateless) |
+| **Resource profile** (drives cluster choice) | steady CPU burn? high egress? amd64-only image? |
 | Service name (lowercase, hyphenated) | `my-app` |
 | Subdomain | `myapp` → `myapp.meirong.dev` |
 | Docker image | `ghcr.io/author/my-app:latest` |
@@ -30,11 +31,17 @@ Ask the user (or infer from context) the following:
 | Needs persistent storage? | yes/no |
 | Needs external secrets? | yes/no |
 
-**Cluster choice matters** — the two have different file layouts, gateways, and registration steps (table below). Default to **oracle-k3s** for stateless personal services; choose **homelab** only when the service needs homelab-local data, the Vault/Prometheus stack, or GPU/LAN access (homelab is also a thermally-constrained single laptop node).
+**Cluster choice is driven by the service's resource profile**, not by "cloud first" — full rationale and measured numbers in [`docs/decisions/cluster-placement-for-new-services.md`](../../../docs/decisions/cluster-placement-for-new-services.md). The two clusters also have different file layouts, gateways, and registration steps (table below).
 
-⚠️ **oracle-k3s is NOT roomy any more.** It was downsized 4 OCPU/24GB → **2 OCPU / 12GB** on 2026-08-05, and that is a one-way move (ap-osaka-1 A1 Free Tier has no capacity to grow back). Only **1800m** is allocatable and CPU requests already sit at **82%** (1477m, measured 2026-08-06 — this only goes up as you add services, so re-measure with `kubectl --context oracle-k3s describe node oracle-k3s` instead of trusting this number). So: set `requests` from measured usage (10–25m covers most apps — compare `trends`, which runs on 15m), and put non-core services on `priorityClassName: bulk`. Do not copy the 50m–100m figures that upstream reference manifests tend to use.
+**Put it on `homelab` when** the service is **compute-intensive** (steady CPU burn: transcoding, indexing, builds, model inference, batch jobs), a **high-traffic / high-bandwidth public service**, needs homelab-local data / the Vault+Prometheus stack / LAN access, or ships **amd64-only images**. homelab has the headroom: **10 vCPU (9600m allocatable), requests at 21%, `free -m` available 6617 MB** (measured 2026-08-10) — roughly 7.5 spare cores against oracle's 0.5.
 
-⚠️ **oracle-k3s is arm64.** Verify the image publishes a `linux/arm64` variant before choosing it. When pinning by digest, use the **multi-arch manifest-list digest**, not an amd64 image digest.
+**Keep it on `oracle-k3s` when** it's a lightweight stateless personal service (10–25m CPU class). That's still the default for ordinary apps.
+
+⚠️ **homelab's limits are already oversold** (CPU 122%, memory 152%) and the same node runs Prometheus/Grafana/Alertmanager/Vault. A compute-heavy pod there **must carry an explicit CPU limit**, or a runaway process takes the monitoring stack down with it. It is also a Ryzen 5600H laptop idling at ~60–62°C — sustained CPU load raises temps and throttles everything on the box (see `docs/reference/homelab-host-power-thermal.md`). Do **not** give a public service `priorityClassName: bulk`; being first to evict is the wrong behavior for something users hit.
+
+⚠️ **oracle-k3s is NOT roomy any more.** It was downsized 4 OCPU/24GB → **2 OCPU / 12GB** on 2026-08-05, and that is a one-way move (ap-osaka-1 A1 Free Tier has no capacity to grow back). Only **1800m** is allocatable, CPU requests sit at **71%** (1293m) and memory requests at **88%**, with just **2615 MB** available per `free -m` (measured 2026-08-10 — re-measure with `kubectl --context oracle-k3s describe node oracle-k3s` instead of trusting this number). So: set `requests` from measured usage (10–25m covers most apps — compare `trends`, which runs on 15m), and put non-core services on `priorityClassName: bulk`. Do not copy the 50m–100m figures that upstream reference manifests tend to use.
+
+⚠️ **oracle-k3s is arm64.** Verify the image publishes a `linux/arm64` variant before choosing it. When pinning by digest, use the **multi-arch manifest-list digest**, not an amd64 image digest. An amd64-only image is by itself a reason to land on homelab.
 
 | | homelab | oracle-k3s |
 |---|---|---|

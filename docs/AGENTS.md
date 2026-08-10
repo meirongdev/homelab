@@ -99,9 +99,13 @@ homelab/
 - **Helm**: 配置进 `values/*.yaml`，不用内联 `--set`。
 - **SSH**: 全舰队用 key `~/.ssh/vgio`。
 - **新增服务**: 走 skill `.claude/skills/add-service/SKILL.md`（manifest → HTTPRoute →
-  homepage → Uptime Kuma monitor 全流程）。默认仍落 **oracle-k3s**，但 ⚠️ **它不再"容量
-  宽裕"**（2026-08-05 缩到 **2 OCPU / 12GB**；CPU requests 已占 allocatable 82%、limits
-  超卖；内存余量**看 `free -m` available 或 `rssBytes`，别信 `kubectl top node`**——
+  homepage → Uptime Kuma monitor 全流程）。**落点按资源画像选**，判据见
+  [cluster-placement-for-new-services.md](decisions/cluster-placement-for-new-services.md)：
+  **计算密集 / 大流量公共服务 / 只有 amd64 镜像 → homelab**（余 7.5 核 + 6.6GB，2026-08-10 实测；
+  ⚠️ 但它 limits 已超卖且同机托着 Prometheus/Vault，**必须写显式 CPU limit**，且抬温有实际代价）；
+  轻量无状态个人服务仍默认 **oracle-k3s**，但 ⚠️ **它不再"容量宽裕"**（2026-08-05 缩到
+  **2 OCPU / 12GB**，单向不可逆；CPU requests 占 allocatable 71%、只剩约 0.5 核；limits 超卖；
+  内存余量**看 `free -m` available 或 `rssBytes`，别信 `kubectl top node`**——
   实测数值与判据见 [k8s-qos-resource-management.md](reference/k8s-qos-resource-management.md)）。
   新服务 requests 按实测填（CPU 多数应用 10–25m 足够），非核心挂 `priorityClassName: bulk`；
   ⚠️ arm64 先确认镜像有 `linux/arm64`；跨 ns 引用要 ReferenceGrant（**`v1beta1`**）；
