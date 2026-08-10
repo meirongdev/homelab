@@ -91,6 +91,11 @@ hubble:
   enabled: true
   relay:
     enabled: true
+    # 2026-08-10 补：此前无 resources → hubble-relay 是本集群仅剩的 BestEffort 之一。
+    # 实测 7d 峰值 76Mi。
+    resources:
+      requests: { cpu: 10m, memory: 96Mi }
+      limits: { memory: 192Mi }
   ui:
     enabled: false
   tls:
@@ -107,13 +112,20 @@ envoy:
 
 operator:
   replicas: 1
+  # 2026-08-10: memory limit 192Mi→320Mi、request 96Mi→192Mi。
+  # 实测 7d 峰值 172Mi / 192Mi = **89%**，过 >80% 判据。cilium-operator 的内存随
+  # **集群规模**（identity / endpoint / CiliumNode 数）增长，不随流量——加服务就会推高。
   resources:
-    requests: { cpu: 50m, memory: 96Mi }
-    limits: { cpu: 500m, memory: 192Mi }
+    requests: { cpu: 50m, memory: 192Mi }
+    limits: { cpu: 500m, memory: 320Mi }
 
+# 顶层 resources = cilium-agent DaemonSet（本键在 chart 里是对的，实测已生效）。
+# 2026-08-10: memory limit 512Mi→768Mi、request 256Mi→384Mi。
+# 实测 7d 峰值 445Mi / 512Mi = **87%**。agent 的内存同样随集群规模走
+# （每个 endpoint 的 eBPF map 状态 + identity 缓存）。
 resources:
-  requests: { cpu: 100m, memory: 256Mi }
-  limits: { cpu: 1000m, memory: 512Mi }
+  requests: { cpu: 100m, memory: 384Mi }
+  limits: { cpu: 1000m, memory: 768Mi }
 
 # ClusterMesh CA bundle — NOT committed (crypto material, per repo secret-hygiene).
 # This is the shared CA that homelab + oracle-k3s trust for ClusterMesh. On reinstall,
