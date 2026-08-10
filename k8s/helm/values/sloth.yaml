@@ -19,6 +19,13 @@ metrics:
   prometheusLabels:
     release: kube-prometheus-stack
 
+# ⚠️ PriorityClass 分档（2026-08-10）：sloth **设不了 priorityClassName，不是漏配**。
+# chart 0.16.0 逐键确认 + `helm template --set` 实证：顶层与 `sloth.` 下都不存在这个键，
+# 写进去会被 Helm 静默忽略——看起来像配了、实际没有，比不配更危险。
+# 同类还有 ZITADEL（chart 9.34.1）与仓库外的 timeslot，见
+# reference/k8s-qos-resource-management.md「两处设不了，不是漏配」。
+# 代偿：本轮把个人应用与非关键组件压到 bulk(-10)，sloth 留在默认档 0 已在它们之上。
+#
 # 2026-08-10: CPU limit 50m→200m、request 5m→10m。
 # 实测节流率 **20%**（非本次引入，是既有状态；当天查 node-exporter 回归时顺带发现）。
 # sloth 的工作是「按 SLO CR 生成 recording rules」——变更时短促突发、平时接近 0，

@@ -1,6 +1,6 @@
 # K8s 资源管理与 QoS 策略
 
-> Last updated: 2026-08-05
+> Last updated: 2026-08-10
 > Status: 生效事实（本文只定**原则**，不存具体数值）
 
 本文档记录 Homelab 中 CPU/Memory requests & limits 的设定**原则**。
@@ -92,9 +92,18 @@ Homelab 由两个集群组成：
 | 档 | 值 | 谁在里面 |
 |---|---|---|
 | `critical` | 1000 | Vault、ArgoCD 全家、zitadel-pg |
-| `high` | 900 | external-dns、cloudflared、otel-collector(oracle) |
-| （默认） | 0 | 其余，含 **ZITADEL 应用本身** |
-| `bulk` | -10 | 可牺牲的个人应用（calibre-web/stirling-pdf/karakeep/browserless 等）+ **非关键观测/扫描组件**（opencost、trivy-operator，2026-08-06 补） |
+| `high` | 900 | external-dns、cloudflared、otel-collector（**两集群**）+ **Prometheus、Alertmanager**（2026-08-10 补，homelab 侧） |
+| （默认） | 0 | 其余，含 **ZITADEL 应用本身**、**Grafana**、ESO、kube-state-metrics、node-exporter |
+| `bulk` | -10 | 可牺牲的个人应用（calibre-web/stirling-pdf/karakeep/browserless/open-notebook/jobs-sg-web 等）+ **非关键观测/扫描组件**（opencost、trivy-operator，2026-08-06 补；**tetragon ×2、kyverno ×4**，2026-08-10 补） |
+
+**Prometheus/Alertmanager 归 high、Grafana 留默认的理由**（2026-08-10）：前两者分别是
+**指标源**与**告警投递**，掉了不只是丢图，是所有告警一起哑（dead-man's switch 也走同一条路）；
+Grafana 只是 UI——真出事可以直接查 Prometheus，且它是 monitoring ns 里内存最大的一个。
+
+**kyverno 全家归 bulk 的理由**（2026-08-10）：实测 webhook failurePolicy —— 唯一管
+**工作负载准入**的 `kyverno-resource-validating-webhook-cfg` 是 **Ignore**，其余 `Fail` 的
+只管 Kyverno 自己的 CR（policy/exception/cleanup）。所以它掉线**不会挡住 pod 创建**，
+是真 fail-open，与 trivy-operator 同理。tetragon 同此判据。
 
 **opencost / trivy-operator 归 bulk 的理由**（2026-08-06）：两者此前无 `priorityClassName`，
 落在默认档 0 —— 比标了 `bulk`(-10) 的个人应用还高，与「谁该先被牺牲」的直觉相反。
@@ -118,13 +127,16 @@ opencost 是纯观测组件，掉线只丢一段成本采样；trivy-operator �
   必须插进现有段内。另起一个 `trivy:` 块 = YAML 重复键 = 后者静默覆盖前者，
   那批 CVE 抑制会无声消失。
 
-⚠️ **两处设不了，不是漏配**：
+⚠️ **三处设不了，不是漏配**：
 
 - **ZITADEL 应用**：chart 9.34.1 没有 `priorityClassName` 这个 values 键（逐键确认过），
   写进 `valuesContent` 会被 Helm 静默忽略——看起来像配了，实际没有，比不配更危险。
   改用相对次序保证：`bulk`(-10) 把可牺牲的应用压到它下面。
 - **timeslot**：本仓库之外的手工 Helm release（chart `timeslot-0.1.0`，无 ArgoCD
   tracking-id），只能靠 ns 的 LimitRange 给默认 request，动不了它的 pod spec。
+- **sloth**（2026-08-10 补）：chart 0.16.0 里顶层与 `sloth.` 下**都不存在**
+  `priorityClassName`（逐键确认 + `helm template --set` 双重实证），写进去被静默忽略。
+  代偿同 ZITADEL：把可牺牲的应用压到 `bulk`(-10)，sloth 留在默认档 0 已在它们之上。
 
 `bulk` 是 2026-08-05 oracle 缩容到 12GB 时加的——内存峰值从占 24GB 的 43%
 变成占 12GB 的 ~70% 后，「谁先死」第一次成为真问题。

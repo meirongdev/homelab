@@ -133,7 +133,8 @@ serviceMonitor:
 # 2026-08-10: memory limit 256Mi→384Mi、request 128Mi→192Mi。
 # 实测 7d 峰值 225Mi / 256Mi = **88%**，过 80% 判据。日志量随集群 pod 数增长，
 # 而 fail-open 在这里恰恰要求它**不要**被 OOM 反复杀（杀了就丢遥测，且 OOM 后
-# 干净重启不进 CrashLoopBackOff，没有告警会响 —— 见本批新增的 oom-alerts.yaml）。
+# 干净重启不进 CrashLoopBackOff，没有告警会响 —— 见 manifests/monitoring/alerts/
+# prometheus-rules.yaml 的 ContainerMemoryNearLimit / ContainerOOMKilled*）。
 # CPU 不动：homelab 的 CPU requests 只占 20%，且 200m limit 实测有 2% 节流、可接受。
 resources:
   requests:
@@ -142,3 +143,10 @@ resources:
   limits:
     cpu: 200m
     memory: 384Mi
+
+# PriorityClass 分档补齐（2026-08-10）：homelab 侧补齐 PriorityClass 分档。
+# `high`(900) 与 oracle 的 otel-collector 对称——它是本集群日志/指标的**出口**，
+# 掉了等于 homelab 在 Loki/Tempo 上失明，而那两个都在 oracle（homelab 整机故障时
+# 故障前的日志还在，前提是这条出口活着）。
+# 键路径 `priorityClassName` 已用 `helm template --set` 实证命中（chart 0.165.0）。
+priorityClassName: high

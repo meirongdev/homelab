@@ -20,6 +20,17 @@
 # kyverno.yaml 的 reportsController。发现途径与验证方法见
 # docs/runbooks/krr-report-triage.md § 3。
 
+# PriorityClass 分档补齐（2026-08-10）：tetragon agent 归 `bulk`(-10)。
+# 依据是 k8s-qos-resource-management.md 对 trivy-operator 归 bulk 的同一条理由 ——
+# CLAUDE.md 硬约束是「所有安全组件 fail-open + 控 CPU」，**被驱逐正是 fail-open**：
+# tetragon 掉线只丢一段运行时可见性，不影响任何运行中的工作负载。
+#
+# ⚠️⚠️ **本 chart 的 priorityClassName 与 resources 层级正好相反**（1.7.0 逐键实证）：
+#   resources          → 顶层**无效**，必须写 `tetragon.resources`（见下）
+#   priorityClassName  → 顶层**有效**，`tetragon.priorityClassName` 不存在
+# 两者挨着写、方向相反，是本文件最容易搞错的地方。改动前务必 `helm template --set` 验一次。
+priorityClassName: bulk
+
 # 进程事件已默认开启；保持精简，先不开 enableProcessCred/enableProcessNs（额外开销）。
 tetragon:
   # --- agent DaemonSet 资源（热节点严格受限）---
@@ -52,6 +63,8 @@ export:
 
 # --- operator 资源（本段键名一直是对的，operator 也确实是 Burstable）---
 tetragonOperator:
+  # 同 agent 归 bulk：它只做 CRD/TracingPolicy 的 reconcile，掉了不影响已加载的策略。
+  priorityClassName: bulk
   resources:
     requests:
       cpu: 25m

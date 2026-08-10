@@ -108,6 +108,9 @@ spec:
       labels:
         app: open-notebook-surrealdb
     spec:
+      # PriorityClass 分档补齐（2026-08-10）：个人应用归 bulk(-10)，与 oracle 侧 personal-services
+      # 的分档一致（calibre-web/excalidraw/it-tools… 都是 bulk）。
+      priorityClassName: bulk
       securityContext:
         # 上游 compose 显式 `user: root`——镜像默认用户写不了挂载卷。
         # 本 ns 的 PSA 是 baseline（非 restricted），root 允许。
@@ -202,6 +205,8 @@ spec:
       labels:
         app: open-notebook
     spec:
+      # 同 surrealdb：个人应用归 bulk(-10)。
+      priorityClassName: bulk
       containers:
         - name: open-notebook
           # `-single`（内嵌 DB）变体上游已标记 deprecated、v2 移除，故走两容器形态。

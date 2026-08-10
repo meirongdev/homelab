@@ -34,6 +34,10 @@ spec:
       labels: { app: jobs-sg-web }
     spec:
       serviceAccountName: jobs-sg
+      # PriorityClass 分档补齐（2026-08-10）：个人应用归 bulk(-10)，与 oracle 侧
+      # personal-services 的分档一致。CronJob（ingest/enrich/report）不设——
+      # 它们是短命批处理，驱逐排序对它们没有意义。
+      priorityClassName: bulk
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
