@@ -5,7 +5,14 @@ all:
         oracle_masters:
           hosts:
             oracle-k3s:
-              ansible_host: <ORACLE_PUBLIC_IP>
+              # Tailscale IP，不是 OCI 公网 IP —— 本仓库不提交任何公网地址
+              # （CI: scripts/check-public-ips.py）。控制机在 tailnet 上，SSH 走这里即可。
+              # ⚠️ 这个值同时决定 fetch-kubeconfig.yaml 写进 ~/.kube/config 的 server 地址，
+              #    必须在 setup-k3s.yaml 的 tls-san 列表里，否则 kubectl 会 TLS SAN 不匹配。
+              # 破窗（tailnet 整个不可用）时临时覆盖，公网 IP 现取不落盘：
+              #   ansible-playbook -i inventory/hosts.yaml playbooks/<x>.yaml \
+              #     -e ansible_host=$(cd ../terraform && terraform output -raw instance_public_ip)
+              ansible_host: 100.107.166.37
           vars:
             ansible_user: ubuntu
             ansible_ssh_private_key_file: ~/.ssh/vgio
