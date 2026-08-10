@@ -1,7 +1,7 @@
 # Homelab Architecture
 
 > 单页架构总览，双集群 homelab（homelab + oracle-k3s）。
-> Last updated: 2026-08-09
+> Last updated: 2026-08-10
 
 ## Network Topology
 
@@ -10,7 +10,7 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
                                                                      │
                     ┌─────────────────────────────────────────────────┘
                     ▼
-         ┌──────────────────────┐       Tailscale (Pod CIDR)      ┌──────────────────────┐
+         ┌──────────────────────┐       Tailscale (node /32)      ┌──────────────────────┐
          │    homelab (K3s)     │ ◄──────────────────────────────► │   oracle-k3s (K3s)   │
          │  CNI: Cilium VXLAN   │     10.42.0.0/16 ←→ 10.52.0.0/16│  CNI: Cilium VXLAN   │
          │  node: 10.10.10.10   │      Cilium ClusterMesh          │  node: 10.0.0.26    │
@@ -50,7 +50,7 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 | 关系型数据库 | CNPG 一套模式、**两个** Cluster：`apps-pg`(共享应用库) + `zitadel-pg`(身份面独立)。应用不再自带 postgres，加 `Database`/`DatabaseRole` CR 即可 | [`decisions/shared-postgres-platform.md`](decisions/shared-postgres-platform.md) |
 | 备份工具 | restic (非 Kopia)，无 server 直推 106 | [`plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md`](plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md) |
 | SSO | 应用原生 OIDC, 非共享入口层 SSO | [`plans/security/2026-03-08-cilium-zitadel-sso-plan.md`](plans/security/2026-03-08-cilium-zitadel-sso-plan.md) |
-| 跨集群网络 | Tailscale Pod CIDR + Cilium ClusterMesh | [`reference/tailscale-network.md`](reference/tailscale-network.md) |
+| 跨集群网络 | Tailscale 节点级 underlay（各节点 /32 + NodePort）+ Cilium ClusterMesh VXLAN | [`reference/tailscale-network.md`](reference/tailscale-network.md) |
 
 ## Service Inventory
 
