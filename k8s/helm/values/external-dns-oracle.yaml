@@ -15,6 +15,17 @@ provider:
 
 priorityClassName: high
 
+# 2026-08-10 补 resources：同 homelab 那份，此前是 **BestEffort**，与 `priorityClassName: high`
+# 矛盾（QoS 排在 Pod Priority 之前，说明见 external-dns.yaml 的同位注释）。
+# oracle 上更要紧：allocatable 只有 9080Mi，是真会碰到内存压力的那个集群。
+# 实测 7d 峰值 150Mi（比 homelab 的 82Mi 高，它管的 HTTPRoute 多），CPU p95 1m。
+resources:
+  requests:
+    cpu: 10m
+    memory: 160Mi
+  limits:
+    memory: 384Mi
+
 env:
   - name: CF_API_TOKEN
     valueFrom:

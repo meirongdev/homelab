@@ -21,10 +21,23 @@ metadata:
 spec:
   limits:
     # 没声明 resources 的容器拿到合理默认值，而不是被当成 0-request / 无上限。
-    # ⚠️ 不止影响「将来新增」——`timeslot` 就是靠这条拿到 50m 的：它是本仓库之外的
-    # 手工 Helm release（chart timeslot-0.1.0，无 ArgoCD tracking-id），自己没写
-    # resources。2026-08-05 缩容到 2 OCPU 时 50m→15m：节点只剩 2000m 可分配，
-    # 一个没人认领的默认值不该吃掉 2.5%。
+    # 典型受益者是 `timeslot`：本仓库之外的手工 Helm release（chart timeslot-0.1.0，
+    # 无 ArgoCD tracking-id），自己没写 resources。2026-08-05 缩容到 2 OCPU 时
+    # 默认值 50m→15m：节点 allocatable 只有 1800m（不是 2000m，k3s 预留 200m），
+    # 一个没人认领的默认值不该吃掉其中 2.8%。
+    #
+    # ⚠️ **LimitRange 只在准入时注入，不追溯已存在的 Pod**（2026-08-10 修正）：
+    # 本文件此处原先断言「timeslot 就是靠这条拿到 50m/15m 的」，实测是**错的** ——
+    # timeslot 的 Pod 建于 2026-03-07，比本 LimitRange（2026-08-02）早 5 个月，
+    # 从没经过带这条规则的准入，一直是 `resources: {}` 的 **BestEffort**
+    # （0 request、无上限），比注释担心的「吃掉 2.8%」更糟：BestEffort 在 kubelet
+    # 驱逐排序里恒排第一档，排在标了 `bulk`(-10) 的应用前面。
+    # 已 `kubectl -n personal-services rollout restart deploy/timeslot` 补上，
+    # 现为 Burstable（15m/64Mi + 500m/256Mi，实测确认）。
+    # 教训：新增/修改 LimitRange 后，要对该 ns 里**早于它**的 Deployment 逐个重启，
+    # 否则护栏只对新建 Pod 生效，而 `kubectl get limitrange` 看起来一切正常。
+    # 查法：`kubectl -n <ns> get pods -o custom-columns=NAME:.metadata.name,QOS:.status.qosClass`
+    # 里任何 BestEffort 都是漏网的。
     - type: Container
       defaultRequest:
         cpu: 15m
