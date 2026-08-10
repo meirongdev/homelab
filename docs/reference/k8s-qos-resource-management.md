@@ -251,6 +251,11 @@ max by (cluster,namespace,pod,container) (kube_pod_container_resource_limits{res
 采纳流程：KRR **只读不改**（`krr-enforcer` 刻意未部署，会与 ArgoCD selfHeal 死循环），
 看完报告手工改 git 里的 `resources`。
 
+**完整分诊 SOP → [runbooks/krr-report-triage.md](../runbooks/krr-report-triage.md)**：
+五类分诊（忽略 / BestEffort / 逼近 limit / CPU 回收 / 不采纳）、两类系统性误读
+（100Mi–10m 地板值、oracle 空结果冒充零值）、报告照不出但会间接暴露的三种
+「配置在 git 里却从未生效」，以及改完怎么实测确认。
+
 两个读数注意事项：
 
 - 标 `(No data)` / `(Not enough data)` 的是当前没有运行 Pod 的 Job/CronJob，忽略即可
