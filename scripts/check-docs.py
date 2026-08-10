@@ -49,9 +49,14 @@ def head(text, n=16):
 
 
 def status_line(text):
-    """取文首那段里的状态行。"""
+    """取文首那段里的状态行。
+
+    只认**行首字段**（`> 状态:` / `> Status:` / `> Deprecated:`），不匹配标题或
+    正文里恰好含"状态/Status"字样的行——2026-08-10 一篇 ADR 标题带"无状态"
+    曾被误判成状态行，连带 R4 误报。
+    """
     for i, ln in enumerate(text.splitlines()[:16], 1):
-        if re.search(r"状态|Status|Deprecated", ln):
+        if re.search(r"^\s*>?\s*(状态|Status|Deprecated)\s*[:：]", ln, re.I):
             return i, ln
     return None, None
 
@@ -100,7 +105,7 @@ def check_frontmatter(md, rel, text):
     elif top == "decisions":
         if not re.search(r"日期|Date", h):
             fail("R3", md, "ADR 必须有日期")
-        if not re.search(r"状态|Status", h, re.I):
+        if not re.search(r"^\s*>?\s*(状态|Status)\s*[:：]", h, re.I | re.M):
             fail("R3", md, "ADR 必须有状态")
     elif top == "plans":
         if not re.search(r"状态|Status|Deprecated", h):
