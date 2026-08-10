@@ -55,38 +55,26 @@ resource "oci_core_security_list" "main" {
     }
   }
 
-  # HTTP (port 80) — for Cloudflare Tunnel
-  ingress_security_rules {
-    protocol  = "6"
-    source    = "0.0.0.0/0"
-    stateless = false
-    tcp_options {
-      min = 80
-      max = 80
-    }
-  }
-
-  # HTTPS (port 443)
-  ingress_security_rules {
-    protocol  = "6"
-    source    = "0.0.0.0/0"
-    stateless = false
-    tcp_options {
-      min = 443
-      max = 443
-    }
-  }
-
-  # Kubernetes API Server (port 6443)
-  ingress_security_rules {
-    protocol  = "6"
-    source    = "0.0.0.0/0"
-    stateless = false
-    tcp_options {
-      min = 6443
-      max = 6443
-    }
-  }
+  # 2026-08-10 删掉了三条 0.0.0.0/0 的 TCP 入站规则：80 / 443 / 6443。
+  # 实测依据（`ss -tulnp` on node + `firewall-cmd --get-active-zones`）：
+  #
+  # · 80/443 —— **节点上根本没有进程监听这两个端口**。入口是 Cloudflare Tunnel，
+  #   cloudflared 是**出站**连到 CF 边缘的；所有 DNS 记录都是
+  #   `CNAME → <tunnel_id>.cfargotunnel.com` 且 proxied=true（cloudflare/terraform/main.tf:46），
+  #   没有任何 A 记录指向本机公网 IP。这两条规则从来没被用过。
+  #
+  # · 6443 —— k3s-server 确实在 `*:6443` 上监听，但没有任何客户端走公网连它：
+  #   ArgoCD 控制面 2026-08-02 起在本集群内（kubernetes.default.svc），
+  #   本机 kubectl 走 Tailscale。关键是 **tailscale0 属于 firewalld 的 `trusted` zone**，
+  #   完全不经 `public` 规则，所以删掉这条云侧规则不影响经 tailnet 的 API 访问；
+  #   同批把 setup-k3s.yaml 的 tls-san 也收成只有 Tailscale IP。
+  #
+  # 保留 22/tcp：tailnet 整个挂掉时唯一的进入手段（密钥认证，无口令登录）。
+  # 想连它也关掉的话，破窗改用 OCI 控制台的 Instance Console Connection（串口）。
+  #
+  # ⚠️ OS 层的 firewalld `public` zone 仍开着一大堆 k8s 端口
+  #    （10250/2380/4240/32379/16443/25000/19001/… 多数是早期 CNI/microk8s 试验的残留）。
+  #    它们目前只靠这份 Security List 挡在云边界——**这一层薄，别再往下面这个列表里加口子**。
 
   # Tailscale WireGuard (UDP 41641). Without this node0 never receives NAT-traversal
   # packets, so every tailnet path to it rides a DERP relay (observed 2026-07-07:
