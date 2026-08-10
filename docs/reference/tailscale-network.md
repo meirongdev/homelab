@@ -333,7 +333,7 @@ tailscale status
 # Underlay routes in table 52 (NOT pod CIDRs — those are gone):
 # homelab node must see node0's /32; oracle node must see pve's 10.10.10.0/24
 ssh ubuntu@100.94.186.7    'ip route show table 52 | grep 10.0.0.26'
-ssh ubuntu@<ORACLE_PUBLIC_IP>  'ip route show table 52 | grep 10.10.10.0/24'
+ssh ubuntu@100.107.166.37  'ip route show table 52 | grep 10.10.10.0/24'
 
 # ClusterMesh dataplane: pod→pod both directions, incl. max-size inner packet.
 # Get LIVE CoreDNS pod IPs first — hardcoded IPs go stale on pod restart and a dead
@@ -591,8 +591,19 @@ ip rule list
 
 1. **Via Oracle as jump host** (Oracle can reach homelab via Tailscale pve route):
    ```bash
+   # 还在 tailnet 上 —— 用 Tailscale 地址，不需要公网 IP
    ssh -i ~/.ssh/vgio \
-     -o ProxyCommand="ssh -i ~/.ssh/vgio -W %h:%p ubuntu@<ORACLE_PUBLIC_IP>" \
+     -o ProxyCommand="ssh -i ~/.ssh/vgio -W %h:%p ubuntu@100.107.166.37" \
+     root@10.10.10.10
+   ```
+
+   tailnet 整个不可用时才需要 Oracle 的**公网** IP。它不在本仓库里
+   （CI: `scripts/check-public-ips.py`），现取不落盘 —— `terraform output` 读本地
+   state，离线可用；新克隆没有 state 时去 OCI 控制台看实例的 Public IP：
+   ```bash
+   ORACLE_PUB=$(cd cloud/oracle/terraform && terraform output -raw instance_public_ip)
+   ssh -i ~/.ssh/vgio \
+     -o ProxyCommand="ssh -i ~/.ssh/vgio -W %h:%p ubuntu@$ORACLE_PUB" \
      root@10.10.10.10
    ```
 

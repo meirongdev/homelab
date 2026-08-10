@@ -257,9 +257,14 @@
             - traefik
           node-name: oracle-k3s
           tls-san:
-            - {{ ansible_host }}
-            # Tailscale IP — homelab ArgoCD 经此连接 oracle API (GitOps)。
+            # Tailscale IP — 唯一的外部 API 端点：ArgoCD 集群注册、本机 kubectl
+            # (fetch-kubeconfig.yaml 写的就是 {{ ansible_host }}) 都经此。
             # 节点内网 IP (10.0.0.26) 由 k3s 自动加入证书 SAN，无需在此声明。
+            #
+            # 这里**刻意不含 OCI 公网 IP**（2026-08-10）：一是本仓库不提交公网地址
+            # （CI: scripts/check-public-ips.py），二是没有任何客户端走公网连 6443。
+            # 代价：`https://<公网IP>:6443` 会 TLS SAN 不匹配。破窗时不需要它——
+            # SSH 进节点后本地 /etc/rancher/k3s/k3s.yaml 走 127.0.0.1。
             - 100.107.166.37
           cluster-cidr: "10.52.0.0/16"
           service-cidr: "10.53.0.0/16"

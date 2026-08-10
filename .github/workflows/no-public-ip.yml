@@ -1,0 +1,30 @@
+# 强制「本仓库不提交任何公网 IP」。
+#
+# 为什么需要它：oracle-k3s 的 OCI 公网地址曾散落在 15 处（inventory、AppProject
+# destination、5 篇文档），而 OCI Security List 把 6443/443/80 开给 0.0.0.0/0——
+# 在公开仓库里等于直接给出扫描目标。2026-08-10 全部清掉，改走 Tailscale。
+# 规则不强制就会腐化：粘一段 ssh 命令、贴一次 kubeconfig，它就回来了。
+#
+# ⚠️ 刻意**不设 paths 过滤**：公网 IP 能落进任何文件类型（最常见的恰恰是 .md，
+# 而 static-checks.yml 的 paths 里没有 .md）。这个 job 只跑一个标准库脚本，很便宜。
+# ⚠️ 只拦「新提交」。已经进了 git 历史的地址，改文件删不掉——那要单独重写历史。
+name: no public IP
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 只用标准库，不需要 setup-python / 装依赖
+      - name: 检查公网 IP 泄露
+        run: python3 scripts/check-public-ips.py

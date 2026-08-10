@@ -53,7 +53,7 @@
 
 **现象**: `zitadel-setup` Job 持续失败，错误: `masterkey must be 32 bytes, but is 44`
 
-**根因**: 上次会话修复 ZITADEL 时，在 Vault 中写入了 44 字符的 master-key (`<REDACTED-ZITADEL-MASTERKEY-44CHAR>`)。ZITADEL 要求 master key 为 **恰好 32 字节 (32 个 ASCII 字符)**。
+**根因**: 上次会话修复 ZITADEL 时，在 Vault 中写入了 **44 字符**的 master-key。ZITADEL 要求 master key 为 **恰好 32 字节 (32 个 ASCII 字符)**。
 
 **影响链**:
 - ZITADEL 不启动 → `auth.meirong.dev` 返回 500
@@ -61,7 +61,9 @@
 - `helm-install-zitadel` Job 死循环重试
 
 **修复过程**:
-1. `vault kv put secret/homelab/zitadel master-key=<REDACTED-ZITADEL-MASTERKEY> db-password=<REDACTED-ZITADEL-DB-PASSWORD>` (截断为 32 字符)
+1. `vault kv put secret/homelab/zitadel master-key=<32字符> db-password=<password>`
+   （把原 44 字符 master-key 截断到 32 字符。⚠️ 2026-08-10 从本行及 git 历史里抹掉了当时
+   粘贴的明文值——那两个值早已随 ZITADEL 迁 oracle 轮换失效，但不该留在公开仓库里）
 2. `kubectl annotate externalsecret zitadel-masterkey -n zitadel force-sync=$(date +%s)` 强制 ESO 重新同步
 3. 删除失败的 `helm-install-zitadel` Job → K3s HelmChart controller 自动重建
 4. ZITADEL setup 成功运行完所有数据库迁移

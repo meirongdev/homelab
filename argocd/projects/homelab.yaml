@@ -42,9 +42,9 @@ spec:
     # homelab Tailscale 端点(canonical;cluster Secret + Application 均用此)
     - server: https://100.94.186.7:6443
       namespace: "*"
-    # oracle-k3s 公网端点(保留作 fallback)
-    - server: https://<ORACLE_PUBLIC_IP>:6443
-      namespace: "*"
+    # 2026-08-10 删掉了 oracle-k3s 的**公网** fallback 端点：没有任何 Application
+    # 引用过它（全部走 100.94.186.7 或 kubernetes.default.svc），而本仓库不提交公网
+    # 地址（CI: scripts/check-public-ips.py）。API 的 tls-san 也已不含公网 IP。
     # oracle-k3s Tailscale 端点(迁移前 canonical;迁移后 oracle 自己走 in-cluster,
     # 这条留着兼容尚未重写完的 Application 与紧急回滚)
     - server: https://100.107.166.37:6443

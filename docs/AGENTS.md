@@ -143,6 +143,11 @@ homelab/
 是 readlist 两个短命 Job 的 `readlist-{snapshot,score}-no-egress`（2026-08-05）；集群级默认拒绝
 **刻意延后**，别当成已生效。逐层状态与灰度路径见 `docs/reference/security.md`。
 
+🚫 **不提交任何公网 IP**（CI 强制 `scripts/check-public-ips.py`，无 paths 过滤全跑）。
+节点一律用 Tailscale 地址（`100.64/10`）或内网地址；文档里写 `<ORACLE_PUBLIC_IP>` 占位符，
+真值现取 `cd cloud/oracle/terraform && terraform output -raw instance_public_ip`。
+放行的只有第三方 anycast DNS（`1.1.1.1`/`8.8.8.8`/…），豁免写行内 `public-ip-ok: <理由>`。
+
 **硬约束**: homelab 是 Ryzen 5600H 单节点热笔记本（空闲 ~60–62°C；功耗/散热细节与降温度抓手见 [reference/homelab-host-power-thermal.md](reference/homelab-host-power-thermal.md)）。所有安全组件 **fail-open + 控 CPU**。
 
 ## Storage Notes
