@@ -248,16 +248,19 @@ max by (cluster,namespace,pod,container) (kube_pod_container_resource_limits{res
 > | 规则 | 时机 | 覆盖 |
 > |---|---|---|
 > | `ContainerOOMKilled` | 事后 | 双集群（kube-state-metrics） |
-> | `ContainerOOMKilledCadvisor` | 事后 | **仅 homelab**（cAdvisor），用来交叉验证上一条的标签值拼写 |
+> | `ContainerOOMKilledCadvisor` | 事后 | **仅 homelab**（kubelet 内嵌 cAdvisor 的 OOM 计数器；oracle 侧该指标未被采集），用来交叉验证上一条的标签值拼写 |
 > | `ContainerMemoryNearLimit` | **事前**（7d 峰值 >85% limit） | 双集群 |
 >
 > ⚠️ `ContainerOOMKilled` 的 `reason="OOMKilled"` **至今未经实测证实** —— 30d 窗口内
 > 两集群只出现过 `Unknown`/`Error`/`Completed`，没有任何 OOMKilled 样本。第一次真实
 > OOM 时务必确认它真的响了；没响就查 `count by (cluster,reason) (kube_pod_container_status_last_terminated_reason == 1)`。
 >
-> ⚠️ **oracle-k3s 没有 cAdvisor 指标**：`container_oom_events_total` homelab 116 条 /
-> oracle **0 条**；`container_cpu_cfs_throttled_*` homelab 41 条 / oracle **0 条**。
-> 对 oracle 跑这类查询会返回**空结果**，与「值为 0」外观完全一致 ——
+> ⚠️ **没有独立部署 cAdvisor**——`container_*` 指标全部来自 **kubelet 内嵌 cAdvisor**：
+> homelab 经 kube-prometheus-stack 全量入库；oracle 的 otel-collector
+> `prometheus/cadvisor` receiver 的 keep 正则只保留 `container_(cpu_usage_seconds_total|
+> memory_working_set_bytes)`（为 KRR）。所以 `container_oom_events_total`（homelab 116 条 /
+> oracle 0 条）与 `container_cpu_cfs_throttled_*`（homelab 41 条 / oracle 0 条）
+> 在 oracle 侧**不进入中枢 Prometheus**，查询返回**空结果**，与「值为 0」外观完全一致 ——
 > 2026-08-10 就据此误下过「oracle 无 CPU 节流」的结论。在 oracle 上判断 CPU 是否吃紧，
 > 只能看 limit 与 p95 的比值 + 应用日志时序。
 

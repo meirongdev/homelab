@@ -155,10 +155,14 @@ spec:
         # 不依赖任何标签值。若某次本条响了而 ContainerOOMKilled 没响，就是那条的
         # 标签值写错了 —— 查实际值：
         #   count by (cluster,reason) (kube_pod_container_status_last_terminated_reason == 1)
-        # ⚠️ 覆盖面注意：oracle-k3s **没有 cAdvisor 指标**（container_oom_events_total
-        #    homelab 116 条 / oracle 0 条；同一盲区还吃掉 container_cpu_cfs_throttled_*，
-        #    oracle 0 条 / homelab 41 条）。对 oracle 跑这类查询返回**空结果**，
-        #    与「值为 0」外观完全一致 —— 2026-08-10 据此误判过一次「oracle 无 CPU 节流」。
+        # ⚠️ 覆盖面注意：**没有独立部署 cAdvisor**——container_* 全部来自 kubelet 内嵌
+        #    cAdvisor。homelab 经 kube-prometheus-stack 全量入库；oracle 的 otel-collector
+        #    `prometheus/cadvisor` receiver 的 keep 正则只保留
+        #    `container_(cpu_usage_seconds_total|memory_working_set_bytes)` 两个指标（为 KRR），
+        #    所以 container_oom_events_total（homelab 116 条 / oracle 0 条）与
+        #    container_cpu_cfs_throttled_*（homelab 41 条 / oracle 0 条）在 oracle 侧
+        #    不进入中枢 Prometheus。对 oracle 跑这类查询返回**空结果**，与「值为 0」
+        #    外观完全一致 —— 2026-08-10 据此误判过一次「oracle 无 CPU 节流」。
         - alert: ContainerOOMKilledCadvisor
           expr: increase(container_oom_events_total{container!=""}[15m]) > 0
           for: 0m

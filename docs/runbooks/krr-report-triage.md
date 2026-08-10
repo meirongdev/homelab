@@ -120,7 +120,10 @@ curl -s --data-urlencode 'query=sum by (namespace,container) (rate(container_cpu
   | jq -r '.data.result[] | select((.value[1]|tonumber)>0.02) | "\((.value[1]|tonumber*100)|floor)% \(.metric.namespace)/\(.metric.container)"' | sort -rn
 ```
 
-> ⚠️ 同 §2-F：**这条查询在 oracle 上返回空结果**（无 cAdvisor 指标），
+> ⚠️ 同 §2-F：**这条查询在 oracle 上返回空结果**——oracle 的 otel-collector 只 keep
+> `container_(cpu_usage_seconds_total|memory_working_set_bytes)` 两个 kubelet cAdvisor 指标，
+> 节流计数器不进中枢 Prometheus（见
+> [k8s-qos-resource-management.md](../reference/k8s-qos-resource-management.md)），
 > 与「节流率为 0」外观完全一致。oracle 上补 CPU limit 无法用这个方法验证。
 
 ⚠️ **补完 BestEffort 后节点的 requests 百分比会上涨，这是正确的**，不是变差。
@@ -190,10 +193,12 @@ curl -s --data-urlencode 'query=sum by (namespace,container) (rate(container_cpu
   http://localhost:19090/api/v1/query | jq -r '.data.result[] | select((.value[1]|tonumber)>0.02) | "\((.value[1]|tonumber*100)|floor)% \(.metric.namespace)/\(.metric.container)"'
 ```
 
-> ⚠️⚠️ **oracle 上这个查询会骗你**：oracle **没有 cAdvisor 节流指标**
-> （`container_cpu_cfs_throttled_*` homelab 41 条 / oracle **0 条**），
-> 查询返回**空结果**，与「节流率为 0」外观完全一致。2026-08-10 就据此误下过
-> 「oracle 无节流」的结论。在 oracle 上只能看 limit 与 p95 的比值 + 应用日志时序。
+> ⚠️⚠️ **oracle 上这个查询会骗你**：oracle 的 otel-collector 只 keep
+> `container_(cpu_usage_seconds_total|memory_working_set_bytes)` 两个 kubelet cAdvisor 指标，
+> **节流计数器不进中枢 Prometheus**（`container_cpu_cfs_throttled_*` homelab 41 条 /
+> oracle **0 条**），查询返回**空结果**，与「节流率为 0」外观完全一致。2026-08-10
+> 就据此误下过「oracle 无节流」的结论。在 oracle 上只能看 limit 与 p95 的比值 +
+> 应用日志时序。
 
 ---
 
