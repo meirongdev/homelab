@@ -99,6 +99,30 @@ system-*-critical）：补 requests 会把 oracle 内存 requests 从 85% 推到
 **判据一句话**：BestEffort + priority 0 + 掉了会出事 = 必补；
 BestEffort + system-critical = 可以不补；BestEffort + priority 0 + 纯观测 = 看余量再说。
 
+⚠️⚠️ **补 resources 时给不给 CPU limit，要单独判断——给错会引入原本不存在的问题。**
+BestEffort 容器此前**没有任何 CPU limit，不可能被节流**；补上就可能被节流。
+2026-08-10 实测：给 node-exporter 配 `limits.cpu: 200m` 后节流率 **31%**，
+`CPUThrottlingHigh` 当场告警——而它 1m 粒度的峰值只有 **3m**。
+
+原因是**采集/抓取型组件的负载是亚秒级突发**：CFS 按 100ms 周期发配额，
+瞬时需求远超均值，1m 粒度的 rate 完全看不见这件事。同批加了同样 200m limit 的
+kube-state-metrics 实测节流 **0%**（它维护状态、不突发）——所以这不是普遍规律，
+**必须逐个实测**，不能按组件类别想当然。
+
+- **抓取/导出型**（node-exporter 一类）：只给 memory limit，**CPU limit 留空**。
+  仓库既有原则同此：`namespace-guardrails.yaml` 写着「不设 cpu limit 以避免 CPU 节流」。
+- **常驻服务型**：给 CPU limit 没问题，但补完隔天回来查一次节流率。
+
+```bash
+# 判据只有这个；kubectl top 与 1m 粒度 rate 都看不出来（均值极低）
+curl -s --data-urlencode 'query=sum by (namespace,container) (rate(container_cpu_cfs_throttled_periods_total{cluster="homelab",container!=""}[1h])) / sum by (namespace,container) (rate(container_cpu_cfs_periods_total{cluster="homelab",container!=""}[1h]))' \
+  http://localhost:19090/api/v1/query \
+  | jq -r '.data.result[] | select((.value[1]|tonumber)>0.02) | "\((.value[1]|tonumber*100)|floor)% \(.metric.namespace)/\(.metric.container)"' | sort -rn
+```
+
+> ⚠️ 同 §2-F：**这条查询在 oracle 上返回空结果**（无 cAdvisor 指标），
+> 与「节流率为 0」外观完全一致。oracle 上补 CPU limit 无法用这个方法验证。
+
 ⚠️ **补完 BestEffort 后节点的 requests 百分比会上涨，这是正确的**，不是变差。
 那些 Pod 本来就在用这些资源，只是之前对调度器隐身。2026-08-10 oracle 实测
 CPU 76%→83%、内存 66%→86%。上涨后要顺手做分类 D 把 CPU 收回来。
