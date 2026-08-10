@@ -231,6 +231,12 @@ defaultRules:
 
 prometheus:
   prometheusSpec:
+    # PriorityClass 分档补齐（2026-08-10）：此前 Prometheus 在 priority **0**，与个人服务同级。
+    # 给 `high`(900)：它是双集群唯一的指标源，掉了不只是丢图，是**所有告警一起哑**
+    # （包括本轮新加的 OOM 事前告警）。Grafana 刻意留默认档——那只是 UI，
+    # 真出事可以直接查 Prometheus；且 Grafana 是 monitoring ns 里内存最大的一个。
+    # 键路径已用 `helm template --set` 实证命中（chart 87.6.0）。
+    priorityClassName: high
     retention: 7d
     # 启动宽限安全网（2026-07-04）：TSDB 已迁到 local-path（见下 storageSpec），启动重放走
     #   本地盘、很快，operator 默认 ~900s 窗口本已够用；保留 1800s 仅作 WAL 增大后的余量。
@@ -450,6 +456,10 @@ alertmanager:
     templates:
       - /etc/alertmanager/config/*.tmpl
   alertmanagerSpec:
+    # PriorityClass 分档补齐（2026-08-10）：`high`(900)。它是告警的**投递**环节——Prometheus 判定
+    # 出问题、Alertmanager 才把消息送出去。它掉了的失效形态最阴险：规则照常求值、
+    # 看板一切正常，只是没有任何通知到达，而 dead-man's switch 也走同一条路。
+    priorityClassName: high
     resources:
       requests:
         cpu: 50m

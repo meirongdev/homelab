@@ -14,6 +14,12 @@
 # 各拆分 controller 降到单副本（单节点无需高可用/反亲和）
 admissionController:
   replicas: 1
+  # PriorityClass 分档补齐（2026-08-10）：kyverno 全家归 `bulk`(-10)。
+  # 判据是实测的 webhook failurePolicy：唯一管**工作负载准入**的
+  # `kyverno-resource-validating-webhook-cfg` 是 **Ignore**，其余 `Fail` 的只管
+  # Kyverno 自己的 CR（policy/exception/cleanup）。所以 kyverno 掉线**不会挡住 pod 创建**，
+  # 是真 fail-open —— 与 trivy-operator 归 bulk 的理由一致（被驱逐正是 fail-open）。
+  priorityClassName: bulk
   antiAffinity:
     enabled: false
   container:
@@ -31,6 +37,7 @@ admissionController:
 
 backgroundController:
   replicas: 1
+  priorityClassName: bulk
   antiAffinity:
     enabled: false
   # 2026-08-10 补 resources：此前本段没有 resources，吃 chart 默认 limit 128Mi，
@@ -53,6 +60,7 @@ backgroundController:
 
 reportsController:
   replicas: 1
+  priorityClassName: bulk
   antiAffinity:
     enabled: false
   # 2026-07-16 fix: add explicit resources. 122 restarts on single-node homelab —
@@ -72,6 +80,7 @@ reportsController:
 
 cleanupController:
   replicas: 1
+  priorityClassName: bulk
   antiAffinity:
     enabled: false
   # 2026-08-10 补 resources：同 backgroundController，此前吃 chart 默认 limit 128Mi，
