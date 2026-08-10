@@ -122,16 +122,23 @@ spec:
               port: 13133
             initialDelaySeconds: 5
             periodSeconds: 10
+          # 2026-08-10: memory limit 512Mi→768Mi、request 128Mi→256Mi。
+          # 实测 7d 峰值 447Mi / 512Mi = **87%**，过了 >80% 判据。上面那句
+          # 「under-resourcing it means an OOM blinds the whole cluster」正是这条的理由——
+          # 它是 oracle 唯一的 logs+metrics+traces 管道，被 OOM 杀掉等于整个集群失明，
+          # 而且 OOM 后干净重启、不进 CrashLoopBackOff，没有告警会响
+          # （本批已补 ContainerMemoryNearLimit 事前告警兜底）。
+          # memory_limiter 保持 limit_mib: 400 不动（otel-collector-config.yaml:289）。
+          # 实测 RSS 峰值 447Mi > limiter 的 400 —— 差额正是原注释说的 Go RSS > heap，
+          # 所以容器 limit 必须显著高于 limit_mib，而不是贴着它设。
+          # 768Mi 下 RSS 占比降到约 58%。**动 limit_mib 前先回来核这里的比例。**
           resources:
             requests:
               cpu: 75m
-              memory: 128Mi
+              memory: 256Mi
             limits:
-              # Sole logs+metrics+traces pipeline for oracle-k3s — under-resourcing
-              # it means an OOM blinds the whole cluster. memory_limiter (below) is
-              # kept well under this ceiling to account for Go RSS > heap.
               cpu: 500m
-              memory: 512Mi
+              memory: 768Mi
           # 显式 root：/var/log/pods 只读 + /var/lib/otelcol checkpoint/队列可写
           # （hostPath root:root；节点日志代理的通行惯例，同 homelab collector）
           securityContext:
