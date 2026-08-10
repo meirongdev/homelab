@@ -79,6 +79,26 @@ BestEffort 的 request 恒为 0，**永远落在"超"那一桶**，于是排在�
 
 处置：按 §1 查实测值 → 补 `resources` → 按 §4 下发 → 按 §5 验证。
 
+⚠️ **一个重要例外：先看 Pod Priority，再决定值不值得补。**
+「BestEffort 排第一档」说的是**同一驱逐桶内**的事——kubelet 先按「用量是否超 request」
+分桶，桶内**下一个排序键就是 Pod Priority**。所以带 `system-node-critical`(2000001000)
+或 `system-cluster-critical`(2000000000) 的 Pod 无论 QoS 如何都排在**最后**，
+它们的 BestEffort 基本无害。
+
+```bash
+kubectl --context <ctx> -n <ns> get pod <pod> \
+  -o custom-columns='QOS:.status.qosClass,PRIO:.spec.priority,CLASS:.spec.priorityClassName'
+```
+
+2026-08-10 据此**放弃**了 oracle 侧的 cilium 全家（agent/envoy/operator 都是
+system-*-critical）：补 requests 会把 oracle 内存 requests 从 85% 推到 **95%**
+（+896Mi / 9080Mi allocatable），把新服务的调度空间吃光，换来的驱逐收益却接近零。
+同一集群里真正裸奔的是 `hubble-relay` / `hubble-ui`（priority **0**、无 class），
+但那是纯观测组件，掉了不影响服务——于是也一并搁置。
+
+**判据一句话**：BestEffort + priority 0 + 掉了会出事 = 必补；
+BestEffort + system-critical = 可以不补；BestEffort + priority 0 + 纯观测 = 看余量再说。
+
 ⚠️ **补完 BestEffort 后节点的 requests 百分比会上涨，这是正确的**，不是变差。
 那些 Pod 本来就在用这些资源，只是之前对调度器隐身。2026-08-10 oracle 实测
 CPU 76%→83%、内存 66%→86%。上涨后要顺手做分类 D 把 CPU 收回来。

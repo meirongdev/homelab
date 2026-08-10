@@ -46,6 +46,20 @@ Homelab 由两个集群组成：
 压力时，起决定作用的是 kubelet 的**类内**判据 —— 先看 **Pod Priority**，再看
 「用量超出 request 的幅度」。
 
+> **2026-08-10 补两条实测推论**，处理 KRR 报告时反复用到：
+>
+> 1. **BestEffort 的危害取决于 Pod Priority**。kubelet 先按「用量是否超 request」分桶
+>    （BestEffort 的 request 恒为 0，**永远在"超"那一桶**），桶内下一个键才是 Priority。
+>    所以带 `system-node-critical`(2000001000) / `system-cluster-critical`(2000000000)
+>    的 Pod 即使是 BestEffort 也排在最后 —— oracle 的 cilium-agent/envoy/operator 属此类，
+>    **刻意不补 requests**（补了会把该节点内存 requests 从 85% 推到 95%，收益却接近零）。
+>    反过来，`priority: 0` 且无 class 的 BestEffort 才是真裸奔。
+>
+> 2. **BestEffort 会让 `priorityClassName` 完全失效**。2026-08-10 实测：external-dns 的
+>    values 里写着 `priorityClassName: high`(900)，但它没有 resources → BestEffort →
+>    落在"超 request"桶，而守规矩、用量在 request 之内的 `bulk`(-10) 应用落在另一桶，
+>    结果 high 的先死。**声明了优先级就必须同时声明 resources，否则那行是装饰。**
+
 四档（定义：`cloud/oracle/manifests/base/priorityclasses.yaml` 与 homelab 侧
 `k8s/helm/manifests/namespace-guardrails/priorityclasses.yaml`，两边取值一致）：
 
