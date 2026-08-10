@@ -79,6 +79,7 @@ openspec/
 .qwen/commands/
 .qwen/skills/
 .qwen/tmp/
+.qwen/skill-curator.json
 .github/prompts/
 .github/skills/
 proxmox/ansible/.vault_pass
