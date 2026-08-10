@@ -51,6 +51,16 @@ gatewayAPI:
   enableAppProtocol: true
 
 clustermesh:
+  # ⚠️ **跑完 `just deploy-cilium` 必须接着跑一次**（2026-08-10 实测教训）：
+  #   just connect-clustermesh 100.94.186.7:32379 100.107.166.37:32379
+  # 本配方带 `--reset-values`，它会把 `cilium clustermesh connect` 交换来的
+  # **跨集群 CA 信任**冲掉（两集群各自自签 CA，指纹不同；证书不入库所以本文件保不住它）。
+  # 下面的 `clusters:` 只保住 endpoint 条目，保不住互信。
+  # 断开后的形态极易误判：`cilium-dbg troubleshoot clustermesh` 六项全 ✅
+  # （KVStoreMesh 下 agent 连的是本地 apiserver，那段本来就通）、NodePort 也 TCP 可达。
+  # 真判据只有两个：`cilium status` 里 `remote configuration: retrieved=false`，
+  # 以及**对端** clustermesh-apiserver 的 etcd 容器日志 `remote error: tls: bad certificate`。
+  # 详细复盘见 cloud/oracle/values/cilium-values.yaml 同位注释。
   useAPIServer: true
   config:
     enabled: true

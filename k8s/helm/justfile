@@ -7,7 +7,14 @@ ctx := "k3s-homelab"
 # `argocd_chart_version`，就在 deploy-argocd 上方，跟着那条配方走）。
 # LGTM/otel/external-dns 已全部迁 ArgoCD（2026-07-31）：chart 版本唯一真源是
 # argocd/applications/<app>.yaml 的 targetRevision——不要在这里重复维护（此前双 pin 漂移过：loki 7.0.0 vs 7.1.0）。
-cilium_version           := "1.19.1"
+# 2026-08-10 1.19.1 → 1.20.0：oracle 侧 `just deploy-cilium` 当时**没有 --version**
+# （只有本文件 pin 了），一次例行部署就随 chart repo 升到了 1.20.0，两集群版本劈叉
+# 导致 oracle→homelab ClusterMesh `retrieved=false`（单向断，homelab→oracle 仍好）。
+# 选择向前对齐而非回滚。1.20 的四条 breaking change 已逐条核过，本仓库均不命中：
+# TLSRoute 0 个（那条「Gateway API 需 ≥v1.6.1」的实质就是 TLSRoute v1alpha2→v1，
+# 本仓库只用 HTTPRoute，实测 1.20 + Gateway API v1.2.1 入口全部 200）、
+# CiliumNodeConfig v2alpha1 0 个、带 kafka/l7/l7proto 的 CNP/CCNP 0 条、未用自定义 CNI chaining。
+cilium_version           := "1.20.0"
 vault_version            := "0.33.0"
 eso_version              := "2.6.0"
 
@@ -172,6 +179,10 @@ deploy-cilium: add-repos
     kubectl --context "$ctx" -n kube-system rollout status deployment/hubble-relay --timeout=5m
     kubectl --context "$ctx" -n kube-system rollout restart deploy/cilium-operator
     kubectl --context "$ctx" exec -n kube-system ds/cilium -c cilium-agent -- cilium status --brief
+    echo ""
+    echo "⚠️  --reset-values 会冲掉跨集群 CA 信任 → ClusterMesh 会静默断开（2026-08-10 实测）。"
+    echo "   现在必须跑：just connect-clustermesh 100.94.186.7:32379 100.107.166.37:32379"
+    echo "   判据看 'cilium status' 的 remote configuration: retrieved=true"
 
 # Cilium 状态检查
 cilium-status:

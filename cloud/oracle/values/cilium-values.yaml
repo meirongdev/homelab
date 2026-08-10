@@ -64,9 +64,22 @@ clustermesh:
     # （kvstoremesh 变成 0 remote clusters，不报任何错）。
     # 对称物是 homelab 的 k8s/cilium/values.yaml，它一直有这段。
     #
-    # 写进来之后 `deploy-cilium` 变成幂等：无需再补跑 connect 就能保住 mesh。
-    # ⚠️ 仍然要跑 `just connect-clustermesh` 的唯一场景是**任一集群重建**——那会重新
-    #    自签 CA，两侧要重新交换证书（`--allow-mismatching-ca`）；本段只保住 endpoint。
+    # 写进来之后 endpoint 条目本身是幂等的了。
+    #
+    # ⚠️⚠️ **但 `deploy-cilium` 整体仍然不幂等 —— 2026-08-10 实测证伪了上面这条**：
+    # 原注释说「仍要跑 connect 的唯一场景是任一集群重建」。错。`--reset-values`
+    # **同时**会把 `cilium clustermesh connect` 交换来的**跨集群 CA 信任**冲掉，
+    # 而那份信任不在本文件里、也不可能在（证书不入库）。当天一次只为改 resources 的
+    # 例行部署就断了 mesh，形态极具迷惑性：
+    #   - `cilium-dbg troubleshoot clustermesh` 六项全 ✅（TCP/TLS/CA/客户端证书都"正常"）
+    #     —— 因为 KVStoreMesh 架构下 agent 连的是**本地** apiserver，那段当然通
+    #   - NodePort 32379 从 Tailscale 双向 TCP 可达，两节点 ip rule 5200 也都在
+    #   - 唯一真判据是 `cilium status` 的 `remote configuration: retrieved=false`
+    #     和 **对端 etcd 容器**日志里的 `remote error: tls: bad certificate`
+    #
+    # 结论：**任何一侧跑完 `deploy-cilium`，都要接着跑一次**
+    #   `just connect-clustermesh 100.94.186.7:32379 100.107.166.37:32379`
+    # （它带 `--allow-mismatching-ca`，正是为两集群各自自签 CA 的情况设计的）。
     # ips 必须是对端的 **Tailscale IP**（不是 VCN 私网 IP），配合 NodePort 32379。
     clusters:
       - name: homelab
