@@ -76,8 +76,8 @@
 
   | enforce | namespace |
   |---------|-----------|
-  | `baseline` | default, vault, personal-services, cloudflare, external-secrets, kyverno, external-dns, opencost（homelab）；argocd, cloudflare, external-dns, homepage, personal-services, rss-system, opencost, zitadel, default, external-secrets, cnpg-system（oracle） |
-  | `restricted` | jobs-sg（homelab）；databases（oracle，CNPG **apps-pg** 所在地） |
+  | `baseline` | default, vault, personal-services, cloudflare, external-secrets, kyverno, external-dns, opencost（homelab）；argocd, cloudflare, external-dns, homepage, personal-services, rss-system, opencost, default, external-secrets, cnpg-system（oracle） |
+  | `restricted` | jobs-sg（homelab）；databases（oracle，CNPG **apps-pg** 所在地）· **zitadel**（oracle，2026-08-10 起，SSO + 身份库 zitadel-pg） |
   | `privileged`（显式豁免, warn/audit 仍记 baseline） | kube-system, monitoring, trivy-system, tetragon, kube-bench, backup（homelab）；kube-system, monitoring, trivy-system, falco, backup（oracle） |
 
   只剩 `cilium-secrets` / `kube-node-lease` / `kube-public` 三个无标签——它们**天生不跑 Pod**，
@@ -91,13 +91,17 @@
   `databases` 是 2026-08-06 新建的共享库平台，只承载 `apps-pg`；zitadel 的库刻意没并进去。
   也就是说**身份库吃的是 `zitadel` ns 的档，不是 `databases` 的 restricted**。
 
-- **`zitadel` ns 的 PSA 缺口已于 2026-08-10 补上**（此前清单里一个标签都没有 → 吃 PSA 内置默认
-  `privileged` 且 warn/audit 全空；实测 server dry-run 一个 hostPID+hostNetwork+privileged+hostPath:/
-  的 Pod 能建成、零 warning）。现为 `enforce: baseline` + `warn/audit: restricted`。
-  **还差一步到 restricted**：chart 渲的 4 个 Pod 缺 `allowPrivilegeEscalation:false` /
-  `capabilities.drop[ALL]` / `seccompProfile`（zitadel-pg 由 CNPG 渲，已达标）。
-  顺序必须是**先补 chart values 再翻 enforce** —— 反过来当下无感，但下次 chart 升级时
-  `zitadel-init`/`zitadel-setup` Job 会被挡在准入外，升级卡在 DB 迁移中途。见 [ROADMAP](../ROADMAP.md) 开放项 #13。
+- **`zitadel` ns：2026-08-10 一天内走完 无标签 → baseline → restricted**。起点是清单里
+  一个标签都没有 → 吃 PSA 内置默认 `privileged` 且 warn/audit 全空（实测 server dry-run 一个
+  hostPID+hostNetwork+privileged+hostPath:/ 的 Pod 能建成、零 warning），而这个 ns 装着 SSO
+  与身份库 `zitadel-pg`。分两步是因为**顺序不能反**：先在
+  [`zitadel.yaml`](../../cloud/oracle/manifests/zitadel/zitadel.yaml) 的 `valuesContent` 补
+  `securityContext`/`podSecurityContext`（chart 默认缺 `allowPrivilegeEscalation:false` /
+  `capabilities.drop[ALL]` / `seccompProfile`；CNPG 渲的 zitadel-pg 本就达标），
+  helm upgrade 后 10 个容器逐个复核通过、`auth.meirong.dev` 仍 200，**才**翻 enforce。
+  ☠️ 由此产生一条**承重关系**：ns 是 restricted 之后那段 chart values 不能删——删了之后
+  运行中的 Pod 毫无异样（PSA 只在创建/更新时评估），症状要等下一次 helm upgrade 才现形，
+  且现形方式是 `zitadel-init`/`zitadel-setup` Job 被拒 → 升级卡在 DB 迁移中途。
 
 - **收紧前先用 dry-run 问准入自己**（比翻文档/读 values 可靠，PSA 会把现存违规 Pod 全列出来）：
 
