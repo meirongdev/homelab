@@ -174,11 +174,15 @@ RAM 单价 = 节点小时成本 × 0.175 / 12.66
 
 KRR **只读不改**，采纳需手工改 git（`krr-enforcer` 刻意未部署，原因见 decisions）。
 
-1. 看 Telegram 附件里 `CPU DIFF` / `MEMORY DIFF` 列
-2. 忽略标 `(No data)` / `(Not enough data)` 的行 —— 那是当前没有运行 Pod 的 Job/CronJob
-3. 改对应 values / manifest 的 `resources`，push
-4. 内存推荐是「窗口内 max + 15%」，**7d 窗口会漏掉跨周尖峰**（如每周备份 CronJob），
-   给这类工作负载留额外余量
+推荐值的两条口径（影响怎么读，故留在本文）：
+
+- CPU 取 **p95**；内存取窗口内 **max + 15%**，可反推峰值 `峰值 ≈ 推荐 ÷ 1.15`
+- 内存有 **100Mi** 地板、CPU 有 **10m** 地板 —— 恰好等于地板的推荐**不是测量结果**
+- 内存窗口 7d（对齐 Prometheus retention），**跨周尖峰会落在窗外**（如每周备份 CronJob），
+  这类工作负载要自行留余量
+
+**拿到报告之后怎么处理 → [runbooks/krr-report-triage.md](../runbooks/krr-report-triage.md)**
+（五类分诊、哪些刻意不采纳、改哪里怎么下发、改完怎么验证真的生效）。
 
 ### 手工触发一次 KRR
 
