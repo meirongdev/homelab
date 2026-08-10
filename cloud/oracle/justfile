@@ -6,6 +6,16 @@ set dotenv-load
 ctx := "oracle-k3s"
 vault_token := env_var_or_default("VAULT_TOKEN", "")
 
+# ⚠️ 2026-08-10 补 pin —— 本文件此前**没有** --version，而 deploy-cilium 前一步就是
+# `helm repo update cilium`：一次只为改 resources 的例行部署把 oracle 从 1.19.1 静默
+# 升到了 1.20.0，两集群劈叉导致 oracle→homelab ClusterMesh `retrieved=false`。
+# 同一条规则仓库里本来就写着（argocd/applications/kube-prometheus-stack.yaml:25
+# 「chart 版本必须 pin：不 pin 时会随 chart repo 更新意外整栈升级」），只是没覆盖到这里。
+# ⚠️ 必须与 k8s/helm/justfile 的 cilium_version 保持一致 —— 两集群版本劈叉会断 ClusterMesh。
+cilium_version := "1.20.0"
+# 与 k8s/helm/justfile 的 eso_version 一致（两集群同版本，实测 helm list 均为 2.6.0）。
+eso_version    := "2.6.0"
+
 # ─── Node Setup ────────────────────────────────────────────────
 
 # Provision K3s on the Oracle Cloud node
@@ -32,6 +42,7 @@ deploy-cilium:
     helm upgrade --install cilium cilium/cilium \
         --namespace kube-system \
         --kube-context {{ctx}} \
+        --version {{cilium_version}} \
         --values values/cilium-values.yaml \
         --reset-values \
         --wait \
@@ -48,6 +59,10 @@ deploy-cilium:
     kubectl --context {{ctx}} -n kube-system get secret hubble-server-certs hubble-relay-client-certs
     kubectl --context {{ctx}} -n kube-system rollout status deployment/hubble-relay --timeout=5m
     kubectl --context {{ctx}} exec -n kube-system ds/cilium -c cilium-agent -- cilium status --brief
+    @echo ""
+    @echo "⚠️  --reset-values 会冲掉跨集群 CA 信任 → ClusterMesh 会静默断开（2026-08-10 实测）。"
+    @echo "   现在必须跑：just connect-clustermesh 100.94.186.7:32379 100.107.166.37:32379"
+    @echo "   （在 k8s/helm/ 目录下）。判据看 'cilium status' 的 remote configuration: retrieved=true"
 
 # Cilium 状态检查
 cilium-status:
@@ -80,6 +95,8 @@ bootstrap: deploy-cilium install-eso create-vault-token deploy-manifests deploy-
     @echo "✅ Oracle K3s cluster fully bootstrapped"
 
 # Install External Secrets Operator via Helm
+# ⚠️ 2026-08-10 补 --version 与 --values：此前两者都没有，`helm repo update` + 无 pin
+#    等于每跑一次就升到 chart 最新版（cilium 那条 recipe 同样的坑，当天已实际踩中）。
 install-eso:
     helm repo add external-secrets https://charts.external-secrets.io || true
     helm repo update
@@ -87,7 +104,8 @@ install-eso:
         --namespace external-secrets \
         --create-namespace \
         --kube-context {{ctx}} \
-        --set metrics.service.enabled=true \
+        --version {{eso_version}} \
+        --values values/external-secrets-values.yaml \
         --wait --timeout 5m
 
 # Create Vault token secret (needed by ClusterSecretStore)
