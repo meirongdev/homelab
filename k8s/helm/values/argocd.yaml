@@ -117,7 +117,19 @@ dex:
 notifications:
   enabled: false
 applicationSet:
+  # ⚠️ `enabled: false` 在 chart 10.1.4 上**没有真正禁用它** —— `helm get manifest`
+  # 实证当前 release 仍渲染出 Deployment/Service/Role/RoleBinding/ServiceAccount 五个对象，
+  # pod 也确实在跑（且集群里 0 个 ApplicationSet 对象，等于白跑）。
+  # 因此这里必须补 resources：不补就是 `resources: {}` → BestEffort → 驱逐排第一档。
+  # 实测 7d 峰值 163Mi、CPU p95 1m。
+  # TODO: 真要停用得查 chart 10.x 里正确的禁用方式，属功能变更，未在本次资源调优范围内。
   enabled: false
+  resources:
+    requests:
+      cpu: 10m
+      memory: 176Mi
+    limits:
+      memory: 384Mi
 
 # --- 资源声明 ---
 # application-controller 内存：512Mi 在加入 Trivy(~18 大 CRD)+Kyverno(更大 CRD) 两个
@@ -131,19 +143,29 @@ applicationSet:
 #    大 CRD 的 App 之后回头看一眼 `max_over_time(...[2d]) / limit`，别等它再炸。
 #    查法见 docs/reference/k8s-qos-resource-management.md 的「检测 OOMKill」。
 # 改后需 `cd k8s/helm && just deploy-argocd`（manual-helm，git push 不生效）。
+# 2026-08-10（ROADMAP #3 收尾）：**同一故障在 1.5Gi 上第三次逼近** —— 实测 7d 峰值
+# 1306Mi / limit 1536Mi = 85%，又过了上面说的 80% 判据。limit 抬到 2Gi。
+# 同时把 request 从 384Mi 抬到 896Mi：上面那句「request 维持 384Mi」当时是对的
+# （homelab 单节点无调度竞争），但控制面 2026-08-02 已迁到 oracle，那里 allocatable
+# 只有 9080Mi、requests 实测已 78%。稳态 RSS ~1.3G 却只申报 384Mi，意味着它在 kubelet
+# 驱逐排序里「超 request」近 1G —— 在**最紧的集群**上排在很前面。896Mi 是折中：
+# 显著改善驱逐排序，又不像 KRR 建议的 1515Mi 那样一口吃掉 12% 的节点内存预算。
+# CPU request 维持 100m：实测 p95 82m 尚在其下，且 limit 1000m 足够 burst，
+# 不跟 KRR 抬到 128m（oracle 的 CPU request 才是真正稀缺的那个）。
 controller:
   resources:
     requests:
       cpu: 100m
-      memory: 384Mi
+      memory: 896Mi
     limits:
       cpu: 1000m
-      memory: 1536Mi
+      memory: 2Gi
 
 repoServer:
   resources:
     requests:
-      cpu: 50m
+      # 2026-08-10: 50m→15m，实测 7d p95 11m
+      cpu: 15m
       memory: 128Mi
     limits:
       cpu: 500m
@@ -185,13 +207,15 @@ repoServer:
           memory: 32Mi
 
 server:
+  # 2026-08-10: CPU request 25m→10m（实测 p95 1m）；
+  # memory limit 128Mi→192Mi（实测 7d 峰值 97Mi = 76%，逼近 80% 判据）。
   resources:
     requests:
-      cpu: 25m
+      cpu: 10m
       memory: 64Mi
     limits:
       cpu: 250m
-      memory: 128Mi
+      memory: 192Mi
 
 redis:
   image:

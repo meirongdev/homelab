@@ -50,13 +50,17 @@ singleBinary:
     storageClass: local-path
     size: 5Gi
   
+  # 2026-08-10 按 KRR + Prometheus 实测调整（oracle 是 CPU-request 紧的那个集群：
+  # allocatable 只有 1800m，补完 BestEffort 后 requests 一度到 83%）：
+  #   CPU request 50m→10m —— 实测 7d p95 仅 5m，50m 是纯占位
+  #   memory limit 384Mi→512Mi —— 实测 7d 峰值 292Mi = 76%，逼近 reference 里的 80% 判据
   resources:
     requests:
-      cpu: 50m
+      cpu: 10m
       memory: 128Mi
     limits:
       cpu: 500m
-      memory: 384Mi
+      memory: 512Mi
 
 # ✅ 禁用 chunks cache（节省 9.6GB 内存！）
 chunksCache:
