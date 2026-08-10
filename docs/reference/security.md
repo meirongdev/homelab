@@ -35,7 +35,15 @@
 
 ## 2. 边缘安全 (Edge) — Cloudflare
 
-- **零暴露端口**：所有外部流量 `Internet → Cloudflare DNS → Tunnel(cloudflared) → Cilium Gateway → Service`，集群无公网入站端口。入口链路细节见 [networking-ingress.md](networking-ingress.md)。
+- **应用流量零暴露**：所有外部流量 `Internet → Cloudflare DNS → Tunnel(cloudflared) → Cilium Gateway → Service`。cloudflared 是**出站**连 CF 边缘，DNS 全是 `CNAME → <tunnel_id>.cfargotunnel.com` 且 proxied，**没有任何 A 记录指向节点公网 IP**。入口链路细节见 [networking-ingress.md](networking-ingress.md)。
+- ⚠️ **但「零暴露端口」不等于节点没有公网入站规则**——这条描述此前写成了「集群无公网入站端口」，
+  与事实不符（2026-08-10 更正）。homelab 在家宽 NAT 后面、本来就没有公网 IP；**oracle-k3s 有**，
+  它的 OCI Security List 曾把 **22 / 80 / 443 / 6443 全开给 `0.0.0.0/0`**，其中 6443 是 k8s API 直挂公网。
+  2026-08-10 实测后删掉 80/443/6443（80/443 无进程监听，纯死规则；6443 无公网客户端，
+  且 `tailscale0` 属 firewalld `trusted` zone，删了不影响经 tailnet 的 API 访问）。
+  **现存公网入站仅 3 条**：`22/tcp`（tailnet 全挂时的唯一进入手段，密钥认证）、
+  `41641/udp`（Tailscale NAT 穿透，缺了会全程走 DERP 中继）、`ICMP 3/4`（PMTU）。
+  规则与逐条实测依据写在 `cloud/oracle/terraform/main.tf` 的注释里。
 - **WAF**（zone 级，覆盖两条 Tunnel 所有子域；`cloudflare/terraform/waf.tf`，`just apply` 部署）：5 条自定义规则用满免费额度（拦 WordPress/PHP 扫描、敏感文件 `.env/.git`、漏扫 UA、非标 HTTP 方法、高威胁分 Managed Challenge）+ **1 条**限流规则（免费额度就 1 条，共用一个计数器）：认证端点（`/login`,`/oauth2`,`/api/login`,`/signin`,`/v1/auth`）**外加** `draw.meirong.dev` 的 `/socket.io/`（Excalidraw 2026-08-04 去掉 SSO 后，那是个公开的协作中继），30 req/10s/IP+colo → 封 10s。Pro 计划才有 Managed Ruleset (SQLi/XSS/RCE)/OWASP CRS/泄漏凭据检测（见 `waf.tf` 注释段）。
 - **Zone settings**：SSL Full、TLS 1.2+、Always HTTPS、Security Level Medium、Browser Integrity Check、Email Obfuscation、Hotlink Protection、Opportunistic Encryption。
 - **API Token 权限**：Zone DNS Edit + Zone WAF Edit + Zone Settings Edit + Cloudflare Tunnel Edit。
@@ -308,7 +316,7 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 
 | 威胁 / 攻击面 | 缓解控制 | 覆盖 |
 |--------------|----------|------|
-| 外部漏洞利用 / 扫描 | Cloudflare WAF + 零暴露端口 + 限流 | ✅ |
+| 外部漏洞利用 / 扫描 | Cloudflare WAF + 应用流量零暴露 + 限流；oracle 节点公网入站收到 3 条（22/41641/ICMP，见 §2） | ✅ |
 | 凭据窃取 / 未授权访问 | ZITADEL OIDC（锁定注册）+ 各 app 认证 | ✅ |
 | 密钥泄漏（静态） | Vault + ESO；镜像内密钥由 Trivy exposed-secret 扫描 | ✅ |
 | 密钥静默陈旧 | ESO 健康告警 → Telegram | ✅ |
@@ -328,6 +336,15 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 3. **节点 API 审计日志**：延后（磁盘紧）；如开启用 Metadata 级策略 + 严格 maxsize/maxbackup，先确认磁盘余量。
 4. **Kyverno Audit→Enforce**：逐条清理存量违规后提升；restrict-image-registries 最久保持 Audit。
 5. **离站备份**：restic 仓库（Vault raft / pg_dump / sqlite，含恢复演练通过）目前仅 106 本地 ZFS 单副本，尚未同步到云端（OCI always-free / B2）。详见 docs/runbooks/backup-recovery.md 与 ROADMAP.md。
+6. **oracle 节点 OS 层防火墙口子过多**（2026-08-10 发现，未处理）：firewalld `public` zone 开着
+   `10250 / 2380 / 4240 / 4244 / 32379 / 16443 / 25000 / 19001 / 12379 / 10248-10259 / 7800 / 1338 / …`
+   ——多数是早期 CNI（`cali+`、`flannel.1`、`cni0` 仍挂在 `trusted` zone）和 microk8s 试验的残留。
+   它们**目前只靠 OCI Security List 这一层挡在云边界**，纵深只有一层厚。
+   收口有真实风险（`enp0s3` 也在 `public` zone，误删可能切断节点自身到 API 的路径），
+   需要先逐端口确认归属再动；在那之前**不要往 Security List 里新增任何 `0.0.0.0/0` 规则**。
+7. **git 历史里的旧对象**（2026-08-10）：公网 IP 与两个已失效的 ZITADEL 凭据已从全历史抹除并
+   force-push，但 GitHub 上重写前的悬空对象**仍可按 commit SHA 访问**，直到向 GitHub Support
+   申请 GC。彻底了结的替代手段是轮换 OCI 公网 IP，让旧对象里的值失去意义。
 
 ## 12. 运维入口
 
