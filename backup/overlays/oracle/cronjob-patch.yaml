@@ -11,5 +11,14 @@ spec:
         spec:
           containers:
             - name: backup
+              # 2026-08-10: memory limit 512Mi→768Mi。实测 7d 峰值 460Mi = **90%**，
+              # 是全仓库离 OOMKill 最近的几个之一。restic 的内存随**仓库快照数**增长
+              # （索引要载入内存），所以这个比值只会单调变差 —— 而备份被 OOM 杀掉
+              # 属于「静默失效」：CronJob 失败不一定有人看，且 OOM 后干净退出、
+              # 不进 CrashLoopBackOff。本批同时补了 oom-alerts.yaml 兜底。
+              # ⚠️「oracle CPU 余量大」这句已过期：2026-08-05 缩到 2 OCPU，
+              #   allocatable 1800m，requests 一度到 83%。CPU limit 保持 "1" 不动
+              #   （备份是夜间错峰的一次性任务，让它跑快点是对的），但别再据此
+              #   给别的工作负载放宽 request。
               resources:
-                limits: { cpu: "1", memory: "512Mi" }   # oracle CPU 余量大
+                limits: { cpu: "1", memory: "768Mi" }

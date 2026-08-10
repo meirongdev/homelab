@@ -148,6 +148,59 @@ spec:
               Check: `kubectl --context k3s-homelab -n {{ $labels.namespace }} describe pod {{ $labels.pod }}`
               逼近 limit 的容器排名与判读见 docs/reference/k8s-qos-resource-management.md「检测 OOMKill」。
 
+        # 2026-08-10 加：上面那条的**交叉验证**，只在 homelab 有数据。
+        # 动机：30d 窗口内两集群的 last_terminated_reason 只出现过 Unknown/Error/Completed，
+        # **从没有过 OOMKilled 样本**，所以上面那条的 reason 标签值拼写至今未经实测证实
+        # （依据是 kubelet 透传、kube-state-metrics 原样导出）。本条走 cAdvisor 计数器，
+        # 不依赖任何标签值。若某次本条响了而 ContainerOOMKilled 没响，就是那条的
+        # 标签值写错了 —— 查实际值：
+        #   count by (cluster,reason) (kube_pod_container_status_last_terminated_reason == 1)
+        # ⚠️ 覆盖面注意：oracle-k3s **没有 cAdvisor 指标**（container_oom_events_total
+        #    homelab 116 条 / oracle 0 条；同一盲区还吃掉 container_cpu_cfs_throttled_*，
+        #    oracle 0 条 / homelab 41 条）。对 oracle 跑这类查询返回**空结果**，
+        #    与「值为 0」外观完全一致 —— 2026-08-10 据此误判过一次「oracle 无 CPU 节流」。
+        - alert: ContainerOOMKilledCadvisor
+          expr: increase(container_oom_events_total{container!=""}[15m]) > 0
+          for: 0m
+          labels:
+            severity: warning
+            component: workload
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.pod }} [{{ $labels.container }}] 发生 OOM 事件（cAdvisor 口径，{{ $labels.cluster }}）"
+            description: |
+              cAdvisor 计数器口径，仅 homelab 有数据。与 ContainerOOMKilled 互为验证：
+              本条响而那条没响 = 那条的 reason 标签值写错了，按本文件注释排查。
+
+        # 2026-08-10 加：**事前**预警。上面两条都是事后的——容器已经被杀了才响。
+        # 本条是这一层唯一能提前动手的信号，判据取自
+        # docs/reference/k8s-qos-resource-management.md 的「>80% 就该抬 limit 或查泄漏」，
+        # 阈值放到 85% 以降噪。
+        # ⚠️ 两侧都必须先 max by(...) 聚合掉 id/image/job 等多余标签，否则直接除会报
+        #    "many-to-one matching must be explicit"；分组键必须带 cluster，
+        #    否则两集群同名 ns/pod 会串味。
+        # ⚠️ 用 max_over_time 而非瞬时值：尖峰型负载看瞬时会整个漏掉——
+        #    argocd-application-controller 2026-08-02 被杀时瞬时读数只有 0.67G，
+        #    2d 窗口才照出 94%。
+        - alert: ContainerMemoryNearLimit
+          expr: |
+            max by (cluster, namespace, pod, container) (
+              max_over_time(container_memory_working_set_bytes{container!=""}[7d])
+            )
+            / on (cluster, namespace, pod, container)
+            max by (cluster, namespace, pod, container) (
+              kube_pod_container_resource_limits{resource="memory"}
+            ) > 0.85
+          for: 30m
+          labels:
+            severity: warning
+            component: workload
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.container }} 的 7d 内存峰值已达 limit 的 {{ $value | humanizePercentage }}（{{ $labels.cluster }}）"
+            description: |
+              一次尖峰就会 OOMKill，而 OOM 后干净重启、无人察觉。现在抬 limit 还来得及。
+              ⚠️ 控制面组件（ArgoCD / Kyverno / trivy / opencost）的峰值随**被管对象规模**
+              增长而非流量增长——每次新增大 CRD 的 App 或扩容之后要回头复查这条。
+
         - alert: CloudflaredAllReplicasDown
           expr: kube_deployment_status_replicas_available{deployment="cloudflared"} == 0
           for: 2m

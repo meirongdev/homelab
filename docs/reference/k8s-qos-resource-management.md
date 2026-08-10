@@ -212,9 +212,28 @@ max by (cluster,namespace,pod,container) (kube_pod_container_resource_limits{res
 被杀时的瞬时读数只有 0.67G，2d 窗口才照出 94%）。
 
 ⚠️ **`KubePodCrashLooping` 抓不到这类事件** —— 容器 OOM 后干净重启，从不进
-`CrashLoopBackOff`。集群当前也**没有任何规则**引用
-`kube_pod_container_status_last_terminated_reason{reason="OOMKilled"}`
-（2026-08-02 核实，repo 与 live rules 皆零）。补告警是 [ROADMAP #4](../ROADMAP.md)。
+`CrashLoopBackOff`。
+
+> **2026-08-10 更新**（本段原先说「集群没有任何规则引用 OOMKilled，补告警是 ROADMAP #4」，
+> 两处都已过期）：`ContainerOOMKilled` 早在 2026-08-02 就补上了
+> （`manifests/monitoring/alerts/prometheus-rules.yaml`），ROADMAP #4 现在指的是
+> prometheus-operator CRD 补升，与 OOM 无关。同日新增两条补齐剩下的缺口：
+>
+> | 规则 | 时机 | 覆盖 |
+> |---|---|---|
+> | `ContainerOOMKilled` | 事后 | 双集群（kube-state-metrics） |
+> | `ContainerOOMKilledCadvisor` | 事后 | **仅 homelab**（cAdvisor），用来交叉验证上一条的标签值拼写 |
+> | `ContainerMemoryNearLimit` | **事前**（7d 峰值 >85% limit） | 双集群 |
+>
+> ⚠️ `ContainerOOMKilled` 的 `reason="OOMKilled"` **至今未经实测证实** —— 30d 窗口内
+> 两集群只出现过 `Unknown`/`Error`/`Completed`，没有任何 OOMKilled 样本。第一次真实
+> OOM 时务必确认它真的响了；没响就查 `count by (cluster,reason) (kube_pod_container_status_last_terminated_reason == 1)`。
+>
+> ⚠️ **oracle-k3s 没有 cAdvisor 指标**：`container_oom_events_total` homelab 116 条 /
+> oracle **0 条**；`container_cpu_cfs_throttled_*` homelab 41 条 / oracle **0 条**。
+> 对 oracle 跑这类查询会返回**空结果**，与「值为 0」外观完全一致 ——
+> 2026-08-10 就据此误下过「oracle 无 CPU 节流」的结论。在 oracle 上判断 CPU 是否吃紧，
+> 只能看 limit 与 p95 的比值 + 应用日志时序。
 
 **判读**：先看 7d 曲线形状再动手 —— 稳定爬升是泄漏（该查代码），
 在基线上下震荡+偶发尖峰是**头寸不够**（该抬 limit）。
