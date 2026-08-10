@@ -107,6 +107,36 @@ spec:
               Username: postgres
               SSL:
                 Mode: disable
+    # PSA restricted 达标所需的三个字段（2026-08-10 加）。chart 默认的 securityContext 只给
+    # runAsNonRoot/runAsUser/readOnlyRootFilesystem/privileged 四项，**缺** restricted 要求的
+    # allowPrivilegeEscalation:false / capabilities.drop[ALL] / seccompProfile —— 实测
+    # `kubectl label ns zitadel …enforce=restricted --overwrite --dry-run=server` 会列出 4 个
+    # 违规 Pod（chart 渲的那批；zitadel-pg 由 CNPG 渲，四项本就齐全）。
+    #
+    # ⚠️ 顺序不能反：**先有这段，再把 ns 翻 restricted**。反过来做当下毫无感觉（PSA 不动
+    # 运行中的 Pod），但下一次 chart 升级时 zitadel-init / zitadel-setup 两个 Job 会被挡在
+    # 准入外，表现为「升级卡在 DB 迁移中途」——那是最难收拾的时刻。
+    #
+    # 这两个键是 chart 全局键，实测（helm template 9.34.1）会落到**全部 9 个容器**上：
+    # zitadel · login(含 wait-for-zitadel init) · init · setup 的 4 个容器 · cleanup。
+    # 不是 login.startupProbe.timeoutSeconds 那种写了被静默丢弃的键——改这里仍建议先渲一遍。
+    # 卷类型也已核过（configMap/secret/emptyDir/projected），都在 restricted 白名单内。
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      readOnlyRootFilesystem: true
+      privileged: false
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      seccompProfile:
+        type: RuntimeDefault
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      fsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
     resources:
       requests:
         cpu: 50m
