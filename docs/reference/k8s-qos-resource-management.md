@@ -153,8 +153,14 @@ oracle-k3s 在 2026-08-05 之前一条都没配（`capacity − allocatable` 的
 | 方式 | 范围 | 同步策略 |
 |------|------|---------|
 | **ArgoCD**（raw YAML）| `k8s/helm/manifests/` 下的个人服务 | auto-sync / 120s reconciliation |
-| **ArgoCD**（Helm chart）| 安全/可观测组件（kyverno、tetragon、trivy、falco、**loki、tempo、sloth**） | auto-sync / 120s reconciliation |
-| **just deploy-X**（Helm）| 基础设施层（kube-prometheus-stack、vault、cilium、external-secrets）| 手动触发（bootstrapping/恢复场景） |
+| **ArgoCD**（Helm chart）| 安全/可观测组件（kyverno、tetragon、trivy、falco、**loki、tempo、sloth**、**kube-prometheus-stack**、**external-dns**×2） | auto-sync / 120s reconciliation |
+| **just deploy-X**（Helm）| 基础设施层（vault、cilium、external-secrets、ArgoCD 自身）| 手动触发（bootstrapping/恢复场景） |
+
+> **2026-08-10 修正**：kube-prometheus-stack 早已迁入 ArgoCD（`argocd/applications/kube-prometheus-stack.yaml`，
+> 多源 chart+values），本表却仍把它列在「手动 helm」那行。判据别看 `helm list`——ArgoCD 接管前
+> 装过的 release 会一直留在那里；看**对象上的 tracking-id**：
+> `kubectl -n <ns> get deploy <name> -o jsonpath='{.metadata.annotations.argocd\.argoproj\.io/tracking-id}'`
+> 非空即 ArgoCD 管（改 values 后 `git push` 即可，别手动 `helm upgrade`）。
 
 loki、tempo、sloth、restic-backup 已从 Helm/kubectl 管理迁入 ArgoCD（2026-07-06）。
 

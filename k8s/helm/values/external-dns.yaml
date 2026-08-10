@@ -9,6 +9,19 @@ provider:
 
 priorityClassName: high
 
+# 2026-08-10 补 resources：此前本文件没有 resources，chart 默认 `{}` → pod 是
+# **BestEffort**。这与上面那行 `priorityClassName: high` 直接矛盾 —— QoS 是 kubelet
+# 驱逐排序的**第一级**判据（先看用量是否超 request，BestEffort 的 request 恒为 0，
+# 永远落在"超"那一档），priority 只在同一档内比较。结果就是一个标了 high(900) 的组件
+# 排在 `bulk`(-10) 的个人应用**前面**被驱逐。
+# 实测 7d 峰值 82Mi、CPU p95 2m。
+resources:
+  requests:
+    cpu: 10m
+    memory: 96Mi
+  limits:
+    memory: 256Mi
+
 env:
   - name: CF_API_TOKEN
     valueFrom:
