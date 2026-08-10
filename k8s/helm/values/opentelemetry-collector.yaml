@@ -130,10 +130,15 @@ serviceMonitor:
     release: kube-prometheus-stack   # serviceMonitorSelector 采纳所需（仓库固定约定）
 
 # 5600H 单节点，fail-open 哲学：宁可丢遥测不抢业务 CPU
+# 2026-08-10: memory limit 256Mi→384Mi、request 128Mi→192Mi。
+# 实测 7d 峰值 225Mi / 256Mi = **88%**，过 80% 判据。日志量随集群 pod 数增长，
+# 而 fail-open 在这里恰恰要求它**不要**被 OOM 反复杀（杀了就丢遥测，且 OOM 后
+# 干净重启不进 CrashLoopBackOff，没有告警会响 —— 见本批新增的 oom-alerts.yaml）。
+# CPU 不动：homelab 的 CPU requests 只占 20%，且 200m limit 实测有 2% 节流、可接受。
 resources:
   requests:
     cpu: 50m
-    memory: 128Mi
+    memory: 192Mi
   limits:
     cpu: 200m
-    memory: 256Mi
+    memory: 384Mi
