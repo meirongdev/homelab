@@ -16,6 +16,11 @@
 原因：oracle 的 otel-collector 只抓 node-exporter / KSM / cloudflared / cilium-envoy /
 external-secrets / external-dns，**没有 kubelet cAdvisor**。
 
+> **2026-08-10 措辞更正**：kubelet **内嵌** cAdvisor，两集群都没有独立部署 cAdvisor；
+> 准确说法是 oracle 的 otel-collector **当时没有抓取** kubelet 的 `/metrics/cadvisor`
+> 端点，所以 container_* 在 oracle 侧为 0。本文其余「没有 cAdvisor」均指「未采集」，
+> 决策本身不受影响。
+
 同一个缺口，两个工具给出了不同的答案。
 
 ## 决策一：OpenCost 用 collector 数据源，不查 Prometheus

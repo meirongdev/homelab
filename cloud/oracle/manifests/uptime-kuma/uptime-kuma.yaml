@@ -119,12 +119,14 @@ spec:
               # （16:04:35→16:05:00），把冷启整体拖到 39s 才 listening，正是探针
               # 误杀的土壤。requests 不动（20m）→ 不占节点可调度额度（当前 76%），
               # 只抬 limits 的超卖比（1111%→约 1128%），代价可忽略。
-              # ⚠️ oracle 侧没有 cadvisor 节流指标（container_cpu_cfs_throttled_*
-              # 只在 homelab 有 37 条序列），所以这条是按日志时序推断、非实测节流率。
-              # 2026-08-10 复核仍然如此：oracle **0 条**、homelab 41 条。
-              # ⚠️⚠️ 这个盲区会主动骗人：对 oracle 跑节流率查询会返回**空结果**，
-              # 看起来和「节流率为 0」一模一样 —— 当天就据此误下过「oracle 无节流」的结论。
-              # 在 oracle 上判断 CPU 是否吃紧，只能看 limit 与 p95 的比值 + 应用日志时序。
+              # ⚠️ oracle 侧没有节流计数器（container_cpu_cfs_throttled_*，homelab 41 条 /
+              # oracle 0 条）：两集群都没独立部署 cAdvisor，container_* 全来自 kubelet 内嵌
+              # cAdvisor；oracle 的 otel-collector 只 keep container_(cpu_usage_seconds_total|
+              # memory_working_set_bytes) 两个指标（为 KRR），节流计数器不进中枢 Prometheus
+              # （同盲区含 container_oom_events_total）。所以这条是按日志时序推断、非实测
+              # 节流率。对 oracle 跑节流率查询返回**空结果**，看起来和「节流率为 0」一模一样
+              # ——当天就据此误下过「oracle 无节流」的结论。在 oracle 上判断 CPU 是否吃紧，
+              # 只能看 limit 与 p95 的比值 + 应用日志时序。
               cpu: 500m
               # 2026-08-10: 256Mi→384Mi。实测 7d 峰值 202Mi = 79%，贴着 80% 判据；
               # monitor 数量还在涨，先留出头寸。requests 同上不动，不占调度额度。
