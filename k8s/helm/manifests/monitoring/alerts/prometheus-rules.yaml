@@ -185,13 +185,27 @@ spec:
         # ⚠️ 用 max_over_time 而非瞬时值：尖峰型负载看瞬时会整个漏掉——
         #    argocd-application-controller 2026-08-02 被杀时瞬时读数只有 0.67G，
         #    2d 窗口才照出 94%。
+        # ⚠️ 2026-08-11 修**除数带 pod 造成的 CronJob 假阳性**：原式两侧都按
+        #    (cluster,namespace,pod,container) join。CronJob 每晚换新 pod，改 limit 只
+        #    影响新 pod，**旧 pod 的 spec 不可变**，于是老 limit 继续参与计算，直到
+        #    successfulJobsHistoryLimit 把它挤掉。实例：backup 的 768Mi 已于 08-10 生效
+        #    （新 pod 峰值 148Mi=19%），告警却仍按 08-09 那个 512Mi 的残留 pod 报
+        #    90.03%，且会持续 2~3 晚。**每次给 CronJob 抬 limit 都会复现**，不是偶然。
+        #    改法：分子保持 pod 粒度（排障要知道是哪个 pod 峰值最高），分母降到
+        #    (cluster,namespace,container) 取 max = 该工作负载**当前**的 limit，
+        #    用 group_left 做多对一。于是「历史峰值 vs 现行 limit」，语义才是对的。
+        #    ⚠️ 反向代价：limit **调小**时会对着旧的大 limit 比，短暂漏报（Deployment
+        #       滚完即恢复，CronJob 最多 3 晚）。抬 limit 远比压 limit 常见，认这个取舍。
+        #    ⚠️ 别改回按 pod join 来「修」漏报——那样 CronJob 假阳性立刻回来。
+        #    验证过：改前命中 repo-server 93.29% + backup 90.03%（后者是假的）；
+        #    改后只剩 repo-server 93.29%，356 条 series 无 many-to-many 报错。
         - alert: ContainerMemoryNearLimit
           expr: |
             max by (cluster, namespace, pod, container) (
               max_over_time(container_memory_working_set_bytes{container!=""}[7d])
             )
-            / on (cluster, namespace, pod, container)
-            max by (cluster, namespace, pod, container) (
+            / on (cluster, namespace, container) group_left
+            max by (cluster, namespace, container) (
               kube_pod_container_resource_limits{resource="memory"}
             ) > 0.85
           for: 30m

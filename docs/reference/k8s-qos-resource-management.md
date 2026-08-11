@@ -264,6 +264,19 @@ max by (cluster,namespace,pod,container) (kube_pod_container_resource_limits{res
 > 2026-08-10 就据此误下过「oracle 无 CPU 节流」的结论。在 oracle 上判断 CPU 是否吃紧，
 > 只能看 limit 与 p95 的比值 + 应用日志时序。
 
+> **2026-08-11 更新**：`ContainerMemoryNearLimit` 的口径从「每个 pod 的峰值 ÷ **该 pod 自己的**
+> limit」改成「每个 pod 的峰值 ÷ 该工作负载 **当前**的 limit」（分母降到
+> `(cluster,namespace,container)` 取 max，`group_left` 多对一）。
+>
+> 起因：CronJob 每晚换新 pod，改 limit 只影响新 pod，**旧 pod 的 spec 不可变**，
+> 老 limit 会继续参与计算直到 `successfulJobsHistoryLimit` 把它挤掉。backup 的 768Mi
+> 08-10 已生效（新 pod 峰值 148Mi = 19%），告警却仍按 08-09 那个 512Mi 的残留 pod
+> 报 90.03%。**每次给 CronJob 抬 limit 都会复现 2~3 晚假阳性**，不是偶然。
+>
+> ⚠️ 反向代价：limit **调小**时会对着旧的大 limit 比，短暂漏报（Deployment 滚完即恢复，
+> CronJob 最多 3 晚）。抬 limit 远比压 limit 常见，认这个取舍；**别为了修漏报改回按 pod
+> join**，那样 CronJob 假阳性立刻回来。
+
 **判读**：先看 7d 曲线形状再动手 —— 稳定爬升是泄漏（该查代码），
 在基线上下震荡+偶发尖峰是**头寸不够**（该抬 limit）。
 2026-08-02 的 `argocd-application-controller` 属后者：基线 0.54–0.68G、尖峰 0.85G+、limit 1Gi
