@@ -13,6 +13,11 @@ vault_token := env_var_or_default("VAULT_TOKEN", "")
 # 「chart 版本必须 pin：不 pin 时会随 chart repo 更新意外整栈升级」），只是没覆盖到这里。
 # ⚠️ 必须与 k8s/helm/justfile 的 cilium_version 保持一致 —— 两集群版本劈叉会断 ClusterMesh。
 cilium_version := "1.20.0"
+# Cilium 1.20 要求的 Gateway API CRD 版本。⚠️ 与 k8s/helm/justfile 的 gateway_api_version 一致。
+# ☠️ 2026-08-11：这组 CRD 停留在 v1.2.1，导致两集群 Gateway API 控制器**静默瘫痪 30 小时**
+#    （新路由全部拿不到 status，旧路由照常 200 所以没人发现）。原委见 k8s/helm/justfile
+#    顶部 cilium_version 上方的长注释；修复配方 `just deploy-gateway-api-crds`。
+gateway_api_version := "1.6.1"
 # 与 k8s/helm/justfile 的 eso_version 一致（两集群同版本，实测 helm list 均为 2.6.0）。
 eso_version    := "2.6.0"
 
@@ -32,7 +37,31 @@ setup-tailscale authkey:
 
 # ─── Cilium CNI ─────────────────────────────────────────────────
 
+# 安装/升级 Gateway API CRD —— Cilium 的前置条件。幂等；跑完重启 operator 并验收。
+# ⚠️ --server-side 必需（httproutes CRD 429KB，客户端 apply 撑爆注解上限）；
+#    TLSRoute 只在 experimental 频道。详见 k8s/helm/justfile 同名配方的注释。
+deploy-gateway-api-crds:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    base="https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v{{gateway_api_version}}/config/crd"
+    for c in gatewayclasses gateways httproutes grpcroutes referencegrants backendtlspolicies; do
+        echo "→ standard/$c"
+        kubectl --context {{ctx}} apply --server-side --force-conflicts \
+            -f "$base/standard/gateway.networking.k8s.io_$c.yaml"
+    done
+    echo "→ experimental/tlsroutes"
+    kubectl --context {{ctx}} apply --server-side --force-conflicts \
+        -f "$base/experimental/gateway.networking.k8s.io_tlsroutes.yaml"
+    kubectl --context {{ctx}} -n kube-system rollout restart deploy/cilium-operator
+    kubectl --context {{ctx}} -n kube-system rollout status deploy/cilium-operator --timeout=3m
+    if kubectl --context {{ctx}} -n kube-system logs deploy/cilium-operator --tail=300 \
+        | grep -q "Required GatewayAPI resources are not found"; then
+        echo "❌ Gateway API 控制器仍未初始化 —— 核对 CRD 版本与 Cilium 要求" && exit 1
+    fi
+    echo "✅ Gateway API CRD = v{{gateway_api_version}}，控制器已初始化"
+
 # Deploy Cilium (replaces Flannel as CNI)
+# ⚠️ 升级 Cilium 前先跑 `just deploy-gateway-api-crds`（或至少核对 gateway_api_version）。
 deploy-cilium:
     # Reset release values so old manual --set flags cannot poison future upgrades, then
     # drop stale Hubble cert secrets so certgen re-issues them for the current cluster name.
