@@ -53,7 +53,7 @@
 
 `critical`(1000) ArgoCD 全家 + zitadel-pg ·
 `high`(900) cloudflared / external-dns / otel-collector ·
-`(0)` 其余含 **ZITADEL 应用本身** · `bulk`(-10) calibre-web / stirling-pdf /
+`(0)` 其余含 **ZITADEL 应用本身** · `bulk`(-10) calibre-web / bentopdf /
 squoosh / it-tools / excalidraw×2 / trends / karakeep / rsshub-browserless。
 
 ⚠️ **ZITADEL 应用设不了 priorityClassName**：chart 9.34.1 没有这个 values 键（逐键

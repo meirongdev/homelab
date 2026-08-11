@@ -90,7 +90,9 @@ resources:
   # （argocd/applications/calibre-metadata.yaml），因为一次性 enrich Job 需要专门的
   # ignoreDifferences（job-controller 会注入 suspend/selector/labels，否则永久 OutOfSync）。
   - personal-services/it-tools.yaml
-  - personal-services/stirling-pdf.yaml
+  # bentopdf 2026-08-11 取代 stirling-pdf（同域名 pdf.meirong.dev）。
+  # 纯客户端 WASM 应用：无 PVC / 无 ExternalSecret / 无 OIDC。
+  - personal-services/bentopdf.yaml
   - personal-services/squoosh.yaml
   - personal-services/timeslot.yaml
   - personal-services/trends.yaml

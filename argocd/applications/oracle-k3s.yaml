@@ -30,5 +30,6 @@ spec:
     syncOptions:
       - ServerSideApply=true
       - CreateNamespace=false # namespace 已在 kustomize 树内
-      # 有状态 PVC（miniflux-db/karakeep/meilisearch/uptime-kuma/stirling-pdf）
+      # 有状态 PVC（miniflux-db/karakeep/meilisearch/uptime-kuma）
+      # 2026-08-11: stirling-pdf 退役，其 PVC 已随之删除（接替者 bentopdf 是纯客户端应用，无 PVC）。
       # 带 argocd.argoproj.io/sync-options: Prune=false 护栏，防误删数据。

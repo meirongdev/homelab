@@ -11,7 +11,7 @@
 |---------|---------|-----------|-----|
 | Homepage | oracle-k3s | `homepage` | `home.meirong.dev` |
 | IT-Tools | oracle-k3s | `personal-services` | `tool.meirong.dev` |
-| Stirling-PDF | oracle-k3s | `personal-services` | `pdf.meirong.dev` |
+| BentoPDF | oracle-k3s | `personal-services` | `pdf.meirong.dev`（**无认证，人人可用**；2026-08-11 取代 Stirling-PDF。纯客户端 WASM，服务端只是 nginx 静态站、零状态、无 PVC；WASM 模块运行时从 jsDelivr CDN 加载） |
 | Squoosh | oracle-k3s | `personal-services` | `squoosh.meirong.dev` |
 | Excalidraw | oracle-k3s | `personal-services` | `draw.meirong.dev`（无认证，2026-08-04 去掉 oauth2-proxy） |
 | Trends | oracle-k3s | `personal-services` | `trends.meirong.dev` |

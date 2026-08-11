@@ -53,8 +53,8 @@ sqlite 依赖 POSIX 字节区间锁（`fcntl`）+ 同步小写入；NFS 的 NLM 
 - **homelab（10 个）**: `data-vault-0`、`audit-vault-0`、`data-trivy-server-0`、
   `alertmanager-…-db`、`prometheus-…-db`、`kube-prometheus-stack-grafana`、`opencost-pvc`、
   `open-notebook-data-local`、`open-notebook-surreal-local`、`jobs-sg-data`（2026-08-03 新增）
-- **oracle-k3s（15 个）**: `storage-loki-0`、`storage-tempo-0`、`opencost-pvc`、`calibre-books-local`、
-  `calibre-web-automated-config-local`、`stirling-pdf-configs`、`timeslot-pvc`、`trends-data`、
+- **oracle-k3s（14 个）**: `storage-loki-0`、`storage-tempo-0`、`opencost-pvc`、`calibre-books-local`、
+  `calibre-web-automated-config-local`、`timeslot-pvc`、`trends-data`、
   `uptime-kuma-data-v2`、`karakeep-data`、`meilisearch-data`、`data-trivy-server-0`、
   `zitadel-pg-1`、`readlist-data`（2026-08-05 新增，已进夜备白名单）、
   `apps-pg-1`（2026-08-06 新增，CNPG 共享库；同日 `miniflux-db-pvc` 随 `rss-postgres`

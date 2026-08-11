@@ -64,7 +64,9 @@ data:
     # evidence(重建要烧 2–3 天 Google Books 配额)、publisher_map、overrides、
     # title_whitelist。readlist.db 是 sqlite，被下面的 *.db/-wal/-shm 规则覆盖；
     # /data/snapshot 下的快照是派生物，一起进来无妨（体积小）。
-    for pat in karakeep-data uptime-kuma-data timeslot-pvc stirling-pdf-configs calibre-web-automated-config trends-data readlist-data; do
+    # 2026-08-11: 移除 stirling-pdf-configs —— stirling-pdf 已被 bentopdf 取代，
+    # 后者是纯客户端 WASM 应用，服务端零状态、没有 PVC，因此备份清单里不需要接替项。
+    for pat in karakeep-data uptime-kuma-data timeslot-pvc calibre-web-automated-config trends-data readlist-data; do
       for d in /localpath/*"$pat"*; do
         [ -d "$d" ] || continue
         dest="/work/pvc/$(basename "$d")"

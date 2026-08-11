@@ -24,7 +24,8 @@ data:
         {"name": "Miniflux",       "url": "http://miniflux.rss-system.svc:8080"},
         {"name": "IT-Tools",       "url": "http://it-tools.personal-services.svc:80"},
         {"name": "Squoosh",        "url": "http://squoosh.personal-services.svc:8080"},
-        {"name": "Stirling-PDF",   "url": "http://stirling-pdf.personal-services.svc:8080/login"},
+        # BentoPDF 是纯静态站，`/` 直接 200 —— 不像前任 stirling-pdf 要探 /login 绕开登录重定向。
+        {"name": "BentoPDF",       "url": "http://bentopdf.personal-services.svc:8080/"},
         {"name": "Uptime Kuma",    "url": "http://uptime-kuma.personal-services.svc:3001"},
         # --- public-URL probes (Cloudflare → Cilium Gateway) ---
         # Auth-protected services may redirect to their own login page; treat 2xx-3xx as healthy external reachability.

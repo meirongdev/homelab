@@ -4,7 +4,9 @@
 #   /            → excalidraw 前端(官方静态镜像)
 #   /socket.io/  → excalidraw-room(实时协作 websocket 中继;自建 arm64 镜像)
 #
-# 无认证,和同 ns 的 IT-Tools/Stirling-PDF/Squoosh 一致。原本挂了 per-app oauth2-proxy
+# 无认证,和同 ns 的 IT-Tools/BentoPDF/Squoosh 一致（2026-08-11 修正:原文写的
+# Stirling-PDF 其实是**有**登录+OIDC 的,举例举错了;它已退役,接替者 BentoPDF 才真的无认证）。
+# 原本挂了 per-app oauth2-proxy
 # (ZITADEL OIDC),但服务端不存任何画布数据(见下面的持久化说明),SSO 没有可保护的对象,
 # 只是给自己加登录摩擦。代价:/socket.io/ 成了开放中继,谁都能拿它开房间烧 arm64 的
 # CPU/带宽 —— 房间本身是客户端 E2E 加密、密钥在 URL fragment,别人进不了你的会话。

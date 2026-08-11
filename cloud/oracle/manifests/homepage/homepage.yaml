@@ -141,10 +141,10 @@ data:
               container: readlist
               label_selector: app=readlist
 
-        - Stirling-PDF:
-            icon: stirling-pdf.png
+        - BentoPDF:
+            icon: bentopdf.png
             href: https://pdf.meirong.dev
-            description: 开源 PDF 处理工具箱
+            description: PDF 工具箱（纯浏览器处理，免登录）
 
         - Squoosh:
             icon: photopea.png

@@ -51,7 +51,8 @@
 ## 3. 身份与访问 (Identity) — ZITADEL OIDC
 
 - **单一 IdP**：`auth.meirong.dev`。无共享 ingress 层 SSO；每个服务**要么公开、要么原生 ZITADEL OIDC、要么自带认证**。
-- **原生 OIDC apps**：Grafana / Miniflux / Stirling-PDF / KaraKeep / ArgoCD。各自机密 client 由 `zitadel/scripts/*.sh`(REST) 幂等下发，creds 经 Vault→ESO。**本地账号保留为后备**（无锁死风险）。
+- **原生 OIDC apps**：Grafana / Miniflux / KaraKeep / ArgoCD。各自机密 client 由 `zitadel/scripts/*.sh`(REST) 幂等下发，creds 经 Vault→ESO。**本地账号保留为后备**（无锁死风险）。
+- **刻意公开无认证**：`pdf.meirong.dev`(BentoPDF，2026-08-11 取代 Stirling-PDF)、`draw.meirong.dev`(Excalidraw)。BentoPDF 是纯客户端 WASM，文件不出浏览器、服务端零状态，公开面只是一个 nginx 静态站。
 - **GitHub 联邦锁定**：instance 级外部 IdP，`isCreationAllowed/isAutoCreation=false` + `autoLinking=EMAIL` —— 陌生人无法自助注册，GitHub 身份仅能按已验证邮箱链接到既有 ZITADEL 用户。
 - 部署形态与各 app 接入细节见 [identity.md](identity.md)。
 
