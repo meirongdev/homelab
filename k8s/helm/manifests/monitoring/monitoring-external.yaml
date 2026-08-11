@@ -1,10 +1,11 @@
 ---
 # External NodePort services for cross-cluster observability
 #
-# ⚠️ 2026-08-02 起这里**只剩 Prometheus 一条**。Loki 与 Tempo 已迁往 oracle-k3s，
-# 跨集群的日志/追踪方向随之反转（改成 homelab 写出去），对应的 NodePort 也搬到了
+# ⚠️ 2026-08-02 起 Loki 与 Tempo 已迁往 oracle-k3s，跨集群的日志/追踪方向随之反转
+# （改成 homelab 写出去），对应的 NodePort 搬到了
 # cloud/oracle/manifests/monitoring/monitoring-external.yaml。
 # 指标方向没变：oracle 的 OTel Collector 仍经 Tailscale prometheusremotewrite 到这里。
+# 2026-08-11 新增 Alertmanager（见下）：oracle 的 Loki ruler 要把日志告警投回这里。
 ---
 # Prometheus OTLP receiver — exposed for oracle-k3s OTel Collector (metrics push)
 # Prometheus must have enableFeatures: [otlp-write-receiver] set
@@ -22,4 +23,29 @@ spec:
     - port: 9090
       targetPort: 9090
       nodePort: 31090
+      name: http
+---
+# Alertmanager —— 给 **oracle 的 Loki ruler** 投递日志告警用（2026-08-11 新增）。
+#
+# 为什么需要跨集群：告警链路的两端分居两集群 —— 日志在 oracle 的 Loki，
+# 而 Alertmanager（以及 Telegram 路由/抑制/模板那一整套）在 homelab。
+# Loki 的 ruler 跑在 oracle 的 loki-0 单体里（`-target=all`，不是独立 Deployment），
+# 它要主动 POST 到 Alertmanager，因此必须能从 oracle 打到这里。
+#
+# ⚠️ 仅经 Tailscale 暴露（100.64/10），与 Prometheus:31090 / vault-ui:31952 同一模式；
+#    节点本身没有公网入站（OCI Security List + 无端口转发），不构成对外暴露面。
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager-external
+  namespace: monitoring
+spec:
+  type: NodePort
+  selector:
+    alertmanager: kube-prometheus-stack-alertmanager
+    app.kubernetes.io/name: alertmanager
+  ports:
+    - port: 9093
+      targetPort: 9093
+      nodePort: 31093
       name: http

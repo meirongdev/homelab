@@ -43,6 +43,8 @@ resources:
   - monitoring/otel-collector.yaml
   - monitoring/exporters.yaml
   - monitoring/monitoring-external.yaml
+  # Loki ruler 的 LogQL 告警规则（ruler 跑在 loki-0 单体里，不是独立 Deployment）
+  - monitoring/loki-rules.yaml
   # KRR 右尺寸推荐周报（查中枢 Prometheus，结果推 Telegram）
   - monitoring/krr.yaml
   # OpenCost 成本归因：仅 namespace（工作负载由独立 opencost-oracle Helm App 部署，同 falco 模式）

@@ -34,6 +34,34 @@ loki:
           prefix: index_
           period: 24h
 
+  # 2026-08-11 启用 ruler —— 用于日志告警（目前唯一一条：Cilium Gateway API 控制器未初始化，
+  # 见 cloud/oracle/manifests/monitoring/loki-rules.yaml 与
+  # docs/records/2026-08-11-gateway-api-crd-stall.md）。
+  #
+  # ⚠️ **不需要新 pod**：下面 `ruler.replicas: 0` 指的是「不起独立的 ruler Deployment」，
+  #    而 SingleBinary 模式的 loki-0 是 `-target=all`，ruler 本来就跑在里面
+  #    （实测 /ruler/ring 返回 200）。别被那个 0 误导成「ruler 没启用」。
+  #
+  # ⚠️ 目录必须显式写成 /rules：chart 的规则 sidecar（loki-sc-rules，watch
+  #    `loki_rule` 标签的 ConfigMap）把文件写进 emptyDir `/rules`，而 ruler 的
+  #    `storage.type: local` 默认目录是 `/var/loki/rules` —— 两边对不上，规则永远不被加载
+  #    （症状：`/loki/api/v1/rules` 返回 `unable to read rule dir /var/loki/rules/fake`）。
+  #    `auth_enabled: false` ⇒ 单租户，租户名固定为 **fake**，所以规则要落在 /rules/fake/，
+  #    靠 ConfigMap 上的 `k8s-sidecar-target-directory` 注解指定。
+  rulerConfig:
+    storage:
+      type: local
+      local:
+        directory: /rules
+    rule_path: /tmp/loki-rules-scratch
+    # Alertmanager 在 **homelab**，Loki 在 oracle —— 跨 Tailscale 投递。
+    # 该 NodePort 由 k8s/helm/manifests/monitoring/monitoring-external.yaml 定义。
+    alertmanager_url: http://100.94.186.7:31093
+    enable_alertmanager_v2: true
+    ring:
+      kvstore:
+        store: inmemory
+
 # ✅ 明确指定使用 SingleBinary 模式
 deploymentMode: SingleBinary
 
