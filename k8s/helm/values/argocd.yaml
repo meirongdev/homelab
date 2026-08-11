@@ -164,14 +164,54 @@ controller:
 repoServer:
   resources:
     requests:
-      # 2026-08-10: 50m→15m，实测 7d p95 11m
-      cpu: 15m
+      # 2026-08-11: 15m→25m。08-10 定 15m 的依据是「7d p95 11m」，一天后复测 p95 已经
+      # **17m —— 高于 request 本身**（1m 峰值 166m，是 request 的 11 倍）。节点 CPU
+      # requests 在 74%，多给 10m 只占 0.55%，但 cpu.shares 权重直接翻倍。
+      # ⚠️ 别再往下砍：repo-server 的健康检查是 CPU 敏感的硬实时路径，见下方 probe 注释。
+      cpu: 25m
+      # 维持 128Mi：节点 memory requests 已到 **91%**，加 request 会挤占调度预算。
+      # 抬 limit 不占预算，所以下面只动 limit。
       memory: 128Mi
     limits:
       cpu: 500m
       # 512Mi: 256Mi 在集中 refresh(21 app 并发 helm/kustomize 渲染)时 OOMKilled
       # (2026-07-07 观察到 exit 137)。request 不变，仅放宽突发上限。
-      memory: 512Mi
+      # 2026-08-11: 512Mi→768Mi。实测 7d 峰值 477.7Mi = **93.29%**，触发
+      # ContainerMemoryNearLimit。⚠️ 但**这是症状不是病**：7d 内 last_terminated_reason
+      # 从没出现过 OOMKilled，477Mi 那次尖峰紧跟一次冷启动后的 28 个 App 全量渲染
+      # （14:26 START→14:32 449Mi；19:04 START→19:17 477Mi）。真因是下面的探针重启，
+      # 修好探针后尖峰频率本身就会降。这里抬 limit 只是买保险。
+      memory: 768Mi
+  # 2026-08-11: 探针放宽。**这是本次的真修复**，不是调优。
+  #
+  # 症状：repo-server 24h 内重启 15 次，全部 exit code 0 / reason=Completed
+  #      （不是 OOMKilled —— 内存告警是它的下游症状，别被带偏）。
+  # 直接证据：
+  #   level=error msg="Error serving health check request" component=healthcheck
+  #   duration=1.171583629s error="rpc error: code = Canceled desc = context canceled"
+  #   所有 duration 落在 **1.018s–1.284s**，而 chart 默认 timeoutSeconds: 1 ——
+  #   只超时 20~280 毫秒，是刀尖上的配置。`/healthz?full=true` 内部要做一次 gRPC
+  #   自查，稳态 <1s，一有 CPU 争抢就滑过 1 秒 → kubelet 取消 → 探针失败。
+  # 死亡螺旋：连续 13 次重启，每次活 33–40 秒 = initialDelay 10 + failureThreshold 3
+  #   × periodSeconds 10。被杀后冷启动（GPG keyring 生成、TLS 自签、Redis 连接）比
+  #   稳态更慢，10 秒 initialDelay 内起不来 → 又被杀。最后靠 CrashLoopBackOff 退避
+  #   （84s→167s→308s→~311s 封顶）拖到节点空下来才逃出。
+  # ⚠️ 同一失败模式被触发过两次，两次都是 CPU 余量被削：2026-08-05 缩容到 2 OCPU
+  #   （当天 +8 次重启）、2026-08-10 把 CPU request 砍到 15m（新 pod 起来 14 秒后就
+  #   出现第一条超时）。所以这三项（request / timeout / startupProbe）是一套，别拆。
+  #
+  # startupProbe 接管冷启动：20 × 10s = 200 秒宽限期，期间 liveness/readiness 全部挂起，
+  # 螺旋从根上断掉。走的是更轻的 /healthz（不带 full=true）。
+  startupProbe:
+    enabled: true
+    timeoutSeconds: 5
+  # 稳态超时：1s→5s。相对 1.28s 的实测最差值留 4 倍余量。
+  livenessProbe:
+    timeoutSeconds: 5
+  # readiness 同样是 1s 默认值、同样的 /healthz。它失败不杀容器，但会把 repo-server
+  # 摘出 Service endpoints → application-controller 拿不到清单 → 同步失败，一样要放宽。
+  readinessProbe:
+    timeoutSeconds: 5
   # Gate startup on real DNS resolution of the git host. On a fresh pod,
   # Cilium needs a moment to program the endpoint's eBPF datapath; ArgoCD
   # otherwise fires its first git fetch inside that sub-second window and the
