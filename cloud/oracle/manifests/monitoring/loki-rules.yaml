@@ -21,32 +21,14 @@ metadata:
   annotations:
     k8s-sidecar-target-directory: /rules/fake
 data:
-  # ⏳ 临时自检规则 —— 验证「ruler 真的能把告警投到跨集群 Alertmanager」这最后一跳。
-  # 真规则从未触发过（控制器是好的），所以 notifications_sent_total 一直是 0，
-  # 投递腿只有间接证据。本规则必然触发，把那个计数器顶上去。
-  #
-  # ⚠️ severity 刻意用 **info**：Alertmanager 的 route 树里，telegram 子路由的 matcher 是
-  #    `severity=~"critical|warning"`，watchdog 子路由匹配 `alertname="Watchdog"`。
-  #    info + 非 Watchdog 三条子路由全不匹配 → 落回根路由的 `receiver: "null"` → **不发任何通知**。
-  #    （已对着 Alertmanager /api/v2/status 的实际 route 树核过，不是照着 values 猜的。）
-  # 🗑️ 验证完即删 —— 见本文件的 git 历史。
-  zz-ruler-selftest.yaml: |
-    groups:
-      - name: ruler-delivery-selftest
-        interval: 1m
-        rules:
-          - alert: LokiRulerDeliverySelfTest
-            expr: |
-              sum(count_over_time({k8s_namespace_name="kube-system", k8s_container_name="cilium-operator"}[1h])) > 0
-            for: 0m
-            labels:
-              severity: info
-              component: ingress
-            annotations:
-              summary: "Loki ruler 投递自检（临时，验证完即删；severity=info 不会进 Telegram）"
-              description: |
-                这不是故障。用于验证 oracle 的 Loki ruler 能否把告警投递到 homelab 的
-                Alertmanager:31093。验证完毕后本规则应已从 git 删除。
+  # ✅ 投递链路已于 2026-08-11 用一条临时 info 级自检规则端到端验证过（提交 a677450，
+  #    验证后即删）。实测结果，供日后排障时当基线：
+  #      ruler 侧 loki_prometheus_notifications_sent_total{alertmanager=".../31093/api/v2/alerts"} 0→1，
+  #               errors_total=0、dropped_total=0
+  #      Alertmanager 侧 收到该告警，`receivers=['null']`（severity=info 落回根路由的 null）
+  #      Telegram 计数 35→35 不变，即自检没有打扰任何人
+  #    要复现这个自检：加一条必然触发的规则并标 `severity: info` 即可 —— 不要用
+  #    critical/warning，那会真的发到 Telegram。
   cilium-gateway-api.yaml: |
     groups:
       - name: cilium-gateway-api
