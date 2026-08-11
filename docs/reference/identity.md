@@ -43,24 +43,28 @@
 
 ## 原生 ZITADEL OIDC 应用
 
-**Stirling-PDF** (`pdf`) / **Grafana** (`grafana`) / **Miniflux** (`rss`) / **KaraKeep** (`keep`) /
+**Grafana** (`grafana`) / **Miniflux** (`rss`) / **KaraKeep** (`keep`) /
 **ArgoCD** (`argocd`) 直连 OIDC。共同点：
+
+> 2026-08-11：**Stirling-PDF (`pdf`) 已退役**，接替它的 BentoPDF 是纯客户端应用、
+> 刻意不做权限管理（人人可用），因此 ZITADEL 侧的 `stirling-pdf` 应用与
+> Vault `secret/oracle-k3s/stirling-pdf` 一并删除。
 
 - 各自的机密 WEB client 由 `zitadel/scripts/configure-oidc-app.sh` **幂等**下发
   （REST 而非 Terraform，原因见下「配置脚本为何走 REST」）。
 - creds 放 Vault 应用自己的 path（`secret/homelab/{grafana,argocd-oidc}`、
-  `secret/oracle-k3s/{stirling-pdf,miniflux,karakeep}`，keys `oauth_client_id`/`oauth_client_secret`）
+  `secret/oracle-k3s/{miniflux,karakeep}`，keys `oauth_client_id`/`oauth_client_secret`）
   → ESO → 应用的 K8s Secret。
 - **各应用本地账号密码登录保留为后备**（无锁死风险）。
 - Redirect URIs: Grafana `…/login/generic_oauth`、Miniflux `…/oauth2/oidc/callback`、
-  Stirling `…/login/oauth2/code/oidc`、KaraKeep `…/api/auth/callback/custom`、
+  KaraKeep `…/api/auth/callback/custom`、
   ArgoCD `…/auth/callback`（+ CLI 用的 `http://localhost:8085/auth/callback`）。
 
 各应用要点：
 
 - **部署路径不同**: Grafana → 改 `values/kube-prometheus-stack.yaml` → git push（ArgoCD
   `kube-prometheus-stack` App）；ArgoCD 本体 → `just deploy-argocd`（写完 Vault 后跑）；
-  Miniflux/Stirling/KaraKeep 与 ArgoCD 的 `argocd-oidc` ExternalSecret 都随 git push 由
+  Miniflux/KaraKeep 与 ArgoCD 的 `argocd-oidc` ExternalSecret 都随 git push 由
   ArgoCD 调和（分别经 `oracle-k3s` 与 `vault-eso` App）。
 - **Grafana**: `role_attribute_path: "'Admin'"` —— 任何 ZITADEL 认证过的身份都是 Admin
   （单用户 + 注册锁死的 IdP 下安全）。

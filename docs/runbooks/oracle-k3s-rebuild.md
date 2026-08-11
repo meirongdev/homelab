@@ -24,7 +24,7 @@ oracle-k3s 的 local-path PVC（15 个，2026-08-06 对着 live 集群重新生�
 `uptime-kuma-data` 实为 `uptime-kuma-data-v2`、漏了 `readlist-data`、`miniflux-db-pvc` 已退役）：
 
 `storage-loki-0` · `storage-tempo-0` · `opencost-pvc` · `calibre-books-local` ·
-`calibre-web-automated-config-local` · `stirling-pdf-configs` · `timeslot-pvc` ·
+`calibre-web-automated-config-local` · `timeslot-pvc` ·
 `trends-data` · `uptime-kuma-data-v2` · `karakeep-data` · `meilisearch-data` ·
 `readlist-data` · `data-trivy-server-0` · `apps-pg-1` · `zitadel-pg-1`
 

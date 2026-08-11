@@ -9,7 +9,7 @@
 # ⚠️ 迁移时最容易漏的一类东西：风险工作负载搬走了，护栏却留在原地。
 # 迁移前 oracle 的 personal-services **没有任何 ResourceQuota/LimitRange**（实测确认）。
 #
-# 本 ns 在 oracle 上的常驻 pod 比 homelab 多（it-tools/squoosh/stirling-pdf/timeslot/
+# 本 ns 在 oracle 上的常驻 pod 比 homelab 多（it-tools/squoosh/bentopdf/timeslot/
 # trends/excalidraw×2/uptime-kuma + calibre ≈ 11），30 仍有充足余量。
 # 只限制 pod 数与 Job 对象数，**不设 cpu/memory 配额** —— 那会要求每个容器都声明
 # requests，是另一个量级的约束，不是这里要解决的问题。

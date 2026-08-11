@@ -284,7 +284,7 @@ All services have liveness and readiness probes configured:
 | Service | Probe Path | Port |
 |---------|-----------|------|
 | it-tools | `GET /` | 80 |
-| stirling-pdf | `GET /api/v1/info` | 8080 |
+| bentopdf | `GET /` | 8080 |
 | squoosh | `GET /` | 8080 |
 | miniflux | `GET /healthcheck` | 8080 |
 | rsshub | `GET /healthz` | 1200 |

@@ -95,7 +95,7 @@ Dashboard ConfigMaps 通过 ArgoCD Application `monitoring-dashboards` 管理（
 
 ### 模式 A：标准 stdout/stderr（推荐）
 
-**适用场景：** 大多数现代容器化应用（it-tools、stirling-pdf、squoosh 等）
+**适用场景：** 大多数现代容器化应用（it-tools、bentopdf、squoosh 等）
 
 **原理：** 应用直接向 stdout/stderr 输出日志，容器运行时写入 `/var/log/pods/<namespace>_<pod>/<container>/*.log`，OTel Collector 的 filelog receiver 自动采集。
 

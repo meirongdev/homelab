@@ -26,7 +26,7 @@ cloud/oracle/
 │   │   └── gateway.yaml
 │   ├── homepage/         # Homepage dashboard
 │   ├── monitoring/       # OTel collector + exporters
-│   ├── personal-services/ # IT-Tools / Stirling-PDF / Squoosh / Timeslot
+│   ├── personal-services/ # IT-Tools / BentoPDF / Squoosh / Timeslot
 │   ├── rss-system/       # RSS pipeline (Miniflux + RSSHub + KaraKeep + Redpanda Connect)
 │       ├── namespace.yaml
 │       ├── secrets.yaml
