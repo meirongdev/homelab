@@ -10,11 +10,27 @@ ctx := "k3s-homelab"
 # 2026-08-10 1.19.1 → 1.20.0：oracle 侧 `just deploy-cilium` 当时**没有 --version**
 # （只有本文件 pin 了），一次例行部署就随 chart repo 升到了 1.20.0，两集群版本劈叉
 # 导致 oracle→homelab ClusterMesh `retrieved=false`（单向断，homelab→oracle 仍好）。
-# 选择向前对齐而非回滚。1.20 的四条 breaking change 已逐条核过，本仓库均不命中：
-# TLSRoute 0 个（那条「Gateway API 需 ≥v1.6.1」的实质就是 TLSRoute v1alpha2→v1，
-# 本仓库只用 HTTPRoute，实测 1.20 + Gateway API v1.2.1 入口全部 200）、
+# 选择向前对齐而非回滚。1.20 的四条 breaking change 中三条本仓库确实不命中：
 # CiliumNodeConfig v2alpha1 0 个、带 kafka/l7/l7proto 的 CNP/CCNP 0 条、未用自定义 CNI chaining。
+#
+# ☠️ **但「Gateway API 需 ≥v1.6.1」那条当时判错了，代价是两集群入口静默半瘫 30 小时**
+# （2026-08-11 查明）。原结论写的是「实质就是 TLSRoute v1alpha2→v1，本仓库只用 HTTPRoute，
+# 实测 1.20 + Gateway API v1.2.1 入口全部 200」。错在两处：
+#   1. 它不只关乎 TLSRoute。Cilium 1.20 的 operator 在启动时**硬性检查**
+#      TLSRoute / BackendTLSPolicy / ReferenceGrant(**必须提供 v1**) 三个 CRD 是否齐备，
+#      少任何一个就**整个 Gateway API 控制器不初始化**——哪怕你一条 TLSRoute 都没有。
+#   2. 「入口全部 200」这个验证方法**恰恰看不见这种故障**：已建路由的 datapath 早就编程好了、
+#      会一直生效，所以旧域名照常 200；死掉的只是**调和新路由的能力**。
+#      故障因此完全静默，直到 2026-08-11 加 bentopdf 时第一条新 HTTPRoute 拿不到 status、
+#      pdf.meirong.dev 503 才暴露。homelab 08-10 07:08Z 挂、oracle 08-10 19:07Z 挂。
+#   教训：验证 Gateway API 是否健康，**不能只 curl 旧域名**，要看
+#     `kubectl -n kube-system logs deploy/cilium-operator | grep "Required GatewayAPI resources"`
+#     以及新建路由能否拿到 `.status`。
+# ⚠️ 因此 cilium_version 与 gateway_api_version 是**一对**，升级 Cilium 必须同步核对后者。
 cilium_version           := "1.20.0"
+# Cilium 1.20 要求的 Gateway API CRD 版本（见 `just deploy-gateway-api-crds`）。
+# 升级前先读 Cilium 对应版本文档的 Gateway API 前置条件，别假设旧 CRD 还能用。
+gateway_api_version      := "1.6.1"
 vault_version            := "0.33.0"
 eso_version              := "2.6.0"
 
@@ -132,7 +148,37 @@ status-personal:
 
 # ⬇️ Cilium CNI ⬇️
 
+# 安装/升级 Gateway API CRD（Cilium 的**前置条件**，不是可选项）。
+# ☠️ 这组 CRD 以前是带外手工装的、不在任何配方里，所以升 Cilium 时没人想起要同步升它们——
+#    2026-08-11 两集群 Gateway API 控制器静默瘫痪 30 小时就是这么来的（详见文件顶部
+#    cilium_version 上方的长注释）。收进配方就是为了让它跟着 cilium_version 一起被看见。
+# ⚠️ 必须 --server-side：httproutes 的 CRD 有 429KB，客户端 apply 会撑爆
+#    last-applied-configuration 注解的大小上限。
+# ⚠️ TLSRoute 只在 **experimental** 频道发布，standard 频道没有；Cilium 仍要求它存在。
+# 幂等，可重复执行；跑完自动重启 operator（它只在**启动时**做这项检查）。
+deploy-gateway-api-crds:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    base="https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v{{gateway_api_version}}/config/crd"
+    for c in gatewayclasses gateways httproutes grpcroutes referencegrants backendtlspolicies; do
+        echo "→ standard/$c"
+        kubectl --context {{ctx}} apply --server-side --force-conflicts \
+            -f "$base/standard/gateway.networking.k8s.io_$c.yaml"
+    done
+    echo "→ experimental/tlsroutes"
+    kubectl --context {{ctx}} apply --server-side --force-conflicts \
+        -f "$base/experimental/gateway.networking.k8s.io_tlsroutes.yaml"
+    kubectl --context {{ctx}} -n kube-system rollout restart deploy/cilium-operator
+    kubectl --context {{ctx}} -n kube-system rollout status deploy/cilium-operator --timeout=3m
+    # 真正的验收：控制器起来了没有。别拿「旧域名还能 200」当证据。
+    if kubectl --context {{ctx}} -n kube-system logs deploy/cilium-operator --tail=300 \
+        | grep -q "Required GatewayAPI resources are not found"; then
+        echo "❌ Gateway API 控制器仍未初始化 —— 核对 CRD 版本与 Cilium 要求" && exit 1
+    fi
+    echo "✅ Gateway API CRD = v{{gateway_api_version}}，控制器已初始化"
+
 # 部署 Cilium（CNI + Gateway API + ClusterMesh 控制面）；唯一真源 ../cilium/values.yaml，见 k8s/cilium/README.md
+# ⚠️ 升级 Cilium 前先跑 `just deploy-gateway-api-crds`（或至少核对 gateway_api_version）。
 deploy-cilium: add-repos
     #!/usr/bin/env bash
     set -euo pipefail

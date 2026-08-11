@@ -73,13 +73,25 @@ prune 掉整个 `personal-services` ns → 级联删光同 ns 的 open-notebook 
 
 ### H3 —— `ReferenceGrant` 必须声明 `v1beta1`
 
-Gateway API 的 ReferenceGrant 至今**未晋升到 `v1`**。声明 `v1` 不会只让这一个对象失败，
-而是整个 App 报 `ComparisonError: unable to resolve parseableType` —— App 级不可用。
+声明集群里**没有提供**的版本，不会只让这一个对象失败，而是整个 App 报
+`ComparisonError: unable to resolve parseableType` —— App 级不可用。
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1beta1   # ← 不是 v1
 kind: ReferenceGrant
 ```
+
+> **2026-08-11 更正理由（规则不变，原因变了）**：本节原写「ReferenceGrant 至今未晋升到
+> `v1`」，这已经不成立 —— Gateway API 早已把它提升到 `v1`，而且 **Cilium 1.20 反过来
+> *要求* 该 CRD 提供 `v1`**，否则 operator 的 Gateway API 控制器整个不初始化
+> （两集群因此静默瘫痪 30 小时，见 [records/2026-08-11-gateway-api-crd-stall.md](../records/2026-08-11-gateway-api-crd-stall.md)）。
+>
+> 集群现装 Gateway API **v1.6.1**，其 referencegrants CRD **同时 served `v1` 与 `v1beta1`，
+> 且 `v1beta1` 仍是 storage 版本**。所以：
+> - 继续写 `v1beta1` 是对的（仍受支持、是 storage，改成 v1 是无谓的 churn）；
+> - 但**别再把理由说成「v1 不存在」** —— 它存在。真正的判据永远是
+>   「**集群里这个 CRD 提供哪些版本**」：
+>   `kubectl get crd referencegrants.gateway.networking.k8s.io -o jsonpath='{.spec.versions[*].name}'`
 
 > 相关但**不由 CI 检查**的一条：本仓库的 ReferenceGrant 的 `to[]` 都不限定 `name`，
 > 即「授权网关访问该 ns 下全部 Service」。这是刻意的简化，不是缺陷 —— 见下方
