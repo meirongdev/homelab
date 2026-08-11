@@ -1,0 +1,66 @@
+# Loki ruler 的告警规则（LogQL）。
+#
+# 投递链路：oracle 的 loki-0（`-target=all`，ruler 在单体里）→ 跨 Tailscale POST 到
+# homelab 的 Alertmanager（NodePort 31093，见 k8s/helm/manifests/monitoring/monitoring-external.yaml）
+# → 既有的 Telegram 路由/模板。ruler 的开关与目录在 k8s/helm/values/loki.yaml 的 `rulerConfig`。
+#
+# ⚠️ 两个必须同时对上的细节，错一个规则就静默不加载：
+#   1. label `loki_rule` —— chart 的 sidecar（容器 loki-sc-rules）按 `LABEL=loki_rule` WATCH
+#      ConfigMap；没有这个标签它根本不看这个对象。
+#   2. 注解 `k8s-sidecar-target-directory: /rules/fake` —— sidecar 默认把文件平铺进 `/rules`，
+#      而 Loki 的本地 ruler 存储要求 `<dir>/<租户>/`。`auth_enabled: false` ⇒ 单租户，
+#      租户名固定是 **fake**。少了这个注解，文件落在 /rules 下，ruler 视而不见。
+#   验证：`curl http://100.107.166.37:31080/prometheus/api/v1/rules` 里能看到本组。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-alerting-rules
+  namespace: monitoring
+  labels:
+    loki_rule: "1"
+  annotations:
+    k8s-sidecar-target-directory: /rules/fake
+data:
+  cilium-gateway-api.yaml: |
+    groups:
+      - name: cilium-gateway-api
+        interval: 1m
+        rules:
+          # 2026-08-11 补：此前**没有任何告警**覆盖「Gateway API 控制器未初始化」，
+          # 两集群因此静默瘫痪 30 小时（新路由全部 503，旧路由照常 200 所以无人察觉）。
+          # 完整复盘：docs/records/2026-08-11-gateway-api-crd-stall.md
+          #
+          # 该日志由 cilium-operator 在**启动时**做 Gateway API CRD 前置检查失败时打印，
+          # 两集群的日志都进同一个 Loki，靠 `cluster` 标签区分。
+          - alert: CiliumGatewayAPIControllerNotInitialized
+            expr: |
+              sum by (cluster) (
+                count_over_time(
+                  {k8s_namespace_name="kube-system", k8s_container_name="cilium-operator"}
+                  |= "Required GatewayAPI resources are not found" [1h]
+                )
+              ) > 0
+            for: 2m
+            labels:
+              severity: critical
+              component: ingress
+            annotations:
+              summary: "{{ $labels.cluster }} 的 Cilium Gateway API 控制器未初始化 —— 新路由全部不会生效"
+              description: |
+                cilium-operator 启动时的 Gateway API CRD 前置检查失败，**整个 Gateway API
+                控制器没有启动**。后果非常隐蔽：
+                  · 已建路由照常工作（datapath 早已编程），公网域名全部 200
+                  · Pod 健康、Deployment 可用、ArgoCD Synced —— 没有任何其它信号
+                  · 但**任何新增/修改的 HTTPRoute 都不会被调和**，新服务上线即 503
+                典型诱因：升级了 Cilium 却没同步升 Gateway API CRD。
+
+                处置：
+                  cd k8s/helm      && just deploy-gateway-api-crds   # homelab
+                  cd cloud/oracle  && just deploy-gateway-api-crds   # oracle-k3s
+                看具体缺什么：
+                  kubectl -n kube-system logs deploy/cilium-operator | grep -A3 "Required GatewayAPI"
+
+                ⚠️ 本条是**启动期边沿触发**的：日志只在 operator 启动时打印一次，所以用了
+                1h 窗口。它能在故障引入后一小时内报出来，但**告警自动 resolved 不等于已修复**
+                —— 真正的验收是上面那条 just 配方结尾的自检，或确认新建 HTTPRoute 能拿到
+                `.status`（`kubectl -n <ns> get httproute <name> -o jsonpath='{.status.parents[0].conditions[?(@.type=="Accepted")].status}'`）。
