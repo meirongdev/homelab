@@ -238,6 +238,15 @@ prometheus:
     # 键路径已用 `helm template --set` 实证命中（chart 87.6.0）。
     priorityClassName: high
     retention: 7d
+    # retentionSize（2026-08-12）：TSDB+WAL 的**硬上限**，time/size 先到者生效。
+    # 为什么需要它：PVC 的"5Gi"在 local-path 上是**装饰性的**——该 provisioner 不强制
+    # 配额，实测 TSDB 已 4.67Gi 仍在随 series 增长（oracle remote-write、新告警一路加），
+    # 此前唯一闸门是 7d 时间截断，磁盘账没人管。取 4608MB ≈ 声明值的 90%（Prometheus
+    # 官方建议给 WAL/churn 留 10-15% 头）：series 再涨时表现为**有效保留期从 7d 温和
+    # 缩短**，而不是磁盘静默膨胀。设置当天会立即裁掉最老的一两个 block（P2 级数据，可丢）。
+    # ⚠️ 想真正扩容不能改 PVC（volumeClaimTemplate 不可变 + local-path 不支持 expand），
+    # 得删 STS+PVC 重建，见上方 storageSpec 注释。
+    retentionSize: 4608MB
     # 启动宽限安全网（2026-07-04）：TSDB 已迁到 local-path（见下 storageSpec），启动重放走
     #   本地盘、很快，operator 默认 ~900s 窗口本已够用；保留 1800s 仅作 WAL 增大后的余量。
     #   历史（NFS 上曾因 head/WAL 读被慢 NFS 拖过 900s 死线 → CrashLoop，故迁 local-path）。
