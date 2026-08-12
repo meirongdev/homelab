@@ -1,6 +1,6 @@
 # Observability — 告警、看板组织与 SLO
 
-> Last updated: 2026-08-10
+> Last updated: 2026-08-12
 > Status: 生效事实
 >
 > 遥测的**消费侧**：告警路由与覆盖盲区、Grafana 看板组织约定、SLI/SLO 体系。
@@ -180,14 +180,41 @@ recurse 目录源）：
   （error=5xx, total=全部）。**新增/改**: 在对应 `spec.slos[]` 追加
   （`errorQuery`/`totalQuery` 用 `envoy_cluster_name=~".*/<ns>_<svc>_.*"`；oracle 侧记得
   `_total` 指标名 + `cluster="oracle-k3s"`）→ `git push`。
-- **⚠️ errorQuery 末尾必须 `OR on() vector(0)`（2026-07-12 踩坑）**: envoy 按响应码类
-  **惰性创建**序列——服务从未返回过 5xx（或 envoy 重启计数器重置）时 errorQuery 为空集，
-  SLI 除法整体消失 → **SLO 序列与燃尽率告警静默失效**。现有 5 条已统一加固，新增必须沿用
-  （见 slos.yaml 头部注释）。
+- **☠️ 分子分母都要兜底，两个坑独立且症状完全不同**（现有 5 条已统一加固，新增必须沿用；
+  推导见 slos.yaml 头部注释）：
+  - **errorQuery 末尾 `OR on() vector(0)`（2026-07-12 踩坑）**: envoy 按响应码类
+    **惰性创建**序列——服务从未返回过 5xx（或 envoy 重启计数器重置）时 errorQuery 为
+    **空集**，SLI 除法整体消失 → SLO 序列与燃尽率告警一起静默失效。
+  - **totalQuery 末尾 `(... > 0) OR on() vector(1)`（2026-08-12 踩坑）**: 零请求窗口里
+    `rate()` 不是空集，是**值为 0 的真实样本**；配上上一条的 `vector(0)` 就成了
+    0/0 = **NaN**，并被当正常样本写进 TSDB。Sloth 的周期窗口(30d)规则是
+    `sum_over_time(ratio_rate5m[30d]) / count_over_time(...)`，**sum_over_time 遇 NaN
+    全程传染 → 一个 NaN 样本毒死整条 30d 序列**，连锁 `period_burn_rate` 与
+    `period_error_budget_remaining` 全 NaN。短窗口(5m~3d)是直接 `rate()` 不受影响，
+    所以**症状只在预算面板、告警照常工作**——5 个服务全 N/A 潜伏至少一整个可见窗口
+    才被肉眼发现。→ [../records/2026-08-12-slo-nan-poisoning.md](../records/2026-08-12-slo-nan-poisoning.md)
 - **告警**: 每个 SLO 生成多窗口燃尽率告警，`pageAlert→critical` / `ticketAlert→warning`，
   经现有 Alertmanager 路由到 Telegram。
+- **SLO 自身的哨兵** `SLOSLIProducingNaN`（`alerts/slo-meta-alerts.yaml`，2026-08-12 新增）:
+  `slo:sli_error:ratio_rate5m unless (slo:sli_error:ratio_rate5m > -1)` —— 取出所有
+  **不是实数**的 SLI 样本（NaN 参与任何比较都返回 false，故 `> -1` 会把它滤掉）。
+  盯 **rate5m 而非 30d 面板**：周期窗口的 NaN 只可能来自 rate5m，它是严格上游、覆盖
+  100% 成因且早约 30 天暴露。⚠️ 不能写成 `count(X) - count(X > -1) > 0`——全 NaN 时
+  右侧是空集、减法结果整个消失，告警永不触发。
 - **看板**: Grafana `SLO` 文件夹 → "SLO / Service Availability"
   （`manifests/monitoring/dashboards/slo-dashboard.yaml`）。
-- **⚠️ 零流量盲区**: 真实流量 SLI 在服务无人访问时为 NaN（vector(0) 加固后序列恒存在，
-  不再整体消失）。这是一手指标的固有特性；燃尽率告警只在真出现 5xx 时触发。闲置服务要稳定
-  可用性信号，叠一层合成探测（Uptime Kuma）兜底。
+  **N/A 一律代表 SLI 异常**（2026-08-12 起：空闲窗口稳定产出 0，不再是 NaN）；
+  此前面板把 N/A 标注成"无流量、非故障"，正是那次故障潜伏的一半原因。
+- **⚠️ 周期 30d 跑在 retention 7d 上**: `sum_over_time([30d])` 实际只读得到 ~7 天
+  （`count_over_time` 返回约 2 万个样本 @30s ≈ 7.15d），"30d 错误预算剩余"实为 ~7 天平均。
+  **刻意不改**：告警用的全是 ≤3d 窗口、在 7d 内完全有效，而 sloth 内置窗口目录只有
+  30d/28d，换 7d 要自带 catalog 并重标定全部燃尽率系数；抬 retention 到 30d 则会 OOM
+  （评估见 `values/kube-prometheus-stack.yaml`）。面板标题已注明真实窗口。
+- **⚠️ 零流量服务的 SLO 统计意义很弱**: 兜底后闲置窗口按"0 错误 = 健康"计入，序列不再断，
+  但样本量太小时目标本身失真——zitadel 曾 7 天仅 138 个请求（~0.8 req/h），99% 目标下
+  一个 5xx 就是 0.7% 预算。**SLI 的样本量实际由 Uptime Kuma 的公网探测供给**：
+  `provisioner.yaml` 那组 `https://*.meirong.dev/` 探针（只收 3xx、不跟随跳转）就是
+  各服务三千级 3xx 计数的来源。2026-08-12 排查 zitadel 无流量时发现**它根本不在监控
+  清单里**（身份提供方竟是唯一没有存活探测的对外服务），已补上。
+  ⚠️ 反过来要清醒：这些 SLO 的分母以合成探测为主，测的是"入口通不通"，
+  不等价于真实用户体验。
