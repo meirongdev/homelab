@@ -10,6 +10,8 @@ _tunnel:
     @pgrep -f "ssh.*-L 18006:127.0.0.1:8006" >/dev/null || \
       ssh -f -o ExitOnForwardFailure=yes -o ConnectTimeout=8 -i ~/.ssh/vgio \
         -L 18006:127.0.0.1:8006 root@192.168.50.106 sleep 600
+    # 等端口真的在监听再返回（`ssh -f` 返回 ≠ 转发就绪，否则 terraform 首个 API 调用会被拒）
+    @for i in $(seq 1 20); do nc -z 127.0.0.1 18006 2>/dev/null && break; sleep 0.5; done
 
 # Initialize Terraform and create tfvars if it doesn't exist
 init:
