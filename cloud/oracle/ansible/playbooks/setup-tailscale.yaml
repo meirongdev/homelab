@@ -42,41 +42,165 @@
         state: reloaded
       when: fw_in.changed or fw_out.changed
 
-    # --- Cilium identity-mark ↔ Tailscale fwmark 位段冲突（2026-08-09）---
-    # 与 homelab 那条同因同治，全文根因见
-    # k8s/ansible/playbooks/setup-tailscale.yaml 里的长注释。摘要：
-    # Cilium 把 endpoint 身份编码进 skb->mark 高位；Tailscale 即使
-    # `--netfilter-mode=off`（不装 iptables/nft）**仍会装 ip rule**，那三条
-    # `fwmark 0x80000/0xff0000` 检查的正是 mark bit16-23 = `identity & 0xFF == 0x08`
-    # → 中签的 pod 出向被劫持进 main 表、绕过 table 52(tailscale0)、CGNAT 包
-    # 被扔进默认网关而黑洞。1/256 抽签，改标签就可能中。
+    # --- Tailscale ip rule 收敛器（2026-08-12 重构，取代 boot-oneshot）---
+    # 守一条不变量：5200 `to 100.64.0.0/10 lookup 52`。挡的是 Cilium identity-mark
+    # 撞 Tailscale fwmark（2026-08-09 定性）：`identity & 0xFF == 0x08` 的 pod（1/256
+    # 抽签）出向被劫进 main 表，到整个 100.64/10 黑洞。取证全文见
+    # docs/reference/tailscale-network.md；homelab 侧对应
+    # k8s/ansible/playbooks/setup-tailscale.yaml（它多守一条 5260 LAN 直通）。
     #
-    # ⚠️ oracle 目前**还没中签**（2026-08-09 扫 52 个 endpoint，低字节 0x08 的只有
-    # 保留身份 8，无真实负载），但规则集与 homelab 完全一致 —— 即同样暴露，
-    # 只是运气好。中签的后果不小：oracle 的 otel-collector remote-write 与 krr 都
-    # 靠 100.94.186.7 打回 homelab，一断就是跨集群遥测停摆。故预防性一并钉死。
-    - name: Install tailscale-cgnat-route systemd unit (immune to Cilium identity-mark collision)
+    # ☠️ 为什么从"开机 oneshot"改成"收敛器"（2026-08-12 review 发现两台节点全线失守）：
+    # 单元 active(exited)"看起来修过"，规则却不在，且 homepage（identity 138760，
+    # 低字节 0x08）到 100.64/10 全超时。凶手不是 tailscaled，是 **systemd-networkd**：
+    # `ManageForeignRoutingPolicyRules` 默认 yes —— networkd (重)启动/重配时清扫一切
+    # 非它管理的 ip rule。8-11 06:40 unattended-upgrades 重启本节点 networkd，规则被清；
+    # tailscaled 的四条(5210-5270) 有 netlink 监听自愈，这条没有守护者。
+    # A/B 实测（本节点 2026-08-12）：默认配置重启 networkd → 5200 三秒内被清（抓现行）；
+    # 装上下面的 drop-in 再重启 → 幸存。中签的代价不小：otel remote-write 与 krr 都靠
+    # 100.94.186.7 打回 homelab，一断就是跨集群遥测停摆。
+    # 全程取证见 docs/records/2026-08-12-tailscale-iprule-guard-drift.md
+    #
+    # 防线一（根因）：networkd drop-in 关掉外来规则/路由清扫。
+    # 防线二（兜底）：幂等断言脚本 + timer 每 5 分钟重申 —— 对**任何**删除者收敛，
+    # 并写 node-exporter textfile 指标（exporters.yaml 已开 textfile collector），
+    # 失守可告警（k8s/helm/manifests/monitoring/alerts/tailscale-iprule-alerts.yaml）。
+    - name: Stop systemd-networkd sweeping foreign ip rules/routes (root cause of the 2026-08-11 drift)
       ansible.builtin.copy:
-        dest: /etc/systemd/system/tailscale-cgnat-route.service
+        dest: /etc/systemd/networkd.conf.d/10-no-foreign-sweep.conf
+        mode: "0644"
+        content: |
+          # ManageForeignRoutingPolicyRules 默认 yes：networkd (重)启动/重配时清扫一切
+          # 非它管理的 ip rule —— 2026-08-11 unattended-upgrades 重启 networkd，把
+          # 5200 防护规则清掉（tailscaled 的规则有 netlink 监听自愈，这条没有）。
+          # ManageForeignRoutes 同理设 no：table 52 与 Cilium 的路由对 networkd 也是"外来"的。
+          # 见 docs/records/2026-08-12-tailscale-iprule-guard-drift.md
+          [Network]
+          ManageForeignRoutingPolicyRules=no
+          ManageForeignRoutes=no
+      register: networkd_sweep_conf
+
+    - name: Restart systemd-networkd to load sweep config (only when changed; verified non-disruptive)
+      ansible.builtin.service:
+        name: systemd-networkd
+        state: restarted
+      when: networkd_sweep_conf.changed
+
+    - name: Install assert-tailscale-ip-rules script
+      ansible.builtin.copy:
+        dest: /usr/local/sbin/assert-tailscale-ip-rules
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          # Tailscale 相关 ip rule 收敛器 —— tailscale-ip-rules.timer 每 5 分钟执行。
+          # ansible 管理（cloud/oracle/ansible/playbooks/setup-tailscale.yaml），别在节点上手改。
+          set -u
+
+          TEXTFILE_DIR=/var/lib/node_exporter/textfile
+          STATE_FILE=/var/lib/tailscale-iprule-reasserts.count
+          PROM_FILE=$TEXTFILE_DIR/tailscale_iprule.prom
+
+          mkdir -p "$TEXTFILE_DIR"
+
+          reasserted=0
+          present_lines=""
+
+          # assert <priority> <ip rule 匹配/添加参数...>
+          assert() {
+            prio=$1; shift
+            n=$(ip rule show | grep -c "^${prio}:.*$*")
+            if [ "$n" -eq 0 ]; then
+              ip rule add "$@" priority "$prio" && reasserted=$((reasserted + 1))
+              present=0
+            else
+              # 并发竞态可能留下重复规则；收敛到恰好一条
+              while [ "$n" -gt 1 ]; do ip rule del "$@" priority "$prio"; n=$((n - 1)); done
+              present=1
+            fi
+            present_lines="${present_lines}tailscale_iprule_present{priority=\"${prio}\"} ${present}
+          "
+          }
+
+          assert 5200 to 100.64.0.0/10 lookup 52
+
+          total=$(cat "$STATE_FILE" 2>/dev/null || echo 0)
+          case "$total" in *[!0-9]*|"") total=0 ;; esac
+          total=$((total + reasserted))
+          printf '%s\n' "$total" > "$STATE_FILE"
+
+          TMP="$PROM_FILE.tmp.$$"
+          {
+            printf '# HELP tailscale_iprule_present 断言前该规则是否在位（0=本轮发现缺失并已补）\n'
+            printf '# TYPE tailscale_iprule_present gauge\n'
+            printf '%s' "$present_lines"
+            printf '# HELP tailscale_iprule_reasserts_total 发现缺失并补齐的累计次数（状态文件持久）\n'
+            printf '# TYPE tailscale_iprule_reasserts_total counter\n'
+            printf 'tailscale_iprule_reasserts_total %s\n' "$total"
+          } > "$TMP" && mv "$TMP" "$PROM_FILE"
+
+          if [ "$reasserted" -gt 0 ]; then
+            echo "REASSERT: $reasserted ip rule(s) were missing and re-added"
+          fi
+          exit 0
+
+    - name: Install tailscale-ip-rules service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/tailscale-ip-rules.service
         mode: "0644"
         content: |
           [Unit]
-          Description=Pin 100.64.0.0/10 (Tailscale CGNAT) to table 52, bypassing Tailscale's fwmark rules that collide with Cilium's identity mark
+          Description=Assert Tailscale-related ip rule invariants (convergent guard)
           After=tailscaled.service network-online.target
           Wants=network-online.target
 
           [Service]
           Type=oneshot
-          RemainAfterExit=yes
-          ExecStart=/bin/sh -c "ip rule del to 100.64.0.0/10 lookup 52 priority 5200 2>/dev/null; ip rule add to 100.64.0.0/10 lookup 52 priority 5200"
-          ExecStop=/bin/sh -c "ip rule del to 100.64.0.0/10 lookup 52 priority 5200 2>/dev/null || true"
+          # 两遍断言夹 20s：覆盖"断言刚跑完就撞上一次清扫"（如开机 90s 处 timer 首跑
+          # 撞云初始化的网络重配），失守窗口从"下个 tick(5min)"缩到 ~20s。
+          # 刻意没有 RemainAfterExit（timer 触发才会真正重跑 ExecStart）、没有 ExecStop
+          # （规则永不自动移除——旧单元的 ExecStop 正是迁移时的坑）。
+          # ⚠️ 没有 PartOf=tailscaled：实测 restart 传播对已死的 oneshot 是空操作，
+          # 且 tailscaled 重启本来就不清规则（清规则的是 networkd，已由 drop-in 根治）
+          # —— timer 是唯一的、也是足够的重申机制。
+          ExecStart=/usr/local/sbin/assert-tailscale-ip-rules
+          ExecStart=/bin/sleep 20
+          ExecStart=/usr/local/sbin/assert-tailscale-ip-rules
+
+    - name: Install tailscale-ip-rules timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/tailscale-ip-rules.timer
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Re-assert Tailscale ip rules every 5 minutes (convergence loop)
+
+          [Timer]
+          OnBootSec=90
+          OnUnitActiveSec=5min
 
           [Install]
-          WantedBy=multi-user.target
+          WantedBy=timers.target
 
-    - name: Enable and start tailscale-cgnat-route unit
+    # 旧单元退役。⚠️ 它的 ExecStop 会顺手删规则——后面立即 start 断言服务补回。
+    - name: Retire legacy one-shot rule unit (superseded by convergent guard)
       ansible.builtin.systemd:
         name: tailscale-cgnat-route.service
+        enabled: false
+        state: stopped
+      failed_when: false
+
+    - name: Remove legacy unit file
+      ansible.builtin.file:
+        path: /etc/systemd/system/tailscale-cgnat-route.service
+        state: absent
+
+    - name: Enable and start the convergence timer
+      ansible.builtin.systemd:
+        name: tailscale-ip-rules.timer
         enabled: true
         state: started
         daemon_reload: true
+
+    - name: Assert rules now (also repairs what legacy ExecStop just removed)
+      ansible.builtin.systemd:
+        name: tailscale-ip-rules.service
+        state: started

@@ -1,6 +1,6 @@
 # Tailscale Cross-Cluster Networking
 
-> Last updated: 2026-08-09
+> Last updated: 2026-08-12
 > Status: 生效事实
 >
 > Rewritten 2026-07-07 after the topology review. The original design (each K3s node
@@ -47,11 +47,14 @@ because nothing in the tailnet transits traffic toward the OCI VCN.
 Rule of thumb: **never advertise an IP that another tailnet subnet router is
 responsible for delivering to you.**
 
-### `nfs-lan-route` ip-rule — permanent by design, do not remove
+### 5260 LAN-direct ip-rule — permanent by design, do not remove
 
 `k8s-node` and `pve` each carry an `ip rule` at priority **5260** forcing
 `to 192.168.50.0/24` through `lookup main`. This is **not** leftover scaffolding
 from the 2026-07-12 double-advertiser fix — it is structural and stays.
+（维护机制 2026-08-12 起变更：`k8s-node` 上由收敛器 `tailscale-ip-rules.timer`
+每 5 分钟断言，历史单元 `nfs-lan-route.service` 已退役，见下方「守护自身失守」；
+`pve` 上仍是同名手工单元——它不跑 systemd-networkd，无清扫问题。）
 
 Because `pve` legitimately advertises `192.168.50.0/24` (it is 24/7, unlike a
 laptop, so it is the right subnet router) and `k8s-node` needs `--accept-routes`
@@ -143,7 +146,8 @@ NetworkPolicy/CNP/CCNP（两个集群都是空的）、ipcache 缺条目、Clust
 #### 修法与安全性
 
 在 **5200**（早于 5210）把 `100.64.0.0/10` 钉死到 table 52，对所有 pod 一次性免疫。
-落在 `tailscale-cgnat-route.service`，两个 playbook 各一份：
+由收敛器 `tailscale-ip-rules.timer` 维护（2026-08-12 起；历史单元
+`tailscale-cgnat-route.service` 已退役，原因见下节），两个 playbook 各一份：
 `k8s/ansible/playbooks/setup-tailscale.yaml` 与
 `cloud/oracle/ansible/playbooks/setup-tailscale.yaml`。形状与上面 5260 那条完全一致。
 
@@ -157,6 +161,31 @@ NetworkPolicy/CNP/CCNP（两个集群都是空的）、ipcache 缺条目、Clust
 没有真实负载中签，但它的规则集与 homelab 一模一样（同样 `netfilter-mode=off`、同样缺这条
 保护规则），即同样暴露，只是运气好。中签的代价不小：oracle 的 otel remote-write 与 krr
 都靠 `100.94.186.7` 打回 homelab。
+
+#### 2026-08-12：守护自身失守 —— 现在由两道防线 + 指标看护
+
+上面两条规则（5200/5260）曾以"开机 oneshot"systemd 单元维护，**2026-08-12 review
+发现两台 k8s 节点上全部静默失守**：单元 `active (exited)`"看起来修过"，`ip rule`
+里规则却没了；oracle 的 homepage 恰好中签（identity 138760，低字节 0x08），到
+100.64/10 全超时。凶手是 **systemd-networkd**——`ManageForeignRoutingPolicyRules`
+默认 `yes`，networkd (重)启动/重配时清扫一切非它管理的 ip rule；8-11 清晨
+unattended-upgrades 重启两台节点的 networkd，规则同批被清。tailscaled 的四条
+（5210-5270）有 netlink 监听自愈，自定义规则没有守护者。`pve` 用 ifupdown2 不跑
+networkd，其手工 5260 幸存——这条差异是破案线索。A/B 实测（oracle）：默认配置重启
+networkd → 5200 三秒内被清；装 drop-in 后重启 → 幸存。
+完整取证链 → [records/2026-08-12-tailscale-iprule-guard-drift.md](../records/2026-08-12-tailscale-iprule-guard-drift.md)
+
+现行架构（两个 setup-tailscale playbook 各一份，内容按节点差异化）：
+
+| 防线 | 机制 | 覆盖 |
+|---|---|---|
+| 根因 | `/etc/systemd/networkd.conf.d/10-no-foreign-sweep.conf`（`ManageForeignRoutingPolicyRules=no` + `ManageForeignRoutes=no`） | networkd 不再清外来规则/路由（也保护 Cilium 与 table 52 的路由） |
+| 兜底 | `assert-tailscale-ip-rules` 脚本 + `tailscale-ip-rules.timer` 每 5 分钟幂等断言（单次运行两遍断言夹 20s） | 任何删除者，失守窗口 ≤5 分钟自愈 |
+| 可见性 | 脚本写 node-exporter textfile：`tailscale_iprule_present` / `tailscale_iprule_reasserts_total` | 5 条告警（缺失/拉锯/指标停更/逐集群 absent），见 `alerts/tailscale-iprule-alerts.yaml` |
+
+⚠️ 实测两个反直觉结论，改这套机制前先读：**tailscaled 重启并不清这些规则**（清的是
+networkd）；**`PartOf=tailscaled` 对已死的 oneshot 不触发**（restart 传播是空操作）——
+所以单元里刻意没有 PartOf，timer 是唯一的重申机制。
 
 ## How It Works
 
