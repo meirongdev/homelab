@@ -1,16 +1,34 @@
 # SLO 定义（Sloth）。基于一手的 Cilium Gateway Envoy L7 指标（真实入口请求），
 # 为主要 homelab 用户服务定义"可用性 99% / 30d"SLO（error = 5xx）。
 # Sloth 控制器据此生成 PrometheusRule：
-#   - SLI 录制规则 slo:sli_error:ratio_rate{5m,30m,1h,2h,6h,1d,3d}
+#   - SLI 录制规则 slo:sli_error:ratio_rate{5m,30m,1h,2h,6h,1d,3d} + 周期窗口 30d
 #   - 多窗口多燃尽率告警（page→severity:critical / ticket→severity:warning → Telegram）
 #   - 元信息 slo:objective:ratio 等
 #
 # 指标来源：envoy_cluster_upstream_rq_xx{envoy_cluster_name="<gw>/<ns>_<svc>_<port>",
 #   envoy_response_code_class="2|3|4|5"}（见 cilium-envoy-servicemonitor.yaml）。
 # total = 全部响应类；error = 5xx（4xx 是客户端错误，计入分母不计入分子）。
-# ⚠️ errorQuery 末尾必须 OR on() vector(0)：envoy 按响应码类惰性创建序列，服务从未
-#    返回过 5xx（或 envoy 重启计数器重置后）时 errorQuery 为空集，除法结果整个消失
-#    → SLO 序列/告警静默失效（2026-07-12 oracle 侧首次部署时踩到）。
+#
+# ☠️ 分子分母都必须兜底。两个坑互相独立、都让 SLO **静默失效**（无告警、面板只显 N/A）：
+#   ① errorQuery 末尾 `OR on() vector(0)`：envoy 按响应码类惰性创建序列，服务从未
+#      返回过 5xx（或 envoy 重启计数器重置后）时 errorQuery 为**空集**，除法结果
+#      整个消失 → 序列不存在（2026-07-12 oracle 侧首次部署时踩到）。
+#   ② totalQuery 末尾 `(... > 0) OR on() vector(1)`：零请求窗口里 rate() 不是空集，
+#      是**值为 0 的真实样本**；配上 ① 的 vector(0) 就成了 0/0 = NaN，而 NaN 会被
+#      当正常样本写进 TSDB。周期窗口(30d)的录制规则用的是汇总优化：
+#        sum_over_time(ratio_rate5m[30d]) / count_over_time(ratio_rate5m[30d])
+#      sum_over_time 遇 NaN 全程传染 → **一个 NaN 样本毒死整条 30d 序列**，连锁
+#      period_burn_rate → period_error_budget_remaining 全 NaN。短窗口(5m~3d)是直接
+#      rate() 不受影响，所以症状**只出现在 30d 面板**、告警链路照常工作，极难察觉
+#      （2026-08-12 发现：grafana 只有 0.3% 的 5m 窗口为空就足够毒死整月）。
+#      兜底语义 = 空闲窗口记 0 错误 = 健康。这是可用性 SLO 的常规取法；"入口整个
+#      不可达" 属外部视角，由 Uptime Kuma 的公网探测负责，不指望这里的 5xx 比率。
+#      → 复发哨兵见 alerts/prometheus-rules.yaml 的 SLOSLIProducingNaN。
+#
+# ⚠️ 周期写 30d，但 Prometheus retention=7d（kube-prometheus-stack.yaml），
+#    sum_over_time([30d]) 实际只读得到 ~7 天 → "30d 错误预算剩余" 实为 ~7d 平均。
+#    刻意不改：告警用的全是 ≤3d 窗口、在 7d 内完全有效，而 sloth 内置窗口目录只有
+#    30d/28d，换 7d 要自带 catalog 并重标定全部燃尽率系数，不值当。面板已注明。
 #
 # ⚠️ metadata.labels.release=kube-prometheus-stack：经 sloth.extraLabels 也会打到生成的
 #    PrometheusRule，确保被 operator 的 ruleSelector 选中。
@@ -33,7 +51,7 @@ spec:
       sli:
         events:
           errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/monitoring_kube-prometheus-stack-grafana_.*", envoy_response_code_class="5"}[{{.window}}])) OR on() vector(0)
-          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/monitoring_kube-prometheus-stack-grafana_.*"}[{{.window}}]))
+          totalQuery: (sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/monitoring_kube-prometheus-stack-grafana_.*"}[{{.window}}])) > 0) OR on() vector(1)
       alerting:
         name: GrafanaGatewayHighErrorRate
         labels: { slo_service: grafana }
@@ -47,7 +65,7 @@ spec:
       sli:
         events:
           errorQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/vault_vault_.*", envoy_response_code_class="5"}[{{.window}}])) OR on() vector(0)
-          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/vault_vault_.*"}[{{.window}}]))
+          totalQuery: (sum(rate(envoy_cluster_upstream_rq_xx{envoy_cluster_name=~".*/vault_vault_.*"}[{{.window}}])) > 0) OR on() vector(1)
       alerting:
         name: VaultGatewayHighErrorRate
         labels: { slo_service: vault }
@@ -82,7 +100,7 @@ spec:
       sli:
         events:
           errorQuery: sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/personal-services_calibre-web_.*", envoy_response_code_class="5"}[{{.window}}])) OR on() vector(0)
-          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/personal-services_calibre-web_.*"}[{{.window}}]))
+          totalQuery: (sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/personal-services_calibre-web_.*"}[{{.window}}])) > 0) OR on() vector(1)
       alerting:
         name: CalibreWebGatewayHighErrorRate
         labels: { slo_service: calibre-web }
@@ -96,7 +114,7 @@ spec:
       sli:
         events:
           errorQuery: sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/argocd_argocd-server_.*", envoy_response_code_class="5"}[{{.window}}])) OR on() vector(0)
-          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/argocd_argocd-server_.*"}[{{.window}}]))
+          totalQuery: (sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/argocd_argocd-server_.*"}[{{.window}}])) > 0) OR on() vector(1)
       alerting:
         name: ArgoCDGatewayHighErrorRate
         labels: { slo_service: argocd }
@@ -110,7 +128,7 @@ spec:
       sli:
         events:
           errorQuery: sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/zitadel_zitadel_.*", envoy_response_code_class="5"}[{{.window}}])) OR on() vector(0)
-          totalQuery: sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/zitadel_zitadel_.*"}[{{.window}}]))
+          totalQuery: (sum(rate(envoy_cluster_upstream_rq_xx_total{cluster="oracle-k3s", envoy_cluster_name=~".*/zitadel_zitadel_.*"}[{{.window}}])) > 0) OR on() vector(1)
       alerting:
         name: ZitadelGatewayHighErrorRate
         labels: { slo_service: zitadel }

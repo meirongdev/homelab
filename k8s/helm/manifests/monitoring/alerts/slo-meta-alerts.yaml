@@ -1,0 +1,70 @@
+---
+# SLO 自身的健康度告警（meta-monitoring：监控"监控"本身）。
+#
+# 为什么这个文件存在（2026-08-12）：ZITADEL 的 SLI 有 **97.9% 的 5m 窗口是 NaN**，
+# 持续至少一个月，5 个服务的 30d 错误预算面板全部显示 "N/A"，而**没有任何东西告警**。
+# 发现它靠的是人肉看面板觉得"不太对"——这正是本仓库最忌讳的静默失效模式
+# （同 2026-08-11 Gateway API CRD 那次：旧路由照常 200、只有新增的静默 503）。
+#
+# 根因（详见 manifests/monitoring/slos.yaml 的头注释）：SLI = errorQuery/totalQuery，
+# 零请求窗口里两边都是 0 → 0/0 = NaN，且 NaN 被当正常样本写进 TSDB。Sloth 的周期
+# 窗口(30d)规则是 sum_over_time(ratio_rate5m[30d]) / count_over_time(...)，
+# sum_over_time 遇 NaN 全程传染 → 一个 NaN 样本毒死整条 30d 序列。
+# 已通过给 totalQuery 加 `(... > 0) OR on() vector(1)` 兜底修掉；本告警是**防复发哨兵**：
+# 日后若有人照旧模板加新 SLO 忘了兜底，30 分钟内就有 ticket，而不是一个月后靠肉眼。
+#
+# 为什么盯 rate5m 而不是盯 30d 面板（那才是症状）：周期窗口的 NaN **只可能**来自
+# rate5m 的 NaN（它就是 rate5m 的 sum/count），所以 rate5m 是严格上游、能覆盖 100%
+# 的成因，且比症状早 ~30 天暴露。再加一条 30d 的症状告警纯属冗余，而且修复后旧的
+# NaN 样本要等 retention(7d) 自然滚出，那条告警会白响一周。
+#   （理论上另一条 NaN 路径是 objective 写成 100.0 → error_budget=0 → 0/0；那是
+#    提交时就看得见的配置错误，不值得单开一条规则。）
+#
+# PromQL 说明：`X unless (X > -1)` = 取出 X 里所有**不是实数**的样本。NaN 参与任何
+# 比较都返回 false，所以 `> -1` 会把 NaN 过滤掉，unless 再取差集即得 NaN 集合。
+# 等价写法 `X != X`（NaN 不等于自身）更短但太隐晦，故取显式形式。两者均已对线上
+# Prometheus 实测（2026-08-12，同样命中 zitadel 一条）。
+# ⚠️ 不能写成 `count(...) - count(... > -1) > 0`：全部 NaN 时右侧是空集，减法结果
+#    整个消失 → 告警永不触发（本仓库已有的 absent 类踩坑同理）。
+#
+# label release=kube-prometheus-stack 是 operator ruleSelector 收编本规则的必要条件。
+# 经 ArgoCD `monitoring-dashboards` App 部署（path 递归，新文件自动纳管）。
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: slo-meta-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: slo-health
+      rules:
+        # for: 30m —— 修复后 NaN 应当**完全不再出现**（空闲窗口现在稳定产出 0），
+        # 所以这里不是"抑制抖动"而是"给规则组评估留几轮余量"，30m 已很宽松。
+        - alert: SLOSLIProducingNaN
+          expr: slo:sli_error:ratio_rate5m unless (slo:sli_error:ratio_rate5m > -1)
+          for: 30m
+          labels:
+            severity: warning
+            component: observability
+          annotations:
+            summary: "SLO {{ $labels.sloth_slo }} 的 SLI 正在产出 NaN，错误预算将被毒死"
+            description: |
+              {{ $labels.sloth_service }}/{{ $labels.sloth_slo }} 的
+              slo:sli_error:ratio_rate5m = NaN，通常是 SLI 出现 0/0：该 5m 窗口内
+              零请求，而 totalQuery 没有兜底成非零。
+
+              后果不是"这一个点没数据"：Sloth 的周期窗口规则用 sum_over_time 汇总
+              rate5m，NaN 会传染整条 30d 序列 → period_burn_rate 与
+              period_error_budget_remaining 全部 NaN → Grafana "SLO / Service
+              Availability" 看板恒显 "N/A"，且要等 retention(7d) 滚过才自愈。
+              短窗口(5m~3d)是直接 rate()，不受影响 —— 所以燃尽率告警仍然有效，
+              **只有面板坏**，极易被当成"这服务本来就没流量"而忽略。
+
+              修：给该 SLO 的 totalQuery 补兜底，与 slos.yaml 里其余条目一致——把
+                sum(rate(<指标>[<window>]))
+              包成
+                (sum(rate(<指标>[<window>])) > 0) OR on() vector(1)
+              改 k8s/helm/manifests/monitoring/slos.yaml 后 git push，ArgoCD 3 分钟同步。
+              背景与完整推导：docs/records/2026-08-12-slo-nan-poisoning.md

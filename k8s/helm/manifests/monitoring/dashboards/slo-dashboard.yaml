@@ -1,7 +1,13 @@
 # Grafana Dashboard: SLO / Service Availability
 # 展示 Sloth 生成的服务可用性 SLO（错误预算剩余 / 燃尽率 / SLI 错误率）。
 # 数据源: Prometheus（slo:* 录制规则，来自 manifests/slos.yaml + Cilium Envoy 一手指标）。
-# 无流量服务显示 "N/A 无流量"（NaN：rate() 无样本，SLI 无法计算，非故障）。
+# ⚠️ N/A 的含义在 2026-08-12 变了，别再照旧读：此前文案写的是"N/A = 无流量 = 非故障"，
+#    而当时 5 个服务**全部** N/A，真实原因是 SLI 的 0/0 产出 NaN 毒死了 30d 汇总规则
+#    （见 records/2026-08-12-slo-nan-poisoning.md）。这句"非故障"的注解恰好把故障解释
+#    成了正常，是它潜伏一个多月没被发现的一半原因。修复后空闲窗口稳定产出 0，
+#    **N/A 一律代表 SLI 异常**，并由 SLOSLIProducingNaN 告警兜底。
+# ⚠️ 面板标的 30d 是 SLO 周期，不是实际窗口：Prometheus retention=7d，
+#    sum_over_time([30d]) 只读得到 ~7 天。刻意不改，理由见 manifests/monitoring/slos.yaml。
 # Auto-loaded via kube-prometheus-stack grafana-sc-dashboard sidecar。
 ---
 apiVersion: v1
@@ -19,7 +25,7 @@ data:
       "annotations": {
         "list": []
       },
-      "description": "homelab 服务可用性 SLO（Sloth，99%/30d，基于 Cilium Gateway Envoy 一手请求指标）",
+      "description": "homelab 服务可用性 SLO（Sloth，99%/30d，基于 Cilium Gateway Envoy 一手请求指标）。⚠️ 30d 是 SLO 周期；Prometheus retention=7d，预算类面板实际窗口约 7 天。N/A = SLI 异常（非'无流量'），见 SLOSLIProducingNaN 告警。",
       "editable": true,
       "graphTooltip": 1,
       "links": [],
@@ -39,8 +45,8 @@ data:
         {
           "type": "bargauge",
           "id": 2,
-          "title": "错误预算剩余 (30d)",
-          "description": "slo:period_error_budget_remaining:ratio。1=预算全满，0=耗尽，<0=已超支(违反 SLO)。'N/A 无流量'=近期无请求，SLI 无法计算(非故障)。",
+          "title": "错误预算剩余（30d 周期 · 实际窗口 ≈7d）",
+          "description": "slo:period_error_budget_remaining:ratio。1=预算全满，0=耗尽，<0=已超支(违反 SLO)。⚠️ N/A = SLI 产出 NaN，是**故障**不是无流量：空闲窗口现在会正常产出 0。整列 N/A 通常意味着 0/0 毒死了 30d 汇总规则（2026-08-12 复盘）；SLOSLIProducingNaN 会在 30 分钟内告警。",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -62,7 +68,7 @@ data:
                   "options": {
                     "match": "null+nan",
                     "result": {
-                      "text": "N/A 无流量"
+                      "text": "N/A ⚠️"
                     }
                   }
                 }
@@ -117,7 +123,7 @@ data:
           "type": "stat",
           "id": 3,
           "title": "当前燃尽率 (5m，>1=超速消耗预算)",
-          "description": "slo:current_burn_rate:ratio。>1=正在比 SLO 允许的更快地烧预算；0=无错误；'N/A 无流量'=近期无请求。",
+          "description": "slo:current_burn_rate:ratio。>1=正在比 SLO 允许的更快地烧预算；0=无错误（含空闲窗口）；N/A = SLI 产出 NaN，属异常，见 SLOSLIProducingNaN。",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -138,7 +144,7 @@ data:
                   "options": {
                     "match": "null+nan",
                     "result": {
-                      "text": "N/A 无流量"
+                      "text": "N/A ⚠️"
                     }
                   }
                 }
@@ -195,7 +201,7 @@ data:
           "type": "timeseries",
           "id": 4,
           "title": "SLI 错误率 (rate1h) — 红线=错误预算 (1%)",
-          "description": "slo:sli_error:ratio_rate1h 各服务 1 小时错误率。持续高于 1%(=1-99%目标)就在烧预算。无流量服务无数据点(正常)。",
+          "description": "slo:sli_error:ratio_rate1h 各服务 1 小时错误率。持续高于 1%(=1-99%目标)就在烧预算。本面板用直接 rate([1h]) 计算、不经 30d 汇总，故不受 NaN 传染影响——它正常而上方预算面板 N/A，就是汇总规则被毒的典型征兆。",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -262,7 +268,7 @@ data:
         {
           "type": "table",
           "id": 5,
-          "title": "SLO 错误预算剩余明细 (30d，升序，最差在上)",
+          "title": "SLO 错误预算剩余明细（30d 周期 · 实际 ≈7d，升序，最差在上）",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -339,7 +345,7 @@ data:
                         "options": {
                           "match": "null+nan",
                           "result": {
-                            "text": "N/A 无流量"
+                            "text": "N/A ⚠️"
                           }
                         }
                       }
