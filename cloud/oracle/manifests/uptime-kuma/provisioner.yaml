@@ -40,6 +40,13 @@ data:
         # 也可能 3xx 跳 /login——两段都收，等实测出稳定状态码后再收紧。
         {"name": "Open Notebook",  "url": "https://notebook.meirong.dev/",      "accepted_statuscodes": ["200-299", "300-399"], "maxredirects": 0},
         {"name": "ArgoCD",         "url": "https://argocd.meirong.dev/",        "accepted_statuscodes": ["200-299", "300-399"]},
+        # ZITADEL（oracle）2026-08-12 补：此前**整个清单里没有它**——身份提供方是全站
+        # SSO 的单点依赖，却是唯一没有存活探测的对外服务。
+        # 副作用同样重要：它因此是 5 个 SLO 里唯一没有探测底噪的，7 天仅 138 个真实请求
+        # （~0.8 req/h），97.9% 的 5m 窗口为空 → SLI 长期无样本、可用性目标失真
+        # （其余服务三千级的 3xx 计数正是这组探测穿过 gateway 留下的）。
+        # 实测 2026-08-12：/ → 302 /ui/login，故与上面同款只收 3xx、不跟随跳转。
+        {"name": "ZITADEL",        "url": "https://auth.meirong.dev/",          "accepted_statuscodes": ["300-399"], "maxredirects": 0},
         # 备份服务（原 Kopia）现已迁移 Tailscale NodePort（https://100.94.186.7:31515，自签 cert），不再有公网入口，故不在此处探测。
         # --- new info pipeline services ---
         # KaraKeep: root / redirects 307 to /signin; monitor /signin directly (returns 200)
