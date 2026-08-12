@@ -1,6 +1,6 @@
 # Homelab 宿主机功耗与散热 (Homelab Host Power & Thermal)
 
-> Last updated: 2026-08-09
+> Last updated: 2026-08-12
 > Status: 生效事实
 > Scope: homelab 的物理宿主（Proxmox `pve`，Ryzen 5600H 笔记本）。homelab 温度/功耗约束的**唯一真相源**，
 > AGENTS/security 里的硬约束从这里引用，别在别处再写一份数字。
@@ -56,9 +56,15 @@
 
 - proxmox host 温度/磁盘温度已进 Prometheus（node-exporter + smartctl，192.168.50.4），
   Grafana `Hardware` 看板。
-- ⚠️ **RAPL 未采集**：Prometheus 里没有 `node_rapl_package_joules_total{cluster="homelab"}`——
-  proxmox 的 node_exporter 没开 RAPL collector，cost 文档的校准查询当前查不到数据
-  （上文 ~5W 是 SSH 直接采样的单点值，不是 7 天均值）。
+- **RAPL 已采集（2026-08-12 修复）**：`node_rapl_package_joules_total{cluster="homelab"}` 有数据，
+  Grafana `Hardware` 的 Power Overview 看板正常。此前空了很久的根因**不是没开 collector**——
+  collector 一直开着，卡的是权限：`energy_uj` 自内核 5.10 起 root-only（PLATYPUS 缓解，
+  CVE-2020-8694），而 node_exporter 以非特权用户跑 → `node_scrape_collector_success{collector="rapl"} 0`，
+  一条 `node_rapl_*` 都不产出，**且完全静默**。修法是 udev 规则把 `energy_uj` 放给 `node_exporter`
+  组（`proxmox/ansible/playbooks/node-exporter-deploy.yaml` 两个 play 均有，playbook 内置断言防回归）。
+  ⚠️ 排查同类问题时**先看 `node_scrape_collector_success{collector="..."}`**，别只看指标有没有。
+- ⚠️ 本机是 Ryzen，powercap 只有 `package-0` + `core` 两个域，**没有 dram/uncore**
+  （storage-106 是 Intel，四个域齐全）。查不到 pve 的 DRAM 功耗是硬件如此，不是故障。
 
 ## 相关
 
