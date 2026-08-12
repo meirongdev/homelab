@@ -1,6 +1,6 @@
 # 成本归因与资源右尺寸
 
-> Last updated: 2026-07-31
+> Last updated: 2026-08-12
 > Status: 生效事实
 
 两套互补的工具：**OpenCost** 回答「钱花在哪」（常驻，出指标 → Grafana），
@@ -145,9 +145,10 @@ oracle 的这两个指标由 otel `prometheus/cadvisor` receiver 提供（见
 
 ### 校准 homelab 定价（首次上线后 / 硬件变更后）
 
-> ⚠️ 2026-08-09 确认：下方查询当前**查不到数据**——proxmox 的 node_exporter 未开 RAPL
-> collector，Prometheus 里没有 `node_rapl_package_joules_total{cluster="homelab"}`。
-> 要跑通校准，先给 proxmox 的 node_exporter 加 `--collector.rapl`。
+> ✅ 2026-08-12 起下方查询**有数据了**（此前空是 RAPL `energy_uj` 的 root-only 权限，
+> 不是没开 collector；根因与修法见
+> [homelab-host-power-thermal.md](homelab-host-power-thermal.md) 的「监控」节）。
+> ⚠️ 但 `[7d:]` 的均值要等积够 7 天历史才有意义，在那之前用短窗口。
 
 ```bash
 # 1. 取近 7 天 RAPL 实测功耗（CPU package + DRAM）

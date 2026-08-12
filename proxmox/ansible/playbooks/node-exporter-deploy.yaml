@@ -39,6 +39,33 @@
         group: root
         mode: "0755"
 
+    # ── RAPL permissions ───────────────────────────────────────────────────────
+    # energy_uj is root-only since kernel 5.10 (PLATYPUS mitigation, CVE-2020-8694),
+    # but node_exporter runs unprivileged — so --collector.rapl fails silently:
+    # node_scrape_collector_success{collector="rapl"} 0 and zero node_rapl_* series,
+    # which left the Grafana "Hardware / Power Overview" dashboard empty (found 2026-08-12).
+    # udev's built-in MODE=/GROUP= only apply to /dev nodes, not to sysfs attributes,
+    # so the permission change has to go through RUN+=. Read access goes to the
+    # node_exporter group only, not world — the counters are still a power side channel.
+    - name: Install udev rule granting node_exporter read access to RAPL counters
+      ansible.builtin.copy:
+        dest: /etc/udev/rules.d/99-node-exporter-rapl.rules
+        mode: "0644"
+        content: |
+          # Managed by Ansible — proxmox/ansible/playbooks/node-exporter-deploy.yaml
+          SUBSYSTEM=="powercap", ACTION=="add|change", TEST=="/sys%p/energy_uj", RUN+="/bin/chgrp node_exporter /sys%p/energy_uj", RUN+="/bin/chmod g+r /sys%p/energy_uj"
+      register: rapl_udev_rule
+
+    # Runs every time (cheap, idempotent) so permissions self-heal if something reset
+    # them; only reported as changed when the rule file itself changed.
+    - name: Reload udev rules and re-trigger powercap devices
+      ansible.builtin.command:
+        cmd: "{{ item }}"
+      loop:
+        - udevadm control --reload-rules
+        - udevadm trigger --subsystem-match=powercap --action=add --settle
+      changed_when: rapl_udev_rule is changed
+
     - name: Create node_exporter systemd service (with RAPL + ZFS)
       ansible.builtin.copy:
         dest: /etc/systemd/system/node_exporter.service
@@ -158,6 +185,22 @@
       retries: 6
       delay: 5
 
+    - name: Fetch node_exporter metrics for RAPL verification
+      ansible.builtin.uri:
+        url: "http://localhost:{{ node_exporter_port }}/metrics"
+        return_content: true
+      register: ne_metrics
+
+    - name: Assert the RAPL collector is actually producing data
+      ansible.builtin.assert:
+        that:
+          - "'node_scrape_collector_success{collector=\"rapl\"} 1' in ne_metrics.content"
+          - "'node_rapl_package_joules_total' in ne_metrics.content"
+        fail_msg: >-
+          RAPL collector produced nothing. Check that 99-node-exporter-rapl.rules took effect:
+          ls -l /sys/class/powercap/intel-rapl:0/energy_uj should be root:node_exporter with g+r.
+        success_msg: "RAPL OK — node_rapl_* series present"
+
     - name: Report endpoints
       ansible.builtin.debug:
         msg:
@@ -209,6 +252,26 @@
         owner: root
         group: root
         mode: "0755"
+
+    # ── RAPL permissions ───────────────────────────────────────────────────────
+    # Same root-only energy_uj problem as on the storage host — see the comment in
+    # Play 1. This Ryzen 5600H exposes package-0 + core only (no uncore/dram domain).
+    - name: Install udev rule granting node_exporter read access to RAPL counters
+      ansible.builtin.copy:
+        dest: /etc/udev/rules.d/99-node-exporter-rapl.rules
+        mode: "0644"
+        content: |
+          # Managed by Ansible — proxmox/ansible/playbooks/node-exporter-deploy.yaml
+          SUBSYSTEM=="powercap", ACTION=="add|change", TEST=="/sys%p/energy_uj", RUN+="/bin/chgrp node_exporter /sys%p/energy_uj", RUN+="/bin/chmod g+r /sys%p/energy_uj"
+      register: rapl_udev_rule
+
+    - name: Reload udev rules and re-trigger powercap devices
+      ansible.builtin.command:
+        cmd: "{{ item }}"
+      loop:
+        - udevadm control --reload-rules
+        - udevadm trigger --subsystem-match=powercap --action=add --settle
+      changed_when: rapl_udev_rule is changed
 
     - name: Create node_exporter systemd service (with RAPL)
       ansible.builtin.copy:
@@ -325,6 +388,22 @@
       until: se_check.status == 200
       retries: 6
       delay: 5
+
+    - name: Fetch node_exporter metrics for RAPL verification
+      ansible.builtin.uri:
+        url: "http://localhost:{{ node_exporter_port }}/metrics"
+        return_content: true
+      register: ne_metrics
+
+    - name: Assert the RAPL collector is actually producing data
+      ansible.builtin.assert:
+        that:
+          - "'node_scrape_collector_success{collector=\"rapl\"} 1' in ne_metrics.content"
+          - "'node_rapl_package_joules_total' in ne_metrics.content"
+        fail_msg: >-
+          RAPL collector produced nothing. Check that 99-node-exporter-rapl.rules took effect:
+          ls -l /sys/class/powercap/intel-rapl:0/energy_uj should be root:node_exporter with g+r.
+        success_msg: "RAPL OK — node_rapl_* series present"
 
     - name: Report endpoints
       ansible.builtin.debug:

@@ -3,6 +3,8 @@
 # scraped by homelab Prometheus via two jobs:
 #   - node-exporter-metal-nodes  (:9100)  — CPU/mem/disk/network/RAPL
 #   - smartctl-proxmox-pve       (:9633)  — SMART disk health
+# RAPL on this Ryzen exposes package-0 + core only — there is no dram/uncore domain,
+# so don't re-add a node_rapl_dram_joules_total target here (it can only ever be empty).
 # Deployed via: cd proxmox/ansible && just node-exporter (Play 2, pve-1).
 # Auto-loaded via grafana-sc-dashboard sidecar and synced by ArgoCD monitoring-dashboards App.
 ---
@@ -368,8 +370,7 @@ data:
           "type": "stat",
           "targets": [
             {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_package_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}[2m])", "instant": true, "legendFormat": "Package"},
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_core_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}[2m])", "instant": true, "legendFormat": "Core"},
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_dram_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}[2m])", "instant": true, "legendFormat": "DRAM"}
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_core_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}[2m])", "instant": true, "legendFormat": "Core"}
           ]
         },
         {
@@ -385,8 +386,7 @@ data:
           "type": "timeseries",
           "targets": [
             {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_package_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}[2m])", "legendFormat": "Package"},
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_core_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}[2m])", "legendFormat": "Core"},
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_dram_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}[2m])", "legendFormat": "DRAM"}
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "rate(node_rapl_core_joules_total{job=\"node-exporter-metal-nodes\", nodename=\"proxmox-pve\"}[2m])", "legendFormat": "Core"}
           ]
         },
 
