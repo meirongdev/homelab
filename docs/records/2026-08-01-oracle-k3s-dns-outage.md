@@ -91,3 +91,14 @@ kubectl --context oracle-k3s exec -n personal-services deploy/uptime-kuma -- \
 3. **dead-man's switch 链路单点盲区**：Watchdog → uptime-kuma → Telegram 依赖 oracle-k3s 的 DNS（连发送通知也要 DNS）。本次是 homelab Alertmanager 的独立链路（经 homelab 网络直连 `api.telegram.org`）救场。接受"双链路冗余"现状即可，但应文档化；若要加固，可给 uptime-kuma 的 Telegram 通知配固定 IP / 备用 DNS。
 4. **uptime-kuma 告警静默失败无对等保护**：本次其 DOWN 通知发不出去但无自指告警；Alertmanager 侧有 `AlertmanagerFailedToSendAlerts`，uptime-kuma 侧没有对等机制，属已知盲区。
 5. **外部故障**：非仓库变更引起，更接近 OCI 侧 / 实例网络的瞬时闪断；若反复出现需开 OCI support ticket 或核查实例网络路径。
+
+## 后续（2026-08-12）
+
+教训 1 的修复经历了两版：第一版（8 月初）给 resolved 配 `FallbackDNS=1.1.1.1`，
+**无效**——FallbackDNS 只服务 resolved 自己的 stub(127.0.0.53) 路径，不写进
+`/run/systemd/resolve/resolv.conf`，而 kubelet 喂给 CoreDNS 的正是该文件，集群路径
+（本次真正死掉的那条）上游依旧只有 OCI 一个；cloudflared 重启率毫无好转（26d 24/28
+次）就是旁证。2026-08-12 改为 `DNS=1.1.1.1 1.0.0.1`（全局上游池，会进 resolv.conf）
+并重建 CoreDNS pod（kubelet 在 pod 创建时快照 resolv.conf）。用 iptables 掐死
+`169.254.169.254:53` 30 秒做故障演练：pod 内 4 个域名全部解析成功、DROP 计数 15 包
+——本次故障形态已可存活。固化于 `cloud/oracle/ansible/playbooks/setup-k3s.yaml`。
