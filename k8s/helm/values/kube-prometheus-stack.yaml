@@ -243,7 +243,12 @@ prometheus:
     # 配额，实测 TSDB 已 4.67Gi 仍在随 series 增长（oracle remote-write、新告警一路加），
     # 此前唯一闸门是 7d 时间截断，磁盘账没人管。取 4608MB ≈ 声明值的 90%（Prometheus
     # 官方建议给 WAL/churn 留 10-15% 头）：series 再涨时表现为**有效保留期从 7d 温和
-    # 缩短**，而不是磁盘静默膨胀。设置当天会立即裁掉最老的一两个 block（P2 级数据，可丢）。
+    # 缩短**，而不是磁盘静默膨胀。生效当天即裁掉最老 block（实测 4.81→4.38GiB，P2 级可丢）。
+    # 应用机制（2026-08-12 实测，和直觉相反）：operator 0.92 + Prometheus 3 把 retention
+    # 渲染进**配置文件**（config_out/prometheus.env.yaml 的 storage: 段）由 reloader
+    # 热加载——**不重启 pod、不改 STS args**。所以 /api/v1/status/flags 恒显
+    # retention.size=0B（旗标未用，是默认值），别拿它判断生效与否，看
+    # /api/v1/status/runtimeinfo 或 TSDB 体积变化。
     # ⚠️ 想真正扩容不能改 PVC（volumeClaimTemplate 不可变 + local-path 不支持 expand），
     # 得删 STS+PVC 重建，见上方 storageSpec 注释。
     retentionSize: 4608MB
