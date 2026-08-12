@@ -4,3 +4,10 @@ proxmox:
       ansible_host: 192.168.50.4
     storage:
       ansible_host: 192.168.50.106
+
+# storage-106 上的实验田 VM（proxmox/terraform-storage 预配）
+exp:
+  hosts:
+    k3s-exp:
+      ansible_host: 192.168.50.107
+      ansible_user: ubuntu # cloud-init 用户，非 root（ansible.cfg 默认 root 只适用裸金属）

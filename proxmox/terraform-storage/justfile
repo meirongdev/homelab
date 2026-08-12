@@ -1,0 +1,32 @@
+# storage-106 terraform tasks
+# ⚠️ 本机直连两台 PVE 的 :8006 均不通（SSH 22 正常）——所以 plan/apply 依赖 _tunnel。
+
+# Show help
+help:
+    @just --list --unsorted
+
+# SSH 隧道 → 106 的 PVE API（幂等：已有隧道就复用；10 分钟自动退出）
+_tunnel:
+    @pgrep -f "ssh.*-L 18006:127.0.0.1:8006" >/dev/null || \
+      ssh -f -o ExitOnForwardFailure=yes -o ConnectTimeout=8 -i ~/.ssh/vgio \
+        -L 18006:127.0.0.1:8006 root@192.168.50.106 sleep 600
+
+# Initialize Terraform and create tfvars if it doesn't exist
+init:
+    @if [ ! -f terraform.tfvars ]; then \
+      echo "Creating terraform.tfvars from example (记得填 api token，见 provider.tf 注释)..."; \
+      cp terraform.tfvars.example terraform.tfvars; \
+    fi
+    terraform init
+
+# Plan all changes
+plan: _tunnel
+    terraform plan -out=terraform.plan
+
+# Apply the plan
+apply: _tunnel
+    terraform apply terraform.plan
+
+# Destroy the experiment VM (实验田，随便拆)
+destroy: _tunnel
+    terraform destroy
