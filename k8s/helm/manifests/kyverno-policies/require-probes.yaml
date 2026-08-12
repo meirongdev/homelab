@@ -1,8 +1,16 @@
 ---
 # 要求容器配置 readinessProbe（健康检查，避免把流量打到未就绪/已僵死的 Pod）。
 #
-# ⚠️ 先 Audit；部分一次性 Job / sidecar 合理地无 probe，提升 Enforce 前先读
+# ⚠️ 先 Audit；部分 sidecar 合理地无 probe，提升 Enforce 前先读
 #    `kubectl get polr -A` 评估影响。仅要求 readinessProbe（liveness 争议较大，可后补）。
+#
+# autogen 收窄到长驻控制器（2026-08-13）：Kyverno 默认把 Pod 规则扩写到全部 8 种
+# 控制器，包括 Job/CronJob——而 readiness 语义上只对「有流量要接」的长驻负载成立，
+# run-to-completion 的批处理根本没有 ready 概念。此前 monitoring/krr 每轮后台扫描
+# （约 7 分钟）刷一条恒定误报的 PolicyViolation Warning 事件，把 events 面变成噪音。
+# 用注解而不用 spec 字段：CRD 对未知字段静默剪枝（本仓库最恨的失效模式），注解是
+# 跨版本文档化的机制；改完拿 `kubectl get cpol require-probes -o jsonpath=
+# '{.status.autogen}'` 验证生成规则里再无 Job/CronJob。
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -11,6 +19,7 @@ metadata:
     policies.kyverno.io/title: Require Readiness Probe
     policies.kyverno.io/category: Best Practices
     policies.kyverno.io/severity: low
+    pod-policies.kyverno.io/autogen-controllers: "DaemonSet,Deployment,ReplicaSet,ReplicationController,StatefulSet"
 spec:
   failurePolicy: Ignore
   background: true
