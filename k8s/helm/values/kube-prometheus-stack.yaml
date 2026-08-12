@@ -518,6 +518,14 @@ kube-state-metrics:
       memory: 128Mi
 
 prometheus-node-exporter:
+  # textfile collector（2026-08-12）：读宿主机脚本落盘的自定义指标。目前唯一的写入方是
+  # ip rule 收敛器 assert-tailscale-ip-rules（ansible setup-tailscale.yaml），产出
+  # tailscale_iprule_present / ..._reasserts_total，配套告警见
+  # manifests/monitoring/alerts/tailscale-iprule-alerts.yaml。
+  # 路径复用 chart 默认挂载的宿主根文件系统（/host/root，hostRootFsMount 默认开），
+  # 不需要额外 hostPath 挂载。
+  extraArgs:
+    - --collector.textfile.directory=/host/root/var/lib/node_exporter/textfile
   resources:                       # 实测：峰值 29Mi，CPU p95 5m
     requests:
       cpu: 10m

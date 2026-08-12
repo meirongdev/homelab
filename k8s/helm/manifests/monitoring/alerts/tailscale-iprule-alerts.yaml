@@ -1,0 +1,120 @@
+---
+# Tailscale ip rule 守护指标的告警（meta-monitoring：守护者本身也要被守护）。
+#
+# 为什么这个文件存在（2026-08-12）：Cilium identity-mark × Tailscale fwmark 冲突的
+# 防护规则（priority 5200/5260，2026-08-09 修的）被发现**在两台节点上全部静默失守**
+# ——systemd 单元 active(exited)"看起来修过"，`ip rule` 里规则却没了；oracle 上
+# homepage（identity 低字节 0x08）到 100.64/10 全超时，没有任何告警。根因：
+# systemd-networkd 的 `ManageForeignRoutingPolicyRules` 默认 yes，(重)启动时清扫一切
+# 外来 ip rule——8-11 unattended-upgrades 重启 networkd，规则被清；tailscaled 的规则
+# 有 netlink 监听自愈，这些没有。→ docs/records/2026-08-12-tailscale-iprule-guard-drift.md
+#
+# 修复两层：networkd drop-in 关掉清扫（根因），加节点收敛器（assert-tailscale-ip-rules
+# 脚本 + 5 分钟 timer，ansible 管理）对任何删除者兜底。本文件的职责是**剩下的两类不自愈故障**：
+#   1. 收敛器自己死了（timer 停了、脚本报错、textfile 目录没了）→ 指标停更/消失；
+#   2. 有东西以快于 timer 的节奏持续删规则（收敛器在打拉锯战）→ 反复 reassert。
+# 中签 pod 的实际断连由既有告警兜底（OracleTelemetryAbsent / 备份新鲜度），这里不重复。
+#
+# 指标来源：宿主脚本写 /var/lib/node_exporter/textfile/tailscale_iprule.prom，
+# node-exporter textfile collector 暴露（homelab: kps values 的 extraArgs；
+# oracle: manifests/monitoring/exporters.yaml），oracle 侧经 otel remote-write 汇入。
+# 序列都带 cluster 标签；absent 类告警按仓库惯例**逐集群写死**（absent() 不会
+# 自带 cluster 标签，合写会在单侧失效时静默漏报——external-dns/ESO 同款处理）。
+#
+# label release=kube-prometheus-stack 是 operator ruleSelector 收编的必要条件。
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tailscale-iprule-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: tailscale-iprule-guard
+      rules:
+        # 规则持续不在位：脚本每轮都发现缺失（present=0 是"断言前"的状态快照）。
+        # 正常漂移下一轮就该回到 1；连续 20 分钟为 0 意味着 `ip rule add` 本身在失败
+        # （表被删？语法被内核拒？）或删除者快于每轮收敛——都需要人看。
+        - alert: TailscaleIpRulePersistentlyMissing
+          expr: tailscale_iprule_present == 0
+          for: 20m
+          labels:
+            severity: warning
+            component: network
+          annotations:
+            summary: "{{ $labels.cluster }} 的 ip rule {{ $labels.priority }} 持续缺失，收敛器补不回去"
+            description: |
+              assert-tailscale-ip-rules 连续 20 分钟每轮都报告 priority
+              {{ $labels.priority }} 缺失。收敛器每 5 分钟重申一次，正常漂移
+              下一轮即恢复——持续为 0 说明 `ip rule add` 在失败，或有东西以
+              快于 timer 的节奏持续删规则。
+              节点上查：`systemctl status tailscale-ip-rules.timer`、
+              `journalctl -u tailscale-ip-rules.service -n 20`、`ip rule`。
+              后果：5200 缺位时 identity 低字节 0x08 的 pod 到 100.64/10 全黑洞
+              （otel remote-write / restic 夜备都在抽签池里）。
+              背景：docs/records/2026-08-12-tailscale-iprule-guard-drift.md
+
+        # 拉锯战：短窗口内反复补齐。networkd 清扫已在 drop-in 层根治，正常应恒为 0；
+        # 偶发 +1（如新装节点首轮）不告警，6h 内 >3 次说明出现了新的系统性删除者。
+        - alert: TailscaleIpRuleRepeatedDrift
+          expr: increase(tailscale_iprule_reasserts_total[6h]) > 3
+          labels:
+            severity: warning
+            component: network
+          annotations:
+            summary: "{{ $labels.cluster }} 的 ip rule 6h 内被删了 {{ $value }} 次，收敛器在打拉锯战"
+            description: |
+              收敛器 6 小时内补齐规则超过 3 次。networkd 的外来规则清扫已由
+              10-no-foreign-sweep.conf 关掉，正常此计数应恒定不动——这个频率
+              说明出现了新的系统性删除者（networkd drop-in 被移除？新组件？）。
+              节点上蹲现行：`ip monitor rule` + `journalctl -u systemd-networkd -u tailscaled -f`；
+              并核对 /etc/systemd/networkd.conf.d/10-no-foreign-sweep.conf 是否还在。
+              背景：docs/records/2026-08-12-tailscale-iprule-guard-drift.md
+
+        # 收敛器死了（timer 停/脚本崩/没人写文件）：textfile 的 mtime 停止前进。
+        # node-exporter 会一直用旧值答复 scrape——不看 mtime 的话，指标"看起来还在"
+        # 而保护早已停摆，正是本次事故的形态。阈值 30m = 6 个 timer 周期。
+        - alert: TailscaleIpRuleGuardStale
+          expr: time() - node_textfile_mtime_seconds{file=~".*tailscale_iprule\\.prom"} > 1800
+          labels:
+            severity: warning
+            component: network
+          annotations:
+            summary: "{{ $labels.cluster }} 的 ip rule 收敛器 30 分钟没写指标了（timer 死了？）"
+            description: |
+              tailscale_iprule.prom 的 mtime 超过 30 分钟未更新——收敛 timer
+              每 5 分钟应写一次。timer 被禁用/脚本报错/目录被清都会走到这里，
+              此时规则失守将**不再自愈**。
+              节点上查：`systemctl list-timers tailscale-ip-rules.timer`、
+              `journalctl -u tailscale-ip-rules.service -n 20`。
+
+        # 序列整个消失（scrape 断/collector 被撤/单侧链路死）——absent 逐集群写死。
+        - alert: TailscaleIpRuleMetricsAbsentHomelab
+          expr: absent(tailscale_iprule_present{cluster="homelab"})
+          for: 30m
+          labels:
+            severity: warning
+            component: network
+          annotations:
+            summary: "homelab 的 tailscale_iprule_* 指标整个消失了"
+            description: |
+              node-exporter 的 textfile collector 不再暴露该序列：collector
+              参数被改掉、textfile 目录不可读、或 scrape 断了。守护状态盲了，
+              规则失守将无人知晓。查 kps values 的 prometheus-node-exporter
+              extraArgs 与节点 /var/lib/node_exporter/textfile/。
+
+        - alert: TailscaleIpRuleMetricsAbsentOracle
+          expr: absent(tailscale_iprule_present{cluster="oracle-k3s"})
+          for: 30m
+          labels:
+            severity: warning
+            component: network
+          annotations:
+            summary: "oracle-k3s 的 tailscale_iprule_* 指标整个消失了"
+            description: |
+              oracle 侧序列消失：node-exporter textfile collector 被改、
+              textfile 目录不可读、或 otel remote-write 整链中断（后者会连带
+              触发 OracleTelemetryAbsent，先看它）。查
+              cloud/oracle/manifests/monitoring/exporters.yaml 与节点
+              /var/lib/node_exporter/textfile/。
