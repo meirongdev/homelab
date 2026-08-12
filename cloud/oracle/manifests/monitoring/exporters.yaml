@@ -26,6 +26,10 @@ spec:
             - --path.procfs=/host/proc
             - --path.sysfs=/host/sys
             - --path.rootfs=/host/root
+            # textfile collector（2026-08-12）：读宿主机 ip rule 收敛器
+            # （assert-tailscale-ip-rules，见 cloud/oracle/ansible/playbooks/setup-tailscale.yaml）
+            # 落盘的 tailscale_iprule_* 指标；路径复用已有的 /host/root 挂载。
+            - --collector.textfile.directory=/host/root/var/lib/node_exporter/textfile
             - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+|var/lib/kubelet/.+)($|/)
             - --collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$
           ports:
