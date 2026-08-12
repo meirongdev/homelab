@@ -1,0 +1,75 @@
+---
+# k3s-exp 实验田：storage-106 上 3G VM 里的**独立**单节点 k3s。
+#
+# 定位（决策：docs/decisions/storage106-experiment-vm.md）：
+#   与 homelab 集群零耦合——不 join、不接 ArgoCD、不接 *.meirong.dev 入口、
+#   不进备份白名单。实验负载全在这儿折腾；玩坏了 terraform destroy/apply +
+#   重跑本 play 即可重建，无人被叫醒。
+#
+# VM 由 proxmox/terraform-storage 管；本 play 只管 VM 内部。
+# kubeconfig：just exp-kubeconfig（存 ~/.kube/k3s-exp.yaml，不并入主 config）。
+- name: Provision k3s experiment field (standalone, NOT joined to homelab)
+  hosts: exp
+  become: true
+  vars:
+    # 与 homelab/oracle 同版（v1.34.5+k3s1），实验结论可平移
+    k3s_version: v1.34.5+k3s1
+  tasks:
+    # ⚠️ 判据看状态不看 rc：cloud-init 对 "done 但有 recoverable error" 返回 **rc=2**，
+    # 而本 VM 恒定命中——bpg provider 生成的 cloud-init 用了 22.2 起弃用的 `user:`
+    # 标量键（而非 `users:` 列表），每次开机都记两条 DEPRECATED → extended_status
+    # 变成 "degraded done"。实测 errors: [] 且 26 个模块 0 失败，纯噪音。
+    # 若哪天真出错，status 会是 "error"，下面的断言照样能抓住。
+    - name: Wait for cloud-init to finish
+      ansible.builtin.command: cloud-init status --wait
+      register: cloud_init_status
+      changed_when: false
+      failed_when: "'status: done' not in cloud_init_status.stdout"
+
+    # cloud image 不带 guest agent；PVE 侧 agent 设备已由 terraform 启用，
+    # 装上它 qm/terraform 才能看到 IP、干净关机
+    - name: Install qemu-guest-agent
+      ansible.builtin.apt:
+        name: qemu-guest-agent
+        state: present
+        update_cache: true
+
+    - name: Enable qemu-guest-agent
+      ansible.builtin.systemd:
+        name: qemu-guest-agent
+        enabled: true
+        state: started
+
+    # 单节点 server。disable traefik/servicelb：3G 的机器省 ~150Mi，实验需要什么
+    # 自己装什么；保留 flannel/coredns/local-path/metrics-server（默认栈，够用且轻）。
+    # ⚠️ 刻意不用 Cilium：实验田不需要，且省掉 agent+envoy ~500Mi。
+    # ⚠️ 重试不是摆设：本网络到 GitHub release 资产（github.com → 302 →
+    # release-assets.githubusercontent.com）**间歇性失败**——2026-08-13 装机时首次
+    # 报 `[ERROR] Download failed`，同一 URL 十几秒后手工 curl 即 200。
+    # 同一现象也让 `terraform init` 拉 provider 失败过一次。get.k3s.io 脚本本身与
+    # 中国镜像 rancher-mirror 当时都试过：前者 200、后者 000，故仍走官方源 + 重试。
+    - name: Install k3s (single-node server)
+      ansible.builtin.shell: |
+        curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION={{ k3s_version }} sh -s - server \
+          --disable traefik \
+          --disable servicelb \
+          --write-kubeconfig-mode 644
+      args:
+        creates: /usr/local/bin/k3s
+      register: k3s_install
+      retries: 5
+      delay: 15
+      until: k3s_install is succeeded
+
+    - name: Wait for node Ready
+      ansible.builtin.command: k3s kubectl wait --for=condition=Ready node/k3s-exp --timeout=180s
+      changed_when: false
+
+    - name: Show cluster state
+      ansible.builtin.command: k3s kubectl get nodes -o wide
+      register: exp_nodes
+      changed_when: false
+
+    - name: Print
+      ansible.builtin.debug:
+        msg: "{{ exp_nodes.stdout_lines }}"

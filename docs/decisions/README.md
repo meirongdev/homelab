@@ -14,6 +14,7 @@
 | [opencost-krr-data-sources](opencost-krr-data-sources.md) | 同一个 cAdvisor 缺口，OpenCost 走 collector 旁路、KRR 补窄口径采集。含 krr-enforcer 否决 |
 | [orphaned-resources](orphaned-resources.md) | 配置漂移体检否决 kor（信噪比 0.6%，误判 `argocd-secret`/`vault-token`），改用 ArgoCD 原生 `orphanedResources` + `warn: false` |
 | [argocd-image-updater](argocd-image-updater.md) | CRD 模型与约束（⚠️ 当前闲置，集群内无 `ImageUpdater` CR） |
+| [storage106-experiment-vm](storage106-experiment-vm.md) | 实验田要"独立小集群"不要"入集群 worker"：同硬件下实验可用内存 2G vs 0.5-0.9G（DaemonSet 入伙税），且爆炸半径归零、不推翻 106 与 prod 的解耦。含 8G 内存三方分配（ARC 2G / 宿主 2.1G / VM 3G） |
 | [cluster-placement-for-new-services](cluster-placement-for-new-services.md) | 落点按资源画像选：**计算密集/大流量走 homelab**（7.5 核 + 6.6GB 余量、amd64），轻量无状态仍默认 oracle-k3s（只剩 0.5 核 + 2.6GB）。含必写 CPU limit 与 thermal 代价 |
 | [shared-postgres-platform](shared-postgres-platform.md) | 手搓 `rss-postgres` → CNPG `apps-pg` 共享库；**不**并入 `zitadel-pg`（节点内存 87% + SSO 带 critical 优先级）。含备份从 `pg_dumpall` 改逐库 `pg_dump` 的连带影响 |
 

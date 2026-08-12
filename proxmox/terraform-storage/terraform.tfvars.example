@@ -1,0 +1,4 @@
+# cp terraform.tfvars.example terraform.tfvars 后填真值（terraform.tfvars 已 gitignore）。
+# token 生成：ssh root@192.168.50.106 'pveum user token add root@pam terraform --privsep 0'
+proxmox_api_token = "root@pam!terraform=00000000-0000-0000-0000-000000000000"
+ssh_public_key    = "ssh-rsa AAAA... vg-gitlab"

@@ -120,3 +120,27 @@
         name: zfs-zed
         enabled: true
         state: started
+
+    # --- ZFS ARC 上限 2GiB（2026-08-13，给 k3s-exp 实验 VM 让内存）---
+    # 历史：512MB →（2026-07-06 为 NFS 读缓存）4GB → 2GB。4GB 是给 NFS 运行时
+    # 时代定的尺寸，而 NFS 五天后（07-11）就退役了——现在 106 只是备份目标：
+    # 写入是顺序 pack 文件，ARC 主要服务夜间 restic prune/check 的元数据
+    # （池子 1.2T/10.9T），2GB 足够；代价是备份窗口慢一点（白天机器 load~0.3 纯空转）。
+    # 让出的 2GB 给 proxmox/terraform-storage 的 k3s-exp（2c/3G）。
+    # 决策与内存账：docs/decisions/storage106-experiment-vm.md
+    # 单独跑：just storage-arc-limit（--tags arc，不碰上面的 NFS/ZFS 任务）
+    - name: Cap ZFS ARC at 2 GiB (persist across reboots)
+      ansible.builtin.copy:
+        dest: /etc/modprobe.d/zfs.conf
+        content: |
+          # ansible 管理（proxmox/ansible/storage-playbook.yaml, tags: arc）——别手改。
+          # 2GiB：备份目标的元数据缓存够用；让出的内存给 k3s-exp VM。
+          # 历史：512MB → 4GB（2026-07-06，NFS 读缓存，NFS 已于 07-11 退役）→ 2GB（2026-08-13）。
+          options zfs zfs_arc_max=2147483648
+        mode: "0644"
+      tags: [arc]
+
+    - name: Apply ARC cap at runtime (ARC evicts down within seconds)
+      ansible.builtin.shell: echo 2147483648 > /sys/module/zfs/parameters/zfs_arc_max
+      changed_when: true
+      tags: [arc]
