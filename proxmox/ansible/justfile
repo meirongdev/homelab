@@ -62,6 +62,9 @@ exp-tunnel:
     @pgrep -f "ssh.*-L 16443:127.0.0.1:6443" >/dev/null || \
       ssh -f -o ExitOnForwardFailure=yes -i ~/.ssh/vgio \
         -L 16443:127.0.0.1:6443 ubuntu@192.168.50.107 sleep 600
+    # ⚠️ 等端口真的在监听再返回：`ssh -f` 返回时转发未必已就绪，紧接着的 kubectl
+    # 会吃到 connection refused（2026-08-13 首次跑就中了）。
+    @for i in $(seq 1 20); do nc -z 127.0.0.1 16443 2>/dev/null && break; sleep 0.5; done
     ssh -i ~/.ssh/vgio ubuntu@192.168.50.107 'cat /etc/rancher/k3s/k3s.yaml' \
       | sed 's|https://127.0.0.1:6443|https://127.0.0.1:16443|; s/name: default/name: k3s-exp/; s/cluster: default/cluster: k3s-exp/; s/user: default/user: k3s-exp/; s/current-context: default/current-context: k3s-exp/' \
       > ~/.kube/k3s-exp-tunnel.yaml
