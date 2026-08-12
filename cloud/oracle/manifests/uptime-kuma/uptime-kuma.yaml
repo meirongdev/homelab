@@ -47,6 +47,9 @@ spec:
       labels:
         app: uptime-kuma
     spec:
+      # high(900)：dead-man's switch 的接收端（homelab Alertmanager Watchdog 推到
+      # 这里）+ 全舰队存活探测源。它被驱逐 = 告警链路的哨兵和探测底噪一起消失。
+      priorityClassName: high
       # Override DNS to avoid Tailscale/OracleVCN search domain timeouts.
       # dnsPolicy: None + explicit dnsConfig fully replaces the generated resolv.conf
       # so taild*.ts.net and *.oraclevcn.com search domains are NOT inherited.

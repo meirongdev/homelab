@@ -15,6 +15,11 @@
 driver:
   kind: modern_ebpf
 
+# bulk(-10)：镜像 homelab 侧 tetragon=bulk 的决定——安全传感器 fail-open，掉了不挡
+# 业务，内存紧张时先让位。⚠️ 键名是 podPriorityClassName 不是 priorityClassName
+# （chart 9.1.0，已用 helm template --set 实证渲染进 DaemonSet）。
+podPriorityClassName: bulk
+
 # Falco 引擎
 falco:
   json_output: true          # 结构化告警（利于 Loki 查询）
@@ -95,6 +100,8 @@ resources:
 falcosidekick:
   enabled: true
   replicaCount: 1
+  # 子 chart 的键名是普通 priorityClassName（与父 chart 的 podPriorityClassName 不同名）
+  priorityClassName: bulk
   # chart 默认镜像 2.32.0 根本不支持 Telegram message_thread_id（config.go 未把该键
   # 注册进 viper，无论环境变量叫什么都不会写进 payload，告警只能落到群"General"话题）。
   # 2.33+ 才修好；锁到已发布版 2.34.1（已本地实测 payload 含 message_thread_id）。

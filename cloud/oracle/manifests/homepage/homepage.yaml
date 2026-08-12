@@ -273,6 +273,8 @@ spec:
       labels:
         app: homepage
     spec:
+      # bulk(-10)：纯门户 UI，非核心（2026-08-12 oracle 分档补齐）
+      priorityClassName: bulk
       serviceAccountName: homepage
       containers:
         - name: homepage

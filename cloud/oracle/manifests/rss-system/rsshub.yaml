@@ -15,6 +15,7 @@ spec:
       labels:
         app: rsshub
     spec:
+      priorityClassName: bulk   # 非核心，与同文件 browserless 一致（2026-08-12 补齐）
       containers:
         - name: rsshub
           # 2026-08-04 digest 刷新（原 sha256:5bd34215…，已落后 upstream :latest）。
@@ -83,6 +84,7 @@ spec:
       labels:
         app: rsshub-redis
     spec:
+      priorityClassName: bulk   # 非核心，与同文件 browserless 一致（2026-08-12 补齐）
       containers:
         - name: redis
           image: redis:alpine

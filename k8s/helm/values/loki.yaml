@@ -67,7 +67,10 @@ deploymentMode: SingleBinary
 
 singleBinary:
   replicas: 1
-  
+  # high(900)：双集群日志的唯一汇点（homelab 的 otel 也往这推）——被驱逐 = 两集群
+  # 日志一起断流。与 homelab 侧 Prometheus=high 同一档位逻辑（2026-08-12 oracle 分档补齐）。
+  priorityClassName: high
+
   persistence:
     enabled: true
     # ⚠️ local-path（节点本地盘），不用 nfs-client：SingleBinary + filesystem 存储把 chunks/
@@ -141,6 +144,9 @@ backend:
 gateway:
   enabled: true
   replicas: 1
+  # high(900)：它是日志写入的唯一入口（otel 推的是 gateway 不是 loki 本体），
+  # 只保 loki-0 不保它，断流形态一样。
+  priorityClassName: high
   resources:
     requests:
       cpu: 15m
