@@ -54,6 +54,7 @@ spec:
       labels:
         app: redpanda-connect
     spec:
+      priorityClassName: bulk   # 非核心，与 karakeep/browserless 同档（2026-08-12 补齐）
       containers:
         # 管道 1: Miniflux Webhook → KaraKeep
         - name: webhook-to-karakeep

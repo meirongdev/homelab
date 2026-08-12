@@ -46,6 +46,11 @@ tempoQuery:
 # ——homelab 的 tempo STS `volumeClaimTemplates` 实测为空，即一直跑在 emptyDir 上，
 # 每次 Pod 重启丢光全部 trace（与本文件宣称的「7 天保留」不符）。同 tempo.image.tag
 # 那个坑：chart 的键是扁平的，写错层级不报错、只是不生效。
+# high(900)：双集群追踪的唯一汇点，与 loki 同档（2026-08-12 oracle 分档补齐）。
+# ⚠️ 顶层键——chart 的 priorityClassName 不在 tempo: 块里（上面 image 的教训同源：
+# 写错层级不报错、只是不生效；已用 helm template --set 实证本键渲染进 StatefulSet）。
+priorityClassName: high
+
 # local-path：trace 数据 7 天保留期，可丢，不用网络存储。
 persistence:
   enabled: true
