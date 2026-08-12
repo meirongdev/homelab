@@ -47,7 +47,7 @@
   ArgoCD→homelab 走 Tailscale + NodePort），ClusterMesh 纯待命——加自愈探针不划算；
   另一条路是明确退役 ClusterMesh、跨集群一律走 NodePort（连同 5 条告警一起消失）。
 
-- **这台 Mac 上 `terraform plan/apply` 连 `192.168.50.4:8006`（Proxmox API）100% `no route to host`**，但 `ping`/`curl`/`ssh` 到同一地址全部正常（curl 有响应，偏慢 ~3s）。**已排除 Tailscale**——整个 `tailscale down` 后仍 100% 复现。当前无阻塞（VM 变更改走 `qm`/SSH）。若日后要用 terraform 管 Proxmox，从 provider 的 HTTP client 行为或本机残留 utun0-3/网络扩展查起，不是标准路由表问题。
+- ~~**这台 Mac 上 `terraform plan/apply` 连 `192.168.50.4:8006` 100% `no route to host`**~~ **已定性（2026-08-13）**：不是网络问题，是 **macOS 本地网络隐私授权（TCC）**——未获授权的**非 Apple 签名**二进制（terraform/kubectl/Homebrew python）访问 LAN 一律 `EHOSTUNREACH`，而 `ping`/`curl`/`ssh`/`nc` 是 Apple 自带故全通（这正是当年误判"网络正常、是 provider 的锅"的原因），Tailscale/loopback 不受限故一直好用。根治 = 系统设置→隐私与安全性→本地网络里给终端授权；不依赖授权的绕法（SSH 隧道 / Tailscale 寻址）已固化进 `proxmox/terraform-storage`。→ [复盘](records/2026-08-13-macos-local-network-tcc.md)
 
 - **oracle-k3s：2 个 Docker Hub 镜像仍未被 Trivy 扫过，等配额恢复后重试一次**（2026-08-05；
   2026-08-11 从 3 个减为 2 个 —— `stirling-pdf` 已退役，接替者 BentoPDF 在 ghcr.io，
