@@ -1,6 +1,6 @@
 ---
 # 共用逻辑在 tailscale/ansible/roles/tailscale_node（roles_path 见 ansible.cfg）。
-# 本文件只保留 homelab 差异：tailscale up 的 SNAT/netfilter 参数 + NFS LAN 路由 workaround。
+# 本文件只保留 homelab 差异：tailscale up 的 SNAT/netfilter 参数 + ip rule 收敛器。
 - name: Setup Tailscale on homelab K3s node
   hosts: k8s_masters
   become: true
@@ -23,94 +23,181 @@
   roles:
     - tailscale_node
   tasks:
-    # --- LAN-route fix (2026-07-06，历史名 NFS LAN-route) ---
-    # The MacBook `mbpm5` advertises 192.168.50.0/24 over Tailscale. With
-    # `--accept-routes`, this node (and pve) route 192.168.50.106 THROUGH that
-    # laptop — SNAT 换源端口、+~19ms，且笔记本休眠时直接黑洞。
-    # 当年受害者是 SQLite-on-NFS 工作负载；2026-07-11 起 106 已无 NFS 运行时
-    # 依赖，此规则现在保障的是 restic 夜备（SSH→106）与 vzdump 的路径可靠性。
-    # This rule forces 192.168.50.0/24 back onto the native LAN path
-    # (node -> default gw pve -> vmbr0 -> storage-106), which is <1ms.
-    # The SAME unit must exist on the pve host (192.168.50.4) — it is applied
-    # there manually (no pve host playbook). Root cause to fix upstream: stop
-    # mbpm5 from advertising 192.168.50.0/24. See git log 2026-07-06.
-    - name: Install nfs-lan-route systemd unit (bypass Tailscale for LAN NFS)
+    # --- Tailscale 相关 ip rule 收敛器（2026-08-12 重构，取代两只 boot-oneshot）---
+    # 守两条不变量（各自的取证全文在 docs/reference/tailscale-network.md）：
+    #   5200  to 100.64.0.0/10 lookup 52      Cilium identity-mark 撞 Tailscale fwmark
+    #         （2026-08-09 定性）：Cilium 把 identity 编进 skb->mark 高 16 位；Tailscale
+    #         即使 netfilter-mode=off 也装 `fwmark 0x80000/0xff0000` 的 ip rule，掩码
+    #         恰好压在 identity 低字节上 → `identity & 0xFF == 0x08` 的 pod（1/256 抽签，
+    #         改标签就重抽）出向被劫进 main 表，CGNAT 包扔给 LAN 网关黑洞，
+    #         到整个 100.64/10 全超时。别用"换标签"绕：下一个中签的照样断。
+    #   5260  to 192.168.50.0/24 lookup main  LAN 直通（2026-07-06，历史名 NFS LAN-route）
+    #         pve 合法通告 192.168.50.0/24、本机 --accept-routes，table 52 恒有该段路由；
+    #         没有这条规则，到 storage-106 的 restic/vzdump 流量会舍近求远走隧道。
+    #         pve 主机上有同款手工单元（无 pve playbook）。
+    #
+    # ☠️ 为什么从"开机 oneshot"改成"收敛器"（2026-08-12 review 发现两台节点全线失守）：
+    # 单元 active(exited)"看起来修过"，规则却全没了，oracle 上 homepage（identity 低字节
+    # 0x08）到 100.64/10 全超时。凶手不是 tailscaled，是 **systemd-networkd**：
+    # `ManageForeignRoutingPolicyRules` 默认 yes —— networkd (重)启动/重配时清扫一切
+    # 非它管理的 ip rule。8-11 清晨 unattended-upgrades 重启了两台节点的 networkd
+    # （homelab 06:17 / oracle 06:40），防护规则同时被清；tailscaled 的四条(5210-5270)
+    # 有 netlink 监听自愈，我们的没有守护者。pve 用 ifupdown2 不跑 networkd，其手工
+    # 5260 幸存 —— 这条差异是破案线索。A/B 实测（oracle 2026-08-12）：默认配置重启
+    # networkd → 5200 三秒内被清（抓现行）；装上下面的 drop-in 再重启 → 幸存。
+    # 全程取证见 docs/records/2026-08-12-tailscale-iprule-guard-drift.md
+    #
+    # 防线一（根因）：networkd drop-in 关掉外来规则/路由清扫。
+    # 防线二（兜底）：幂等断言脚本 + timer 每 5 分钟重申 —— 对**任何**删除者收敛，
+    # 并写 node-exporter textfile 指标，失守可见可告警
+    # （k8s/helm/manifests/monitoring/alerts/tailscale-iprule-alerts.yaml）。
+    - name: Stop systemd-networkd sweeping foreign ip rules/routes (root cause of the 2026-08-11 drift)
       ansible.builtin.copy:
-        dest: /etc/systemd/system/nfs-lan-route.service
+        dest: /etc/systemd/networkd.conf.d/10-no-foreign-sweep.conf
+        mode: "0644"
+        content: |
+          # ManageForeignRoutingPolicyRules 默认 yes：networkd (重)启动/重配时清扫一切
+          # 非它管理的 ip rule —— 2026-08-11 unattended-upgrades 重启 networkd，把
+          # 5200/5260 防护规则清掉（tailscaled 的规则有 netlink 监听自愈，这些没有）。
+          # ManageForeignRoutes 同理设 no：table 52 与 Cilium 的路由对 networkd 也是"外来"的。
+          # 见 docs/records/2026-08-12-tailscale-iprule-guard-drift.md
+          [Network]
+          ManageForeignRoutingPolicyRules=no
+          ManageForeignRoutes=no
+      register: networkd_sweep_conf
+
+    - name: Restart systemd-networkd to load sweep config (only when changed; verified non-disruptive)
+      ansible.builtin.service:
+        name: systemd-networkd
+        state: restarted
+      when: networkd_sweep_conf.changed
+
+    - name: Install assert-tailscale-ip-rules script
+      ansible.builtin.copy:
+        dest: /usr/local/sbin/assert-tailscale-ip-rules
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          # Tailscale 相关 ip rule 收敛器 —— tailscale-ip-rules.timer 每 5 分钟执行。
+          # ansible 管理（k8s/ansible/playbooks/setup-tailscale.yaml），别在节点上手改。
+          set -u
+
+          TEXTFILE_DIR=/var/lib/node_exporter/textfile
+          STATE_FILE=/var/lib/tailscale-iprule-reasserts.count
+          PROM_FILE=$TEXTFILE_DIR/tailscale_iprule.prom
+
+          mkdir -p "$TEXTFILE_DIR"
+
+          reasserted=0
+          present_lines=""
+
+          # assert <priority> <ip rule 匹配/添加参数...>
+          assert() {
+            prio=$1; shift
+            n=$(ip rule show | grep -c "^${prio}:.*$*")
+            if [ "$n" -eq 0 ]; then
+              ip rule add "$@" priority "$prio" && reasserted=$((reasserted + 1))
+              present=0
+            else
+              # 并发竞态可能留下重复规则；收敛到恰好一条
+              while [ "$n" -gt 1 ]; do ip rule del "$@" priority "$prio"; n=$((n - 1)); done
+              present=1
+            fi
+            present_lines="${present_lines}tailscale_iprule_present{priority=\"${prio}\"} ${present}
+          "
+          }
+
+          assert 5200 to 100.64.0.0/10 lookup 52
+          assert 5260 to 192.168.50.0/24 lookup main
+
+          total=$(cat "$STATE_FILE" 2>/dev/null || echo 0)
+          case "$total" in *[!0-9]*|"") total=0 ;; esac
+          total=$((total + reasserted))
+          printf '%s\n' "$total" > "$STATE_FILE"
+
+          TMP="$PROM_FILE.tmp.$$"
+          {
+            printf '# HELP tailscale_iprule_present 断言前该规则是否在位（0=本轮发现缺失并已补）\n'
+            printf '# TYPE tailscale_iprule_present gauge\n'
+            printf '%s' "$present_lines"
+            printf '# HELP tailscale_iprule_reasserts_total 发现缺失并补齐的累计次数（状态文件持久）\n'
+            printf '# TYPE tailscale_iprule_reasserts_total counter\n'
+            printf 'tailscale_iprule_reasserts_total %s\n' "$total"
+          } > "$TMP" && mv "$TMP" "$PROM_FILE"
+
+          if [ "$reasserted" -gt 0 ]; then
+            echo "REASSERT: $reasserted ip rule(s) were missing and re-added"
+          fi
+          exit 0
+
+    - name: Install tailscale-ip-rules service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/tailscale-ip-rules.service
         mode: "0644"
         content: |
           [Unit]
-          Description=Route 192.168.50.0/24 (NFS server storage-106) via LAN, bypass Tailscale subnet route (mbpm5)
+          Description=Assert Tailscale-related ip rule invariants (convergent guard)
           After=tailscaled.service network-online.target
           Wants=network-online.target
 
           [Service]
           Type=oneshot
-          RemainAfterExit=yes
-          ExecStart=/bin/sh -c "ip rule del to 192.168.50.0/24 lookup main priority 5260 2>/dev/null; ip rule add to 192.168.50.0/24 lookup main priority 5260"
-          ExecStop=/bin/sh -c "ip rule del to 192.168.50.0/24 lookup main priority 5260 2>/dev/null || true"
+          # 两遍断言夹 20s：覆盖"断言刚跑完就撞上一次清扫"（如开机 90s 处 timer 首跑
+          # 撞云初始化的网络重配），失守窗口从"下个 tick(5min)"缩到 ~20s。
+          # 刻意没有 RemainAfterExit（timer 触发才会真正重跑 ExecStart）、没有 ExecStop
+          # （规则永不自动移除——旧单元的 ExecStop 正是迁移时的坑）。
+          # ⚠️ 没有 PartOf=tailscaled：实测 restart 传播对已死的 oneshot 是空操作，
+          # 且 tailscaled 重启本来就不清规则（清规则的是 networkd，已由 drop-in 根治）
+          # —— timer 是唯一的、也是足够的重申机制。
+          ExecStart=/usr/local/sbin/assert-tailscale-ip-rules
+          ExecStart=/bin/sleep 20
+          ExecStart=/usr/local/sbin/assert-tailscale-ip-rules
 
-          [Install]
-          WantedBy=multi-user.target
-
-    - name: Enable and start nfs-lan-route unit
-      ansible.builtin.systemd:
-        name: nfs-lan-route.service
-        enabled: true
-        state: started
-        daemon_reload: true
-
-    # --- Cilium identity-mark ↔ Tailscale fwmark 位段冲突（2026-08-09 定性）---
-    # ☠️ 症状：**某一个 pod** 到整个 100.64/10 全超时（连关闭端口也不回 RST），
-    # 同节点其它 pod 全部正常。抓包显示它的包从 eth0 出去 SNAT 成 10.10.10.10，
-    # 而正常 pod 从 tailscale0 出去 SNAT 成 100.94.186.7 —— CGNAT 地址被扔进 LAN
-    # 默认网关，出公网即死。
-    #
-    # 根因：**Cilium 把 endpoint 的安全身份编码进 skb->mark 的高位**
-    # （mark 高 16 位 = identity）。而上面 `--netfilter-mode=off` 只让 Tailscale
-    # 不装 iptables/nft 规则，**它照样装 ip rule** —— 那三条
-    # `from all fwmark 0x80000/0xff0000 lookup main|default|unreachable`
-    # 检查的正是 mark 的 bit16-23，即 `identity & 0xFF == 0x08`。
-    # 于是**任何 identity 低字节恰为 0x08 的 pod**，出向流量都在 5210 处被劫持进
-    # main 表，绕过了 5270（`lookup 52` = tailscale0）。这是 **1/256 的抽签**，
-    # identity 由标签算出，任何 pod 改一次标签都可能中招。
-    #
-    # 实测证据链（A/B/A）：monitoring/alertmanager identity=108040，
-    # 108040 & 0xFF = 8 → 全 100.64/10 不可达；给 pod 加一个无关标签使
-    # identity 变 95821（低字节 77）→ 立刻通；撤掉标签回到 108040 → 立刻又断。
-    # 全集群扫描：当时只有它一个真实负载的低字节是 0x08，也只有它坏。
-    #
-    # 为什么这样修：本节点 netfilter-mode=off，**没有任何东西会合法地设置 0x80000**
-    # （已核：nft / iptables-nft / iptables-legacy 三处含 0x80000 的规则均为 0 条），
-    # 所以 5210-5250 在这里只会因位段碰撞而误伤，不承担真实的防环职责。
-    # 把 100.64/10 在 5200（早于 5210）钉死到 table 52，对所有 pod 一次性免疫。
-    # 形状与上面 5260 那条完全一致。
-    # ⚠️ 别改成"给 alertmanager 换标签"：那只躲开这一次抽签，下一个中签的 pod 照样断。
-    - name: Install tailscale-cgnat-route systemd unit (immune to Cilium identity-mark collision)
+    - name: Install tailscale-ip-rules timer
       ansible.builtin.copy:
-        dest: /etc/systemd/system/tailscale-cgnat-route.service
+        dest: /etc/systemd/system/tailscale-ip-rules.timer
         mode: "0644"
         content: |
           [Unit]
-          Description=Pin 100.64.0.0/10 (Tailscale CGNAT) to table 52, bypassing Tailscale's fwmark rules that collide with Cilium's identity mark
-          After=tailscaled.service network-online.target
-          Wants=network-online.target
+          Description=Re-assert Tailscale ip rules every 5 minutes (convergence loop)
 
-          [Service]
-          Type=oneshot
-          RemainAfterExit=yes
-          ExecStart=/bin/sh -c "ip rule del to 100.64.0.0/10 lookup 52 priority 5200 2>/dev/null; ip rule add to 100.64.0.0/10 lookup 52 priority 5200"
-          ExecStop=/bin/sh -c "ip rule del to 100.64.0.0/10 lookup 52 priority 5200 2>/dev/null || true"
+          [Timer]
+          OnBootSec=90
+          OnUnitActiveSec=5min
 
           [Install]
-          WantedBy=multi-user.target
+          WantedBy=timers.target
 
-    - name: Enable and start tailscale-cgnat-route unit
+    # 旧单元退役。⚠️ 它们的 ExecStop 会顺手删规则——后面立即 start 断言服务补回。
+    - name: Retire legacy one-shot rule units (superseded by convergent guard)
       ansible.builtin.systemd:
-        name: tailscale-cgnat-route.service
+        name: "{{ item }}"
+        enabled: false
+        state: stopped
+      loop:
+        - nfs-lan-route.service
+        - tailscale-cgnat-route.service
+      failed_when: false
+
+    - name: Remove legacy unit files
+      ansible.builtin.file:
+        path: "/etc/systemd/system/{{ item }}"
+        state: absent
+      loop:
+        - nfs-lan-route.service
+        - tailscale-cgnat-route.service
+
+    - name: Enable and start the convergence timer
+      ansible.builtin.systemd:
+        name: tailscale-ip-rules.timer
         enabled: true
         state: started
         daemon_reload: true
+
+    - name: Assert rules now (also repairs what legacy ExecStop just removed)
+      ansible.builtin.systemd:
+        name: tailscale-ip-rules.service
+        state: started
 
     # --- Tailscale/CNI recursion guard (2026-07-07) ---
     # tailscaled advertises ALL local addresses as candidate WireGuard endpoints,

@@ -4,6 +4,7 @@
 
 | 日期 | 记录 | 内容 |
 |------|------|------|
+| 2026-08-12 | [tailscale-iprule-guard-drift](2026-08-12-tailscale-iprule-guard-drift.md) | systemd-networkd 默认清扫外来 ip rule（`ManageForeignRoutingPolicyRules=yes`），8-11 unattended-upgrades 重启 networkd 把 fwmark 撞车防护（5200/5260）**双节点清光**，oneshot 单元仍显 active"看起来修过"；homepage 中签断连 33h 无告警。修成两道防线（networkd drop-in 关清扫 + timer 收敛器）+ textfile 指标 5 条告警。含 A/B 抓现行与「pve 幸存者对照组」破案法 |
 | 2026-08-12 | [slo-nan-poisoning](2026-08-12-slo-nan-poisoning.md) | SLI 在零请求窗口 0/0 产出 **NaN 并写入 TSDB**，被 `sum_over_time` 汇总时传染整条 30d 序列 → 5 个服务的错误预算面板**全部 N/A**，而告警链路（≤3d 窗口）全绿、无人察觉。含「别给『没数据』预先写好非故障的解释文案」的教训 |
 | 2026-08-11 | [gateway-api-crd-stall](2026-08-11-gateway-api-crd-stall.md) | Cilium 1.20 升级漏配 Gateway API CRD（v1.2.1 vs 要求的 v1.6.1）→ 两集群 Gateway API 控制器**静默未初始化 30 小时**；旧域名照常 200、无告警，只有新增路由才 503。含「用一个必然通过的测试验证假设」的教训 |
 | 2026-08-03 | [namespace-prune-cascade](2026-08-03-namespace-prune-cascade.md) | Namespace 内嵌在应用清单里 → 删该文件 prune 掉整个 ns → 级联删光同 ns 下无关应用的数据（`Prune=false` 护栏对此无效）；已从 restic 完整恢复 |
