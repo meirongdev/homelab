@@ -20,3 +20,7 @@ homelab-authkey:
 # 获取 Oracle 节点的 pre-auth key（用于 Ansible setup-tailscale）
 oracle-authkey:
     terraform output -raw oracle_authkey
+
+# 获取 106 worker 的 pre-auth key（用于 k8s/ansible 的 just setup-tailscale-worker）
+homelab-worker-authkey:
+    terraform output -raw homelab_worker_authkey

@@ -1,0 +1,212 @@
+---
+# 把 storage-106 上的 VM 以 **agent（worker）** 身份加入 homelab k3s 集群。
+# 2026-08-13 入编，取代了同一台 VM 上「独立单节点 k3s（k3s-exp）」的形态 ——
+# 两者互斥：同一台机不能既跑 k3s server 又当别的集群的 agent。
+# 被取代的决策见 docs/decisions/storage106-experiment-vm.md。
+#
+# ⚠️ 前置：必须先跑 `just setup-tailscale-worker <key>`。不是为了连通性（LAN 路由
+#    已够），而是为了 **MTU 一致性** —— 见下面 ③。
+#
+# ☠️ 与 master（setup-k3s.yaml）不同、抄错会静默失效的四处：
+#
+#  ① 网络：worker 在 192.168.50.0/24，控制面在 10.10.10.0/24（pve vmbr0 的第二个
+#     地址段，pve 已开 ip_forward）。没有静态路由则 k3s agent 与 cilium-agent
+#     （values 里 k8sServiceHost: 10.10.10.10）都连不上 API。实测 RTT 0.8ms。
+#
+#  ② ip rule：worker 带 --accept-routes，会从 pve 学到 10.10.10.0/24 进 table 52，
+#     其优先级高于 main → 控制面流量被劫进隧道，绕开 ① 的直连。收敛器里那条
+#     `5240 to 10.10.10.0/24 lookup main` 就是防这个（inventory 的 k8s_workers.vars）。
+#     ☠️ 不是 5250 —— 那个优先级被 tailscaled 自己的 `fwmark ... unreachable` 占着。
+#
+#  ③ MTU：Cilium 的 MTU 是**每节点各自** auto-detect 最低设备。2026-08-13 实测
+#     master：tailscale0/cilium_vxlan/lxc*(pod 侧) 全是 **1280**，eth0 是 1500。
+#     本节点若不装 Tailscale，最低设备是 eth0=1500 → 它的 pod 拿 1500，跨节点
+#     pod↔pod 时 1500+50 的 VXLAN 外层超过 LAN 的 1500，大包碎/丢。
+#     ☠️ 不要改用显式 MTU 绕：Cilium 对显式值不减隧道开销，同一个坑 2026-07-07
+#        踩过（k8s/cilium/values.yaml 里有全文）。
+#     ⚠️ 另有一条更硬的理由见下：本节点上的 DaemonSet 要直连 oracle 的 tailnet 地址。
+#
+#  ③b DaemonSet 的跨集群出口：monitoring/otel-collector-agent 会自动排到本节点，
+#     其 exporter 写死 oracle 的 tailnet NodePort（loki http://100.107.166.37:31080/otlp、
+#     tempo 100.107.166.37:31317）。节点不在 tailnet 上，这个 pod 就够不着——
+#     日志/追踪**静默断流**，无任何报错。这是「worker 必须入 tailnet」的第一理由。
+#
+#  ④ 预留：本节点 3G 内存 / 2 vCPU（master 是 13G / 10 核）。reservation 按 3G
+#     缩放，**不可照抄 master 的 512Mi+512Mi** —— 那会吃掉本节点三分之一。
+#
+# Pod 的上游 DNS 用公网解析器即可：master 那边写 10.10.10.10 是因为
+# 「10.10.10.0/24 段公网 DNS 不通」（2026-07-07），本节点在 LAN 段，实测 1.1.1.1 / 8.8.8.8 均通。
+
+- name: Prepare the storage-106 k3s worker
+  hosts: k8s_workers
+  become: true
+  tasks:
+    - name: Install prerequisites
+      ansible.builtin.apt:
+        name:
+          - curl
+          - qemu-guest-agent
+        state: present
+        update_cache: true
+
+    - name: Enable qemu-guest-agent for Proxmox diagnostics
+      ansible.builtin.systemd:
+        name: qemu-guest-agent
+        enabled: true
+        state: started
+
+    # ① 到控制面网段的持久路由。单独一个 netplan 文件而不是改 50-cloud-init.yaml：
+    # 后者由 cloud-init 生成，重新配置时会被覆盖。netplan 合并同名 ethernets 键。
+    - name: Persist the route to the control-plane segment
+      ansible.builtin.copy:
+        dest: /etc/netplan/60-k3s-controlplane-route.yaml
+        mode: "0600"
+        content: |
+          # 到 homelab 控制面网段（pve vmbr0 的第二地址段）的静态路由。
+          # ansible 管理（k8s/ansible/playbooks/setup-k3s-worker.yaml），别在节点上手改。
+          network:
+            version: 2
+            ethernets:
+              eth0:
+                routes:
+                  - to: 10.10.10.0/24
+                    via: 192.168.50.4
+      register: cp_route
+
+    - name: Apply netplan when the route changed
+      ansible.builtin.command: netplan apply
+      when: cp_route.changed
+      changed_when: true
+
+    - name: Verify the control-plane API is reachable over the LAN route
+      ansible.builtin.wait_for:
+        host: 10.10.10.10
+        port: 6443
+        timeout: 30
+
+    # 与 master 同源的内核前置（值取自 setup-k3s.yaml，kubelet 的硬性要求）。
+    - name: Drop sysctl tuning for inotify + file-max
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/30-k8s-inotify.conf
+        content: |
+          fs.inotify.max_user_instances = 8192
+          fs.inotify.max_user_watches = 524288
+          fs.inotify.max_queued_events = 32768
+        mode: "0644"
+      notify: Reload sysctl
+
+    # CIS 加固前置：protect-kernel-defaults 要求这些 sysctl 已就位，缺任一项 k3s 拒启。
+    - name: Drop sysctl for kubelet protect-kernel-defaults (CIS hardening prerequisite)
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/31-k8s-protect-kernel.conf
+        content: |
+          vm.panic_on_oom = 0
+          vm.overcommit_memory = 1
+          kernel.panic = 10
+          kernel.panic_on_oops = 1
+          kernel.keys.root_maxbytes = 25000000
+          kernel.keys.root_maxkeys = 1000000
+        mode: "0644"
+      notify: Reload sysctl
+
+    - name: Flush handlers so the sysctls land before k3s starts
+      ansible.builtin.meta: flush_handlers
+
+  handlers:
+    - name: Reload sysctl
+      ansible.builtin.command: sysctl --system
+      changed_when: false
+
+- name: Join the worker to the homelab cluster
+  hosts: k8s_workers
+  become: true
+  tasks:
+    - name: Read the node-token from the control plane
+      ansible.builtin.slurp:
+        src: /var/lib/rancher/k3s/server/node-token
+      delegate_to: k8s-node
+      register: k3s_node_token
+      run_once: true
+
+    - name: Create K3s config directory
+      ansible.builtin.file:
+        path: /etc/rancher/k3s
+        state: directory
+        mode: "0755"
+
+    # Pod 的上游 DNS。本节点在 LAN 段，公网解析器可达（实测），无需 master 那个
+    # 指向 10.10.10.10 的 resolved stub 变通。
+    - name: Write clean resolv.conf for kubelet (pods' upstream DNS)
+      ansible.builtin.copy:
+        dest: /etc/rancher/k3s/resolv.conf
+        content: |
+          nameserver 1.1.1.1
+          nameserver 8.8.8.8
+        mode: "0644"
+
+    - name: Write K3s agent config
+      ansible.builtin.copy:
+        dest: /etc/rancher/k3s/config.yaml
+        content: |
+          # ansible 管理（k8s/ansible/playbooks/setup-k3s-worker.yaml），别在节点上手改。
+          node-name: {{ inventory_hostname }}
+          kubelet-arg:
+            - resolv-conf=/etc/rancher/k3s/resolv.conf
+            # ④ 按 3G 节点缩放 —— master 用的 512Mi+512Mi 会吃掉本节点三分之一。
+            - kube-reserved=cpu=100m,memory=256Mi,ephemeral-storage=1Gi
+            - system-reserved=cpu=100m,memory=256Mi,ephemeral-storage=1Gi
+            - eviction-hard=memory.available<150Mi,nodefs.available<10%
+            - eviction-soft=memory.available<250Mi,nodefs.available<15%
+            - eviction-soft-grace-period=memory.available=2m,nodefs.available=2m
+            - eviction-max-pod-grace-period=60
+          # 集群用 Cilium kubeProxyReplacement（见 k8s/cilium/values.yaml）。
+          # agent 默认会起 kube-proxy，不关会与 Cilium 抢 service 数据面。
+          disable-kube-proxy: true
+          protect-kernel-defaults: true
+        mode: "0644"
+
+    - name: Check if K3s is already installed
+      ansible.builtin.stat:
+        path: /usr/local/bin/k3s
+      register: k3s_binary
+
+    # 版本必须与 server 对齐（当前 v1.34.5+k3s1）：k3s 不保证 agent 新于 server 可用。
+    - name: Install K3s agent and join the cluster
+      ansible.builtin.shell: |
+        curl -sfL https://get.k3s.io | \
+          INSTALL_K3S_VERSION={{ k3s_version }} \
+          K3S_URL=https://10.10.10.10:6443 \
+          K3S_TOKEN='{{ k3s_node_token.content | b64decode | trim }}' \
+          sh -s - agent
+      when: not k3s_binary.stat.exists
+      changed_when: true
+      vars:
+        k3s_version: v1.34.5+k3s1
+
+    - name: Wait for the k3s-agent service to be active
+      ansible.builtin.systemd:
+        name: k3s-agent
+        state: started
+        enabled: true
+      register: agent_svc
+      until: agent_svc is succeeded
+      retries: 10
+      delay: 6
+
+- name: Verify the worker joined
+  hosts: k8s_masters
+  become: true
+  tasks:
+    - name: Wait for the worker to report Ready
+      ansible.builtin.command: k3s kubectl wait --for=condition=Ready node/k8s-worker-106 --timeout=180s
+      register: worker_ready
+      changed_when: false
+
+    - name: Show cluster nodes
+      ansible.builtin.command: k3s kubectl get nodes -o wide
+      register: cluster_status
+      changed_when: false
+
+    - name: Display
+      ansible.builtin.debug:
+        msg: "{{ cluster_status.stdout_lines }}"
