@@ -1,6 +1,6 @@
 # Homelab Docs Portal
 
-> Last updated: 2026-08-09
+> Last updated: 2026-08-13
 > 这是**索引 + 文档规则**。运行态事实都在下面链接的文档里，本页不复制副本。
 
 ## 从哪里开始
@@ -41,6 +41,7 @@ CI 在每次 PR 与 push to main 时跑（`.github/workflows/docs-check.yml`）�
 | R5 | 目录索引双向完整 + `plans/README.md` 份数与实际一致 | ✅ 脚本 |
 | — | 相对链接 + 非 docs 文件对 `docs/` 的引用 | ✅ 脚本 |
 | — | 非 docs README 的目录树只画真实存在的子目录 | ✅ 脚本 |
+| — | `Last updated` 不早于最后一次内容提交（R3 的时效部分）| ✅ 脚本 |
 | R1 | 目录归属 | ⚠️ 人 |
 | R6 | 唯一真相源 | ⚠️ 人 |
 | R7 | 命令带执行上下文 | ⚠️ 人 |
@@ -99,6 +100,11 @@ CI 在每次 PR 与 push to main 时跑（`.github/workflows/docs-check.yml`）�
 | `plans/` | `日期` + `状态` + 结论 |
 | `runbooks/` | 触发条件 + 成功判定 + 回滚（恢复类 runbook 本身即回滚，注明豁免） |
 | `records/` | 日期 + 影响 + 根因 |
+
+**改了内容就改 `Last updated`**（脚本强制）：它不得早于该文件最后一次内容提交
+——`git log` 是判据，只改这一行的提交不算数。2026-08-13 清理时 21 篇文档的时间戳
+落在实际内容之后（`services.md` 写 08-06，正文已含 08-11 的 BentoPDF），
+读者据此判断"这页还新鲜"，判断的是假的。浅克隆时该检查整条跳过，故 CI 用 `fetch-depth: 0`。
 
 ## R4 — 状态枚举
 

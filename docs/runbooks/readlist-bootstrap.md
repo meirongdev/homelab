@@ -1,6 +1,6 @@
 # Runbook — readlist 首次引导 / 灾后重建数据
 
-> Last updated: 2026-08-05
+> Last updated: 2026-08-09
 >
 > **触发条件**：readlist 的 PVC 是空的或被恢复成了空库 —— 首次上线、`readlist-data` 丢失后
 > 重建、或从 restic 恢复出一份不含 run 的库。
