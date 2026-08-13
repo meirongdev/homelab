@@ -5,7 +5,8 @@
 | 决策 | 结论 |
 |------|------|
 | [gateway-controller-evaluation](gateway-controller-evaluation.md) | Traefik vs Cilium Gateway → 选 Cilium Gateway API 作唯一入口 |
-| [external-dns-adoption](external-dns-adoption.md) | 子域名 DNS 从 Terraform 手管 → HTTPRoute 声明式。含 Crossplane 否决、`upsert-only` 共存安全性 |
+| [external-dns-adoption](external-dns-adoption.md) | 子域名 DNS 从 Terraform 手管 → HTTPRoute 声明式。含 `upsert-only` 共存安全性 |
+| [crossplane-not-adopted](crossplane-not-adopted.md) | ❌ 不引入 Crossplane：最大云面（Cloudflare）provider 2023-01 即死；且控制面管"集群赖以存在的资源"会把 DR 路径搞复杂。含痛点的逐个轻解与重评条件 |
 | [manual-helm-to-argocd-adoption](manual-helm-to-argocd-adoption.md) | 采纳现存 Helm release 的**渲染等价性验证法**；`skipCrds` 把 CRD 陈旧与迁移解耦。⚠️ 跨集群同 chart 的正解是 `helm.releaseName` 而非 `fullnameOverride` |
 | [manifests-directory-per-app](manifests-directory-per-app.md) | `k8s/helm/manifests/` 一个 App 一个目录（目录即清单），废除 `directory.include` glob |
 | [no-helm-chart-for-in-house-apps](no-helm-chart-for-in-house-apps.md) | 自研应用一律 kustomize/目录源，**不打 chart**；Helm 只用于消费上游 chart。含推翻条件 |
