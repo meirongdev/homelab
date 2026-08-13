@@ -1,0 +1,58 @@
+# CoreDNS 自定义 server 块 —— 把 OCI 的 VCN 私有后缀 `oraclevcn.com` 定向到 OCI 自己的
+# 解析器，不要再随机丢给 1.1.1.1。k3s 内置 CoreDNS 的 Corefile 末尾有
+# `import /etc/coredns/custom/*.server`，对应 ConfigMap `coredns-custom`（volume 挂载写死
+# 了 optional: true），所以**加这个 ConfigMap 就是唯一的扩展点**，不要去改 Corefile 本体
+# （k3s 每次启动会用打包的模板覆盖它）。`reload` 插件在 Corefile 里，改完约 1–2 分钟自动生效。
+#
+# ── WHY（2026-08-13：restic-backup-29776050 三次尝试全挂 → KubeJobFailed 告警）────────
+# 备份 Job 第一步 `apk add restic openssh-client postgresql17-client findutils` 报
+# "temporary error (try again later)"，三次重试全败。节点自己 curl 同一个 CDN 30/30 正常，
+# 于是一路挖到 **pod 侧解析外部域名会阵发性整体失败**：
+#
+#   1. OCI 的 DHCP 往节点 resolv.conf 注入 `search vcn11052309.oraclevcn.com`；
+#      kubelet 把它接在 Pod search 列表末尾 → pod 里是
+#      `default.svc.cluster.local svc.cluster.local cluster.local vcn11052309.oraclevcn.com`
+#      配 `ndots:5`。
+#   2. 于是解析任何点数 < 5 的外部域名（dl-cdn.alpinelinux.org 只有 2 个点）都会先探一发
+#      `dl-cdn.alpinelinux.org.vcn11052309.oraclevcn.com`。
+#   3. CoreDNS 的 `forward . /etc/resolv.conf` 上游是 1.1.1.1 / 1.0.0.1 / 169.254.169.254，
+#      **默认 random 策略每次只挑一个**。实测这个私有后缀：
+#         1.1.1.1 → SERVFAIL   1.0.0.1 → SERVFAIL   169.254.169.254 → NXDOMAIN
+#      （该 zone 委派给 VCN 内部 NS，公网递归解析器只能 SERVFAIL；不是故障，是设计如此。）
+#   4. ☠️ **musl 在 search 遍历中遇到 SERVFAIL 会直接放弃整轮**（只有 NXDOMAIN 才继续下一个
+#      后缀）。所以真正的裸域名**根本没被查过**，直接报 "bad address"。glibc 不这样——
+#      实测 debian:13-slim 40/40 全过，Alpine 同条件 0/30 全败。**只有 musl 镜像中招。**
+#   5. CoreDNS 的 `cache` 会把 SERVFAIL 也缓存几秒 → 故障呈**阵发**：几秒钟全黑，然后自愈。
+#      实测同一 pod 里 curl 同一 URL 30 次，可以 0/30 全败，隔一会儿又 30/30 全过。
+#      这正是「三次重试都在同一个坏窗口里」的成因，也是它此前一直被当成「偶发网络抖动」
+#      （2026-07-16 把 backoffLimit 1→2 就是在治这个症状）的原因。
+#
+# 影响面**不止备份**：oracle 上任何 Alpine/musl 镜像的 pod 解析外部域名都在抽签。
+# 集群内名字（apps-pg-rw.databases.svc 等）不受影响——它们在 cluster.local 那几个后缀就命中
+# 了，走不到 oraclevcn 这一跳，所以同一个备份脚本里的 pg_dump 从来没出过事。
+#
+# 修法：给 `oraclevcn.com` 单开一个 server 块，只 forward 到 169.254.169.254。
+# 这样 search 探针稳定拿到 NXDOMAIN，musl 就会继续走到裸域名。
+# 为什么不用 `template` 直接回 NXDOMAIN：VCN 内部主机名（如别的 OCI 实例）是真实可解析的，
+# 一刀切回 NXDOMAIN 会把它们一起打死；转发给 OCI 解析器则语义完全正确。
+# 为什么不改 kubelet 的 --resolv-conf 去掉这个 search 域：那要动 ansible + 重启 k3s，
+# 且节点重建后 OCI 会再注入；这里一个 ConfigMap 就够，且随 GitOps 走。
+#
+# ⚠️ 这里刻意写宽后缀 `oraclevcn.com` 而不是 `vcn11052309.oraclevcn.com`：VCN 重建会换
+# 掉那串数字，写宽的话不用跟着改，而语义上 oraclevcn.com 下的一切本来就该问 OCI 解析器。
+# 验证：`kubectl -n kube-system logs -l k8s-app=kube-dns | grep -i reload` 看到重载，
+# 然后在 pod 里 `dig @10.53.0.10 <任意>.oraclevcn.com` 应稳定回 NXDOMAIN（不是 SERVFAIL）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  # 键名必须以 .server 结尾 —— *.server 在 Corefile **顶层**导入（即定义新 server 块），
+  # *.override 则是导进 `.:53` 块内部。写错后缀会让 CoreDNS 起不来。
+  oraclevcn.server: |
+    oraclevcn.com:53 {
+        errors
+        cache 30
+        forward . 169.254.169.254
+    }

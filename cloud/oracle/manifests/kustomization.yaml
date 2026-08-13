@@ -7,6 +7,9 @@ resources:
   - base/namespace-cloudflare.yaml
   - base/cloudflare-tunnel.yaml
   - base/gateway.yaml
+  # CoreDNS 扩展：把 OCI VCN 私有后缀交给 OCI 解析器，修 musl pod 的阵发性 DNS 失败
+  # （2026-08-13 备份 Job 三连挂的根因，来龙去脉全在文件头注释里）
+  - base/coredns-custom.yaml
   # PriorityClasses（控制面驱逐优先级，见 base/priorityclasses.yaml）
   - base/priorityclasses.yaml
   # external-dns: ns + Cloudflare token ExternalSecret (chart is ArgoCD-managed, see
