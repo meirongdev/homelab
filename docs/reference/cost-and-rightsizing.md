@@ -1,6 +1,6 @@
 # 成本归因与资源右尺寸
 
-> Last updated: 2026-08-12
+> Last updated: 2026-08-13
 > Status: 生效事实
 
 两套互补的工具：**OpenCost** 回答「钱花在哪」（常驻，出指标 → Grafana），
@@ -97,7 +97,7 @@ uid `opencost-multicluster-overview`。
 `$cluster` 变量取自 `label_values(node_total_hourly_cost, cluster)`，天然只返回跑了
 OpenCost 的两个集群，不会混入 `dgx-spark` / `macbook` 这类外部 node-exporter 目标。
 
-> 单节点集群闲置率天然偏高（实测两边都约 **63–64%**）—— 闲置容量确实在烧电/占额度，
+> 小集群闲置率天然偏高（实测两边都约 **63–64%**；该次实测时两边**都还是单节点**，homelab 于 2026-08-13 加了 worker，数字待重测）—— 闲置容量确实在烧电/占额度，
 > 属真实情况而非归因失败。
 
 ## KRR

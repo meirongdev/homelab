@@ -4,6 +4,7 @@
 
 | 日期 | 记录 | 内容 |
 |------|------|------|
+| 2026-08-13 | [k3s-worker-join-106](2026-08-13-k3s-worker-join-106.md) | 106 入编 homelab worker 的四个坑：☠️ `tailscale up` 与 ip-rule 防护之间有致命窗口（`--accept-routes` 学到 LAN 段进 table 52，节点自己把自己踢下线，要从 tailnet 抢救）· 5250 被 tailscaled 占着（空位只有 5200/5220/5240/5260）· `disable-kube-proxy` 是 server-only、写进 agent 直接 fatal · **既存缺陷**：k8s-node 缺自己网段的 ip rule → inventory 里那条 ProxyCommand 一直是坏的。含两个假阴性判据（`pgrep -f` 自我污染、busybox `nslookup`） |
 | 2026-08-13 | [oracle-musl-dns-servfail](2026-08-13-oracle-musl-dns-servfail.md) | 为消除 CoreDNS 单上游而加的 `DNS=1.1.1.1 1.0.0.1`，让 OCI 私有 search 域 `vcn<id>.oraclevcn.com` 的探针拿到 **SERVFAIL 而非 NXDOMAIN** → **musl 放弃整轮 search**，oracle 上所有 Alpine 容器的外网解析变成抽签（glibc 免疫）；夜间备份三连挂当金丝雀。含「评审时看见了副作用、却把 rcode 和受害者都判错」的教训 |
 | 2026-08-13 | [macos-local-network-tcc](2026-08-13-macos-local-network-tcc.md) | 工作机上 terraform/kubectl 连 LAN 恒报 `no route to host`（ROADMAP 挂了很久的"原因不明"）→ 定性为 **macOS 本地网络隐私授权**：未授权的非 Apple 二进制访问本地链路返回 `EHOSTUNREACH`，与真路由故障同形。含 2×2 判别实验与三条已固化绕法 |
 | 2026-08-12 | [tailscale-iprule-guard-drift](2026-08-12-tailscale-iprule-guard-drift.md) | systemd-networkd 默认清扫外来 ip rule（`ManageForeignRoutingPolicyRules=yes`），8-11 unattended-upgrades 重启 networkd 把 fwmark 撞车防护（5200/5260）**双节点清光**，oneshot 单元仍显 active"看起来修过"；homepage 中签断连 33h 无告警。修成两道防线（networkd drop-in 关清扫 + timer 收敛器）+ textfile 指标 5 条告警。含 A/B 抓现行与「pve 幸存者对照组」破案法 |

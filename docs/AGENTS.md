@@ -60,8 +60,13 @@ docs/                          # 见下方「Documentation Rules」
   ClusterMesh VXLAN。⚠️ `AdvertiseRoutes` 只该有本节点 /32（Pod CIDR 子网路由 2026-07-07 已移除）。
   → [tailscale-network.md](reference/tailscale-network.md)
 - **外部流量**：Internet → Cloudflare DNS → Tunnel → Cilium Gateway → Service
-- **节点**：homelab `10.10.10.10` / TS `100.94.186.7`（Ryzen 5600H 笔记本）·
-  oracle-k3s `10.0.0.26` / TS `100.107.166.37` · NAS storage-106 `192.168.50.106` / TS `100.110.27.111`
+- **节点**：homelab 自 2026-08-13 起是**双节点**——control-plane `k8s-node` `10.10.10.10`
+  / TS `100.94.186.7`（Ryzen 5600H 笔记本）+ worker `k8s-worker-106` `192.168.50.107` /
+  TS `100.74.162.97`（跑在 NAS 106 上的 2c/3G VM）· oracle-k3s `10.0.0.26` / TS
+  `100.107.166.37` · NAS storage-106 宿主 `192.168.50.106` / TS `100.110.27.111`
+  ⚠️ worker 与 master **不在同一网段**（LAN vs pve 的 `10.10.10.0/24`），且它多一条
+  ip rule。加/改它必读 `k8s/ansible/playbooks/setup-k3s-worker.yaml` 的文件头三条约束
+  （[ADR](decisions/storage106-as-homelab-worker.md)）。
 - **oracle 重启/改 shape 后**跑 `cd cloud/oracle && just verify-node`（只读核全部不变量；
   **别在文档里写死它报的条数**，那是动态累加的）。
 
