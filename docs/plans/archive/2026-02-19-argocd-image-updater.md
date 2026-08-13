@@ -2,7 +2,7 @@
 
 > **状态: ❌ 已退役（2026-08-03）** —— `argocd-image-updater` App + values 已删、控制器从 oracle 卸载
 > （0 个 `ImageUpdater` CR，空转数月从未更新任何镜像；oracle-k3s App 旧式注解一并移除）。
-> 本文保留作再接入参考；未来自动升级走 Renovate（[ROADMAP #10](../../ROADMAP.md)）。
+> 本文保留作再接入参考；未来自动升级走 Renovate（[ROADMAP 开放项 #12「低优先 / 可选」](../../ROADMAP.md)）。
 > CRD 模型与约束见 [decisions/argocd-image-updater.md](../../decisions/argocd-image-updater.md)。
 
 **Goal:** 安装 ArgoCD Image Updater，自动监控 `ghcr.io/meirongdev/it-tools` 镜像，有新版本时自动提交 Git 并由 ArgoCD 部署。

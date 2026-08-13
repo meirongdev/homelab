@@ -2,7 +2,7 @@
 
 **Date:** 2026-02-25  
 **Updated:** 2026-02-27  
-**Status:** ✅ Phase 1 完成 — ZITADEL 已部署，oauth2-proxy 已切换至 OIDC  
+**Status:** ⚠️ 已被取代 — 当时 Phase 1 完成（ZITADEL 部署 + oauth2-proxy 切 OIDC），但入口层共享 SSO 已整体移除，现为**各应用原生 OIDC**，见 [reference/identity.md](../../reference/identity.md)  
 **Author:** Matthew  
 
 > **⚠️ 后续更新（Deprecated）**: 本文档描述的入口层共享 SSO（Traefik ForwardAuth + oauth2-proxy）已在后续架构调整中整体移除；Traefik 本身也已被 Cilium Gateway API 取代。当前身份模型为**各应用原生 ZITADEL OIDC**（少数无法直连 OIDC 的应用用 per-app oauth2-proxy），不再有共享入口层 SSO。见 [2026-03-08-cilium-zitadel-sso-plan.md](../security/2026-03-08-cilium-zitadel-sso-plan.md) 与 [reference/identity.md](../../reference/identity.md)。

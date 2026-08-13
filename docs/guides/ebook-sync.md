@@ -49,6 +49,6 @@ git push   # ArgoCD 3 分钟内自动同步
 补全走 **[calibre-metadata-enrichment.md](calibre-metadata-enrichment.md)** ——
 四层手段、各自实测产出率、以及什么时候该停。
 
-> ⚠️ 此前这里指向 `plans/apps/2026-07-05-calibre-metadata-enrichment.md`。
+> ⚠️ 此前这里指向 `plans/archive/2026-07-05-calibre-metadata-enrichment.md`（2026-08-13 归档前在 `plans/apps/`）。
 > 那是**写完即冻结的历史快照**，且其「环境」一节已过期（书库早已不在 NFS 上），
 > 更重要的是它描述的做法（查不到就拿文件 mtime 当出版日期）**已被证明有害**并弃用。
