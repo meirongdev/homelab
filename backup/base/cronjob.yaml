@@ -19,7 +19,14 @@ spec:
           labels: { app: restic-backup }
         spec:
           restartPolicy: Never
-          # 单节点集群；hostPath 本就只落在唯一节点
+          # ⚠️ 必须钉在 control-plane（2026-08-13，homelab 变双节点后）：本 Job 备份的是
+          # **所在节点**的 hostPath /var/lib/rancher/k3s/storage。不钉节点时它可能被调度
+          # 到 worker——那里该目录几乎为空，下面脚本的白名单循环对空目录静默 continue，
+          # 产出「近空快照 + rc=0」的假阴性备份（漏备 == 已备）。oracle 单节点本身就是
+          # control-plane，不受影响。worker 上一旦出现 PVC，由 PVCOnUnbackedNode 告警
+          # 兜底（k8s/helm/manifests/monitoring/alerts/prometheus-rules.yaml）。
+          nodeSelector:
+            node-role.kubernetes.io/control-plane: "true"
           securityContext:
             runAsUser: 0             # 需 root 读 hostPath 各 uid 文件 + 写 /root/.ssh
           containers:

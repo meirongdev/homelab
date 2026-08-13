@@ -23,7 +23,13 @@ spec:
         spec:
           hostPID: true
           restartPolicy: Never
-          # 单节点 homelab 控制面与工作节点同机；容忍可能存在的控制面污点
+          # ⚠️ 必须钉在 control-plane（2026-08-13，homelab 变双节点后）：targets 里的
+          # master/etcd/controlplane 检查项只有在控制面节点上才有意义。不钉节点时
+          # Job 可能排到 worker——拿控制面基准审 agent，报告"看起来全绿"实为审错对象。
+          # 代价（有意接受）：worker 的 node 级检查项暂无覆盖，见 reference/security.md 第 7 层。
+          nodeSelector:
+            node-role.kubernetes.io/control-plane: "true"
+          # 容忍可能存在的控制面污点
           tolerations:
             - operator: Exists
           containers:
