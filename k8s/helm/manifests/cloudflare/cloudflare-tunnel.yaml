@@ -22,6 +22,25 @@ spec:
         app: cloudflared
     spec:
       priorityClassName: high
+      # ☠️ 必须钉在 control-plane（k8s-node），别删。
+      # 2026-08-13 降副本时一并删掉了原来的 podAntiAffinity（单副本下自己跟自己反亲和
+      # 是死配置），结果调度器立刻把**唯一**的入口 pod 放到了 k8s-worker-106 —— 就是
+      # NAS(192.168.50.106) 上那台 2c/3G 的 VM，当天才入编、在另一个网段、还多一条 ip rule。
+      # 为什么不能接受：homelab 的 36 个业务负载全在 k8s-node 上，入口跑到 worker 只会
+      # 白白多一跳跨节点 VXLAN，并把 NAS 宿主机拉进入口的故障域（它还是每夜 restic 的
+      # 备份目标）。入口应当和它所服务的后端同节点。
+      #
+      # 用 required 而不是 preferred 是**故意的**：preferred 在 k8s-node 重启后仍会漂到
+      # worker 且不会漂回来，单副本经不起这种不确定性。required 的代价只是「k8s-node 挂了
+      # 就 Pending」，而那时 36 个后端本来也全没了，留个能转发 502 的隧道毫无价值 ——
+      # 反倒是 CloudflaredAllReplicasDown 直接告警的信号更干净。
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: Exists
       containers:
         - name: cloudflared
           image: cloudflare/cloudflared@sha256:18626b1baac4450214535cd5bc40ef44c0635244d585ebf707749c22b6f3408f
