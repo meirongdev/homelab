@@ -351,8 +351,23 @@
     # （ROADMAP 原 #8 记录的"仍在发作"），就是这个原因。DNS= 是全局上游池，会进 resolv.conf。
     #
     # 只配 v4：节点无 v6 默认路由，v6 上游会成为 CoreDNS 永远探不通的死目标。
-    # oraclevcn.com 内部名会有部分查询随机打到 1.1.1.1 → NXDOMAIN：集群无任何 VCN
-    # 内部名依赖（cluster.local 由 kubernetes 插件应答），行为等价，可接受。
+    #
+    # ☠️ 下面这条原判断是**错的**，2026-08-13 已被一次真实故障推翻，**别照它的结论行事**：
+    #   原文：「oraclevcn.com 内部名会有部分查询随机打到 1.1.1.1 → NXDOMAIN：集群无任何
+    #          VCN 内部名依赖（cluster.local 由 kubernetes 插件应答），行为等价，可接受。」
+    # 错在两处：
+    #   (1) 公网递归解析器对 `*.vcn<id>.oraclevcn.com` 答的是 **SERVFAIL 而不是 NXDOMAIN**
+    #       （该 zone 委派给 VCN 私有 NS，公网解析不到）。这两个 rcode 对解析器**不等价**。
+    #   (2) 出问题的根本不是「VCN 内部名」，而是**所有外部域名**——OCI 的 DHCP 往
+    #       resolv.conf 注入 `search vcn<id>.oraclevcn.com`，kubelet 把它接到 Pod 的
+    #       search 列表里，于是 pod 每解析一个外部域名都会先探一发该后缀；musl 拿到
+    #       SERVFAIL 会**放弃整轮 search**（NXDOMAIN 才继续），裸域名根本没被查过。
+    # 结果：本 drop-in 落地次日（2026-08-13 03:30）的第一次夜间备份三连挂，
+    # 且所有 Alpine 镜像的 pod 外网解析都变成了抽签。glibc 镜像不受影响。
+    # 修法不在这里改（多上游冗余本身是对的、要保留），而是给 oraclevcn.com 单开一个
+    # CoreDNS server 块只转发给 169.254.169.254 →
+    #   cloud/oracle/manifests/base/coredns-custom.yaml（GitOps 同步，含完整机制说明）
+    # 复盘：docs/records/2026-08-13-oracle-musl-dns-servfail.md
     #
     # 验证（2026-08-12 演练）：iptables 掐死 →169.254.169.254:53 共 30s，pod 内 4 个
     # 域名全部解析成功，DROP 计数 15 包——查询确实被掐、确实走了备胎。
