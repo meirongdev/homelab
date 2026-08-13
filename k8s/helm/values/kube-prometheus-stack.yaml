@@ -228,6 +228,15 @@ defaultRules:
   # 限定的替代规则，homelab 侧真出问题时依旧会告警。
   disabled:
     KubeletDown: true
+    # KubeCPU/KubeMemoryOvercommit 在本拓扑下是恒定告警（2026-08-13，homelab 加入
+    # 2c/3G worker 当天开始 firing）：上游语义是"挂掉最大节点后，剩余容量装不下全部
+    # requests"（N-1 冗余）。homelab 是 1 大 + 1 小的**不对称双节点**——master 的
+    # requests 永远塞不进 worker，且 master 挂 = 控制面没了，N-1 在此拓扑下无意义，
+    # 该告警也不可能靠加资源"修好"。永久黄灯只会训练人忽略告警页。
+    # 真正有意义的信号（requests 逼近**总** allocatable、新 pod 快排不进去）由
+    # manifests/monitoring/alerts/prometheus-rules.yaml 的 capacity 组替代提供。
+    KubeCPUOvercommit: true
+    KubeMemoryOvercommit: true
 
 prometheus:
   prometheusSpec:

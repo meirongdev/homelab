@@ -24,7 +24,7 @@
 | 4 | 准入：Pod 基线 | Pod Security Admission | ✅ 生产 | `just harden-psa` / oracle ns 清单 | 双 |
 | 5 | 准入：策略即代码 | Kyverno（Audit） | ✅ 生产 | `values/kyverno.yaml`, `manifests/kyverno-policies/` | homelab |
 | 6 | 供应链/CVE | Trivy Operator | ✅ 生产 | `values/trivy-operator.yaml` · `values/trivy-operator-oracle.yaml` | **双集群**（oracle 2026-08-03 补齐）|
-| 7 | CIS 合规 | kube-bench（周巡检） | ⚠️ 已装，双节点后覆盖有缺口 | `manifests/kube-bench/kube-bench.yaml` | homelab |
+| 7 | CIS 合规 | kube-bench（周巡检，钉 control-plane；worker 的 node 级检查未覆盖·有意接受） | ✅ 生产 | `manifests/kube-bench/kube-bench.yaml` | homelab |
 | 8 | 节点加固 | k3s `protect-kernel-defaults` + sysctl | ⏳ 待重启生效 | `k8s/ansible/playbooks/setup-k3s.yaml` | homelab |
 | 9 | 网络 | Cilium NetworkPolicy + Hubble 可见性 | 🟡 仅可见性 | Cilium（默认拒绝刻意延后） | 双 |
 | 10 | 运行时检测 | Tetragon(homelab) / Falco+Falcosidekick(oracle) | ✅ 已实现（Falco→Telegram 已接通，2026-07 起原生 output，不再经 Gotify） | `values/{tetragon,falco}.yaml` | 双（分别选型） |
@@ -81,12 +81,12 @@
   重建，列表里明明有它，live 却空了近一周），`psa-check` 就是为这个失效模式加的哨兵。
   ⚠️ 一个 ns 只能有一个写者：`kube-bench` 的标签归清单管，故已从 `psa_privileged_ns` 移除。
 
-☠️ **kube-bench 在双节点下审计的是「它碰巧落到的那个节点」**（2026-08-13 核对：
-CronJob **无 `nodeSelector`**，只有 `hostPID: true`）。homelab 自 2026-08-13 加了
-worker 后，它可能排到 `k8s-worker-106` 上——那台是 agent，控制面那批 CIS 检查项
-根本不适用，报告会"看起来通过"而实际没审计控制面。
-**待办**：给它钉 `nodeSelector: node-role.kubernetes.io/control-plane`，
-或改成 DaemonSet 式逐节点审计。
+**kube-bench 钉在 control-plane 审计**（缺口当日发现当日修，2026-08-13：CronJob 加
+`nodeSelector: node-role.kubernetes.io/control-plane`）。此前双节点下它审计的是
+「碰巧落到的那个节点」——排到 `k8s-worker-106`（agent）时，控制面那批 CIS 检查项根本
+不适用，报告"看起来通过"而实际没审计控制面。
+⚠️ 残余缺口（有意接受）：worker 的 node 级检查项（kubelet 文件权限等）无覆盖；
+要补的话改 DaemonSet 式逐节点审计，或为 worker 加一个 `--targets node` 的第二 CronJob。
 
 - **等级矩阵**（2026-08-10 全量核对过 live，两集群一致）：
 

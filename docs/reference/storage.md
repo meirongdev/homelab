@@ -51,10 +51,19 @@ sqlite 依赖 POSIX 字节区间锁（`fcntl`）+ 同步小写入；NFS 的 NLM 
 
 ⚠️ **2026-08-13 起 homelab 是双节点**，`local-path` 因此有了**两个物理落点**：
 `k8s-node`（现有全部 PVC 都在这）和新 worker `k8s-worker-106`（106 上那台 VM 的
-本地盘）。restic 的 homelab overlay **只备份 `k8s-node` 上的 hostPath**。
-☠️ 一旦有状态负载被排到 worker 上，它的 PVC 会**静默不备份**（H4 查的就是归属，
-但查不出落在哪个节点）。要么给这类负载钉 `nodeName`/nodeSelector 到 `k8s-node`，
-要么先扩 overlay。当前 worker 上只有 DaemonSet、无 PVC。
+本地盘）。**备份边界 = control-plane 节点**，两道锁（2026-08-13 当日补）：
+
+1. backup CronJob 钉 `nodeSelector: node-role.kubernetes.io/control-plane`
+   （`backup/base/cronjob.yaml`）。不钉的话它可能被排到 worker——那里的 hostPath
+   几乎为空，白名单循环对空目录静默 `continue`，产出**「近空快照 + rc=0」的假阴性
+   备份**，比"漏备一个 PVC"更糟。
+2. 告警 `PVCOnUnbackedNode`（`k8s/helm/manifests/monitoring/alerts/prometheus-rules.yaml`
+   backups 组）：homelab 任何**非 control-plane** 节点上出现被 kubelet 统计的 PVC 即
+   warning——H4 只保证"进白名单"，这条保证"落对节点"。已知局限：负载缩到 0 后
+   kubelet_volume_stats 消失、告警自行恢复，但数据还躺在节点盘上，处置别只看告警消没消。
+
+☠️ 结论不变：**有状态负载暂时别排到 worker**。要排，先给该节点建独立备份路径，
+再有意豁免告警。当前 worker 上只有 DaemonSet、无 PVC。
 → [decisions/storage106-as-homelab-worker.md](../decisions/storage106-as-homelab-worker.md)
 
 
