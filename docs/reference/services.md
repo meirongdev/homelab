@@ -1,6 +1,6 @@
 # Services — 服务清单
 
-> Last updated: 2026-08-11
+> Last updated: 2026-08-13
 > Status: 生效事实
 >
 > **这张表是服务清单的唯一真相源** —— `docs/README.md`、`docs/ARCHITECTURE.md` 与各 runbook
@@ -31,6 +31,18 @@
 | ZITADEL (SSO) | oracle-k3s | `zitadel` | `auth.meirong.dev` |
 | PostgreSQL (`apps-pg`, CNPG 共享应用库) | oracle-k3s | `databases` | Internal only（2026-08-06 取代手搓的 `rss-postgres`；当前租户只有 miniflux。加库见 [decisions/shared-postgres-platform.md](../decisions/shared-postgres-platform.md)） |
 | PostgreSQL (`zitadel-pg`, CNPG) | oracle-k3s | `zitadel` | Internal only（身份面**刻意独立**，不并入 `apps-pg`） |
+
+## 集群外托管的 meirong.dev 站点
+
+⚠️ 这两个**不在**上表里，也查不到 HTTPRoute（`kubectl get httproute` 核对不到不等于没上线），
+但它们占着 `meirong.dev` 的主机名、且在 Homepage 上有磁贴。机制与注意事项（GitHub Pages 必须
+DNS-only、绕过 WAF、DNS 通了≠站点通了）见
+[networking-ingress.md](networking-ingress.md#不走这条链的-meirongdev-主机名集群外托管)。
+
+| 站点 | 托管 | URL |
+|------|------|-----|
+| Blog | Cloudflare Pages (`meirongdevblog.pages.dev`) | `meirong.dev`（apex） |
+| Playgrounds（各语言官方在线 Playground 导航） | GitHub Pages，repo `meirongdev/playgrounds` | `playgrounds.meirong.dev`（2026-08-13 接域名；DNS 记录在 `cloudflare/terraform` 的 `local.external_origin_dns`） |
 
 ## 运维备忘（按服务）
 
