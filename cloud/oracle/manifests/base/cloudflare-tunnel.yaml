@@ -86,8 +86,12 @@ spec:
               cpu: 500m
               memory: 256Mi
 ---
-# ClusterIP service for cloudflared metrics
-# Scraped by OTel Collector running in-cluster (no NodePort needed)
+# cloudflared 指标的 ClusterIP service（无需 NodePort）
+# 由本集群 OTel Collector 采集后经 prometheusremotewrite 写回 homelab Prometheus。
+# ⚠️ 那个 prometheus receiver 指向的是 **ClusterIP DNS 名** = 抓 VIP，每次只随机命中
+# 一个 pod。单副本下无所谓，但**副本数一旦提回 ≥2 就分不出单副本死活**（挂掉一个，
+# ha_connections 照样报 4）。届时应改用 PodMonitor 或 headless Service，
+# 参照 homelab 侧 k8s/helm/manifests/monitoring/cloudflared-servicemonitor.yaml。
 apiVersion: v1
 kind: Service
 metadata:
