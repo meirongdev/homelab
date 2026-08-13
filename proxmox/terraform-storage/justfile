@@ -29,6 +29,11 @@ plan: _tunnel
 apply: _tunnel
     terraform apply terraform.plan
 
-# Destroy the experiment VM (实验田，随便拆)
+# ☠️ 这台 VM 自 2026-08-13 起是 **homelab 集群的 worker `k8s-worker-106`**，
+#    不再是「随便拆」的实验田。destroy 会让 prod 集群 node NotReady。
+#    要拆先在集群里 drain + delete node：
+#      kubectl --context k3s-homelab drain k8s-worker-106 --ignore-daemonsets --delete-emptydir-data
+#      kubectl --context k3s-homelab delete node k8s-worker-106
+#    决策：docs/decisions/storage106-as-homelab-worker.md
 destroy: _tunnel
     terraform destroy
