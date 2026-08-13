@@ -4,7 +4,7 @@
 > （隧道 530、pod ImagePullBackOff、`kubectl` i/o timeout、DNS NXDOMAIN）。
 > **成功判定**：§ Step 5 — Verify recovery 全部通过。
 > **回滚**：不适用——本文本身就是恢复流程（R3 对恢复类 runbook 豁免回滚段）。
-> Last updated: 2026-07-31
+> Last updated: 2026-08-13
 
 ## Symptom
 
