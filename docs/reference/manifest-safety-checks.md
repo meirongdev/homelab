@@ -1,6 +1,6 @@
 # 清单安全规则 (Manifest Safety Checks)
 
-> Last updated: 2026-08-10
+> Last updated: 2026-08-13
 > Status: 生效事实
 > Scope: `scripts/check-manifests.py` 强制的 H1-H5 —— source of truth。
 > 每条规则都对应一次**真实发生过的事故或静默失效**，不是风格偏好。
@@ -167,7 +167,7 @@ metadata:
 | ReferenceGrant 寄生在别人的文件里 | 语法与作用都正确，问题是**位置** | `allow-gateway-to-calibre` 没限定 Service 名（作用于整个 ns），却住在 `route-calibre-web.yaml` 里 → 删 calibre 路由会连带断掉 `notebook.meirong.dev`。现改为每个 route 文件各带一条自己的 grant（Gateway API 是累加式授权），删任一文件都不影响另一个 |
 | 文档与集群漂移 | 文档格式可以完美而内容全错 | 2026-07-31 那次 NFS 描述格式合规、内容过期，是 `kubectl` 照出来的 |
 | **operator 动态创建的 PVC 逃出 H4** | H4 只扫**清单里声明**的 PVC；CNPG 的卷由 operator 按 `Cluster` 的 `instances` 生成，仓库里没有对应的 PVC 对象 | `apps-pg-1` / `zitadel-pg-1` 两个库的备份归属完全靠 `backup/overlays/oracle/backup-script.yaml` 里的逐库 `pg_dump` 行。**apps-pg 上加一个租户就必须手工加一行**，H4 不会提醒——性质等同于 sqlite 白名单，而那份白名单曾让 `trends-data` 静默漏备两个月。见 [decisions/shared-postgres-platform.md](../decisions/shared-postgres-platform.md) |
-| **清单外创建的 ns 逃出 H5** | H5 只扫**清单里声明**的 Namespace；Helm chart 自带的 ns、ArgoCD 的 `CreateNamespace=true`、operator 自建的 ns 在仓库里根本没有对象 | oracle 的 `external-secrets` / `cnpg-system` / `trivy-system` / `default` / `cilium-secrets` 至今无 PSA 标签，CI 全绿也照样查不到。**只能靠 `kubectl get ns -L pod-security.kubernetes.io/enforce` 眼看**（`just psa-status` 打的就是这条，但它固定 `k3s-homelab` 上下文，oracle 要手工加 `--context`）。补齐路径见 [ROADMAP](../ROADMAP.md) 开放项 #13 |
+| **清单外创建的 ns 逃出 H5** | H5 只扫**清单里声明**的 Namespace；Helm chart 自带的 ns、ArgoCD 的 `CreateNamespace=true`、operator 自建的 ns 在仓库里根本没有对象 | oracle 的 `external-secrets` / `cnpg-system` / `trivy-system` / `default` / `cilium-secrets` 至今无 PSA 标签，CI 全绿也照样查不到。**只能靠 `kubectl get ns -L pod-security.kubernetes.io/enforce` 眼看**（`just psa-status` 打的就是这条，但它固定 `k3s-homelab` 上下文，oracle 要手工加 `--context`）。⚠️ **当前没有开放项跟踪这几个 ns 的补齐**（此处原写"见 ROADMAP 开放项 #13"，而 ROADMAP 从来没有 #13——2026-08-13 更正）；PSA 逐层状态见 [security.md](security.md) |
 | CRD 字段放错层级 | `kubectl apply --validate=strict` 对 CRD **照样放行**，多余的键要到 ArgoCD 用 ServerSideApply 建 typed patch 时才炸 | 2026-08-06 把 `postImportApplicationSQL` 写在 `bootstrap.initdb` 下（正确位置是 `initdb.import`）→ 客户端校验通过，同步时报 `field not declared in schema` 并进入重试（重试会钉住 revision，修复 commit 得先 terminate operation）。预检要用 `kubectl apply --server-side --dry-run=server`，字段位置以 `kubectl explain` 为准 |
 
 **删任何清单文件前**，先 `grep '^kind:' <file>`，确认没有作用域大于该文件的资源

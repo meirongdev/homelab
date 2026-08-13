@@ -1,6 +1,6 @@
 # Homelab Roadmap
 
-> Last updated: 2026-08-10
+> Last updated: 2026-08-13
 > 本文只回答两件事：**还剩什么没做**，和**做过什么/为什么不做**。
 > 实施细节不写在这里——每条都链到 `decisions/`（取舍）或 `plans/`（执行过程）。
 >
@@ -18,6 +18,11 @@
 > requests 按实测填，非核心挂 `bulk`。
 
 按优先级排列。括号内是出处文档。
+
+> ⚠️ **编号是稳定标识，不是序号**——`reference/`、`decisions/`、runbook 都按 `开放项 #N`
+> 引用它们。**关闭一条不重新编号、也不把号让给新条目**：空档就是"这号已经关掉了"的证据
+> （#8 = oracle DNS 上游冗余，见下方已完成表）。曾经因为挪过号，三处文档的
+> `Renovate #10` 与一处 `#13` 全指错了地方（2026-08-13 修）。
 
 | # | 项目 | 说明 |
 |---|------|------|
@@ -61,16 +66,16 @@
 
   ```bash
   kubectl --context oracle-k3s -n trivy-system rollout restart deploy/trivy-operator
-  # 6-8 分钟后回查（这 3 个镜像都很大，单个扫描要几分钟）
+  # 6-8 分钟后回查（这 2 个镜像都很大，单个扫描要几分钟）
   kubectl --context oracle-k3s get vulnerabilityreports -A -o json | jq -r \
     '.items[] | select(.metadata.labels."trivy-operator.resource.name"
-     | test("browserless|stirling|redpanda")) | "\(.metadata.labels."trivy-operator.resource.name") crit=\(.report.summary.criticalCount)"'
+     | test("browserless|redpanda")) | "\(.metadata.labels."trivy-operator.resource.name") crit=\(.report.summary.criticalCount)"'
   ```
 
-  ⚠️ 在此之前 `TrivyImageCriticalVulnerabilities` 读到的 0 **不覆盖这 3 个镜像**——
+  ⚠️ 在此之前 `TrivyImageCriticalVulnerabilities` 读到的 0 **不覆盖这 2 个镜像**——
   告警只数现存报告，缺报告按 0 计入。根治办法（给扫描 Job 配 Docker Hub 认证，
   `trivy.privateRegistryScanSecretsNames`）已评估但**刻意没做**：需要新增 Docker Hub
-  凭据，当前判断不值得为 3 个镜像引入。
+  凭据，当前判断不值得为 2 个镜像引入。
 
 ---
 
@@ -80,10 +85,13 @@
 |------|------|
 | Cert-Manager (Let's Encrypt + DNS-01) | TLS 在 Cloudflare 边缘终结、集群内 HTTP，无内网直连 TLS 需求 → 纯负担 |
 | Vault HA / auto-unseal | 单节点无 HA 意义；sealed 已被 ESO 告警覆盖 + 恢复路径已文档化，transit auto-unseal 要再养一个 Vault |
-| Crossplane | 2026-07-07 否决：CF provider 已死 2 年、问题规模不匹配（单人静态云面）、控制面鸡生蛋、单节点内存开销。重评条件见[演进路线 §三](plans/architecture/2026-07-07-tech-debt-and-evolution.md) |
+| Crossplane | 2026-07-07 否决：CF provider 已死 2 年、问题规模不匹配（单人静态云面）、控制面鸡生蛋、单节点内存开销。重评条件见 [ADR](decisions/crossplane-not-adopted.md) |
 | Talos 迁移 | 2026-03 刚重建 Ubuntu 24.04 且流程已顺，单节点收益不抵成本。加第二台 worker 时重评（[演进路线 §五](plans/architecture/2026-07-07-tech-debt-and-evolution.md)） |
 | Cilium External Workloads（NAS 入网） | 2026-03-19 取消：`CiliumExternalWorkload` CRD 与 CLI 已从 Cilium 1.15+ 移除，1.19.1 不支持。若要限制 NFS 访问，改用 `CiliumNetworkPolicy` + `fromCIDR: 192.168.50.106/32`（[原方案](plans/archive/2026-03-15-cilium-external-workload-nas.md)） |
 | 集群级网络默认拒绝 | **刻意延后**（非取消）：单用户威胁模型下横向移动收益边际低、debug 成本高。Hubble 已开做可见性，作为日后单 ns 灰度的前置。见 [security.md](reference/security.md) |
+| homelab 多节点 HA / etcd 三节点 | 2026-07-04 否决：硬件不支持、单用户收益为零。正确形态是**单节点 + 快速重建**（`just homelab-recover` + restic 备份体系）。加第二台 worker 时与 Talos 一并重评 |
+| Thanos / Mimir / 指标对象存储长期化 | 2026-07-04 否决：双写复杂、搬迁窗口长，`retention` + `retentionSize` 控制就够（见 `k8s/helm/values/kube-prometheus-stack.yaml`）。⚠️ 同批"LGTM 整体不搬"那半条**已被推翻**——Loki/Tempo 于 2026-08-02 迁 oracle（[迁移计划](plans/architecture/2026-08-02-homelab-to-oracle-workload-migration.md)），Prometheus/Grafana/Alertmanager 仍在 homelab |
+| storage-106 并入 homelab 集群 | 2026-07-04 否决：缺的是内存，而 106 仅 ~5GB 可用、CPU 弱 8 倍；计算压上 NFS 后端会放大爆炸半径（[评估附录](plans/architecture/2026-07-04-fleet-architecture-optimization.md)）。⚠️ **2026-08-13 的 `k3s-exp` 不推翻它**——那是 106 上的独立单节点实验集群，不是 homelab worker（[ADR](decisions/storage106-experiment-vm.md)） |
 
 ---
 
@@ -170,7 +178,7 @@ homelab + oracle-k3s 双双从 Flannel 迁 Cilium
 | 2026-07-12 | **Tailscale 根因修复**：mbpm5 停止广播 `192.168.50.0/24`，pve 保留为唯一 subnet router。`nfs-lan-route` ip-rule 经 2026-07-19 实测裁定**永久保留**，理由见 [tailscale-network.md](reference/tailscale-network.md) |
 | 2026-07-18 | **Vault 孤儿 secret 清理**：全 Vault × 两集群 ExternalSecret 交叉核对，销毁 4 个无消费者的 path（`homelab/postgres`、`homelab/zitadel-oidc`、`oracle-k3s/oauth2-proxy`、`homelab/kopia`）。剩余 16 个 path 全部有消费者。⚠️ `secret/homelab/zitadel` 是活的（oracle 3 个 ExternalSecret + 跨集群 backup 读它） |
 | 2026-07-31 | 本地明文 Vault 清单 `k8s/helm/values/vault_values.md` 实际删除。⚠️ 此前 07-18 就声明"已删除"但文件一直在磁盘上——它是 gitignored 的，删除不产生 diff，所以声明落空没人发现。约定见 [reference/security.md §4](reference/security.md) |
-| 2026-08-03 | **ArgoCD Image Updater 退役**：0 个 `ImageUpdater` CR、空转数月的控制器卸载（删 `argocd/applications/argocd-image-updater.yaml` App + `k8s/helm/values/argocd-image-updater.yaml`），`oracle-k3s` App 上遗留的旧式注解一并移除（那个 controller 没了注解即死配置）。机制文档保留在 [decisions/argocd-image-updater.md](decisions/argocd-image-updater.md)，日后要自动升级可重新接入或走 Renovate（见开放项 #10）。 |
+| 2026-08-03 | **ArgoCD Image Updater 退役**：0 个 `ImageUpdater` CR、空转数月的控制器卸载（删 `argocd/applications/argocd-image-updater.yaml` App + `k8s/helm/values/argocd-image-updater.yaml`），`oracle-k3s` App 上遗留的旧式注解一并移除（那个 controller 没了注解即死配置）。机制文档保留在 [decisions/argocd-image-updater.md](decisions/argocd-image-updater.md)，日后要自动升级可重新接入或走 Renovate（见开放项 #12）。 |
 | 2026-08-06 | **oracle VM 清理**：`crictl rmi --prune` 删 32 个死镜像（96→64），磁盘 71G→62G 回收 **9GB**（containerd 37G→28G）。积压原因是 kubelet 镜像 GC 为阈值触发（`imageGCHighThresholdPercent` 85%）而磁盘才 37%，**从未跑过**。⚠️ 首轮报一屏 `DeadlineExceeded` 是 crictl 默认调用超时仅 2s，containerd 实际删成了 |
 | 2026-08-06 | **image-updater 残留凭据清除**：退役 3 天后 `cloud/oracle/manifests/argocd/image-updater-secrets.yaml` 仍在 kustomize 树里，**每分钟从 Vault 拉一次 GitHub 凭据**产出两个无人消费的 Secret。⚠️ 其一名为 `git-creds`，确认过它没有 `argocd.argoproj.io/secret-type` 标签、ArgoCD 不认作仓库凭据才删 |
 | 2026-08-06 | **孤儿资源复跑**（控制面迁 oracle 后首次双集群跑）：信号面各 6 条，**真孤儿 0 条**。补 3 条结构性 ignore（Vault 两个 volumeClaimTemplate PVC、CNPG 的 `cnpg-default-monitoring`）；另汇总 4 条**永久孤儿**（不入 git 的 bootstrap 依赖），刻意不进 ignore —— 那份清单就是「从 Git 重建会缺什么」([决策](decisions/orphaned-resources.md)) |

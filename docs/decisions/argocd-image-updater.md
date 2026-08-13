@@ -4,7 +4,7 @@
 > 状态: ❌ **已退役（2026-08-03）** —— 空转数月（0 个 `ImageUpdater` CR，从不更新任何镜像）
 > 后被卸载：删 `argocd/applications/argocd-image-updater.yaml` App + `k8s/helm/values/argocd-image-updater.yaml`，
 > `oracle-k3s` App 上的旧式注解一并移除。**本页保留作为机制说明/日后重新接入的参考**
-> （或改走 Renovate，见 [ROADMAP](../ROADMAP.md) 开放项 #10）。
+> （或改走 Renovate，见 [ROADMAP](../ROADMAP.md) 开放项 #12）。
 > 退役前的运行态：chart 1.2.4 / image v1.2.2，日志常驻 `No ImageUpdater CRs to process`。
 >
 > ⚠️ **下面「工作原理 / 关键配置文件 / 验证 / 问题排查」几节写的是 it-tools 那套 homelab 配置，
