@@ -118,3 +118,44 @@ spec:
               触发 OracleTelemetryAbsent，先看它）。查
               cloud/oracle/manifests/monitoring/exporters.yaml 与节点
               /var/lib/node_exporter/textfile/。
+
+        # 序列不完整（2026-08-13 真实事故形态，见 records/2026-08-13-iprule-guard-render-bug.md）：
+        # 脚本活着、也在写文件，但吐出的 present 序列数 < 配置的规则数。渲染 bug 把
+        # 断言塌成一行时正是如此——只有第一条规则有序列（值恒 0），其余规则**连序列
+        # 都没有**，PersistentlyMissing 对它们永远不会 fire（absent series 不参与 == 0）。
+        # expected 由 Jinja 静态渲染、不经过 shell——塌行时它仍是真值，对账即抓现行。
+        - alert: TailscaleIpRuleSeriesIncomplete
+          expr: >-
+            count by (cluster, instance) (tailscale_iprule_present)
+              < on (cluster, instance) tailscale_iprule_rules_expected
+          for: 15m
+          labels:
+            severity: warning
+            component: network
+          annotations:
+            summary: "{{ $labels.cluster }}/{{ $labels.instance }} 的 ip rule 序列数少于应断言条数，脚本在部分失效"
+            description: |
+              节点吐出的 tailscale_iprule_present 序列数持续少于脚本配置的
+              规则数（tailscale_iprule_rules_expected）——说明部分 assert 调用
+              根本没执行到（脚本塌行/中途报错），失效的那几条规则**没有任何
+              其它告警覆盖**。节点上查：
+              `journalctl -u tailscale-ip-rules.service -n 20`、
+              `cat /var/lib/node_exporter/textfile/tailscale_iprule.prom`。
+
+        # 有 present 序列却没有 expected：节点还在跑旧版脚本（未随 playbook 更新），
+        # 上面的对账锁对它是盲的。30m 容忍 ansible 滚动窗口。
+        - alert: TailscaleIpRuleExpectedMissing
+          expr: >-
+            count by (cluster, instance) (tailscale_iprule_present)
+              unless on (cluster, instance) tailscale_iprule_rules_expected
+          for: 30m
+          labels:
+            severity: warning
+            component: network
+          annotations:
+            summary: "{{ $labels.cluster }}/{{ $labels.instance }} 没有 tailscale_iprule_rules_expected 序列（旧版脚本？）"
+            description: |
+              该节点在产出 present 序列却没有 expected 序列——多半还在跑
+              没有对账指标的旧版收敛器脚本，SeriesIncomplete 对它是盲的。
+              重跑对应 setup-tailscale playbook 的收敛器安装段即可
+              （homelab: k8s/ansible / oracle: cloud/oracle/ansible）。

@@ -5,10 +5,22 @@
   hosts: k8s_cluster
   become: true
   vars:
-    # 收敛器要断言的 ip rule 列表（每项直接拼进 `ip rule add`）。默认是 master 的两条；
-    # k8s_workers 在 inventory 里覆盖，多加 10.10.10.0/24 那条 —— 理由见 inventory 注释。
+    # 收敛器要断言的 ip rule 列表（每项直接拼进 `ip rule add`）。
+    # 2026-08-13 起 master 与 worker 同一份（此前 5240 只给 worker，master 是漏配）：
+    #   5200  Cilium identity-mark 撞 Tailscale fwmark 的防护（取证见下方 tasks 注释）
+    #   5240  到 10.10.10.0/24 走 main 不进隧道 —— 两个节点各有各的死法：
+    #         worker：--accept-routes 从 pve 学到该段进 table 52，到控制面 API 的
+    #                 流量被劫进隧道（详见 setup-k3s-worker.yaml 文件头 ②）；
+    #         master：自己就在这个网段，从 vmbr0 进来的连接（pve 的 ProxyCommand、
+    #                 同段邻居）回包被劫进隧道，非对称直接超时 —— inventory 里
+    #                 k8s-node 的唯一声明访问路径因此一直是坏的
+    #                 （docs/records/2026-08-13-k3s-worker-join-106.md §4）。
+    #   5260  LAN 直通（到 106 的 restic/vzdump 不舍近求远走隧道）
+    #   ☠️ 优先级空位只有 5200/5220/5240/5260：tailscaled 自己占 5210/5230/5250/5270，
+    #   且必须 < 5270（`from all lookup 52`）才抢得到。
     tailscale_assert_rules:
       - "5200 to 100.64.0.0/10 lookup 52"
+      - "5240 to 10.10.10.0/24 lookup main"
       - "5260 to 192.168.50.0/24 lookup main"
     # ⚠️ This node must advertise NOTHING (2026-07-07). In particular NEVER advertise
     # its own IP 10.10.10.10/32: pve (a tailnet subnet router that TRANSITS this
@@ -84,6 +96,14 @@
         state: restarted
       when: networkd_sweep_conf.changed
 
+    # ☠️ 断言行必须用 {% for %} 逐行展开成**真实换行**。
+    # 2026-08-13 曾写成 `join('\n          ')`：在 YAML 块标量里 Jinja 拿到的是
+    # 字面反斜杠+n，整段 assert 塌成**一行**——shell 把 `52\n` 吃成 `52n`，
+    # `ip rule add` 每轮报 invalid table ID；第二条起的规则连 metric 序列都不产生。
+    # 收敛器名存实亡而规则"看起来在位"（是 setup 时一次性加对的）。
+    # 见 docs/records/2026-08-13-iprule-guard-render-bug.md。
+    # 下面脚本尾部的 tailscale_iprule_rules_expected（Jinja 静态渲染的条数）
+    # + 告警 TailscaleIpRuleSeriesIncomplete 就是给这类"塌行"上的对账锁。
     - name: Install assert-tailscale-ip-rules script
       ansible.builtin.copy:
         dest: /usr/local/sbin/assert-tailscale-ip-rules
@@ -119,7 +139,9 @@
           "
           }
 
-          {{ tailscale_assert_rules | map('regex_replace', '^', 'assert ') | join('\n          ') }}
+          {% for rule in tailscale_assert_rules %}
+          assert {{ rule }}
+          {% endfor %}
 
           total=$(cat "$STATE_FILE" 2>/dev/null || echo 0)
           case "$total" in *[!0-9]*|"") total=0 ;; esac
@@ -134,6 +156,9 @@
             printf '# HELP tailscale_iprule_reasserts_total 发现缺失并补齐的累计次数（状态文件持久）\n'
             printf '# TYPE tailscale_iprule_reasserts_total counter\n'
             printf 'tailscale_iprule_reasserts_total %s\n' "$total"
+            printf '# HELP tailscale_iprule_rules_expected 应断言的规则条数（Jinja 静态渲染，与 present 序列数对账）\n'
+            printf '# TYPE tailscale_iprule_rules_expected gauge\n'
+            printf 'tailscale_iprule_rules_expected {{ tailscale_assert_rules | length }}\n'
           } > "$TMP" && mv "$TMP" "$PROM_FILE"
 
           if [ "$reasserted" -gt 0 ]; then

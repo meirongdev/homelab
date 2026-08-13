@@ -55,8 +55,9 @@ setup-tailscale-worker authkey:
       --private-key ~/.ssh/vgio
 
 # 把 106 上的 VM 以 agent 身份加入本集群（先跑 setup-tailscale-worker，见剧本头 ③/③b）
-# ⚠️ token 在这里取，经 k8s-node 的 **Tailscale 地址**：inventory 里那条经 pve 的
-#    ProxyCommand 是坏的（k8s-node 缺 `to 10.10.10.0/24 lookup main`，回程走了隧道）。
+# token 经 k8s-node 的 **Tailscale 地址**取——不依赖在家庭 LAN，远程也能跑。
+# （历史：2026-08-13 前这么写是因为 ProxyCommand 路径坏——k8s-node 缺 5240 回程规则；
+#   当日已修（records/2026-08-13-iprule-guard-render-bug.md），tailnet 取法因更通用而保留。）
 join-worker:
     #!/usr/bin/env bash
     set -euo pipefail
