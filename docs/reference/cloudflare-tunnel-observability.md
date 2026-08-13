@@ -1,6 +1,6 @@
 # Cloudflare Tunnel Observability
 
-> Last updated: 2026-07-31
+> Last updated: 2026-08-13
 > Status: 生效事实
 
 当前架构的入口路径为：`Cloudflare DNS -> Cloudflare Tunnel -> Cilium Gateway API -> Services`。
@@ -40,17 +40,41 @@ metrics path:
 cloudflared:2000 -> Prometheus / OTel Collector -> Grafana
 ```
 
+## 副本数：两个集群都是 1
+
+2026-08-13 起两侧 cloudflared 均为**单副本**，这是结论不是疏忽。隧道级冗余来自 cloudflared
+自身——**单个进程持有 4 条边缘连接、跨 3–4 个 colo**（`cloudflared_tunnel_ha_connections` = 4/pod），
+副本数只加 pod 级冗余。而历史上每一次 cloudflared 重启都是**节点级**事件（两副本同时死），
+2 副本一次也没挡住。完整实测依据写在两份清单的文件尾注里：
+`k8s/helm/manifests/cloudflare/cloudflare-tunnel.yaml` 与
+`cloud/oracle/manifests/base/cloudflare-tunnel.yaml`。
+
+☠️ **两侧都故意不带 PodDisruptionBudget**：单副本下 `minAvailable: 1` 会让
+`disruptionsAllowed` 变成 0 而卡死 `kubectl drain`，`maxUnavailable: 1` 则恒定放行等于没约束。
+要恢复 PDB 必须先把 replicas 提回 ≥2。
+
 ## 当前采集路径
 
 ### homelab
 
 - `cloudflared` 在 `cloudflare` namespace 暴露 `:2000/metrics`
-- homelab Prometheus 直接采集本集群 `cloudflared` 指标
+- `monitoring/cloudflared` ServiceMonitor 抓取（`k8s/helm/manifests/monitoring/cloudflared-servicemonitor.yaml`）
+
+  ⚠️ **这条 2026-08-13 之前是假的**：本文档当时写着「homelab Prometheus 直接采集本集群
+  `cloudflared` 指标」，`opentelemetry-collector.yaml` 的文件头也写着「含 cloudflared」，
+  但实际上 homelab 从来没有过 cloudflared 的 scrape job，也没有任何 ServiceMonitor/PodMonitor
+  —— `cloudflared-metrics` 这个 Service 自建成起就无人采集。判据是
+  `curl -s $PROM/api/v1/targets | grep cloudflared`，**不是文档里怎么写的**。
 
 ### oracle-k3s
 
 - `cloudflared` 在 `cloudflare` namespace 暴露 `:2000/metrics`
 - oracle-k3s 的 OTel Collector 采集 `cloudflared` 指标后，通过 `prometheusremotewrite` 写回 homelab Prometheus
+
+  ⚠️ 这里的 prometheus receiver 指向 **ClusterIP DNS 名**（`cloudflared-metrics.cloudflare.svc:2000`），
+  抓的是 VIP，每次只随机命中一个 pod。单副本下无所谓，但**副本数一旦提回 ≥2 就分不出单副本死活**
+  （挂掉一个，`ha_connections` 照样报 4）。homelab 侧不受影响：ServiceMonitor 抓的是
+  Endpoints，每个 pod 一个 target。
 
 ### 已移除的旧采集项
 
@@ -66,28 +90,46 @@ cloudflared:2000 -> Prometheus / OTel Collector -> Grafana
 
 1. Tunnel up/down 状态
 2. `cloudflared_tunnel_ha_connections`
-3. `cloudflared_tunnel_active_streams`
-4. `rate(cloudflared_tunnel_total_requests[5m])`
-5. `cloudflared_tunnel_request_errors`
-6. `cloudflared_tunnel_server_locations`
+3. `cloudflared_tunnel_concurrent_requests_per_tunnel`
+4. `rate(cloudflared_tunnel_response_by_code_total[5m])` by `status_code`
+5. `cloudflared_tunnel_server_locations`
+
+### ☠️ 指标名与标签的坑（2026-08-13 逐条对着 `/metrics` 核过）
+
+本节此前列的四个名字里有三个**根本不存在**，面板不可能出过数据。真实情况：
+
+| 文档曾经写的（不存在） | 真实的 |
+|------|--------|
+| `cloudflared_tunnel_total_requests` | `cloudflared_tunnel_requests_total`（⚠️ 但见下，恒为 0） |
+| `cloudflared_tunnel_request_errors` | `cloudflared_tunnel_request_errors_total` |
+| `cloudflared_tunnel_active_streams` | `cloudflared_tunnel_concurrent_requests_per_tunnel` |
+| `server_locations` 的 `location` 标签 | `edge_location`（另有 `connection_id`） |
+
+⚠️ 更坑的是：**即使把 `cloudflared_tunnel_requests_total` 的名字写对，它实测也恒为 0**
+（四个 pod 全 0，同一时刻 `concurrent_requests_per_tunnel` 是 3），当前 cloudflared 版本已废弃它。
+隧道侧真正有数的请求计数器是 `cloudflared_tunnel_response_by_code_total{status_code}`。
+判活优先用 `ha_connections`。
+
+按 hostname / 路由的 RED 依然只能看 cilium-envoy 的 `envoy_cluster_upstream_rq`
+（cloudflared 指标不带 hostname 标签），见 `k8s/helm/manifests/monitoring/cilium-envoy-servicemonitor.yaml`。
 
 ## 常用 PromQL
 
 ```promql
-# 每个集群的 tunnel HA 连接数
+# 每个集群的 tunnel HA 连接数（单副本下正常值 = 4）
 sum by (cluster) (cloudflared_tunnel_ha_connections)
 
-# 每个集群当前活跃 streams
-sum by (cluster) (cloudflared_tunnel_active_streams)
+# 每个集群当前在途请求数
+sum by (cluster) (cloudflared_tunnel_concurrent_requests_per_tunnel)
 
-# 每个集群最近 5 分钟请求速率
-sum by (cluster) (rate(cloudflared_tunnel_total_requests[5m]))
+# 每个集群最近 5 分钟按状态码的响应速率
+sum by (cluster, status_code) (rate(cloudflared_tunnel_response_by_code_total[5m]))
 
 # 错误请求速率
-sum by (cluster) (rate(cloudflared_tunnel_request_errors[5m]))
+sum by (cluster) (rate(cloudflared_tunnel_request_errors_total[5m]))
 
 # 按 PoP 观察边缘连接
-sum by (cluster, location) (cloudflared_tunnel_server_locations)
+sum by (cluster, edge_location) (cloudflared_tunnel_server_locations)
 ```
 
 ## 故障排查

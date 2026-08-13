@@ -8,7 +8,11 @@
 #        → Loki（native OTLP）/ Tempo（OTLP gRPC）
 #
 # ⚠️ 刻意没有 metrics 管道：homelab 指标由 kube-prometheus-stack 原生抓取
-# （ServiceMonitor + additionalScrapeConfigs，含 cloudflared），collector 不做重复采集。
+# （ServiceMonitor + additionalScrapeConfigs），collector 不做重复采集。
+# ⚠️ 本行 2026-08-13 前写着「含 cloudflared」，是**错的**——homelab 当时根本没有
+# cloudflared 的 scrape job，Service 无人采集。现已补 ServiceMonitor
+# （k8s/helm/manifests/monitoring/cloudflared-servicemonitor.yaml）才名副其实。
+# 教训：「哪些指标被采集」的判据是 /api/v1/targets，不是这里的注释。
 # 历史注记：本文件 2026-03 的旧版从未随任何 helm release 生效过
 # （2026-07-31 实测：无 release、无 pod、Loki 无 homelab 日志）。
 # 设计取舍全集见 docs/decisions/otel-2026-alignment.md
