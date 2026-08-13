@@ -4,6 +4,7 @@
 
 | 日期 | 记录 | 内容 |
 |------|------|------|
+| 2026-08-13 | [iprule-guard-render-bug](2026-08-13-iprule-guard-render-bug.md) | Jinja `join('\n')` 在 YAML 块标量里渲染出字面 `\n` → worker 的 ip rule 收敛器断言塌成一行：5200 每轮 add 失败、5240/5260 连 metric 序列都不产生（absent-series 哑区），防线名存实亡而规则"看起来在位"。8-12 那批告警抓到真阳性。修渲染 + 规则清单统一（master 补漏配的 5240，ProxyCommand 路径复活）+ expected 对账指标与两条新告警 |
 | 2026-08-13 | [k3s-worker-join-106](2026-08-13-k3s-worker-join-106.md) | 106 入编 homelab worker 的四个坑：☠️ `tailscale up` 与 ip-rule 防护之间有致命窗口（`--accept-routes` 学到 LAN 段进 table 52，节点自己把自己踢下线，要从 tailnet 抢救）· 5250 被 tailscaled 占着（空位只有 5200/5220/5240/5260）· `disable-kube-proxy` 是 server-only、写进 agent 直接 fatal · **既存缺陷**：k8s-node 缺自己网段的 ip rule → inventory 里那条 ProxyCommand 一直是坏的。含两个假阴性判据（`pgrep -f` 自我污染、busybox `nslookup`） |
 | 2026-08-13 | [oracle-musl-dns-servfail](2026-08-13-oracle-musl-dns-servfail.md) | 为消除 CoreDNS 单上游而加的 `DNS=1.1.1.1 1.0.0.1`，让 OCI 私有 search 域 `vcn<id>.oraclevcn.com` 的探针拿到 **SERVFAIL 而非 NXDOMAIN** → **musl 放弃整轮 search**，oracle 上所有 Alpine 容器的外网解析变成抽签（glibc 免疫）；夜间备份三连挂当金丝雀。含「评审时看见了副作用、却把 rcode 和受害者都判错」的教训 |
 | 2026-08-13 | [macos-local-network-tcc](2026-08-13-macos-local-network-tcc.md) | 工作机上 terraform/kubectl 连 LAN 恒报 `no route to host`（ROADMAP 挂了很久的"原因不明"）→ 定性为 **macOS 本地网络隐私授权**：未授权的非 Apple 二进制访问本地链路返回 `EHOSTUNREACH`，与真路由故障同形。含 2×2 判别实验与三条已固化绕法 |

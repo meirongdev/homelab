@@ -120,6 +120,7 @@
           "
           }
 
+          # ⚠️ 增删 assert 行时同步改下面写死的 tailscale_iprule_rules_expected
           assert 5200 to 100.64.0.0/10 lookup 52
 
           total=$(cat "$STATE_FILE" 2>/dev/null || echo 0)
@@ -135,6 +136,9 @@
             printf '# HELP tailscale_iprule_reasserts_total 发现缺失并补齐的累计次数（状态文件持久）\n'
             printf '# TYPE tailscale_iprule_reasserts_total counter\n'
             printf 'tailscale_iprule_reasserts_total %s\n' "$total"
+            printf '# HELP tailscale_iprule_rules_expected 应断言的规则条数（写死，与上面 assert 行数同步）\n'
+            printf '# TYPE tailscale_iprule_rules_expected gauge\n'
+            printf 'tailscale_iprule_rules_expected 1\n'
           } > "$TMP" && mv "$TMP" "$PROM_FILE"
 
           if [ "$reasserted" -gt 0 ]; then
