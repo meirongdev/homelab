@@ -65,7 +65,7 @@ resource "tailscale_tailnet_key" "homelab_worker" {
   tags          = ["tag:homelab"]
   # ⚠️ 描述只能用字母数字和空格：括号/连字符会被 Tailscale API 以
   # `keys: description had invalid characters (400)` 拒绝（2026-08-13 实踩）。
-  description   = "homelab k3s worker on storage 106"
+  description = "homelab k3s worker on storage 106"
 }
 
 resource "tailscale_tailnet_key" "oracle" {
