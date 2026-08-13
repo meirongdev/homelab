@@ -1,12 +1,12 @@
 # K8s 资源管理与 QoS 策略
 
-> Last updated: 2026-08-10
+> Last updated: 2026-08-13
 > Status: 生效事实（本文只定**原则**，不存具体数值）
 
 本文档记录 Homelab 中 CPU/Memory requests & limits 的设定**原则**。
 **具体数值不在本文维护** —— 以 `k8s/helm/values/` 与集群实际为准
 （`kubectl -n <ns> get deploy -o yaml`）。2026-07-06 那轮调整的推导过程见
-[plans/architecture/2026-07-06-resource-optimization.md](../plans/architecture/2026-07-06-resource-optimization.md)（历史快照）。
+[plans/archive/2026-07-06-resource-optimization.md](../plans/archive/2026-07-06-resource-optimization.md)（历史快照）。
 
 > 延伸阅读：[K8s CPU 配置：QoS、Throttling 与驱逐策略](https://meirong.dev/posts/k8s-cpu-qos-resource-management/)
 
@@ -315,6 +315,6 @@ max by (cluster,namespace,pod,container) (kube_pod_container_resource_limits{res
 
 - [cost-and-rightsizing.md](cost-and-rightsizing.md) — OpenCost 成本归因 + KRR 右尺寸
 - [runbooks/oracle-k3s-shape-downsize.md](../runbooks/oracle-k3s-shape-downsize.md) — 改 A1 shape 的 SOP（本文那套原则的一次实战应用）
-- [plans/architecture/2026-07-06-resource-optimization.md](../plans/architecture/2026-07-06-resource-optimization.md) — 2026-07-06 那轮调整的推导（历史快照，非当前值）
+- [plans/archive/2026-07-06-resource-optimization.md](../plans/archive/2026-07-06-resource-optimization.md) — 2026-07-06 那轮调整的推导（历史快照，非当前值）
 - [observability-multicluster.md](observability-multicluster.md) — 多集群监控架构
 - [Kubernetes QoS 官方文档](https://kubernetes.io/docs/tasks/configure-pod-container/quality-service-pod/)

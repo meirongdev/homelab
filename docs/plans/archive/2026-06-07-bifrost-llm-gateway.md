@@ -1,13 +1,18 @@
 # Bifrost LLM gateway (replaces Cloudflare AI Gateway)
 
 **Date**: 2026-06-07
-**Status**: ✅ 已上线 — `llm.meirong.dev` 生产运行（ArgoCD `bifrost` App + oauth2-proxy 管理面 + virtual-key 网关面）。
-文首原写的"pending operator steps"（ZITADEL client / Vault secret / DNS apply / CF dashboard delete）均已完成。
+**Status**: ❌ **已退役（2026-08-08）** —— 曾于 2026-06-07 上线并生产运行（`llm.meirong.dev`，
+ArgoCD `bifrost` App + oauth2-proxy 管理面 + virtual-key 网关面），2026-08-08 整个 App
+（网关 + oauth2-proxy + `dgx-proxy` 全局 Service）删除，域名下线。
+**接替者尚未落地**：[LiteLLM 迁移](../apps/2026-08-01-litellm-gateway-migration.md)仍是 📐 设计，
+当前 LLM 消费方（jobs-sg 富化、Open Notebook、calibre 元数据）**直连 DGX vLLM**，无网关层。
+本文保留只为回答「为什么 Cloudflare AI Gateway 被换掉」与「PVC-SQLite 配置漂移这个坑长什么样」，
+**不代表现状，别照着执行**。
 
 ## Why
 
 The repo had a Cloudflare AI Gateway (`shared-llm`) intended as the unified LLM
-egress. Its own design doc ([`plans/archive/2026-05-31-cloudflare-ai-gateway-design.md`](../archive/2026-05-31-cloudflare-ai-gateway-design.md))
+egress. Its own design doc ([`plans/archive/2026-05-31-cloudflare-ai-gateway-design.md`](2026-05-31-cloudflare-ai-gateway-design.md))
 flagged the blocker: CF AI Gateway custom providers need a **Cloudflare-edge-reachable
 HTTPS upstream**, but the target models live on **Tailscale `100.x`** machines
 (DGX Spark, `100.89.15.120`) that CF's edge cannot reach. So it could never front them.

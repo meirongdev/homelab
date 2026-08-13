@@ -16,11 +16,11 @@
 ### 1.1 现在是什么
 
 - **Bifrost**（`maximhq/bifrost`）在 homelab `bifrost` 命名空间运行，`llm.meirong.dev`（ArgoCD `bifrost` App，见
-  [bifrost plan](./2026-06-07-bifrost-llm-gateway.md)；该 App 已于 2026-08-08 退役，本方案即其接替设计）。
+  [bifrost plan](../archive/2026-06-07-bifrost-llm-gateway.md)；该 App 已于 2026-08-08 退役，本方案即其接替设计）。
 - 架构：Cloudflare Tunnel → Cilium Gateway → HTTPRoute（`/v1,/openai,/anthropic,/genai` 直连 Bifrost +
   virtual-key 门；其余 → oauth2-proxy → ZITADEL 登录）。
 - Bifrost 上游：`http://100.97.87.120:8000`（DGX Spark vLLM `deepseek-v4-flash`），pod → tailnet 直连已实测可行。
-- 已知脆弱点（写进 [bifrost plan](./2026-06-07-bifrost-llm-gateway.md) 的坑）：Bifrost 的 enforce 开关 + 路由规则 +
+- 已知脆弱点（写进 [bifrost plan](../archive/2026-06-07-bifrost-llm-gateway.md) 的坑）：Bifrost 的 enforce 开关 + 路由规则 +
   虚拟 key 全在 **PVC SQLite**（`bifrost-data-local`），不在 git；重建 PVC 即"开门"。
 - 消费方：`~/.zshrc` 的 `BIFROST_VK` + `codex-dgx` alias → `~/.codex/bifrost.config.toml`
   （`base_url=https://llm.meirong.dev/v1`，`wire_api=responses`，model `custom_dgx/deepseek-v4-flash`）。
@@ -813,24 +813,21 @@ homelab LLM 网关（llm.meirong.dev）原为 Bifrost。其配置（enforce 开�
 - [ ] **Step 4: `docs/ROADMAP.md`**：第 4 行开放项里 `Bifrost 双机 fallback` → `LLM 网关双机 fallback（LiteLLM）`，
   链到本计划/决策
 
-- [ ] **Step 5: 归档 Bifrost plan**（R1：整体移除 → archive；R4：`⚠️ 已被取代` 须链到取代文档）
-
-```bash
-git mv docs/plans/apps/2026-06-07-bifrost-llm-gateway.md docs/plans/archive/2026-06-07-bifrost-llm-gateway.md
-```
-
-编辑文首：`> 状态: ⚠️ 已被取代 —— 由 [LiteLLM 迁移](../apps/2026-08-01-litellm-gateway-migration.md) 取代；Bifrost 无真实使用，已整体移除。`
-
-`docs/plans/archive/README.md` 的「已被取代」表加一行：
-`| 2026-06-07 | [Bifrost LLM gateway](2026-06-07-bifrost-llm-gateway.md) | 由自建 LiteLLM（[迁移计划](../apps/2026-08-01-litellm-gateway-migration.md)）取代；管理面自带认证、配置进 git |`
+- [x] **Step 5: 归档 Bifrost plan** —— **已于 2026-08-13 先期完成，本步骤不必再执行**。
+  因为 Bifrost 是 2026-08-08 **独立退役**的（不等本计划落地），plan 却一直挂着
+  「✅ 已上线、生产运行」的假状态，故提前按 R1 归档：文件已在
+  [`plans/archive/2026-06-07-bifrost-llm-gateway.md`](../archive/2026-06-07-bifrost-llm-gateway.md)，
+  状态改的是 `❌ 已退役（2026-08-08）`（**不是**原计划的 `⚠️ 已被取代`——取代者还没落地），
+  `archive/README.md` 的行进了「已取消」表而非「已被取代」表。
+  本计划落地后可把那两处改写成「已被取代 → LiteLLM」。
 
 - [ ] **Step 6: `cloudflare/terraform/README.md`**：`LLM gateway` 段把 Bifrost 描述改为 LiteLLM（hostname 与
   "tailnet 直连 100.x"的论证不变），链接指到本计划/决策
 
 - [ ] **Step 7: 更新 plans 索引与计数**
-  - `docs/plans/apps/README.md`：删 `2026-06-07 Bifrost` 行（已归档）；本计划行已先期加入索引，
-    执行完成后把该行状态从 📐 设计 改成 ✅ 已完成
-  - `docs/plans/README.md`：apps 份数按实际改（归档一个 +1 新增 = 仍 9 份；执行完本计划标记 ✅ 后核对）
+  - `docs/plans/apps/README.md`：`2026-06-07 Bifrost` 行**已于 2026-08-13 随 Step 5 删除**；
+    本计划行已先期加入索引，执行完成后把该行状态从 📐 设计 改成 ✅ 已完成
+  - `docs/plans/README.md`：apps 份数按实际改（2026-08-13 归档三份后为 9；`check-docs.py` 会核）
 
 - [ ] **Step 8: 校验 + 提交**
 

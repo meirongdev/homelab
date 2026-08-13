@@ -1,10 +1,19 @@
 # 服务资源分配优化建议
 
-> 状态: ⚠️ **部分落地** —— 2026-07-06 的建议快照，**不代表当前实际 requests/limits**。
-> 当前值以集群为准（`kubectl -n <ns> get deploy -o yaml`）或以 `k8s/helm/values/` 为准。
+> 状态: ⚠️ **已被取代（2026-08-13 归档）** —— 本文调的那套服务在 homelab 上**已经不存在了**：
+> calibre-web 2026-08-03 迁 oracle、Bifrost + oauth2-proxy 2026-08-08 退役、
+> argocd-image-updater 2026-08-03 退役、restic 早已不写 NFS、VM 也从 12GB 变成 13312MB。
+> 逐条数值因此全部失效，**一条都不要照抄**。
+> - **原则**（requests 反映稳态 / limits 防抢占 / batch 按 peak 削）→
+>   [reference/k8s-qos-resource-management.md](../../reference/k8s-qos-resource-management.md)（唯一真相源）
+> - **当前数值** → `k8s/helm/values/`、`cloud/oracle/manifests/` 与集群本身
+> - **右尺寸怎么算** → [reference/cost-and-rightsizing.md](../../reference/cost-and-rightsizing.md) ·
+>   [runbooks/krr-report-triage.md](../../runbooks/krr-report-triage.md)
+>
+> 保留本文只为记录"当时按什么推导削的"这一套方法与风险分级。
 > 日期: 2026-07-06
 > 范围: homelab 集群（5600H, 12GB VM）常驻服务资源 requests/limits 调整
-> 前置: [2026-07-04 舰队架构优化](2026-07-04-fleet-architecture-optimization.md)（物理层）、
+> 前置: [2026-07-04 舰队架构优化](../architecture/2026-07-04-fleet-architecture-optimization.md)（物理层）、
 > [reference/k8s-qos-resource-management.md](../../reference/k8s-qos-resource-management.md)（QoS 策略基准）
 
 ---

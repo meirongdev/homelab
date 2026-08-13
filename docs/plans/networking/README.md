@@ -11,6 +11,5 @@
 | 2026-03-06 | [homelab Cilium Mesh 安装](2026-03-06-cilium-mesh-installation.md) | ✅ 已完成（CNI 决策事实来源，无独立 ADR） |
 | 2026-02-21 | [Tailscale 跨集群网络设计](2026-02-21-tailscale-network-design.md) | ✅ 已完成（模型后续演进过） |
 | 2026-02-20 | [Oracle Cloud Free Tier K3s 集群](2026-02-20-oracle-cloud-k3s-cluster.md) | ✅ 已完成 |
-| 2026-02-19 | [ArgoCD Image Updater](2026-02-19-argocd-image-updater.md) | ❌ 已退役（2026-08-03） |
 
 > 已归档（从未实施 / 已取消 / 已被取代 / 前提消失）的方案见 [plans/archive/](../archive/README.md)。
