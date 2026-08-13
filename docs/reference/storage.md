@@ -49,6 +49,15 @@ sqlite 依赖 POSIX 字节区间锁（`fcntl`）+ 同步小写入；NFS 的 NLM 
 
 ## 当前 PVC 清单（全部 `local-path`）
 
+⚠️ **2026-08-13 起 homelab 是双节点**，`local-path` 因此有了**两个物理落点**：
+`k8s-node`（现有全部 PVC 都在这）和新 worker `k8s-worker-106`（106 上那台 VM 的
+本地盘）。restic 的 homelab overlay **只备份 `k8s-node` 上的 hostPath**。
+☠️ 一旦有状态负载被排到 worker 上，它的 PVC 会**静默不备份**（H4 查的就是归属，
+但查不出落在哪个节点）。要么给这类负载钉 `nodeName`/nodeSelector 到 `k8s-node`，
+要么先扩 overlay。当前 worker 上只有 DaemonSet、无 PVC。
+→ [decisions/storage106-as-homelab-worker.md](../decisions/storage106-as-homelab-worker.md)
+
+
 2026-08-06 对**两个 live 集群**重新生成（上一版 08-03 的 oracle 行已有两处过期：
 漏了 `readlist-data`，且把 `uptime-kuma-data-v2` 写成了 `uptime-kuma-data`）。
 **集群里没有 `nfs-client` StorageClass** —— 引用它的 PVC 会永久 Pending。
