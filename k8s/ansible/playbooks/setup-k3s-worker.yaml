@@ -121,12 +121,18 @@
   hosts: k8s_workers
   become: true
   tasks:
-    - name: Read the node-token from the control plane
-      ansible.builtin.slurp:
-        src: /var/lib/rancher/k3s/server/node-token
-      delegate_to: k8s-node
-      register: k3s_node_token
-      run_once: true
+    # ☠️ token 由调用方（justfile 的 join-worker）经 k8s-node 的 **Tailscale 地址**
+    # 取好后传进来，本剧本刻意不用 `delegate_to: k8s-node`：inventory 里 k8s-node 的
+    # ProxyCommand（ssh -W 经 pve）**是坏的** —— pve 到 10.10.10.10 的 TCP 建不起来，
+    # 因为 k8s-node 缺一条 `to 10.10.10.0/24 lookup main` 的 ip rule，回程被 table 52
+    # 送进 tailscale0，非对称。2026-08-13 加 worker 时才暴露；根因未修，见
+    # docs/records/2026-08-13-k3s-worker-join-106.md。
+    - name: Require the cluster join token
+      ansible.builtin.assert:
+        that:
+          - k3s_token is defined
+          - k3s_token | length > 20
+        fail_msg: "缺 k3s_token —— 用 `just join-worker`，别直接调 ansible-playbook"
 
     - name: Create K3s config directory
       ansible.builtin.file:
@@ -159,11 +165,13 @@
             - eviction-soft=memory.available<250Mi,nodefs.available<15%
             - eviction-soft-grace-period=memory.available=2m,nodefs.available=2m
             - eviction-max-pod-grace-period=60
-          # 集群用 Cilium kubeProxyReplacement（见 k8s/cilium/values.yaml）。
-          # agent 默认会起 kube-proxy，不关会与 Cilium 抢 service 数据面。
-          disable-kube-proxy: true
+          # ⚠️ 这里**不要**写 disable-kube-proxy —— 它是 server-only flag，agent 会以
+          # `flag provided but not defined: -disable-kube-proxy` 直接 fatal 拒启
+          # （2026-08-13 实踩）。集群用 Cilium kubeProxyReplacement，agent 从 server
+          # 的集群配置继承「kube-proxy 已禁用」，无需也不能自己声明。
           protect-kernel-defaults: true
         mode: "0644"
+      register: agent_config
 
     - name: Check if K3s is already installed
       ansible.builtin.stat:
@@ -176,14 +184,22 @@
         curl -sfL https://get.k3s.io | \
           INSTALL_K3S_VERSION={{ k3s_version }} \
           K3S_URL=https://10.10.10.10:6443 \
-          K3S_TOKEN='{{ k3s_node_token.content | b64decode | trim }}' \
+          K3S_TOKEN='{{ k3s_token }}' \
           sh -s - agent
       when: not k3s_binary.stat.exists
       changed_when: true
       vars:
         k3s_version: v1.34.5+k3s1
 
-    - name: Wait for the k3s-agent service to be active
+    # config.yaml 改了要重启才生效（首装时安装脚本已启过一次；这条覆盖复跑的情况）。
+    - name: Restart k3s-agent when the config changed
+      ansible.builtin.systemd:
+        name: k3s-agent
+        state: restarted
+        daemon_reload: true
+      when: agent_config.changed and k3s_binary.stat.exists
+
+    - name: Ensure the k3s-agent service is running and enabled
       ansible.builtin.systemd:
         name: k3s-agent
         state: started
@@ -193,17 +209,20 @@
       retries: 10
       delay: 6
 
+# 验收从工作机用 kubectl 做，同样绕开坏掉的 ProxyCommand。
 - name: Verify the worker joined
-  hosts: k8s_masters
-  become: true
+  hosts: localhost
+  connection: local
+  gather_facts: false
   tasks:
     - name: Wait for the worker to report Ready
-      ansible.builtin.command: k3s kubectl wait --for=condition=Ready node/k8s-worker-106 --timeout=180s
-      register: worker_ready
+      ansible.builtin.command: >-
+        kubectl --context k3s-homelab wait --for=condition=Ready
+        node/k8s-worker-106 --timeout=180s
       changed_when: false
 
     - name: Show cluster nodes
-      ansible.builtin.command: k3s kubectl get nodes -o wide
+      ansible.builtin.command: kubectl --context k3s-homelab get nodes -o wide
       register: cluster_status
       changed_when: false
 

@@ -54,9 +54,17 @@ setup-tailscale-worker authkey:
       -e "tailscale_authkey={{ authkey }}" \
       --private-key ~/.ssh/vgio
 
-# 把 106 上的 VM 以 agent 身份加入本集群（先跑 setup-tailscale-worker，MTU 一致性依赖它）
+# 把 106 上的 VM 以 agent 身份加入本集群（先跑 setup-tailscale-worker，见剧本头 ③/③b）
+# ⚠️ token 在这里取，经 k8s-node 的 **Tailscale 地址**：inventory 里那条经 pve 的
+#    ProxyCommand 是坏的（k8s-node 缺 `to 10.10.10.0/24 lookup main`，回程走了隧道）。
 join-worker:
-    ansible-playbook playbooks/setup-k3s-worker.yaml --private-key ~/.ssh/vgio
+    #!/usr/bin/env bash
+    set -euo pipefail
+    TOKEN=$(ssh -i ~/.ssh/vgio -o BatchMode=yes ubuntu@100.94.186.7 \
+      'sudo cat /var/lib/rancher/k3s/server/node-token')
+    ansible-playbook playbooks/setup-k3s-worker.yaml \
+      --private-key ~/.ssh/vgio \
+      -e "k3s_token=$TOKEN"
 
 # Fix DNS fallback on K3s nodes and reapply CoreDNS public upstreams
 # Run after network interruption if image pulls fail (CoreDNS can't resolve external names)
