@@ -88,7 +88,19 @@ spec:
           parseMode: HTML
           sendResolved: true
           # 标题行按状态/严重度标 emoji + 加粗;正文列出各 alert 的 summary/description。
-          # 本集群告警文本为中文散文 + 反引号,无 <>& → HTML 安全。
+          # ⚠️ parseMode=HTML 对 annotation 正文有**硬约束**:Telegram 只认一个很小的
+          # 标签白名单(b/i/u/s/a/code/pre/blockquote/em/strong/del/ins/tg-spoiler),
+          # 任何其它 `<xxx>` 都会让 sendMessage 返回 400 `can't parse entities:
+          # Unsupported start tag` —— **该条告警就永远发不出去**,而 Alertmanager 侧
+          # 只表现为 notifications_failed_total 涨一格,没人会注意。
+          # 反引号是 Markdown,在 HTML 模式下**不提供任何保护**,包在里面照样被当标签解析。
+          # ✋ 所以 runbook 里的占位符**一律写 `$name`,不要写 `<name>`**。
+          # 2026-08-13 修正:此处原注释断言"无 <>& → HTML 安全",但当时 prometheus-rules.yaml
+          # 里实际有 4 处 `<...>`(DgxSparkMemoryPressure ×2、DgxSparkOOMKill ×1 的
+          # `ssh <dgx>`,以及 **critical 的 VaultSealed** 的 `unseal <key>`)。
+          # 它们一直没暴露,只因为这几条恰好都还没真正触发过 —— 属于"首次触发即静默失败"
+          # 的埋雷,已全部改成 `$dgx` / `$key`。加新规则时别把这个模式带回来。
+          # 注:裸 `&`(如 `a && b`)Telegram 容忍,今天 NodeRebooted 就带 `&&` 正常投递了。
           message: |-
             {{ if eq .Status "resolved" }}✅ <b>RESOLVED</b>{{ else if eq .CommonLabels.severity "critical" }}🆘 <b>CRITICAL</b>{{ else }}⚠️ <b>WARNING</b>{{ end }} · <b>{{ .CommonLabels.alertname }}</b>{{ if .CommonLabels.cluster }} @ {{ .CommonLabels.cluster }}{{ end }}
             {{ range .Alerts }}

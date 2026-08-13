@@ -62,7 +62,7 @@ spec:
             summary: "Vault is sealed — ESO cannot sync secrets"
             description: |
               Vault has been sealed for 1+ minute. All ExternalSecrets will fail until unsealed.
-              Run: `just vault-unseal` (from k8s/helm/) or `kubectl exec -n vault vault-0 -- vault operator unseal <key>`
+              Run: `just vault-unseal` (from k8s/helm/) or `kubectl exec -n vault vault-0 -- vault operator unseal $key`
 
         - alert: VaultUnreachable
           expr: up{job=~".*vault.*"} == 0
@@ -369,8 +369,8 @@ spec:
             description: |
               DGX Spark（GB10，128GB 统一内存）任务在等内存，推理吞吐会掉。
               ⚠️ 别再看 `MemAvailable` 判断（模型常驻使其长期低位，与压力无关），
-              看 PSI：`ssh <dgx> 'cat /proc/pressure/memory'`。
-              Check: `ssh <dgx> 'free -h; nvidia-smi'`，看是否有该卸载的模型常驻。
+              看 PSI：`ssh $dgx 'cat /proc/pressure/memory'`。
+              Check: `ssh $dgx 'free -h; nvidia-smi'`，看是否有该卸载的模型常驻。
         - alert: DgxSparkOOMKill
           # 确定性指标：真的被杀了。0 容忍——7 天基线就是 0。
           expr: increase(node_vmstat_oom_kill{job="node-exporter-dgx-spark"}[1h]) > 0
@@ -381,7 +381,7 @@ spec:
             summary: "{{ $labels.nodename }} 发生 OOM kill"
             description: |
               过去 1 小时内核 OOM killer 杀掉了进程（7 天基线为 0，任何一次都是异常）。
-              Check: `ssh <dgx> 'dmesg -T | grep -i "killed process" | tail'`。
+              Check: `ssh $dgx 'dmesg -T | grep -i "killed process" | tail'`。
               ⚠️ DGX 没有 node_filesystem_* 指标（容器化 node_exporter 未挂宿主根），磁盘只能看 SMART。
 
         # ☠️ 覆盖盲区（2026-08-09 补）：**两个集群在 08-08 各重启过一次，告警一声没吭**。
