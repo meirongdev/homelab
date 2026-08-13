@@ -1,6 +1,6 @@
 # ArgoCD Application Patterns
 
-> Last updated: 2026-08-09
+> Last updated: 2026-08-13
 > Status: 生效事实
 >
 > 当前 ArgoCD 管理模式分析、可选 pattern 对比与取舍建议。
@@ -117,7 +117,7 @@ homelab 负载必须显式写 `https://100.94.186.7:6443`，写错会把整套 h
   [networking-ingress.md](networking-ingress.md)；oracle 侧 `helm.releaseName` 的坑见下文坑 2。
 - ~~`argocd-image-updater`~~ ❌ 2026-08-03 退役（0 个 CR 空转数月）；机制存档
   [../decisions/argocd-image-updater.md](../decisions/argocd-image-updater.md)，替代方向
-  Renovate（ROADMAP #10）。
+  Renovate（ROADMAP #12）。
 
 ### oracle-k3s App（kustomize 树）的专有事实
 
