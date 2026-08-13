@@ -1,6 +1,6 @@
 # Tailscale Cross-Cluster Networking
 
-> Last updated: 2026-08-12
+> Last updated: 2026-08-13
 > Status: 生效事实
 >
 > Rewritten 2026-07-07 after the topology review. The original design (each K3s node
@@ -272,6 +272,29 @@ homelab k8s-node → curl 100.97.87.120:8000/v1/models → 200
 
 The ACL already allows `tag:oracle` to `*:*`, so **widening the ACL changes
 nothing** — the peer isn't in oracle's netmap at all.
+
+#### Sharing carries the device only — no subnet routes, hence no ClusterMesh
+
+**Node sharing does not carry subnet routes or exit nodes in either direction.**
+Consequences, measured 2026-08-13 after the Sparks formed their own k3s + Cilium
+cluster:
+
+- `pve`'s `10.10.10.0/24` is invisible to the Sparks → they cannot reach
+  `10.10.10.10`, homelab's node IP (`ping` 100% loss; `ip route get` falls through
+  to their own LAN gateway `10.14.20.1`; `tailscale debug prefs` → `"RouteAll": false`).
+- The Sparks' k3s `--node-ip` is `192.168.200.101/102` (their back-to-back NCCL
+  link) and we cannot receive a route for it → homelab cannot reach it either.
+- Those two node IPs are exactly what Cilium ClusterMesh VXLAN-encapsulates
+  **toward**, so the cross-cluster node plane cannot exist. Extending the mesh to
+  the DGX cluster was evaluated and rejected —
+  [dgx-clustermesh-not-adopted](../decisions/dgx-clustermesh-not-adopted.md)
+  (also covers the `cluster.id` collision and the DERP-only 2.28 MB/s link).
+- ⚠️ `tailscale ping` to a shared node succeeds **while real TCP to it fails**
+  (verified against homelab's `:32379`): it is a path-layer probe and does not
+  traverse the ACL packet filter. Never use it as evidence a port is reachable.
+
+Consuming the DGX inference endpoint from homelab therefore uses a plain Service +
+hand-written `Endpoints` pointing at the Spark's Tailscale IP — no CNI involvement.
 
 ⚠️ **Untagging `node0` is not a small fix.** Tailscale **OAuth clients can only
 create tagged devices**, and node0 was authenticated with an OAuth-client preauth
