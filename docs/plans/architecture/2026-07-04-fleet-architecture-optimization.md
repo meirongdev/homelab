@@ -3,6 +3,25 @@
 > 状态: ⚠️ **部分落地** —— 建议快照，非现状。ZITADEL 迁 oracle、dead-man's switch、restic 备份、核显 UMA 显存调整（2GB→512MB）已做；
 > 离站备份、DGX Spark 入编仍开放，见 [ROADMAP](../../ROADMAP.md)。
 > 日期: 2026-07-04
+
+> **2026-08-13 拆分导航——仍生效的部分已全部回写到常青文档，本文只剩证据链。**
+> 下表是唯一需要读的东西；正文保留 2026-07-04 的原始诊断，**其中的数值一律过期**
+> （oracle 4C/24G→**2C/12G**、k8s VM 12GB→**13312MB**、宿主可见 13.5GB→**15.0GB**、
+> idle 74°C→**60–62°C**）。
+>
+> | 本文内容 | 现在去哪读 |
+> |---|---|
+> | P0-1 离站备份 · P1-5 DGX 入编 · P2-8 恢复演练自动化 · P2-7/9 Renovate/告警噪声 | [ROADMAP](../../ROADMAP.md) 开放项 #1 / #5 / #6 / #12（**唯一开放项清单**） |
+> | §4 pve 内存实测（UMA、MemTotal、VM 分配） | [reference/homelab-host-power-thermal.md](../../reference/homelab-host-power-thermal.md)「内存容量」——UMA 已收回，本文数值是收回**前**的 |
+> | 「明确不建议做的」里仍生效的：多节点 HA · Thanos/Mimir · 106 并入集群 · cert-manager · Vault auto-unseal | [ROADMAP](../../ROADMAP.md)「不做 / 已取消」表 |
+> | §附 106 入集群评估 | 结论仍成立，但**做法已细化**：106 上开独立单节点 `k3s-exp`（非 homelab worker），见 [ADR](../../decisions/storage106-experiment-vm.md) |
+>
+> **❌ 已被后续推翻的四条**（读正文时请忽略）：
+> ① 「不引入 CNPG 之类 Postgres operator」—— 2026-07-18 起 ZITADEL DB 用 CNPG，2026-08-06 又加共享 `apps-pg`
+> （[ADR](../../decisions/shared-postgres-platform.md)）；② 「LGTM 整体不搬」—— Loki/Tempo 已迁 oracle
+> （[迁移计划](2026-08-02-homelab-to-oracle-workload-migration.md)）；③ 「Gotify 迁 oracle」—— Gotify 整体退役，
+> 告警改 Alertmanager 原生 Telegram（[ADR](../../decisions/alerting-telegram-migration.md)）；
+> ④ 「Bifrost 配双 DGX fallback」—— Bifrost 2026-08-08 退役（[归档](../archive/2026-06-07-bifrost-llm-gateway.md)）。
 > 范围: 全舰队（homelab / oracle-k3s / storage-106 / DGX Spark ×2 / MacBook）机器角色与集群架构
 > 定位: 承接 `docs/plans/networking/2026-03-07-homelab-oracle-architecture-optimization.md` 与 `docs/plans/archive/../archive/2026-03-07-simplification-recommendations.md`，聚焦**物理层错配**而非新增组件
 
