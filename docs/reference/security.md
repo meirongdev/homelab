@@ -1,6 +1,6 @@
 # K3s 集群安全架构 (Security Architecture)
 
-> Last updated: 2026-08-11
+> Last updated: 2026-08-13
 > Status: 生效事实
 > Scope: 双集群（homelab + oracle-k3s）的纵深防御模型 —— source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
@@ -8,7 +8,7 @@
 
 ## 0. 设计原则（硬约束驱动）
 
-- **单节点热笔记本约束**：homelab 是 Ryzen 5600H 笔记本（空闲 ~60–62°C、内存紧、重启需 `just homelab-recover`；功耗/散热细节见 [homelab-host-power-thermal.md](homelab-host-power-thermal.md)）。所有安全组件 **fail-open + 控 CPU**：不引入会在故障时阻断调度的 fail-closed 准入，周期/串行扫描优先于常驻高负载。
+- **热笔记本约束**：homelab 的控制面 `k8s-node` 是 Ryzen 5600H 笔记本（2026-08-13 起另有一个 worker `k8s-worker-106`，但安全组件仍以控制面为准）（空闲 ~60–62°C、内存紧、重启需 `just homelab-recover`；功耗/散热细节见 [homelab-host-power-thermal.md](homelab-host-power-thermal.md)）。所有安全组件 **fail-open + 控 CPU**：不引入会在故障时阻断调度的 fail-closed 准入，周期/串行扫描优先于常驻高负载。
 - **GitOps 优先**：除两类例外（PSA 标签用 `just`、Vault/ESO/argocd 用 Helm），安全策略均经 ArgoCD `git push` 声明式下发。
 - **单用户威胁模型**：一个可信运维者、无敌对多租户。据此**有意延后**集群级网络默认拒绝（横向移动收益边际低、debug 成本高）。
 

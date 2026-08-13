@@ -33,6 +33,7 @@ almost nothing — see the underlay route table below.
 | `pve` (100.118.193.51) | `10.10.10.0/24`, `192.168.50.0/24` | LAN access for ops; **also carries oracle→homelab VXLAN outer packets** |
 | `node0` (100.107.166.37) | `10.0.0.26/32` (its own VCN IP) | homelab→oracle VXLAN outer packets |
 | `k8s-node` (100.94.186.7) | **nothing** | ⚠️ see the poisoning gotcha below |
+| `k8s-worker-106` (100.74.162.97) | **nothing** | 同上，理由更直接：它就在 `192.168.50.0/24` 上，而 pve 正是该段的 subnet router（2026-08-13 入编，[ADR](../decisions/storage106-as-homelab-worker.md)） |
 
 Pod/Service CIDRs (10.42/10.43/10.52/10.53) are **not** advertised anymore.
 
@@ -63,6 +64,28 @@ segment. Non-destructive test on `k8s-node` 2026-07-19 (drop the rule → read t
 route → restore immediately): without the rule, traffic to 192.168.50.x
 immediately switches to `dev tailscale0` — an extra hop through the tunnel to
 reach a host that is one LAN hop away. Keep the rule on **both** nodes.
+
+### 5240 control-plane-direct ip-rule —— 只有 `k8s-worker-106` 需要
+
+2026-08-13 入编的 worker 在 `192.168.50.0/24`，而控制面在 `10.10.10.0/24`
+（pve `vmbr0` 的第二地址段）。pve 合法通告 **两个** 段，worker 带 `--accept-routes`
+于是 table 52 里两段都有。5260 只覆盖前者，控制面那段会被劫进隧道 —— k3s agent 与
+cilium-agent（`k8sServiceHost: 10.10.10.10`）的存活就挂在了 tailnet 上，还绕开了
+实测 0.8ms 的 LAN 直连。故 worker 多一条 **5240** `to 10.10.10.0/24 lookup main`。
+
+☠️ **优先级不能取 5250**：tailscaled 自己占着 **5210 / 5230 / 5250 / 5270**，
+留给我们的空位只有 **5200 / 5220 / 5240 / 5260**，且必须 < 5270 才抢得到
+`from all lookup 52`。2026-08-13 首版写成 5250 直接与它的
+`fwmark 0x80000/0xff0000 unreachable` 冲突。
+
+`k8s-node` **没有**这条规则，因此 pve 发起到 `10.10.10.10` 的 TCP 全部非对称失败
+（SYN 走 vmbr0 进、SYN-ACK 走隧道出）。后果是 `k8s/ansible/inventory/hosts.yaml`
+里给 k8s-node 声明的 ProxyCommand 访问路径**一直不可用**。
+⚠️ **未修**，两个选项见 [records/2026-08-13-k3s-worker-join-106.md](../records/2026-08-13-k3s-worker-join-106.md) §4。
+
+☠️ **给新节点跑 `setup-tailscale` 有个致命窗口**：`tailscale up` 一成功、收敛器还没装上
+的那几秒里，节点自己的 LAN 流量已被卷进隧道 —— SSH 会当场断，且断的是你正在用的那条。
+别在窗口内中断剧本；已经断了就从 tailnet 地址进去补规则。
 
 ### `tailscale-cgnat-route` ip-rule —— Cilium 身份标记撞上 Tailscale 的 fwmark
 

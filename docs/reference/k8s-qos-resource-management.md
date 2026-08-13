@@ -38,7 +38,7 @@ Homelab 由两个集群组成：
 | **Burstable** | 设置了 requests 或 limits，但不完全相等 | 中等 |
 | **BestEffort** | 均未设置 | 最先被驱逐 |
 
-`Burstable` 兼顾稳态预留和空闲时 burst，适合单节点家用场景。
+`Burstable` 兼顾稳态预留和空闲时 burst，适合本项目这种小规模家用集群。
 
 ### ⚠️ QoS 只排到类，类内排序看 Pod Priority
 
@@ -215,8 +215,12 @@ rate(container_cpu_cfs_throttled_seconds_total[5m])
 
 ## 检测 OOMKill（容器顶爆自身 limit）
 
-单节点上更常咬人的**不是**节点驱逐，而是单个容器撞到自己的 memory limit 被内核杀掉
+在**大节点**上更常咬人的**不是**节点驱逐，而是单个容器撞到自己的 memory limit 被内核杀掉
 （`exitCode 137`）。它**不影响邻居**，也因此很容易长期没人发现。
+
+⚠️ 这条判断在 2026-08-13 加入的 `k8s-worker-106` 上**不成立**：那台只有 2311Mi
+allocatable，且 eviction 阈值按 3G 收得很紧（`memory.available<150Mi` hard /
+`<250Mi` soft）。排在它上面的负载，节点驱逐是实打实的风险，两种都要看。
 
 ```bash
 # 谁最近被 OOM 杀过（--context 换 oracle-k3s 查另一集群）

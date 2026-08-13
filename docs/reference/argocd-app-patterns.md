@@ -324,7 +324,7 @@ root
 
 ## Guidance
 
-1. **双集群异构**（homelab 单节点 vs oracle-k3s free tier）决定了 ApplicationSet 的 Cluster generator 不是最佳选择——两个集群的 manifest 差别太大，template 里会塞满条件判断，降低可读性。
+1. **双集群异构**（homelab 双节点/amd64 vs oracle-k3s free tier/arm64；homelab 2026-08-13 加了 worker `k8s-worker-106`）决定了 ApplicationSet 的 Cluster generator 不是最佳选择——两个集群的 manifest 差别太大，template 里会塞满条件判断，降低可读性。
 2. **如果继续加 Helm 应用**（如再加 Grafana 全家桶成员）→ **ApplicationSet + Git generator**，用一个配置文件（例如 `argocd/appsets/helm-apps.json`）驱动，新增只需一行 JSON。⚠️ 这是**尚未采用的建议方案**，`argocd/appsets/` 目录当前不存在——本文中该路径与上面的 ApplicationSet YAML 都是示例，不是仓库现状。
 3. **如果不同组件需要不同的同步策略/namespace 权限** → **分层 App-of-Apps**，把 security 和 observability 拆开。
 4. **跨集群**：当前 `oracle-k3s.yaml` 用 Kustomize 直推是最简单的方式。如果 oracle 侧加更多应用，在 `cloud/oracle/manifests/` 内用 Kustomize `components/` 组织，ArgoCD 侧保持一个 Application 不变，这是约束跨集群复杂度最有效的边界。

@@ -1,7 +1,13 @@
 # storage-106 上的 k3s-exp 实验田：独立小集群，不是 homelab worker
 
 > 日期: 2026-08-13
-> 状态: ✅ 已完成
+> 状态: ❌ 已被取代（同日）→ [storage106-as-homelab-worker](storage106-as-homelab-worker.md)
+>
+> ⚠️ **本文不代表现状。** 同日运维者指示反转：那台 VM 已拆掉 k3s-exp、以
+> `k8s-worker-106` 身份加入 homelab 集群。下面「否决入集群 worker」的账**估算偏保守**
+> ——实测 3G VM 入伙后 requests 只占 928Mi/2311Mi(40%)、available 仍有 2130MB，
+> 远好于本文估的「只剩 0.5–0.9G」。保留本文是为了那笔账的推导过程和 8G 内存三方分配，
+> 结论以取代者为准。
 
 ## Context
 

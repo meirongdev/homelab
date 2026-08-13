@@ -91,7 +91,7 @@
 | 集群级网络默认拒绝 | **刻意延后**（非取消）：单用户威胁模型下横向移动收益边际低、debug 成本高。Hubble 已开做可见性，作为日后单 ns 灰度的前置。见 [security.md](reference/security.md) |
 | homelab 多节点 HA / etcd 三节点 | 2026-07-04 否决：硬件不支持、单用户收益为零。正确形态是**单节点 + 快速重建**（`just homelab-recover` + restic 备份体系）。加第二台 worker 时与 Talos 一并重评 |
 | Thanos / Mimir / 指标对象存储长期化 | 2026-07-04 否决：双写复杂、搬迁窗口长，`retention` + `retentionSize` 控制就够（见 `k8s/helm/values/kube-prometheus-stack.yaml`）。⚠️ 同批"LGTM 整体不搬"那半条**已被推翻**——Loki/Tempo 于 2026-08-02 迁 oracle（[迁移计划](plans/architecture/2026-08-02-homelab-to-oracle-workload-migration.md)），Prometheus/Grafana/Alertmanager 仍在 homelab |
-| storage-106 并入 homelab 集群 | 2026-07-04 否决：缺的是内存，而 106 仅 ~5GB 可用、CPU 弱 8 倍；计算压上 NFS 后端会放大爆炸半径（[评估附录](plans/architecture/2026-07-04-fleet-architecture-optimization.md)）。⚠️ **2026-08-13 的 `k3s-exp` 不推翻它**——那是 106 上的独立单节点实验集群，不是 homelab worker（[ADR](decisions/storage106-experiment-vm.md)） |
+| storage-106 并入 homelab 集群 | ⛔ **2026-08-13 已推翻并实施**：106 上的 VM 以 `k8s-worker-106` 入编 homelab（[ADR](decisions/storage106-as-homelab-worker.md) · [施工复盘](records/2026-08-13-k3s-worker-join-106.md)）。入编的是 **VM 不是宿主**，所以 2026-07-04 那条「计算压上 NFS 后端放大爆炸半径」的理由已不适用（NFS 2026-07-11 就退役了）；实测入伙税也远低于估算（requests 928Mi/2311Mi）。代价是 106 与 prod 的解耦被主动放弃 |
 
 ---
 

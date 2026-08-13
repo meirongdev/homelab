@@ -49,7 +49,7 @@ CLI 的终端程序（Terminal / iTerm / Claude Code）。授权后 terraform �
 |---|---|---|
 | terraform 连 106 的 PVE API | SSH 隧道 → `127.0.0.1:18006`（loopback 免疫） | `proxmox/terraform-storage/justfile` 的 `_tunnel` |
 | terraform 登 PVE 导磁盘 | provider `ssh.node.address` 指 **Tailscale** 地址 | `proxmox/terraform-storage/provider.tf` |
-| kubectl 连实验田 | SSH 隧道 → `127.0.0.1:16443` | `proxmox/ansible` 的 `just exp-tunnel` |
+| ~~kubectl 连实验田~~ | ~~SSH 隧道 → `127.0.0.1:16443`~~ | ⛔ 配方已随实验田退役（2026-08-13 同日 106 改入编 homelab worker）。那台机现在用主 kubeconfig 的 `k3s-homelab` context 就能看到 |
 
 ## 教训
 
