@@ -12,13 +12,16 @@ vault_token := env_var_or_default("VAULT_TOKEN", "")
 # 同一条规则仓库里本来就写着（argocd/applications/kube-prometheus-stack.yaml:25
 # 「chart 版本必须 pin：不 pin 时会随 chart repo 更新意外整栈升级」），只是没覆盖到这里。
 # ⚠️ 必须与 k8s/helm/justfile 的 cilium_version 保持一致 —— 两集群版本劈叉会断 ClusterMesh。
+# renovate: datasource=helm depName=cilium registryUrl=https://helm.cilium.io
 cilium_version := "1.20.0"
 # Cilium 1.20 要求的 Gateway API CRD 版本。⚠️ 与 k8s/helm/justfile 的 gateway_api_version 一致。
 # ☠️ 2026-08-11：这组 CRD 停留在 v1.2.1，导致两集群 Gateway API 控制器**静默瘫痪 30 小时**
 #    （新路由全部拿不到 status，旧路由照常 200 所以没人发现）。原委见 k8s/helm/justfile
 #    顶部 cilium_version 上方的长注释；修复配方 `just deploy-gateway-api-crds`。
+# renovate: datasource=github-releases depName=kubernetes-sigs/gateway-api
 gateway_api_version := "1.6.1"
 # 与 k8s/helm/justfile 的 eso_version 一致（两集群同版本，实测 helm list 均为 2.6.0）。
+# renovate: datasource=helm depName=external-secrets registryUrl=https://charts.external-secrets.io
 eso_version    := "2.6.0"
 
 # ─── Node Setup ────────────────────────────────────────────────

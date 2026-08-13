@@ -1,0 +1,168 @@
+// Renovate 配置 —— 让「版本钉扎」不再靠人肉记账。
+//
+// 为什么引入（2026-08-13）：28 个 ArgoCD App、两套 ansible、四个 justfile 的版本变量
+// 已经过了人肉能管住的规模，而漂移是**静默**的：
+//   · 2026-08-11 Cilium 1.20 升级漏配 Gateway API CRD → 控制器静默不初始化 30 小时，
+//     旧路由照常 200、无告警，只有新增路由 503；
+//   · 2026-08-13 复查发现 oracle 的 ansible 剧本**仍钉着 v1.2.1**，注释却写"与 homelab 一致"
+//     —— 这种漏改只在重建集群时才爆；
+//   · 同日扫全仓还发现 node_exporter 在三套 ansible 里是 1.11.1 / 1.10.0 / 1.11.1。
+// docs/plans/architecture/2026-07-07-tech-debt-and-evolution.md 早就写明"这类漂移必然复发"。
+//
+// 与 CI 的分工（两者互补，缺一不可）：
+//   scripts/check-version-pairs.py  拦「多处副本互相不一致」（存量正确性，PR 就红）
+//   Renovate                        推「上游有新版本了」（增量新鲜度，只开 PR）
+//
+// ☠️ 刻意的三条自我约束：
+//   ① **永不 automerge**。这仓库有大量"合并≠部署"的手动 helm 组件，自动合并会制造
+//      git 与现网不一致的假象。
+//   ② **不开 pinDigests**。仓库对 arm64 关键镜像要求钉**多架构 index digest**，
+//      让 Renovate 给所有镜像铺 digest 会淹掉 PR 队列；已有 digest 的它会自动跟着升。
+//   ③ **不管 docs/**。文档里的示例 YAML 是历史快照（plans/ 写完即冻结），改它们是错的。
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: [
+    "config:recommended",
+    ":dependencyDashboard",
+    // 安全类更新单独走、不受 schedule 限制（下面 vulnerabilityAlerts 也有覆盖）
+    ":semanticCommits",
+  ],
+  timezone: "Asia/Shanghai",
+  // 每周一批量：日更会让 PR 变噪音，而这套系统的升级节奏本来就是"周末找个窗口"。
+  schedule: ["* 0-6 * * 1"],
+  prConcurrentLimit: 3,
+  prHourlyLimit: 2,
+  automerge: false,
+  rangeStrategy: "pin",
+  commitMessagePrefix: "chore(deps):",
+  labels: ["dependencies"],
+  ignorePaths: [
+    "docs/**",           // plans/ 是冻结快照，reference/ 里的 YAML 是说明用
+    ".github/prompts/**",
+    ".github/skills/**",
+  ],
+
+  // ── 内置 manager：ArgoCD Application 的 chart 版本 ────────────────────────
+  // 默认只认 argocd.yaml，本仓库是 argocd/applications/<app>.yaml，需显式放宽。
+  // ⚠️ 字段名用 fileMatch 而非新版的 managerFilePatterns：本地 renovate-config-validator
+  // 实测 37.x 只认前者，而 41+ 仍兼容它（只是标记 deprecated）。等确定跑的是 41+ 再换名，
+  // 换名时注意新语法要求正则加 /…/ 定界符。
+  argocd: {
+    fileMatch: ["^argocd/applications/.+\\.yaml$"],
+  },
+
+  // ── 内置 manager：清单里的容器镜像 ────────────────────────────────────────
+  // 只收 GitOps 同步树（改这些文件 = 改现网），不收 docs。
+  kubernetes: {
+    fileMatch: [
+      "^k8s/helm/manifests/.+\\.yaml$",
+      "^cloud/oracle/manifests/.+\\.yaml$",
+      "^backup/.+\\.yaml$",
+    ],
+  },
+
+  // ── 自定义 manager：justfile / ansible 里的版本变量 ───────────────────────
+  // 约定：版本行**上面一行**写 `# renovate: datasource=… depName=… [registryUrl=…]`。
+  // 把来源写在版本旁边（而不是攒在本文件里），是为了让改版本的人当场看到它从哪来。
+  customManagers: [
+    {
+      customType: "regex",
+      fileMatch: ["(^|/)justfile$"],
+      matchStrings: [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+?)(?: registryUrl=(?<registryUrl>\\S+))?\\s*\\n[a-z0-9_]+\\s*:=\\s*\"(?<currentValue>[^\"]+)\"",
+      ],
+    },
+    {
+      customType: "regex",
+      fileMatch: [
+        "^k8s/ansible/playbooks/.+\\.yaml$",
+        "^cloud/oracle/ansible/playbooks/.+\\.yaml$",
+        "^proxmox/ansible/playbooks/.+\\.yaml$",
+        "^macbook/ansible/playbooks/.+\\.yaml$",
+      ],
+      matchStrings: [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+?)(?: registryUrl=(?<registryUrl>\\S+))?\\s*\\n\\s*[a-z0-9_]+:\\s*\"?(?<currentValue>[^\"\\s#]+)\"?",
+      ],
+    },
+    {
+      // CI 里刻意 pin 的工具版本。`uses:` 那些由内置 github-actions manager 管，
+      // 这里只管 with:/run: 里的裸版本号。
+      // ☠️ **刻意不标 just 与 shellcheck**：它们的版本在同一行里出现两次
+      //    （tarball 的 release tag + 解出的目录名 / 镜像 tag 与注释），
+      //    regex manager 只会替掉第一处，PR 会带着一条拼不出来的下载 URL —— 那种 PR
+      //    比不开 PR 更浪费时间。要管它们得先把版本抽成 env 变量，属独立改动。
+      customType: "regex",
+      fileMatch: ["^\\.github/workflows/.+\\.ya?ml$"],
+      matchStrings: [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+?)\\s*\\n\\s*[a-z_]+:\\s*\"?(?<currentValue>\\d+\\.\\d+\\.\\d+)\"?",
+      ],
+    },
+  ],
+
+  packageRules: [
+    {
+      // ☠️ Cilium 与 Gateway API CRD 是**一对**：必须在同一个 PR 里一起看。
+      // 分开升就是 2026-08-11 那次 30 小时静默 stall 的复现路径。
+      matchDepNames: ["cilium", "kubernetes-sigs/gateway-api"],
+      groupName: "cilium + gateway-api（配对升级）",
+      labels: ["dependencies", "manual-helm", "needs-crd-step"],
+      prBodyNotes: [
+        "⚠️ **这两个必须一起升**，且合并后需要人工动作：",
+        "1. `cd k8s/helm && just deploy-gateway-api-crds`（两集群各跑一次，注意 `ctx`）",
+        "2. `just deploy-cilium`（Cilium 是 manual-helm，**合并 ≠ 部署**）",
+        "3. 给 `scripts/check-version-pairs.py` 的 `CILIUM_GATEWAY_API` 加一行新 minor，否则 CI 会红（这是特意的：强迫读一遍上游的 Gateway API 前置条件）",
+        "4. 验收看 `kubectl -n kube-system logs deploy/cilium-operator | grep 'Required GatewayAPI'`，**别拿 curl 旧域名当证据**",
+        "5. oracle 侧 ansible 剧本里的 `gateway_api_version` 也在本 PR 内，别只改一处",
+      ],
+    },
+    {
+      // manual-helm 四件套：git 里改了 values/版本，现网**不会**自动跟着变。
+      matchDepNames: ["vault", "external-secrets", "argo-cd"],
+      labels: ["dependencies", "manual-helm"],
+      prBodyNotes: [
+        "⚠️ 本组是 **manual-helm**（Cilium / Vault / ESO / ArgoCD 本体）：ArgoCD 不管它们，",
+        "合并只是改了 git，必须手动 `helm upgrade`（配方见 `k8s/helm/justfile`）。",
+        "不部署就会留下「git 说新版、现网是旧版」的假象。",
+      ],
+    },
+    {
+      // 两集群镜像部署的 App（external-dns / opencost / trivy-operator 各两份）：
+      // 同名 chart 分组成一个 PR，天然满足 check-version-pairs 的 V1。
+      matchManagers: ["argocd"],
+      groupName: "{{depName}}（两集群同版本）",
+    },
+    {
+      matchDepNames: ["prometheus/node_exporter", "prometheus-community/smartctl_exporter"],
+      groupName: "exporters（三套 ansible 机队）",
+      prBodyNotes: [
+        "这几个 exporter 分散在 proxmox / k8s / macbook 三套 ansible 里，历史上曾漂到不同版本",
+        "（2026-08-13 实测 1.11.1 / 1.10.0 / 1.11.1）。本 PR 把它们一起抬平。",
+        "⚠️ 合并后要各自重跑对应 playbook 才生效（`just install-node-exporter` / `make node-exporter-deploy`）。",
+      ],
+    },
+    {
+      // k3s 是集群本体：升级要停机窗口，不该混在周更批次里
+      matchDepNames: ["k3s-io/k3s"],
+      labels: ["dependencies", "needs-maintenance-window"],
+      schedule: ["at any time"],
+      prBodyNotes: [
+        "⚠️ k3s 版本升级需要维护窗口，且要与现网实际版本对齐后再改（`kubectl get nodes`）。",
+        "本仓库只在 worker 剧本里钉了 `k3s_version`，master 走 stable —— 改前先读",
+        "`k8s/ansible/playbooks/setup-k3s-worker.yaml` 的文件头约束。",
+      ],
+    },
+    {
+      // GitHub Release 的 tag 带 v 前缀，去掉后才能与变量里的裸版本比对
+      matchDatasources: ["github-releases"],
+      extractVersion: "^v(?<version>.+)$",
+    },
+  ],
+
+  // CVE 类更新不等周更窗口。与 Trivy 的分工：Trivy 看**运行中镜像**，
+  // Renovate 看**仓库声明的依赖**，两者视角不同（见 reference/security.md 第 6 层）。
+  vulnerabilityAlerts: {
+    enabled: true,
+    schedule: ["at any time"],
+    labels: ["dependencies", "security"],
+  },
+}

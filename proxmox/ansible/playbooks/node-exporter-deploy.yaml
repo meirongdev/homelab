@@ -4,7 +4,9 @@
   hosts: storage
   gather_facts: true
   vars:
+    # renovate: datasource=github-releases depName=prometheus/node_exporter
     node_exporter_version: "1.11.1"
+    # renovate: datasource=github-releases depName=prometheus-community/smartctl_exporter
     smartctl_exporter_version: "0.14.0"
     node_exporter_port: 9100
     smartctl_exporter_port: 9633
@@ -219,7 +221,9 @@
   hosts: pve-1
   gather_facts: true
   vars:
+    # renovate: datasource=github-releases depName=prometheus/node_exporter
     node_exporter_version: "1.11.1"
+    # renovate: datasource=github-releases depName=prometheus-community/smartctl_exporter
     smartctl_exporter_version: "0.14.0"
     node_exporter_port: 9100
     smartctl_exporter_port: 9633

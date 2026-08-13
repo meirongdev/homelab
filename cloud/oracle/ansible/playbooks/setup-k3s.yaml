@@ -329,6 +329,7 @@
     # 见 docs/records/2026-08-11-gateway-api-crd-stall.md）。
     # 2026-08-13 前这里钉着 v1.2.1 且注释声称"与 homelab 一致"（实际 homelab 已 1.6.1）
     # ——按旧值重建就是原样重放事故。
+    # renovate: datasource=github-releases depName=kubernetes-sigs/gateway-api
     gateway_api_version: "1.6.1"
   tasks:
     # k3s 内置 traefik 被 disable（见上面的 config），不再提供 Gateway API CRD。

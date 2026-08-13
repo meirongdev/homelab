@@ -8,6 +8,7 @@
   hosts: macbook
   gather_facts: true            # need ansible_user_dir
   vars:
+    # renovate: datasource=github-releases depName=prometheus/node_exporter
     node_exporter_version: "1.11.1"
     node_exporter_arch: darwin-arm64
     node_exporter_sha256: e987428618362c2d2540a68b722bd982ef1486c9961631298f20ea8fd57d3be4

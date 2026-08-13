@@ -23,7 +23,7 @@
 | 3 | 密钥 | Vault + ESO + 健康告警 | ✅ 生产 | `k8s/helm/values/vault-*`, `manifests/monitoring/alerts/eso-alerts.yaml` | 双 |
 | 4 | 准入：Pod 基线 | Pod Security Admission | ✅ 生产 | `just harden-psa` / oracle ns 清单 | 双 |
 | 5 | 准入：策略即代码 | Kyverno（Audit） | ✅ 生产 | `values/kyverno.yaml`, `manifests/kyverno-policies/` | homelab |
-| 6 | 供应链/CVE | Trivy Operator | ✅ 生产 | `values/trivy-operator.yaml` · `values/trivy-operator-oracle.yaml` | **双集群**（oracle 2026-08-03 补齐）|
+| 6 | 供应链/CVE | Trivy Operator（运行中镜像）+ Renovate（仓库声明的依赖，🚧 待装 App）| ✅ 生产 | `values/trivy-operator.yaml` · `values/trivy-operator-oracle.yaml` · `.github/renovate.json5` | **双集群**（oracle 2026-08-03 补齐）|
 | 7 | CIS 合规 | kube-bench（周巡检，钉 control-plane；worker 的 node 级检查未覆盖·有意接受） | ✅ 生产 | `manifests/kube-bench/kube-bench.yaml` | homelab |
 | 8 | 节点加固 | k3s `protect-kernel-defaults` + sysctl | ⏳ 待重启生效 | `k8s/ansible/playbooks/setup-k3s.yaml` | homelab |
 | 9 | 网络 | Cilium NetworkPolicy + Hubble 可见性 | 🟡 仅可见性 | Cilium（默认拒绝刻意延后） | 双 |
