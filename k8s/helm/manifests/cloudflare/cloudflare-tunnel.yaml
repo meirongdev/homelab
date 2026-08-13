@@ -65,8 +65,11 @@ spec:
               cpu: 200m
               memory: 128Mi
 ---
-# ClusterIP service for cloudflared metrics
-# Scraped by OTel Collector running in-cluster (no NodePort needed)
+# cloudflared 指标的 ClusterIP service（无需 NodePort）
+# ⚠️ 这行原本写的是「Scraped by OTel Collector running in-cluster」，**是错的**：
+# homelab 的 OTel Collector 刻意没有 metrics 管道，这个 Service 在 2026-08-13 之前
+# 从来没有任何采集方。现由 monitoring/cloudflared ServiceMonitor 抓
+# （k8s/helm/manifests/monitoring/cloudflared-servicemonitor.yaml，抓 Endpoints 非 VIP）。
 apiVersion: v1
 kind: Service
 metadata:
