@@ -1,8 +1,12 @@
 # terraform-storage — storage-106 上的 VM
 
-管 storage-106（Proxmox VE）上的虚机。目前只有一台：**k3s-exp 实验田**
-（2c/3G/30G，独立单节点 k3s，不入 homelab 集群）。
-为什么存在、8G 内存怎么分：[docs/decisions/storage106-experiment-vm.md](../../docs/decisions/storage106-experiment-vm.md)。
+管 storage-106（Proxmox VE）上的虚机。目前只有一台（2c/3G/30G）。
+
+⚠️ **它的角色 2026-08-13 变过一次**：先是「独立单节点 k3s 实验田（k3s-exp）」，
+同日改为 **homelab 集群的 worker `k8s-worker-106`**。VM 的 terraform 定义没变
+（名字仍是 `k3s-exp`，改名要 destroy/recreate，不值得），变的是里面装什么。
+- 现行决策：[storage106-as-homelab-worker](../../docs/decisions/storage106-as-homelab-worker.md)
+- 8G 内存三方分配的推导仍在被取代的那份：[storage106-experiment-vm](../../docs/decisions/storage106-experiment-vm.md)
 
 ## 用法
 
@@ -12,14 +16,22 @@ just plan
 just apply
 ```
 
-完整流程（VM 建好后装 k3s）：
+完整流程（VM 建好后入编 homelab 集群）：
 
 ```bash
 cd proxmox/terraform-storage && just plan && just apply
-cd ../ansible && just storage-arc-limit   # 若 ARC 还没降到 2G（apply VM 前该先做）
-just exp-k3s                              # VM 内装 k3s
-just exp-kubeconfig                       # 取 kubeconfig 到 ~/.kube/k3s-exp.yaml
+cd ../ansible && just storage-arc-limit    # 若 ARC 还没降到 2G（apply VM 前该先做）
+
+# 以下在 k8s/ansible/ —— 原 proxmox/ansible 的 exp-k3s/exp-kubeconfig 已随实验田退役
+cd ../../k8s/ansible
+just setup-tailscale-worker "$(cd ../../tailscale/terraform && just homelab-worker-authkey)"
+just join-worker
 ```
+
+☠️ 两条必须按顺序、且**别在 `setup-tailscale-worker` 跑到一半中断它**：
+`tailscale up` 之后、ip-rule 防护装上之前有个窗口，节点会把自己的 LAN 流量卷进隧道
+从而 SSH 不可达（要从 tailnet 抢救）。取证见
+[records/2026-08-13-k3s-worker-join-106.md](../../docs/records/2026-08-13-k3s-worker-join-106.md)。
 
 ## ⚠️ 两个坑
 

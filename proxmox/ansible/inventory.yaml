@@ -5,7 +5,8 @@ proxmox:
     storage:
       ansible_host: 192.168.50.106
 
-# storage-106 上的实验田 VM（proxmox/terraform-storage 预配）
+# storage-106 上的 VM（proxmox/terraform-storage 预配）。VM 名仍是 k3s-exp（改名要
+# destroy/recreate），但它自 2026-08-13 起是 homelab 集群的 worker k8s-worker-106。
 exp:
   hosts:
     k3s-exp:

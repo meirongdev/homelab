@@ -38,34 +38,12 @@ node-exporter:
 node-exporter-storage:
     ansible-playbook playbooks/node-exporter-deploy.yaml --limit storage
 
-# 106 的 ZFS ARC 上限 4G→2G（给 k3s-exp VM 让内存；只跑 arc 标签，不碰 NFS/ZFS 其它任务）
+# 106 的 ZFS ARC 上限 4G→2G（给同机那台 VM 让内存；只跑 arc 标签，不碰 NFS/ZFS 其它任务）
+# 那台 VM 现在是 homelab 的 worker k8s-worker-106，让出的内存等于给 prod 用。
 storage-arc-limit:
     ansible-playbook storage-playbook.yaml --tags arc
 
-# 实验田 VM 内装独立 k3s（VM 先由 ../terraform-storage 的 just apply 建出来）
-exp-k3s:
-    ansible-playbook playbooks/exp-k3s.yaml
-
-# 取实验田 kubeconfig 到 ~/.kube/k3s-exp.yaml（独立文件，不并入主 config）
-# ⚠️ macOS 未授权「本地网络」时，kubectl 打 192.168.50.107 会报 no route to host
-#    （非 Apple 签名二进制访问 LAN 的 TCC 拒绝，不是网络故障）——见 exp-tunnel。
-exp-kubeconfig:
-    ssh -i ~/.ssh/vgio ubuntu@192.168.50.107 'cat /etc/rancher/k3s/k3s.yaml' \
-      | sed 's/127.0.0.1/192.168.50.107/; s/name: default/name: k3s-exp/; s/cluster: default/cluster: k3s-exp/; s/user: default/user: k3s-exp/; s/current-context: default/current-context: k3s-exp/' \
-      > ~/.kube/k3s-exp.yaml
-    @echo "用法: kubectl --kubeconfig ~/.kube/k3s-exp.yaml get nodes"
-    @echo "若报 no route to host → 授权本地网络，或改用 just exp-tunnel"
-
-# 走 SSH 隧道的 kubeconfig（loopback 不受 macOS 本地网络 TCC 限制，未授权也能用）
-# 隧道 10 分钟自动退出；重跑本配方即可续。
-exp-tunnel:
-    @pgrep -f "ssh.*-L 16443:127.0.0.1:6443" >/dev/null || \
-      ssh -f -o ExitOnForwardFailure=yes -i ~/.ssh/vgio \
-        -L 16443:127.0.0.1:6443 ubuntu@192.168.50.107 sleep 600
-    # ⚠️ 等端口真的在监听再返回：`ssh -f` 返回时转发未必已就绪，紧接着的 kubectl
-    # 会吃到 connection refused（2026-08-13 首次跑就中了）。
-    @for i in $(seq 1 20); do nc -z 127.0.0.1 16443 2>/dev/null && break; sleep 0.5; done
-    ssh -i ~/.ssh/vgio ubuntu@192.168.50.107 'cat /etc/rancher/k3s/k3s.yaml' \
-      | sed 's|https://127.0.0.1:6443|https://127.0.0.1:16443|; s/name: default/name: k3s-exp/; s/cluster: default/cluster: k3s-exp/; s/user: default/user: k3s-exp/; s/current-context: default/current-context: k3s-exp/' \
-      > ~/.kube/k3s-exp-tunnel.yaml
-    @echo "用法: kubectl --kubeconfig ~/.kube/k3s-exp-tunnel.yaml get nodes"
+# ⛔ 实验田 k3s-exp 已退役（2026-08-13）：同一台 VM 改以 `k8s-worker-106` 入编
+#    homelab 集群，两者互斥。原 exp-k3s / exp-kubeconfig / exp-tunnel 三条配方随之删除。
+#    现在的入编流程在 k8s/ansible/：`just setup-tailscale-worker <key>` + `just join-worker`。
+#    决策：docs/decisions/storage106-as-homelab-worker.md
