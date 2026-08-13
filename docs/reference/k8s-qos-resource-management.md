@@ -15,7 +15,7 @@
 ## 背景
 
 Homelab 由两个集群组成：
-- **homelab**（Proxmox K3s, 5600H, 12GB VM）— 有状态/数据面服务
+- **homelab**（Proxmox K3s, 5600H, **13312MB VM**；宿主分配链见 [homelab-host-power-thermal.md](homelab-host-power-thermal.md)）— 有状态/数据面服务
 - **oracle-k3s**（Oracle Cloud A1.Flex **2 OCPU / 12GB**，2026-08-05 由 4/24 缩容）— 公网无状态 + 告警面
 
 日常用户约 1–2 人，偶发突发至 ~10 人。

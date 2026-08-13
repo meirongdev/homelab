@@ -1,7 +1,7 @@
 # Homelab Architecture
 
 > 单页架构总览，双集群 homelab（homelab + oracle-k3s）。
-> Last updated: 2026-08-10
+> Last updated: 2026-08-13
 
 ## Network Topology
 
@@ -29,7 +29,7 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 
 | 维度 | homelab | oracle-k3s |
 |------|---------|------------|
-| 硬件 | Ryzen 5600H 笔记本, 16GB 物理（OS 实际可见 15.0GB（MemTotal 15717940 kB；核显 UMA 显存已从 2GB 调整为 512MB）；实测见 [2026-07-04 舰队架构优化 §4](plans/architecture/2026-07-04-fleet-architecture-optimization.md)） | Oracle Cloud Free Tier (ARM, **2 OCPU / 12GB**；2026-08-05 由 4/24 缩容，见 [runbook](runbooks/oracle-k3s-shape-downsize.md)) |
+| 硬件 | Ryzen 5600H 笔记本，16GB 物理 / OS 可见 15.0GB / k8s VM 13312MB（分配链与判据见 [homelab-host-power-thermal.md](reference/homelab-host-power-thermal.md)，**唯一真相源**） | Oracle Cloud Free Tier (ARM, **2 OCPU / 12GB**；2026-08-05 由 4/24 缩容，见 [runbook](runbooks/oracle-k3s-shape-downsize.md)) |
 | 角色 | 指标中枢 + Vault + 本地模型接入 (Prometheus/Grafana/Vault/Open Notebook) | 公网服务 + GitOps 控制面 + 日志/追踪 + 身份面 (ArgoCD/Loki/Tempo/ZITADEL/Calibre/…) |
 | 存储 | local-path (NFS retired 2026-07-11; 106 = cold backup target) | local-path only |
 | 备份 | restic CronJob → 106 sftp | restic CronJob → 106 sftp (via TS) |
