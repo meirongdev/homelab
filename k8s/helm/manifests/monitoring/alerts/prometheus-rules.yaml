@@ -433,6 +433,114 @@ spec:
               sudo systemctl restart systemd-journald`，之后 `journalctl -b -1` 才有内容。
               重启后按 runbook 核不变量：`cd cloud/oracle && just verify-node`（只读）。
 
+    # ☠️ 覆盖盲区（2026-08-13 补）：**V4-Flash 推理服务死了 3h10m，告警"响过"却没人动。**
+    # 事故实录（全部可在本 Prometheus 复查，均在 7d 保留期内）：
+    #   09:57:54  dgx-spark-2 整机硬挂 —— journal 戛然而止，无 shutdown / 无 panic / 无 OOM 记录
+    #   09:58:30  leader 侧僵尸 TP 组成型：running=2 而 iteration_tokens_total_count
+    #             冻在 6075 —— 但 :8000 仍 200、up==1、**指标一切正常**
+    #   10:02:30  k8s liveness 探针杀掉 leader（探针原话：demand=2 but steps stuck at 6075）
+    #   10:07     rank1 不在 → leader 组不成 TP 组 → 崩溃循环 40 次，:8000 连接被拒
+    #   13:07     人工硬断电重启 dgx-spark-2（该次开机**无**对应 shutdown 记录）
+    #   13:17     服务恢复
+    # 为什么"响过却没人动"：内置 TargetDown 确实 firing 了 10:12–13:12（三条，
+    # node-exporter / smartctl / vllm 各一条），但
+    #   1. 语义太泛 —— "某个 job 的 target 掉了"读不出"推理服务没了"，也不含任何排查动作；
+    #   2. severity=warning → repeatInterval **4h** → 3 小时的中断在 Telegram 里
+    #      基本只留下**一条**消息，混在日常噪声里被划过去。
+    # 即这里不是"缺信号"，而是**信号没有可操作性，且重复周期长于故障时长**。
+    # 下面三条按事故的三个阶段分别定位，并把前两条升到 critical（repeat 30m + 🆘）。
+    # ⚠️ 与 TargetDown 的重叠是**故意保留**的：TargetDown 是覆盖任何 job 的兜底，
+    # 这三条是带 runbook 的定向规则。别为了"去重"把 TargetDown 关掉。
+    # ⚠️ 这三条**只依赖 vllm-dgx-spark + node-exporter-dgx-spark 两个 job**：homelab
+    # Prometheus 并不抓 dgx 集群的 kube-state-metrics，所以 KubePodCrashLooping /
+    # PodStuckInUnknown 那类 Pod 级规则对 dgx **完全不生效**，别指望它们兜底。
+    - name: dgx-spark-inference
+      rules:
+        - alert: DgxSparkVllmDown
+          # 关键在 `and on(nodename)`：只在**宿主可达而引擎不可达**时才报，即确实是引擎问题。
+          # 整机/tailnet 不可达是另一码事（见本文件 NodeRebooted 注释：dgx-spark-2 曾因
+          # 断网缺席 56h 却从未关机），那种情况留给 TargetDown / NodeRebooted，
+          # 免得一次网络抖动被误读成"引擎挂了"。
+          # 2026-08-13 拿事故当时的数据实证过：11:00 该表达式返回 dgx-spark-1（会触发），
+          # 健康态返回空（不会触发）。
+          expr: up{job="vllm-dgx-spark"} == 0 and on(nodename) up{job="node-exporter-dgx-spark"} == 1
+          # for 10m：正常重启（含整机重启恢复）实测 5m29s 就能真实推理，10m 留 ~2 倍余量,
+          # 故 `make v4flash-restart` 不会烧告警；而本次中断会在 10:17 触发。
+          for: 10m
+          labels:
+            severity: critical
+            component: inference
+          annotations:
+            summary: "dgx-spark V4-Flash 推理服务不可用（宿主在线，:8000 无响应）"
+            description: |
+              deepseek-v4-flash 唯一的 API 端点 100.97.87.120:8000 没了，而宿主机还活着。
+              最常见成因（08-13 实录）：**对端节点 dgx-spark-2 死了**，leader 组不成
+              TP=2 → 崩溃循环，日志为 `Engine core initialization failed`。
+              先查对端在不在：`ssh -i ~/.ssh/vgio admin@100.67.164.92 uptime`
+                （不通 = 整机硬挂，只能硬断电重启；journal 会在某一秒直接断掉，
+                 事后**找不到** panic/OOM 记录，别在日志里挖根因）
+              再看两个 rank：`cd ~/projects/meirongdev/nv-dgx-spark && make v4flash-status`
+              日志：`make v4flash-logs`（rank0）/ `make v4flash-logs-worker`（rank1）
+              ⚠️ 恢复必须整组重启 `make v4flash-restart`，**绝不能只重启一个 rank**
+              （会造出僵尸 TP 组，见 DgxSparkVllmStuck）。加载约 5 分钟。
+        - alert: DgxSparkVllmStuck
+          # 僵尸 TP 组：**up==1 而引擎不干活**。这是多节点 TP serving 的签名故障 ——
+          # /health 与 /v1/models 照常 200、指标照常被抓，但每个真实生成都超时。
+          # 任何基于"抓得到就算活着"的告警（含 TargetDown）**原理上看不见这一段**。
+          # 判据照抄 k8s liveness 探针（nv-dgx-spark/k8s/v4flash/configmap-launch.yaml
+          # 里的 liveness.py）：有需求 + 进度不前进。08-13 的真实样本（本 Prometheus
+          # 可复查 09:58:30–10:02:30）：running=2 恒定，iteration_tokens_total_count
+          # 冻在 6075 整 4 分钟。
+          # 指标缺失时表达式返回空 = 不告警，与探针的"missing data must pass"一致
+          # （vLLM 的直方图在第一次迭代完成前根本不存在）。
+          expr: |
+            (vllm:num_requests_running + vllm:num_requests_waiting) > 0
+              and increase(vllm:iteration_tokens_total_count[5m]) == 0
+          # ⚠️ 明知打不过探针：`increase[5m]==0` + for 5m ≈ 停滞 10 分钟才报，而探针
+          # （period 60s / failure 3）约 3.5 分钟就杀。所以这条是**兜底**，覆盖探针被
+          # 关掉/失效、或回滚到 systemd 路径（那条路径没有任何探针）的情况。
+          # 故意取保守窗口：误报一次是白响一个 🆘，晚 5 分钟发现几乎没有代价。
+          # 若哪天探针被移除，把窗口收到 increase[3m] + for 2m。
+          for: 5m
+          labels:
+            severity: critical
+            component: inference
+          annotations:
+            summary: "dgx-spark vLLM 有请求积压但零进度（疑似僵尸 TP 组）"
+            description: |
+              引擎**看着是活的**（up==1、/health 200、/v1/models 200）但一步都没往前走。
+              别拿 `/health` 或 `/v1/models` 判断，它们在这个故障里照样返回 200 ——
+              发一个真实生成才能确认：`make v4flash-test`。
+              成因几乎总是只重启了一个 rank（或一侧节点/进程单独死掉），
+              存活那侧永久卡在集合通信里且**不退出**。
+              恢复：`make v4flash-restart`（整组，约 10 分钟）。
+              现场取证：`curl -s http://100.97.87.120:8000/metrics | grep -E 'num_requests|iteration_tokens_total_count'`
+        - alert: DgxSparkVllmRestarted
+          # liveness 探针是**静默恢复**的 —— 这正是 08-13 没人察觉的另一半：探针
+          # 10:02:30 杀掉了一个挂死的 leader，做得完全正确，但没有任何人被告知。
+          # 与本文件 NodeRebooted 同一哲学：重启会重置一切内存态，必须显式盯。
+          # 这里还有性能含义：重启后头几个请求实测 ~30% 慢（冷启动 + 一次性 Triton
+          # JIT 编译），看到这条就知道那段时间的 tok/s 数字不能拿来引用。
+          # process_start_time_seconds 2026-08-13 核对过：报 13:11:07，与容器
+          # Started 13:11:08 一致，可信（它由 vLLM 的 prometheus_client 直接导出）。
+          expr: (time() - process_start_time_seconds{job="vllm-dgx-spark"}) < 1800
+          # for 5m：引擎加载约 5 分钟，等它真起来再报，免得和 DgxSparkVllmDown 抢话。
+          # warning 而非 critical：重启**已经成功**了，属于事后知情，不是正在烧的火。
+          # 会在每次主动 `make v4flash-restart` 时也响一声 —— 与 NodeRebooted 一样刻意接受。
+          for: 5m
+          labels:
+            severity: warning
+            component: inference
+          annotations:
+            summary: "dgx-spark vLLM 引擎刚重启（进程启动不足 30 分钟）"
+            description: |
+              引擎进程重启了。若非你主动 `make v4flash-restart`，那它是**被杀的** ——
+              可能是 liveness 探针判定僵尸 TP 组（正确行为），也可能是 OOM 或 CUDA 错误。
+              Check: `make v4flash-status`（RESTARTS 列即累计次数，08-13 那次崩溃循环烧到 40）。
+              上一个容器为什么死（deploy/ 选择器，不用先查 pod 名；2026-08-13 实测可用）：
+                `kubectl --kubeconfig ~/.kube/dgx-spark.yaml -n v4flash logs deploy/v4flash-leader --previous | tail -50`
+              ⚠️ 刚重启后别做性能基准（冷启动 ~30% 慢，且首个请求含 Triton JIT 尖峰）。
+
     - name: multicluster-telemetry
       rules:
         - alert: OracleTelemetryAbsent
