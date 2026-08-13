@@ -8,6 +8,27 @@ all:
               ansible_host: 10.10.10.10
               tailscale_ip: 100.94.186.7
               ansible_ssh_common_args: '-o ProxyCommand="ssh -W %h:%p -i ~/.ssh/vgio root@192.168.50.4"'
+        # 2026-08-13 入编：storage-106 上的 VM 以 worker 身份加入本集群。
+        # 与 master 不同，它直挂 LAN（192.168.50.0/24），无需经 pve 的 ProxyCommand。
+        # 反向：它到控制面 10.10.10.10 靠一条静态路由经 pve 转发，见 setup-k3s-worker.yaml。
+        k8s_workers:
+          hosts:
+            k8s-worker-106:
+              ansible_host: 192.168.50.107
+              tailscale_ip: ""   # 由 setup-tailscale 分配后回填
+          vars:
+            # ☠️ 比 master 多一条 5240。worker 装了 Tailscale 后带 `--accept-routes`，
+            # 会从 pve 学到 10.10.10.0/24（pve 正是靠通告这段让 oracle→homelab 走通）
+            # 进 table 52；table 52 的规则优先级高于 main，本节点到控制面
+            # 10.10.10.10:6443 的流量会被劫进隧道，绕开 0.8ms 的 LAN 直连，
+            # 并让 k3s agent / cilium-agent 的存活挂在 tailnet 上。
+            # ☠️ 优先级必须小于 5270（`from all lookup 52`）才抢得到，且**不能撞
+            # tailscaled 自己占的 5210/5230/5250/5270** —— 2026-08-13 首次写成 5250
+            # 直接和它的 `fwmark ... unreachable` 冲突。空位只有 5200/5220/5240/5260。
+            tailscale_assert_rules:
+              - "5200 to 100.64.0.0/10 lookup 52"
+              - "5240 to 10.10.10.0/24 lookup main"
+              - "5260 to 192.168.50.0/24 lookup main"
       vars:
         ansible_user: ubuntu
         ansible_become: true

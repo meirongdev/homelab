@@ -1,10 +1,15 @@
 ---
 # 共用逻辑在 tailscale/ansible/roles/tailscale_node（roles_path 见 ansible.cfg）。
 # 本文件只保留 homelab 差异：tailscale up 的 SNAT/netfilter 参数 + ip rule 收敛器。
-- name: Setup Tailscale on homelab K3s node
-  hosts: k8s_masters
+- name: Setup Tailscale on homelab K3s nodes
+  hosts: k8s_cluster
   become: true
   vars:
+    # 收敛器要断言的 ip rule 列表（每项直接拼进 `ip rule add`）。默认是 master 的两条；
+    # k8s_workers 在 inventory 里覆盖，多加 10.10.10.0/24 那条 —— 理由见 inventory 注释。
+    tailscale_assert_rules:
+      - "5200 to 100.64.0.0/10 lookup 52"
+      - "5260 to 192.168.50.0/24 lookup main"
     # ⚠️ This node must advertise NOTHING (2026-07-07). In particular NEVER advertise
     # its own IP 10.10.10.10/32: pve (a tailnet subnet router that TRANSITS this
     # segment's traffic) learns the route into table 52, which outranks its main table,
@@ -51,6 +56,13 @@
     # 防线二（兜底）：幂等断言脚本 + timer 每 5 分钟重申 —— 对**任何**删除者收敛，
     # 并写 node-exporter textfile 指标，失守可见可告警
     # （k8s/helm/manifests/monitoring/alerts/tailscale-iprule-alerts.yaml）。
+    # master 上这个目录早就存在，新节点没有 —— 2026-08-13 加 worker 时才暴露。
+    - name: Ensure networkd drop-in directory exists
+      ansible.builtin.file:
+        path: /etc/systemd/networkd.conf.d
+        state: directory
+        mode: "0755"
+
     - name: Stop systemd-networkd sweeping foreign ip rules/routes (root cause of the 2026-08-11 drift)
       ansible.builtin.copy:
         dest: /etc/systemd/networkd.conf.d/10-no-foreign-sweep.conf
@@ -107,8 +119,7 @@
           "
           }
 
-          assert 5200 to 100.64.0.0/10 lookup 52
-          assert 5260 to 192.168.50.0/24 lookup main
+          {{ tailscale_assert_rules | map('regex_replace', '^', 'assert ') | join('\n          ') }}
 
           total=$(cat "$STATE_FILE" 2>/dev/null || echo 0)
           case "$total" in *[!0-9]*|"") total=0 ;; esac
