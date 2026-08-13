@@ -20,6 +20,7 @@
 | [cluster-placement-for-new-services](cluster-placement-for-new-services.md) | 落点按资源画像选：**计算密集/大流量走 homelab**（7.5 核 + 6.6GB 余量、amd64），轻量无状态仍默认 oracle-k3s（只剩 0.5 核 + 2.6GB）。含必写 CPU limit 与 thermal 代价 |
 | [dgx-clustermesh-not-adopted](dgx-clustermesh-not-adopted.md) | ❌ DGX Spark 双机 k3s **不接 ClusterMesh**：那两台机是**外部 tailnet 的共享节点**，节点共享不携带 subnet route → VXLAN 要发往的节点 IP（`192.168.200.x` / `10.10.10.10`）双向不可达，且全程 DERP 2.28 MB/s。改用 homelab 侧 Service + 手写 Endpoints。含 `cluster.id` 撞车（两边都是 1）与 DGX `mtu` 键名拼错从未生效 |
 | [shared-postgres-platform](shared-postgres-platform.md) | 手搓 `rss-postgres` → CNPG `apps-pg` 共享库；**不**并入 `zitadel-pg`（节点内存 87% + SSO 带 critical 优先级）。含备份从 `pg_dumpall` 改逐库 `pg_dump` 的连带影响 |
+| [slo-availability-targets](slo-availability-targets.md) | **99% 的推导**（单节点无 HA 下最紧的可信目标：一次 30min 手工维护窗口 = 35% 预算）+ 服务选择两维判据（真实流量 ≥1000/窗口 **且** 有人会注意到——关键性不是理由，可测量性才是）+ 错误预算标准算术。☠️ 实测揭穿分母：Uptime Kuma 探针（60s）穿 gateway 计入 SLI，**vault/argocd 真实流量 ≈0**、5 条里 3 条不合格；而真实错误率 1.38% 的 `uptime-kuma` 没有 SLO。预算只做优先级信号、**不做变更闸门**（显式取舍） |
 | [renovate-adoption](renovate-adoption.md) | 采纳 Renovate 管版本钉扎（🚧 待装 GitHub App）。与 `check-version-pairs.py` 的 V1-V3 分工：检查器拦「多处副本互相不一致」，Renovate 推「上游有新版」。三条自我约束：永不 automerge（manual-helm 合并≠部署）· 不开 pinDigests（arm64 要 index digest）· 不管 docs/。分组按「必须一起改」分——cilium+gateway-api 一个 PR |
 
 ## 写新 ADR
