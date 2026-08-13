@@ -1,6 +1,6 @@
 # Observability — OTel 日志与追踪架构
 
-> Last updated: 2026-08-03
+> Last updated: 2026-08-11
 > Status: 生效事实
 >
 > 2026-07-31 homelab collector 首次真实落地 + 2026 OTel 对齐，见 [`decisions/otel-2026-alignment.md`](../decisions/otel-2026-alignment.md)。

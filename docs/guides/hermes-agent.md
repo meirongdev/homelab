@@ -1,6 +1,6 @@
 # Hermes Agent — Profile 管理与 MCP 集成
 
-> Last updated: 2026-06-26
+> Last updated: 2026-07-31
 > 适用版本：Hermes Agent v0.17.x（macbook，Homebrew 安装）
 
 ---

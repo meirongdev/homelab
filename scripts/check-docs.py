@@ -12,6 +12,7 @@
 只用标准库（CI 上不装依赖）。
 """
 import re
+import subprocess
 import sys
 import pathlib
 from collections import defaultdict
@@ -35,6 +36,8 @@ DATE_ANY = re.compile(r"\d{4}-\d{2}-\d{2}|\d{8}")
 MD_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 # 非 docs 文件里对 docs/ 的引用（注释里最常见，markdown 链接检查抓不到）
 DOCS_REF = re.compile(r"docs/[A-Za-z0-9_./-]+\.md")
+# 文首的 `Last updated: YYYY-MM-DD` 字段（reference/ 必填，runbooks/guides 惯例也写）
+LAST_UPDATED = re.compile(r"Last updated:\s*(\d{4}-\d{2}-\d{2})")
 
 violations = defaultdict(list)
 
@@ -251,6 +254,58 @@ def check_external_refs():
                     fail("LINK", p, f"引用了不存在的 {m}", i)
 
 
+def git(*args):
+    """跑一条 git，失败返回 None（没有 git / 不是仓库 / 命令出错都当"查不了"）。"""
+    try:
+        r = subprocess.run(["git", "-C", str(ROOT), *args],
+                           capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout if r.returncode == 0 else None
+
+
+def last_content_commit(rel, limit=10):
+    """该文件最后一次**内容**提交的日期；只改 `Last updated:` 那一行的提交不算。
+
+    否则会自相矛盾：为了修时间戳而提交，本身又让时间戳变旧。
+    """
+    log = git("log", f"-{limit}", "--follow", "--format=%H %as", "--", rel)
+    if not log:
+        return None
+    for line in log.splitlines():
+        sha, _, date = line.partition(" ")
+        patch = git("show", "--format=", "--unified=0", sha, "--", rel)
+        if patch is None:
+            return date.strip()
+        changed = [l for l in patch.splitlines()
+                   if l[:1] in "+-" and not l.startswith(("+++", "---"))]
+        # 空 patch（改名提交在旧路径上取不到 diff）与纯时间戳提交一样，继续往前找
+        if any(not LAST_UPDATED.search(l) for l in changed):
+            return date.strip()
+    return None
+
+
+def check_last_updated():
+    """`Last updated:` 不得早于该文件最后一次内容提交。
+
+    2026-08-13 清理时 21 篇文档的时间戳落后于实际内容（services.md 写 08-06，
+    正文却已含 08-11 的 BentoPDF）——读者据此判断"这页还新鲜"，判断的是假的。
+    浅克隆/无 git 时**整条跳过**：历史不全，宁可不查也不误报。
+    """
+    if git("rev-parse", "--git-dir") is None:
+        return
+    if (git("rev-parse", "--is-shallow-repository") or "").strip() == "true":
+        return
+    for md in sorted(DOCS.rglob("*.md")):
+        m = LAST_UPDATED.search(head(md.read_text(), 12))
+        if not m:
+            continue
+        actual = last_content_commit(md.relative_to(ROOT).as_posix())
+        if actual and m.group(1) < actual:
+            fail("STAMP", md,
+                 f"Last updated 写 {m.group(1)}，但内容最后一次提交是 {actual}——改了内容就得改这行")
+
+
 RULES_COVERED = [
     ("R2", "命名（日期前缀 / 常青不带日期 / 小写 kebab-case）", "✅ 自动"),
     ("R3", "H1 在首行 + 各目录文首必填字段", "✅ 自动"),
@@ -258,6 +313,7 @@ RULES_COVERED = [
     ("R5", "目录 README 索引双向完整 + plans/README.md 份数与实际一致", "✅ 自动"),
     ("--", "docs 内相对链接 + 非 docs 文件对 docs/ 的引用", "✅ 自动"),
     ("--", "非 docs README 的目录树只画真实存在的子目录", "✅ 自动"),
+    ("--", "`Last updated:` 不早于最后一次内容提交（浅克隆时跳过）", "✅ 自动"),
     ("R1", "目录归属（这份文档该放哪）", "⚠️ 需人判断"),
     ("R6", "唯一真相源（同一事实只维护一处）", "⚠️ 需人判断"),
     ("R7", "命令带执行上下文", "⚠️ 需人判断"),
@@ -285,6 +341,7 @@ def main():
     check_plan_counts()
     check_readme_trees()
     check_external_refs()
+    check_last_updated()
 
     total = sum(len(v) for v in violations.values())
     n_docs = len(list(DOCS.rglob("*.md")))

@@ -8,7 +8,7 @@
 > ⚠️ **Phase 4 不要照抄**：其中的保守模式（`kubeProxyReplacement: false`、`gatewayAPI.enabled: false`）
 > 是当年为绕开那个 BPF bug 的临时手段。**标准配置是 `kubeProxyReplacement: true` + Cilium Gateway API**，
 > 见 `k8s/cilium/README.md` 与 `just deploy-cilium`。
-> Last updated: 2026-07-31
+> Last updated: 2026-08-01
 
 ## Goal
 

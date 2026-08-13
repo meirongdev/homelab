@@ -1,6 +1,6 @@
 # oracle-k3s 缩容到 2 OCPU / 12GB
 
-> Last updated: 2026-08-05
+> Last updated: 2026-08-11
 > Status: 生效事实 + 切换 SOP
 > 触发条件：需要改 `VM.Standard.A1.Flex` 的 shape（vendor 回收额度、腾额度开第二台、
 > 或事后要涨回去）。任何改 `ocpus` / `memory_gb` 的动作都走本文。

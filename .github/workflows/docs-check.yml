@@ -34,7 +34,11 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      # 需要完整历史：`Last updated` 时效检查按 git log 判断文件最后一次内容提交，
+      # 浅克隆（默认 depth=1）下该检查会整条跳过，等于没查。
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # 只用标准库，不需要 setup-python / 装依赖
       - name: 检查文档组织规则

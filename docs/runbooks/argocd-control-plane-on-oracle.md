@@ -1,6 +1,6 @@
 # ArgoCD 控制面运行在 oracle-k3s
 
-> Last updated: 2026-08-02
+> Last updated: 2026-08-06
 > Status: 生效事实 + 迁移 SOP
 > 触发条件：重装/升级 ArgoCD、集群凭据过期、需要回滚到 homelab 控制面、
 > 或要完成 2026-08-02 迁移的收尾步骤。

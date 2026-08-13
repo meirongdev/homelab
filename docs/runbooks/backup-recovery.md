@@ -1,6 +1,6 @@
 # Backup & Recovery Runbook
 
-> Last updated: 2026-08-10
+> Last updated: 2026-08-11
 > 设计与执行: [../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md](../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md)
 
 ## Status
