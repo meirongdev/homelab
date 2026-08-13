@@ -1,6 +1,6 @@
 # jobs-sg — 新加坡 SWE 岗位趋势周报（架构事实）
 
-> Last updated: 2026-08-10
+> Last updated: 2026-08-13
 > Status: 生效事实
 > Scope: jobs-sg 在 homelab 集群的部署形态、镜像固定方式、备份口径、首次上线依赖顺序
 > —— source of truth。应用代码在 [meirongdev/jobs-sg](https://github.com/meirongdev/jobs-sg)。
@@ -578,7 +578,10 @@ CI 当时是绿的：`testdata/fixture/jobs.jsonl` 由 `scripts/genfixture` 从*
 - ~~`classify.WorkMode` 只匹配 `remote`/`hybrid`/`onsite` → 所有职位都是 `Onsite`~~
   **已修（2026-08-08，上游 `af34eed`）**，详见下节。
 - Grafana 面板未做（`jobs_sg_*` 指标已在采，用 Explore 可查）。
-- 恢复演练未做：实际 restore + `PRAGMA integrity_check` 应作为下一步 DoD。
+- ~~恢复演练未做~~ **已覆盖（2026-08-13）**：`restic-restore-drill` CronJob 每月从 106 仓库
+  实际 restore `jobs.db` 并跑 `PRAGMA integrity_check` + 表数判据；`raw/*.jsonl.gz` 归档
+  抽一个文件 `gzip -t` 实解（不是全量恢复）。判据敏感度用损坏数据验过。
+  → [storage.md 月度恢复演练](storage.md#月度恢复演练2026-08-13-上线)
 
 ## 重放归档重算分类（`jobs-sg-reclassify`，2026-08-08 起）
 
