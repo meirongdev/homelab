@@ -20,13 +20,18 @@ spec:
         key: oracle-k3s/cloudflare
         property: token
 ---
+# ⚠️ 单副本是**结论不是疏忽**（2026-08-13 从 2 副本降下来，实测依据见文件尾注）。
+# oracle-k3s 是单节点集群，2 副本**原理上**就拿不到任何节点级 HA；而隧道级冗余本就
+# 来自 cloudflared 自身：单个进程持有 4 条边缘连接、跨 3 个 colo（kix03/04/05）。
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: cloudflared
   namespace: cloudflare
 spec:
-  replicas: 2
+  replicas: 1
+  # 滚动更新仍然无空窗：默认 25%/25% 在 1 副本下算出
+  # maxUnavailable=floor(0.25)=0、maxSurge=ceil(0.25)=1 —— 新 pod ready 后旧 pod 才退。
   selector:
     matchLabels:
       app: cloudflared
@@ -35,15 +40,6 @@ spec:
       labels:
         app: cloudflared
     spec:
-      affinity:
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchLabels:
-                    app: cloudflared
-                topologyKey: kubernetes.io/hostname
       priorityClassName: high
       containers:
         - name: cloudflared
@@ -108,15 +104,18 @@ spec:
       targetPort: 2000
       name: metrics
 ---
-# Keep at least one cloudflared replica available during voluntary disruptions.
-# Critical because all *.meirong.dev ingress on oracle-k3s depends on this tunnel.
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: cloudflared
-  namespace: cloudflare
-spec:
-  minAvailable: 1
-  selector:
-    matchLabels:
-      app: cloudflared
+# ☠️ 这里**故意没有 PodDisruptionBudget**（2026-08-13 随降副本一并删除）。
+# 单副本下 PDB 只有两种结果，都没用：
+#   minAvailable: 1  → disruptionsAllowed = 0 → `kubectl drain` 永久卡死
+#   maxUnavailable: 1 → disruptionsAllowed = 1 → 恒定放行，等于没有约束
+# 单节点集群上它本来也从未起过作用（驱逐后无处可调度）。
+#
+# ── 降到单副本的实测依据（2026-08-13）──────────────────────────────
+# 1. 单节点 = 没有节点级 HA 可拿。历史上每次 cloudflared 重启都是节点重启：
+#    两副本同秒 exit=255 @2026-08-13T12:20:48Z，节点开机 20:18:23 (+08)；
+#    `last -x` 显示 oracle 6 天内重启 5 次（08-08/10/11/13×2）。2 副本挡住的次数为 0。
+#    另见 records/2026-08-01-oracle-k3s-dns-outage.md 的「两副本相继退出」。
+# 2. 节点 memory requests 已达 allocatable 的 85%，省下的 64Mi request 不是白拿。
+# 3. 7 天峰值并发 3 个请求，单 pod 实占 ~15Mi RSS / ~0m CPU。
+# 唯一失去的能力：单 pod 独立崩溃时 ~15–25s 的 502。靠 CloudflaredAllReplicasDown 兜底
+# （KSM 序列 cluster="oracle-k3s" 已确认存在，经 OTel remote-write 回 homelab Prometheus）。

@@ -163,7 +163,7 @@ oracle-k3s 在 2026-08-05 之前一条都没配（`capacity − allocatable` 的
 
 | 类型 | CPU Limit | 代表服务 |
 |------|-----------|---------|
-| 入口流量（cloudflared × 2 副本）| `200m` | cloudflared（2026-07-06 下调） |
+| 入口流量（cloudflared，单副本）| `200m` | cloudflared（2026-07-06 下调；2026-08-13 由 2 副本降为 1） |
 | 用户 Web 服务 | `500m–1000m` | calibre-web、karakeep |
 | 数据库 | `500m` | postgres |
 | 可观测性 | `300m–500m` | Loki, Tempo, Prometheus, Grafana |

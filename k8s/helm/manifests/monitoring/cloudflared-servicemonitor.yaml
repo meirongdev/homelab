@@ -1,0 +1,47 @@
+# 抓取 homelab cloudflared 的隧道指标 —— 补上 2026-08-13 发现的采集盲区。
+#
+# ☠️ 发现经过：homelab Prometheus 的 active targets 里**从来没有 cloudflared job**，
+# 集群里也没有任何 cloudflared 的 ServiceMonitor/PodMonitor —— `cloudflare/cloudflared-metrics`
+# 这个 Service 自建成起就无人采集，是个纯摆设。而当时有两处文档都声称它已被采集
+# （k8s/helm/values/opentelemetry-collector.yaml 的文件头 + reference/cloudflare-tunnel-observability.md），
+# 所以「文档说有」不能当证据，判据是 `/api/v1/targets` 里有没有这个 job。
+# 唯一存在的 cloudflared 序列是 cluster="oracle-k3s"（走 oracle OTel 的 remoteWrite）。
+#
+# ⚠️ 必须带 label release=kube-prometheus-stack，否则 Prometheus Operator 的
+#    serviceMonitorSelector（matchLabels release=kube-prometheus-stack）会**静默忽略**。
+# cluster=homelab 由默认 scrapeClass 的 relabeling 自动补上，无需手设。
+#
+# 为什么是 ServiceMonitor 而不是照抄 oracle 的 OTel 抓法：ServiceMonitor 抓的是
+# Service 的 **Endpoints**（每个 pod 一个 target），而 oracle 侧 OTel 的 prometheus
+# receiver 指向 ClusterIP DNS 名 = 抓 VIP，每次只随机命中一个 pod。后者在多副本下
+# 分不出单副本死活（一个挂了 ha_connections 照样报 4）。现在两侧都是单副本，
+# 但**副本数一旦提回 ≥2，oracle 侧的这个盲区会立刻回来**。
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: cloudflared
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app.kubernetes.io/part-of: cloudflare-tunnel
+spec:
+  namespaceSelector:
+    matchNames:
+      - cloudflare
+  selector:
+    matchLabels:
+      app: cloudflared
+  endpoints:
+    - port: metrics
+      interval: 30s
+      path: /metrics
+      metricRelabelings:
+        # 只留判活与容量所需的少量指标；cloudflared 全量约 200 条，其余是 Go runtime。
+        # ⚠️ cloudflared_tunnel_requests_total 实测**恒为 0**（当前版本已废弃：并发为 3
+        #    的同时它仍是 0），**故意不收**。隧道侧的请求量/错误率用
+        #    cloudflared_tunnel_response_by_code_total{status_code}（实测有数）。
+        #    按路由/域名的 RED 仍然只能看 cilium-envoy 的 envoy_cluster_upstream_rq
+        #    —— cloudflared 指标不带 hostname 标签（见 cilium-envoy-servicemonitor.yaml）。
+        - sourceLabels: [__name__]
+          regex: 'cloudflared_tunnel_(ha_connections|concurrent_requests_per_tunnel|server_locations|response_by_code_total|request_errors_total)|cloudflared_(tcp|udp)_active_sessions|cloudflared_proxy_connect_latency_(bucket|sum|count)'
+          action: keep

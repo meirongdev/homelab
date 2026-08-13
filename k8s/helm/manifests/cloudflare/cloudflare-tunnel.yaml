@@ -1,10 +1,18 @@
+# ⚠️ 单副本是**结论不是疏忽**（2026-08-13 从 2 副本降下来，实测依据见文件尾注）。
+# 隧道级冗余来自 cloudflared 自身：**单个进程就持有 4 条到 Cloudflare 边缘的连接、
+# 分散在 3–4 个 colo**（`cloudflared_tunnel_ha_connections` = 4/pod）。副本数只加
+# pod 级冗余，而 homelab 的 36 个业务负载全在 k8s-node 上（worker 只跑 DaemonSet），
+# 入口多活在后端单点的前提下没有意义。
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: cloudflared
   namespace: cloudflare
 spec:
-  replicas: 2
+  replicas: 1
+  # 滚动更新仍然无空窗：默认 25%/25% 在 1 副本下算出
+  # maxUnavailable=floor(0.25)=0、maxSurge=ceil(0.25)=1 —— 新 pod ready 后旧 pod 才退。
+  # 改 replicas 前先重算这两个数，别让 maxUnavailable 变成 1。
   selector:
     matchLabels:
       app: cloudflared
@@ -14,15 +22,6 @@ spec:
         app: cloudflared
     spec:
       priorityClassName: high
-      affinity:
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchLabels:
-                    app: cloudflared
-                topologyKey: kubernetes.io/hostname
       containers:
         - name: cloudflared
           image: cloudflare/cloudflared@sha256:18626b1baac4450214535cd5bc40ef44c0635244d585ebf707749c22b6f3408f
@@ -84,16 +83,18 @@ spec:
       targetPort: 2000
       name: metrics
 ---
-# Keep at least one cloudflared replica available during voluntary disruptions
-# (node drain, rolling update). Critical because all *.meirong.dev ingress
-# depends on this tunnel.
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: cloudflared
-  namespace: cloudflare
-spec:
-  minAvailable: 1
-  selector:
-    matchLabels:
-      app: cloudflared
+# ☠️ 这里**故意没有 PodDisruptionBudget**（2026-08-13 随降副本一并删除）。
+# 单副本下 PDB 只有两种结果，都没用：
+#   minAvailable: 1  → disruptionsAllowed = 0 → `kubectl drain` 永久卡死
+#   maxUnavailable: 1 → disruptionsAllowed = 1 → 恒定放行，等于没有约束
+# 想恢复 PDB 必须**先**把 replicas 提回 ≥2，否则就是在 deadlock 和 no-op 之间二选一。
+#
+# ── 降到单副本的实测依据（2026-08-13）──────────────────────────────
+# 1. 每个副本自带 4 条边缘连接、跨 3–4 个 colo（sin07/sin11/sin18/sin20 等），
+#    冗余在 cloudflared 内部，不在副本数上。
+# 2. 历史上每一次 cloudflared 重启都是**节点级**事件，2 副本一次也没挡住：
+#    homelab 两副本 2026-08-08 07:00Z 前后 3 分钟内同时重启（当日双集群重启）；
+#    另见 records/2026-08-01-oracle-k3s-dns-outage.md 的「两副本相继退出」。
+# 3. 7 天峰值并发 3 个请求，单 pod 实占 ~15Mi RSS / ~0m CPU —— 吞吐从不是理由。
+# 唯一失去的能力：单 pod 独立崩溃时会有 ~15–25s 的 502（readiness
+# initialDelaySeconds=10）。用 CloudflaredAllReplicasDown 告警兜底（== 0 在单副本下依然正确）。

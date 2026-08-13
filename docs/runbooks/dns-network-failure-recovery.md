@@ -75,10 +75,10 @@ tls-san:
 Allows `kubectl` to connect via Tailscale when local network is down.
 Applied by `setup-k3s.yaml`. kubeconfig now uses Tailscale IP by default.
 
-### 4. cloudflared: 2 replicas + liveness probe
+### 4. cloudflared: 单副本 + liveness probe
 
 ```yaml
-replicas: 2
+replicas: 1
 livenessProbe:
   httpGet:
     path: /ready
@@ -88,7 +88,16 @@ livenessProbe:
 ```
 
 K8s auto-restarts any cloudflared pod that loses tunnel connectivity.
-2 replicas = zero-downtime during restarts (Cloudflare load-balances).
+
+⚠️ **2026-08-13 由 2 副本降为 1**，本节此前写的「2 replicas = zero-downtime during
+restarts」在本 runbook 的场景下从来没成立过：这份 runbook 处理的是 **DNS/网络级故障**，
+那是节点级事件，两个副本会**同时**死（见
+`records/2026-08-01-oracle-k3s-dns-outage.md`：「cloudflared 两副本在 22:49–22:55 UTC
+相继退出」）。真正的隧道冗余来自 cloudflared 自身持有的 4 条跨 colo 边缘连接。
+判据与完整依据见 `reference/cloudflare-tunnel-observability.md`。
+
+单副本下 pod 独立崩溃会有 ~15–25s 的 502（readiness `initialDelaySeconds: 10`），
+由告警 `CloudflaredAllReplicasDown` 兜底。
 
 ## Emergency Recovery Procedure
 
