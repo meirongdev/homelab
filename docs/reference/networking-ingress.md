@@ -1,6 +1,6 @@
 # Networking & Ingress — 入口链路与 DNS 自动化
 
-> Last updated: 2026-08-10
+> Last updated: 2026-08-13
 > Status: 生效事实
 >
 > 南北向入口（Cloudflare → Cilium Gateway）与 DNS 自动化（external-dns）。
@@ -68,6 +68,33 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
   ⚠️ `cloudflare/terraform/` 这个 root 的有效 token 在 gitignored 的 `.env` 里，由 justfile
   （`set dotenv-load`）经 `-var` 注入——**必须用 `just plan`/`just apply`**，裸跑 `terraform plan`
   会读到 `terraform.tfvars` 里留存的无效值而报错（2026-07-19 曾误判为"token 失效"）。
+
+## 不走这条链的 meirong.dev 主机名（集群外托管）
+
+⚠️ **"写 HTTPRoute 即建 DNS" 只覆盖跑在集群里的服务**。集群外托管的站点没有 HTTPRoute，
+两套自动化都够不着它：external-dns 的 source 只有 `gateway-httproute`（看不见），通配隧道
+路由只对 CNAME 指向隧道的主机名生效（用不上）。这类记录**必须**在
+`cloudflare/terraform/main.tf` 的 `local.external_origin_dns` 里显式声明 —— 这是"加子域名别动
+那个模块"的唯一例外。
+
+| 主机名 | 托管 | 记录归属 | 代理 |
+|--------|------|----------|------|
+| `meirong.dev`（apex，博客） | Cloudflare Pages `meirongdevblog.pages.dev` | Cloudflare Pages 自建，**不在 terraform state 里** | 橙云 |
+| `playgrounds.meirong.dev` | GitHub Pages `meirongdev.github.io`（repo `meirongdev/playgrounds`） | `local.external_origin_dns`（2026-08-13） | **DNS-only** |
+
+- ⚠️ **GitHub Pages 必须 DNS-only（灰云）**：GitHub 给自定义域签 Let's Encrypt 证书走 HTTP-01，
+  橙云 + 全区 *Always Use HTTPS* 会把校验重定向到「还没有证书的 HTTPS 源」，成死循环。
+  仓库 Settings → Pages 显示证书已签发后，才可以按需改回 `proxied = true`。
+- ⚠️ **DNS-only 的主机名完全绕过边缘** —— WAF / 限流 / 缓存（[security.md §2](security.md)）
+  对它一条都不生效，别把它算进那几层防护的覆盖面。
+- ⚠️ **DNS 通了 ≠ 站点通了**：Pages 用自定义 Actions workflow（`actions/deploy-pages`）发布时，
+  仓库里提交的 `CNAME` 文件**被忽略**，自定义域得在仓库 Pages 设置里登记，否则解析正常但
+  返回 "There isn't a GitHub Pages site here"（`gh api -X PUT repos/<o>/<r>/pages -f cname=…`）。
+- ⚠️ **登记完还得重新部署一次**（`gh workflow run pages.yml`）：登记后新域名会继续 404
+  （同时 `<org>.github.io/<repo>` 开始 301 到新域名），且上一次构建的 `baseurl` 还是 `/<repo>`
+  —— 直接挂到根域会让每个静态资源 404（页面能开、样式全丢）。重跑一次以空 base path 重建。
+  验收要看**资源**不只看页面：`curl -s https://<host>/ | grep -o 'href="/[^"]*"'` 应该是
+  `/assets/...`，不是 `/<repo>/assets/...`。
 
 ## 节点地址速查
 
