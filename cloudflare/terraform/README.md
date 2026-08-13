@@ -54,7 +54,8 @@ just apply  # Apply changes
 
 ## Adding a New Subdomain
 
-**Don't touch this module.** Write an `HTTPRoute` — that's the whole procedure.
+**Don't touch this module** — *if the site runs in one of the clusters*. Write an `HTTPRoute`;
+that's the whole procedure. (Cluster-**external** sites are the one exception → next section.)
 
 Since 2026-07-20 the tunnel has a single wildcard route (`*.meirong.dev` → Cilium gateway,
 see `main.tf`) and **external-dns owns subdomain DNS** (`gateway-httproute` source, one
@@ -73,13 +74,44 @@ Editing this module for a new subdomain now means **fighting external-dns over o
 > Full mechanism: [docs/reference/networking-ingress.md](../../docs/reference/networking-ingress.md) ·
 > decision: [docs/decisions/external-dns-adoption.md](../../docs/decisions/external-dns-adoption.md)
 
+## Adding a Cluster-External Site (GitHub Pages / Cloudflare Pages)
+
+A site hosted outside the clusters has **no `HTTPRoute`**, so neither automation reaches it:
+external-dns only reads `gateway-httproute` sources, and the wildcard tunnel route only applies
+to hostnames CNAME'd at the tunnel. Its record must be declared here, in
+`local.external_origin_dns` (`main.tf`) — one line, then `just apply`.
+
+⚠️ **GitHub Pages needs `proxied = false`** (DNS-only). GitHub signs the custom domain's
+Let's Encrypt cert over HTTP-01; orange-cloud + zone-wide *Always Use HTTPS* redirects that
+challenge to an HTTPS origin that doesn't have the cert yet — chicken-and-egg. Flip to
+`proxied = true` only after the repo's **Settings → Pages** reports the certificate as issued.
+
+⚠️ **DNS is only half of it.** When Pages publishes from a *custom Actions workflow*
+(`actions/deploy-pages`), a committed `CNAME` file is **ignored** — the custom domain has to be
+set in the repo's Pages settings, or the host 404s with "There isn't a GitHub Pages site here"
+even though DNS resolves correctly:
+
+```bash
+gh api -X PUT repos/<owner>/<repo>/pages -f cname=<host>.meirong.dev
+gh workflow run pages.yml          # REQUIRED — see below
+gh api -X PUT repos/<owner>/<repo>/pages -F https_enforced=true   # once cert state == approved
+```
+
+⚠️ **The `gh workflow run` is not optional.** Right after the domain is set, the new host keeps
+404-ing (and `<org>.github.io/<repo>` starts 301-ing to it) until the site is deployed again —
+and the previously built artifact had `baseurl=/<repo>`, so serving it at the new root would
+404 every asset. One re-run rebuilds with an empty base path and starts serving. Verify the
+*assets*, not just the page: `curl -s https://<host>.meirong.dev/ | grep -o 'href="/[^"]*"'`
+should show `/assets/...`, never `/<repo>/assets/...`.
+
 ## Managed Resources
 
 | Resource | Notes |
 |----------|-------|
 | Tunnel config (homelab) | one wildcard ingress `*.meirong.dev` → `var.gateway_service`, plus a `http_status:404` catch-all |
-| Zone security settings + WAF | see below — zone-wide, covers **both** tunnels |
-| Subdomain CNAMEs | **none** (`terraform_managed_dns = []`) — owned by external-dns. Current service list: [docs/reference/services.md](../../docs/reference/services.md) |
+| Zone security settings + WAF | see below — zone-wide, covers **both** tunnels (⚠️ *not* DNS-only hostnames — those bypass the edge entirely) |
+| Subdomain CNAMEs (tunnel) | **none** (`terraform_managed_dns = []`) — owned by external-dns. Current service list: [docs/reference/services.md](../../docs/reference/services.md) |
+| Cluster-external CNAMEs | `local.external_origin_dns`: `playgrounds` → `meirongdev.github.io` (GitHub Pages, DNS-only, 2026-08-13). ⚠️ The apex `meirong.dev` → `meirongdevblog.pages.dev` (blog, Cloudflare Pages) is **not** in this state — Cloudflare Pages created it. |
 
 ## WAF & Security Configuration
 

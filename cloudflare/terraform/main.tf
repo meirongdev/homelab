@@ -53,3 +53,38 @@ resource "cloudflare_dns_record" "subdomains" {
   proxied = true
   ttl     = 1
 }
+
+# CNAMEs for sites hosted OUTSIDE the clusters (GitHub Pages / Cloudflare Pages / ...).
+#
+# These are the one exception to the README's "don't touch this module to add a subdomain":
+# a cluster-external site has no HTTPRoute, so NEITHER automation covers it — external-dns
+# only reads `gateway-httproute` sources, and the wildcard tunnel route only applies to
+# hostnames whose CNAME points at the tunnel. So the record has to live here, in code.
+#
+# ⚠️ Do NOT put these in var.terraform_managed_dns — its content is hardcoded to the tunnel.
+# ⚠️ GitHub Pages needs proxied = false (DNS-only): GitHub provisions the custom domain's
+# Let's Encrypt cert over HTTP-01, and orange-cloud + "Always Use HTTPS" turns that into a
+# chicken-and-egg (the challenge gets redirected to an HTTPS origin that has no cert yet).
+# Flip a record to proxied = true only after the repo's Settings -> Pages shows the
+# certificate as issued.
+locals {
+  external_origin_dns = {
+    # meirongdev/playgrounds — 各语言官方在线 Playground 导航（Jekyll, deployed by Actions).
+    # Project page under the meirongdev org => CNAME target is the ORG's pages host
+    # (meirongdev.github.io), not <org>.github.io/<repo>; the repo's committed CNAME file
+    # is what tells Pages which host to serve.
+    "playgrounds.meirong.dev" = { target = "meirongdev.github.io", proxied = false }
+  }
+}
+
+resource "cloudflare_dns_record" "external_origins" {
+  for_each = local.external_origin_dns
+
+  zone_id = data.cloudflare_zone.meirong.id
+  name    = each.key
+  content = each.value.target
+  type    = "CNAME"
+  proxied = each.value.proxied
+  ttl     = each.value.proxied ? 1 : 300
+  comment = "external origin — managed by cloudflare/terraform (not external-dns)"
+}
