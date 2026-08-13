@@ -29,7 +29,8 @@ cp .env.example .env
 
 # 2. Copy and fill in your IDs
 cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars: set cloudflare_account_id, tunnel_id, and ingress_rules
+# Edit terraform.tfvars: set cloudflare_account_id and tunnel_id
+# (terraform_managed_dns stays empty — external-dns owns subdomain DNS, see below)
 
 # 3. Initialize Terraform
 just init
@@ -42,40 +43,43 @@ just plan   # Preview changes
 just apply  # Apply changes
 ```
 
-> **LLM gateway**: self-hosted LLM access is handled by **Bifrost** in the homelab
-> cluster (`llm.meirong.dev`), not a Cloudflare AI Gateway. Bifrost runs inside the
-> Tailscale-connected cluster so it can reach `100.x` model machines directly — which
-> a Cloudflare AI Gateway custom provider never could (CF's edge can't see the tailnet).
-> See `docs/plans/apps/2026-06-07-bifrost-llm-gateway.md`.
+> **LLM gateway**: there is **no LLM gateway right now**. Bifrost (`llm.meirong.dev`)
+> served that role from 2026-06-07 until it was retired on **2026-08-08**; today the
+> consumers (jobs-sg enrichment, Open Notebook, calibre metadata) talk to the DGX vLLM
+> endpoints directly over the tailnet. A Cloudflare AI Gateway is still not an option
+> either way: its custom providers need a CF-edge-reachable HTTPS upstream, and the
+> models live on Tailscale `100.x` addresses the edge can't see. Replacement design:
+> `docs/plans/apps/2026-08-01-litellm-gateway-migration.md` (📐 design, not deployed).
+> History: `docs/plans/archive/2026-06-07-bifrost-llm-gateway.md`.
 
 ## Adding a New Subdomain
 
-Edit `terraform.tfvars` and add an entry to `ingress_rules`:
+**Don't touch this module.** Write an `HTTPRoute` — that's the whole procedure.
 
-```hcl
-ingress_rules = {
-  "home"     = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
-  "book"     = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
-  "grafana"  = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
-  "vault"    = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }
-  "mynewapp" = { service = "http://cilium-gateway-homelab-gateway.kube-system.svc:80" }  # <- add here
-}
-```
+Since 2026-07-20 the tunnel has a single wildcard route (`*.meirong.dev` → Cilium gateway,
+see `main.tf`) and **external-dns owns subdomain DNS** (`gateway-httproute` source, one
+instance per cluster with distinct `txtOwnerId`). So:
 
-Then run `just apply`. Terraform will automatically:
-1. Create a CNAME DNS record pointing to the Cloudflare Tunnel.
-2. Update the Tunnel ingress rules to route the hostname to the Cilium Gateway service.
+1. Add the `HTTPRoute` (homelab: `k8s/helm/manifests/gateway/`; oracle: `cloud/oracle/manifests/base/`)
+2. Push → ArgoCD syncs it → external-dns creates the CNAME → the wildcard route forwards it
 
-> **Note**: After adding a subdomain here, you also need to add a corresponding `HTTPRoute` in `k8s/helm/manifests/gateway/gateway.yaml` so Cilium Gateway API knows where to forward the traffic inside the cluster.
+The old per-subdomain `ingress_rules` map was removed on 2026-07-20 (5 explicit host rules
+plus 5 Terraform-managed CNAMEs handed over to external-dns via pre-seeded ownership TXT).
+Editing this module for a new subdomain now means **fighting external-dns over ownership**.
+
+> Escape hatch: `terraform_managed_dns` (default `[]`) exists for a hostname whose DNS must
+> *not* be owned by external-dns. Nothing uses it today.
+>
+> Full mechanism: [docs/reference/networking-ingress.md](../../docs/reference/networking-ingress.md) ·
+> decision: [docs/decisions/external-dns-adoption.md](../../docs/decisions/external-dns-adoption.md)
 
 ## Managed Resources
 
-| Subdomain | Service |
-|-----------|---------|
-| `home.meirong.dev` | Homepage dashboard |
-| `book.meirong.dev` | Calibre-Web |
-| `grafana.meirong.dev` | Grafana |
-| `vault.meirong.dev` | HashiCorp Vault UI |
+| Resource | Notes |
+|----------|-------|
+| Tunnel config (homelab) | one wildcard ingress `*.meirong.dev` → `var.gateway_service`, plus a `http_status:404` catch-all |
+| Zone security settings + WAF | see below — zone-wide, covers **both** tunnels |
+| Subdomain CNAMEs | **none** (`terraform_managed_dns = []`) — owned by external-dns. Current service list: [docs/reference/services.md](../../docs/reference/services.md) |
 
 ## WAF & Security Configuration
 
