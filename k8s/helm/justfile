@@ -27,11 +27,15 @@ ctx := "k3s-homelab"
 #     `kubectl -n kube-system logs deploy/cilium-operator | grep "Required GatewayAPI resources"`
 #     以及新建路由能否拿到 `.status`。
 # ⚠️ 因此 cilium_version 与 gateway_api_version 是**一对**，升级 Cilium 必须同步核对后者。
+# renovate: datasource=helm depName=cilium registryUrl=https://helm.cilium.io
 cilium_version           := "1.20.0"
 # Cilium 1.20 要求的 Gateway API CRD 版本（见 `just deploy-gateway-api-crds`）。
 # 升级前先读 Cilium 对应版本文档的 Gateway API 前置条件，别假设旧 CRD 还能用。
+# renovate: datasource=github-releases depName=kubernetes-sigs/gateway-api
 gateway_api_version      := "1.6.1"
+# renovate: datasource=helm depName=vault registryUrl=https://helm.releases.hashicorp.com
 vault_version            := "0.33.0"
+# renovate: datasource=helm depName=external-secrets registryUrl=https://charts.external-secrets.io
 eso_version              := "2.6.0"
 
 # ⚠️ 紧急回滚 / 手动重部署（仅 ArgoCD 不可用时；配置真源仍是 values/<app>.yaml）：
@@ -395,6 +399,7 @@ calibre_ctx := "oracle-k3s"
 #   已用 --force-conflicts 把所有权收回 helm；kubectl-patch 仍残留 requests.memory
 #   的共享所有权，下次改 request 若再冲突，同样加 --force-conflicts。
 #   教训：手工 kubectl patch 过的字段会永久劫持 helm 的声明，改完记得 helm 收回。
+# renovate: datasource=helm depName=argo-cd registryUrl=https://argoproj.github.io/argo-helm
 argocd_chart_version := "10.1.4"
 
 # 一键安装 ArgoCD + 应用配置（幂等，可重复执行）

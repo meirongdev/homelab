@@ -15,6 +15,7 @@ on:
       - '**/*.tf'
       - '**/*.sh'
       - 'scripts/check-manifests.py'
+      - 'scripts/check-version-pairs.py'
       - '.github/workflows/static-checks.yml'
   push:
     branches: [main]
@@ -25,6 +26,7 @@ on:
       - '**/*.tf'
       - '**/*.sh'
       - 'scripts/check-manifests.py'
+      - 'scripts/check-version-pairs.py'
       - '.github/workflows/static-checks.yml'
 
 permissions:
@@ -75,6 +77,14 @@ jobs:
           print(f'✅ {len(files)} 个 YAML 文件全部可解析（含重复键检查）')
           PY
 
+      - name: 版本配对断言 V1-V3
+        # 把散在多处的同一个版本事实锁住：同名 chart 跨集群同版本、声明为同一事实的
+        # 版本变量组一致、cilium↔gateway-api 符合兼容表。
+        # 来由：2026-08-11 漏配 Gateway API CRD 静默停摆 30h，2026-08-13 又发现 oracle
+        # 剧本仍钉着旧值而注释写着"与 homelab 一致" —— 注释拦不住，CI 可以。
+        # 与 Renovate 的分工见 .github/renovate.json5 头注。
+        run: uv run --with pyyaml python scripts/check-version-pairs.py
+
       - name: 清单安全规则 H1-H5
         # 把已经发生过的事故变成能拦的规则：Namespace/CRD 独占文件（2026-08-03 级联删除）、
         # Application path↔destination 同集群、ReferenceGrant v1beta1、PVC 有备份归属、
@@ -97,6 +107,7 @@ jobs:
       - name: 安装 terraform
         uses: hashicorp/setup-terraform@v3
         with:
+          # renovate: datasource=github-releases depName=hashicorp/terraform
           terraform_version: 1.15.5
 
       - name: terraform fmt 检查

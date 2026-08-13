@@ -2,9 +2,11 @@
 
 > Last updated: 2026-08-13
 > Status: 生效事实
-> Scope: `scripts/check-manifests.py` 强制的 H1-H5 —— source of truth。
+> Scope: CI 强制的仓库规则 —— source of truth。两个检查器：
+> `scripts/check-manifests.py` 的 **H1-H5**（清单结构）与
+> `scripts/check-version-pairs.py` 的 **V1-V3**（版本配对，2026-08-13 加）。
 > 每条规则都对应一次**真实发生过的事故或静默失效**，不是风格偏好。
-> 检查器由 [static-checks.yml](../../.github/workflows/static-checks.yml) 在 PR 与 main 上运行。
+> 两者都由 [static-checks.yml](../../.github/workflows/static-checks.yml) 在 PR 与 main 上运行。
 
 ## 为什么有这份文档
 
@@ -156,6 +158,49 @@ metadata:
 > 它会把现存违规 Pod 连同缺失字段一起列出来。⚠️ 只评估**当下存在的** Pod ——
 > 周期性 Job（trivy 的 node-collector 要 hostPath）当时不在场，dry-run 干净 ≠ 收紧安全。
 
+### V1 —— 同一 chart 出现在多个 Application 里必须同版本
+
+**为什么**：三对 App 是**跨集群镜像部署**同一个 chart（`external-dns` / `opencost` /
+`trivy-operator` 各两份）。升级时只改一侧，另一侧就静默留在旧版本，直到某天两集群行为
+不一致才被发现。
+
+自动发现、不需要维护名单：检查器扫 `argocd/applications/*.yaml`，把同名 `chart` 的
+`targetRevision` 两两比对。**刻意的灰度**（单侧先行）写行内豁免：
+
+```yaml
+targetRevision: "2.5.27"   # version-pair-ok: 灰度先行 oracle，2026-09 对齐
+```
+
+### V2 —— 声明为「同一事实」的版本变量组必须取值一致
+
+**为什么**：`gateway_api_version` 同一个事实写在**三处**（`k8s/helm/justfile`、
+`cloud/oracle/justfile`、`cloud/oracle/ansible/playbooks/setup-k3s.yaml`）。
+2026-08-13 实测：前两处已是 1.6.1，剧本里**还钉着 1.2.1**，注释却写"与 homelab 一致"
+—— 而这处漏改只在**重建集群时**才爆，等于埋了一颗定时炸弹。
+
+配对组是**人工声明**的（`DECLARED_PAIRS`），不做"同名变量一律必须相等"的推断。加组前
+先问：改了一处不改另一处，会不会出事？会才加。当前两组：
+
+| 组 | 为什么必须相等 |
+|---|---|
+| `gateway_api_version`（3 处）| 两集群装同一版本 CRD；oracle 的 justfile 与剧本描述的更是同一批 CRD |
+| `cilium_version`（2 处）| ClusterMesh 要求两端版本一致；且各自的 Gateway API 版本由同一张兼容表推出 |
+
+⚠️ **刻意不收** `node_exporter_version`（三套 ansible 各一份，实测 1.11.1 / 1.10.0 /
+1.11.1）与 `eso_version`（两集群独立安装）：那是三个独立机队/两个独立安装，不一致是
+"该升级了"而不是"配置错了"。把它算违规就会制造一条谁都不看的红灯——
+这类漂移交给 Renovate 开 PR（[决策](../decisions/renovate-adoption.md)）。
+
+### V3 —— `cilium_version` 与 `gateway_api_version` 必须符合兼容表
+
+**为什么**：**2026-08-11 的 30 小时静默 stall**。缺 CRD 时 Cilium operator 的 Gateway API
+控制器**整个不初始化**，而旧路由照常 200、无任何告警，只有新增路由静默 503
+（[复盘](../records/2026-08-11-gateway-api-crd-stall.md)）。
+
+检查器里有一张 `CILIUM_GATEWAY_API` 表（当前只有 `1.20 → 1.6.1`）。
+☠️ **升 Cilium 时表里查不到对应 minor 会直接报错，这是特意的**：它强迫升级者去读一遍
+上游的 Gateway API 前置条件，而不是假设旧 CRD 还能用——后者正是 08-11 的死法。
+
 ## 查不出来的那些（仍需人判断）
 
 写下来是为了不让「CI 绿了」被误当成「安全了」。
@@ -177,8 +222,15 @@ metadata:
 
 ```bash
 # 仓库根目录
-uv run --with pyyaml python scripts/check-manifests.py          # 检查
-uv run --with pyyaml python scripts/check-manifests.py --list   # 只看规则与出处
+uv run --with pyyaml python scripts/check-manifests.py             # H1-H5
+uv run --with pyyaml python scripts/check-manifests.py --list      # 只看规则与出处
+uv run --with pyyaml python scripts/check-version-pairs.py         # V1-V3
+uv run --with pyyaml python scripts/check-version-pairs.py --list
 ```
 
-CI 里由 `.github/workflows/static-checks.yml` 在改动 `*.yaml` 时自动运行。
+CI 里由 `.github/workflows/static-checks.yml` 在改动 `*.yaml` / `justfile` /
+检查器自身时自动运行。
+
+⚠️ **改规则必须同步改这份文档**（两边不一致的话，要么规则是摆设，要么检查器在误伤）。
+V1-V3 的敏感度在上线当天逐条实测过：故意把 oracle 剧本改回 1.2.1、把两集群 cilium 版本
+拆开、把 Cilium 升到表外的 minor、把变量改名——六个场景全部按预期判红，行内豁免按预期转绿。
