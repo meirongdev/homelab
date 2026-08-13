@@ -69,6 +69,42 @@ sqlite 依赖 POSIX 字节区间锁（`fcntl`）+ 同步小写入；NFS 的 NLM 
 
 2026-08-06 对**两个 live 集群**重新生成（上一版 08-03 的 oracle 行已有两处过期：
 漏了 `readlist-data`，且把 `uptime-kuma-data-v2` 写成了 `uptime-kuma-data`）。
+
+## 月度恢复演练（2026-08-13 上线）
+
+**"备份在跑"和"备份能恢复"是两件事**，此前只有前者有监控。2026-07-06 手工演练通过过一次，
+但之后备份内容变了几轮（jobs-sg、open-notebook 都是后来加的），那次结论早已不覆盖现状。
+
+现有 `restic-restore-drill` CronJob（每月 1 日 04:00 CST，`backup/overlays/homelab/`）
+真恢复一遍并跑 **8 条判据**：仓库结构（`restic check`）· 两集群快照新鲜度 ·
+Vault raft 快照 · jobs.db integrity · 两个 pg dump 的收尾标记 · raw 归档实解压。
+只恢复 `/work`（两集群各几百 MB）——oracle 快照里挂着 23.5G 书库，全量恢复毫无必要。
+告警三条一套：`RestoreDrillFailed` / `RestoreDrillStale` / `RestoreDrillNeverRan`。
+
+☠️ **判据要能真的判失败**，否则演练只是每月一次的自我安慰。上线当天用**损坏数据**逐条
+验过敏感度（7 种坏法全部判出、零漏报），其中两条最说明问题：
+
+- **截断的 `vault.snap` 依然非空** → 只验 `-s` 会放过；判据必须是 `tar tzf` 里有 `state.bin`。
+- **合法空库的 `PRAGMA integrity_check` 返回 `ok`** → 只验它会放过；靠"表数 > 0"才抓住。
+- 半截的 `pg_dump` 大小看着完全正常 → 判据是**收尾标记** `PostgreSQL database dump complete`。
+
+⚠️ **只验"latest 能恢复"是假信心**：夜备三个月前停了，`latest` 照样能恢复、判据照样全绿。
+故演练第 0 步先卡快照新鲜度（>3 天即失败）。这也是 `BackupNotRunning` 覆盖不到的
+——它只看 CronJob 有没有被调度，看不出"调度了但仓库里没有新快照"。
+
+### ☠️ restic 在 K8s 下的锁陷阱（会咬夜备，不只咬演练）
+
+restic 判定"锁已陈旧"靠 **hostname + PID**。而每个 Job 的 Pod hostname 都不同，
+所以**跨 Pod 泄漏的锁在 30 分钟内一律不被认为陈旧**，`restic unlock`（只删陈旧锁）
+对它无效——夜备脚本里那句 `restic unlock` 也一样清不掉。
+
+泄漏是怎么产生的：任何被 `activeDeadlineSeconds` 杀掉的运行，或**管道被提前关闭**的
+restic（`restic ls … | head` 会 SIGPIPE 杀掉 restic，2026-08-13 实测踩到两次）。
+
+- 演练脚本靠 `--retry-lock 10m` 等（也顺带覆盖与夜备 `forget --prune` 的短暂重叠）。
+- 真卡住时手工处置：`restic unlock --remove-all`
+  ☠️ **只在确认没有任何备份/prune 在跑时**才能用——它会连活锁一起删。
+- 写脚本时别用 `restic … | head`：整份落盘再挑。
 **集群里没有 `nfs-client` StorageClass** —— 引用它的 PVC 会永久 Pending。
 
 - **homelab（10 个）**: `data-vault-0`、`audit-vault-0`、`data-trivy-server-0`、
