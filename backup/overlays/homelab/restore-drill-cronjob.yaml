@@ -1,0 +1,61 @@
+# 月度恢复演练 —— 独立 CronJob，**刻意不塞进夜备脚本**。
+# 理由：夜备是最后一道防线，往它里面加一段几百 MB 的恢复会让"恢复卡住"把一次
+# 已经成功的本地备份拖成 Job failed（撞 activeDeadline），真假信号混在一条链上。
+# 分开之后两者失败域独立：夜备的健康度不受演练影响，演练有自己的告警。
+#
+# 判据脚本与设计取证见 restore-drill-script.yaml 的头注。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: restic-restore-drill
+  namespace: backup
+  labels:
+    app: restic-restore-drill
+spec:
+  schedule: "0 4 1 * *"          # 每月 1 日 04:00 CST：夜备（03:00/03:30）都跑完之后
+  timeZone: "Asia/Shanghai"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  # ☠️ 刻意**不设** ttlSecondsAfterFinished（对比 kube-bench 设了 7d）：
+  # 告警 RestoreDrillStale/Absent 的数据源是 kube_job_status_completion_time，
+  # 它随 **Job 对象**存在而存在。月度任务若 7 天后就把 Job 删掉，序列随之消失 →
+  # absent 类告警误报、stale 类告警反而永远查不到数据（absent series 不参与比较，
+  # 本仓库栽过两次的形态）。改用 history 计数封顶：3 次成功 ≈ 3 个月的可查窗口。
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 1800   # 实测 restore 只需几分钟；超 30min 视为卡住
+      backoffLimit: 1               # 容一次瞬时 sftp 抖动；判据是确定性的，真坏会连败
+      template:
+        metadata:
+          labels: { app: restic-restore-drill }
+        spec:
+          restartPolicy: Never
+          # 本 Job 不挂 hostPath（数据从 restic 仓库来、落 emptyDir），因此不像夜备那样
+          # **必须**钉控制面；钉它是为了临时盘可预期 —— worker 只有 24G ephemeral / 3G RAM。
+          nodeSelector:
+            node-role.kubernetes.io/control-plane: "true"
+          priorityClassName: bulk       # 非核心：可被真负载抢占，月度任务不急
+          securityContext:
+            runAsUser: 0                # restic restore 要还原各 uid 的文件属主
+          containers:
+            - name: drill
+              image: alpine:3.22        # 与夜备同基底（backup/base/cronjob.yaml）
+              command: ["sh", "/scripts/drill.sh"]
+              resources:
+                requests: { cpu: "50m", memory: "128Mi" }
+                limits:   { cpu: "1",   memory: "512Mi" }   # 夜间/月初窗口，短时 1 核可接受
+              volumeMounts:
+                - { name: script, mountPath: /scripts, readOnly: true }
+                - { name: creds,  mountPath: /creds,   readOnly: true }
+                - { name: work,   mountPath: /work }
+          volumes:
+            - name: script
+              configMap: { name: restic-restore-drill-script }
+            # 复用夜备的仓库凭据（同 ns 同 Secret，无需第二个 ExternalSecret）
+            - name: creds
+              secret: { secretName: restic-backup, defaultMode: 0400 }
+            - name: work
+              emptyDir:
+                sizeLimit: 2Gi          # 恢复量实测 ~600Mi；超限则驱逐本 Pod 而不是撑爆节点盘

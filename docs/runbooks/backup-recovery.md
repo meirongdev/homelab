@@ -1,11 +1,13 @@
 # Backup & Recovery Runbook
 
-> Last updated: 2026-08-11
+> Last updated: 2026-08-13
 > 设计与执行: [../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md](../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md)
 
 ## Status
 
 **🟢 restic 备份已上线并验证（2026-07-06，Phase 1）。** 双集群每夜逻辑 dump → 106 ZFS 加密仓库 `881fb124bf`。恢复演练通过（Vault snapshot + 两 PG dump + sqlite integrity_check 全 OK）。
+**月度恢复演练已自动化（2026-08-13）**：`restic-restore-drill` CronJob 每月 1 日 04:00 CST 真恢复 + 跑 8 条判据，
+见下方「演练失败怎么办」与 [reference/storage.md](../reference/storage.md#月度恢复演练2026-08-13-上线)。
 **离站（Phase 5）仍待做** —— 当前仅本地仓库（raidz1 + sanoid 保护），无异地副本；屋内灾难仍是敞口，属计划 Phase 5。
 
 - 清单：kustomize base+overlay `backup/`（2026-07-07 双集群合并；共用骨架在 `backup/base`）。
@@ -64,6 +66,45 @@ restic -r <repo> restore latest --target /tmp/restore --host <homelab|oracle-k3s
 ```
 
 Vault unseal keys: `vault-keys.json` / K8s secret `vault-backup-keys`（见记忆 `vault-pod-token-empty`）。
+
+
+## 演练失败怎么办（RestoreDrillFailed）
+
+告警说的是「备份跑了，但恢复出来的数据过不了检查」——夜备的绿灯对此完全无感。
+
+```bash
+# 1) 先看是哪条判据（每条都对应一种具体坏法）
+kubectl --context k3s-homelab -n backup logs job/<drill-job> | grep -E 'DRILL-FAIL|drill-ok'
+
+# 2) 手动补跑一次（名字必须以 restic-restore-drill 开头，否则告警正则匹配不到）
+kubectl --context k3s-homelab -n backup create job \
+  --from=cronjob/restic-restore-drill restic-restore-drill-manual-$(date +%m%d)
+```
+
+判据 → 含义对照：
+
+| 判据报错 | 说明 | 下一步 |
+|---|---|---|
+| `快照 … 早于 …（夜备已停？）` | 仓库里没有新快照——**夜备其实已经坏了**，与能否恢复无关 | 查 `BackupNotRunning` / 夜备 Job 日志 |
+| `vault.snap 里没有 state.bin` | raft 快照截断/损坏（文件非空也不算数） | 查夜备当晚是否撞 `activeDeadlineSeconds`、Vault token 是否失效 |
+| `jobs.db integrity_check = …` / `没有任何表` | sqlite 热拷贝撞上写事务，或恢复出空库 | 用更早的快照恢复；查 jobs-sg 是否在 03:00 窗口有写者 |
+| `<db>.sql 没有 pg_dump 收尾标记` | dump 是半截的（**大小看着完全正常**） | 查 oracle 侧夜备是否超时/连接中断 |
+| `raw 归档 gzip 校验失败` | **不可再生数据**损坏（MCF 下架职位拿不回来） | 立刻用更早快照核对，别覆盖现有归档 |
+| `restic ls 执行失败` | 演练**自身**受阻（多半仓库锁），**不等于数据坏了** | 见下方锁处置，别照着删数据 |
+
+### 仓库锁卡住（restic：repository is already locked）
+
+☠️ restic 的陈旧锁判定靠 **hostname + PID**，而 K8s 里每个 Job 的 Pod hostname 都不同——
+**跨 Pod 泄漏的锁在 30 分钟内清不掉**，`restic unlock`（只删陈旧锁）无效。
+泄漏来自被 `activeDeadlineSeconds` 杀掉的运行，或管道被提前关闭的 restic（`… | head`）。
+
+```bash
+# 先确认没有任何备份/prune 在跑（否则会删掉活锁、打断正在写的备份）
+kubectl --context k3s-homelab -n backup get jobs
+kubectl --context oracle-k3s   -n backup get jobs
+# 确认无活动后，在一个临时 Pod 里（凭据同夜备）：
+restic unlock --remove-all
+```
 
 ## 保护层次（互补）
 1. **ZFS raidz1**（106）— 容 1 盘。

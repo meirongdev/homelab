@@ -126,6 +126,69 @@ spec:
               或先为该节点建立独立备份路径再有意豁免。
               背景：docs/reference/storage.md。
 
+        # ── 月度恢复演练（2026-08-13 上线）─────────────────────────────────────
+        # 演练本体：backup/overlays/homelab/restore-drill-{cronjob,script}.yaml。
+        # 它每月真恢复一遍并跑 8 条判据（仓库结构、两集群快照新鲜度、vault raft 快照、
+        # jobs.db integrity、两个 pg dump 的收尾标记、raw 归档实解压）。
+        # 判据的**敏感度已用损坏数据实测**：7 种真实坏法全部判出、零漏报（上线当天）。
+        #
+        # ⚠️ 这三条是一套，别只留其中一条：
+        #   Failed  → 演练跑了但判据不过（备份存在却恢复不出来，最坏的那种）
+        #   Stale   → 演练太久没成功过（调度坏了/被 suspend）
+        #   NeverRan→ **序列根本不存在**时 Stale 永远不会 fire（absent series 不参与比较，
+        #             本仓库栽过两次），故必须有 absent 兜底
+        - alert: RestoreDrillFailed
+          expr: kube_job_failed{namespace="backup", job_name=~"restic-restore-drill.*"} > 0
+          for: 5m
+          labels:
+            severity: warning
+            component: backup
+          annotations:
+            summary: "恢复演练 {{ $labels.job_name }} 失败 —— 备份的可恢复性存疑"
+            description: |
+              月度恢复演练有判据未通过。这**不是**"备份没跑"，而是"备份跑了但恢复出来
+              的数据过不了检查"——夜备的绿灯对此完全无感。
+              先看是哪条判据：
+              `kubectl --context k3s-homelab -n backup logs job/{{ $labels.job_name }} | grep DRILL-FAIL`
+              每条判据对应的坏法与处置见 backup/overlays/homelab/restore-drill-script.yaml
+              的头注与 docs/runbooks/backup-recovery.md。
+              ⚠️ 若报的是 `restic ls 执行失败` 一类，那是演练自身受阻（多半仓库锁没释放，
+              见脚本里 RETRY 处的说明），不等于数据坏了 —— 别照着删数据。
+
+        - alert: RestoreDrillStale
+          expr: |
+            time() - max(kube_job_status_completion_time{namespace="backup", job_name=~"restic-restore-drill.*", cluster="homelab"})
+              > 40 * 24 * 3600
+          for: 1h
+          labels:
+            severity: warning
+            component: backup
+          annotations:
+            summary: "已 {{ $value | humanizeDuration }} 没有成功的恢复演练"
+            description: |
+              演练是月度任务（每月 1 日 04:00 CST），40 天阈值留了一次调度失败的余量。
+              超期意味着"备份能恢复"这件事已经很久没被证明过。
+              查：`kubectl --context k3s-homelab -n backup get cronjob restic-restore-drill`
+              （是否被 suspend）与最近的 Job 列表。
+              手动补跑：`kubectl --context k3s-homelab -n backup create job
+              --from=cronjob/restic-restore-drill restic-restore-drill-manual-$(date +%m%d)`
+              ⚠️ 名字必须以 restic-restore-drill 开头，否则本组告警的正则匹配不到它。
+
+        - alert: RestoreDrillNeverRan
+          expr: absent(kube_job_status_completion_time{namespace="backup", job_name=~"restic-restore-drill.*", cluster="homelab"})
+          for: 24h
+          labels:
+            severity: warning
+            component: backup
+          annotations:
+            summary: "恢复演练从未成功过（或 Job 对象全被清掉了）"
+            description: |
+              找不到任何成功的演练 Job。两种原因：① 演练从未跑成功过；
+              ② Job 对象被清掉了 —— ☠️ 特别注意**别给这个 CronJob 加
+              ttlSecondsAfterFinished**：月度任务若 7 天后就删 Job，序列随之消失，
+              RestoreDrillStale 会永远查不到数据而静默失效（本条就是它的兜底）。
+              保留窗口靠 successfulJobsHistoryLimit: 3（≈3 个月）。
+
     - name: capacity
       # 2026-08-13：替代 chart 的 KubeCPU/KubeMemoryOvercommit（已在 values 的
       # defaultRules.disabled 关掉，理由见彼处：N-1 语义在 1大+1小 的不对称双节点上

@@ -1,0 +1,188 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: restic-restore-drill-script
+  namespace: backup
+data:
+  # 恢复演练 —— 每月从 106 仓库真恢复一遍并**跑判据**，把"备份看起来在跑"升级成
+  # "备份被证明能恢复"。2026-07-06 手工演练通过过一次，但此后备份内容变了几轮
+  # （jobs-sg、open-notebook 都是后来加的），一次性演练的结论早已不覆盖现状。
+  #
+  # ☠️ 设计要点一：**必须验快照新鲜度**。只验"latest 能恢复"是假信心 —— 夜备三个月前
+  # 就停了，latest 照样能恢复、判据照样全绿。BackupNotRunning 只看 CronJob 有没有被
+  # 调度，看不出"调度了但仓库里没有新快照"。故第 0 步先卡 SNAP_MAX_AGE_DAYS。
+  #
+  # ☠️ 设计要点二：**判据要能真的判失败**。每条都针对一种真实的坏法：
+  #   vault.snap  → 不是"文件在且非空"，而是 gzip tar 里必须有 state.bin
+  #                （截断的 snapshot 文件依然非空，但 tar 会解不出来）
+  #   jobs.db     → PRAGMA integrity_check + 表数 > 0（热拷贝撞上写事务的产物）
+  #   *.sql       → pg_dump 的收尾标记（被 activeDeadline 杀掉的 dump 是**无标记的
+  #                 半截文件**，大小看起来完全正常）
+  #   raw/*.jsonl.gz → gzip -t 实解一个（这是全库唯一不可再生的数据）
+  #
+  # ⚠️ 只恢复 /work（两集群各几百 MB）：oracle 快照里还挂着 23.5G 书库，整份恢复既撑爆
+  # 节点临时盘也毫无必要 —— 演练要的是"每类数据都抽样证明可恢复"，不是全量对拷。
+  drill.sh: |
+    #!/bin/sh
+    # 月度恢复演练：从 sftp:106 仓库恢复关键数据并逐条跑判据。
+    # 任一判据不过 → 非零退出 → Job failed → RestoreDrillFailed 告警。
+    set -eu
+
+    SNAP_MAX_AGE_DAYS=3          # 快照比这更旧 = 夜备其实已经坏了
+    R=/work/restore              # emptyDir，随 Pod 消失
+    # ☠️ K8s 特有的锁陷阱（2026-08-13 实测两次撞上）：restic 判定"锁已陈旧"靠
+    # hostname+PID —— 而每个 Job 的 Pod hostname 都不一样，**跨 Pod 泄漏的锁在 30 分钟内
+    # 一律不被认为陈旧**，`restic unlock`（只删陈旧锁）对它无效。所以这里靠 --retry-lock
+    # 等：既能等掉与夜备 forget/prune 的短暂重叠，也能熬过泄漏锁的一部分。
+    # 真卡住就让演练失败告警——手工处置是 `restic unlock --remove-all`
+    # （☠️ 只在确认没有任何备份/prune 在跑时才可以用，它会连活锁一起删）。
+    RETRY="--retry-lock 10m"
+
+    echo "[drill] installing tools (restic/openssh/sqlite/jq/coreutils)..."
+    apk add --no-cache restic openssh-client sqlite jq coreutils >/dev/null
+
+    # SSH（与 backup.sh 同款：b64 存私钥保尾部换行）
+    install -d -m 700 /root/.ssh
+    base64 -d /creds/SSH_KEY_B64 > /root/.ssh/id_ed25519
+    chmod 600 /root/.ssh/id_ed25519
+    cat > /root/.ssh/config <<EOF
+    Host 192.168.50.106 100.110.27.111
+      User root
+      IdentityFile /root/.ssh/id_ed25519
+      StrictHostKeyChecking accept-new
+      UserKnownHostsFile /root/.ssh/known_hosts
+    EOF
+    chmod 600 /root/.ssh/config
+
+    export RESTIC_PASSWORD="$(cat /creds/RESTIC_PASSWORD)"
+    export RESTIC_REPOSITORY="sftp:root@192.168.50.106:/storage/restic"
+
+    FAILED=0
+    fail() { echo "[DRILL-FAIL] $*"; FAILED=$((FAILED + 1)); }
+    ok()   { echo "[drill-ok]   $*"; }
+
+    # --- 0) 仓库自检 + 两个 host 的快照新鲜度 ---
+    # ⚠️ 先清陈旧锁再 check：`restic check` 要**独占锁**，而被 activeDeadline 杀掉、
+    # 或被 SIGPIPE 打断的 restic 会留下锁（2026-08-13 首测就撞上：探测命令用了
+    # `restic ls | head`，head 提前关管道 → restic 被杀 → 锁遗留 → 演练直接失败）。
+    # unlock 默认只删**持锁进程已死**的锁，与夜备脚本同款做法，安全。
+    restic unlock 2>/dev/null || true
+    echo "[drill] restic check (structure)..."
+    restic check $RETRY
+    ok "仓库结构与索引一致"
+
+    CUTOFF="$(date -u -d "${SNAP_MAX_AGE_DAYS} days ago" +%F)"
+    for h in homelab oracle-k3s; do
+      # ☠️ 不能用 `--latest 1`（2026-08-13 首测被它骗过）：restic 的 --latest 是
+      # **按 (host, paths) 分组**各取最新，本仓库同一 host 历史上有多组 paths
+      # （calibre 迁走前后、jobs-sg raw 加入前后各是一组），于是它返回**多条**，
+      # `.[0]` 恰好是某个旧路径集的最新快照 —— 判据据此报"夜备已停"，而同一次运行里
+      # restore 拿到的却是当天的快照，自相矛盾。改为按全量时间取最大，与分组无关。
+      SNAP_JSON="$(restic snapshots $RETRY --host "$h" --json)"
+      SNAP_ID="$(echo "$SNAP_JSON" | jq -r 'sort_by(.time) | .[-1].short_id // empty')"
+      SNAP_TIME="$(echo "$SNAP_JSON" | jq -r 'sort_by(.time) | .[-1].time // empty')"
+      if [ -z "$SNAP_ID" ]; then
+        fail "$h 在仓库里没有任何快照"
+        continue
+      fi
+      # ISO 日期可直接按字符串比大小，绕开 busybox date 的解析限制
+      SNAP_DATE="$(echo "$SNAP_TIME" | cut -c1-10)"
+      if [ "$SNAP_DATE" \< "$CUTOFF" ]; then
+        fail "$h 最新快照 $SNAP_ID 是 $SNAP_DATE，早于 $CUTOFF（夜备已停？）"
+      else
+        ok "$h 最新快照 $SNAP_ID @ $SNAP_DATE（新鲜）"
+      fi
+    done
+
+    # --- 1) homelab /work 恢复 + 判据 ---
+    echo "[drill] restore homelab /work ..."
+    restic restore $RETRY latest --host homelab --include /work --target "$R/homelab"
+
+    V="$R/homelab/work/vault.snap"
+    if [ ! -s "$V" ]; then
+      fail "vault.snap 缺失或为空"
+    elif ! tar tzf "$V" 2>/dev/null | grep -q 'state.bin'; then
+      fail "vault.snap 里没有 state.bin —— 不是可用的 raft 快照（截断？）"
+    else
+      ok "vault.snap 是合法 raft 快照（$(wc -c < "$V") bytes，含 state.bin）"
+    fi
+
+    J="$(find "$R/homelab" -name 'jobs.db' -type f 2>/dev/null | head -1)"
+    if [ -z "$J" ]; then
+      fail "jobs.db 未在恢复结果里找到（jobs-sg 掉出备份白名单？）"
+    else
+      IC="$(sqlite3 "$J" 'PRAGMA integrity_check;' 2>&1 || echo 'query-failed')"
+      # 表数用 sqlite_master 计数：不绑定具体业务表名，schema 演进不会误报，
+      # 但截断/空库（0 张表）照样能抓住。
+      NT="$(sqlite3 "$J" "select count(*) from sqlite_master where type='table';" 2>/dev/null || echo 0)"
+      if [ "$IC" != "ok" ]; then
+        fail "jobs.db integrity_check = $IC"
+      elif [ "$NT" -lt 1 ]; then
+        fail "jobs.db 里没有任何表（恢复出来是空库）"
+      else
+        ok "jobs.db integrity_check=ok，$NT 张表"
+      fi
+    fi
+
+    S="$R/homelab/work/open-notebook.surql"
+    if [ ! -s "$S" ]; then
+      fail "open-notebook.surql 缺失或为空（Vault 的 open-notebook 口令没写？见 backup.sh 2b）"
+    elif [ "$(wc -c < "$S")" -lt 1024 ]; then
+      fail "open-notebook.surql 只有 $(wc -c < "$S") bytes —— /export 疑似截断"
+    else
+      # 关键字只做软校验：SurrealDB 换导出格式属正常演进，不该让演练变红
+      grep -q 'DEFINE' "$S" || echo "[drill-warn] open-notebook.surql 里没有 DEFINE 语句（导出格式变了？）"
+      ok "open-notebook.surql $(wc -c < "$S") bytes"
+    fi
+
+    # --- 2) oracle-k3s /work 恢复 + 判据（pg_dump 收尾标记）---
+    echo "[drill] restore oracle-k3s /work ..."
+    restic restore $RETRY latest --host oracle-k3s --include /work --target "$R/oracle"
+
+    for db in miniflux zitadel; do
+      F="$R/oracle/work/$db.sql"
+      if [ ! -s "$F" ]; then
+        fail "$db.sql 缺失或为空（该库掉出 oracle 备份清单？）"
+      elif ! tail -5 "$F" | grep -q 'PostgreSQL database dump complete'; then
+        fail "$db.sql 没有 pg_dump 收尾标记 —— dump 是半截的（大小看起来正常也不算数）"
+      else
+        ok "$db.sql 完整（$(wc -c < "$F") bytes，有收尾标记）"
+      fi
+    done
+
+    # --- 3) jobs-sg raw 归档抽样实解（全库唯一不可再生的数据）---
+    # MCF API 只返回当前在架职位，下架的拿不回来 —— 这份 .jsonl.gz 归档丢了就是永久丢。
+    # 只挑一个文件恢复并 gzip -t，几十 KB 的代价换"这类数据真能解开"的证据。
+    # ⚠️ 三个都踩过的坑，改这段前先读：
+    #  ① 不要 `restic ls ... | head`：head 提前关管道 → SIGPIPE 杀掉 restic → 它来不及
+    #    释放仓库锁，而泄漏的锁 30 分钟内清不掉（见文件头 RETRY 处）。先整份落盘再挑。
+    #  ② 不要给 ls 加 `/localpath` 路径过滤：实测它只列到 pvc 目录、**不往 raw/ 里递归**，
+    #    导致判据误报"归档没进备份"。不加过滤才列全（多几千行文本，无所谓）。
+    #  ③ 不要把 stderr 吞掉：命令失败与"没有匹配"会长得一模一样，判据就会把自己的
+    #    故障报成备份的故障（本仓库在 Loki 上栽过同一个形态）。故这里区分两者。
+    if ! restic ls $RETRY latest --host homelab > /tmp/ls.txt; then
+      fail "restic ls 执行失败 —— 无法判断 raw 归档是否可恢复（不是'归档不存在'）"
+      RAWPATH=""
+    else
+      RAWPATH="$(grep '\.jsonl\.gz$' /tmp/ls.txt | head -1 || true)"
+      [ -n "$RAWPATH" ] || fail "快照里找不到任何 raw/*.jsonl.gz（jobs-sg 归档没进备份！）"
+    fi
+    if [ -n "$RAWPATH" ]; then
+      restic restore $RETRY latest --host homelab --include "$RAWPATH" --target "$R/raw" >/dev/null
+      RAWFILE="$R/raw$RAWPATH"
+      if [ ! -s "$RAWFILE" ]; then
+        fail "raw 归档恢复出来是空文件：$RAWPATH"
+      elif ! gzip -t "$RAWFILE" 2>/dev/null; then
+        fail "raw 归档 gzip 校验失败（内容损坏）：$RAWPATH"
+      else
+        ok "raw 归档抽样可解压：$(basename "$RAWPATH")（$(wc -c < "$RAWFILE") bytes）"
+      fi
+    fi
+
+    echo "[drill] restored size: $(du -sh "$R" 2>/dev/null | cut -f1)"
+    if [ "$FAILED" -gt 0 ]; then
+      echo "[drill] ❌ $FAILED 条判据未通过 —— 备份的可恢复性有问题，别等真出事才发现"
+      echo "[drill]    处置见 docs/runbooks/backup-recovery.md"
+      exit 1
+    fi
+    echo "[drill] ✅ 全部判据通过（仓库结构 + 快照新鲜度 + 四类数据实恢复）"

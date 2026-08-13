@@ -10,5 +10,9 @@ resources:
   - external-secret.yaml
   - open-notebook-external-secret.yaml
   - backup-script.yaml
+  # 月度恢复演练（2026-08-13）：真恢复 + 跑判据，把"备份在跑"升级成"备份被证明能恢复"。
+  # 只在 homelab 侧有一份 —— 它读的是同一个 106 仓库，一次演练同时覆盖两个集群的快照。
+  - restore-drill-script.yaml
+  - restore-drill-cronjob.yaml
 patches:
   - path: cronjob-patch.yaml
