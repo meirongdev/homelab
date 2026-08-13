@@ -174,8 +174,14 @@ trivy:
       # CVSS 仅 3.1（原型污染），不值得为它冒动 lockfile 的回归风险。
       - id: CVE-2021-44906
         statement: "minimist 原型污染(CVSS 3.1); excalidraw-room 的 yarn.lock 随 ROOM_REF 固定, 重建不改变, 修需抬 ROOM_REF, 2026-11 复审"
+      # ⚠️ 第 3 条格式坑（2026-08-13 抓到）：id 必须用**报告里实际出现的** ID——trivy 的
+      # ignore 是精确字符串匹配、不解析别名。这条最初写成 GHSA-7rqj-j65f-68wh（同一漏洞
+      # 的 GitHub 别名），而 vulnerabilityreport 里是 CVE-2026-73420 → 豁免静默失效，
+      # TrivyImageCriticalVulnerabilities 持续 firing。两个 ID 都留着防 DB 换主 ID。
+      - id: CVE-2026-73420
+        statement: "@auth/core 同形字符 @ 绕过(=GHSA-7rqj-j65f-68wh); 漏洞在 email/magic-link 流程, karakeep 未配邮件登录且 DISABLE_SIGNUPS=true+OIDC; :release(v0.33.2)上游未 bump 0.41.3, 等上游, 2026-10 复审"
       - id: GHSA-7rqj-j65f-68wh
-        statement: "@auth/core 同形字符 @ 绕过; karakeep 已钉 :release(上游最新)仍未 bump 到 0.41.3, 等上游, 2026-10 复审"
+        statement: "同上 CVE-2026-73420 的 GHSA 别名, 防 trivy DB 换回主 ID"
       # （原先这里有一条 CVE-2026-42945 的临时豁免——nginx 1.28.2-r1 任意代码执行。
       #   2026-08-05 已在源仓库 meirongdev/it-tools 把 base 钉到 nginx:1.30-alpine
       #   并重建（sha-ffb28a7），实测 nginx-1.30.4-r1 → 真修掉了，故删除该豁免。）
