@@ -1,6 +1,6 @@
 # Observability — 告警、看板组织与 SLO
 
-> Last updated: 2026-08-12
+> Last updated: 2026-08-13
 > Status: 生效事实
 >
 > 遥测的**消费侧**：告警路由与覆盖盲区、Grafana 看板组织约定、SLI/SLO 体系。
@@ -153,8 +153,14 @@ recurse 目录源）：
 
 ## SLI / SLO（Sloth + Cilium Envoy 一手指标）
 
-服务可用性 SLO 基于**真实入口请求**（Cilium Gateway 的 Envoy L7 指标），非合成探测；
+服务可用性 SLO 基于 Cilium Gateway 的 Envoy L7 指标（入口一手请求）；
 用 **Sloth** 生成多窗口燃尽率规则。2026-06-16 上线，2026-07-12 扩展至 oracle 网关。
+
+> **目标值/服务清单的判据、错误预算算术** → [decisions/slo-availability-targets.md](../decisions/slo-availability-targets.md)。
+> 本节只讲**机制**（怎么跑），**为什么这么定**在那份 ADR。
+> ⚠️ 该 ADR 的实测推翻了本节原先那句"基于真实入口请求、**非合成探测**"：
+> Uptime Kuma 的 60s 外部探针穿过 gateway、计入 SLI 分母，**vault/argocd 的真实流量
+> 实测 ≈0**（vault 5 天只有 1 个 `2xx`）——5 条 SLO 里 3 条量到的几乎只有探针本身。
 
 - **一手指标 (homelab)**: `cilium-envoy` DaemonSet `:9964`（`cilium-config`
   `enable-metrics=true`/`external-envoy-proxy=true`），
@@ -213,8 +219,10 @@ recurse 目录源）：
 - **⚠️ 零流量服务的 SLO 统计意义很弱**: 兜底后闲置窗口按"0 错误 = 健康"计入，序列不再断，
   但样本量太小时目标本身失真——zitadel 曾 7 天仅 138 个请求（~0.8 req/h），99% 目标下
   一个 5xx 就是 0.7% 预算。**SLI 的样本量实际由 Uptime Kuma 的公网探测供给**：
-  `provisioner.yaml` 那组 `https://*.meirong.dev/` 探针（只收 3xx、不跟随跳转）就是
-  各服务三千级 3xx 计数的来源。2026-08-12 排查 zitadel 无流量时发现**它根本不在监控
-  清单里**（身份提供方竟是唯一没有存活探测的对外服务），已补上。
+  `provisioner.yaml` 那组 `https://*.meirong.dev/` 探针（`interval=60`，只收 3xx、
+  不跟随跳转）就是各服务大部分 3xx 计数的来源。2026-08-12 排查 zitadel 无流量时发现
+  **它根本不在监控清单里**（身份提供方竟是唯一没有存活探测的对外服务），已补上。
   ⚠️ 反过来要清醒：这些 SLO 的分母以合成探测为主，测的是"入口通不通"，
-  不等价于真实用户体验。
+  不等价于真实用户体验。**逐服务的探针占比 / 真实流量实测值、以及由此得出的服务选择
+  判据**见 [decisions/slo-availability-targets.md](../decisions/slo-availability-targets.md)
+  （数字只在那里维护，这里不留副本）。
