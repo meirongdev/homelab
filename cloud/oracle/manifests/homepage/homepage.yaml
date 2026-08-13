@@ -130,6 +130,14 @@ data:
             href: https://notebook.meirong.dev
             description: AI 研读笔记本（本地模型）
 
+        # 集群外的站点（GitHub Pages，仓库 meirongdev/playgrounds）：没有 HTTPRoute、
+        # 没有 pod，所以不写 kubernetes: 块，DNS 也不由 external-dns 建 ——
+        # CNAME 在 cloudflare/terraform/main.tf 的 external_origin_dns 里显式管。
+        - Playgrounds:
+            icon: mdi-code-braces
+            href: https://playgrounds.meirong.dev
+            description: 各语言官方在线 Playground 导航
+
         # 只发元数据与评分，**不发书** —— 与 Calibre-Web(book.meirong.dev) 是两个东西，
         # 域名刻意用 readlist. 而不是 books.，差一个字母的误配代价太高。
         - readlist:
