@@ -1,6 +1,6 @@
 # Storage & Backup — 存储与备份
 
-> Last updated: 2026-08-06
+> Last updated: 2026-08-13
 > Status: 生效事实
 >
 > 双集群存储布局（全部 `local-path`）、NFS 退役事实、PVC 迁移程序，以及 restic 备份体系。
@@ -12,8 +12,11 @@
 - `192.168.50.106` / Tailscale `100.110.27.111`（hostname `storage`，`tag:homelab`，2026-07-06 入网）。
   PVE 节点，`proxmox/ansible/inventory.yaml` 的 `storage` 组。
 - 数据在 **ZFS pool `mrstorage`，挂载 `/storage`**（与 OS 盘分离），由
-  `proxmox/ansible/storage-playbook.yaml` 预配。ARC 读缓存 4GB + **sanoid** hourly/daily 快照
+  `proxmox/ansible/storage-playbook.yaml` 预配。**ARC 读缓存上限 2GiB** + **sanoid** hourly/daily 快照
   （见 [../plans/storage/2026-07-04-storage-106-utilization-and-backup-simplification.md](../plans/storage/2026-07-04-storage-106-utilization-and-backup-simplification.md)）。
+  ⚠️ ARC 于 **2026-08-13 由 4G 降到 2G**，给同机的 `k3s-exp` 实验 VM 腾内存（106 只有 8G，
+  三方分配 = ARC 2G / 宿主 2.1G / VM 3G）—— 106 是备份**目标**，写入是顺序 pack 文件，
+  ARC 主要服务夜间 restic prune/check 的元数据。判据见 [decisions/storage106-experiment-vm.md](../decisions/storage106-experiment-vm.md)。
 - **重建 106 是数据安全的，且不再影响集群**: OS 在 boot 盘、数据全在 `mrstorage`。
   重装后重跑 `storage-playbook.yaml` 即 `zpool import -f mrstorage` + 重建 `/etc/exports`。
   2026-07-11 起**没有任何 pod 挂载 106**，宕机只暂停备份窗口。
