@@ -1,6 +1,6 @@
 # Homelab Roadmap
 
-> Last updated: 2026-08-13
+> Last updated: 2026-08-14
 > 本文只回答两件事：**还剩什么没做**，和**做过什么/为什么不做**。
 > 实施细节不写在这里——每条都链到 `decisions/`（取舍）或 `plans/`（执行过程）。
 >
