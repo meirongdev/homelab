@@ -55,6 +55,19 @@ spec:
       # push_token=alertmanager-watchdog-homelab、notification 已挂(is_default=1)、
       # 心跳每 45s 一条全 UP。所以 Alertmanager 这侧再喊一遍纯属重复且标签错误。
       #
+      # ⚠️ 2026-08-14 修正:上面这个"自检"前提**只覆盖一半的故障**。
+      # 它成立的条件是「发送侧或链路坏、**接收侧活着**」。当接收侧自己也没了时:
+      #   08-13 17:21 UTC oracle 硬重启 → uptime-kuma 一起下线
+      #   → monitor id=1 心跳缺口 17:18:26 → 17:28:06(**9分40秒**,interval 才 60s)
+      #   → 当天 important 翻转数 = **0**。没转 DOWN、没报警、库里不留痕迹。
+      # 原因:push monitor 的检查跑在 uptime-kuma **进程内**,它自己下线就没人做检查;
+      # 重启回来后 ~45s 内新推送就到,看上去"一直 UP"。
+      # 2026-08-09 那次实测验的是"配置正确 + 正在收心跳",**没有验"制造一个缺口会不会
+      # 真的转 DOWN"** —— 配置对 ≠ 机制有效。
+      # 本条 null 路由**保持不变**(它针对的抖动噪声判断依然对);
+      # 失明窗口另由 prometheus-rules.yaml 的 `DeadMansSwitchReceiverDown` 覆盖
+      # (只捞持续 5 分钟以上的全量失败,alertname 不同故不受本路由影响)。
+      #
       # ⚠️ 只按 `integration="webhook"` 收窄(告警标签里没有 receiver 名,这已是最细粒度)。
       # 当前 **watchdog-webhook 是唯一的 webhook 接收器** —— 将来若再加 webhook 接收器,
       # 它的投递失败会被这条一并静默,那时必须改成别的判别方式。

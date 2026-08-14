@@ -557,12 +557,34 @@ spec:
             summary: "{{ $labels.cluster }} / {{ $labels.instance }} 刚重启（开机不足 30 分钟）"
             description: |
               节点重启了。若非你主动操作，就是**非正常关机**，需要查原因。
-              ⚠️ oracle 的 journald 是 volatile（`#Storage=auto` 且 `/var/log/journal`
-              不存在）→ **上一次启动的日志在重启时就没了**，事后无法复盘。
-              要查崩溃原因得先让日志活过重启：`sudo mkdir -p /var/log/journal &&
-              sudo systemd-tmpfiles --create --prefix /var/log/journal &&
-              sudo systemctl restart systemd-journald`，之后 `journalctl -b -1` 才有内容。
+              oracle 的 journald 持久化**已启用**（`/var/log/journal` 存在，`Storage=auto`
+              据此落盘；2026-08-14 实测 `journalctl --list-boots` 能看到 6 个历史 boot）。
+              查崩溃现场：`journalctl -b -1 -n 25` —— 若最后几行是正常业务日志、
+              **没有任何 shutdown 序列**，那就是宿主层硬重置，客场查不出更多。
               重启后按 runbook 核不变量：`cd cloud/oracle && just verify-node`（只读）。
+
+        # ☠️ 频次盲区（2026-08-14 补）：上面那条**每次重启都正常响过**，oracle 在
+        # 08-10~08-13 就 firing 了 21 个样本 —— 但它是**逐次**告警，读不出
+        # "这台机在反复重启"。而 2026-08-09 加 NodeRebooted 时注释里记的已经是
+        # "oracle 5 天重启 5 次"，到 2026-08-14 复查又是**6 天 6 次**（全部无 shutdown
+        # 记录、无 panic、无 OOM、无 crash dump，每次都从 EDK II 固件冷启动）
+        # —— 即这是**持续 9 天以上的慢性故障**，却因为每次只留一条 warning
+        # 混在日常噪声里，从没被当成一件事看。与 V4-Flash 那次同型：信号在，模式不在。
+        # 阈值取 24h ≥3：正常运维（内核升级链）一天最多 2 次，且带干净 shutdown。
+        - alert: NodeRebootLoop
+          expr: changes(node_boot_time_seconds{job=~"node-exporter|node-exporter-metal-nodes|node-exporter-dgx-spark"}[24h]) >= 3
+          for: 10m
+          labels:
+            severity: warning
+            component: infrastructure
+          annotations:
+            summary: "{{ $labels.cluster }} / {{ $labels.instance }} 24h 内重启 {{ $value }} 次——不是偶发"
+            description: |
+              这台机在反复重启，按单次 NodeRebooted 看不出来。先分清是哪一类：
+              `journalctl -b -1 -n 25` 有干净 shutdown 序列 → 客场原因（内核升级/主动重启）；
+              日志戛然而止且无 panic/OOM → **宿主层硬重置，客场查不出**。
+              oracle 属后者：查 OCI 控制台该实例的 Work Requests / 维护事件，
+              客场只能做韧性（重启期间 dead-man's switch 会失明，见 DeadMansSwitchReceiverDown）。
 
     # ☠️ 覆盖盲区（2026-08-13 补）：**V4-Flash 推理服务死了 3h10m，告警"响过"却没人动。**
     # 事故实录（全部可在本 Prometheus 复查，均在 7d 保留期内）：
@@ -690,3 +712,39 @@ spec:
               (NodePort svcs from monitoring-external.yaml), then Tailscale reachability.
               Bit us 2026-07-07: monitoring-external.yaml fell out of every App's include glob
               and ArgoCD pruned the NodePort services — silent telemetry blackout for ~1 day.
+
+        # ☠️ 死人开关**自身的失明窗口**（2026-08-14 补）。
+        # alertmanager-config.yaml 里把 `AlertmanagerFailedToSendAlerts{integration=webhook}`
+        # 路由到 null，理由写的是"死人开关是**自检**的：心跳停 → oracle 的 push monitor
+        # (60s interval) 转 DOWN → 它自己从 oracle 直连 Telegram 报警"。
+        # 那个前提**只在"发送侧/链路坏、接收侧活着"时成立**。2026-08-14 实测反例：
+        #   08-13 17:21 UTC oracle 硬重启 → uptime-kuma 一起没了
+        #   → monitor id=1 的心跳缺口 17:18:26 → 17:28:06（**9分40秒**，interval 才 60s）
+        #   → 当天 important 翻转数 = **0**：没转 DOWN、没报警、库里不留痕迹
+        # 因为 push monitor 的检查跑在 uptime-kuma **进程内**，它自己下线就没人检查；
+        # 重启回来后 ~45s 内新推送就到了，看上去"一直 UP"。
+        # 即**接收方和发送方一起挂时，死人开关静默失明**——而 oracle 正好每天硬重启。
+        # 这条不是要推翻 2026-08-09 那个静默决定（那条针对的是 1.6% 失败率的抖动噪声，
+        # 依然对）；这条只捞**持续 5 分钟以上的全量失败**，即"接收方真的没了"。
+        # ⚠️ 阈值经线上 5 天双向实测：>=5/5m 在 5 次硬重启上全部命中（条件真实持续
+        # 9.5~11 分钟），且**完全避开**所有小抖动（08-10 04:26 的 9 次/时、08-11 03:26
+        # 的 5 次/时等一律不触发）。改阈值前请照同样方式两向复验。
+        # ⚠️ 与上面 null 路由不冲突：那条按 alertname 匹配，本告警 alertname 不同，
+        # 不会被一并丢弃。但若将来新增别的 webhook 接收器，`integration="webhook"`
+        # 就不再唯一指向死人开关，这条要跟着改判别方式。
+        - alert: DeadMansSwitchReceiverDown
+          expr: increase(alertmanager_notifications_failed_total{integration="webhook"}[5m]) >= 5
+          for: 5m
+          labels:
+            severity: warning
+            component: observability
+          annotations:
+            summary: "死人开关推送持续失败——此刻 homelab 挂了不会有人知道"
+            description: |
+              Watchdog 心跳推不到 oracle 的 Uptime Kuma，已持续 5 分钟以上。
+              **这段时间死人开关是失明的**：它的自检兜底跑在 uptime-kuma 进程内，
+              接收方自己下线时不会转 DOWN，事后也不留痕迹。
+              最常见原因是 oracle 整机重启（查 NodeRebootLoop / NodeRebooted 是否同时响）。
+              核实接收端：`kubectl --context oracle-k3s -n personal-services get pods | grep uptime-kuma`
+              查心跳缺口是否真的没被记成 DOWN：
+              `kubectl --context oracle-k3s -n personal-services exec deploy/uptime-kuma -c uptime-kuma -- sqlite3 /app/data/kuma.db "SELECT time,status FROM heartbeat WHERE monitor_id=1 ORDER BY time DESC LIMIT 20;"`
