@@ -52,7 +52,8 @@
 >
 > 2026-08-14：**KaraKeep (`keep`) 已退役**——Miniflux→KaraKeep 书签管道整体下线
 > （实测近 7d 零 webhook 流量、SQLite 仅 564K，用户确认不需要）。ZITADEL 侧的
-> `karakeep` 应用与 Vault `secret/oracle-k3s/karakeep` 建议一并删除（待手工清理）。
+> `karakeep` 应用与 Vault `secret/oracle-k3s/karakeep`、`secret/oracle-k3s/redpanda-connect`
+> 已一并删除。
 
 - 各自的机密 WEB client 由 `zitadel/scripts/configure-oidc-app.sh` **幂等**下发
   （REST 而非 Terraform，原因见下「配置脚本为何走 REST」）。

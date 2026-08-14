@@ -1,6 +1,6 @@
 # Storage & Backup — 存储与备份
 
-> Last updated: 2026-08-13
+> Last updated: 2026-08-14
 > Status: 生效事实
 >
 > 双集群存储布局（全部 `local-path`）、NFS 退役事实、PVC 迁移程序，以及 restic 备份体系。
@@ -117,9 +117,8 @@ restic（`restic ls … | head` 会 SIGPIPE 杀掉 restic，2026-08-13 实测踩
   `apps-pg-1`（2026-08-06 新增，CNPG 共享库；同日 `miniflux-db-pvc` 随 `rss-postgres`
   退役删除，见 [decisions/shared-postgres-platform.md](../decisions/shared-postgres-platform.md)）
 
-> `karakeep-data` / `meilisearch-data` 已于 2026-08-14 随 karakeep 整体退役，Deployment 删除后
-> PVC 按 `Prune=false` 留在节点上作为冻结数据（SQLite 仅 564K / meili 308K，不再备份），
-> 确认不要后可手工 `kubectl delete pvc -n rss-system karakeep-data meilisearch-data`。
+> `karakeep-data` / `meilisearch-data` 已于 2026-08-14 随 karakeep 整体退役并删除
+> （SQLite 仅 564K / meili 308K，用户确认无需备份）。
 
 ⚠️ **CNPG 的 PVC（`apps-pg-1`、`zitadel-pg-1`）由 operator 动态创建，不在任何清单里
 声明 → CI 的 H4 规则看不见它们。** 这两个库的备份归属靠

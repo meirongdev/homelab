@@ -21,7 +21,7 @@
 | 日期 | 方案 | 为什么取消 |
 |------|------|-----------|
 | 2026-06-07 | [Bifrost LLM 网关](2026-06-07-bifrost-llm-gateway.md) | 落地后 2026-08-08 整体退役：`bifrost` ArgoCD App（网关 + oauth2-proxy 管理面 + dgx-proxy）全删，`llm.meirong.dev` 下线。**接替者尚未落地**——[LiteLLM 迁移](../apps/2026-08-01-litellm-gateway-migration.md)仍是 📐 设计，当前消费方（jobs-sg / Open Notebook）直连 DGX vLLM |
-| 2026-02-28 | [信息管道 Miniflux→KaraKeep](2026-02-28-info-pipeline-miniflux-karakeep-gotify.md) | 落地后 2026-08-14 整体退役：`redpanda-connect` + `karakeep` 两个 Deployment、`keep.meirong.dev` HTTPRoute、Homepage/Uptime Kuma 条目、备份白名单全删；Miniflux/RSSHub 保留，书签功能**无接替者**。实测近 7d 零 webhook 流量、SQLite 仅 564K，用户确认不需要（oracle 节点 84% 内存吃紧，webhook-to-karakeep 冷启动尖峰达 limit 95%）。PVC 按 `Prune=false` 保留在节点上 |
+| 2026-02-28 | [信息管道 Miniflux→KaraKeep](2026-02-28-info-pipeline-miniflux-karakeep-gotify.md) | 落地后 2026-08-14 整体退役：`redpanda-connect` + `karakeep` 两个 Deployment、`keep.meirong.dev` HTTPRoute、Homepage/Uptime Kuma 条目、备份白名单全删；Miniflux/RSSHub 保留，书签功能**无接替者**。实测近 7d 零 webhook 流量、SQLite 仅 564K，用户确认不需要（oracle 节点 84% 内存吃紧，webhook-to-karakeep 冷启动尖峰达 limit 95%）。PVC 已删除（用户确认无需备份） |
 | 2026-03-15 | [NAS 经 Cilium External Workload 入网](2026-03-15-cilium-external-workload-nas.md) | 技术上不可行：`CiliumExternalWorkload` CRD 与 CLI 已从 Cilium 1.15+ 移除 |
 | 2026-03-03 | [Sink 短链 — Cloudflare Workers](2026-03-03-sink-cloudflare-worker.md) | 2026-05-27 整体退役（commit `806950b`）：submodule + workers justfile + Homepage 条目移除；短链服务下线 |
 | 2026-02-19 | [ArgoCD Image Updater](2026-02-19-argocd-image-updater.md) | 落地后 2026-08-03 退役：0 个 `ImageUpdater` CR、空转数月从未更新任何镜像，App + values + oracle 侧旧注解一并移除。选型约束见 [decisions/argocd-image-updater.md](../../decisions/argocd-image-updater.md) |

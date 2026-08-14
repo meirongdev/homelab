@@ -8,8 +8,8 @@ data:
     #!/bin/sh
     # oracle-k3s nightly backup → restic 仓库 (106 ZFS, sftp over Tailscale)
     # PG=逐库 pg_dump(apps-pg/miniflux + zitadel-pg/zitadel)；sqlite=local-path hostPath 原样拷贝。
-    # 2026-08-14: karakeep-data/meilisearch-data 随 karakeep 退役移除白名单（Deployment 已删，
-    # PVC 按 Prune=false 留在节点上作为冻结数据，不再参与夜备）。
+    # 2026-08-14: karakeep-data/meilisearch-data 随 karakeep 退役移除白名单（Deployment
+    # 与 PVC 均已删除，用户确认无需备份）。
     # calibre 书库(2026-08-02 从 homelab 迁入，~23G)以目录整体纳入 restic
     # ——增量去重，首晚全量后每晚近零成本。做法与迁移前 homelab 侧一致。
     set -eu
