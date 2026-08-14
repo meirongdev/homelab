@@ -1,6 +1,6 @@
 # K3s 集群安全架构 (Security Architecture)
 
-> Last updated: 2026-08-13
+> Last updated: 2026-08-14
 > Status: 生效事实
 > Scope: 双集群（homelab + oracle-k3s）的纵深防御模型 —— source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
@@ -314,7 +314,7 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 
 ## 9. 安全可观测与告警
 
-- **统一管道**（2026-07 起）：homelab 侧 Prometheus(metrics)/Loki(logs) → Alertmanager → 原生 `telegramConfigs`(无 bridge) → Telegram 群 MatthewDaily 的「🚨 Homelab 告警」话题。`severity:warning|critical` 路由，`info` 丢弃；**`Watchdog` 不丢弃**——由 `watchdog` AlertmanagerConfig 抢先路由到 oracle Uptime Kuma push monitor 作 dead-man's switch。旧 `alertmanager-gotify-bridge` 因 `concurrent map writes` 崩溃 bug + 上游无维护已下线。oracle 侧 Falco 走独立的 Falcosidekick 原生 Telegram output(§8.5)——两条链路各自直连 Telegram Bot API，同一个 bot/话题，但代码路径不同，互不依赖。Gotify 本体已随本次迁移彻底下线（Deployment/PVC/网关路由/DNS 全部移除），详见 `decisions/alerting-telegram-migration.md`。
+- **统一管道**（2026-07 起）：homelab 侧 Prometheus(metrics)/Loki(logs) → Alertmanager → 原生 `telegramConfigs`(无 bridge) → Telegram 群 MatthewDaily 的「🚨 Homelab 告警」话题。`severity:warning|critical` 路由，`info` 丢弃；**`Watchdog` 不丢弃**——由 `watchdog` AlertmanagerConfig 抢先路由到 oracle Uptime Kuma push monitor 作 dead-man's switch（目的、链路与**覆盖边界**见 [dead-mans-switch.md](dead-mans-switch.md)，此处不留副本；⚠️ 它有已证实的失明盲区，别当成无条件兜底）。旧 `alertmanager-gotify-bridge` 因 `concurrent map writes` 崩溃 bug + 上游无维护已下线。oracle 侧 Falco 走独立的 Falcosidekick 原生 Telegram output(§8.5)——两条链路各自直连 Telegram Bot API，同一个 bot/话题，但代码路径不同，互不依赖。Gotify 本体已随本次迁移彻底下线（Deployment/PVC/网关路由/DNS 全部移除），详见 `decisions/alerting-telegram-migration.md`。
 - **新增 `PrometheusRule`/`ServiceMonitor` 必须带 `release:kube-prometheus-stack`** 否则 operator selector 忽略。
 - **安全相关规则**：ESO 健康（`eso-alerts.yaml`）、Trivy 发现（`trivy-alerts.yaml`）。多集群靠 `cluster` 标签区分。
 - **看板**：Grafana `Security` 文件夹 3 张——**Trivy 漏洞概览**（CVE/暴露密钥/配置审计，Prometheus）、**Kyverno 准入策略**（评估结果/Enforce 拦截/各策略 fail/webhook 延迟，Prometheus，Kyverno 各 controller ServiceMonitor）、**运行时与审计事件**（Falco 告警 + Tetragon 进程事件 + kube-bench CIS，Loki）。Hubble CLI 看网络流。
