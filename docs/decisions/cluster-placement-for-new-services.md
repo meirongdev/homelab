@@ -46,8 +46,25 @@
 | 只发 amd64 镜像 | **homelab** |
 | 轻量无状态个人服务（requests 10–25m 级别） | **oracle-k3s**（仍是默认） |
 | 身份/SSO、日志、追踪（既有归属） | **oracle-k3s** |
+| 无状态周期 CronJob / 批处理（无 PVC、无宿主依赖、无节点语义） | **homelab 的 `k8s-worker-106`**（2026-08-14 起；见下「worker 的职责」） |
 
 ## 后果
+
+### `k8s-worker-106` 的职责（2026-08-14 定）
+
+（106 上的 VM 作为 homelab worker 的背景见 [storage106-as-homelab-worker](storage106-as-homelab-worker.md)。）
+
+- **能放**：无状态、周期、节点无关的 CronJob / 批处理 —— 它只有 `2311Mi` allocatable
+  （requests 40% / CPU 15%，Celeron 慢核），适合承接周期扫描/批处理这类「短、脉冲、可牺牲」负载，
+  把 master（5600H 笔记本）的周期 CPU/热峰值挪走。首个落点是 `monitoring/krr`（2026-08-14，无 PVC
+  / 无 hostPath，只查集群内 Prometheus + K8s API + 推 Telegram）。
+- **放不了有状态负载**：`local-path` PVC 落 106 盘后不在 restic 白名单（H4），要放先加白名单。
+- **放不了要直连 DGX 的**：worker 是 tagged 设备，netmap 里没有 DGX 这个 shared peer
+  （实测 pod `100.97.87.120:8000` 超时）；而 master 的用户所有身份能到。像 jobs-sg 的 `enrich`
+  这类直连 DGX 的负载必须留 master（jobs-sg 另有共享 `jobs-sg-data` PVC，本就整体锁死 master）。
+- **放不了控制面/宿主依赖负载**：kube-bench 钉死 control-plane + 依赖 master 宿主 hostPath。
+
+## 后果（原有）
 
 - **homelab 的 limits 已经超卖**（CPU 122%、内存 152%），而它同时托着
   Prometheus/Grafana/Alertmanager/Vault。往这台机器放计算密集负载**必须写显式 CPU limit**，
