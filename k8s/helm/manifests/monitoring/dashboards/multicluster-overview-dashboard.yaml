@@ -707,7 +707,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum by (cluster) (kube_pod_status_phase{cluster=~\"$cluster\", namespace=~\"$namespace\", phase=~\"Pending|Failed|Unknown\"})",
+              "expr": "(sum by (cluster) (kube_pod_status_phase{cluster=~\"$cluster\", namespace=~\"$namespace\", phase=~\"Pending|Failed|Unknown\"})) or on() vector(0)",
               "legendFormat": "{{cluster}} not running",
               "refId": "A"
             }
@@ -774,7 +774,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "count by (cluster) (rate(kube_pod_container_status_restarts_total{cluster=~\"$cluster\", namespace=~\"$namespace\", container!=\"\"}[15m]) > 0)",
+              "expr": "(count by (cluster) (rate(kube_pod_container_status_restarts_total{cluster=~\"$cluster\", namespace=~\"$namespace\", container!=\"\"}[15m]) > 0)) or on() vector(0)",
               "legendFormat": "{{cluster}} containers restarted",
               "refId": "A"
             }
@@ -833,7 +833,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum by (cluster) (kube_deployment_status_replicas_available{cluster=~\"$cluster\", namespace=~\"$namespace\"}) / sum by (cluster) (kube_deployment_status_replicas{cluster=~\"$cluster\", namespace=~\"$namespace\"})",
+              "expr": "(sum by (cluster) (kube_deployment_status_replicas_available{cluster=~\"$cluster\", namespace=~\"$namespace\"}) / sum by (cluster) (kube_deployment_status_replicas{cluster=~\"$cluster\", namespace=~\"$namespace\"})) or on() vector(1)",
               "legendFormat": "{{cluster}} deployment健康率",
               "refId": "A"
             }
