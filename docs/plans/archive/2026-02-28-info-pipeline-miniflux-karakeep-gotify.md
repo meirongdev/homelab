@@ -4,7 +4,7 @@
 **状态**: ❌ 已退役（2026-08-14）——管道 1（Miniflux→KaraKeep）与管道 2（KaraKeep→Gotify→Telegram）
 随本方案整体退役；Miniflux/RSSHub 保留，书签功能无接替者（实测近 7d 零 webhook 流量、SQLite 仅 564K，
 用户确认不需要；oracle 节点 84% 内存吃紧且 webhook-to-karakeep 冷启动尖峰逼近 limit）。
-退役清理见 commit 记录，PVC 按 `Prune=false` 保留在节点上。
+退役清理见 commit 记录，PVC 已于 2026-08-14 删除（用户确认无需备份）。
 
 ## 概览
 

@@ -9,7 +9,7 @@
 > 数据一律从 restic 恢复（见 [backup-recovery.md](backup-recovery.md)），
 > 无更早状态可退。注豁免。
 >
-> Last updated: 2026-08-11
+> Last updated: 2026-08-14
 > Status: 生效 SOP
 
 ## 现状（一句话）
