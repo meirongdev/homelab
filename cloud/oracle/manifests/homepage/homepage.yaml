@@ -186,15 +186,6 @@ data:
               container: miniflux
               label_selector: app=miniflux
 
-        - KaraKeep:
-            icon: karakeep.png
-            href: https://keep.meirong.dev
-            description: 书签管理器
-            kubernetes:
-              namespace: rss-system
-              container: karakeep
-              label_selector: app=karakeep
-
     - 监控:
         - Uptime Kuma:
             icon: uptime-kuma.png

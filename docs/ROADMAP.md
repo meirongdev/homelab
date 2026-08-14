@@ -53,11 +53,11 @@
 
 - ~~**这台 Mac 上 `terraform plan/apply` 连 `192.168.50.4:8006` 100% `no route to host`**~~ **已定性（2026-08-13）**：不是网络问题，是 **macOS 本地网络隐私授权（TCC）**——未获授权的**非 Apple 签名**二进制（terraform/kubectl/Homebrew python）访问 LAN 一律 `EHOSTUNREACH`，而 `ping`/`curl`/`ssh`/`nc` 是 Apple 自带故全通（这正是当年误判"网络正常、是 provider 的锅"的原因），Tailscale/loopback 不受限故一直好用。根治 = 系统设置→隐私与安全性→本地网络里给终端授权；不依赖授权的绕法（SSH 隧道 / Tailscale 寻址）已固化进 `proxmox/terraform-storage`。→ [复盘](records/2026-08-13-macos-local-network-tcc.md)
 
-- **oracle-k3s：2 个 Docker Hub 镜像仍未被 Trivy 扫过，等配额恢复后重试一次**（2026-08-05；
+- **oracle-k3s：1 个 Docker Hub 镜像仍未被 Trivy 扫过，等配额恢复后重试一次**（2026-08-05；
   2026-08-11 从 3 个减为 2 个 —— `stirling-pdf` 已退役，接替者 BentoPDF 在 ghcr.io，
-  不受 Docker Hub 匿名配额影响）。
-  `rsshub-browserless`(browserless/chrome)、
-  `redpanda-connect`(docker.redpanda.com/redpandadata/connect) 两者的扫描 Job 均因
+  不受 Docker Hub 匿名配额影响；2026-08-14 再减为 1 个 —— `redpanda-connect` 随
+  karakeep 管道退役）。
+  `rsshub-browserless`(browserless/chrome) 的扫描 Job 均因
   `TOOMANYREQUESTS: unauthenticated pull rate limit` FATAL。配额是 Docker Hub 匿名的
   **100 pulls / 6h / IP**，当天被清 73 条 Critical 时的强制重扫（删 6 份报告 + 3 次
   operator 重启）打空了。**失败的扫描不会自动重试**（详见
@@ -65,10 +65,10 @@
 
   ```bash
   kubectl --context oracle-k3s -n trivy-system rollout restart deploy/trivy-operator
-  # 6-8 分钟后回查（这 2 个镜像都很大，单个扫描要几分钟）
+  # 6-8 分钟后回查（镜像很大，单个扫描要几分钟）
   kubectl --context oracle-k3s get vulnerabilityreports -A -o json | jq -r \
     '.items[] | select(.metadata.labels."trivy-operator.resource.name"
-     | test("browserless|redpanda")) | "\(.metadata.labels."trivy-operator.resource.name") crit=\(.report.summary.criticalCount)"'
+     | test("browserless")) | "\(.metadata.labels."trivy-operator.resource.name") crit=\(.report.summary.criticalCount)"'
   ```
 
   ⚠️ 在此之前 `TrivyImageCriticalVulnerabilities` 读到的 0 **不覆盖这 2 个镜像**——
@@ -182,4 +182,5 @@ homelab + oracle-k3s 双双从 Flannel 迁 Cilium
 | 2026-08-06 | **image-updater 残留凭据清除**：退役 3 天后 `cloud/oracle/manifests/argocd/image-updater-secrets.yaml` 仍在 kustomize 树里，**每分钟从 Vault 拉一次 GitHub 凭据**产出两个无人消费的 Secret。⚠️ 其一名为 `git-creds`，确认过它没有 `argocd.argoproj.io/secret-type` 标签、ArgoCD 不认作仓库凭据才删 |
 | 2026-08-13 | **月度恢复演练自动化**（原开放项 #6）：`restic-restore-drill` CronJob 每月真恢复 + 跑 8 条判据（仓库结构 · 两集群快照新鲜度 · Vault raft 快照 · jobs.db integrity · 两个 pg dump 收尾标记 · raw 归档实解压），配 3 条告警。☠️ 判据敏感度用**损坏数据**逐条实测：7 种坏法全判出、零漏报——截断的 `vault.snap` 仍非空、合法空库的 `integrity_check` 返回 `ok`、半截 `pg_dump` 大小正常，只验"文件在且非空"三种全放过。另记一条会咬夜备的坑：restic 的陈旧锁判定靠 hostname+PID，K8s 里跨 Pod 泄漏的锁 30 分钟内 `unlock` 清不掉（[storage.md](reference/storage.md)） |
 | 2026-08-13 | **Renovate + 版本配对 CI**（原开放项 #12 里的一项）：`.github/renovate.json5`（内置 argocd/kubernetes manager + 3 个 regex manager，实测识别 16 条自定义依赖）配 `scripts/check-version-pairs.py` 的 V1-V3——同名 chart 跨集群同版本、声明为同一事实的版本变量组一致、cilium↔gateway-api 符合兼容表。六个破坏场景实测全判红（含**今天真实发现的** oracle 剧本漂在 1.2.1）。⚠️ **仍待人工装一次 GitHub App** 才会真正开 PR（[决策](decisions/renovate-adoption.md)） |
+| 2026-08-14 | **信息管道（Miniflux→KaraKeep）退役**：`redpanda-connect` + `karakeep` 两个 Deployment、`keep.meirong.dev` HTTPRoute、Homepage/Uptime Kuma 条目、备份白名单全删；Miniflux/RSSHub 保留。起因：`webhook-to-karakeep` 内存告警（7d 峰值达 limit 95%，冷启动尖峰）——实测近 7d 零 webhook 流量、SQLite 仅 564K，用户确认不需要；顺带释放 oracle ~1Gi memory requests。PVC 按 `Prune=false` 留在节点作冻结数据。方案已归档 [plans/archive/2026-02-28-info-pipeline-miniflux-karakeep-gotify.md](plans/archive/2026-02-28-info-pipeline-miniflux-karakeep-gotify.md) |
 | 2026-08-06 | **孤儿资源复跑**（控制面迁 oracle 后首次双集群跑）：信号面各 6 条，**真孤儿 0 条**。补 3 条结构性 ignore（Vault 两个 volumeClaimTemplate PVC、CNPG 的 `cnpg-default-monitoring`）；另汇总 4 条**永久孤儿**（不入 git 的 bootstrap 依赖），刻意不进 ignore —— 那份清单就是「从 Git 重建会缺什么」([决策](decisions/orphaned-resources.md)) |

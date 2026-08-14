@@ -27,13 +27,11 @@ cloud/oracle/
 │   ├── homepage/         # Homepage dashboard
 │   ├── monitoring/       # OTel collector + exporters
 │   ├── personal-services/ # IT-Tools / BentoPDF / Squoosh / Timeslot
-│   ├── rss-system/       # RSS pipeline (Miniflux + RSSHub + KaraKeep + Redpanda Connect)
+│   ├── rss-system/       # RSS pipeline (Miniflux + RSSHub)
 │       ├── namespace.yaml
 │       ├── secrets.yaml
 │       ├── miniflux.yaml
 │       ├── rsshub.yaml
-│       ├── karakeep.yaml
-│       └── redpanda-connect.yaml
 ├── values/               # Helm values (for example Cilium)
 ├── terraform/            # Oracle Cloud infra (VCN, compute, etc.)
 ├── justfile              # Top-level commands for full cluster management

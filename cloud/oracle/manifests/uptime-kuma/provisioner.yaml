@@ -48,9 +48,6 @@ data:
         # 实测 2026-08-12：/ → 302 /ui/login，故与上面同款只收 3xx、不跟随跳转。
         {"name": "ZITADEL",        "url": "https://auth.meirong.dev/",          "accepted_statuscodes": ["300-399"], "maxredirects": 0},
         # 备份服务（原 Kopia）现已迁移 Tailscale NodePort（https://100.94.186.7:31515，自签 cert），不再有公网入口，故不在此处探测。
-        # --- new info pipeline services ---
-        # KaraKeep: root / redirects 307 to /signin; monitor /signin directly (returns 200)
-        {"name": "KaraKeep",       "url": "http://karakeep.rss-system.svc:3000/signin"},
         # Timeslot: oracle-k3s local service, direct ClusterDNS bypasses SSO
         {"name": "Timeslot",       "url": "http://timeslot.personal-services.svc:8080/api/slots"},
         # Trends: GitHub 趋势追踪, /healthz returns 200

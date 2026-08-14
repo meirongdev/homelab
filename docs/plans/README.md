@@ -14,13 +14,13 @@
 
 | 类别 | 内容 | 份数 |
 |------|------|------|
-| [apps/](apps/README.md) | 应用部署/迁移方案 | 9 |
+| [apps/](apps/README.md) | 应用部署/迁移方案 | 8 |
 | [networking/](networking/README.md) | 网络/集群方案 | 7 |
 | [observability/](observability/README.md) | 可观测方案 | 7 |
 | [security/](security/README.md) | 安全加固方案 | 3 |
 | [architecture/](architecture/README.md) | 舰队级架构诊断与演进建议 | 4 |
 | [storage/](storage/README.md) | 存储/备份方案 | 3 |
-| [archive/](archive/README.md) | **不存在于当前系统的方案**（从未实施/已取消/已被取代/前提消失） | 17 |
+| [archive/](archive/README.md) | **不存在于当前系统的方案**（从未实施/已取消/已被取代/前提消失） | 18 |
 
 ⚠️ **已完成、且东西还在跑的方案不进 archive** —— 它们解释了系统为何是现在这样，留在各自类别里。
 archive 只收「读了也帮不上理解当前系统」的那些——**含完成后又整体退役的**（如 Bifrost）。

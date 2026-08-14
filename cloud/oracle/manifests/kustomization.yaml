@@ -28,8 +28,6 @@ resources:
   - rss-system/secrets.yaml
   - rss-system/miniflux.yaml
   - rss-system/rsshub.yaml
-  - rss-system/karakeep.yaml
-  - rss-system/redpanda-connect.yaml
   # Homepage
   - homepage/namespace.yaml
   - homepage/homepage.yaml
