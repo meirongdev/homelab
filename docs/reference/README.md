@@ -23,7 +23,8 @@
 
 - [observability-multicluster.md](observability-multicluster.md) — 日志/指标/链路追踪统一架构（含 dgx-spark/macbook 外部主机与 SMART 采集）
 - [observability-otel-logging.md](observability-otel-logging.md) — OTel 日志管道细节 + 4 种应用接入模式
-- [observability-alerting-slo.md](observability-alerting-slo.md) — 告警路由（Telegram + dead-man's switch）与覆盖盲区、Dashboards 组织约定、SLI/SLO（Sloth）
+- [observability-alerting-slo.md](observability-alerting-slo.md) — 告警路由（Telegram）与覆盖盲区、Dashboards 组织约定、SLI/SLO（Sloth）
+- [dead-mans-switch.md](dead-mans-switch.md) — 唯一**判定方不与被监控方共命运**的告警（十来条 `absent()` 规则同样判缺席，但都跑在 homelab 自己的 Prometheus 里）：目的、6 跳链路、**覆盖矩阵与三处失明盲区**、演练程序
 - [k8s-qos-resource-management.md](k8s-qos-resource-management.md) — 资源配额与 QoS 约定
 - [cost-and-rightsizing.md](cost-and-rightsizing.md) — OpenCost 成本归因 + KRR 右尺寸（定价模型、指标语义、运维操作）
 

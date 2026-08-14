@@ -1,6 +1,6 @@
 # Observability — 告警、看板组织与 SLO
 
-> Last updated: 2026-08-13
+> Last updated: 2026-08-14
 > Status: 生效事实
 >
 > 遥测的**消费侧**：告警路由与覆盖盲区、Grafana 看板组织约定、SLI/SLO 体系。
@@ -18,8 +18,12 @@
   旧 `alertmanager-gotify-bridge` 与 Gotify 本体已于 2026-07 下线，取舍见
   [../decisions/alerting-telegram-migration.md](../decisions/alerting-telegram-migration.md)。
 - **`Watchdog` 不丢弃** —— `watchdog` AlertmanagerConfig CRD 抢先把它 webhook 到 oracle
-  Uptime Kuma 的 push monitor（dead-man's switch：告警链路本身死了会在状态页变红）；
-  静态路由树的 `null` receiver 只接真正没人认领的告警。
+  Uptime Kuma 的 push monitor，即**死人开关**；静态路由树的 `null` receiver
+  只接真正没人认领的告警。
+  → 目的、6 跳链路、**覆盖矩阵与三处失明盲区**、演练程序全在
+  [dead-mans-switch.md](dead-mans-switch.md)（唯一真相源，此处不留副本）。
+  ⚠️ 别按"告警链路死了就会在状态页变红"这一句去理解它——**接收方和发送方一起挂时
+  它静默失明**，2026-08-14 实测 580s 缺口零翻转。
 - **⚠️ 新增 `PrometheusRule`/`ServiceMonitor` 必须带 label `release: kube-prometheus-stack`**，
   否则 operator 的 `ruleSelector`/`serviceMonitorSelector` 静默忽略。
 - oracle 侧 Falco 告警走独立的 Falcosidekick 原生 Telegram output（同 bot 同话题、代码路径
