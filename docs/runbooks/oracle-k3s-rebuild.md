@@ -25,7 +25,7 @@ oracle-k3s 的 local-path PVC（15 个，2026-08-06 对着 live 集群重新生�
 
 `storage-loki-0` · `storage-tempo-0` · `opencost-pvc` · `calibre-books-local` ·
 `calibre-web-automated-config-local` · `timeslot-pvc` ·
-`trends-data` · `uptime-kuma-data-v2` · `karakeep-data` · `meilisearch-data` ·
+`trends-data` · `uptime-kuma-data-v2` ·
 `readlist-data` · `data-trivy-server-0` · `apps-pg-1` · `zitadel-pg-1`
 
 > **两个 CNPG 卷（`apps-pg-1` / `zitadel-pg-1`）的恢复方式不同**：它们由 operator 按

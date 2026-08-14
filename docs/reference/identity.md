@@ -43,36 +43,36 @@
 
 ## 原生 ZITADEL OIDC 应用
 
-**Grafana** (`grafana`) / **Miniflux** (`rss`) / **KaraKeep** (`keep`) /
+**Grafana** (`grafana`) / **Miniflux** (`rss`) /
 **ArgoCD** (`argocd`) 直连 OIDC。共同点：
 
 > 2026-08-11：**Stirling-PDF (`pdf`) 已退役**，接替它的 BentoPDF 是纯客户端应用、
 > 刻意不做权限管理（人人可用），因此 ZITADEL 侧的 `stirling-pdf` 应用与
 > Vault `secret/oracle-k3s/stirling-pdf` 一并删除。
+>
+> 2026-08-14：**KaraKeep (`keep`) 已退役**——Miniflux→KaraKeep 书签管道整体下线
+> （实测近 7d 零 webhook 流量、SQLite 仅 564K，用户确认不需要）。ZITADEL 侧的
+> `karakeep` 应用与 Vault `secret/oracle-k3s/karakeep` 建议一并删除（待手工清理）。
 
 - 各自的机密 WEB client 由 `zitadel/scripts/configure-oidc-app.sh` **幂等**下发
   （REST 而非 Terraform，原因见下「配置脚本为何走 REST」）。
 - creds 放 Vault 应用自己的 path（`secret/homelab/{grafana,argocd-oidc}`、
-  `secret/oracle-k3s/{miniflux,karakeep}`，keys `oauth_client_id`/`oauth_client_secret`）
+  `secret/oracle-k3s/miniflux`，keys `oauth_client_id`/`oauth_client_secret`）
   → ESO → 应用的 K8s Secret。
 - **各应用本地账号密码登录保留为后备**（无锁死风险）。
 - Redirect URIs: Grafana `…/login/generic_oauth`、Miniflux `…/oauth2/oidc/callback`、
-  KaraKeep `…/api/auth/callback/custom`、
   ArgoCD `…/auth/callback`（+ CLI 用的 `http://localhost:8085/auth/callback`）。
 
 各应用要点：
 
 - **部署路径不同**: Grafana → 改 `values/kube-prometheus-stack.yaml` → git push（ArgoCD
   `kube-prometheus-stack` App）；ArgoCD 本体 → `just deploy-argocd`（写完 Vault 后跑）；
-  Miniflux/KaraKeep 与 ArgoCD 的 `argocd-oidc` ExternalSecret 都随 git push 由
+  Miniflux 与 ArgoCD 的 `argocd-oidc` ExternalSecret 都随 git push 由
   ArgoCD 调和（分别经 `oracle-k3s` 与 `vault-eso` App）。
 - **Grafana**: `role_attribute_path: "'Admin'"` —— 任何 ZITADEL 认证过的身份都是 Admin
   （单用户 + 注册锁死的 IdP 下安全）。
 - **Miniflux**: `OAUTH2_USER_CREATION=1` 首次 SSO 登录自动建号；要保住 admin 权限，
   先用本地 admin 登录、在 Settings 里链接 OIDC 身份。
-- **KaraKeep**: NextAuth custom provider；`OAUTH_ALLOW_DANGEROUS_EMAIL_ACCOUNT_LINKING=true`
-  按已验证邮箱把 ZITADEL 身份链接到既有账号（ZITADEL 会验证邮箱），SSO 登进现有账号的同时
-  `DISABLE_SIGNUPS=true` 仍拦住自助注册。
 - **ArgoCD**: dex 保持禁用——原生 `configs.cm.oidc.config`，`clientID/clientSecret:
   $argocd-oidc:oidc.client*` 从带 `app.kubernetes.io/part-of=argocd` label 的 ESO secret 解析
   （与 chart 管的 `argocd-secret` 分开）。`rbac.policy.default: role:admin`。

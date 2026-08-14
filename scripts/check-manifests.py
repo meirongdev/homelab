@@ -86,7 +86,6 @@ TREE_BACKUP_OVERLAY = {
 # 刻意不进白名单的 PVC —— 每条都必须写清楚「那它靠什么保住」。
 # 加豁免比加白名单更需要理由：这是唯一能让数据合法地不进 restic 的出口。
 BACKUP_EXEMPT = {
-    "meilisearch-data": "搜索索引，可由 karakeep 全量重建（backup-script.yaml 开头已声明不备份）",
     # miniflux-db-pvc 于 2026-08-06 随 rss-postgres 退役删除，故移除其豁免条目——
     # 留着会让将来任何同名 PVC 被静默豁免。miniflux 现在住在 CNPG 的 apps-pg。
     # ⚠️ 注意 H4 看不到 CNPG 的 PVC（apps-pg-1 / zitadel-pg-1 由 operator 动态创建，

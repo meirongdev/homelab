@@ -38,8 +38,7 @@
 | ZITADEL PG | oracle（迁移后）| `pg_dump`（network）|
 | Miniflux PG | oracle | `pg_dump`（network）|
 | sqlite: open-notebook checkpoints / jobs-sg | homelab | 特权 CronJob hostPath 读 local-path + `sqlite3 ".backup"`（在线 API）|
-| sqlite: karakeep / uptime-kuma / timeslot / calibre-web-config / readlist | oracle | 同上（白名单见 `backup/overlays/oracle/backup-script.yaml`）。2026-08-11 移除 stirling-pdf（退役，接替者 BentoPDF 服务端零状态）|
-| meilisearch | oracle | **不备份** —— 索引可由 karakeep 重建（2026-08-06 起显式排除）|
+| sqlite: uptime-kuma / timeslot / calibre-web-config / readlist | oracle | 同上（白名单见 `backup/overlays/oracle/backup-script.yaml`）。2026-08-11 移除 stirling-pdf（退役，接替者 BentoPDF 服务端零状态）；2026-08-14 移除 karakeep-data/meilisearch-data（karakeep 退役，PVC 按 `Prune=false` 留在节点作冻结数据）|
 | SurrealDB: open-notebook | homelab | HTTP `GET /export` 逻辑导出 → `open-notebook.surql`（rocksdb 是活进程持有的 `.sst/MANIFEST`，热拷不一致）。口令走 optional 卷，缺失时只 warn 不中断夜备 |
 | **Calibre 书库** | oracle（2026-08-03 迁入）| **已进 restic**：`calibre-books-local`（~23G）目录整体纳入，增量去重。⚠️ 本行原写"不进 restic，留 NFS/ZFS"，NFS 退役后已不成立 |
 

@@ -122,10 +122,11 @@ homelab 负载必须显式写 `https://100.94.186.7:6443`，写错会把整套 h
 ### oracle-k3s App（kustomize 树）的专有事实
 
 - `cloud/oracle/manifests/` 自 2026-06-04 进 GitOps；auto-sync + selfHeal + **prune** 全开。
-  有状态 PVC（`karakeep-data`、`meilisearch-data`、`uptime-kuma-data-v2`）带
+  有状态 PVC（`uptime-kuma-data-v2`）带
   `argocd.argoproj.io/sync-options: Prune=false`。
   ⚠️ 2026-08-11 退役 stirling-pdf 时踩到这条的另一面：`Prune=false` 意味着**删清单文件
-  不会删卷**，PVC 会静静留成孤儿。退役带 PVC 的服务必须手工 `kubectl delete pvc`。
+  不会删卷**，PVC 会静静留成孤儿。退役带 PVC 的服务必须手工 `kubectl delete pvc`
+  （2026-08-14 退役 karakeep 时，`karakeep-data`/`meilisearch-data` 即按此保留在节点上）。
   ⚠️ CNPG 的卷（`apps-pg-1`、`zitadel-pg-1`）**不在这个名单里也不需要**——它们由 operator
   按 `Cluster` 生成，不是清单对象，ArgoCD 的 prune 根本看不到。删 `Cluster` 才会连带删卷。
 - **不入 git 的 bootstrap 依赖**: `argocd-manager` SA + cluster-admin 在

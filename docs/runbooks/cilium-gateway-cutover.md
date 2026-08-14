@@ -229,7 +229,6 @@ curl -I https://vault.meirong.dev
 curl -I https://book.meirong.dev
 curl -I https://home.meirong.dev
 curl -I https://rss.meirong.dev
-curl -I https://keep.meirong.dev
 curl -I https://status.meirong.dev
 ```
 

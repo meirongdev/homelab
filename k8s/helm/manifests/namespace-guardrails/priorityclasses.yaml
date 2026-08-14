@@ -53,4 +53,4 @@ metadata:
 value: -10
 globalDefault: false
 preemptionPolicy: Never
-description: "可牺牲的个人应用（calibre/bentopdf/karakeep/browserless 等）—— 内存压力时最先被驱逐"
+description: "可牺牲的个人应用（calibre/bentopdf/browserless 等）—— 内存压力时最先被驱逐"

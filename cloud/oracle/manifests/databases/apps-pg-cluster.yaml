@@ -11,12 +11,11 @@
 #   两个库本来就在同一个单节点，"故障域隔离"是虚的；真正剩下的隔离只对 postgres 级
 #   故障有效——而**内存上限恰好是这个节点最现实的那个**：实测内存 87%、limits 超卖 224%，
 #   且 zitadel-pg 带 priorityClassName: critical（"SSO 的库被驱逐 = 全站登录挂"）。
-#   合库 = 让 RSS 刷新风暴 / karakeep 批量导入和 SSO 抢同一个 memory limit。
+#   合库 = 让 RSS 刷新风暴和 SSO 抢同一个 memory limit。
 #   省下的只有一个 postmaster（~60-80Mi）。不值。两个 Cluster、一套模式即可。
 #
-# 首批租户只有 miniflux。karakeep 虽然在旧库里有个同名库，但迁移前实测是 **0 张表**——
-# 它早就是 sqlite（DATA_DIR=/data + karakeep-data PVC），那个空库是历史残留，不迁；
-# miniflux.yaml 里"miniflux + karakeep 共用"的注释是过期的。
+# 首批租户只有 miniflux。karakeep 旧库里的同名库迁移前实测 **0 张表**（karakeep 早已是
+# sqlite），是历史残留不迁；2026-08-14 该空库随 karakeep 整体退役。
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:

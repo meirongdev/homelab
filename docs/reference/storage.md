@@ -110,12 +110,16 @@ restic（`restic ls … | head` 会 SIGPIPE 杀掉 restic，2026-08-13 实测踩
 - **homelab（10 个）**: `data-vault-0`、`audit-vault-0`、`data-trivy-server-0`、
   `alertmanager-…-db`、`prometheus-…-db`、`kube-prometheus-stack-grafana`、`opencost-pvc`、
   `open-notebook-data-local`、`open-notebook-surreal-local`、`jobs-sg-data`（2026-08-03 新增）
-- **oracle-k3s（14 个）**: `storage-loki-0`、`storage-tempo-0`、`opencost-pvc`、`calibre-books-local`、
+- **oracle-k3s（12 个）**: `storage-loki-0`、`storage-tempo-0`、`opencost-pvc`、`calibre-books-local`、
   `calibre-web-automated-config-local`、`timeslot-pvc`、`trends-data`、
-  `uptime-kuma-data-v2`、`karakeep-data`、`meilisearch-data`、`data-trivy-server-0`、
+  `uptime-kuma-data-v2`、`data-trivy-server-0`、
   `zitadel-pg-1`、`readlist-data`（2026-08-05 新增，已进夜备白名单）、
   `apps-pg-1`（2026-08-06 新增，CNPG 共享库；同日 `miniflux-db-pvc` 随 `rss-postgres`
   退役删除，见 [decisions/shared-postgres-platform.md](../decisions/shared-postgres-platform.md)）
+
+> `karakeep-data` / `meilisearch-data` 已于 2026-08-14 随 karakeep 整体退役，Deployment 删除后
+> PVC 按 `Prune=false` 留在节点上作为冻结数据（SQLite 仅 564K / meili 308K，不再备份），
+> 确认不要后可手工 `kubectl delete pvc -n rss-system karakeep-data meilisearch-data`。
 
 ⚠️ **CNPG 的 PVC（`apps-pg-1`、`zitadel-pg-1`）由 operator 动态创建，不在任何清单里
 声明 → CI 的 H4 规则看不见它们。** 这两个库的备份归属靠

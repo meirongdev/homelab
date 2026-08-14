@@ -1,7 +1,10 @@
 # 信息管道：Miniflux → Redpanda Connect → KaraKeep → Gotify → Telegram
 
 **日期**: 2026-02-28
-**状态**: ✅ 完成（见 ROADMAP.md Phase 3）
+**状态**: ❌ 已退役（2026-08-14）——管道 1（Miniflux→KaraKeep）与管道 2（KaraKeep→Gotify→Telegram）
+随本方案整体退役；Miniflux/RSSHub 保留，书签功能无接替者（实测近 7d 零 webhook 流量、SQLite 仅 564K，
+用户确认不需要；oracle 节点 84% 内存吃紧且 webhook-to-karakeep 冷启动尖峰逼近 limit）。
+退役清理见 commit 记录，PVC 按 `Prune=false` 保留在节点上。
 
 ## 概览
 

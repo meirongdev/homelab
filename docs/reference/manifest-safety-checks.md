@@ -1,6 +1,6 @@
 # 清单安全规则 (Manifest Safety Checks)
 
-> Last updated: 2026-08-13
+> Last updated: 2026-08-14
 > Status: 生效事实
 > Scope: CI 强制的仓库规则 —— source of truth。两个检查器：
 > `scripts/check-manifests.py` 的 **H1-H5**（清单结构）与
@@ -120,7 +120,6 @@ kind: ReferenceGrant
 |---|---|
 | `open-notebook-surreal-local` | SurrealDB，由 HTTP `/export` 逻辑导出覆盖 |
 | `calibre-books-local` | 23G 书库，由 `BOOKS_DIR` 整目录纳入 restic，不走 sqlite 白名单 |
-| `meilisearch-data` | 搜索索引，可由 karakeep 全量重建，**刻意不备份** |
 
 **这条规则上线即抓到一个真实缺口**：`trends-data`（45MB SQLite，且 PVC 带
 `Prune=false`，本就是当作要紧数据对待的）自 2026-06-05 起静默未备份约两个月，

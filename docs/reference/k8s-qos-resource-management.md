@@ -94,7 +94,7 @@ Homelab 由两个集群组成：
 | `critical` | 1000 | Vault、ArgoCD 全家、zitadel-pg |
 | `high` | 900 | external-dns、cloudflared、otel-collector（**两集群**）+ **Prometheus、Alertmanager**（2026-08-10 补，homelab 侧） |
 | （默认） | 0 | 其余，含 **ZITADEL 应用本身**、**Grafana**、ESO、kube-state-metrics、node-exporter |
-| `bulk` | -10 | 可牺牲的个人应用（calibre-web/bentopdf/karakeep/browserless/open-notebook/jobs-sg-web 等）+ **非关键观测/扫描组件**（opencost、trivy-operator，2026-08-06 补；**tetragon ×2、kyverno ×4**，2026-08-10 补） |
+| `bulk` | -10 | 可牺牲的个人应用（calibre-web/bentopdf/browserless/open-notebook/jobs-sg-web 等）+ **非关键观测/扫描组件**（opencost、trivy-operator，2026-08-06 补；**tetragon ×2、kyverno ×4**，2026-08-10 补） |
 
 **Prometheus/Alertmanager 归 high、Grafana 留默认的理由**（2026-08-10）：前两者分别是
 **指标源**与**告警投递**，掉了不只是丢图，是所有告警一起哑（dead-man's switch 也走同一条路）；
@@ -164,7 +164,7 @@ oracle-k3s 在 2026-08-05 之前一条都没配（`capacity − allocatable` 的
 | 类型 | CPU Limit | 代表服务 |
 |------|-----------|---------|
 | 入口流量（cloudflared，单副本）| `200m` | cloudflared（2026-07-06 下调；2026-08-13 由 2 副本降为 1） |
-| 用户 Web 服务 | `500m–1000m` | calibre-web、karakeep |
+| 用户 Web 服务 | `500m–1000m` | calibre-web |
 | 数据库 | `500m` | postgres |
 | 可观测性 | `300m–500m` | Loki, Tempo, Prometheus, Grafana |
 | 后台/轻量服务 | `100m–200m` | alertmanager, kube-state-metrics, oauth2-proxy |

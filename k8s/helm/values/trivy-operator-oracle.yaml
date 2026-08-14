@@ -3,7 +3,7 @@
 #
 # 为什么 oracle 也要一份（2026-08-03 新增）：此前 trivy-operator 只在 homelab，
 # 而 2026-08 的两轮迁移把 **ArgoCD 控制面 / Loki / Tempo / Calibre-Web** 都搬到了 oracle
-# ——这些镜像随之脱离 CVE 扫描，形成盲区。oracle 上还常驻 ZITADEL(身份面)、KaraKeep、
+# ——这些镜像随之脱离 CVE 扫描，形成盲区。oracle 上还常驻 ZITADEL(身份面)、
 # Miniflux 等公网服务，本就是更该被扫的一侧。
 #
 # 与 homelab 那份（values/trivy-operator.yaml）的**三处实质差异**：
@@ -109,8 +109,9 @@ trivy:
       # --- 以下两条为 2026-08-04 TrivyImageCriticalVulnerabilities(73 条 Critical)分诊结论 ---
       # 两条 CVE 合计占那 73 条中的 35 条(48%),且都不是"升级镜像"能解的。
       #
-      # CVE-2026-31789：24/73(33%),横跨 10 个镜像(cloudflared / excalidraw / it-tools /
-      # alpine-k8s / meilisearch / nginx / rsshub / squoosh / wait4x / zitadel-login)。
+      # CVE-2026-31789：24/73(33%),横跨 9 个镜像(cloudflared / excalidraw / it-tools /
+      # alpine-k8s / nginx / rsshub / squoosh / wait4x / zitadel-login；meilisearch 已于
+      # 2026-08-14 随 karakeep 退役)。
       # **架构上不适用**：OpenSSL 官方公告(openssl-library.org, 2026-04-07)原文
       # "only 32 bit platforms are affected"，且触发需要 >1GB 的 X.509 证书被打印/记录，
       # 故官方定级 **Low**。NVD 却给了 9.8/Critical —— 典型的 NVD 过度评分。
@@ -119,9 +120,9 @@ trivy:
       # 上游没有已修版本可升。
       - id: CVE-2026-31789
         statement: "OpenSSL 官方定级 Low 且明确 only 32 bit platforms affected(需 >1GB 证书); 本集群 arm64 不适用; NVD 9.8 为过度评分, 2026-11 复审"
-      # CVE-2026-59873：11/73(15%),横跨 6 个镜像(excalidraw-room / homepage / karakeep /
+      # CVE-2026-59873：11/73(15%),横跨 5 个镜像(excalidraw-room / homepage /
       # rsshub / uptime-kuma / zitadel-login)全是 npm 传递依赖 tar。修复版 7.5.19，
-      # 这 6 个上游镜像**都还没重建到该版本**(homepage/excalidraw 已实测在 latest digest)。
+      # 这 5 个上游镜像**都还没重建到该版本**(homepage/excalidraw 已实测在 latest digest)。
       # 与 homelab 那份 values 里 open_notebook 的同 CVE 豁免同口径：gzip 炸弹 DoS，
       # 这些服务运行时都不解包不可信归档。
       - id: CVE-2026-59873
@@ -164,24 +165,14 @@ trivy:
       - id: CVE-2026-42010
         statement: "libgnutls30 deb12u6(修复 u7); uptime-kuma:2.5.0-slim 基底待上游重建; 需服务端启用 RSA-PSK 套件, 本实例不作 TLS 服务端; RedHat 定级 7.1, NVD 9.8 过度评分, 2026-11 复审"
       #
-      # --- 上游已停更、无已修镜像可升的三条（同批分诊，均已逐一实测确认）---
-      # alpine-chrome: 实测 `latest` 与 `124` 是同一个 libxml2-2.11.8-r0（修复版 2.11.8-r1），
-      # gcr 上数字 tag 也停在 124 → zenika 已不再重建，无处可升。仅 karakeep 抓取用。
-      - id: CVE-2024-56171
-        statement: "libxml2 UAF; zenika-hub/alpine-chrome 上游停更(实测 latest==124 同为 2.11.8-r0)无已修镜像, 2026-11 复审"
+      # --- 上游已停更、无已修镜像可升（同批分诊，均已逐一实测确认）---
       # excalidraw-room 是自建镜像，但 minimist 来自 upstream 按 commit pin 的 yarn.lock
       # (ROOM_REF=03ff435, 2023-12)，重建不会变；要修得动 lockfile 或抬 ROOM_REF。
       # CVSS 仅 3.1（原型污染），不值得为它冒动 lockfile 的回归风险。
       - id: CVE-2021-44906
         statement: "minimist 原型污染(CVSS 3.1); excalidraw-room 的 yarn.lock 随 ROOM_REF 固定, 重建不改变, 修需抬 ROOM_REF, 2026-11 复审"
-      # ⚠️ 第 3 条格式坑（2026-08-13 抓到）：id 必须用**报告里实际出现的** ID——trivy 的
-      # ignore 是精确字符串匹配、不解析别名。这条最初写成 GHSA-7rqj-j65f-68wh（同一漏洞
-      # 的 GitHub 别名），而 vulnerabilityreport 里是 CVE-2026-73420 → 豁免静默失效，
-      # TrivyImageCriticalVulnerabilities 持续 firing。两个 ID 都留着防 DB 换主 ID。
-      - id: CVE-2026-73420
-        statement: "@auth/core 同形字符 @ 绕过(=GHSA-7rqj-j65f-68wh); 漏洞在 email/magic-link 流程, karakeep 未配邮件登录且 DISABLE_SIGNUPS=true+OIDC; :release(v0.33.2)上游未 bump 0.41.3, 等上游, 2026-10 复审"
-      - id: GHSA-7rqj-j65f-68wh
-        statement: "同上 CVE-2026-73420 的 GHSA 别名, 防 trivy DB 换回主 ID"
+      # ⚠️ 格式坑（2026-08-13）：id 必须用**报告里实际出现的** ID——trivy ignore 是精确
+      # 字符串匹配、不解析别名，曾因用 GHSA 别名导致豁免静默失效、告警持续 firing。
       # （原先这里有一条 CVE-2026-42945 的临时豁免——nginx 1.28.2-r1 任意代码执行。
       #   2026-08-05 已在源仓库 meirongdev/it-tools 把 base 钉到 nginx:1.30-alpine
       #   并重建（sha-ffb28a7），实测 nginx-1.30.4-r1 → 真修掉了，故删除该豁免。）

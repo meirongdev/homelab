@@ -59,7 +59,7 @@
 ## 3. 身份与访问 (Identity) — ZITADEL OIDC
 
 - **单一 IdP**：`auth.meirong.dev`。无共享 ingress 层 SSO；每个服务**要么公开、要么原生 ZITADEL OIDC、要么自带认证**。
-- **原生 OIDC apps**：Grafana / Miniflux / KaraKeep / ArgoCD。各自机密 client 由 `zitadel/scripts/*.sh`(REST) 幂等下发，creds 经 Vault→ESO。**本地账号保留为后备**（无锁死风险）。
+- **原生 OIDC apps**：Grafana / Miniflux / ArgoCD。各自机密 client 由 `zitadel/scripts/*.sh`(REST) 幂等下发，creds 经 Vault→ESO。**本地账号保留为后备**（无锁死风险）。
 - **刻意公开无认证**：`pdf.meirong.dev`(BentoPDF，2026-08-11 取代 Stirling-PDF)、`draw.meirong.dev`(Excalidraw)。BentoPDF 是纯客户端 WASM，文件不出浏览器、服务端零状态，公开面只是一个 nginx 静态站。
 - **GitHub 联邦锁定**：instance 级外部 IdP，`isCreationAllowed/isAutoCreation=false` + `autoLinking=EMAIL` —— 陌生人无法自助注册，GitHub 身份仅能按已验证邮箱链接到既有 ZITADEL 用户。
 - 部署形态与各 app 接入细节见 [identity.md](identity.md)。
@@ -236,10 +236,10 @@
      `platforms: linux/amd64,linux/arm64`）：该 Dockerfile 前端跑 BUILDPLATFORM、
      Go 是 `CGO_ENABLED=0` 按 TARGETARCH 交叉编译，加 amd64 不需要 QEMU，只多一次 go build。
   2. **Docker Hub 匿名拉取限流**。`TOOMANYREQUESTS: You have reached your unauthenticated
-     pull rate limit` 会让扫描 FATAL（实测命中 browserless/chrome、stirlingtools/stirling-pdf、
-     docker.redpanda.com/redpandadata/connect）。**强制批量重扫最容易触发**——删一批报告
+     pull rate limit` 会让扫描 FATAL（实测命中 browserless/chrome；stirling-pdf 与
+     redpanda-connect 均已退役，随镜像消失）。**强制批量重扫最容易触发**——删一批报告
      再重启 operator 会短时间打出几十次 manifest 请求，配额瞬间见底。
-     ☠️ **失败的扫描不会自动重试，所以这个缺口不会自愈**（2026-08-05 实测：3 个被限流的
+     ☠️ **失败的扫描不会自动重试，所以这个缺口不会自愈**（2026-08-05 实测：被限流的
      容器在 40 分钟里零扫描 Job、operator 日志零提及）。配额本身会随窗口恢复，但
      **没有任何东西会重新触发那次扫描**——连"24h 报告 TTL 到期重扫"这条路都没有
      （TTL 挂在报告的 annotation 上，没报告就没 TTL）。必须人工
