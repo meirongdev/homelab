@@ -105,8 +105,8 @@ data:
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
               "editorMode": "code",
               "exemplar": false,
-              "expr": "sum by (envoy_cluster_name) (increase(envoy_cluster_upstream_rq_total{envoy_cluster_name=~\"kube-system/cilium-gateway.*\", cluster=~\"$cluster\"}[$__range]))",
-              "legendFormat": "{{envoy_cluster_name}}",
+              "expr": "label_replace(sum by (envoy_cluster_name) (increase(envoy_cluster_upstream_rq_total{envoy_cluster_name=~\"kube-system/cilium-gateway.*\", cluster=~\"$cluster\"}[$__range])), \"svc\", \"$1\", \"envoy_cluster_name\", \".*/(.*)_[0-9]+$\")",
+              "legendFormat": "{{svc}}",
               "range": true,
               "refId": "A"
             }
@@ -151,8 +151,8 @@ data:
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
               "editorMode": "code",
               "exemplar": true,
-              "expr": "sum by (envoy_cluster_name) (increase(envoy_cluster_upstream_rq_total{envoy_cluster_name=~\"kube-system/cilium-gateway.*\", cluster=~\"$cluster\"}[$__rate_interval]))",
-              "legendFormat": "{{envoy_cluster_name}}",
+              "expr": "label_replace(sum by (envoy_cluster_name) (increase(envoy_cluster_upstream_rq_total{envoy_cluster_name=~\"kube-system/cilium-gateway.*\", cluster=~\"$cluster\"}[$__rate_interval])), \"svc\", \"$1\", \"envoy_cluster_name\", \".*/(.*)_[0-9]+$\")",
+              "legendFormat": "{{svc}}",
               "range": true,
               "refId": "A"
             }
@@ -211,8 +211,8 @@ data:
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
               "editorMode": "code",
               "exemplar": false,
-              "expr": "sum by (envoy_cluster_name, envoy_response_code) (increase(envoy_cluster_upstream_rq_total{envoy_cluster_name=~\"kube-system/cilium-gateway.*\", cluster=~\"$cluster\"}[$__range]))",
-              "legendFormat": "{{envoy_cluster_name}} · {{envoy_response_code}}",
+              "expr": "label_replace(sum by (envoy_cluster_name, envoy_response_code) (increase(envoy_cluster_upstream_rq_total{envoy_cluster_name=~\"kube-system/cilium-gateway.*\", cluster=~\"$cluster\"}[$__range])), \"svc\", \"$1\", \"envoy_cluster_name\", \".*/(.*)_[0-9]+$\")",
+              "legendFormat": "{{svc}} · {{envoy_response_code}}",
               "range": true,
               "refId": "A"
             }
@@ -302,14 +302,14 @@ data:
             {
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
               "editorMode": "code",
-              "expr": "label_replace(sum by (envoy_cluster_name) (increase(envoy_cluster_upstream_rq_total{envoy_cluster_name=~\"kube-system/cilium-gateway.*\", cluster=~\"$cluster\"}[$__range])), \"cluster_name\", \"$1\", \"envoy_cluster_name\", \"(.*)\")",
+              "expr": "label_replace(sum by (envoy_cluster_name) (increase(envoy_cluster_upstream_rq_total{envoy_cluster_name=~\"kube-system/cilium-gateway.*\", cluster=~\"$cluster\"}[$__range])), \"svc\", \"$1\", \"envoy_cluster_name\", \".*/(.*)_[0-9]+$\")",
               "format": "table",
               "instant": true,
               "legendFormat": "__auto",
               "refId": "A"
             }
           ],
-          "title": "当前活跃服务（envoy_cluster_name → 见 services.md 映射）",
+          "title": "当前活跃服务（ns_svc → 服务清单见 services.md）",
           "type": "table"
         }
       ],
