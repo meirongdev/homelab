@@ -1,7 +1,11 @@
 # Backup & Recovery Runbook
 
-> Last updated: 2026-08-13
+> Last updated: 2026-08-14
 > 设计与执行: [../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md](../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md)
+>
+> **触发条件**：备份/恢复运维（含月度恢复演练）、或数据丢失/损坏后需要从 restic 恢复。
+> **成功判定**：恢复后数据可用（按 § 恢复逐类验证）；演练则 8 条判据全过（见「演练失败怎么办」）。
+> **回滚**：豁免——本文本身就是恢复类操作，恢复到哪个快照由你选的快照决定，无额外回滚路径。
 
 ## Status
 

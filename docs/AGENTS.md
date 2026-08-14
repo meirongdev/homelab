@@ -96,7 +96,7 @@ docs/                          # 见下方「Documentation Rules」
 
 ## Documentation Rules
 
-写文档前读 [docs/README.md](README.md) 的 **R1–R7**（目录归属/命名/文首字段/状态枚举/索引维护/
+写文档前读 [docs/RULES.md](RULES.md) 的 **R1–R7**（目录归属/命名/文首字段/状态枚举/索引维护/
 唯一真相源），CI 的 `check-docs.py` 强制。放错目录、漏建索引都算违规。最常踩的三条：
 
 - **架构事实**进 `reference/`（唯一真相源），别在 plan 里留唯一副本；

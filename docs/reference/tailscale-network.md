@@ -1,12 +1,21 @@
 # Tailscale Cross-Cluster Networking
 
-> Last updated: 2026-08-13
+> Last updated: 2026-08-14
 > Status: 生效事实
 >
 > Rewritten 2026-07-07 after the topology review. The original design (each K3s node
 > advertises its Pod CIDR as a Tailscale subnet route) is GONE — cross-cluster pod
 > traffic now rides **Cilium ClusterMesh VXLAN**, with Tailscale as the node-level
 > underlay only.
+
+## 速览
+
+- **模型**：Tailscale 只做节点级 underlay（各节点 /32 + NodePort）；pod↔pod 走
+  Cilium ClusterMesh VXLAN。
+- **通告**：只有 pve 通告 LAN 两段；k8s-node / k8s-worker-106 不通告；Pod/Service CIDR 一律不通告。
+- **三张 ip rule（5200 / 5240 / 5260）是结构性的，别删**；优先级别取 5250（tailscaled 占用）。
+- **两个致命坑**：k8s-node 别通告自己 /32（路由投毒）· `tailscale up` 到收敛器装上之间有致命窗口。
+- **ClusterMesh**：up-but-stuck 且不自愈，重建 pod 即可；`retrieved=true` 才是真判据。
 
 ## Overview
 

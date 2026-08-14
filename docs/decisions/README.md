@@ -5,23 +5,23 @@
 | 决策 | 结论 |
 |------|------|
 | [gateway-controller-evaluation](gateway-controller-evaluation.md) | Traefik vs Cilium Gateway → 选 Cilium Gateway API 作唯一入口 |
-| [external-dns-adoption](external-dns-adoption.md) | 子域名 DNS 从 Terraform 手管 → HTTPRoute 声明式。含 `upsert-only` 共存安全性 |
-| [crossplane-not-adopted](crossplane-not-adopted.md) | ❌ 不引入 Crossplane：最大云面（Cloudflare）provider 2023-01 即死；且控制面管"集群赖以存在的资源"会把 DR 路径搞复杂。含痛点的逐个轻解与重评条件 |
-| [manual-helm-to-argocd-adoption](manual-helm-to-argocd-adoption.md) | 采纳现存 Helm release 的**渲染等价性验证法**；`skipCrds` 把 CRD 陈旧与迁移解耦。⚠️ 跨集群同 chart 的正解是 `helm.releaseName` 而非 `fullnameOverride` |
-| [manifests-directory-per-app](manifests-directory-per-app.md) | `k8s/helm/manifests/` 一个 App 一个目录（目录即清单），废除 `directory.include` glob |
-| [no-helm-chart-for-in-house-apps](no-helm-chart-for-in-house-apps.md) | 自研应用一律 kustomize/目录源，**不打 chart**；Helm 只用于消费上游 chart。含推翻条件 |
-| [otel-2026-alignment](otel-2026-alignment.md) | homelab collector 首次落地（k8s 裁剪发行版）+ oracle 现代化（container operator、file_storage 持久队列、0.120→0.156） |
-| [alerting-telegram-migration](alerting-telegram-migration.md) | gotify-bridge 有 `concurrent map writes` 崩溃 bug → 改 Alertmanager 原生 Telegram，Gotify 整体退役 |
-| [opencost-krr-data-sources](opencost-krr-data-sources.md) | 同一个 cAdvisor 缺口，OpenCost 走 collector 旁路、KRR 补窄口径采集。含 krr-enforcer 否决 |
-| [orphaned-resources](orphaned-resources.md) | 配置漂移体检否决 kor（信噪比 0.6%，误判 `argocd-secret`/`vault-token`），改用 ArgoCD 原生 `orphanedResources` + `warn: false` |
+| [external-dns-adoption](external-dns-adoption.md) | 子域名 DNS 从 Terraform 手管 → HTTPRoute 声明式（`upsert-only` 共存安全） |
+| [crossplane-not-adopted](crossplane-not-adopted.md) | ❌ 不引入 Crossplane：最大云面 provider 已死 2 年、控制面管"集群赖以存在"会把 DR 搞复杂 |
+| [manual-helm-to-argocd-adoption](manual-helm-to-argocd-adoption.md) | 采纳渲染等价性验证法 + `skipCrds` 解耦 CRD；跨集群同 chart 用 `helm.releaseName` 而非 `fullnameOverride` |
+| [manifests-directory-per-app](manifests-directory-per-app.md) | 一个 App 一个目录（目录即清单），废除 `directory.include` glob |
+| [no-helm-chart-for-in-house-apps](no-helm-chart-for-in-house-apps.md) | 自研应用一律 kustomize/目录源**不打 chart**；Helm 只用于消费上游 chart |
+| [otel-2026-alignment](otel-2026-alignment.md) | homelab collector 首次落地 + oracle 现代化（container operator、持久队列、0.120→0.156） |
+| [alerting-telegram-migration](alerting-telegram-migration.md) | gotify-bridge 并发崩溃 → 改 Alertmanager 原生 Telegram，Gotify 整体退役 |
+| [opencost-krr-data-sources](opencost-krr-data-sources.md) | 同一 cAdvisor 缺口：OpenCost 走 collector 旁路、KRR 补窄口径采集；否决 krr-enforcer |
+| [orphaned-resources](orphaned-resources.md) | 否决 kor（信噪比 0.6%、误判 secret），改用 ArgoCD 原生 `orphanedResources` + `warn: false` |
 | [argocd-image-updater](argocd-image-updater.md) | CRD 模型与约束（⚠️ 当前闲置，集群内无 `ImageUpdater` CR） |
-| [storage106-experiment-vm](storage106-experiment-vm.md) | ⛔ **已被取代**（同日）→ `storage106-as-homelab-worker`。原结论：实验田要"独立小集群"不要"入集群 worker"。保留其入伙税推导与 8G 内存三方分配（ARC 2G / 宿主 2.1G / VM 3G），但该估算实测偏保守 |
-| [storage106-as-homelab-worker](storage106-as-homelab-worker.md) | 106 的 VM 改以 `k8s-worker-106` 入编 homelab（取代上一条）。实测入伙税远低于估算：requests 928Mi/2311Mi(40%)、available 2130MB。含三条与 master 不同的约束（经 pve 的静态路由 · ip rule 5240 · **必须装 Tailscale**——为 DaemonSet 的跨集群出口与 MTU 一致，不是为连通） |
-| [cluster-placement-for-new-services](cluster-placement-for-new-services.md) | 落点按资源画像选：**计算密集/大流量走 homelab**（7.5 核 + 6.6GB 余量、amd64），轻量无状态仍默认 oracle-k3s（只剩 0.5 核 + 2.6GB）。含必写 CPU limit 与 thermal 代价 |
-| [dgx-clustermesh-not-adopted](dgx-clustermesh-not-adopted.md) | ❌ DGX Spark 双机 k3s **不接 ClusterMesh**：那两台机是**外部 tailnet 的共享节点**，节点共享不携带 subnet route → VXLAN 要发往的节点 IP（`192.168.200.x` / `10.10.10.10`）双向不可达，且全程 DERP 2.28 MB/s。改用 homelab 侧 Service + 手写 Endpoints。含 `cluster.id` 撞车（两边都是 1）与 DGX `mtu` 键名拼错从未生效 |
-| [shared-postgres-platform](shared-postgres-platform.md) | 手搓 `rss-postgres` → CNPG `apps-pg` 共享库；**不**并入 `zitadel-pg`（节点内存 87% + SSO 带 critical 优先级）。含备份从 `pg_dumpall` 改逐库 `pg_dump` 的连带影响 |
-| [slo-availability-targets](slo-availability-targets.md) | **99% 的推导**（单节点无 HA 下最紧的可信目标：一次 30min 手工维护窗口 = 35% 预算）+ 服务选择两维判据（真实流量 ≥1000/窗口 **且** 有人会注意到——关键性不是理由，可测量性才是）+ 错误预算标准算术。☠️ 实测揭穿分母：Uptime Kuma 探针（60s）穿 gateway 计入 SLI，**vault/argocd 真实流量 ≈0**、5 条里 3 条不合格；而真实错误率 1.38% 的 `uptime-kuma` 没有 SLO。预算只做优先级信号、**不做变更闸门**（显式取舍） |
-| [renovate-adoption](renovate-adoption.md) | 采纳 Renovate 管版本钉扎（🚧 待装 GitHub App）。与 `check-version-pairs.py` 的 V1-V3 分工：检查器拦「多处副本互相不一致」，Renovate 推「上游有新版」。三条自我约束：永不 automerge（manual-helm 合并≠部署）· 不开 pinDigests（arm64 要 index digest）· 不管 docs/。分组按「必须一起改」分——cilium+gateway-api 一个 PR |
+| [storage106-experiment-vm](storage106-experiment-vm.md) | ⛔ 已被取代 → `storage106-as-homelab-worker`；原结论"实验田独立小集群"，估算实测偏保守 |
+| [storage106-as-homelab-worker](storage106-as-homelab-worker.md) | 106 VM 以 `k8s-worker-106` 入编 homelab（取代上一条）；实测入伙税远低于估算，含三条与 master 不同的约束 |
+| [cluster-placement-for-new-services](cluster-placement-for-new-services.md) | 计算密集/大流量走 homelab、轻量无状态默认 oracle-k3s；含必写 CPU limit 与 thermal 代价 |
+| [dgx-clustermesh-not-adopted](dgx-clustermesh-not-adopted.md) | ❌ DGX 双机**不接 ClusterMesh**（共享节点不带 subnet route，VXLAN 节点 IP 不可达）；改 homelab Service + 手写 Endpoints |
+| [shared-postgres-platform](shared-postgres-platform.md) | 手搓 `rss-postgres` → CNPG `apps-pg`；**不**并入 `zitadel-pg`；备份改逐库 `pg_dump` |
+| [slo-availability-targets](slo-availability-targets.md) | 99% 推导 + 两维判据；☠️ 实测揭穿分母（vault/argocd 真实流量≈0）；预算只做信号不做闸门 |
+| [renovate-adoption](renovate-adoption.md) | 采纳 Renovate 管版本钉扎（🚧 待装 GitHub App）；与 V1-V3 分工；三条自我约束（不 automerge · 不开 pinDigests · 不管 docs/） |
 
 ## 写新 ADR
 

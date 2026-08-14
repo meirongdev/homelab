@@ -1,7 +1,14 @@
 # Multi-Cluster Observability Architecture
 
-> Last updated: 2026-08-11
+> Last updated: 2026-08-14
 > Status: 生效事实
+
+## 速览
+
+- **遥测不是单向的**：日志/追踪（Loki/Tempo）汇聚在 oracle-k3s；指标
+  （Prometheus/Grafana/Alertmanager）仍汇聚在 homelab。
+- **方向**：homelab 跨 Tailscale 写出遥测；oracle 跨 Tailscale `prometheusremotewrite` 写指标。
+- **外部主机**：dgx-spark ×2 与 macbook 也接入采集（node_exporter / smartctl）。
 
 ## Overview
 
