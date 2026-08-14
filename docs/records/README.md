@@ -4,16 +4,16 @@
 
 | 日期 | 记录 | 内容 |
 |------|------|------|
-| 2026-08-14 | [oracle-reboot-loop-and-blind-dead-mans-switch](2026-08-14-oracle-reboot-loop-and-blind-dead-mans-switch.md) | oracle **6 天硬重启 6 次**（宿主层重置：无 shutdown/panic/OOM/crash dump，每次从 EDK II 冷启动），而**死人开关在重启窗口里静默失明**——实测心跳缺口 9分40秒、`important` 翻转 0 条，因为 push monitor 的检查跑在 uptime-kuma 进程内，接收方自己下线就没人检查。`NodeRebooted` 其实响了 21 次：**不是缺信号，是缺模式**。修 `NodeRebootLoop` + `DeadMansSwitchReceiverDown`（阈值对 5 天线上数据两向实测）。含「突发中断被比率型指标稀释成温和百分比」与「安全网只能靠触发来验证」两条教训，并推翻了前一天 SLO ADR 里的 uptime-kuma 判断 |
-| 2026-08-13 | [iprule-guard-render-bug](2026-08-13-iprule-guard-render-bug.md) | Jinja `join('\n')` 在 YAML 块标量里渲染出字面 `\n` → worker 的 ip rule 收敛器断言塌成一行：5200 每轮 add 失败、5240/5260 连 metric 序列都不产生（absent-series 哑区），防线名存实亡而规则"看起来在位"。8-12 那批告警抓到真阳性。修渲染 + 规则清单统一（master 补漏配的 5240，ProxyCommand 路径复活）+ expected 对账指标与两条新告警 |
-| 2026-08-13 | [k3s-worker-join-106](2026-08-13-k3s-worker-join-106.md) | 106 入编 homelab worker 的四个坑：☠️ `tailscale up` 与 ip-rule 防护之间有致命窗口（`--accept-routes` 学到 LAN 段进 table 52，节点自己把自己踢下线，要从 tailnet 抢救）· 5250 被 tailscaled 占着（空位只有 5200/5220/5240/5260）· `disable-kube-proxy` 是 server-only、写进 agent 直接 fatal · **既存缺陷**：k8s-node 缺自己网段的 ip rule → inventory 里那条 ProxyCommand 一直是坏的。含两个假阴性判据（`pgrep -f` 自我污染、busybox `nslookup`） |
-| 2026-08-13 | [oracle-musl-dns-servfail](2026-08-13-oracle-musl-dns-servfail.md) | 为消除 CoreDNS 单上游而加的 `DNS=1.1.1.1 1.0.0.1`，让 OCI 私有 search 域 `vcn<id>.oraclevcn.com` 的探针拿到 **SERVFAIL 而非 NXDOMAIN** → **musl 放弃整轮 search**，oracle 上所有 Alpine 容器的外网解析变成抽签（glibc 免疫）；夜间备份三连挂当金丝雀。含「评审时看见了副作用、却把 rcode 和受害者都判错」的教训 |
-| 2026-08-13 | [macos-local-network-tcc](2026-08-13-macos-local-network-tcc.md) | 工作机上 terraform/kubectl 连 LAN 恒报 `no route to host`（ROADMAP 挂了很久的"原因不明"）→ 定性为 **macOS 本地网络隐私授权**：未授权的非 Apple 二进制访问本地链路返回 `EHOSTUNREACH`，与真路由故障同形。含 2×2 判别实验与三条已固化绕法 |
-| 2026-08-12 | [tailscale-iprule-guard-drift](2026-08-12-tailscale-iprule-guard-drift.md) | systemd-networkd 默认清扫外来 ip rule（`ManageForeignRoutingPolicyRules=yes`），8-11 unattended-upgrades 重启 networkd 把 fwmark 撞车防护（5200/5260）**双节点清光**，oneshot 单元仍显 active"看起来修过"；homepage 中签断连 33h 无告警。修成两道防线（networkd drop-in 关清扫 + timer 收敛器）+ textfile 指标 5 条告警。含 A/B 抓现行与「pve 幸存者对照组」破案法 |
-| 2026-08-12 | [slo-nan-poisoning](2026-08-12-slo-nan-poisoning.md) | SLI 在零请求窗口 0/0 产出 **NaN 并写入 TSDB**，被 `sum_over_time` 汇总时传染整条 30d 序列 → 5 个服务的错误预算面板**全部 N/A**，而告警链路（≤3d 窗口）全绿、无人察觉。含「别给『没数据』预先写好非故障的解释文案」的教训 |
-| 2026-08-11 | [gateway-api-crd-stall](2026-08-11-gateway-api-crd-stall.md) | Cilium 1.20 升级漏配 Gateway API CRD（v1.2.1 vs 要求的 v1.6.1）→ 两集群 Gateway API 控制器**静默未初始化 30 小时**；旧域名照常 200、无告警，只有新增路由才 503。含「用一个必然通过的测试验证假设」的教训 |
-| 2026-08-03 | [namespace-prune-cascade](2026-08-03-namespace-prune-cascade.md) | Namespace 内嵌在应用清单里 → 删该文件 prune 掉整个 ns → 级联删光同 ns 下无关应用的数据（`Prune=false` 护栏对此无效）；已从 restic 完整恢复 |
-| 2026-08-01 | [oracle-k3s-dns-outage](2026-08-01-oracle-k3s-dns-outage.md) | oracle-k3s 丢失 OCI DNS 上游 `169.254.169.254:53` → CoreDNS 全挂 → cloudflared 崩溃 → 全部 meirong.dev 不可达 ~20min |
+| 2026-08-14 | [oracle-reboot-loop-and-blind-dead-mans-switch](2026-08-14-oracle-reboot-loop-and-blind-dead-mans-switch.md) | oracle 6 天硬重启 6 次、死人开关静默失明（非缺信号，是缺模式）；修 `NodeRebootLoop` + `DeadMansSwitchReceiverDown` |
+| 2026-08-13 | [iprule-guard-render-bug](2026-08-13-iprule-guard-render-bug.md) | Jinja `join('\n')` 渲染出字面 `\n` → ip rule 收敛器断言塌行、防线名存实亡；修渲染 + 规则清单统一 + 对账指标 |
+| 2026-08-13 | [k3s-worker-join-106](2026-08-13-k3s-worker-join-106.md) | 106 入编 worker 四个坑：`tailscale up` 致命窗口 · 5250 被占 · `disable-kube-proxy` 仅 server · k8s-node 缺 ip rule |
+| 2026-08-13 | [oracle-musl-dns-servfail](2026-08-13-oracle-musl-dns-servfail.md) | 加的 DNS 上游让 OCI 私有域 SERVFAIL → musl 放弃整轮 search，Alpine 外网解析变抽签（glibc 免疫） |
+| 2026-08-13 | [macos-local-network-tcc](2026-08-13-macos-local-network-tcc.md) | 本机 terraform/kubectl 连 LAN "no route to host" → macOS 本地网络隐私授权，与真路由故障同形 |
+| 2026-08-12 | [tailscale-iprule-guard-drift](2026-08-12-tailscale-iprule-guard-drift.md) | networkd 清扫外来 ip rule 把 fwmark 防护清光、homepage 断连 33h 无告警；修成两道防线 + 5 条告警 |
+| 2026-08-12 | [slo-nan-poisoning](2026-08-12-slo-nan-poisoning.md) | SLI 0/0 产出 NaN 写入 TSDB、传染 30d 序列 → 5 个错误预算面板全 N/A 而告警链路全绿 |
+| 2026-08-11 | [gateway-api-crd-stall](2026-08-11-gateway-api-crd-stall.md) | Cilium 1.20 漏配 Gateway API CRD → 控制器静默未初始化 30h；旧路由照常 200，只有新增路由 503 |
+| 2026-08-03 | [namespace-prune-cascade](2026-08-03-namespace-prune-cascade.md) | Namespace 内嵌清单 → 删文件 prune 掉整个 ns → 级联删光同 ns 数据（`Prune=false` 拦不住）；已从 restic 恢复 |
+| 2026-08-01 | [oracle-k3s-dns-outage](2026-08-01-oracle-k3s-dns-outage.md) | oracle 丢 OCI DNS 上游 → CoreDNS 全挂 → cloudflared 崩溃 → meirong.dev 不可达 ~20min |
 | 2026-07-12 | [pve-screen-backlight-always-on](2026-07-12-pve-screen-backlight-always-on.md) | pve 屏幕常亮（`setterm powersave` 静默失败） |
 | 2026-06-07 | [zitadel-console-grpc-404](2026-06-07-zitadel-console-grpc-404.md) | ZITADEL Console v1 gRPC 经网关 404 → Cilium `enableAppProtocol` |
 | 2026-03-15 | [cilium-hubble-tls-issue](2026-03-15-cilium-hubble-tls-issue.md) | Hubble TLS 证书问题排查 |

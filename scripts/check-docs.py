@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""文档组织规则检查器 —— 强制 docs/README.md 里的 R1-R7。
+"""文档组织规则检查器 —— 强制 docs/RULES.md 里的 R1-R7。
 
 用法:
     python3 scripts/check-docs.py          # 检查，有违规则 exit 1
     python3 scripts/check-docs.py --list   # 只列出规则覆盖情况
 
-设计原则: **本脚本能查的，和 docs/README.md 写的规则必须一一对应。**
+设计原则: **本脚本能查的，和 docs/RULES.md 写的规则必须一一对应。**
 规则文档说得比检查器严，规则就是摆设；检查器比文档严，就会误伤。
 改任何一边都要同步另一边。
 
@@ -356,7 +356,7 @@ def main():
         for v in violations[rule]:
             print(f"  {v}")
         print()
-    print("规则全文见 docs/README.md「文档组织规则」。")
+    print("规则全文见 docs/RULES.md。")
     return 1
 
 

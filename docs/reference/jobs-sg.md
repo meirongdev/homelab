@@ -1,9 +1,20 @@
 # jobs-sg — 新加坡 SWE 岗位趋势周报（架构事实）
 
-> Last updated: 2026-08-13
+> Last updated: 2026-08-14
 > Status: 生效事实
 > Scope: jobs-sg 在 homelab 集群的部署形态、镜像固定方式、备份口径、首次上线依赖顺序
 > —— source of truth。应用代码在 [meirongdev/jobs-sg](https://github.com/meirongdev/jobs-sg)。
+
+## 速览
+
+- **在哪**：homelab 集群独立 ns `jobs-sg`，`jobs.meirong.dev`（无认证，公开统计）。
+  四个二进制一个镜像（ingest / enrich / report / web），3 个 CronJob + 1 Deployment。
+- **跑什么**：每日抓 SG 岗位 → 规则 + LLM 富化（直连 DGX，fail-open）→ 周报推 Telegram；
+  页面全部随请求渲染（`/`、`/tech`、`/pay`、`/companies`、`/ops`）。
+- **备份两条路径，缺一不可**：`jobs.db` 走白名单 `*.db*`；`raw/*.jsonl.gz` 单独纳 restic
+  ——只加白名单会静默漏备（H4 查不出）。
+- **首次上线依赖顺序**：见 § 依赖顺序，那不是配置错误，别去"修"。
+- **已知缺口**：见文末「已知缺口」。
 
 ## 部署形态
 

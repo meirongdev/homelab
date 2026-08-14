@@ -6,6 +6,14 @@
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
 > 实施决策与权衡见 [../plans/security/2026-06-16-k3s-security-hardening.md](../plans/security/2026-06-16-k3s-security-hardening.md)。
 
+## 速览
+
+- **11 层纵深防御**：WAF → OIDC → Vault+ESO → PSA → Kyverno → Trivy → CIS →
+  节点加固 → 网络 → 运行时 → restic。
+- **第 9 层（网络）只到"可见性"**：无自建 CiliumNetworkPolicy，集群级默认拒绝刻意延后。
+- **硬约束**：热笔记本 fail-open + 控 CPU；GitOps 优先（PSA 标签 / Vault / ESO / argocd 例外）。
+- **威胁覆盖矩阵**见 § 10；**已知缺口与路线图**见 § 11。
+
 ## 0. 设计原则（硬约束驱动）
 
 - **热笔记本约束**：homelab 的控制面 `k8s-node` 是 Ryzen 5600H 笔记本（2026-08-13 起另有一个 worker `k8s-worker-106`，但安全组件仍以控制面为准）（空闲 ~60–62°C、内存紧、重启需 `just homelab-recover`；功耗/散热细节见 [homelab-host-power-thermal.md](homelab-host-power-thermal.md)）。所有安全组件 **fail-open + 控 CPU**：不引入会在故障时阻断调度的 fail-closed 准入，周期/串行扫描优先于常驻高负载。

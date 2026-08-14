@@ -9,14 +9,14 @@
 ### 服务与应用
 
 - [services.md](services.md) — **服务清单唯一真相源**（哪个服务在哪个集群/ns/域名）+ 按服务的运维备忘
-- [open-notebook.md](open-notebook.md) — AI 研读知识库：部署形态、模型接线（DGX + Mac OMLX，provisioner 声明式）、配置真相源地图、备份口径
-- [jobs-sg.md](jobs-sg.md) — SG 岗位周报：独立 ns + 3 个 CronJob、digest 固定方式、备份两条路径（白名单捞不到 .jsonl.gz）、首次上线的 bootstrap 依赖
-- [calibre-metadata.md](calibre-metadata.md) — 书库元数据：覆盖率实测、mtime 冒充出版日期的已知污染（487 本）、回补作业的匹配门与判据、calibre 拿不到书评/公众评分的边界
+- [open-notebook.md](open-notebook.md) — AI 研读知识库：部署形态、模型接线（DGX + Mac OMLX）、配置真相源地图、备份口径
+- [jobs-sg.md](jobs-sg.md) — SG 岗位周报：独立 ns + 3 个 CronJob、digest 固定、备份两条路径、bootstrap 依赖
+- [calibre-metadata.md](calibre-metadata.md) — 书库元数据：覆盖率实测、mtime 冒充出版日期（487 本）、回补匹配门与判据、拿不到书评/评分的边界
 
 ### 网络
 
 - [networking-ingress.md](networking-ingress.md) — 入口链路（Tunnel → Cilium Gateway）、HTTPRoute 约定、external-dns DNS 自动化、节点地址速查
-- [tailscale-network.md](tailscale-network.md) — 双集群互联模型（Tailscale 只做 node underlay，pod 流量走 ClusterMesh VXLAN）+ 路由踩坑（含「单个 pod 到 100.64/10 全超时」那条 Cilium identity 撞 Tailscale fwmark 的 1/256 抽签）
+- [tailscale-network.md](tailscale-network.md) — 双集群互联（Tailscale 只做 node underlay、pod 走 ClusterMesh VXLAN）+ 路由踩坑（fwmark 撞车 1/256 抽签）
 - [cloudflare-tunnel-observability.md](cloudflare-tunnel-observability.md) — Tunnel + Gateway 流量可观测（能看到什么、看不到什么）
 
 ### 可观测
@@ -24,13 +24,13 @@
 - [observability-multicluster.md](observability-multicluster.md) — 日志/指标/链路追踪统一架构（含 dgx-spark/macbook 外部主机与 SMART 采集）
 - [observability-otel-logging.md](observability-otel-logging.md) — OTel 日志管道细节 + 4 种应用接入模式
 - [observability-alerting-slo.md](observability-alerting-slo.md) — 告警路由（Telegram）与覆盖盲区、Dashboards 组织约定、SLI/SLO（Sloth）
-- [dead-mans-switch.md](dead-mans-switch.md) — 唯一**判定方不与被监控方共命运**的告警（十来条 `absent()` 规则同样判缺席，但都跑在 homelab 自己的 Prometheus 里）：目的、6 跳链路、**覆盖矩阵与三处失明盲区**、演练程序
+- [dead-mans-switch.md](dead-mans-switch.md) — 唯一判定方不与被监控方共命运的告警：目的、6 跳链路、覆盖矩阵与三处失明盲区、演练程序
 - [k8s-qos-resource-management.md](k8s-qos-resource-management.md) — 资源配额与 QoS 约定
 - [cost-and-rightsizing.md](cost-and-rightsizing.md) — OpenCost 成本归因 + KRR 右尺寸（定价模型、指标语义、运维操作）
 
 ### 硬件与功耗
 
-- [homelab-host-power-thermal.md](homelab-host-power-thermal.md) — homelab 宿主（5600H 笔记本）功耗/散热事实 + 降温度抓手（AGENTS/security 硬约束的唯一真相源）
+- [homelab-host-power-thermal.md](homelab-host-power-thermal.md) — homelab 宿主功耗/散热事实 + 降温度抓手（AGENTS/security 硬约束唯一真相源）
 
 ### 安全与身份
 
@@ -44,7 +44,7 @@
 ### GitOps
 
 - [argocd-app-patterns.md](argocd-app-patterns.md) — 控制面部署形态、28 个 Application 清单与备注、pattern 对比、新增 Application 的 4 个坑
-- [manifest-safety-checks.md](manifest-safety-checks.md) — CI 强制的清单结构规则 H1-H5（每条都来自一次真实事故）+ 明确列出「静态查不出、只能靠人」的那几类
+- [manifest-safety-checks.md](manifest-safety-checks.md) — CI 强制的清单结构规则 H1-H5 + 「静态查不出、只能靠人」的那几类
 
 ---
 

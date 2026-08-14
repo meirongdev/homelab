@@ -1,6 +1,10 @@
 # Security Hardening Runbook — 集群内部安全（Phase 0 + 1）
 
-> Last updated: 2026-08-10
+> Last updated: 2026-08-14
+>
+> **触发条件**：部署/验证/回滚集群内部安全组件（PSA / kube-bench / Trivy / Kyverno / 节点加固 / Hubble）。
+> **成功判定**：各层验证步骤通过（每 Phase 内嵌验证命令与冒烟/巡检判据）。
+> **回滚**：见 § 回滚（组件卸载与恢复路径）。
 
 ## Overview
 
