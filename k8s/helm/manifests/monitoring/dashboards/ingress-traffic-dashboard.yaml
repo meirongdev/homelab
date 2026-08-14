@@ -1,0 +1,375 @@
+# Grafana Dashboard: 公网服务入口流量（Ingress Traffic Overview）
+# 展示每个公网服务（入口 Envoy 层）的每日请求量 / 趋势 / 状态码 / 集群分布。
+#
+# 数据源: cilium-envoy（Cilium Gateway 的 L7 指标），已由
+#   k8s/helm/manifests/monitoring/cilium-envoy-servicemonitor.yaml 采集到 homelab
+#   中枢 Prometheus，双集群（homelab-gateway 本机 + oracle-gateway 经 remote-write）。
+# 核心指标: envoy_cluster_upstream_rq_total{envoy_cluster_name="<gw>/<ns>_<svc>_<port>"}
+#   粒度 = 服务（ns_svc），天然含 envoy_response_code。
+#
+# ⚠️ 语义边界（见 docs/reference/cloudflare-tunnel-observability.md）：
+#   - 这是「服务实际接到的请求」（入口 Envoy 层，Cloudflare 之后的量），
+#     不含 Cloudflare 边缘缓存命中/WAF 拦截的请求。
+#   - 服务名维度（ns_svc），非域名；服务→URL 对照见 docs/reference/services.md。
+#   - 保留期 = 中枢 Prometheus retention（7d），更久历史需先提 retention。
+#   - 刻意排除非业务路由：/envoy-admin、ingress/egress-cluster*、xds-grpc-cilium
+#     （用 envoy_cluster_name 的 cilium-gateway 前缀天然过滤）。
+#
+# Auto-loaded via kube-prometheus-stack grafana-sc-dashboard sidecar
+# （grafana_dashboard:"1" + grafana_folder annotation，与其它自建面板同款）
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ingress-traffic-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Platform"
+data:
+  ingress-traffic-overview.json: |-
+    {
+      "annotations": { "list": [] },
+      "description": "公网服务每日入口流量：每服务的请求量/趋势/状态码/集群分布。数据源 cilium-envoy（Cilium Gateway L7），双集群汇聚到中枢 Prometheus。服务名→URL 对照见 docs/reference/services.md。",
+      "editable": true,
+      "graphTooltip": 1,
+      "links": [
+        {
+          "asDropdown": true,
+          "icon": "external link",
+          "keepTime": true,
+          "tags": ["curated"],
+          "title": "📊 其他自建面板",
+          "type": "dashboards"
+        },
+        {
+          "asDropdown": false,
+          "icon": "doc",
+          "keepTime": true,
+          "tags": [],
+          "targetBlank": true,
+          "title": "Cloudflare Tunnel 观测",
+          "type": "link",
+          "url": "/d/cloudflare-tunnel/cloudflare-tunnel-observability"
+        }
+      ],
+      "panels": [
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+          "id": 100,
+          "panels": [],
+          "title": "🚀 概览",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "fillOpacity": 80,
+                "gradientMode": "none",
+                "lineWidth": 1
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red", "value": 80 }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+          "id": 101,
+          "options": {
+            "displayMode": "basic",
+            "minVizHeight": 10,
+            "minVizWidth": 10,
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "/^Value #/",
+              "values": false
+            },
+            "showUnfilled": true,
+            "sortOrder": "desc"
+          },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "editorMode": "code",
+              "exemplar": false,
+              "expr": "sum by (envoy_cluster_name) (increase(envoy_cluster_upstream_rq_total{envoy_cluster_name=~\"kube-system/cilium-gateway.*\", cluster=~\"$cluster\"}[$__range]))",
+              "legendFormat": "{{envoy_cluster_name}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "各服务累计请求量（所选区间）",
+          "type": "bargauge"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "lineWidth": 1
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+          "id": 102,
+          "options": {
+            "legend": {
+              "calcs": ["sum", "max", "mean"],
+              "displayMode": "table",
+              "placement": "right",
+              "showLegend": true
+            },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "editorMode": "code",
+              "exemplar": true,
+              "expr": "sum by (envoy_cluster_name) (increase(envoy_cluster_upstream_rq_total{envoy_cluster_name=~\"kube-system/cilium-gateway.*\", cluster=~\"$cluster\"}[$__interval]))",
+              "legendFormat": "{{envoy_cluster_name}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "各服务请求速率趋势",
+          "type": "timeseries"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "mappings": [
+                {
+                  "options": { "2": { "color": "green", "index": 0 } },
+                  "type": "value"
+                },
+                {
+                  "options": { "3": { "color": "yellow", "index": 1 } },
+                  "type": "value"
+                },
+                {
+                  "options": { "4": { "color": "orange", "index": 2 } },
+                  "type": "value"
+                },
+                {
+                  "options": { "5": { "color": "red", "index": 3 } },
+                  "type": "value"
+                }
+              ],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [ { "color": "text", "value": null } ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+          "id": 103,
+          "options": {
+            "displayMode": "basic",
+            "minVizHeight": 10,
+            "minVizWidth": 10,
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": ["sum"],
+              "fields": "/^Value #/",
+              "values": true
+            },
+            "showUnfilled": true,
+            "sortOrder": "desc"
+          },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "editorMode": "code",
+              "exemplar": false,
+              "expr": "sum by (envoy_cluster_name, envoy_response_code) (increase(envoy_cluster_upstream_rq_total{envoy_cluster_name=~\"kube-system/cilium-gateway.*\", cluster=~\"$cluster\"}[$__range]))",
+              "legendFormat": "{{envoy_cluster_name}} · {{envoy_response_code}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "各服务按状态码（区间累计）",
+          "type": "bargauge"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "lineWidth": 1
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [ { "color": "green", "value": null } ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+          "id": 104,
+          "options": {
+            "legend": {
+              "calcs": ["sum", "max", "mean"],
+              "displayMode": "table",
+              "placement": "right",
+              "showLegend": true
+            },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "editorMode": "code",
+              "exemplar": true,
+              "expr": "sum by (cluster) (increase(envoy_cluster_upstream_rq_total{envoy_cluster_name=~\"kube-system/cilium-gateway.*\", cluster=~\"$cluster\"}[$__interval]))",
+              "legendFormat": "{{cluster}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "集群趋势（homelab vs oracle-gateway）",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 },
+          "id": 105,
+          "panels": [],
+          "title": "📖 服务 → URL 对照（单点真相源 = docs/reference/services.md）",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "none" },
+              "custom": {
+                "align": "auto",
+                "cellOptions": { "type": "auto" },
+                "inspect": false
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [ { "color": "green", "value": null } ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 18 },
+          "id": 106,
+          "options": {
+            "footer": { "show": false },
+            "frameIndex": 0,
+            "showHeader": true,
+            "sortBy": []
+          },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "editorMode": "code",
+              "expr": "label_replace(sum by (envoy_cluster_name) (increase(envoy_cluster_upstream_rq_total{envoy_cluster_name=~\"kube-system/cilium-gateway.*\", cluster=~\"$cluster\"}[$__range])), \"cluster_name\", \"$1\", \"envoy_cluster_name\", \"(.*)\")",
+              "format": "table",
+              "instant": true,
+              "legendFormat": "__auto",
+              "refId": "A"
+            }
+          ],
+          "title": "当前活跃服务（envoy_cluster_name → 见 services.md 映射）",
+          "type": "table"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 40,
+      "style": "dark",
+      "tags": ["ingress", "traffic", "envoy", "cilium", "multicluster", "prometheus"],
+      "templating": {
+        "list": [
+          {
+            "current": {
+              "selected": true,
+              "text": "Prometheus",
+              "value": "prometheus"
+            },
+            "hide": 2,
+            "label": "Data Source",
+            "name": "datasource",
+            "options": [],
+            "query": "prometheus",
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false,
+            "type": "datasource"
+          },
+          {
+            "current": {
+              "selected": true,
+              "text": ["All"],
+              "value": ["$__all"]
+            },
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "definition": "label_values(envoy_cluster_upstream_rq_total{envoy_cluster_name=~\"kube-system/cilium-gateway.*\"}, cluster)",
+            "hide": 0,
+            "includeAll": true,
+            "label": "Cluster",
+            "multi": true,
+            "name": "cluster",
+            "options": [],
+            "query": {
+              "query": "label_values(envoy_cluster_upstream_rq_total{envoy_cluster_name=~\"kube-system/cilium-gateway.*\"}, cluster)",
+              "refId": "StandardVariableQuery"
+            },
+            "refresh": 2,
+            "regex": "",
+            "skipUrlSync": false,
+            "sort": 1,
+            "type": "query"
+          }
+        ]
+      },
+      "time": { "from": "now-7d", "to": "now" },
+      "timepicker": {
+        "nowDelay": "",
+        "refresh_intervals": ["10s", "30s", "1m", "5m", "15m"],
+        "time_options": ["5m", "15m", "1h", "6h", "12h", "24h", "2d", "7d"]
+      },
+      "timezone": "browser",
+      "title": "Ingress Traffic / 公网服务入口流量",
+      "uid": "ingress-traffic-overview",
+      "version": 1,
+      "weekStart": ""
+    }
