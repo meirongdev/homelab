@@ -694,6 +694,76 @@ spec:
                 `kubectl --kubeconfig ~/.kube/dgx-spark.yaml -n v4flash logs deploy/v4flash-leader --previous | tail -50`
               ⚠️ 刚重启后别做性能基准（冷启动 ~30% 慢，且首个请求含 Triton JIT 尖峰）。
 
+        # ⚠️ 防过载/前兆规则（2026-08-15 落地，规格见 nv-dgx-spark/docs/auto-mitigation-cn.md §3）。
+        # 这是规格 A3/A4/A5 的实现；A1/A2（MemAvailable 百分比阈值）在 08-09 已按实测判定为
+        # 误报陷阱而删除（GB10 统一内存里模型常驻把 MemAvailable 长期压低、对"会否 OOM"无预测力，
+        # 见本组上方 DgxSparkMemoryPressure 的长注释），已由 PSI stall + OOM-kill 两条替代，
+        # 这里**不**重新引入；A6（SMART 失败）已由 storage-alerts.yaml 的 SmartHealthFailed /
+        # SmartMediaErrors / NVMe 磨损规则覆盖（无 job 过滤 → 天然匹配 smartctl-dgx-spark）；
+        # A7（load1>8 info）因 Alertmanager 路由只收 critical|warning、info 被丢弃，写了也是
+        # 死规则，且 GB10 load 探针有噪音，故省略。
+        - alert: DgxSparkKVCacheHigh
+          # KV 缓存占用接近打满 = 排队与吞吐骤降的前兆。kv_cache_usage_perc 是 vLLM 直接导出的
+          # 0..1 比例（vllm-dgx-spark job，只抓 dgx-spark-1 的 :8000/metrics）。
+          # 0.90 是起始建议：max_num_seqs=6 下 KV 打满会让新请求排队甚至被拒。首月按实测回校。
+          expr: vllm:kv_cache_usage_perc{job="vllm-dgx-spark"} > 0.90
+          for: 5m
+          labels:
+            severity: warning
+            component: inference
+          annotations:
+            summary: "dgx-spark vLLM KV 缓存占用 > 90%（{{ $labels.nodename }}）"
+            description: |
+              KV cache 占用即将打满（当前 {{ $value | printf "%.0f" }}），新请求会开始排队 /
+              吞吐骤降。先看谁占着引擎：`cd ~/projects/meirongdev/nv-dgx-spark && make v4flash-load`
+              （running/waiting 数 + 客户端 IP）。KV 打满是 `max_num_seqs=6` 下的正常饱和，
+              通常等长请求跑完自愈；若持续打满说明并发客户太多，需减负。
+        - alert: DgxSparkRequestsQueued
+          # 排队饱和前兆：max_num_seqs=6，waiting>4 意味着基本打满、有人在挨饿
+          # （2026-08-02 事故类型——饱和时交互请求会被长批处理拖死）。
+          # ⚠️ 与 DgxSparkVllmStuck 语义**不同**：那条是"有需求但零进度"（僵尸 TP 组），
+          # 这条是"引擎健康但队列挤爆"。heavy 批处理时 waiting 可瞬间上百，阈值按本集群
+          # 实际（max_num_seqs=6）取 4，首月按实测回校。
+          expr: vllm:num_requests_waiting{job="vllm-dgx-spark"} > 4
+          for: 2m
+          labels:
+            severity: warning
+            component: inference
+          annotations:
+            summary: "dgx-spark vLLM 排队请求 > 4（max_num_seqs=6 饱和）"
+            description: |
+              有 {{ $value }} 个请求在排队，引擎接近/达到饱和（max_num_seqs=6）。
+              长批处理会把交互请求饿死。查当前占用：
+              `cd ~/projects/meirongdev/nv-dgx-spark && make v4flash-load`
+              长期高频触发 = 并发客户太多，考虑限流/减并发；偶发自愈则忽略。
+        - alert: DgxSparkNodeDown
+          # 覆盖盲区（2026-08-15 补）：S2 断电级死亡时，内置 TargetDown（severity=warning、
+          # repeat 4h）语义太泛、读不出"推理机器整个没了"，且重复周期长于故障时长，3 小时的中断
+          # 在 Telegram 里只留一条消息被划过去（08-13 尸检结论，见本组上方长注释）。
+          # 这条是带 runbook 的定向 critical：`node-exporter-dgx-spark` 一个 target 不可达
+          # = 整机或整条出网路径不可达（DGX Spark 无 BMC/IPMI，Wake-on-LAN 亦无效，只能物理回收）。
+          # ⚠️ 与 DgxSparkVllmDown 互补：那条盯"宿主在线、引擎没了"；这条盯"宿主本身没了"。
+          #   保留与 TargetDown 的重叠是**故意**的（业界同款哲学：TargetDown 是兜底，
+          #   这条是带 runbook 的定向），别为了去重把任何一条关掉。
+          # for 取 3m 而非规格建议的 1m：node_exporter 经 flaky 的 Tailscale DERP relay 抓取，
+          # 1m 会被一次中继抖动误报 critical；3m 仍远短于 S2 那种小时级中断，且比 TargetDown
+          # （repeat 4h）早得多叫醒人。
+          expr: up{job="node-exporter-dgx-spark"} == 0
+          for: 3m
+          labels:
+            severity: critical
+            component: inference
+          annotations:
+            summary: "dgx-spark 节点掉线：{{ $labels.nodename }}（node-exporter 不可达）"
+            description: |
+              {{ $labels.nodename }} 的 node_exporter 被 Prometheus 抓不到了，整机或整条出网
+              路径中断。先确认是不是整个 tailnet 抖动：另一台 dgx 还通吗？
+              两台都通 = 网络/中继问题；只这台不通 = 大概率它自己硬挂了（断电级，参考 08-15 S2）。
+              判断对端：`ssh -i ~/.ssh/vgio admin@100.67.164.92 uptime`
+              （登录方式与 tailnet 归属见本文件 NodeRebooted 的长注释）。
+              ⚠️ 无 BMC/IPMI + WoL 无效时，真断电只能物理到场硬重启，重启后
+              `cd ~/projects/meirongdev/nv-dgx-spark && make v4flash-status && make v4flash-test`。
+
     - name: multicluster-telemetry
       rules:
         - alert: OracleTelemetryAbsent
