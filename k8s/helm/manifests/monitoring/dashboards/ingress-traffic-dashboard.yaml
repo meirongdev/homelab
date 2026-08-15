@@ -316,7 +316,7 @@ data:
       "refresh": "30s",
       "schemaVersion": 40,
       "style": "dark",
-      "tags": ["ingress", "traffic", "envoy", "cilium", "multicluster", "prometheus"],
+      "tags": ["curated", "ingress", "traffic", "envoy", "cilium", "multicluster", "prometheus"],
       "templating": {
         "list": [
           {
