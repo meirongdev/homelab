@@ -7,6 +7,8 @@
 > Cloudflare Analytics API 桥接。
 > **入口链路本身**（Tunnel 健康、cloudflared 指标）见
 > [cloudflare-tunnel-observability.md](cloudflare-tunnel-observability.md)。
+> **看到认不出来的流量、想下钻到具体 IP/path/状态码**，见
+> [../runbooks/suspicious-traffic-investigation.md](../runbooks/suspicious-traffic-investigation.md)。
 
 ## 先读这一条
 
