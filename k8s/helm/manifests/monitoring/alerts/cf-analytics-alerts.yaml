@@ -1,0 +1,76 @@
+---
+# cf-analytics-exporter alerting.
+#
+# 这个 exporter 的失效方式全是**静默**的：pod Running、探针绿（探针只探进程，故意不探
+# 数据新鲜度，见 cf-analytics-exporter/cf-analytics-exporter.yaml 的注释），面板照常画
+# 图——只是数字停在几天前。所以「数据是否还在更新」必须由下面这几条规则说话。
+#
+# 典型触发原因，按概率排序：
+#   1. Cloudflare token 被轮换/吊销，或 Zone>Analytics>Read 权限被收走（复用的是
+#      external-dns 那把，改动 external-dns 时容易顺手改坏）。
+#   2. Cloudflare 改了 GraphQL schema / 收紧了免费版的保留期与时间跨度限制。
+#   3. ESO 同步断了，monitoring/cf-analytics-cloudflare secret 变旧。
+#
+# severity warning → 走 Alertmanager 的 telegram 接收器（只接 critical|warning，
+# info 会被 InfoInhibitor 吞掉）。`release: kube-prometheus-stack` 标签是**必需**的，
+# 否则 ruleSelector 不认领这条规则（规则文件在，告警不存在，又是一层静默）。
+#
+# 由 ArgoCD 的 monitoring-dashboards Application 部署（git push → 3 分钟同步）。
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cf-analytics-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: cf-analytics
+      rules:
+        # 抓取本身报错。exporter 每 6h 才刷一次，所以这个 0 会持续到下一轮；
+        # for: 30m 只是避开滚动重启时那一小段（新 pod 首刷完成前 scrape_success=0）。
+        - alert: CFAnalyticsScrapeFailing
+          expr: cf_analytics_scrape_success == 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "cf-analytics-exporter 无法从 Cloudflare 取数"
+            description: "cf_analytics_scrape_success=0 超过 30m —— 公网流量面板的数字会停在上一次成功的那天。常见原因是 Cloudflare API token 被轮换/降权（复用 external-dns 的那把）。看日志：`kubectl --context k3s-homelab logs -n monitoring deploy/cf-analytics-exporter`。"
+
+        # 兜底：上面那条只看「最近一轮」，这条看「多久没有一轮是全绿的」。
+        # ⚠️ 必须带 `> 0` 前置条件——刚启动、首刷尚未成功时该时间戳是 0，
+        # `time() - 0` 是个天文数字，会在每次重启后立刻假阳性。
+        - alert: CFAnalyticsDataStale
+          expr: cf_analytics_last_success_timestamp_seconds > 0
+            and time() - cf_analytics_last_success_timestamp_seconds > 86400
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "cf-analytics 数据超过 24h 未刷新"
+            description: "距上一次完整成功的 Cloudflare 抓取已超过 24h（正常每 6h 一轮）。Grafana 的「Cloudflare / 公网流量」面板正在展示过期数据。"
+
+        # 元故障：序列整体消失时上面两条都不会触发（没数据 = 没告警）。
+        # 该 target 是 homelab 本地 static_configs 直抓，健康时序列必然存在，
+        # 不像 oracle 那些经 remote-write 的指标会有正常的传输空档 → absent() 安全。
+        - alert: CFAnalyticsMetricsAbsent
+          expr: absent(cf_analytics_scrape_success{cluster="homelab"})
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "cf-analytics 指标完全消失"
+            description: "cf_analytics_scrape_success 序列消失超过 30m —— pod 挂了、Service 选不中 pod，或 kube-prometheus-stack.yaml 里的 additionalScrapeConfigs job 被改坏。这会同时屏蔽掉其它所有 cf-analytics 告警。"
+
+        # 数据质量：某天的 (clientIP, host) 组合数撞到了 API 的 10000 行上限，
+        # 独立 IP 数因此被低估（请求数不受影响，它是分组求和）。
+        # 2026-08-15 实测本 zone 单日约 2500 行，真触发说明流量涨了 4 倍。
+        - alert: CFAnalyticsRowsTruncated
+          expr: cf_analytics_rows_truncated == 1
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "cf-analytics 独立 IP 数被 API 行数上限截断"
+            description: "某一天的 (clientIP, host) 分组数达到 ROW_LIMIT(10000)，独立 IP 数被低估。Cloudflare 的 limit 已是硬上限 10000，要继续拆分得改成按 host 逐个查询（域名数 × 天数 次调用）。"

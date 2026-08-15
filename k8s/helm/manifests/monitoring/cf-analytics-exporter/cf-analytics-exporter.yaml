@@ -1,0 +1,112 @@
+# cf-analytics-exporter — 把 Cloudflare 公网流量聚合暴露为 Prometheus 指标。
+#
+# 补的是 docs/reference/cloudflare-tunnel-observability.md 里写明的那块空白：
+# cloudflared 指标不带 hostname，cilium-envoy 只有服务名（ns_svc）且是「Cloudflare 之后」
+# 的量 —— 「哪个域名、多少人（IP）来访问」只有 Cloudflare 边缘知道。
+#
+# ❓ 「为什么不用现成的 Cloudflare exporter」——官方那个和 lablabs 那个都实测评估并否决过，
+#    结论与复现步骤在 docs/decisions/cf-analytics-custom-exporter.md。**别重复这轮调研**，
+#    一句话版：本 zone 是 Free 套餐，它们依赖的 httpRequests1mGroups 直接 403，
+#    而且它们的 uniques 全都只到 zone 级、没有按域名的。
+#
+# 为什么是常驻 Deployment 而不是 CronJob：
+#   指标要被 Prometheus 周期 scrape，CronJob 的短生命周期会跟 scrape 时序对不上
+#   （pod 没了就没 target，指标断成锯齿）。这里常驻 + 内部每 6h 自刷新，60s 被抓。
+#
+# 数据源权限：Zone > Analytics > Read。复用 external-dns 那把 Cloudflare token
+#   （Vault secret/homelab/external-dns property=api_token，2026-08-15 实测该 token
+#   可读 uniques + 按 host/IP 的 adaptive 数据集），不再新建第二把。
+#   ⚠️ k8s Secret 不跨 namespace：external-dns 的那份在 external-dns ns，这里必须由
+#   cf-analytics-external-secret.yaml 在 monitoring ns 再取一份，指向同一个 Vault 路径。
+#
+# 指标 / 抓取 / 面板 / 告警：
+#   metrics  :9901/metrics（cf_analytics_daily_{uniques,requests,client_ips} …）
+#   scrape   k8s/helm/values/kube-prometheus-stack.yaml 的 additionalScrapeConfigs
+#   面板     dashboards/cf-analytics-dashboard.yaml
+#   告警     alerts/cf-analytics-alerts.yaml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cf-analytics-exporter
+  namespace: monitoring
+  labels: { app: cf-analytics-exporter }
+spec:
+  replicas: 1
+  # 单副本 + Recreate：两个副本各自打一遍 CF API 纯属浪费配额，且滚动更新期间
+  # 两份 target 会短暂上报同一 date 的两个值。数据本身在 Cloudflare，重启不丢。
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: cf-analytics-exporter }
+  template:
+    metadata:
+      labels: { app: cf-analytics-exporter }
+      annotations:
+        # 由 `just gen-embedded-scripts` 写入 exporter.py 的 sha256 前 16 位。
+        # ConfigMap 变了不会重启 pod（进程还跑着启动时读进内存的旧脚本），
+        # 把 hash 放进 pod 模板才让 ArgoCD 看见变更并滚动重启。CI 的 E1 校验它。
+        checksum/exporter-py: "230620947bfe4dd8"
+    spec:
+      # 非核心：节点内存吃紧时优先被挤掉（面板缺一格 ≪ 业务被 OOM）。
+      priorityClassName: bulk
+      # 无状态、无 PVC、无 hostPath → 任何节点可跑；落到 106 worker 分担 master。
+      nodeSelector:
+        kubernetes.io/hostname: k8s-worker-106
+      containers:
+        - name: exporter
+          # 通用镜像 + ConfigMap 挂脚本（脚本零第三方依赖，只用标准库）。
+          # 不 pin digest：与 open-notebook-provision.yaml 的同款用法保持一致，
+          # 且 Kyverno 的 disallow-latest-tag / restrict-image-registries 都已满足。
+          image: docker.io/library/python:3.12-alpine
+          command: ["python", "-u", "/app/exporter.py"]
+          ports:
+            - { name: metrics, containerPort: 9901 }
+          env:
+            - name: CF_API_TOKEN
+              valueFrom:
+                secretKeyRef: { name: cf-analytics-cloudflare, key: api-token }
+            - name: CF_ZONE_ID
+              value: "9469bfb589d48156a8a5690e7e3d9d80"
+            - name: REFRESH_SECONDS
+              value: "21600"   # 6h。数据本身一天才变一次，再密只是烧 CF 配额。
+          volumeMounts:
+            - { name: script, mountPath: /app, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+          resources:
+            requests: { cpu: "10m", memory: "32Mi" }
+            limits: { cpu: "100m", memory: "128Mi" }
+          # ☠️ 两个探针都只探「进程还在监听吗」，**刻意不探数据新鲜度**。
+          # 拿 CF 抓取结果当 readiness 会把 pod 踢出 Endpoints → Prometheus 连
+          # cf_analytics_scrape_success=0 都抓不到，抓取故障退化成"没数据"，
+          # 告警规则自己把自己关掉。数据健康度全部走指标 + alerts/cf-analytics-alerts.yaml。
+          readinessProbe:
+            httpGet: { path: /healthz, port: metrics }
+            periodSeconds: 30
+          livenessProbe:
+            httpGet: { path: /healthz, port: metrics }
+            initialDelaySeconds: 15
+            periodSeconds: 120
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: script
+          configMap:
+            name: cf-analytics-exporter
+        # readOnlyRootFilesystem 下 python 仍可能要写临时文件；给一块小的可写区。
+        - name: tmp
+          emptyDir: { sizeLimit: 16Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cf-analytics-exporter
+  namespace: monitoring
+  labels: { app: cf-analytics-exporter }
+spec:
+  selector: { app: cf-analytics-exporter }
+  ports:
+    - { name: metrics, port: 9901, targetPort: metrics }
