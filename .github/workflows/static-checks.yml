@@ -1,7 +1,8 @@
-# 静态检查：YAML 语法（含重复键）/ 清单安全规则 H1-H5 / justfile 可解析 / terraform fmt /
-# shellcheck（全等级，含引号类 SC2086）。
+# 静态检查：YAML 语法（含重复键）/ 清单安全规则 H1-H5 / 内嵌脚本一致性 E1 /
+# justfile 可解析 / terraform fmt / shellcheck（全等级，含引号类 SC2086）。
 # 目的：把踩过的坑（死配方、YAML typo、tf 格式、脚本引号、内嵌 Namespace 被 prune、
-# Application 装错集群、PVC 静默不备份、ns 漏 PSA 标签静默吃 privileged）变成 CI 能拦的——
+# Application 装错集群、PVC 静默不备份、ns 漏 PSA 标签静默吃 privileged、
+# ConfigMap 内嵌脚本与源文件漂移）变成 CI 能拦的——
 # 与 docs-check.yml 同一哲学：规则没有强制就会腐化。
 name: static checks
 
@@ -16,6 +17,9 @@ on:
       - '**/*.sh'
       - 'scripts/check-manifests.py'
       - 'scripts/check-version-pairs.py'
+      - 'scripts/check-embedded-scripts.py'
+      # 内嵌脚本的源文件：改了 .py 但忘了重新生成 ConfigMap，正是 E1 要拦的情况
+      - 'k8s/helm/manifests/**/*.py'
       - '.github/workflows/static-checks.yml'
   push:
     branches: [main]
@@ -27,6 +31,9 @@ on:
       - '**/*.sh'
       - 'scripts/check-manifests.py'
       - 'scripts/check-version-pairs.py'
+      - 'scripts/check-embedded-scripts.py'
+      # 内嵌脚本的源文件：改了 .py 但忘了重新生成 ConfigMap，正是 E1 要拦的情况
+      - 'k8s/helm/manifests/**/*.py'
       - '.github/workflows/static-checks.yml'
 
 permissions:
@@ -91,6 +98,12 @@ jobs:
         # Namespace 显式声明 PSA 等级（zitadel ns 曾静默吃默认 privileged 一个多月）。
         # 规则全文 docs/reference/manifest-safety-checks.md —— 改检查器要同步改文档。
         run: uv run --with pyyaml python scripts/check-manifests.py
+
+      - name: 内嵌脚本一致性 E1
+        # ConfigMap 里内嵌的脚本 vs 同目录的源 `.py`，以及 pod 模板上的 checksum 注解。
+        # 两者任一漂移都是同一种静默：git 干净、ArgoCD Synced、pod Running，跑的是旧代码。
+        # 修复：cd k8s/helm && just gen-embedded-scripts
+        run: uv run python scripts/check-embedded-scripts.py
 
       - name: justfile 冒烟（just --list）
         run: |

@@ -89,3 +89,7 @@ proxmox/ansible/.vault_pass
 # 此前只靠 ~/.config/git/ignore 这条全局规则挡着——换台机器/新克隆就没保护了，故在 repo 内固化。
 .claude/settings.local.json
 .qwen/settings.local.json
+
+# Python bytecode（clean checkout 里不该有；k8s 清单目录下的 .py 是被内嵌进 ConfigMap 的源）
+__pycache__/
+*.py[cod]
