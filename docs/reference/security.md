@@ -52,7 +52,7 @@
   **现存公网入站仅 3 条**：`22/tcp`（tailnet 全挂时的唯一进入手段，密钥认证）、
   `41641/udp`（Tailscale NAT 穿透，缺了会全程走 DERP 中继）、`ICMP 3/4`（PMTU）。
   规则与逐条实测依据写在 `cloud/oracle/terraform/main.tf` 的注释里。
-- **WAF**（zone 级，覆盖两条 Tunnel 所有子域；`cloudflare/terraform/waf.tf`，`just apply` 部署）：5 条自定义规则用满免费额度（拦 WordPress/PHP 扫描、敏感文件 `.env/.git`、漏扫 UA、非标 HTTP 方法、高威胁分 Managed Challenge）+ **1 条**限流规则（免费额度就 1 条，共用一个计数器）：认证端点（`/login`,`/oauth2`,`/api/login`,`/signin`,`/v1/auth`）**外加** `draw.meirong.dev` 的 `/socket.io/`（Excalidraw 2026-08-04 去掉 SSO 后，那是个公开的协作中继），30 req/10s/IP+colo → 封 10s。Pro 计划才有 Managed Ruleset (SQLi/XSS/RCE)/OWASP CRS/泄漏凭据检测（见 `waf.tf` 注释段）。
+- **WAF**（zone 级，覆盖两条 Tunnel 所有子域；`cloudflare/terraform/waf.tf`，`just apply` 部署）：5 条自定义规则用满免费额度（拦 WordPress/PHP 扫描、敏感文件、漏扫 UA、非标 HTTP 方法、高威胁分 Managed Challenge）—— **额度已满，新的敏感路径只能并进「敏感文件」那条的表达式**（`.env/.git/.htaccess` 之外，2026-08-15 起还含 `.tfstate`/`.aws/credentials`/`serviceaccount.json`/`id_rsa`/`.pem`/`web.config`/`/etc/passwd` 等，新 term 一律套 `lower()`，因为 `contains` 区分大小写；哪些路径**刻意不拦**见 `waf.tf` 行内注释）+ **1 条**限流规则（免费额度就 1 条，共用一个计数器）：认证端点（`/login`,`/oauth2`,`/api/login`,`/signin`,`/v1/auth`）**外加** `draw.meirong.dev` 的 `/socket.io/`（Excalidraw 2026-08-04 去掉 SSO 后，那是个公开的协作中继），30 req/10s/IP+colo → 封 10s。Pro 计划才有 Managed Ruleset (SQLi/XSS/RCE)/OWASP CRS/泄漏凭据检测（见 `waf.tf` 注释段）。
 - **Zone settings**：SSL Full、TLS 1.2+、Always HTTPS、Security Level Medium、Browser Integrity Check、Email Obfuscation、Hotlink Protection、Opportunistic Encryption。
 - **API Token 权限**：Zone DNS Edit + Zone WAF Edit + Zone Settings Edit + Cloudflare Tunnel Edit。
 

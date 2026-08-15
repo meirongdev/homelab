@@ -89,9 +89,24 @@ resource "cloudflare_ruleset" "waf_custom_rules" {
 
     # Rule 2: Block access to sensitive files and directories
     # Prevents leaking config files, version control data, and server info
+    #
+    # ⚠️ 新的敏感路径**只能往这条规则里塞**，不能新开一条：免费版自定义规则上限就是 5 条，
+    # 上面这 5 条已经用满。想单独成条得先砍掉一条现有的。
+    #
+    # 2026-08-14 12:00 UTC 一个法国托管 IP（AS211590）在 1 小时内对 apex 打了 991 次
+    # 配置/密钥扫描，全部 404（没有任何敏感内容真的存在）。下面这批 term 就是从那次
+    # 实际请求里挑的高确定性路径 —— 目的是**减少噪音**、让 404 曲线只反映真实错误，
+    # 不是因为挡住了什么真实泄漏。原始分析见 docs/reference/public-traffic-analysis.md。
+    #
+    # ⚠️ 新 term 一律套 `lower()`：那次扫描里就有 `/serviceAccount.json` 这种混合大小写，
+    # 而 Rules 语言的 `contains` **区分大小写**（上面几条旧 term 因此只挡得住小写形式）。
+    # ⚠️ 刻意**没加**的几类，加了会误伤自己的服务：
+    #   `/version` `/apis/` `/swagger`（ArgoCD UI 自己就调 `/api/version` 和 swagger 文档）、
+    #   `/actuator`（将来上 Spring 应用会踩）、`.zip`/`.sql`（book.meirong.dev 下载书）、
+    #   裸 `..`（Calibre 书名里出现连续点并非不可能，收益也已被 `/etc/passwd` 覆盖）。
     {
       action      = "block"
-      expression  = "(http.request.uri.path contains \"/.env\") or (http.request.uri.path contains \"/.git\") or (http.request.uri.path contains \"/.svn\") or (http.request.uri.path contains \"/.htaccess\") or (http.request.uri.path contains \"/.htpasswd\") or (http.request.uri.path contains \"/.DS_Store\") or (http.request.uri.path eq \"/server-status\") or (http.request.uri.path eq \"/server-info\") or (http.request.uri.path contains \"/.well-known/security.txt\" and not http.host eq \"meirong.dev\")"
+      expression  = "(http.request.uri.path contains \"/.env\") or (http.request.uri.path contains \"/.git\") or (http.request.uri.path contains \"/.svn\") or (http.request.uri.path contains \"/.htaccess\") or (http.request.uri.path contains \"/.htpasswd\") or (http.request.uri.path contains \"/.DS_Store\") or (http.request.uri.path eq \"/server-status\") or (http.request.uri.path eq \"/server-info\") or (http.request.uri.path contains \"/.well-known/security.txt\" and not http.host eq \"meirong.dev\") or (lower(http.request.uri.path) contains \".tfstate\") or (lower(http.request.uri.path) contains \".aws/credentials\") or (lower(http.request.uri.path) contains \"credentials.json\") or (lower(http.request.uri.path) contains \"serviceaccount.json\") or (lower(http.request.uri.path) contains \"/.ssh/\") or (lower(http.request.uri.path) contains \"id_rsa\") or (lower(http.request.uri.path) contains \".pem\") or (lower(http.request.uri.path) contains \"/.dockerignore\") or (lower(http.request.uri.path) contains \"/docker-compose.y\") or (lower(http.request.uri.path) contains \"/web.config\") or (lower(http.request.uri.path) contains \"/s3.properties\") or (lower(http.request.uri.path) contains \"/etc/passwd\")"
       description = "Block sensitive file and directory access"
       enabled     = true
     },
