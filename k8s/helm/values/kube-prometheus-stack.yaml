@@ -433,6 +433,24 @@ prometheus:
       # 包含: node-exporter, kube-state-metrics, cloudflared, traefik
       # See: cloud/oracle/manifests/monitoring/otel-collector.yaml
 
+      # cf-analytics-exporter — Cloudflare 边缘视角的公网流量：**按域名的独立访问 IP 数**
+      # 与请求数，外加全站每日独立访客。补的是 cloudflared(无 hostname 标签) 和
+      # cilium-envoy(只有 ns_svc，且已在 Cloudflare 之后) 都看不到的那一块。
+      # 数据源：集群内 cf-analytics-exporter.monitoring Deployment（:9901/metrics），
+      # 内部每 6h 调 Cloudflare GraphQL。
+      # ⚠️ additionalScrapeConfigs verbatim 注入，scrapeClasses 不 relabel → 显式打 cluster
+      #    （告警 CFAnalyticsMetricsAbsent 就是按 cluster="homelab" 断言的）。
+      # ⚠️ 指标值一天只变一次（口径是完整 UTC 日），60s 抓只是为了让 up/absent 类
+      #    告警有正常的分辨率，不代表数据这么新。
+      # 见: k8s/helm/manifests/monitoring/cf-analytics-exporter/
+      - job_name: 'cf-analytics-exporter'
+        scrape_interval: 60s
+        static_configs:
+          - targets:
+              - cf-analytics-exporter.monitoring.svc:9901
+            labels:
+              cluster: homelab
+
     # Enable OTLP receiver so OTel Collectors can push metrics directly
     enableFeatures:
       - otlp-write-receiver
