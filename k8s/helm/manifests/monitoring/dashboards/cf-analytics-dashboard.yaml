@@ -1,26 +1,21 @@
-# Grafana Dashboard: Cloudflare 公网流量（按域名的访问 IP 数 + 请求量 + 全站独立访客）
+# Grafana Dashboard: Cloudflare 公网流量（按域名的访问 IP + 请求来源构成）
 #
 # 数据源: Prometheus ← cf-analytics-exporter（Cloudflare GraphQL Analytics API）
 #   k8s/helm/manifests/monitoring/cf-analytics-exporter/
 #
-# ⚠️ 三个数字容易混，面板里也各自标了 description：
-#   cf_analytics_daily_uniques{date}          Cloudflare 自己算的全站独立访客（edge 去重）
-#   cf_analytics_daily_client_ips{host,date}  我们按 clientIP 去重数出来的**独立访问 IP 数**
-#   cf_analytics_daily_requests{host,date}    请求数
-#   前两者数值接近但不相等（2026-08-14: 2376 vs 2416）——来自两个不同数据集，
-#   adaptive 那个有自适应采样。别拿它们互相"对账"。
+# 📖 **读数前先看 docs/reference/public-traffic-analysis.md** —— 分类法定义、
+#    可信度分级、已知失真、常用 PromQL 配方都在那里，这里只放面板。
 #
-# ⚠️ 两个窗口不一样长，这是 Cloudflare 免费版的保留期决定的，不是配置失误：
-#   全站 uniques 14 天（httpRequests1dGroups，实测可读 30 天）
-#   按域名   7–8 天（httpRequestsAdaptiveGroups 保留期 1w1d）
-#   所以 $date 变量只从**按域名**的指标取值，避免选到一个没有域名数据的日子。
+# ☠️ 三个 IP 数字含义不同，别混：
+#   cf_analytics_daily_client_ips          全部去重（含爬虫、自监控、CF 预取）
+#   cf_analytics_daily_client_ips_human    只数「发过疑似真人请求」的 IP  ← 通常你要的是这个
+#   cf_analytics_daily_uniques             Cloudflare 自己算的 uniq（另一个数据集，别对账）
+#   各 class 的 IP 数**不可相加**：同一 IP 可能既发浏览器请求又发 curl 请求。
 #
-# ⚠️ date 是**标签不是时间戳**：exporter 每 6h 把同一批「完整 UTC 日」重报一遍。
-#   所以趋势图用 barchart（instant 查询 + date 作 X 轴），不要用 Prometheus 时间轴——
-#   按时间轴画出来是一堆平行的水平直线，看着像 bug。
+# ⚠️ 两个窗口不一样长（Cloudflare 免费版保留期）：全站 uniques 14 天，按域名 7–8 天。
+# ⚠️ date 是**标签不是时间戳** → 趋势图用 barchart + instant 查询，不要用时间轴。
 #
 # Auto-loaded via kube-prometheus-stack grafana-sc-dashboard sidecar
-# （grafana_dashboard:"1" + grafana_folder annotation，与其它自建面板同款）
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -35,7 +30,7 @@ data:
   cf-analytics-overview.json: |-
     {
       "annotations": { "list": [] },
-      "description": "Cloudflare 边缘视角的公网流量：每个域名有多少独立访问 IP、多少请求，以及全站每日独立访客。数据经 cf-analytics-exporter 从 Cloudflare Analytics API 桥接。按域名数据仅保留 7-8 天（免费版保留期）。",
+      "description": "Cloudflare 边缘视角的公网访问分析：每个域名有多少真实访客 IP、请求来自什么来源（真人/爬虫/自建监控）。⚠️ 自建监控约占全站请求 45%，读数前请看 docs/reference/public-traffic-analysis.md。按域名数据仅保留 7-8 天（免费版）。",
       "editable": true,
       "graphTooltip": 1,
       "links": [
@@ -56,16 +51,6 @@ data:
           "title": "入口流量（Cloudflare 之后 · 按服务）",
           "type": "link",
           "url": "/d/ingress-traffic-overview/"
-        },
-        {
-          "asDropdown": false,
-          "icon": "doc",
-          "keepTime": true,
-          "tags": [],
-          "targetBlank": true,
-          "title": "Cloudflare Tunnel 观测",
-          "type": "link",
-          "url": "/d/cloudflare-tunnel/cloudflare-tunnel-observability"
         }
       ],
       "templating": {
@@ -80,7 +65,7 @@ data:
           {
             "name": "date",
             "label": "日期 (UTC)",
-            "description": "只列出有按域名数据的日子（Cloudflare 免费版对该数据集只保留 7-8 天）。默认最新的完整一天。",
+            "description": "只列出有按域名数据的日子（免费版对该数据集只保留 7-8 天）。默认最新的完整一天。",
             "type": "query",
             "datasource": { "type": "prometheus", "uid": "${datasource}" },
             "query": {
@@ -105,79 +90,63 @@ data:
         },
         {
           "type": "stat",
-          "title": "独立访问 IP（全站）",
-          "description": "选定日期内访问过本 zone 的不同客户端 IP 数，跨域名去重。由 exporter 按 clientIP 维度拉取后本地去重得到 —— 原始 IP 不进指标。",
+          "title": "疑似真人访客 IP",
+          "description": "至少发过一次 browser/tool/unknown 请求的独立 IP —— 已剔除自建监控、已验证爬虫、自称爬虫、以及 Cloudflare 自己的 Early Hints 预取。⚠️ 尽力而为：伪装成浏览器的爬虫仍会算进来。",
           "id": 101,
           "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
-              "expr": "max(cf_analytics_daily_client_ips{host=\"__total__\", date=\"$date\"})",
-              "legendFormat": "IP",
-              "refId": "A",
-              "editorMode": "code",
-              "instant": true,
-              "range": false
+              "expr": "max(cf_analytics_daily_client_ips_human{host=\"__total__\", date=\"$date\"})",
+              "refId": "A", "editorMode": "code", "instant": true, "range": false
             }
           ],
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "fixed", "fixedColor": "blue" },
-              "decimals": 0,
-              "unit": "none",
-              "mappings": [],
-              "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": null } ] }
+              "color": { "mode": "fixed", "fixedColor": "green" },
+              "decimals": 0, "unit": "none", "mappings": [],
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
             },
             "overrides": []
           },
           "options": {
-            "colorMode": "background",
-            "graphMode": "none",
-            "justifyMode": "center",
+            "colorMode": "background", "graphMode": "none", "justifyMode": "center",
             "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
             "textMode": "auto"
           }
         },
         {
           "type": "stat",
-          "title": "独立访客（Cloudflare uniq）",
-          "description": "Cloudflare 自己算的全站独立访客（edge 去重，口径不公开）。与左边的『独立访问 IP』来自两个不同数据集，数值接近但不会相等 —— 不要互相对账。",
+          "title": "独立 IP 总数",
+          "description": "不做任何剔除的去重 IP 数（含爬虫、自建监控、CF 预取）。与左边的差额就是被识别出来的非真人来源。",
           "id": 102,
           "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
-              "expr": "max(cf_analytics_daily_uniques{date=\"$date\"})",
-              "legendFormat": "访客",
-              "refId": "A",
-              "editorMode": "code",
-              "instant": true,
-              "range": false
+              "expr": "max(cf_analytics_daily_client_ips{host=\"__total__\", date=\"$date\"})",
+              "refId": "A", "editorMode": "code", "instant": true, "range": false
             }
           ],
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "fixed", "fixedColor": "green" },
-              "decimals": 0,
-              "unit": "none",
-              "mappings": [],
-              "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
+              "color": { "mode": "fixed", "fixedColor": "blue" },
+              "decimals": 0, "unit": "none", "mappings": [],
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": null } ] }
             },
             "overrides": []
           },
           "options": {
-            "colorMode": "background",
-            "graphMode": "none",
-            "justifyMode": "center",
+            "colorMode": "background", "graphMode": "none", "justifyMode": "center",
             "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
             "textMode": "auto"
           }
         },
         {
           "type": "stat",
-          "title": "总请求数（全站）",
+          "title": "总请求数",
           "id": 103,
           "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
@@ -185,181 +154,246 @@ data:
             {
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
               "expr": "max(cf_analytics_daily_requests{host=\"__total__\", date=\"$date\"})",
-              "legendFormat": "请求",
-              "refId": "A",
-              "editorMode": "code",
-              "instant": true,
-              "range": false
+              "refId": "A", "editorMode": "code", "instant": true, "range": false
             }
           ],
           "fieldConfig": {
             "defaults": {
               "color": { "mode": "fixed", "fixedColor": "purple" },
-              "decimals": 0,
-              "unit": "none",
-              "mappings": [],
+              "decimals": 0, "unit": "none", "mappings": [],
               "thresholds": { "mode": "absolute", "steps": [ { "color": "purple", "value": null } ] }
             },
             "overrides": []
           },
           "options": {
-            "colorMode": "background",
-            "graphMode": "none",
-            "justifyMode": "center",
+            "colorMode": "background", "graphMode": "none", "justifyMode": "center",
             "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
             "textMode": "auto"
           }
         },
         {
           "type": "stat",
-          "title": "有流量的域名数",
+          "title": "自建监控占请求比",
+          "description": "Uptime Kuma / Alertmanager 等自己的机器发的请求占比。它们走公网绕一圈回来，Cloudflare 无法区分，所以会被计入「访问量」。2026-08-14 实测 45%。",
           "id": 104,
           "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
-              "expr": "count(cf_analytics_daily_requests{host!=\"__total__\", date=\"$date\"} > 0)",
-              "legendFormat": "域名",
-              "refId": "A",
-              "editorMode": "code",
-              "instant": true,
-              "range": false
+              "expr": "max(cf_analytics_daily_requests_by_class{host=\"__total__\", class=\"self_monitor\", date=\"$date\"}) / max(cf_analytics_daily_requests{host=\"__total__\", date=\"$date\"})",
+              "refId": "A", "editorMode": "code", "instant": true, "range": false
             }
           ],
           "fieldConfig": {
             "defaults": {
-              "color": { "mode": "fixed", "fixedColor": "text" },
-              "decimals": 0,
-              "unit": "none",
-              "mappings": [],
-              "thresholds": { "mode": "absolute", "steps": [ { "color": "text", "value": null } ] }
+              "color": { "mode": "thresholds" },
+              "decimals": 0, "unit": "percentunit", "mappings": [],
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 0.3 }, { "color": "orange", "value": 0.6 } ] }
             },
             "overrides": []
           },
           "options": {
-            "colorMode": "background",
-            "graphMode": "none",
-            "justifyMode": "center",
+            "colorMode": "background", "graphMode": "none", "justifyMode": "center",
             "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
             "textMode": "auto"
           }
         },
         {
           "type": "row",
-          "title": "🔎 按域名（选定日期）",
+          "title": "🧭 请求来源构成（选定日期）",
           "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
           "id": 200,
           "collapsed": false
         },
         {
-          "type": "bargauge",
-          "title": "各域名的独立访问 IP 数",
-          "description": "选定日期内，每个域名被多少个不同的客户端 IP 访问过。⚠️ 各域名之和 > 全站数：同一个 IP 经常访问多个子域，全站那格是跨域名再去重的。",
+          "type": "piechart",
+          "title": "全站请求按来源",
+          "description": "verified_bot = Cloudflare 反查 IP 验证过的爬虫（权威，伪造不了）· self_monitor = 我自己的机器 · cf_infra = Cloudflare 边缘的 Early Hints 预取 · unverified_bot = UA 自称爬虫但未验证（启发式）· tool = curl/脚本 · browser = UA 像浏览器（⚠️ 不等于真人）· unknown = 其余。定义见 docs/reference/public-traffic-analysis.md。",
           "id": 201,
-          "gridPos": { "h": 9, "w": 12, "x": 0, "y": 6 },
+          "gridPos": { "h": 9, "w": 8, "x": 0, "y": 6 },
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
-              "expr": "topk(15, max by (host) (cf_analytics_daily_client_ips{host!=\"__total__\", date=\"$date\"}))",
+              "expr": "sum by (class) (cf_analytics_daily_requests_by_class{host=\"__total__\", date=\"$date\"})",
+              "legendFormat": "{{class}}",
+              "refId": "A", "editorMode": "code", "instant": true, "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "decimals": 0, "unit": "none", "mappings": [],
+              "custom": { "hideFrom": { "legend": false, "tooltip": false, "viz": false } }
+            },
+            "overrides": []
+          },
+          "options": {
+            "pieType": "donut",
+            "displayLabels": ["percent"],
+            "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "values": ["value"] },
+            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+            "tooltip": { "mode": "single" }
+          }
+        },
+        {
+          "type": "bargauge",
+          "title": "已验证爬虫按分类（全站）",
+          "description": "Cloudflare 官方维护的验证爬虫名单，按 IP 归属反查确认，UA 伪造无效。空说明当天没有验证爬虫来访。",
+          "id": 202,
+          "gridPos": { "h": 9, "w": 8, "x": 8, "y": 6 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "sort_desc(sum by (category) (cf_analytics_daily_bot_requests{date=\"$date\"}))",
+              "legendFormat": "{{category}}",
+              "refId": "A", "editorMode": "code", "instant": true, "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "continuous-YlRd" },
+              "decimals": 0, "unit": "none", "mappings": [],
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "text", "value": null } ] }
+            },
+            "overrides": []
+          },
+          "options": {
+            "displayMode": "gradient", "orientation": "horizontal",
+            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+            "showUnfilled": true, "minVizWidth": 8, "valueMode": "color"
+          }
+        },
+        {
+          "type": "table",
+          "title": "域名 × 来源（请求数）",
+          "description": "透视表：每个域名的请求分别来自哪些来源。请求数可以横向相加（IP 数不行）。",
+          "id": 203,
+          "gridPos": { "h": 9, "w": 8, "x": 16, "y": 6 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "sum by (host, class) (cf_analytics_daily_requests_by_class{host!=\"__total__\", date=\"$date\"})",
+              "format": "table", "instant": true, "range": false,
+              "refId": "A", "editorMode": "code"
+            }
+          ],
+          "transformations": [
+            { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true, "date": true } } },
+            { "id": "groupingToMatrix", "options": { "columnField": "class", "rowField": "host", "valueField": "Value" } }
+          ],
+          "options": { "showHeader": true, "cellHeight": "sm" },
+          "fieldConfig": {
+            "defaults": {
+              "custom": { "align": "auto", "filterable": true },
+              "decimals": 0,
+              "color": { "mode": "continuous-BlYlRd" },
+              "custom.cellOptions": { "type": "color-text" },
+              "mappings": []
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "row",
+          "title": "🔎 按域名（选定日期）",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 },
+          "id": 300,
+          "collapsed": false
+        },
+        {
+          "type": "bargauge",
+          "title": "各域名的疑似真人访客 IP 数",
+          "description": "已剔除自建监控与爬虫。⚠️ 各域名之和 > 全站数：同一个 IP 常访问多个子域，全站那格是跨域名再去重的。",
+          "id": 301,
+          "gridPos": { "h": 9, "w": 12, "x": 0, "y": 16 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "topk(15, max by (host) (cf_analytics_daily_client_ips_human{host!=\"__total__\", date=\"$date\"}))",
               "legendFormat": "{{host}}",
-              "refId": "A",
-              "editorMode": "code",
-              "instant": true,
-              "range": false
+              "refId": "A", "editorMode": "code", "instant": true, "range": false
             }
           ],
           "fieldConfig": {
             "defaults": {
               "color": { "mode": "continuous-BlPu" },
-              "decimals": 0,
-              "mappings": [],
-              "thresholds": { "mode": "absolute", "steps": [ { "color": "text", "value": null } ] },
-              "unit": "none"
+              "decimals": 0, "unit": "none", "mappings": [],
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "text", "value": null } ] }
             },
             "overrides": []
           },
           "options": {
-            "displayMode": "gradient",
-            "orientation": "horizontal",
+            "displayMode": "gradient", "orientation": "horizontal",
             "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-            "showUnfilled": true,
-            "minVizWidth": 8,
-            "valueMode": "color"
+            "showUnfilled": true, "minVizWidth": 8, "valueMode": "color"
           }
         },
         {
           "type": "bargauge",
           "title": "各域名的请求量",
-          "description": "选定日期内每个域名的请求数。与左图对照能看出「少数 IP 打很多请求」的域名 —— 通常是自建监控探测（Uptime Kuma / ArgoCD / Prometheus 抓外部端点），不是真实访客。",
-          "id": 202,
-          "gridPos": { "h": 9, "w": 12, "x": 12, "y": 6 },
+          "description": "含全部来源。与左图落差大的域名通常是自建监控在刷（见下表「自监控占比」列）。",
+          "id": 302,
+          "gridPos": { "h": 9, "w": 12, "x": 12, "y": 16 },
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
               "expr": "topk(15, max by (host) (cf_analytics_daily_requests{host!=\"__total__\", date=\"$date\"}))",
               "legendFormat": "{{host}}",
-              "refId": "A",
-              "editorMode": "code",
-              "instant": true,
-              "range": false
+              "refId": "A", "editorMode": "code", "instant": true, "range": false
             }
           ],
           "fieldConfig": {
             "defaults": {
               "color": { "mode": "continuous-GrYlRd" },
-              "decimals": 0,
-              "mappings": [],
-              "thresholds": { "mode": "absolute", "steps": [ { "color": "text", "value": null } ] },
-              "unit": "none"
+              "decimals": 0, "unit": "none", "mappings": [],
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "text", "value": null } ] }
             },
             "overrides": []
           },
           "options": {
-            "displayMode": "gradient",
-            "orientation": "horizontal",
+            "displayMode": "gradient", "orientation": "horizontal",
             "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-            "showUnfilled": true,
-            "minVizWidth": 8,
-            "valueMode": "color"
+            "showUnfilled": true, "minVizWidth": 8, "valueMode": "color"
           }
         },
         {
           "type": "table",
-          "title": "域名明细（选定日期）",
-          "description": "每域名的请求数与独立访问 IP 数，外加「人均请求数」= 请求数 / IP 数。这个比值越高越像机器人或自建探测。",
-          "id": 203,
-          "gridPos": { "h": 11, "w": 24, "x": 0, "y": 15 },
+          "title": "域名明细",
+          "description": "「真人 IP = 0」而请求上千的域名，说明它只被你自己的监控访问 —— 例如 argocd/vault/auth。这与 decisions/slo-availability-targets.md 里「真实流量≈0」的结论一致。",
+          "id": 303,
+          "gridPos": { "h": 11, "w": 24, "x": 0, "y": 25 },
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "max by (host) (cf_analytics_daily_client_ips_human{host!=\"__total__\", date=\"$date\"})",
+              "format": "table", "instant": true, "range": false, "editorMode": "code", "refId": "A"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
               "expr": "max by (host) (cf_analytics_daily_client_ips{host!=\"__total__\", date=\"$date\"})",
-              "format": "table",
-              "instant": true,
-              "range": false,
-              "editorMode": "code",
-              "refId": "A"
+              "format": "table", "instant": true, "range": false, "editorMode": "code", "refId": "B"
             },
             {
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
               "expr": "max by (host) (cf_analytics_daily_requests{host!=\"__total__\", date=\"$date\"})",
-              "format": "table",
-              "instant": true,
-              "range": false,
-              "editorMode": "code",
-              "refId": "B"
+              "format": "table", "instant": true, "range": false, "editorMode": "code", "refId": "C"
             },
             {
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
-              "expr": "max by (host) (cf_analytics_daily_requests{host!=\"__total__\", date=\"$date\"}) / max by (host) (cf_analytics_daily_client_ips{host!=\"__total__\", date=\"$date\"})",
-              "format": "table",
-              "instant": true,
-              "range": false,
-              "editorMode": "code",
-              "refId": "C"
+              "expr": "sum by (host) (cf_analytics_daily_requests_by_class{host!=\"__total__\", class=\"self_monitor\", date=\"$date\"}) / max by (host) (cf_analytics_daily_requests{host!=\"__total__\", date=\"$date\"})",
+              "format": "table", "instant": true, "range": false, "editorMode": "code", "refId": "D"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "sum by (host) (cf_analytics_daily_requests_by_class{host!=\"__total__\", class=~\"verified_bot|unverified_bot\", date=\"$date\"}) / max by (host) (cf_analytics_daily_requests{host!=\"__total__\", date=\"$date\"})",
+              "format": "table", "instant": true, "range": false, "editorMode": "code", "refId": "E"
             }
           ],
           "transformations": [
@@ -367,22 +401,22 @@ data:
             {
               "id": "organize",
               "options": {
-                "excludeByName": { "Time": true, "Time 1": true, "Time 2": true, "Time 3": true, "__name__": true },
+                "excludeByName": { "Time": true, "Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true, "Time 5": true, "__name__": true },
                 "renameByName": {
                   "host": "域名",
-                  "Value #A": "独立 IP",
-                  "Value #B": "请求数",
-                  "Value #C": "人均请求"
+                  "Value #A": "真人 IP",
+                  "Value #B": "IP 总数",
+                  "Value #C": "请求数",
+                  "Value #D": "自监控占比",
+                  "Value #E": "爬虫占比"
                 },
-                "indexByName": { "host": 0, "Value #A": 1, "Value #B": 2, "Value #C": 3 }
+                "indexByName": { "host": 0, "Value #A": 1, "Value #B": 2, "Value #C": 3, "Value #D": 4, "Value #E": 5 }
               }
             }
           ],
           "options": {
-            "showHeader": true,
-            "cellHeight": "sm",
-            "footer": { "show": false, "reducer": ["sum"], "fields": "" },
-            "sortBy": [ { "displayName": "独立 IP", "desc": true } ]
+            "showHeader": true, "cellHeight": "sm",
+            "sortBy": [ { "displayName": "真人 IP", "desc": true } ]
           },
           "fieldConfig": {
             "defaults": {
@@ -394,27 +428,21 @@ data:
             },
             "overrides": [
               {
-                "matcher": { "id": "byName", "options": "独立 IP" },
+                "matcher": { "id": "byName", "options": "真人 IP" },
                 "properties": [
                   { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } },
                   { "id": "color", "value": { "mode": "continuous-BlPu" } }
                 ]
               },
               {
-                "matcher": { "id": "byName", "options": "人均请求" },
+                "matcher": { "id": "byRegexp", "options": ".*占比" },
                 "properties": [
-                  { "id": "decimals", "value": 1 },
-                  { "id": "custom.cellOptions", "value": { "type": "color-text" } },
+                  { "id": "unit", "value": "percentunit" },
+                  { "id": "decimals", "value": 0 },
+                  { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
                   {
                     "id": "thresholds",
-                    "value": {
-                      "mode": "absolute",
-                      "steps": [
-                        { "color": "text", "value": null },
-                        { "color": "yellow", "value": 50 },
-                        { "color": "orange", "value": 200 }
-                      ]
-                    }
+                    "value": { "mode": "absolute", "steps": [ { "color": "text", "value": null }, { "color": "yellow", "value": 0.5 }, { "color": "orange", "value": 0.9 } ] }
                   }
                 ]
               }
@@ -424,78 +452,27 @@ data:
         {
           "type": "row",
           "title": "📈 趋势（忽略上方的日期选择）",
-          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 },
-          "id": 300,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 36 },
+          "id": 400,
           "collapsed": false
         },
         {
           "type": "barchart",
-          "title": "全站每日独立访客（Cloudflare uniq · 14 天）",
-          "description": "date 是标签不是时间戳，所以这里用柱状图按 date 排列，而不是 Prometheus 时间轴。窗口 14 天 —— 这个数据集的保留期比按域名那个长得多。",
-          "id": 301,
-          "gridPos": { "h": 9, "w": 12, "x": 0, "y": 27 },
+          "title": "每日：真人 IP vs IP 总数（7-8 天）",
+          "description": "两根柱子的差额 = 被识别出来的爬虫 + 自建监控 + CF 预取。窗口受免费版保留期限制,只有 7-8 天,空白不是故障。",
+          "id": 401,
+          "gridPos": { "h": 9, "w": 12, "x": 0, "y": 37 },
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
-              "expr": "max by (date) (cf_analytics_daily_uniques)",
-              "format": "table",
-              "instant": true,
-              "range": false,
-              "editorMode": "code",
-              "refId": "A"
-            }
-          ],
-          "transformations": [
-            { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true }, "renameByName": { "Value": "独立访客" } } },
-            { "id": "sortBy", "options": { "fields": {}, "sort": [ { "field": "date" } ] } }
-          ],
-          "options": {
-            "xField": "date",
-            "orientation": "auto",
-            "showValue": "auto",
-            "stacking": "none",
-            "barWidth": 0.8,
-            "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false },
-            "tooltip": { "mode": "single" }
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": { "mode": "fixed", "fixedColor": "green" },
-              "decimals": 0,
-              "unit": "none",
-              "custom": { "lineWidth": 1, "fillOpacity": 80, "axisPlacement": "auto" },
-              "mappings": [],
-              "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
+              "expr": "max by (date) (cf_analytics_daily_client_ips_human{host=\"__total__\"})",
+              "format": "table", "instant": true, "range": false, "editorMode": "code", "refId": "A"
             },
-            "overrides": []
-          }
-        },
-        {
-          "type": "barchart",
-          "title": "全站每日独立访问 IP / 请求数（7-8 天）",
-          "description": "按域名数据集的保留期只有 1w1d，所以这里最多 7-8 根柱子；空白不是故障。请求数与 IP 数量级差得远，用双轴。",
-          "id": 302,
-          "gridPos": { "h": 9, "w": 12, "x": 12, "y": 27 },
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
               "expr": "max by (date) (cf_analytics_daily_client_ips{host=\"__total__\"})",
-              "format": "table",
-              "instant": true,
-              "range": false,
-              "editorMode": "code",
-              "refId": "A"
-            },
-            {
-              "datasource": { "type": "prometheus", "uid": "${datasource}" },
-              "expr": "max by (date) (cf_analytics_daily_requests{host=\"__total__\"})",
-              "format": "table",
-              "instant": true,
-              "range": false,
-              "editorMode": "code",
-              "refId": "B"
+              "format": "table", "instant": true, "range": false, "editorMode": "code", "refId": "B"
             }
           ],
           "transformations": [
@@ -504,61 +481,82 @@ data:
               "id": "organize",
               "options": {
                 "excludeByName": { "Time": true, "Time 1": true, "Time 2": true, "__name__": true },
-                "renameByName": { "Value #A": "独立 IP", "Value #B": "请求数" }
+                "renameByName": { "Value #A": "真人 IP", "Value #B": "IP 总数" }
               }
             },
             { "id": "sortBy", "options": { "fields": {}, "sort": [ { "field": "date" } ] } }
           ],
           "options": {
-            "xField": "date",
-            "orientation": "auto",
-            "showValue": "auto",
-            "stacking": "none",
-            "barWidth": 0.8,
-            "groupWidth": 0.7,
+            "xField": "date", "orientation": "auto", "showValue": "auto", "stacking": "none",
+            "barWidth": 0.8, "groupWidth": 0.7,
             "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
             "tooltip": { "mode": "multi" }
           },
           "fieldConfig": {
             "defaults": {
               "color": { "mode": "palette-classic" },
-              "decimals": 0,
-              "unit": "none",
+              "decimals": 0, "unit": "none",
               "custom": { "lineWidth": 1, "fillOpacity": 80, "axisPlacement": "auto" },
               "mappings": [],
               "thresholds": { "mode": "absolute", "steps": [ { "color": "text", "value": null } ] }
             },
-            "overrides": [
-              {
-                "matcher": { "id": "byName", "options": "请求数" },
-                "properties": [ { "id": "custom.axisPlacement", "value": "right" } ]
-              }
-            ]
+            "overrides": []
+          }
+        },
+        {
+          "type": "barchart",
+          "title": "全站每日独立访客（Cloudflare uniq · 14 天）",
+          "description": "Cloudflare 自己算的 uniq，来自另一个数据集（保留期更长）。⚠️ 与左图的「IP 总数」口径不同，接近但不会相等，别对账。",
+          "id": 402,
+          "gridPos": { "h": 9, "w": 12, "x": 12, "y": 37 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "max by (date) (cf_analytics_daily_uniques)",
+              "format": "table", "instant": true, "range": false, "editorMode": "code", "refId": "A"
+            }
+          ],
+          "transformations": [
+            { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true }, "renameByName": { "Value": "独立访客" } } },
+            { "id": "sortBy", "options": { "fields": {}, "sort": [ { "field": "date" } ] } }
+          ],
+          "options": {
+            "xField": "date", "orientation": "auto", "showValue": "auto", "stacking": "none",
+            "barWidth": 0.8,
+            "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false },
+            "tooltip": { "mode": "single" }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "fixed", "fixedColor": "green" },
+              "decimals": 0, "unit": "none",
+              "custom": { "lineWidth": 1, "fillOpacity": 80, "axisPlacement": "auto" },
+              "mappings": [],
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] }
+            },
+            "overrides": []
           }
         },
         {
           "type": "row",
           "title": "🩺 采集健康",
-          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 36 },
-          "id": 400,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 46 },
+          "id": 500,
           "collapsed": true,
           "panels": [
             {
               "type": "stat",
               "title": "上次抓取",
-              "description": "exporter 每 6h 调一次 Cloudflare API。红了看 alerts/cf-analytics-alerts.yaml 里几条告警的排查指引。",
-              "id": 401,
-              "gridPos": { "h": 4, "w": 8, "x": 0, "y": 37 },
+              "description": "exporter 每 6h 调一次 Cloudflare API。红了看 alerts/cf-analytics-alerts.yaml 里的排查指引。",
+              "id": 501,
+              "gridPos": { "h": 4, "w": 8, "x": 0, "y": 47 },
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
               "targets": [
                 {
                   "datasource": { "type": "prometheus", "uid": "${datasource}" },
                   "expr": "cf_analytics_scrape_success",
-                  "legendFormat": "抓取",
-                  "refId": "A",
-                  "editorMode": "code",
-                  "instant": true,
-                  "range": false
+                  "refId": "A", "editorMode": "code", "instant": true, "range": false
                 }
               ],
               "fieldConfig": {
@@ -572,9 +570,7 @@ data:
                 "overrides": []
               },
               "options": {
-                "colorMode": "background",
-                "graphMode": "none",
-                "justifyMode": "center",
+                "colorMode": "background", "graphMode": "none", "justifyMode": "center",
                 "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
                 "textMode": "auto"
               }
@@ -582,34 +578,25 @@ data:
             {
               "type": "stat",
               "title": "数据年龄",
-              "id": 402,
-              "gridPos": { "h": 4, "w": 8, "x": 8, "y": 37 },
+              "id": 502,
+              "gridPos": { "h": 4, "w": 8, "x": 8, "y": 47 },
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
               "targets": [
                 {
                   "datasource": { "type": "prometheus", "uid": "${datasource}" },
                   "expr": "time() - (cf_analytics_last_success_timestamp_seconds > 0)",
-                  "legendFormat": "年龄",
-                  "refId": "A",
-                  "editorMode": "code",
-                  "instant": true,
-                  "range": false
+                  "refId": "A", "editorMode": "code", "instant": true, "range": false
                 }
               ],
               "fieldConfig": {
                 "defaults": {
-                  "unit": "s",
-                  "decimals": 0,
-                  "color": { "mode": "thresholds" },
-                  "mappings": [],
+                  "unit": "s", "decimals": 0, "color": { "mode": "thresholds" }, "mappings": [],
                   "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 25200 }, { "color": "red", "value": 86400 } ] }
                 },
                 "overrides": []
               },
               "options": {
-                "colorMode": "background",
-                "graphMode": "none",
-                "justifyMode": "center",
+                "colorMode": "background", "graphMode": "none", "justifyMode": "center",
                 "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
                 "textMode": "auto"
               }
@@ -618,34 +605,25 @@ data:
               "type": "stat",
               "title": "按域名可回溯天数",
               "description": "受 Cloudflare 免费版 1w1d 保留期限制，正常是 7 或 8。exporter 故意多试一天，由服务端告诉它边界在哪。",
-              "id": 403,
-              "gridPos": { "h": 4, "w": 8, "x": 16, "y": 37 },
+              "id": 503,
+              "gridPos": { "h": 4, "w": 8, "x": 16, "y": 47 },
               "datasource": { "type": "prometheus", "uid": "${datasource}" },
               "targets": [
                 {
                   "datasource": { "type": "prometheus", "uid": "${datasource}" },
                   "expr": "cf_analytics_host_window_days",
-                  "legendFormat": "天",
-                  "refId": "A",
-                  "editorMode": "code",
-                  "instant": true,
-                  "range": false
+                  "refId": "A", "editorMode": "code", "instant": true, "range": false
                 }
               ],
               "fieldConfig": {
                 "defaults": {
-                  "unit": "none",
-                  "decimals": 0,
-                  "color": { "mode": "thresholds" },
-                  "mappings": [],
+                  "unit": "none", "decimals": 0, "color": { "mode": "thresholds" }, "mappings": [],
                   "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 5 } ] }
                 },
                 "overrides": []
               },
               "options": {
-                "colorMode": "background",
-                "graphMode": "none",
-                "justifyMode": "center",
+                "colorMode": "background", "graphMode": "none", "justifyMode": "center",
                 "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
                 "textMode": "auto"
               }
@@ -660,7 +638,7 @@ data:
       "time": { "from": "now-24h", "to": "now" },
       "timepicker": {},
       "timezone": "utc",
-      "title": "Cloudflare / 公网流量（按域名访问 IP）",
+      "title": "Cloudflare / 公网访问分析（按域名 · 按来源）",
       "uid": "cf-analytics-overview",
       "version": 1
     }

@@ -92,7 +92,7 @@
 
 - **cf-analytics 告警**（`manifests/monitoring/alerts/cf-analytics-alerts.yaml`，2026-08-15 新增，4 条）:
   cf-analytics-exporter 每 6h 调一次 Cloudflare Analytics API，把「按域名的访问 IP 数/请求数」
-  桥成指标（→ [cloudflare-tunnel-observability.md](cloudflare-tunnel-observability.md)）。
+  桥成指标，并按来源分类（真人 / 爬虫 / 自建监控）→ [public-traffic-analysis.md](public-traffic-analysis.md)。
   它的失效**全是静默的**：pod Running、探针绿、面板照常出图，只是数字停在几天前。
   `CFAnalyticsScrapeFailing`（抓取报错）· `CFAnalyticsDataStale`（>24h 没有成功过一轮）·
   `CFAnalyticsMetricsAbsent`（序列整体消失，即会屏蔽掉前两条的那个盲区）·
