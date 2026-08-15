@@ -311,6 +311,12 @@ prometheus:
     @echo "Prometheus is available at http://localhost:9090"
     kubectl --context {{ctx}} port-forward -n {{namespace}} svc/kube-prometheus-stack-prometheus 9090:9090
 
+# 把 ConfigMap 内嵌的脚本从同目录的源文件重新生成，并刷新 pod 模板上的 checksum 注解。
+# 改完 cf-analytics-exporter/exporter.py **必须**跑这个，否则改的是源、跑的是旧副本
+# （且 ConfigMap 变更不会自己重启 pod）。CI 的 E1 会拦住漂移。
+gen-embedded-scripts:
+    python3 ../../scripts/check-embedded-scripts.py --write
+
 # 查看集群资源使用情况
 check-resources:
     @echo "=== Node Resources ==="
