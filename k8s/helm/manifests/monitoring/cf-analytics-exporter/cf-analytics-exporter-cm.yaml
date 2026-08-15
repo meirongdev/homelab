@@ -280,6 +280,15 @@ data:
             if bot:
                 bot_requests[bot] = bot_requests.get(bot, 0) + n
 
+        # ☠️ 给**每个有流量的 host** 都补一个 client_ips_human 条目（可能是 0）。
+        # 不补的话，「昨天完全没有真人访问」的域名（实测 argocd/vault/auth 就是）
+        # 根本不产生序列，而 PromQL 里 `== 0` 匹配的是**存在且为 0** 的序列 ——
+        # 缺失序列匹配不上，"没人访问"就永远查不出来，和"一切正常"长得一模一样。
+        # 同类坑在本仓库反复出现（缺失序列 ≠ 零值），别把这行删了当冗余。
+        # by_class 不做这个补齐：那里「某 class 没出现」本来就该是没有序列。
+        for h in requests:
+            ips_human.setdefault(h, set())
+
         return {
             "requests": requests,
             "requests_by_class": req_by_class,
