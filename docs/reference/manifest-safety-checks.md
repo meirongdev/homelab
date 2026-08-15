@@ -1,12 +1,13 @@
 # 清单安全规则 (Manifest Safety Checks)
 
-> Last updated: 2026-08-14
+> Last updated: 2026-08-15
 > Status: 生效事实
-> Scope: CI 强制的仓库规则 —— source of truth。两个检查器：
-> `scripts/check-manifests.py` 的 **H1-H5**（清单结构）与
-> `scripts/check-version-pairs.py` 的 **V1-V3**（版本配对，2026-08-13 加）。
+> Scope: CI 强制的仓库规则 —— source of truth。三个检查器：
+> `scripts/check-manifests.py` 的 **H1-H5**（清单结构）、
+> `scripts/check-version-pairs.py` 的 **V1-V3**（版本配对，2026-08-13 加）与
+> `scripts/check-embedded-scripts.py` 的 **E1**（内嵌脚本一致性，2026-08-15 加）。
 > 每条规则都对应一次**真实发生过的事故或静默失效**，不是风格偏好。
-> 两者都由 [static-checks.yml](../../.github/workflows/static-checks.yml) 在 PR 与 main 上运行。
+> 三者都由 [static-checks.yml](../../.github/workflows/static-checks.yml) 在 PR 与 main 上运行。
 
 ## 为什么有这份文档
 
@@ -200,6 +201,30 @@ targetRevision: "2.5.27"   # version-pair-ok: 灰度先行 oracle，2026-09 对�
 ☠️ **升 Cilium 时表里查不到对应 minor 会直接报错，这是特意的**：它强迫升级者去读一遍
 上游的 Gateway API 前置条件，而不是假设旧 CRD 还能用——后者正是 08-11 的死法。
 
+### E1 —— ConfigMap 内嵌的脚本必须与同目录的源文件一致，且 pod 模板带它的 checksum
+
+**适用对象**：跑「通用镜像 + ConfigMap 挂脚本」的负载。目前只有
+`k8s/helm/manifests/monitoring/cf-analytics-exporter/`（`exporter.py` ↔ `-cm.yaml`）。
+
+**为什么**：这种布局天生有两份副本 —— 一份 `.py` 供编辑器/linter 当代码看，一份嵌在 YAML
+里供 ArgoCD 部署。两个失效模式**都是静默的**，且长得一模一样（git 干净、ArgoCD Synced、
+pod Running、行为是旧的）：
+
+1. 改了 `.py` 忘了重新生成 ConfigMap → 部署的还是旧代码。
+2. 重新生成了 ConfigMap，但 **ConfigMap 变更不会重启 pod** → 进程还跑着启动时读进内存的
+   旧脚本。这条不是假想：`查不出来的那些` 表里 oracle otel-collector 那行就是同一种死法。
+
+所以 E1 查两件事：`data[<key>]` 逐字节等于源文件，**且** pod 模板注解
+`checksum/<...>` 等于源文件 sha256 的前 16 位。第二条让脚本一变 pod 模板就变，
+ArgoCD 自然滚动重启。
+
+**怎么修**：`cd k8s/helm && just gen-embedded-scripts`（= `check-embedded-scripts.py --write`），
+它同时重写 ConfigMap 与 checksum 注解。**不要手改 ConfigMap 里的 Python**。
+
+**加新目标**：在 `check-embedded-scripts.py` 的 `TARGETS` 里加一项。要求 ConfigMap 的
+`data` 只有那一个 key 且位于文件末尾 —— 生成器按「`key: |` 之后到文件尾」整段替换，
+以保住文件头的注释。
+
 ## 查不出来的那些（仍需人判断）
 
 写下来是为了不让「CI 绿了」被误当成「安全了」。
@@ -207,7 +232,7 @@ targetRevision: "2.5.27"   # version-pair-ok: 灰度先行 oracle，2026-09 对�
 | 失效模式 | 为什么静态查不了 | 真实案例 |
 |---|---|---|
 | 配置值写错嵌套层级 | 语法完全合法，多余的键静默忽略 | Tempo 的 `persistence` 是 chart 顶层键，写在 `tempo.` 之下 → 一直跑在 emptyDir，每次重启丢光 trace，而 values 里宣称保留 7 天 |
-| 改了配置但 Pod 不重启 | 清单本身没错，错在下发机制 | oracle otel-collector 是裸 manifest，ConfigMap 更新不改 DaemonSet spec → Pod 不重启，而 Collector 只在启动时读一次配置。**此前对该配置的任何修改都是静默无效的**。已改用 kustomize `configMapGenerator` |
+| 改了配置但 Pod 不重启 | 清单本身没错，错在下发机制 | oracle otel-collector 是裸 manifest，ConfigMap 更新不改 DaemonSet spec → Pod 不重启，而 Collector 只在启动时读一次配置。**此前对该配置的任何修改都是静默无效的**。已改用 kustomize `configMapGenerator`。⚠️ 仍是**通例**：只有 E1 覆盖的那一处（cf-analytics-exporter）靠 checksum 注解拦住了，其余「ConfigMap 变了但 pod 不重启」照样查不出来 |
 | ReferenceGrant 寄生在别人的文件里 | 语法与作用都正确，问题是**位置** | `allow-gateway-to-calibre` 没限定 Service 名（作用于整个 ns），却住在 `route-calibre-web.yaml` 里 → 删 calibre 路由会连带断掉 `notebook.meirong.dev`。现改为每个 route 文件各带一条自己的 grant（Gateway API 是累加式授权），删任一文件都不影响另一个 |
 | 文档与集群漂移 | 文档格式可以完美而内容全错 | 2026-07-31 那次 NFS 描述格式合规、内容过期，是 `kubectl` 照出来的 |
 | **operator 动态创建的 PVC 逃出 H4** | H4 只扫**清单里声明**的 PVC；CNPG 的卷由 operator 按 `Cluster` 的 `instances` 生成，仓库里没有对应的 PVC 对象 | `apps-pg-1` / `zitadel-pg-1` 两个库的备份归属完全靠 `backup/overlays/oracle/backup-script.yaml` 里的逐库 `pg_dump` 行。**apps-pg 上加一个租户就必须手工加一行**，H4 不会提醒——性质等同于 sqlite 白名单，而那份白名单曾让 `trends-data` 静默漏备两个月。见 [decisions/shared-postgres-platform.md](../decisions/shared-postgres-platform.md) |
@@ -225,10 +250,12 @@ uv run --with pyyaml python scripts/check-manifests.py             # H1-H5
 uv run --with pyyaml python scripts/check-manifests.py --list      # 只看规则与出处
 uv run --with pyyaml python scripts/check-version-pairs.py         # V1-V3
 uv run --with pyyaml python scripts/check-version-pairs.py --list
+python3 scripts/check-embedded-scripts.py                          # E1（无第三方依赖）
+python3 scripts/check-embedded-scripts.py --write                  # E1 修复 = just gen-embedded-scripts
 ```
 
 CI 里由 `.github/workflows/static-checks.yml` 在改动 `*.yaml` / `justfile` /
-检查器自身时自动运行。
+`k8s/helm/manifests/**/*.py` / 检查器自身时自动运行。
 
 ⚠️ **改规则必须同步改这份文档**（两边不一致的话，要么规则是摆设，要么检查器在误伤）。
 V1-V3 的敏感度在上线当天逐条实测过：故意把 oracle 剧本改回 1.2.1、把两集群 cilium 版本
