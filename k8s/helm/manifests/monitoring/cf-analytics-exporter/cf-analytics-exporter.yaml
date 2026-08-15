@@ -47,7 +47,7 @@ spec:
         # 由 `just gen-embedded-scripts` 写入 exporter.py 的 sha256 前 16 位。
         # ConfigMap 变了不会重启 pod（进程还跑着启动时读进内存的旧脚本），
         # 把 hash 放进 pod 模板才让 ArgoCD 看见变更并滚动重启。CI 的 E1 校验它。
-        checksum/exporter-py: "2546402ad0dcebb3"
+        checksum/exporter-py: "1064ca585e18cacc"
     spec:
       # 非核心：节点内存吃紧时优先被挤掉（面板缺一格 ≪ 业务被 OOM）。
       priorityClassName: bulk
