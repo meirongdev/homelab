@@ -74,7 +74,8 @@ docs/                          # 见下方「Documentation Rules」
 `argocd-app-patterns.md` · 入口/DNS `networking-ingress.md` · 跨集群 `tailscale-network.md` ·
 存储/备份 `storage.md` · 身份/OIDC `identity.md` · 安全逐层 `security.md` · 可观测
 `observability-multicluster.md` + `observability-otel-logging.md` · 告警/SLO
-`observability-alerting-slo.md` · 成本 `cost-and-rightsizing.md` · 资源/QoS
+`observability-alerting-slo.md` · **公网访问分析（谁在访问、真人/爬虫/自建监控）**
+`public-traffic-analysis.md` · 成本 `cost-and-rightsizing.md` · 资源/QoS
 `k8s-qos-resource-management.md`。
 
 ## Working Conventions

@@ -443,6 +443,7 @@ prometheus:
       # ⚠️ 指标值一天只变一次（口径是完整 UTC 日），60s 抓只是为了让 up/absent 类
       #    告警有正常的分辨率，不代表数据这么新。
       # 见: k8s/helm/manifests/monitoring/cf-analytics-exporter/
+      #     docs/reference/public-traffic-analysis.md（口径/分类法，唯一真相源）
       - job_name: 'cf-analytics-exporter'
         scrape_interval: 60s
         static_configs:

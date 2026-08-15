@@ -20,7 +20,9 @@
 #   cf-analytics-external-secret.yaml 在 monitoring ns 再取一份，指向同一个 Vault 路径。
 #
 # 指标 / 抓取 / 面板 / 告警：
-#   metrics  :9901/metrics（cf_analytics_daily_{uniques,requests,client_ips} …）
+#   metrics  :9901/metrics（daily_client_ips_human / _by_class{class} / _bot_requests …）
+#   📖 口径与分类法（真人 / 爬虫 / 自建监控）→ docs/reference/public-traffic-analysis.md
+#      ⚠️ SELF_MONITOR_AGENTS 是**显式白名单**，新上探测组件必须加进去，否则算成外部访客
 #   scrape   k8s/helm/values/kube-prometheus-stack.yaml 的 additionalScrapeConfigs
 #   面板     dashboards/cf-analytics-dashboard.yaml
 #   告警     alerts/cf-analytics-alerts.yaml
@@ -45,7 +47,7 @@ spec:
         # 由 `just gen-embedded-scripts` 写入 exporter.py 的 sha256 前 16 位。
         # ConfigMap 变了不会重启 pod（进程还跑着启动时读进内存的旧脚本），
         # 把 hash 放进 pod 模板才让 ArgoCD 看见变更并滚动重启。CI 的 E1 校验它。
-        checksum/exporter-py: "230620947bfe4dd8"
+        checksum/exporter-py: "2546402ad0dcebb3"
     spec:
       # 非核心：节点内存吃紧时优先被挤掉（面板缺一格 ≪ 业务被 OOM）。
       priorityClassName: bulk

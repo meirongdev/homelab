@@ -18,6 +18,7 @@
 - [networking-ingress.md](networking-ingress.md) — 入口链路（Tunnel → Cilium Gateway）、HTTPRoute 约定、external-dns DNS 自动化、节点地址速查
 - [tailscale-network.md](tailscale-network.md) — 双集群互联（Tailscale 只做 node underlay、pod 走 ClusterMesh VXLAN）+ 路由踩坑（fwmark 撞车 1/256 抽签）
 - [cloudflare-tunnel-observability.md](cloudflare-tunnel-observability.md) — Tunnel + Gateway 流量可观测（能看到什么、看不到什么）
+- [public-traffic-analysis.md](public-traffic-analysis.md) — 公网访问分析**唯一真相源**：谁在访问哪个域名、来源分类法（真人/爬虫/自建监控）与可信度、☠️ 自建监控占请求 45%、PromQL 配方、免费版能力边界
 
 ### 可观测
 

@@ -92,7 +92,13 @@ token 落进 Grafana datasource、且无法对「数据变旧」告警 —— �
 
 ## 后果
 
-- ✅ 拿到了买不到也装不来的指标：`cf_analytics_daily_client_ips{host,date}`。
+- ✅ 拿到了买不到也装不来的指标：按域名的独立访问 IP 数，以及**按来源的分类**
+  （真人 / 已验证爬虫 / 自建监控 / CF 边缘预取）—— 后者 2026-08-15 补齐，用的是同一条
+  查询多加两个维度，**零额外 API 调用**。口径见
+  [reference/public-traffic-analysis.md](../reference/public-traffic-analysis.md)。
+- ☠️ **它立刻揭穿了一件事**：原始访问量约 **45% 是自建监控**（Uptime Kuma / Alertmanager
+  绕公网回来），`argocd`/`vault`/`auth` 三个域名 100% 是它、真人 IP 为 0 —— 与
+  [slo-availability-targets.md](slo-availability-targets.md) 从 Envoy 侧得出的结论互相印证。
 - ⚠️ **多了一份要自己跟的代码**。缓解措施都已落地，别拆：
   - `check-embedded-scripts.py` 的 **E1** 盯住「`.py` 源 ↔ ConfigMap 内嵌副本」漂移，
     并用 pod 模板的 checksum 注解逼 ArgoCD 在脚本变更时滚动重启
