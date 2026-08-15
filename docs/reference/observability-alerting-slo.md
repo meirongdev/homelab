@@ -1,6 +1,6 @@
 # Observability — 告警、看板组织与 SLO
 
-> Last updated: 2026-08-14
+> Last updated: 2026-08-15
 > Status: 生效事实
 >
 > 遥测的**消费侧**：告警路由与覆盖盲区、Grafana 看板组织约定、SLI/SLO 体系。
@@ -89,6 +89,18 @@
   返回 1；标签选择器确实选得中 —— 选不中的规则和"一切正常"长得一模一样），
   并用 `promtool check rules` 过了语法（Prometheus 容器是 distroless，无 `sh`，
   得用 `kubectl exec -i … promtool check rules /dev/stdin` 喂进去）。
+
+- **cf-analytics 告警**（`manifests/monitoring/alerts/cf-analytics-alerts.yaml`，2026-08-15 新增，4 条）:
+  cf-analytics-exporter 每 6h 调一次 Cloudflare Analytics API，把「按域名的访问 IP 数/请求数」
+  桥成指标（→ [cloudflare-tunnel-observability.md](cloudflare-tunnel-observability.md)）。
+  它的失效**全是静默的**：pod Running、探针绿、面板照常出图，只是数字停在几天前。
+  `CFAnalyticsScrapeFailing`（抓取报错）· `CFAnalyticsDataStale`（>24h 没有成功过一轮）·
+  `CFAnalyticsMetricsAbsent`（序列整体消失，即会屏蔽掉前两条的那个盲区）·
+  `CFAnalyticsRowsTruncated`（撞到 API 10000 行上限 → 独立 IP 数被低估）。
+  ⚠️ 两处**特意为之**：① 探针**只探进程不探数据新鲜度** —— 拿抓取结果当 readiness 会把
+  pod 踢出 Endpoints，Prometheus 连 `scrape_success=0` 都抓不到，抓取故障退化成"没数据"，
+  告警自己把自己关掉；② `CFAnalyticsDataStale` 必须带 `> 0` 前置条件 ——
+  首刷未成功时时间戳是 0，`time() - 0` 是天文数字，每次重启后都会假阳性。
 
 ### ⚠️ 告警覆盖 ≠ 抓取覆盖（2026-08-02 核实）
 

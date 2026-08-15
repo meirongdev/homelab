@@ -115,7 +115,10 @@ docs/                          # 见下方「Documentation Rules」
 `scripts/check-manifests.py` 强制 5 条**由真实事故反推**的规则：**H1** Namespace/CRD 独占文件 ·
 **H2** Application 的 `path` 与 `destination` 同集群 · **H3** ReferenceGrant 声明 `v1beta1` ·
 **H4** 新增 PVC 必须有备份归属 · **H5** Namespace 必须显式写 PSA 等级（漏写 = 静默吃默认
-`privileged`）。规则全文 + **静态查不出、只能靠人的那几类** →
+`privileged`）。另有 `scripts/check-embedded-scripts.py` 的 **E1**：ConfigMap 内嵌的脚本必须与
+同目录的 `.py` 源一致，且 pod 模板带它的 checksum 注解 —— 改了 `.py` 就得在 `k8s/helm/` 跑
+`just gen-embedded-scripts`，否则要么部署的是旧副本、要么 ConfigMap 变了 **pod 根本不重启**。
+规则全文 + **静态查不出、只能靠人的那几类** →
 [manifest-safety-checks.md](reference/manifest-safety-checks.md)。
 搬有状态服务照 [runbooks/stateful-service-cross-cluster-migration.md](runbooks/stateful-service-cross-cluster-migration.md) 走。
 

@@ -1,6 +1,6 @@
 # Cloudflare Tunnel Observability
 
-> Last updated: 2026-08-13
+> Last updated: 2026-08-15
 > Status: 生效事实
 
 当前架构的入口路径为：`Cloudflare DNS -> Cloudflare Tunnel -> Cilium Gateway API -> Services`。
@@ -17,13 +17,19 @@
 4. 边缘 PoP 连接分布
 5. 隧道级错误与重试
 
-当前看不到：
+当前看不到（**从 cloudflared 指标**）：
 
 1. 每个 hostname 的请求量拆分
 2. 每个 hostname 的延迟分位数
 3. 入口层按路由聚合的 4xx/5xx
 
 原因很简单：`cloudflared` 官方指标本身不暴露 hostname 标签，而仓库里也不再保留 Traefik 的 `router` 指标作为补充来源。
+
+> ⚠️ 第 1 条自 2026-08-15 起**换了一条路**补上了：不是从 cloudflared，而是直接问
+> Cloudflare Analytics API —— 见下面的
+> [按域名的请求量与访问 IP 数](#按域名的请求量与访问-ip-数cloudflare-analytics-api)。
+> 代价是粒度只有「天」、按域名只回溯 7–8 天，所以它替代不了实时的入口指标，
+> 第 2、3 条依然看不到。
 
 ## 架构概览
 
@@ -176,11 +182,76 @@ kubectl get gateway,httproute -A
 kubectl describe httproute -A
 ```
 
+## 按域名的请求量与访问 IP 数（Cloudflare Analytics API）
+
+2026-08-15 起，「哪个域名、被多少个不同 IP 访问」这一层由 **cf-analytics-exporter** 提供。
+它不碰 cloudflared 指标，而是每 6h 调一次 Cloudflare GraphQL Analytics API，把聚合结果
+以 Prometheus 指标暴露出来。
+
+- 清单 `k8s/helm/manifests/monitoring/cf-analytics-exporter/`（Deployment + Service +
+  ConfigMap + ExternalSecret，落在 homelab `monitoring` ns 的 `k8s-worker-106`）
+- 抓取 `k8s/helm/values/kube-prometheus-stack.yaml` 的 `additionalScrapeConfigs`
+  （static target，显式打 `cluster=homelab`）
+- 面板 Grafana → Platform → **Cloudflare / 公网流量（按域名访问 IP）**（uid `cf-analytics-overview`）
+- 告警 `k8s/helm/manifests/monitoring/alerts/cf-analytics-alerts.yaml`
+- **为什么是自写的而不是现成 exporter** →
+  [decisions/cf-analytics-custom-exporter.md](../decisions/cf-analytics-custom-exporter.md)
+  （官方与 lablabs 两个都实测否决过，别重复调研）
+
+指标（**全部 gauge**，值的口径是「某个完整 UTC 自然日」，`date` 是标签不是时间戳）：
+
+| 指标 | 含义 |
+|------|------|
+| `cf_analytics_daily_client_ips{host,date}` | 该域名当天的**独立客户端 IP 数**；`host="__total__"` 是跨域名再去重的全站值 |
+| `cf_analytics_daily_requests{host,date}` | 该域名当天的请求数；同样有 `__total__` |
+| `cf_analytics_daily_uniques{date}` | Cloudflare 自己算的全站独立访客（edge 去重） |
+| `cf_analytics_scrape_success` / `cf_analytics_last_success_timestamp_seconds` | 抓取健康 |
+| `cf_analytics_host_window_days` / `cf_analytics_host_days_failed` / `cf_analytics_rows_truncated` | 窗口与数据质量 |
+
+### 三条实测硬限制（2026-08-15 用本仓库那把 token 逐条打过，别照文档猜）
+
+1. ☠️ **两个数据集的保留期差 4 倍**。按域名/IP 拆分的 `httpRequestsAdaptiveGroups` 免费版
+   只留 **1w1d（约 8 天）**，更早直接报 `cannot request data older than 1w1d`；
+   全站的 `httpRequests1dGroups` 实测 30 天可读。所以面板上「全站趋势 14 天、按域名只有
+   7–8 天」是套餐决定的，不是配置漏了。exporter 故意多试一天，靠服务端的报错定位边界，
+   而不是在代码里写死一个会随套餐变的常量。
+2. ☠️ **`httpRequestsAdaptiveGroups` 单次查询时间跨度 ≤ 1 天**，必须逐日查再合并。
+   一轮刷新 = 1 次 uniques + 最多 8 次逐日，共约 9 次调用。
+3. ⚠️ **该数据集没有 `uniq { uniques }` 字段**（实测报 `unknown field "uniq"`）。
+   独立 IP 只能按 `clientIP` 维度拉回来在本地去重 —— 单日约 2500 行，API 硬上限 10000 行，
+   撞上限会低估 IP 数，`cf_analytics_rows_truncated` 就是报这个的。
+
+### 读数时容易搞错的三件事
+
+- **`daily_uniques` ≠ `daily_client_ips{host="__total__"}`**。前者是 Cloudflare 的 uniq
+  （口径不公开、adaptive 数据集有自适应采样），后者是我们自己数的 IP。2026-08-14 分别是
+  2376 和 2416 —— 接近但不该相等，**不要拿它们互相对账**。
+- **各域名的 IP 数之和 > 全站 IP 数**。同一个 IP 常常访问多个子域，全站那格跨域名去重过。
+- **相当一部分「流量」是自建探测**。Uptime Kuma / ArgoCD / 各种健康检查会让某些域名出现
+  「IP 数个位数、请求数上千」的组合。面板里的「人均请求」列就是拿来一眼认出这种的。
+
+☠️ **不导出任何客户端 IP 本身**，只导出去重后的计数：原始 IP 是访客 PII，放进 label 还会
+把基数炸到几千。仓库「不落公网 IP」的硬约束同样适用于指标标签。
+
+### 与 ingress-traffic 面板的分工
+
+两块面板看着像，但量的不是同一件事，排查时别混用：
+
+| | 本节（Cloudflare Analytics） | `ingress-traffic-overview`（cilium-envoy） |
+|---|---|---|
+| 位置 | Cloudflare **边缘**，缓存命中/WAF 拦截**都算** | Cloudflare **之后**，服务实际收到的量 |
+| 维度 | 域名（`host`）+ 独立 IP 数 | 服务（`ns_svc`）+ 状态码 |
+| 粒度 | 天 | 秒级实时 |
+| 回溯 | 按域名 7–8 天 / 全站 14 天 | 中枢 Prometheus retention（7d）|
+
+两者对不上是正常的：差额就是边缘缓存命中 + WAF 拦截 + 直接由 Cloudflare 应答的部分。
+
 ## 限制与后续方向
 
-如果未来确实需要 hostname 级入口指标，有两个更合理的方向：
+hostname 级的**实时**入口指标依然没有（上一节是天粒度的事后聚合）。真要做，两个方向：
 
 1. 研究 Cilium Gateway / Envoy 暴露的可消费路由指标，再决定是否接入
 2. 在应用层补充统一访问日志或 OTel HTTP server metrics，而不是重新引入 Traefik
 
-在此之前，这份文档的定位就是：只把 Tunnel 视为一层“连通性和负载入口”的健康信号源。
+在此之前，这份文档的定位就是：把 Tunnel 视为一层“连通性和负载入口”的健康信号源，
+域名维度的「有多少人来过」由 Cloudflare Analytics 那条旁路回答。
