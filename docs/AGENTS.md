@@ -62,7 +62,7 @@ docs/                          # 见下方「Documentation Rules」
 - **外部流量**：Internet → Cloudflare DNS → Tunnel → Cilium Gateway → Service
 - **节点**：homelab 自 2026-08-13 起是**双节点**——control-plane `k8s-node` `10.10.10.10`
   / TS `100.94.186.7`（Ryzen 5600H 笔记本）+ worker `k8s-worker-106` `192.168.50.107` /
-  TS `100.74.162.97`（跑在 NAS 106 上的 2c/3G VM）· oracle-k3s `10.0.0.26` / TS
+  TS `100.74.162.97`（跑在 NAS 106 上的 2c/4G VM）· oracle-k3s `10.0.0.26` / TS
   `100.107.166.37` · NAS storage-106 宿主 `192.168.50.106` / TS `100.110.27.111`
   ⚠️ worker 与 master **不在同一网段**（LAN vs pve 的 `10.10.10.0/24`），且它多一条
   ip rule。加/改它必读 `k8s/ansible/playbooks/setup-k3s-worker.yaml` 的文件头三条约束
@@ -135,8 +135,9 @@ kube-bench → 节点 CIS → 网络 → Tetragon/Falco → restic。逐层状�
   （`100.64/10`）或内网地址；文档写 `<ORACLE_PUBLIC_IP>` 占位符，真值现取
   `cd cloud/oracle/terraform && terraform output -raw instance_public_ip`。
   只放行第三方 anycast DNS，豁免写行内 `public-ip-ok: <理由>`。
-- **硬约束**：homelab 是 Ryzen 5600H 单节点热笔记本（空闲 ~60–62°C，抬温有实际代价 →
-  [homelab-host-power-thermal.md](reference/homelab-host-power-thermal.md)）。
+- **硬约束**：homelab 控制面 `k8s-node` 是 Ryzen 5600H 热笔记本（空闲 ~60–62°C，抬温有实际代价 →
+  [homelab-host-power-thermal.md](reference/homelab-host-power-thermal.md)）——2026-08-13 起
+  集群另有 worker `k8s-worker-106`，但热约束与安全组件仍以控制面为准。
   所有安全组件 **fail-open + 控 CPU**。
 
 ## Storage Notes

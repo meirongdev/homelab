@@ -54,8 +54,8 @@
 
 （106 上的 VM 作为 homelab worker 的背景见 [storage106-as-homelab-worker](storage106-as-homelab-worker.md)。）
 
-- **能放**：无状态、周期、节点无关的 CronJob / 批处理 —— 它只有 `2311Mi` allocatable
-  （requests 40% / CPU 15%，Celeron 慢核），适合承接周期扫描/批处理这类「短、脉冲、可牺牲」负载，
+- **能放**：无状态、周期、节点无关的 CronJob / 批处理 —— 它只有 ~`3254Mi` allocatable
+  （2026-08-16 VM 3G→4G 前是 2311Mi；requests 40% / CPU 15%，Celeron 慢核），适合承接周期扫描/批处理这类「短、脉冲、可牺牲」负载，
   把 master（5600H 笔记本）的周期 CPU/热峰值挪走。首个落点是 `monitoring/krr`（2026-08-14，无 PVC
   / 无 hostPath，只查集群内 Prometheus + K8s API + 推 Telegram）。
 - **也能放常驻的无状态服务**（2026-08-16 扩大）：`cf-analytics-exporter`、`media/podcast`（读的

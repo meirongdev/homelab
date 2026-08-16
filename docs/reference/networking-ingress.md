@@ -24,8 +24,11 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 
 - 双集群 Cilium（eBPF + VXLAN）；homelab 2026-03-06 部署，oracle 2026-03-07 从 Flannel 迁入。
 - **homelab Cilium 是 Helm 手动管理，不走 ArgoCD**: `just deploy-cilium`（`k8s/helm/`），
-  values 固化在 `k8s/cilium/values.yaml`（+ 同目录 README），pin **v1.19.1**。
-  该配方会 pin `--version 1.19.1` 并恢复 live `cilium-ca`（fresh install 会自签，装完要重跑
+  values 固化在 `k8s/cilium/values.yaml`（+ 同目录 README），pin **v1.20.0**（2026-08-10 双集群
+  例行部署随 chart repo 升到 1.20.0，过程与 Gateway API breaking change 见
+  [../records/2026-08-11-gateway-api-crd-stall.md](../records/2026-08-11-gateway-api-crd-stall.md)；
+  两 justfile 的 `cilium_version` 都是 1.20.0）。
+  该配方会 pin `--version 1.20.0` 并恢复 live `cilium-ca`（fresh install 会自签，装完要重跑
   `just connect-clustermesh …`）。oracle 侧 values 在 `cloud/oracle/values/cilium-values.yaml`
   （`cd cloud/oracle && just deploy-cilium`）。
 - **⚠️ `gatewayAPI.enableAppProtocol: true` 是两集群硬前提**: 没有它，ZITADEL console 的
