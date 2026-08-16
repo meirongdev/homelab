@@ -4,6 +4,7 @@
 
 | 日期 | 方案 | 状态 |
 |------|------|------|
+| 2026-08-16 | [多媒体仓库（音乐/自录 podcast/视频）](2026-08-16-multimedia-repository.md) | 📐 设计 |
 | 2026-08-08 | [jobs-sg 三处问题诊断](2026-08-08-jobs-sg-three-defect-diagnosis.md) | ✅ 已完成（两处真缺陷的修复已合入 main 并部署） |
 | 2026-08-01 | [LiteLLM LLM 网关迁移（替换 Bifrost）](2026-08-01-litellm-gateway-migration.md) | 📐 设计 |
 | 2026-08-01 | [Open Notebook 部署（homelab k3s）](2026-08-01-open-notebook-homelab.md) | ✅ 已完成（现状见 reference/open-notebook.md） |
