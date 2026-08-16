@@ -14,9 +14,13 @@
 - 数据在 **ZFS pool `mrstorage`，挂载 `/storage`**（与 OS 盘分离），由
   `proxmox/ansible/storage-playbook.yaml` 预配。**ARC 读缓存上限 2GiB** + **sanoid** hourly/daily 快照
   （见 [../plans/storage/2026-07-04-storage-106-utilization-and-backup-simplification.md](../plans/storage/2026-07-04-storage-106-utilization-and-backup-simplification.md)）。
-  ⚠️ ARC 于 **2026-08-13 由 4G 降到 2G**，给同机的 `k3s-exp` 实验 VM 腾内存（106 只有 8G，
-  三方分配 = ARC 2G / 宿主 2.1G / VM 3G）—— 106 是备份**目标**，写入是顺序 pack 文件，
-  ARC 主要服务夜间 restic prune/check 的元数据。判据见 [decisions/storage106-experiment-vm.md](../decisions/storage106-experiment-vm.md)。
+  ⚠️ ARC 于 **2026-08-13 由 4G 降到 2G**、**2026-08-16 再降到 1G**，给同机那台 VM 腾内存
+  （106 只有 8G，现在的三方分配 = ARC 1G / 宿主 ~2.6G / VM **4G**）—— 106 是备份**目标**，
+  写入是顺序 pack 文件，ARC 主要服务夜间 restic prune/check 的元数据；媒体只读 NFS 是大文件
+  顺序流，ARC 命中率接近零，这部分几乎无损。代价是备份窗口变长。
+  ☠️ **这台机器的内存到此为止**：`StorageNodeMemoryLow`（已把可回收 ARC 算回去）的实测值
+  已从 2026-08-02 的 66% 掉到 **16%**，阈值是 10%。再要内存只能加物理条。
+  判据见 [decisions/cluster-placement-for-new-services.md](../decisions/cluster-placement-for-new-services.md)。
 - **重建 106 是数据安全的，且不再影响集群**: OS 在 boot 盘、数据全在 `mrstorage`。
   重装后重跑 `storage-playbook.yaml` 即 `zpool import -f mrstorage` + 重建 `/etc/exports`。
   2026-07-11 起**没有任何 pod 挂载 106**，宕机只暂停备份窗口。
@@ -50,8 +54,15 @@ sqlite 依赖 POSIX 字节区间锁（`fcntl`）+ 同步小写入；NFS 的 NLM 
 ## 当前 PVC 清单（全部 `local-path`）
 
 ⚠️ **2026-08-13 起 homelab 是双节点**，`local-path` 因此有了**两个物理落点**：
-`k8s-node`（现有全部 PVC 都在这）和 worker `k8s-worker-106`（106 上那台 VM 的
-本地盘）。备份边界原本 = control-plane 节点，**2026-08-16 起 worker 也被覆盖**：
+`k8s-node`（绝大多数 PVC）和 worker `k8s-worker-106`（106 上那台 VM 的本地盘）。
+**worker 上现有 3 个 PVC**（2026-08-16 迁入）：`navidrome-data-local`、`jellyfin-config-local`
+（媒体服务跟着数据走 —— 视频/音乐本体就在 106 的 ZFS 上）、`opencost-pvc`（空的，见其 values 注释）。
+⚠️ **local-path 卷不跟随调度**：给已有 PVC 的服务加 `nodeSelector` 只会让 Pod 因卷节点亲和冲突
+永远 Pending。搬迁要按 [runbooks/stateful-service-cross-cluster-migration.md](../runbooks/stateful-service-cross-cluster-migration.md)
+的节点内变体走（停服 → tar → 删 PVC → 目标节点重建 → 灌回；灌回可以用一个挂着新 PVC 的
+临时 busybox Pod 触发 local-path 建目录，省掉"先起一次空库再覆盖"的来回）。
+
+备份边界原本 = control-plane 节点，**2026-08-16 起 worker 也被覆盖**：
 
 1. backup CronJob 钉 `nodeSelector: node-role.kubernetes.io/control-plane`
    （`backup/base/cronjob.yaml`）。不钉的话它可能被排到 worker——那里的 hostPath
