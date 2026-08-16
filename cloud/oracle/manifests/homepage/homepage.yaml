@@ -176,6 +176,26 @@ data:
               container: trends
               label_selector: app=trends
 
+        # 多媒体仓库（2026-08-16，media ns，homelab 服务）——不写 kubernetes: 块，
+        # 同 Jobs SG / Calibre-Web：Homepage 跑在 oracle-k3s，查不到 homelab 的 pod。
+        - Jellyfin:
+            icon: jellyfin.png
+            href: https://media.meirong.dev
+            description: 视频播放（自拍/下载/动画）
+            ping: https://media.meirong.dev
+
+        - Navidrome:
+            icon: mdi-music
+            href: https://music.meirong.dev
+            description: 音乐库
+            ping: https://music.meirong.dev
+
+        - Podcast:
+            icon: mdi-podcast
+            href: https://podcast.meirong.dev
+            description: 自录 podcast 分集（RSS）
+            ping: https://podcast.meirong.dev
+
     - RSS & 自动化:
         - Miniflux:
             icon: miniflux.png
