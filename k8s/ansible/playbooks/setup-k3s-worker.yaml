@@ -46,6 +46,11 @@
         name:
           - curl
           - qemu-guest-agent
+          # nfs-common：NFS **client**（mount.nfs helper）。worker 会承接读 NAS 106
+          # 只读媒体的 serving pod（media ns 的 podcast 等）；master 在 setup-k3s.yaml
+          # 里装了它，worker 漏掉会让 NFS pod FailedMount
+          # （"bad option... need a /sbin/mount.nfs helper"。2026-08-16 实测）。
+          - nfs-common
         state: present
         update_cache: true
 
