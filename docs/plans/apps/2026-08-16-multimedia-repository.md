@@ -1,13 +1,19 @@
 # 多媒体仓库（收藏音乐 / 自录 podcast / 视频）
 
 > 日期: 2026-08-16
-> 状态: 📐 设计
+> 状态: ⚠️ 部分完成
 > 结论: 在 homelab 建一个「以 **NAS 106 ZFS 为媒体唯一真相源、k8s 只做 serving 层」的多媒体仓库。
 > 媒体（尤其 >500GB 视频）放 106 的 `mrstorage` ZFS（raidz1 + sanoid 快照 = 本地保护），
 > Jellyfin（视频）/ Navidrome（音乐）/ 静态 RSS（podcast 发布）作为 homelab k8s 负载，
 > 经**只读 NFS** 挂 106 的 `media/`。新增**零云成本**（全走现有 homelab + 106 + 已有隧道/DNS）。
 > 刻意不引 Castopod（PHP 全家桶，超出小范围所需）。
 > 视频只有 106 本机 ZFS 保护、**无离站副本**（用户已确认接受的成本取舍）。
+>
+> **实施进度（2026-08-16）**：NFS 只读 export ✅ · Jellyfin/Navidrome/podcast 部署 ✅ ·
+> HTTPRoute/DNS ✅（media/music/podcast.meirong.dev 公网 200）· 备份/PSA/SLO ✅。
+> 落地时按现有媒体布局调整（复用 106 已有 movie/tv/anime/music，不新建 media/ 树），
+> 并修了 worker 缺 nfs-common 导致的 NFS FailedMount。**未包含**：yt-dlp 下载 Job（Task 9，可选后置），
+> pod 账号与 RSS 分集更新流程（维护性，非阻塞）。
 
 ## 1. 现状与动机
 
