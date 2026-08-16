@@ -39,6 +39,15 @@ data:
           model: openai/mlx-community__Qwen3.6-35B-A3B-nvfp4
           api_base: http://100.89.15.120:8000/v1
           api_key: dummy
+      # ── OpenRouter（第三来源，独立透传，2026-08-16）──
+      # 全部模型透传：openrouter/<任意 OpenRouter 模型 ID> 直接命中。
+      # ⚠️ key 是真实付费凭据：用环境变量引用（os.environ/OPENROUTER_API_KEY），
+      #    值由 Vault secret/homelab/litellm-openrouter → ESO → Deployment env 注入，不进 git。
+      - model_name: "openrouter/*"
+        litellm_params:
+          model: "openrouter/*"
+          api_base: https://openrouter.ai/api/v1
+          api_key: os.environ/OPENROUTER_API_KEY
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -83,6 +92,10 @@ spec:
             - name: UI_PASSWORD
               valueFrom:
                 secretKeyRef: { name: litellm-secret, key: ui-password }
+            # OpenRouter 第三来源的付费 key（Vault → ESO → 此处 env；config.yaml 用 os.environ 引用）
+            - name: OPENROUTER_API_KEY
+              valueFrom:
+                secretKeyRef: { name: litellm-openrouter-secret, key: openrouter-api-key }
             # DB 迁移失败即退出（fail-closed），避免无表静默跑
             - name: ENFORCE_PRISMA_MIGRATION_CHECK
               value: "true"
