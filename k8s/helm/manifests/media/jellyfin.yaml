@@ -1,0 +1,134 @@
+---
+# Jellyfin — 视频播放（多媒体仓库 serving 层）。
+#
+# 数据分工：
+#   · 媒体（movie/tv/anime）= 只读 NFS（media-* PV）→ /media/{music 不用, movie,tv,anime}
+#   · config/cache/metadata = local-path PVC（可写，Jellyfin 需要：元数据库、转码临时目录、
+#     图片缓存）。这个才是要备份的宿主数据。
+#
+# 播放策略：用户选手机/电脑标准浏览器 → 直放（direct play），**不配硬件转码**。
+# Jellyfin 会把 1080p 直发客户端；只有在客户端不支持的 codec 时才需要转码，届时用 CPU
+# （不烧 GPU，5600H 笔记本上转码是长期成本，设计上避免 —— 见 plan 决策「不上视频转码」）。
+#
+# PSA baseline（media ns）：Jellyfin 需要写 config 目录，跑非 root 太苛刻，
+# baseline 的 privilege 集合对上（不强制非 root）。不 damesh do restricted。
+#
+# 镜像：jellyfin/jellyfin multi-arch index digest（amd64 主用于 homelab，arm64 留 oracle 出口）。
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jellyfin-config-local
+  namespace: media
+  annotations:
+    # config 是运行时数据，禁止 ArgoCD prune 级联删除
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jellyfin
+  namespace: media
+  labels: { app: jellyfin }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: jellyfin }
+  template:
+    metadata:
+      labels: { app: jellyfin }
+    spec:
+      # 个人应用分档：bulk(-10) —— 可被驱逐排序在后，不抢控制面
+      priorityClassName: bulk
+      securityContext:
+        runAsUser: 0       # jellyfin 官方镜像需要 root 跑（会自己降权）
+        runAsGroup: 0
+      containers:
+        - name: jellyfin
+          # jellyfin/jellyfin:latest multi-arch index @ 2026-08-16
+          image: jellyfin/jellyfin@sha256:aefb67e6a7ff1debdd154a78a7bbb780fd0c873d8639210a7f6a2016ad2b35db
+          ports:
+            - containerPort: 8096
+              name: http
+          env:
+            - name: JELLYFIN_PublishedServerUrl
+              value: "https://media.meirong.dev"
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: cache
+              mountPath: /cache
+            - name: movie
+              mountPath: /media/movie
+              readOnly: true
+            - name: tv
+              mountPath: /media/tv
+              readOnly: true
+            - name: anime
+              mountPath: /media/anime
+              readOnly: true
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { cpu: "2", memory: 2Gi }
+          livenessProbe:
+            httpGet: { path: /health, port: 8096 }
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          readinessProbe:
+            httpGet: { path: /health, port: 8096 }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+      volumes:
+        - name: config
+          persistentVolumeClaim: { claimName: jellyfin-config-local }
+        - name: cache
+          emptyDir: {}
+        - name: movie
+          persistentVolumeClaim: { claimName: media-movie }
+        - name: tv
+          persistentVolumeClaim: { claimName: media-tv }
+        - name: anime
+          persistentVolumeClaim: { claimName: media-anime }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jellyfin
+  namespace: media
+spec:
+  type: ClusterIP
+  selector: { app: jellyfin }
+  ports:
+    - port: 8096
+      targetPort: 8096
+      name: http
+---
+# media.meirong.dev → jellyfin:8096。同 ns 引用 Service，无需 ReferenceGrant。
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: jellyfin
+  namespace: media
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: homelab-gateway
+      namespace: kube-system
+      port: 80
+  hostnames: ["media.meirong.dev"]
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: jellyfin
+          port: 8096
+          weight: 1

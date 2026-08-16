@@ -1,0 +1,147 @@
+---
+# Navidrome — 音乐库 + 流播（多媒体仓库 serving 层）。
+#
+# 数据分工：
+#   · 音乐 = 只读 NFS（media-music）→ /music
+#   · DB/metadata = local-path PVC（可写，sqlite/rocksdb —— 必须 local-path，见 storage.md
+#     的 NFS 锁坑）。这个才是要备份的宿主数据。
+#
+# 鉴权：Navidrome 首次启动用 ND_INITIALADMINUSER/PASSWORD 建管理账号，
+# 凭据进 Vault → ESO（secret/homelab/media 的 nd_admin 组）。后续登录走 Subsonic API
+# 多端客户端（Boo / play:Sub / symfonium）。
+#
+# 镜像：deluan/navidrome multi-arch index digest（amd64 主用，arm64 留 oracle 出口）。
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: navidrome-data-local
+  namespace: media
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: navidrome
+  namespace: media
+  labels: { app: navidrome }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: navidrome }
+  template:
+    metadata:
+      labels: { app: navidrome }
+    spec:
+      priorityClassName: bulk
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: navidrome
+          # deluan/navidrome:latest multi-arch index @ 2026-08-16
+          image: deluan/navidrome@sha256:9012939114fbb1bb641b81cf96dec5ded15f0aafefe8d47a511d7cb919658e40
+          env:
+            - name: ND_DATAFOLDER
+              value: /data
+            - name: ND_MUSICFOLDER
+              value: /music
+            - name: ND_INITIALADMINUSER
+              valueFrom:
+                secretKeyRef: { name: media-secrets, key: nd-admin-user }
+            - name: ND_INITIALADMINPASSWORD
+              valueFrom:
+                secretKeyRef: { name: media-secrets, key: nd-admin-password }
+          ports:
+            - containerPort: 4533
+              name: http
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: music
+              mountPath: /music
+              readOnly: true
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+          livenessProbe:
+            httpGet: { path: /ping, port: 4533 }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: { path: /ping, port: 4533 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: navidrome-data-local }
+        - name: music
+          persistentVolumeClaim: { claimName: media-music }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: navidrome
+  namespace: media
+spec:
+  type: ClusterIP
+  selector: { app: navidrome }
+  ports:
+    - port: 4533
+      targetPort: 4533
+      name: http
+---
+# Vault → media-secrets：Navidrome 初始 admin。共享 secret/homelab/media（Jellyfin 无凭据，
+# podcast 无凭据，只有这个）。路径在 Vault 里预建（见 docs/plans/apps/multimedia-repository Task 2）。
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: media-secrets
+  namespace: media
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: media-secrets
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: nd-admin-user
+      remoteRef: { key: secret/homelab/media, property: nd_admin_user }
+    - secretKey: nd-admin-password
+      remoteRef: { key: secret/homelab/media, property: nd_admin_password }
+---
+# music.meirong.dev → navidrome:4533。同 ns 引用 Service，无需 ReferenceGrant。
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: navidrome
+  namespace: media
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: homelab-gateway
+      namespace: kube-system
+      port: 80
+  hostnames: ["music.meirong.dev"]
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: navidrome
+          port: 4533
+          weight: 1

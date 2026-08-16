@@ -639,7 +639,7 @@ homelab-recover:
 #   2. 新建 ns 不会自己进列表 —— external-dns(21d)/opencost(10d) 建好后没人回来加，
 #      于是静默吃 PSA 内置默认 privileged（还没有 warn/audit）。
 # 所以有了 `just psa-check`：跑着 Pod 却没标签的 ns 直接报错。改完列表跑 harden-psa。
-psa_baseline_ns := "default vault personal-services cloudflare external-secrets kyverno external-dns opencost"
+psa_baseline_ns := "default vault personal-services cloudflare external-secrets kyverno external-dns opencost media"
 # trivy-system 保守标 privileged：扫描 Job 的 securityContext 由 operator 动态生成、不完全可控，
 # 先不冒险 enforce baseline；warn/audit=baseline 会显示它是否其实合规，确认后可改 baseline。
 # （已复核 2026-08-10：operator ConfigMap 的 nodeCollector.volumes 挂 /var/lib/etcd 等 hostPath，

@@ -1,6 +1,6 @@
 # Services — 服务清单
 
-> Last updated: 2026-08-14
+> Last updated: 2026-08-16
 > Status: 生效事实
 >
 > **这张表是服务清单的唯一真相源** —— `docs/README.md`、`docs/ARCHITECTURE.md` 与各 runbook
@@ -23,6 +23,9 @@
 | Calibre-Web | **oracle-k3s** | `personal-services` | `book.meirong.dev`（2026-08-03 迁移） |
 | Open Notebook (AI 研读) | homelab | `personal-services` | `notebook.meirong.dev`（模型走 DGX + Mac OMLX，见 [open-notebook.md](open-notebook.md)） |
 | jobs-sg (SG 岗位周报) | homelab | `jobs-sg` | `jobs.meirong.dev`（2026-08-03 上线；独立 ns + 3 个 CronJob，见 [jobs-sg.md](jobs-sg.md)） |
+| Jellyfin (视频) | homelab | `media` | `media.meirong.dev`（2026-08-16；媒体读 106 只读 NFS，config 走 local-path，见 [multimedia plan](../plans/apps/2026-08-16-multimedia-repository.md)） |
+| Navidrome (音乐) | homelab | `media` | `music.meirong.dev`（2026-08-16；媒体读 106 只读 NFS，DB 走 local-path） |
+| Podcast (自录 RSS 发布) | homelab | `media` | `podcast.meirong.dev`（2026-08-16；nginx 伺服 106 只读 NFS 的 mp3 + rss.xml） |
 | Grafana | homelab | `monitoring` | `grafana.meirong.dev` |
 | HashiCorp Vault | homelab | `vault` | `vault.meirong.dev` |
 | ArgoCD | **oracle-k3s** | `argocd` | `argocd.meirong.dev`（2026-08-02 控制面迁 oracle，经 Tailscale 纳管 homelab） |
