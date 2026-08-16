@@ -1,0 +1,33 @@
+# llm.meirong.dev -> litellm (litellm ns) — inference + /ui 同一后端；鉴权各自在 LiteLLM 内完成。
+#
+# 归 gateway App 管理（一路由一文件，见 gateway/README 与 add-service 技能）：
+# 本 HTTPRoute 声明自身 namespace=litellm，由 gateway App 部署；工作负载由 litellm App 部署。
+# ⚠️ 两 App 同步无先后，首次若见 ResolvedRefs=False/BackendNotFound：给路由加个临时注解碰一下。
+#
+# HTTPRoute 与 backendRef 同命名空间（litellm）→ 无需 ReferenceGrant。
+# DNS 由 external-dns 从本 HTTPRoute 建（proxied CNAME + owner TXT），不要动 cloudflare/terraform。
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: litellm
+  namespace: litellm
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: homelab-gateway
+      namespace: kube-system
+      port: 80
+  hostnames:
+    - "llm.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: litellm
+          port: 4000
+          weight: 1

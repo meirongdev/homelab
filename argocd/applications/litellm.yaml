@@ -1,0 +1,28 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: litellm
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argoproj.io
+spec:
+  project: homelab
+
+  source:
+    repoURL: https://github.com/meirongdev/homelab
+    targetRevision: main
+    path: k8s/helm/manifests/litellm
+
+  destination:
+    # ⚠️ homelab 负载必须显式写 homelab 集群 server，不能写 kubernetes.default.svc
+    #    （那会指向 oracle 控制面，把这个 App 装错集群）。
+    server: https://100.94.186.7:6443
+    namespace: litellm
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

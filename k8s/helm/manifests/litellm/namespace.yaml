@@ -1,0 +1,12 @@
+---
+# H1: Namespace 独占文件 —— 见 jobs-sg/namespace.yaml 的注释。
+# H5: 显式声明 PSA。litellm = Python proxy + Postgres，用 baseline（与 justfile 的
+#      psa_baseline_ns 里的 litellm 一致；postgres/官方镜像无需 restricted 的只读根文件系统约束）。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: litellm
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline

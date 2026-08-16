@@ -1,0 +1,121 @@
+# LiteLLM — self-hosted LLM gateway (homelab), replaces Bifrost (2026-08-01).
+#
+# Public surface: llm.meirong.dev (Cloudflare Tunnel → Cilium Gateway → HTTPRoute).
+# Auth model (Bifrost 的 oauth2-proxy 已砍掉 — LiteLLM 管理面自带认证):
+#   - inference (/v1/*, /openai, /anthropic, /genai): master key + virtual keys,
+#     Authorization: Bearer sk-…  (LITELLM_MASTER_KEY 已设 ⇒ 默认强制 key 鉴权)
+#   - admin UI (/ui): LiteLLM 自带登录 (UI_USERNAME/UI_PASSWORD, Vault→ESO)
+# Config: config.yaml in git (model_list); keys/spend live in Postgres (litellm-pg).
+# 双自托管上游: DGX (deepseek-v4-flash, 主) + MacPro M2 OMLX (Qwen3.6-35B, 兜底),
+#   fallbacks 键 = 严格的"主→兜底"链（见 docs/plans/apps/2026-08-01-litellm-gateway-migration.md §3 决策 6）。
+# 升版：改 image digest + 注释 tag → git push。不要追 main-stable。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+  namespace: litellm
+data:
+  # ⚠️ api_base 必须带 /v1 后缀 —— LiteLLM 不会像 Bifrost 那样自动补。
+  # api_key: dummy 不是机密（DGX vLLM 与 Mac OMLX 都忽略鉴权，"any token works"），因此可留在 git。
+  # 强制 key 鉴权由 env LITELLM_MASTER_KEY 实现（general_settings.master_key 语义=require a key for all calls）。
+  config.yaml: |
+    model_list:
+      # ── DGX（主，向后兼容：custom_dgx/ 前缀原名不变）──
+      - model_name: custom_dgx/deepseek-v4-flash
+        litellm_params:
+          model: openai/deepseek-v4-flash
+          api_base: http://100.97.87.120:8000/v1
+          api_key: dummy
+      # ── 无前缀别名 deepseek-v4-flash：DGX 主 + Mac 兜底（fallbacks 键 = 严格的"主→兜底"，非轮询）──
+      - model_name: deepseek-v4-flash
+        litellm_params:
+          model: openai/deepseek-v4-flash
+          api_base: http://100.97.87.120:8000/v1
+          api_key: dummy
+          fallbacks: ["mac/qwen3.6-35b"]
+      # ── Mac 兜底（也是独立可用的实际模型）──
+      - model_name: mac/qwen3.6-35b
+        litellm_params:
+          model: openai/mlx-community__Qwen3.6-35B-A3B-nvfp4
+          api_base: http://100.89.15.120:8000/v1
+          api_key: dummy
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm
+  namespace: litellm
+  labels:
+    app: litellm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: litellm
+  template:
+    metadata:
+      labels:
+        app: litellm
+    spec:
+      containers:
+        - name: litellm
+          # litellm/litellm:v1.94.1 @ 2026-08-01（官方 Python proxy；Rust 网关当前仅 /v1/realtime）
+          image: litellm/litellm@sha256:29b7f41dd84601550354b98a8e7c767256a18300ad20a5821fbb652ec0a3ea93
+          args: ["--config", "/app/config.yaml", "--port", "4000"]
+          ports:
+            - containerPort: 4000
+              name: http
+          env:
+            - name: LITELLM_MASTER_KEY
+              valueFrom:
+                secretKeyRef: { name: litellm-secret, key: master-key }
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: litellm-db-secret, key: database-url }
+            - name: UI_USERNAME
+              valueFrom:
+                secretKeyRef: { name: litellm-secret, key: ui-username }
+            - name: UI_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: litellm-secret, key: ui-password }
+            # DB 迁移失败即退出（fail-closed），避免无表静默跑
+            - name: ENFORCE_PRISMA_MIGRATION_CHECK
+              value: "true"
+          volumeMounts:
+            - name: config
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+              readOnly: true
+          resources:
+            requests: { cpu: 200m, memory: 384Mi }
+            limits: { cpu: "1", memory: 1Gi }
+          livenessProbe:
+            httpGet:
+              path: /health/liveness
+              port: 4000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health/readiness
+              port: 4000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: litellm-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm
+  namespace: litellm
+spec:
+  type: ClusterIP
+  selector:
+    app: litellm
+  ports:
+    - port: 4000
+      targetPort: 4000
+      name: http
