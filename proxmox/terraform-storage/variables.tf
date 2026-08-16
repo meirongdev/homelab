@@ -34,10 +34,18 @@ variable "cloud_image_url" {
   default     = "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
 }
 
-# --- k3s-exp VM ---
-# 尺寸依据（2026-08-13 实测，详见 docs/decisions/storage106-experiment-vm.md）：
-# 8G 的机器，ARC 4G→2G（storage-playbook.yaml tags:arc）让出 2G 后 available≈3.5G，
-# VM 3G + 宿主余量 ~0.5G + 7.7G 零使用的 swap 兜底。2c = J4105 四核的一半。
+# --- worker VM（VMID 200，集群里叫 k8s-worker-106）---
+# 尺寸依据：
+# · 2026-08-13：8G 的机器，ARC 4G→2G 让出 2G 后 available≈3.5G，VM 3G + 宿主余量 ~0.5G。
+# · 2026-08-16：ARC 2G→1G（storage-playbook.yaml tags:arc）再让出 1G → **VM 4G**，
+#   为的是接住 jellyfin（实测峰值 800Mi/380m，稳态 332Mi）。
+#   ⚠️ 这台 8G 的机器**到此为止**：`free -m` available 长期只有 ~550MB 且已在用 188MB swap，
+#   ARC 也砍无可砍（1G 是 restic 元数据的下限）。再要内存只能加物理条，别再从 ARC 里挤。
+# · 2c 不动 = J4105 四核的一半：另一半留给宿主的夜间 restic（哈希是 CPU 密集）。
+#
+# ☠️ 改 memory 是 in-place update，但**要 VM 关机重启才生效**（balloon: 0，无内存热插拔）。
+#    而这台机现在是 prod worker：改之前先 `kubectl drain`，且它上面 local-path 的
+#    PVC（navidrome/jellyfin）**跟不走** —— 那几个服务会中断到 VM 起来为止。
 variable "vm_cores" {
   type    = number
   default = 2
@@ -46,7 +54,7 @@ variable "vm_cores" {
 variable "vm_memory" {
   description = "MiB"
   type        = number
-  default     = 3072
+  default     = 4096
 }
 
 variable "vm_disk_size" {

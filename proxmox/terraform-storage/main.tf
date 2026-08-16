@@ -1,10 +1,18 @@
-# k3s-exp：storage-106 上的实验田 VM。
+# storage-106 上的 VM（VMID 200）。VM 名仍是 `k3s-exp`，**但它早已不是实验田**。
 #
-# 定位（决策全文 docs/decisions/storage106-experiment-vm.md）：
-#   独立单节点 k3s（VM 内由 proxmox/ansible `just exp-k3s` 安装），**不加入** homelab
-#   集群、不接 ArgoCD / prod ingress / 备份白名单。实验负载全在这儿折腾，homelab 的
-#   6.4G available 留给 prod。挂了、玩坏了 → terraform destroy/apply 重建即可。
-#   106 "备份机不承担 prod 运行时依赖"（2026-07-11）的不变量不受影响：本 VM 非 prod。
+# ☠️ 2026-08-13 起它是 homelab 集群的 worker 节点 `k8s-worker-106`，跑 prod 负载
+#    （navidrome / opencost / jellyfin / podcast / sloth / external-dns / trivy 扫描 Job），
+#    并且**盘上有 prod 的 local-path PVC**（navidrome 的库、jellyfin 的 metadata）。
+#    → `terraform destroy` / 任何触发 recreate 的改动 = **删 prod 数据**。改这个文件前，
+#      先确认变更是 in-place update 而不是 replace（`terraform plan` 看有没有 `-/+`）。
+#    → 名字改不了：rename 会触发 recreate，不值得（inventory 与文档里都注明了这层错位）。
+#
+# 定位与历史：
+#   · 原始决策（独立实验田，已被取代）docs/decisions/storage106-experiment-vm.md
+#   · 现行决策 docs/decisions/storage106-as-homelab-worker.md
+#   · 入编流程在 k8s/ansible/：`just setup-tailscale-worker <key>` + `just join-worker`
+#   · 备份：worker 侧 restic 夜备（backup/overlays/homelab/worker-cronjob.yaml）
+#     + 106 上的整机周备 vzdump（proxmox/ansible `just vzdump-worker`）
 
 resource "proxmox_virtual_environment_download_file" "ubuntu_noble" {
   node_name    = var.proxmox_node
@@ -19,8 +27,8 @@ resource "proxmox_virtual_environment_vm" "k3s_exp" {
   name        = "k3s-exp" # cloud-init 会拿它当 hostname
   vm_id       = 200
   node_name   = var.proxmox_node
-  description = "实验田：独立单节点 k3s（不入 homelab 集群）。ansible: proxmox/ansible just exp-k3s"
-  tags        = ["exp", "k3s"]
+  description = "homelab 集群的 worker 节点 k8s-worker-106（prod，盘上有 local-path PVC）。加入流程: k8s/ansible just join-worker"
+  tags        = ["homelab", "k3s", "worker"]
   on_boot     = true
 
   # agent 设备必须启用（否则 guest agent 无 virtio 通道可用）；agent 本体由 ansible
@@ -31,7 +39,9 @@ resource "proxmox_virtual_environment_vm" "k3s_exp" {
     timeout = "3m"
   }
 
-  # 无 agent 时优雅关机等不到响应；destroy 直接停机（实验田，无状态可虑）
+  # 无 agent 时优雅关机等不到响应，故 destroy 直接停机。
+  # ⚠️ 这一行在实验田时代无所谓（无状态），现在**不是** —— 它上面有 prod PVC。
+  # 保留是因为 destroy 本身就该先被上面那段 ☠️ 拦住，而不是靠这里做安全网。
   stop_on_destroy = true
 
   cpu {
