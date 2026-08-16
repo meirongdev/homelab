@@ -36,14 +36,6 @@ opencost:
       accessMode: ReadWriteOnce
       size: 2Gi
 
-    # 落 106 worker（2026-08-16）：纯观测组件，查的是 kubelet stats + K8s API（跨节点无所谓），
-    # 腾出 master 上约 248Mi 常驻内存。它的 PVC 是空的（见上），搬走不损失任何数据 ——
-    # 但 PVC 对象仍要删掉重建，local-path 卷不跟随调度。
-    # ⚠️ 键在 `opencost.` 下（chart 2.5.28 values 第 868 行），**不是**顶层 ——
-    # 和上面 priorityClassName 恰好相反，两个都别照抄对方的层级。
-    nodeSelector:
-      kubernetes.io/hostname: k8s-worker-106
-
     # opencost ns 不在 namespace-guardrails 的 LimitRange 覆盖范围内（该 App 只管 4 个既有 ns），
     # 故在此显式声明。
     resources:
@@ -52,6 +44,19 @@ opencost:
         memory: 200Mi
       limits:
         memory: 1Gi
+
+  # 落 106 worker（2026-08-16）：纯观测组件，查的是 kubelet stats + K8s API（跨节点无所谓），
+  # 腾出 master 上约 248Mi 常驻内存。它的 PVC 是空的（见上），搬走不损失任何数据 ——
+  # 但 PVC 对象仍要删掉重建，local-path 卷不跟随调度。
+  # ☠️ 层级三选一，全在这一个 chart 里，且**错了全是静默的**（Helm 忽略未知键）：
+  #   · `opencost.nodeSelector`（本条，chart 2.5.28 values 第 868 行 / deployment.yaml:48）
+  #   · 顶层 `priorityClassName`（第 115 行）
+  #   · `opencost.exporter.*` 只管容器级的东西（resources / persistence / 数据源）
+  # 第一次改这里就写成了 `opencost.exporter.nodeSelector` —— 渲染出来的 Deployment 里
+  # 干脆没有 nodeSelector 字段，Pod 照样落回 master，没有任何报错。判据是
+  # `kubectl -n opencost get deploy opencost -o jsonpath='{.spec.template.spec.nodeSelector}'`。
+  nodeSelector:
+    kubernetes.io/hostname: k8s-worker-106
 
   # chart 默认开启，会额外暴露一个供 AI agent 读成本数据的 HTTP 端点（:8081）。不需要。
   mcp:
