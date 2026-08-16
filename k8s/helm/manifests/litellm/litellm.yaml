@@ -48,6 +48,15 @@ data:
           model: "openrouter/*"
           api_base: https://openrouter.ai/api/v1
           api_key: os.environ/OPENROUTER_API_KEY
+      # ── NVIDIA（第四来源：build.nvidia.com 免费 API，独立透传，2026-08-16）──
+      # 通配透传：nvidia/<NVIDIA 上可用的模型 ID>（免费/收费都行，费用走 NVIDIA key）。
+      # ⚠️ key 是真实凭据：环境变量引用（os.environ/NVIDIA_API_KEY），
+      #    值由 Vault secret/homelab/litellm-nvidia → ESO → Deployment env 注入，不进 git。
+      - model_name: "nvidia/*"
+        litellm_params:
+          model: "nvidia/*"
+          api_base: https://integrate.api.nvidia.com/v1
+          api_key: os.environ/NVIDIA_API_KEY
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -96,6 +105,10 @@ spec:
             - name: OPENROUTER_API_KEY
               valueFrom:
                 secretKeyRef: { name: litellm-openrouter-secret, key: openrouter-api-key }
+            # NVIDIA 第四来源的免费 API key（Vault → ESO → 此处 env）
+            - name: NVIDIA_API_KEY
+              valueFrom:
+                secretKeyRef: { name: litellm-nvidia-secret, key: nvidia-api-key }
             # DB 迁移失败即退出（fail-closed），避免无表静默跑
             - name: ENFORCE_PRISMA_MIGRATION_CHECK
               value: "true"
