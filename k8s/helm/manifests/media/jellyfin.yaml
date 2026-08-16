@@ -49,6 +49,49 @@ spec:
       securityContext:
         runAsUser: 0       # jellyfin 官方镜像需要 root 跑（会自己降权）
         runAsGroup: 0
+      # --- OIDC SSO 插件预置（2026-08-16）---
+      # aussierk/jellyfin-plugin-oidc v1.0.7.0（targetAbi 10.11.0.0，与 Jellyfin 10.11.11 匹配）。
+      # 插件不随 git 清单可装（Jellyfin 插件靠 GUI/自定义 repository/手放 dll），这里用
+      # initContainer 幂等下载到 config PVC 的 plugins 目录，让换 PVC/重装后自动复现，
+      # 避免只靠一次 kubectl cp 的漂移。
+      # ⚠️ 只负责把 dll 放到位；Provider/Role 配置仍要在 Jellyfin Dashboard GUI 里填
+      #    （无文件/环境接口可声明式预设）。
+      initContainers:
+        - name: install-oidc-plugin
+          # busybox:latest multi-arch index（含 wget+unzip）@ 2026-08-16
+          image: busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          env:
+            - name: PLUGIN_DIR
+              value: "/config/plugins/SSO-OIDC Authentication_1.0.7.0"
+            - name: PLUGIN_ZIP
+              value: "/tmp/oidc-rbac.zip"
+            - name: PLUGIN_URL
+              value: "https://github.com/aussierk/jellyfin-plugin-oidc/releases/download/v1.0.7.0/oidc-rbac.zip"
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              if [ -f "$PLUGIN_DIR/Jellyfin.Plugin.OIDC.dll" ]; then
+                echo "[install-oidc-plugin] plugin already present, skip"
+                exit 0
+              fi
+              mkdir -p "$PLUGIN_DIR"
+              echo "[install-oidc-plugin] downloading $PLUGIN_URL"
+              wget -q -O "$PLUGIN_ZIP" "$PLUGIN_URL"
+              cd "$PLUGIN_DIR"
+              unzip -oq "$PLUGIN_ZIP"
+              rm -f "$PLUGIN_ZIP"
+              echo "[install-oidc-plugin] installed:"
+              ls
+          volumeMounts:
+            - name: config
+              mountPath: /config
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 256Mi }
       containers:
         - name: jellyfin
           # jellyfin/jellyfin:latest multi-arch index @ 2026-08-16
