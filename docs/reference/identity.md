@@ -1,6 +1,6 @@
 # Identity — ZITADEL / OIDC 接入
 
-> Last updated: 2026-08-14
+> Last updated: 2026-08-16
 > Status: 生效事实
 >
 > 身份面的部署形态与各应用接入细节。安全视角的摘要在 [security.md §3](security.md)；
@@ -81,6 +81,28 @@
   否则首次 SSO 登录 500 `Initializing OIDC provider (issuer: )`。Helm 4（默认 SSA）下
   `just deploy-argocd` 曾需一次性 `--force-conflicts` 从残留的 `kubectl-patch` manager
   手里接过 `gateway` 健康检查字段。
+
+**Jellyfin** (`media`, homelab, 2026-08-16) — **原生 OIDC 插件**（非 oauth2-proxy 反代）：
+
+- **为什么是插件不是反代**：Jellyfin 有**非浏览器客户端**（iOS/Android/Kodi/Infuse + 直连
+  流媒体 URL），走自己的 API token，不走浏览器 cookie 会话。在反代层套 oauth2-proxy 会
+  把这些客户端/流 URL 全挡掉。正解是**认证层面接 OIDC**——插件对接 ZITADEL 登录，
+  Jellyfin 的 API token / Quick Connect 不受影响。Navidrome 同理但无官方 OIDC（只用本地
+  账号，暂不接）。
+- **插件**：`aussierk/jellyfin-plugin-oidc` v1.0.7.0（安全加固 fork，`targetAbi 10.11.0.0`
+  与 Jellyfin 10.11.11 匹配）。安装靠 **jellyfin Deployment 的幂等 initContainer**
+  （下载 zip 到 `/config/plugins/SSO-OIDC Authentication_1.0.7.0/`，dll 在则跳过）——
+  因为 Jellyfin 插件不随 git 可声明式安装。初始化 + Provider/Role 配置仍要在
+  Jellyfin Dashboard GUI 里做（无文件接口可预设，见 plan）。
+- **ZITADEL client**：`jellyfin`（plain WEB OIDC + BASIC client auth，走
+  `configure-oidc-app.sh` 幂等注册，Homelab 项目）。creds → Vault
+  `secret/homelab/jellyfin-oidc`（keys `oauth_client_id`/`oauth_client_secret`）。
+- **Redirect URI**: `https://media.meirong.dev/sso/OIDC/Callback/zitadel`
+  （插件回调固定后缀，providerId = `zitadel`）。
+- **⚠️ 未完成的手动环节**（GUI，非 IaC）：Dashboard → Plugins → Provider 填
+  authority/client/scopes/claims → Test Connection（端点 pinning）→ Role Mapping
+  （单用户可映射 ZITADEL 角色 → admin）→ 登录按钮 BrandingSnippet。
+  **保留至少一个本地密码 Jellyfin admin 作为 SSO 故障恢复路径**（README 明示）。
 
 ## 无法直连 OIDC 的应用：per-app oauth2-proxy
 
