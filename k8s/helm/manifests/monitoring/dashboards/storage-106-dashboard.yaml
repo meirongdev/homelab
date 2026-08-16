@@ -340,7 +340,7 @@ data:
           "title": "SSD Life Remaining (normalized, 100=new)",
           "type": "bargauge",
           "targets": [
-            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "smartctl_attr_normalized_value{job=\"smartctl-storage-106\", attribute_name=~\"Media_Wearout_Indicator|Wear_Leveling_Count|SSD_Life_Left|Percent_Lifetime_Remain\"}", "instant": true, "legendFormat": "{{device}} ({{attribute_name}})"}
+            {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "smartctl_device_attribute{job=\"smartctl-storage-106\", attribute_name=~\"Media_Wearout_Indicator|Wear_Leveling_Count|SSD_Life_Left|Percent_Lifetime_Remain\", attribute_value_type=\"value\"}", "instant": true, "legendFormat": "{{device}} ({{attribute_name}})"}
           ]
         },
 
