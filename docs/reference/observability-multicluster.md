@@ -227,8 +227,10 @@ scrapeClasses 不会给它们 relabel，`cluster`/`nodename` 必须逐 target �
   - **⚠️ 指标名坑**: 磁盘温度是 `smartctl_device_temperature{temperature_type="current"}`
     （NVMe+SATA 统一），**不是** `smartctl_device_temperature_celsius`（v0.14.0 无此指标，
     用了面板静默空白）。SSD 磨损：NVMe `100 - smartctl_device_percentage_used`，SATA
-    `smartctl_attr_normalized_value{attribute_name=~"Media_Wearout_Indicator|Wear_Leveling_Count|SSD_Life_Left|Percent_Lifetime_Remain"}`
-    （磨损 bargauge 两个 target 都带，覆盖两种盘型）。
+    `smartctl_device_attribute{attribute_value_type="value", attribute_name=~"Media_Wearout_Indicator|Wear_Leveling_Count|SSD_Life_Left|Percent_Lifetime_Remain"}`
+    （磨损 bargauge 两个 target 都带，覆盖两种盘型）。**不是** `smartctl_attr_normalized_value`——
+    v0.14.0 已把该指标改名 `smartctl_device_attribute` 并加 `attribute_value_type` 标签
+    （`"value"`=归一化 100=new），旧名直接查不到、面板静默空白（2026-08-17 三个 dashboard 同修）。
 
 ## NodePort Services on Homelab
 
