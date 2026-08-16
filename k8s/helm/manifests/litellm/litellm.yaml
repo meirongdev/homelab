@@ -50,11 +50,13 @@ data:
           api_key: os.environ/OPENROUTER_API_KEY
       # ── NVIDIA（第四来源：build.nvidia.com 免费 API，独立透传，2026-08-16）──
       # 通配透传：nvidia/<NVIDIA 上可用的模型 ID>（免费/收费都行，费用走 NVIDIA key）。
+      # ⚠️ nvidia 不是 LiteLLM 原生 provider，需用 openai/ 前缀声明 OpenAI 兼容调用；
+      #    model_name 与 model 的双 * 让任意 nvidia/X 透传到 api_base。
       # ⚠️ key 是真实凭据：环境变量引用（os.environ/NVIDIA_API_KEY），
       #    值由 Vault secret/homelab/litellm-nvidia → ESO → Deployment env 注入，不进 git。
       - model_name: "nvidia/*"
         litellm_params:
-          model: "nvidia/*"
+          model: "openai/nvidia/*"
           api_base: https://integrate.api.nvidia.com/v1
           api_key: os.environ/NVIDIA_API_KEY
 ---
