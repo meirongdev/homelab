@@ -19,7 +19,7 @@
 | [observability/](observability/README.md) | 可观测方案 | 7 |
 | [security/](security/README.md) | 安全加固方案 | 3 |
 | [architecture/](architecture/README.md) | 舰队级架构诊断与演进建议 | 4 |
-| [storage/](storage/README.md) | 存储/备份方案 | 3 |
+| [storage/](storage/README.md) | 存储/备份方案 | 4 |
 | [archive/](archive/README.md) | **不存在于当前系统的方案**（从未实施/已取消/已被取代/前提消失） | 18 |
 
 ⚠️ **已完成、且东西还在跑的方案不进 archive** —— 它们解释了系统为何是现在这样，留在各自类别里。
