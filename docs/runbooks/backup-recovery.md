@@ -25,7 +25,15 @@
 
 **为什么换掉 Kopia**：Kopia 复杂度几乎全来自 server 模式（TLS/gRPC/NodePort/524），而它存在只为让无 NFS 的 oracle-k3s 经 gRPC 推备份。restic 无 server：每集群 CronJob 直接 `restic backup` 到同一加密仓库。
 
-**仓库**: 单一 restic 仓库落在 **storage-106 ZFS 专用 dataset** `mrstorage/restic`（`/storage/restic`，raidz1 + sanoid 快照保护、50G 配额）。AES 加密，明文不出域。
+**仓库**: 单一 restic 仓库落在 **storage-106 ZFS 专用 dataset** `mrstorage/restic`（`/storage/restic`，raidz1 + sanoid 快照保护、**100G 配额**）。AES 加密，明文不出域。
+
+> 配额 2026-08-16 由 50G 抬到 100G（当时已用 26.2G = 52%，拆开看 `usedbydataset` 25.7G、
+> 快照仅 496M —— 是仓库本体在长，不是 sanoid 拖累）。池子本身还有 6.29T，抬配额是一条命令：
+> `zfs set quota=100G mrstorage/restic`，且已收进 `proxmox/ansible/storage-playbook.yaml`
+> （`--tags quota`，读到实际值不符才 set）。
+> ⚠️ 配额不是为了省空间，是**给"仓库无限膨胀"划一条会响的线**：dataset 以 `node_filesystem_*`
+> 出现在 node-exporter 里、配额就是它的 size，`MetalNodeFilesystemLow/Critical` 才有分母。
+> 去掉配额等于那两条告警对这个仓库永远不会响。
 
 **接入**（106 已在 tailnet：`storage` / `100.110.27.111` / `tag:homelab`）:
 - homelab CronJob → `sftp:root@192.168.50.106:/storage/restic`（LAN）

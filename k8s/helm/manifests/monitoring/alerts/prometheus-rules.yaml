@@ -426,7 +426,11 @@ spec:
               裸机主机文件系统吃紧（当前 {{ $value | printf "%.1f" }}% 可用）。
               注意 106 的 /storage/restic 是 restic 仓库——填满会让**双集群夜备同时失败**。
               Check: `ssh root@192.168.50.106 'zfs list -o name,used,avail'`（pve 换 192.168.50.4 + `df -h`）。
-              2026-08-02 基线：pve / = 79% 可用，106 /storage = 92%，106 /storage/restic = 51%。
+              基线：pve / = 79% 可用、106 /storage = 92%（2026-08-02 实测）；
+              106 /storage/restic **2026-08-16 起 = 74% 可用**（配额 50G→100G，已用 26.2G）。
+              ⚠️ /storage/restic 的分母是**配额**不是池子 —— 它"满"了池子还有 6T，
+              处置多半是 `zfs set quota=` 抬一格（见 runbooks/backup-recovery.md），
+              而不是去删备份。
 
         - alert: MetalNodeFilesystemCritical
           expr: |

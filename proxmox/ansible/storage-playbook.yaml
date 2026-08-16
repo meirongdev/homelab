@@ -5,6 +5,9 @@
   vars:
     zfs_pool_name: mrstorage
     zfs_mountpoint: /storage
+    # 子数据集配额（`zfs get quota` 的原样字符串，比较用，别写成 "100GB"/"102400M"）
+    zfs_dataset_quotas:
+      - { dataset: "mrstorage/restic", quota: "100G" }
     nfs_exports:
       # `insecure` allows non-privileged (>1024) source ports. Required because the
       # k8s node has no LAN interface and reaches this server only through NAT
@@ -56,6 +59,32 @@
       ansible.builtin.command:
         cmd: zfs set mountpoint={{ zfs_mountpoint }} {{ zfs_pool_name }}
       when: zpool_import.changed
+
+    # --- 子数据集的配额（2026-08-16 补进 IaC）---
+    # 在此之前这些 `zfs set quota=` 只存在于 2026-07-06 那份 plan 的命令块里 ——
+    # 也就是说重建 106 会**静默地**丢掉配额（dataset 无上限地吃池子，不会有任何报错）。
+    # 配额的意义不是省空间（池子还有 6.29T），而是**给"备份仓库无限膨胀"划一条会响的线**：
+    # /storage/restic 作为 ZFS dataset 会以 node_filesystem_* 出现在 node-exporter 里，
+    # 配额就是它的 size → DiskSpaceLow(<15%)/DiskSpaceCritical(<8%) 才有分母可用。
+    # 去掉配额 = 那两条告警对这个仓库永远不会响。
+    # restic: 50G → **100G**（2026-08-16，已用 26.2G/52% 逼近一半时抬的；抬完 26%）。
+    - name: Read current quotas
+      ansible.builtin.command:
+        cmd: zfs get -H -o value quota {{ item.dataset }}
+      loop: "{{ zfs_dataset_quotas }}"
+      register: zfs_quota_now
+      changed_when: false
+      tags: [zfs, quota]
+
+    # 只在实际值与期望不符时才 set —— 这样 `changed` 是真的，不是 changed_when: false 糊出来的
+    - name: Ensure quotas on mrstorage child datasets
+      ansible.builtin.command:
+        cmd: zfs set quota={{ item.item.quota }} {{ item.item.dataset }}
+      loop: "{{ zfs_quota_now.results }}"
+      loop_control:
+        label: "{{ item.item.dataset }} {{ item.stdout }} -> {{ item.item.quota }}"
+      when: item.stdout != item.item.quota
+      tags: [zfs, quota]
 
     - name: Create mr user
       ansible.builtin.user:

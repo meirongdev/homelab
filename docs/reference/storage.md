@@ -1,6 +1,6 @@
 # Storage & Backup — 存储与备份
 
-> Last updated: 2026-08-16
+> Last updated: 2026-08-17
 > Status: 生效事实
 >
 > 双集群存储布局（全部 `local-path`）、NFS 退役事实、PVC 迁移程序，以及 restic 备份体系。
@@ -90,8 +90,51 @@ keep-last=2。**dump 必须落 ZFS，不能用默认的 `local`**：那和 VM �
 → [decisions/storage106-as-homelab-worker.md](../decisions/storage106-as-homelab-worker.md)
 
 
-2026-08-06 对**两个 live 集群**重新生成（上一版 08-03 的 oracle 行已有两处过期：
-漏了 `readlist-data`，且把 `uptime-kuma-data-v2` 写成了 `uptime-kuma-data`）。
+**集群里没有 `nfs-client` StorageClass** —— 引用它的 PVC 会永久 Pending。
+
+- **homelab（18 个，其中 5 个是只读 NFS）**:
+  - 落 `k8s-node`（12 个）: `data-vault-0`、`audit-vault-0`、`data-trivy-server-0`、
+    `alertmanager-…-db`、`prometheus-…-db`、`kube-prometheus-stack-grafana`、
+    `open-notebook-data-local`、`open-notebook-surreal-local`、`jobs-sg-data`（2026-08-03 新增）、
+    `litellm-pg-data-local`（2026-08-16 新增）
+  - 落 `k8s-worker-106`（3 个，2026-08-16 迁入）: `navidrome-data-local`、`jellyfin-config-local`、
+    `opencost-pvc` —— 由 worker 侧夜备覆盖，见上文第 2 条
+  - `media` ns 的 **5 个只读 NFS PV**（`media-movie/tv/anime/music/podcast`，2026-08-16 新增）
+    **不是 local-path**：真身在 106 的 ZFS（raidz1+sanoid），刻意不进 restic
+    （H4 的 `BACKUP_EXEMPT` 里逐条写了理由）
+- **oracle-k3s（12 个）**: `storage-loki-0`、`storage-tempo-0`、`opencost-pvc`、`calibre-books-local`、
+  `calibre-web-automated-config-local`、`timeslot-pvc`、`trends-data`、
+  `uptime-kuma-data-v2`、`data-trivy-server-0`、
+  `zitadel-pg-1`、`readlist-data`（2026-08-05 新增，已进夜备白名单）、
+  `apps-pg-1`（2026-08-06 新增，CNPG 共享库；同日 `miniflux-db-pvc` 随 `rss-postgres`
+  退役删除，见 [decisions/shared-postgres-platform.md](../decisions/shared-postgres-platform.md)）
+
+> `karakeep-data` / `meilisearch-data` 已于 2026-08-14 随 karakeep 整体退役并删除
+> （SQLite 仅 564K / meili 308K，用户确认无需备份）。
+
+⚠️ **CNPG 的 PVC（`apps-pg-1`、`zitadel-pg-1`）由 operator 动态创建，不在任何清单里
+声明 → CI 的 H4 规则看不见它们。** 这两个库的备份归属靠
+`backup/overlays/oracle/backup-script.yaml` 里的逐库 `pg_dump` 行保证，
+**加新租户必须手工加一行**，没有任何检查会提醒你。
+
+⚠️ 这份清单**天然会漂移**（docs-check 只查结构，查不出内容与集群不符——2026-07-31 那次 NFS
+描述就是格式完美而内容全错）。改集群存储后重新生成：`kubectl --context <ctx> get pvc -A`。
+
+- 「新增 PVC 却忘了纳入备份」**已由 CI 拦截**（`scripts/check-manifests.py` 的 H4，见
+  [manifest-safety-checks.md](manifest-safety-checks.md)）——它上线即抓到 `trends-data`
+  静默未备份约两个月。
+  ⚠️ H4 只查「PVC 有没有备份归属」，**查不出「归属了但文件名模式对不上」**：
+  `jobs-sg-data` 的 `raw/<date>/NNN.jsonl.gz` 归档匹配不上白名单那组 `*.db` / `*.json`
+  模式，得靠第 3 步 `JOBS_ARCHIVE_DIR` 整目录纳入才保得住（见
+  [jobs-sg.md](jobs-sg.md)）。这类只能实测（`restic ls` 确认文件真在快照里）。
+- ⚠️ **`local-path` 无冗余、无 ZFS 快照** —— restic 备份是上面每一个卷的**唯一安全网**。
+- 有状态服务的 PVC 带 `argocd.argoproj.io/sync-options: Prune=false` 防误删。
+
+**2026-08-17 对两个 live 集群重新生成**（上一版 08-06 已漏 media/litellm 那 7 个，
+也没反映 3 个 PVC 迁到 worker）。oracle 侧 12 个自 08-06 起无变化。
+⚠️ 同时修了本节的结构：PVC 列表此前**掉在「月度恢复演练」那节里面**，`## 当前 PVC 清单`
+标题下是空的（08-13 插入演练小节时错位，已存在 4 天）。docs-check 只查结构不查归属，
+这类错位它抓不到。
 
 ## 月度恢复演练（2026-08-13 上线）
 
@@ -128,39 +171,6 @@ restic（`restic ls … | head` 会 SIGPIPE 杀掉 restic，2026-08-13 实测踩
 - 真卡住时手工处置：`restic unlock --remove-all`
   ☠️ **只在确认没有任何备份/prune 在跑时**才能用——它会连活锁一起删。
 - 写脚本时别用 `restic … | head`：整份落盘再挑。
-**集群里没有 `nfs-client` StorageClass** —— 引用它的 PVC 会永久 Pending。
-
-- **homelab（10 个）**: `data-vault-0`、`audit-vault-0`、`data-trivy-server-0`、
-  `alertmanager-…-db`、`prometheus-…-db`、`kube-prometheus-stack-grafana`、`opencost-pvc`、
-  `open-notebook-data-local`、`open-notebook-surreal-local`、`jobs-sg-data`（2026-08-03 新增）
-- **oracle-k3s（12 个）**: `storage-loki-0`、`storage-tempo-0`、`opencost-pvc`、`calibre-books-local`、
-  `calibre-web-automated-config-local`、`timeslot-pvc`、`trends-data`、
-  `uptime-kuma-data-v2`、`data-trivy-server-0`、
-  `zitadel-pg-1`、`readlist-data`（2026-08-05 新增，已进夜备白名单）、
-  `apps-pg-1`（2026-08-06 新增，CNPG 共享库；同日 `miniflux-db-pvc` 随 `rss-postgres`
-  退役删除，见 [decisions/shared-postgres-platform.md](../decisions/shared-postgres-platform.md)）
-
-> `karakeep-data` / `meilisearch-data` 已于 2026-08-14 随 karakeep 整体退役并删除
-> （SQLite 仅 564K / meili 308K，用户确认无需备份）。
-
-⚠️ **CNPG 的 PVC（`apps-pg-1`、`zitadel-pg-1`）由 operator 动态创建，不在任何清单里
-声明 → CI 的 H4 规则看不见它们。** 这两个库的备份归属靠
-`backup/overlays/oracle/backup-script.yaml` 里的逐库 `pg_dump` 行保证，
-**加新租户必须手工加一行**，没有任何检查会提醒你。
-
-⚠️ 这份清单**天然会漂移**（docs-check 只查结构，查不出内容与集群不符——2026-07-31 那次 NFS
-描述就是格式完美而内容全错）。改集群存储后重新生成：`kubectl --context <ctx> get pvc -A`。
-
-- 「新增 PVC 却忘了纳入备份」**已由 CI 拦截**（`scripts/check-manifests.py` 的 H4，见
-  [manifest-safety-checks.md](manifest-safety-checks.md)）——它上线即抓到 `trends-data`
-  静默未备份约两个月。
-  ⚠️ H4 只查「PVC 有没有备份归属」，**查不出「归属了但文件名模式对不上」**：
-  `jobs-sg-data` 的 `raw/<date>/NNN.jsonl.gz` 归档匹配不上白名单那组 `*.db` / `*.json`
-  模式，得靠第 3 步 `JOBS_ARCHIVE_DIR` 整目录纳入才保得住（见
-  [jobs-sg.md](jobs-sg.md)）。这类只能实测（`restic ls` 确认文件真在快照里）。
-- ⚠️ **`local-path` 无冗余、无 ZFS 快照** —— restic 备份是上面每一个卷的**唯一安全网**。
-- 有状态服务的 PVC 带 `argocd.argoproj.io/sync-options: Prune=false` 防误删。
-
 ## PVC 迁移程序（改 claim 指向）
 
 历史背景：2026-07-06 的分层设计（sqlite/PG 迁 local-path、追加日志型留 NFS）已不存在——
@@ -191,6 +201,10 @@ restic（`restic ls … | head` 会 SIGPIPE 杀掉 restic，2026-08-13 实测踩
   sqlite=特权 CronJob hostPath 读 `local-path` 根 + `sqlite3 ".backup"`（RWO 卷旁路 Pod
   挂不上，故 hostPath）。保留 `--keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune`。
   凭据 Vault `secret/homelab/restic`（含 base64 SSH key + 周期 Vault token）→ ESO。
+- **容量**: dataset 配额 **100G**（2026-08-16 由 50G 抬起，当时已用 26.2G；抬后 26%）。
+  由 `proxmox/ansible/storage-playbook.yaml --tags quota` 收敛（此前只存在于 07-06 那份 plan 的
+  命令里，重建 106 会静默丢失）。⚠️ 配额是 `MetalNodeFilesystemLow/Critical` 对这个仓库的**分母** ——
+  去掉配额那两条告警就永远不会响；而它报警时池子通常还很空，处置是抬配额不是删备份。
 - **部署**: 双集群共用 kustomize base+overlay（`backup/`，2026-07-07 合并）；homelab 走 ArgoCD
   `backup` App（`backup/overlays/homelab`），oracle 随 `oracle-k3s` App（`backup/overlays/oracle`）。
   手动触发 `just backup-run`（`k8s/helm/`）。
