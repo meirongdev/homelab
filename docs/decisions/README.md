@@ -23,6 +23,7 @@
 | [slo-availability-targets](slo-availability-targets.md) | 99% 推导 + 两维判据；☠️ 实测揭穿分母（vault/argocd 真实流量≈0）；预算只做信号不做闸门 |
 | [renovate-adoption](renovate-adoption.md) | 采纳 Renovate 管版本钉扎（🚧 待装 GitHub App）；与 V1-V3 分工；三条自我约束（不 automerge · 不开 pinDigests · 不管 docs/） |
 | [cf-analytics-custom-exporter](cf-analytics-custom-exporter.md) | 按域名访问 IP 数自写 exporter：官方/lablabs 实测在 Free zone 全废（`httpRequests1mGroups` 403），且**都只有 zone 级 uniques** |
+| [litellm-llm-gateway](litellm-llm-gateway.md) | Bifrost → **LiteLLM**：配置进 git + 自带认证 + Postgres；双自托管来源 DGX 主 + Mac 兜底 fallback |
 
 ## 写新 ADR
 

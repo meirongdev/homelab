@@ -22,6 +22,7 @@
 | RSSHub (+browserless/redis) | oracle-k3s | `rss-system` | Internal only |
 | Calibre-Web | **oracle-k3s** | `personal-services` | `book.meirong.dev`（2026-08-03 迁移） |
 | Open Notebook (AI 研读) | homelab | `personal-services` | `notebook.meirong.dev`（模型走 DGX + Mac OMLX，见 [open-notebook.md](open-notebook.md)） |
+| LiteLLM (LLM 网关) | homelab | `litellm` | `llm.meirong.dev`（inference API + 自带认证 admin UI `/ui`；DGX `deepseek-v4-flash` 主 + Mac `Qwen3.6-35B` 兜底，见 [decisions/litellm-llm-gateway.md](../decisions/litellm-llm-gateway.md)） |
 | jobs-sg (SG 岗位周报) | homelab | `jobs-sg` | `jobs.meirong.dev`（2026-08-03 上线；独立 ns + 3 个 CronJob，见 [jobs-sg.md](jobs-sg.md)） |
 | Jellyfin (视频) | homelab | `media` | `media.meirong.dev`（2026-08-16；媒体读 106 只读 NFS，config 走 local-path，[OIDC SSO 接入中](identity.md#jellyfin)） |
 | Navidrome (音乐) | homelab | `media` | `music.meirong.dev`（2026-08-16；媒体读 106 只读 NFS，DB 走 local-path） |
