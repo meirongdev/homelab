@@ -168,7 +168,13 @@ trivyOperator:
   scanJobNodeSelector:
     kubernetes.io/hostname: k8s-worker-106
 
-# operator 本体（控制器，常驻）也落 worker：状态全在 CR（etcd）里，无 PVC、无节点语义，
-# 掉线只是暂停扫描。腾出 master 上约 194Mi 常驻内存（2026-08-16 实测 RSS）。
-nodeSelector:
-  kubernetes.io/hostname: k8s-worker-106
+# ☠️ **顶层 `nodeSelector` 不能设**（2026-08-16 试过，把 trivy-server 钉成了 23 分钟 Pending）：
+# chart 0.33.1 把同一个 `.Values.nodeSelector` 同时套给 operator 的 Deployment
+# （templates/deployment.yaml:141）和内置 trivy-server 的 StatefulSet
+# （templates/trivy-server/statefulset.yaml:159）—— **没有分开的键**。
+# 而 trivy-server 有 PVC `data-trivy-server-0`（漏洞库缓存，local-path 绑在 k8s-node），
+# 卷不跟随调度 → 一钉 worker 就 `didn't match PersistentVolume's node affinity`。
+# 想把 operator 也挪过去，得连 trivy-server 的 PVC 一起搬；但 worker 只有 2311Mi
+# allocatable、当时 requests 已 78%，再加 server 的 256Mi 会挤掉扫描 Job 自己的头寸。
+# 判断：CPU 脉冲在**扫描 Job**上，上面那条 scanJobNodeSelector 已经拿到了绝大部分收益，
+# operator(194Mi)/server(51Mi) 留在 master 是划算的取舍。
