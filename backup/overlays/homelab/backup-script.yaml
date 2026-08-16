@@ -111,6 +111,22 @@ data:
     # 其中的 checkpoints.sqlite（对话状态）由上面第 2 步的 *.sqlite* 模式捞走。
     # ⚠️ 直接经 UI 拖拽上传、且不在书库里的原件是唯一真丢的东西（提取文本/向量在 DB 里）。
 
+    # --- 2c) LiteLLM：Postgres 逻辑 dump（pg_dump）---
+    # litellm 的 keys/spend 在 Postgres（litellm-pg, local-path）——数据目录**不能**像 sqlite
+    # 那样原样拷贝（无 WAL 自恢复），必须 pg_dump 一致性 dump（与 ZITADEL/它的 DB 同哲理）。
+    # backup 容器 alpine:3.22 自带 postgresql-client（pg17），与服务端版本匹配。
+    # 凭据来自 external-secret.yaml 的 LITELLM_DB_PASSWORD（Vault secret/homelab/litellm-db → db_password）。
+    echo "[backup] pg_dump litellm DB..."
+    export PGPASSWORD="$(cat /creds/LITELLM_DB_PASSWORD 2>/dev/null || true)"
+    if [ -z "$PGPASSWORD" ]; then
+      echo "[warn] LITELLM_DB_PASSWORD absent (vault secret/homelab/litellm-db not written?) — litellm NOT in this backup"
+    elif pg_dump -h litellm-pg.litellm.svc -U litellm -d litellm -Fc -f /work/litellm.dump 2>/dev/null; then
+      echo "[backup]   litellm.dump = $(wc -c < /work/litellm.dump) bytes"
+    else
+      echo "[warn] pg_dump litellm failed — litellm NOT in this backup"
+      rm -f /work/litellm.dump
+    fi
+
     # --- 3) restic backup + 保留策略 ---
     # jobs-sg 的 raw/ 归档（raw/<date>/NNN.jsonl.gz）直接纳入，不经 /work 中转：
     # /work 是 emptyDir，每晚拷一遍会白吃节点临时盘。同 oracle overlay 的 BOOKS_DIR 做法。

@@ -93,6 +93,7 @@ BACKUP_EXEMPT = {
     #    加租户必须手工加一行，本检查器不会提醒。见 decisions/shared-postgres-platform.md。
     "open-notebook-surreal-local": "SurrealDB 数据目录，由 HTTP /export 逻辑导出覆盖（见 runbooks/backup-recovery.md）",
     "calibre-books-local": "23G 书库，由 backup-script.yaml 的 BOOKS_DIR 整目录纳入 restic，不走 sqlite 白名单",
+    "litellm-pg-data-local": "litellm keys/spend 的 Postgres（litellm-pg），由 backup-script.yaml 的 2c) 段 pg_dump 逻辑导出覆盖（与 CNPG 的 apps-pg/zitadel-pg 同哲理，见 decisions/shared-postgres-platform.md）",
     # 多媒体仓库的媒体是**只读 NFS**（media-movie/tv/anime/music/podcast）——数据真相源在 NAS
     # 106 的 ZFS（raidz1 + sanoid 快照保护），serving 层读的是只读副本；restic 目标也是 106，
     # 跨机冗余本就做不到，媒体再进 restic 无意义。决策与取舍见

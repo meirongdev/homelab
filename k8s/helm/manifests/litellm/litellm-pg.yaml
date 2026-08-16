@@ -1,0 +1,81 @@
+# LiteLLM 的 keys/spend DB。单副本 + RWO PVC → Recreate。
+# homelab local-path（全集群唯一 SC；H4：新增 PVC 需有备份归属 —— litellm-pg-data-local
+# 已纳入 homelab restic pg_dump 备份，见 backup/overlays/homelab/backup-script.yaml）。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: litellm-pg-data-local
+  namespace: litellm
+  annotations:
+    # DB 是运行时数据，禁止 ArgoCD prune 级联删除
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm-pg
+  namespace: litellm
+  labels:
+    app: litellm-pg
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: litellm-pg
+  strategy:
+    type: Recreate # 单 RWO PVC
+  template:
+    metadata:
+      labels:
+        app: litellm-pg
+    spec:
+      containers:
+        - name: postgres
+          # postgres:17-alpine @ 2026-08-01（backup 容器 alpine:3.22 自带 pg17 客户端，版本匹配）
+          image: postgres:17-alpine@sha256:af194ccf3e2d7fe367012c7b88ce8b816c5c889b18a5b316799a1f0d7eac746a
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: litellm
+            - name: POSTGRES_USER
+              value: litellm
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: litellm-db-secret, key: postgres-password }
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 500m, memory: 1Gi }
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "litellm", "-d", "litellm"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: litellm-pg-data-local
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm-pg
+  namespace: litellm
+spec:
+  type: ClusterIP
+  selector:
+    app: litellm-pg
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres
