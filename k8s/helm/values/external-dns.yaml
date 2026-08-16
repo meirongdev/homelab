@@ -54,3 +54,11 @@ serviceMonitor:
   enabled: true
   additionalLabels:
     release: kube-prometheus-stack
+
+# 落 106 worker（2026-08-16）：无状态调和器，状态在 Cloudflare 的 TXT registry 里
+# （txtOwnerId: homelab-externaldns），本地盘上什么都没有。
+# ⚠️ 接受的降级：worker 掉线期间**新 HTTPRoute 拿不到 DNS 记录**（存量记录不受影响，
+# policy 是 upsert-only，也不会误删）。新加子域名发现"DNS 不生效"时，先看这个 pod 在不在。
+# 它标着 priorityClassName: high —— 那管的是驱逐顺序，与放哪个节点无关。
+nodeSelector:
+  kubernetes.io/hostname: k8s-worker-106

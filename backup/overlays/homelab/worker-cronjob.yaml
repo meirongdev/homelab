@@ -1,0 +1,77 @@
+---
+# worker 侧夜备（2026-08-16）—— 补上 restic 覆盖不到的第二个节点。
+#
+# base 的 restic-backup 钉 control-plane 且只读**所在节点**的 hostPath，
+# 所以 homelab 变双节点后，k8s-worker-106 上的 local-path PVC 一直不在任何备份里。
+# 本 CronJob 是那条覆盖的另一半：同一个 106 仓库、不同 `--host`、独立保留策略。
+# 脚本与四条设计差异见 worker-backup-script.yaml 的文件头。
+#
+# ⚠️ 不复用 base + patch：base 那份带 vault/pg/surrealdb 的逻辑导出与 control-plane
+# nodeSelector，patch 掉的比留下的多，独立一份更好读也更难写错。
+# 代价是**两份脚本要一起改**（SSH/仓库地址那几行是重复的）—— 改一份时记得看另一份。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: restic-backup-worker
+  namespace: backup
+spec:
+  # 02:00：排在 master(03:00) 前面，让本 Job forget 掉的数据能被 master 那次的
+  # `forget --prune` 顺手回收；也避开 oracle(03:30) 与月度恢复演练(每月 1 号 04:00)。
+  # ⚠️ 名字必须含 "backup"：BackupJobNotRunRecently / BackupJobFailed 两条告警
+  # 靠 `cronjob=~".*backup.*"` / `job_name=~".*backup.*"` 匹配（见 monitoring/alerts）。
+  schedule: "0 2 * * *"
+  timeZone: "Asia/Shanghai"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 1800   # worker 上的数据量是 KB~MB 级；超 30min 即视为卡住
+      backoffLimit: 2
+      template:
+        metadata:
+          labels: { app: restic-backup-worker }
+        spec:
+          restartPolicy: Never
+          # ☠️ 钉死 worker：本 Job 的全部意义就是备份**这台**的 hostPath。
+          # 漂到 master 会备出与 restic-backup 重复的内容，还占着 homelab-worker 这个
+          # host 名 —— 快照看着是新鲜的，实际 worker 的数据一个字节都没进去。
+          nodeSelector:
+            kubernetes.io/hostname: k8s-worker-106
+          securityContext:
+            runAsUser: 0             # 需 root 读 hostPath 下各 uid 的数据文件 + 写 /root/.ssh
+          containers:
+            - name: backup
+              image: alpine:3.22     # 与 base 同版本；这里用不到 pg client，但保持一致便于比对
+              command: ["sh", "/scripts/backup.sh"]
+              env:
+                # 日志里写清楚它真的跑在哪台 —— nodeSelector 写错时这行是最快的证据
+                - name: NODE_NAME
+                  valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+                - name: POD_NAME
+                  valueFrom: { fieldRef: { fieldPath: metadata.name } }
+              resources:
+                requests: { cpu: "50m", memory: "128Mi" }
+                # worker 是 2c/3G 的慢核 VM：给 restic 半核短时突发，别在夜里把它压死。
+                limits: { cpu: "500m", memory: "384Mi" }
+              volumeMounts:
+                - { name: script,    mountPath: /scripts,   readOnly: true }
+                - { name: creds,     mountPath: /creds,     readOnly: true }
+                - { name: work,      mountPath: /work }
+                - { name: localpath, mountPath: /localpath, readOnly: true }
+          volumes:
+            - name: script
+              configMap: { name: restic-backup-worker-script }
+            - name: creds
+              # 与 master 同一个 Secret（external-secret.yaml，Vault secret/homelab/restic）。
+              # 本脚本只用其中的 RESTIC_PASSWORD 与 SSH_KEY_B64。
+              secret: { secretName: restic-backup, defaultMode: 0400 }
+            - name: work
+              emptyDir: {}
+            - name: localpath
+              # ⚠️ DirectoryOrCreate 而不是 base 的 Directory：worker 上还没有任何 PVC 时
+              # /var/lib/rancher/k3s/storage **根本不存在**（2026-08-16 实测），
+              # type: Directory 会让本 Job 每晚 FailedMount —— 一条永远红着的备份告警，
+              # 恰恰在真正需要它之前就被当噪音忽略。
+              hostPath: { path: /var/lib/rancher/k3s/storage, type: DirectoryOrCreate }

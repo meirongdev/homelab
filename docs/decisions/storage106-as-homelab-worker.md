@@ -70,9 +70,14 @@ IaC 落点：
 - **106 与 prod 的解耦被主动放弃**。前一份决策把它列为不变量（源自 2026-07-11 NFS
   退役）；现在 106 上的 VM 下线 = prod 集群 node NotReady。这是本次接受的代价。
 - 实验田没有了。要重开得另找落点。
-- 新节点**未进备份白名单**（H4）：目前它上面只有 DaemonSet，无 PVC。
-  ⚠️ 一旦在 worker 上排有状态负载，`local-path` PVC 会落在这台机的盘上，
-  且**不在 restic 的 homelab overlay 里** —— 必须先加白名单。
+- ~~新节点**未进备份白名单**（H4）：目前它上面只有 DaemonSet，无 PVC。~~
+  **2026-08-16 已解决**：worker 有了自己的夜备 Job
+  （`backup/overlays/homelab/worker-cronjob.yaml`，02:00，`--host homelab-worker`，
+  整目录扫不筛 PVC 名）+ 106 上的整机周备 vzdump（`just vzdump-worker`）。
+  当时查清的实况：worker 的 PVC 曾是**三重裸奔** —— restic 不覆盖、VM 盘在 `local-lvm`
+  不在 `mrstorage` 故 sanoid 拍不到、106 的 `jobs.cfg` 一条 vzdump 都没有。
+  ⚠️ CI 的 H4 仍只解析 master 那份白名单，新 PVC 照样要写进去才过 CI。
+  细节见 [reference/storage.md](../reference/storage.md)。
 - `k8s/cilium/values.yaml` **未改也不需要改**：加节点不涉及 values，Cilium
   DaemonSet 自动排布。（Cilium 仍是 manual-helm。）
 

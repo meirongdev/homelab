@@ -14,5 +14,10 @@ resources:
   # 只在 homelab 侧有一份 —— 它读的是同一个 106 仓库，一次演练同时覆盖两个集群的快照。
   - restore-drill-script.yaml
   - restore-drill-cronjob.yaml
+  # worker 侧夜备（2026-08-16）：base 的 Job 钉 control-plane、只备**所在节点**的
+  # hostPath，k8s-worker-106 上的 local-path PVC 因此一直不在任何备份里。
+  # 这两个文件补上另一半覆盖（同仓库、--host homelab-worker、02:00 错峰）。
+  - worker-backup-script.yaml
+  - worker-cronjob.yaml
 patches:
   - path: cronjob-patch.yaml

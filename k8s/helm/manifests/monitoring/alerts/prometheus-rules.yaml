@@ -107,23 +107,30 @@ spec:
         # 保证不了"落对节点"，这条告警负责把缺口变响。
         # 已知局限：kubelet_volume_stats 只在有 pod 挂载时存在——负载缩到 0 后告警会
         # 自行恢复，但数据还躺在该节点盘上；处置时别只看告警消没消。
+        #
+        # 2026-08-16 更新：k8s-worker-106 已有**自己的**夜备路径
+        # （backup/overlays/homelab/worker-cronjob.yaml，02:00，--host homelab-worker），
+        # 故从本告警排除 —— 它不再是"无备份节点"。排除是**按节点名写死**的，不是按角色：
+        # 将来再加节点，它会照常被这条抓到（那正是要的），除非也给它建一条备份路径并在此登记。
         - alert: PVCOnUnbackedNode
           expr: |
-            count by (cluster, node) (kubelet_volume_stats_capacity_bytes{cluster="homelab", node!=""})
+            count by (cluster, node) (
+              kubelet_volume_stats_capacity_bytes{cluster="homelab", node!="", node!="k8s-worker-106"}
+            )
               unless on (node) kube_node_role{cluster="homelab", role="control-plane"}
           for: 30m
           labels:
             severity: warning
             component: backup
           annotations:
-            summary: "homelab 节点 {{ $labels.node }} 上出现 PVC，但夜备只覆盖 control-plane"
+            summary: "homelab 节点 {{ $labels.node }} 上出现 PVC，但该节点没有任何备份路径"
             description: |
-              该节点上有 local-path PVC 正被 kubelet 统计，而 restic 备份 Job 钉在
-              control-plane、只备份所在节点的 /var/lib/rancher/k3s/storage ——
+              该节点上有 local-path PVC 正被 kubelet 统计，而 restic 备份 Job 只覆盖
+              control-plane（base）与 k8s-worker-106（worker-cronjob.yaml）——
               这些 PVC **不在任何备份里**，且备份任务自身完全正常。
-              处置：把负载迁回 control-plane（local-path 数据不跟随调度，按
+              处置：把负载迁回已被覆盖的节点（local-path 数据不跟随调度，按
               runbooks/stateful-service-cross-cluster-migration.md 的节点内变体走），
-              或先为该节点建立独立备份路径再有意豁免。
+              或照 worker-cronjob.yaml 的样子给该节点建一条备份路径，再把它加进上面的排除。
               背景：docs/reference/storage.md。
 
         # ── 月度恢复演练（2026-08-13 上线）─────────────────────────────────────
