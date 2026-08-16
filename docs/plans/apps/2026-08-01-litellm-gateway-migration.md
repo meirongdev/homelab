@@ -1,6 +1,6 @@
 # LiteLLM LLM 网关迁移（替换 Bifrost）
 
-> 日期: 2026-08-01
+> 日期: 2026-08-01（2026-08 补全：纳入第二自托管上游 MacPro M2 OMLX）
 > 状态: 📐 设计
 > 结论: 把 homelab 的 LLM 网关从 **Bifrost**（`llm.meirong.dev`）整体换成 **LiteLLM proxy**（`litellm/litellm:v1.94.1`），
 > 同主机名、同 OpenAI 兼容面，Bifrost 无真实使用 → **不设计回退**。
@@ -9,7 +9,9 @@
 > has parity coverage and production evidence"）。**动机不是 Rust**，而是：
 > (1) 网关真正被用起来之前的"网关即代码"改造（config.yaml 进 git，替代 Bifrost 的 PVC-SQLite 配置漂移坑）；
 > (2) 砍掉 oauth2-proxy + ZITADEL client 一组只为"无鉴权 admin 面"而生的配套（LiteLLM 管理面自带认证）；
-> (3) 为 ROADMAP 上"双 DGX fallback"铺平（LiteLLM 原生支持 fallback/load-balancing）。
+> (3) 为 ROADMAP 上"多自托管算力 fallback"铺平（LiteLLM 原生支持 fallback/load-balancing）——
+>     本次补全把第二个自托管推理源 **MacPro M2 OMLX**（`100.89.15.120:8000`，Qwen3.6-35B）一并收进网关，
+>     与 DGX 组成「DGX 主 + Mac 兜底」的 fallback 链（接线可行性由 Open Notebook 实证，见 §1.3）。
 
 ## 1. 现状与动机
 
@@ -20,6 +22,8 @@
 - 架构：Cloudflare Tunnel → Cilium Gateway → HTTPRoute（`/v1,/openai,/anthropic,/genai` 直连 Bifrost +
   virtual-key 门；其余 → oauth2-proxy → ZITADEL 登录）。
 - Bifrost 上游：`http://100.97.87.120:8000`（DGX Spark vLLM `deepseek-v4-flash`），pod → tailnet 直连已实测可行。
+- **第二个自托管来源（2026-08 补）**：MacPro M2 OMLX `http://100.89.15.120:8000`（OpenAI 兼容，
+  Qwen3.6-35B / 262k ctx），同为 tailnet 可达；接线已被 Open Notebook 生产使用（见 §1.3）。
 - 已知脆弱点（写进 [bifrost plan](../archive/2026-06-07-bifrost-llm-gateway.md) 的坑）：Bifrost 的 enforce 开关 + 路由规则 +
   虚拟 key 全在 **PVC SQLite**（`bifrost-data-local`），不在 git；重建 PVC 即"开门"。
 - 消费方：`~/.zshrc` 的 `BIFROST_VK` + `codex-dgx` alias → `~/.codex/bifrost.config.toml`
@@ -33,11 +37,33 @@
 | 配置存放 | PVC SQLite（重建即丢，git 里只有 intent） | `config.yaml` 进 git（ConfigMap），GitOps 一致 |
 | 虚拟 key / spend | 有 key，无 spend | key + spend + budget 头等公民（Postgres 持久化） |
 | admin 面鉴权 | 无（要 oauth2-proxy 兜） | 自带 UI 登录（`UI_USERNAME/UI_PASSWORD`） |
-| fallback / 多上游 | 支持 | 支持（ROADMAP 双 DGX fallback 可落） |
+| fallback / 多上游 | 支持 | 支持（ROADMAP 多自托管算力 fallback 可落） |
 | 生态/维护 | 较新、小众 | 主流、活跃（v1.94.x 稳定线） |
 | 资源 | Go，~384Mi | Python，~1Gi（单节点可接受，见 Task 2） |
 
-### 1.3 关键事实（2026-08-01 已核实）
+### 1.3 双自托管来源的接线可行性（2026-08 补全，Open Notebook 实证）
+
+两个推理源对 **homelab master（k8s-node）都直连可达**，且已被 Open Notebook 生产使用——
+[open-notebook.md](../../reference/open-notebook.md) 是接线事实的唯一真相源：
+
+| 来源 | 端点 | 模型 | ctx | 备注 |
+|------|------|------|-----|------|
+| DGX Spark vLLM | `100.97.87.120:8000/v1` | `deepseek-v4-flash` | 1M | 跨境链路（SG→CN，DERP hkg，RTT 66–83ms），忽略鉴权 |
+| MacPro M2 OMLX | `100.89.15.120:8000/v1` | `mlx-community__Qwen3.6-35B-A3B-nvfp4` | 262k | 笔记本，多模型按需加载；embedding 密集任务与 35B 并发时延迟会跳 |
+
+要点（决定 gateway 配置怎么写的坑）：
+
+- **两个后端对 k8s-node 直接可达，经 Open Notebook 已实测**：不需要任何代理/dgx-proxy 那类转发层。
+  ⚠️ **worker-106 不行**（tagged-device netmap 里没有这两个源），网关必须留在 master。
+- **Mac 也是"any token works"**（OMLX 忽略鉴权，Open Notebook 统一用 openai_compatible + dummy）——
+  `api_key: dummy` 可留在 git，与 DGX 同理。
+- **via LiteLLM 加** fallback 链相对 Bifrost 是净收益：DGX 挂了自动切 Mac，而不是 client 手动换 base_url。
+- **不做的事**：不把 Mac 的 embedding/STT/TTS/rerank 接进网关（§范围见 §3 决策 7）——那些仍由
+  Open Notebook 直连 Mac，网关只管对话/生成两个 chat 模型。
+- **RTT 语义差异**：Mac 在境内、延迟低，但**笔记本无 SLA**（电池/合盖会掉）；DGX 跨境但常驻。
+  fallback 语义取「DGX 主 + Mac 兜底」，不是双向均衡——见 §3 决策 6。
+
+### 1.4 关键事实（2026-08-01 已核实）
 
 - LiteLLM 官方仓库自述 "Rust core with Python SDK"；`litellm-rust/crates/ai-gateway` 目前**只做 realtime
   WebSocket**（`/v1/realtime`），chat completions / responses / keys / 配置仍全在 Python proxy。
@@ -65,22 +91,23 @@ LiteLLM proxy（litellm ns, v1.94.1, config.yaml 在 git）
   ├─ /v1/chat/completions, /v1/responses … → key 鉴权（master/虚拟 key）
   ├─ /ui（admin UI）→ LiteLLM 自带登录（UI_USERNAME/UI_PASSWORD，Vault→ESO）
   └─ keys/spend → PostgreSQL litellm-pg（homelab local-path PVC）
-        ▼
-DGX Spark vLLM http://100.97.87.120:8000/v1 （deepseek-v4-flash）
+        ▼  fallback 链（DGX 主 → Mac 兜底）
+  主: DGX Spark vLLM http://100.97.87.120:8000/v1 （deepseek-v4-flash, 1M ctx）
+  兜底: MacPro M2 OMLX http://100.89.15.120:8000/v1 （Qwen3.6-35B, 262k ctx）
 ```
 
 ### 组件清单
 
 | 组件 | 变化 | 说明 |
 |------|------|------|
-| `litellm` Deployment + Service | 新增 | `litellm/litellm@sha256:29b7…`（v1.94.1 amd64），端口 4000 |
+| `litellm` Deployment + Service | 新增 | `litellm/litellm@sha256:29b7…`（v1.94.1 amd64），端口 4000；config.yaml 含 DGX + Mac 双上游 fallback（见 Task 2 config） |
 | `litellm-pg`（Postgres 17）| 新增 | 单副本、local-path PVC `litellm-pg-data-local`（2Gi） |
 | `litellm` HTTPRoute | 新增 | `llm.meirong.dev` catch-all → `litellm:4000` |
 | oauth2-proxy + ZITADEL client `bifrost-admin` | **移除** | LiteLLM 管理面自带认证，不再需要（见 §3 决策） |
 | `bifrost` App / namespace / PVC | **移除** | 随 Bifrost App 删除级联清理（不设计回退） |
 | 备份 | 改 | homelab restic 脚本加 `pg_dump litellm`；删 `bifrost-data` 模式 |
 | SLO | 改 | `bifrost-availability` → `litellm-availability` |
-| 消费方 | 改 | `~/.zshrc` / `~/.codex` 的 key 与命名 |
+| 消费方 | 改 | `~/.zshrc` / `~/.codex` 的 key 与命名；可选加 `codex-mac` profile 直指 Mac 兜底模型 |
 
 ## 3. 关键决策
 
@@ -97,11 +124,24 @@ DGX Spark vLLM http://100.97.87.120:8000/v1 （deepseek-v4-flash）
    `httproute/bifrost/bifrost` 变更为 `httproute/litellm/litellm`（`upsert-only`，无手工 DNS）。
 4. **镜像按 digest 钉死**（仓库惯例）：`litellm/litellm:v1.94.1` 与 `postgres:17-alpine`（amd64 digest，见 §5）。
 5. **model 名保留别名 `custom_dgx/deepseek-v4-flash`**：消费方（Codex profile）的 model 字段零改动，只换 key。
+6. **双自托管来源 fallback：DGX 主 + Mac 兜底**（2026-08 补，替代原"双 DGX fallback"设想）。在
+   config.yaml 里给无前缀 `deepseek-v4-flash` 声明**主上游 DGX + `fallbacks: ["mac/qwen3.6-35b"]`**，
+   用 LiteLLM 原生 fallback 承接 DGX 不可达时自动切 Mac（Mac 也作为独立 `mac/qwen3.6-35b` 模型，
+   供想绕开 fallback 的消费方直接指名）。理由：
+   - 与 Open Notebook 已实证的接线一致（DGX 主、Mac 兜底），零新网络层；
+   - DGX 是跨境共享、常驻、但不可控（他人机器、无告警）；Mac 在境内低延迟但**笔记本无 SLA**
+     （电池/合盖/负载可能掉）。两源互不能全信，互为兜底是最优编排。
+   - round-robin 权重：主写死 DGX 优先，**不做双向均衡**（Mac 是笔记本，不该平摊生产性对话流量）。
+7. **网关只接对话/生成模型，不接 Mac 的 embedding/STT/TTS/rerank**（2026-08 补）。那些多模态模型仍由
+   Open Notebook 直连 Mac（见 §1.3）；网关的单一职责是"一个 OpenAI 兼容入口 + key/spend + DGX/Mac
+   chat fallback"。理由：embedding/音频有各自的调用方（Open Notebook）与语义（批任务、高延迟），
+   塞进网关只会放大 `llm.meirong.dev` 的故障面，收益为零。今后确有 RAG 消费方需要统一 embedding 面时再扩。
 
 ## 4. 不做的事
 
 - **不做回退设计**：Bifrost 无真实使用，`bifrost` App/ns/PVC 直接删除。
 - **不接入 Rust ai-gateway**：当前只支持 `/v1/realtime`，与 chat/responses 无关。
+- **不把 Mac 的多模态模型接进网关**：embedding/STT/TTS/rerank 仍由 Open Notebook 直连 Mac（§3 决策 7）。
 - **不新增 Prometheus 抓取**：沿用 envoy L7 SLO；LiteLLM `/metrics` 留作后续增强。
 - **不动 Cloudflare**：无 CF AI Gateway 资源，隧道/DNS 走既有 external-dns。
 
@@ -117,9 +157,9 @@ DGX Spark vLLM http://100.97.87.120:8000/v1 （deepseek-v4-flash）
 
 ## Task 1 — Vault 密钥 + 上游预检
 
-**目的**：LiteLLM 的所有密钥真相源进 Vault；先确认 DGX vLLM 可用（含 `/v1/responses`），再动手。
+**目的**：LiteLLM 的所有密钥真相源进 Vault；先确认**两个**上游可用——DGX vLLM（含 `/v1/responses`）与 Mac OMLX——再动手。
 
-- [ ] **Step 1: 确认 vLLM 上游可达且支持 responses**
+- [ ] **Step 1: 确认 DGX vLLM 上游可达且支持 responses**
 
 ```bash
 curl -s -m 10 http://100.97.87.120:8000/v1/models
@@ -131,6 +171,21 @@ curl -s -o /dev/null -w '%{http_code}\n' -m 30 -X POST http://100.97.87.120:8000
 ```
 
 （本沙箱实测连不通 DGX —— tailnet/时段问题，执行前以本机/集群内重试为准。）
+
+- [ ] **Step 1b: 确认 Mac OMLX 上游可达（第二个来源）**
+
+```bash
+curl -s -m 10 http://100.89.15.120:8000/v1/models
+# 期望：列表含 mlx-community__Qwen3.6-35B-A3B-nvfp4（若没有：模型未加载，笔记本按需换入，
+#       或 OMLX 进程假死 —— 重启方式见 runbooks/open-notebook-ingest.md）
+curl -s -o /dev/null -w '%{http_code}\n' -m 60 -X POST http://100.89.15.120:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"mlx-community__Qwen3.6-35B-A3B-nvfp4","messages":[{"role":"user","content":"hi"}],"max_tokens":8}'
+# 期望：200 + 真补全（笔记本 35B 首 token 可能 30s+，给足超时）
+```
+
+> ⚠️ 两个上游都必须在同一次执行里确认，因为它们是一个 fallback 链的两端——单测一个"活"，链的另一半可能
+> 已长期不可用而不自知（Mac 尤其：笔记本，无告警，掉线是常事）。
 
 - [ ] **Step 2: 生成并写入 Vault 密钥**
 
@@ -192,19 +247,29 @@ metadata:
   namespace: litellm
 data:
   # ⚠️ api_base 必须带 /v1 后缀 —— LiteLLM 不会像 Bifrost 那样自动补。
-  # api_key: dummy 不是机密（DGX vLLM 忽略鉴权，"any token works"），因此可留在 git。
+  # api_key: dummy 不是机密（DGX vLLM 与 Mac OMLX 都忽略鉴权，"any token works"），因此可留在 git。
   # 强制 key 鉴权由 env LITELLM_MASTER_KEY 实现（general_settings.master_key 语义=require a key for all calls）。
   config.yaml: |
     model_list:
+      # ── DGX（主，向后兼容：custom_dgx/ 前缀原名不变）──
       - model_name: custom_dgx/deepseek-v4-flash
         litellm_params:
           model: openai/deepseek-v4-flash
           api_base: http://100.97.87.120:8000/v1
           api_key: dummy
-      # 无前缀别名，方便未来其它消费方直接叫 deepseek-v4-flash
+      # ── 无前缀别名 deepseek-v4-flash：DGX 主 + Mac 兜底（fallbacks 键 = 严格的"主→兜底"，非轮询）──
       - model_name: deepseek-v4-flash
         litellm_params:
-          model: custom_dgx/deepseek-v4-flash
+          model: openai/deepseek-v4-flash
+          api_base: http://100.97.87.120:8000/v1
+          api_key: dummy
+          fallbacks: ["mac/qwen3.6-35b"]
+      # ── Mac 兜底（也是独立可用的实际模型）──
+      - model_name: mac/qwen3.6-35b
+        litellm_params:
+          model: openai/mlx-community__Qwen3.6-35B-A3B-nvfp4
+          api_base: http://100.89.15.120:8000/v1
+          api_key: dummy
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -522,7 +587,7 @@ kubectl --context k3s-homelab -n litellm get pods,pvc
 
 ## Task 4 — 端到端验证
 
-**目的**：证明"入口可达 + key 门生效 + 真推理通 + responses 通 + UI 可登"。
+**目的**：证明"入口可达 + key 门生效 + 真推理通 + responses 通 + **双上游各自可真推 + fallback 自动切换** + UI 可登"。
 
 - [ ] **Step 1: 代理内网冒烟（绕过公网）**
 
@@ -531,15 +596,15 @@ kubectl --context k3s-homelab -n litellm port-forward svc/litellm 4000:4000 &
 curl -s localhost:4000/health/readiness        # 期望 200 OK
 MASTER_KEY=$(vault kv get -field=master_key secret/homelab/litellm)
 curl -s localhost:4000/v1/models -H "Authorization: Bearer $MASTER_KEY"
-# 期望：data 含 deepseek-v4-flash（与 custom_dgx/deepseek-v4-flash）
+# 期望：data 含 deepseek-v4-flash、custom_dgx/deepseek-v4-flash、mac/qwen3.6-35b（三个都该在）
 ```
 
-- [ ] **Step 2: 生成一个虚拟 key**
+- [ ] **Step 2: 生成一个虚拟 key**（覆盖两个源头模型）
 
 ```bash
 curl -s -X POST localhost:4000/key/generate \
   -H "Authorization: Bearer $MASTER_KEY" -H "Content-Type: application/json" \
-  -d '{"models":["custom_dgx/deepseek-v4-flash"],"max_budget":0}'
+  -d '{"models":["custom_dgx/deepseek-v4-flash","deepseek-v4-flash","mac/qwen3.6-35b"],"max_budget":0}'
 # 记下返回的 "key": "sk-…" → 后续 Task 5 写入消费方
 ```
 
@@ -566,6 +631,28 @@ curl -s -X POST localhost:4000/v1/responses \
   -H "Authorization: Bearer $VK" -H 'Content-Type: application/json' \
   -d '{"model":"custom_dgx/deepseek-v4-flash","input":"say hi","max_output_tokens":8}'
 # 期望：200 + output 数组
+```
+
+- [ ] **Step 4b: Mac 上游独立可用（直指 `mac/qwen3.6-35b`，绕开 fallback）**
+
+```bash
+# 直指 Mac（走 pod→tailnet→100.89.15.120）；这是"第二个来源"能独立推理的证明
+curl -s -X POST localhost:4000/v1/chat/completions \
+  -H "Authorization: Bearer $VK" -H 'Content-Type: application/json' \
+  -d '{"model":"mac/qwen3.6-35b","messages":[{"role":"user","content":"say hi"}],"max_tokens":8}'
+# 期望：200 + choices[0].message.content 非空（笔记本 35B 首 token 可能 30s+，给足超时）
+```
+
+- [ ] **Step 4c: fallback 自动切换（DGX → Mac）**
+
+```bash
+# 临时把 config.yaml 里 DGX api_base 改成一个不存在的地址（如 http://10.255.255.254:1/v1），
+# git push 让 ArgoCD 重载；再打逻辑名 deepseek-v4-flash（带 fallbacks 的那个）
+curl -s -X POST localhost:4000/v1/chat/completions \
+  -H "Authorization: Bearer $VK" -H 'Content-Type: application/json' \
+  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"say hi"}],"max_tokens":8}'
+# 期望：仍 200 + 内容来自 Mac（DGX 不可达 → 自动切到 fallback 上游）
+# ⚠️ 验完把 api_base 改回 100.97.87.120 再 push（别把主上游留在坏地址上）
 ```
 
 - [ ] **Step 5: 公网入口 + UI**
@@ -622,6 +709,27 @@ model_max_output_tokens = 32768
 source ~/.zshrc
 codex-dgx exec "reply with exactly: ok"   # 或 codex --profile litellm 打开后发一条消息
 ```
+
+- [ ] **Step 4（可选）: 加一个直指 Mac 的 profile —— `codex-mac`**
+
+想"明确用 Mac（绕开 DGX 优先的 fallback）"时，加第二个 overlay（不覆盖默认 `codex-dgx`）：
+
+```toml
+# ~/.codex/mac.config.toml — `codex-mac` → LiteLLM → Mac Qwen3.6-35B（兜底模型，非默认）
+model = "mac/qwen3.6-35b"
+model_provider = "litellm"
+model_context_window = 262144
+model_max_output_tokens = 32768
+```
+
+```bash
+# ~/.zshrc
+alias codex-mac='codex --profile mac'
+```
+
+> ⚠️ Mac Qwen3.6-35B 是**非默认**的兜底位：Codex 日常工作继续走 `codex-dgx`（DGX 主），
+> 只有明确对比/避让 DGX 时才用 `codex-mac`。别把个人默认切到 Mac——笔记本无 SLA，掉线时
+> 反而把"有网关兜底"这个优势丢掉。
 
 ---
 
@@ -795,7 +903,8 @@ homelab LLM 网关（llm.meirong.dev）原为 Bifrost。其配置（enforce 开�
 ## Consequences
 - +一个 Postgres 运行时依赖（单副本 local-path，restic pg_dump 兜底）。
 - admin UI 由强口令而非 SSO 守护；单用户 + CF WAF 威胁模型下可接受。
-- 双 DGX fallback（ROADMAP）改由 LiteLLM 原生 fallback 承载。
+- 双自托管来源 fallback（DGX 主 + Mac Qwen3.6-35B 兜底，ROADMAP 原"双 DGX"升级为"双来源"）改由
+  LiteLLM 原生 fallback 承载；Mac 的多模态模型（embedding/STT/TTS/rerank）不进网关，仍由 Open Notebook 直连。
 ```
 
 - [ ] **Step 2: `docs/CONVENTIONS.md` 四处更新**
@@ -846,8 +955,12 @@ git push
 - [ ] `kubectl get ns bifrost` → 不存在；`kubectl -n litellm get pvc` → `litellm-pg-data-local` Bound
 - [ ] 无 key `POST /v1/chat/completions` → 401；虚拟 key → 200 真推理
 - [ ] `/v1/responses`（Codex 路径）→ 200
+- [ ] **双上游各自可真推**：`deepseek-v4-flash`（DGX）与 `mac/qwen3.6-35b`（Mac OMLX）的
+      `POST /v1/chat/completions` 都 → 200 + 非空 content
+- [ ] **fallback 切换实测**：DGX api_base 故意改错时，`deepseek-v4-flash` 仍 200 且内容来自 Mac；
+      恢复 api_base 后回到 DGX
 - [ ] `https://llm.meirong.dev/ui` → 200，UI_USERNAME/UI_PASSWORD 可登录并可建 key
-- [ ] `codex-dgx`（`--profile litellm`）可用
+- [ ] `codex-dgx`（`--profile litellm`）可用（可选：`codex-mac` 直指 Mac）
 - [ ] 夜备日志含 `litellm.dump = <N> bytes`；restic snapshot 含该文件（`restic -r /storage/restic snapshots --latest`）
 - [ ] SLO 规则 `litellm-availability` 生成；PSA `litellm` ns = baseline
 - [ ] external-dns 记录 owner：`cname-llm.meirong.dev` → `…/resource=httproute/litellm/litellm`
