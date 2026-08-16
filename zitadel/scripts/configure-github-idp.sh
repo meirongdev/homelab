@@ -123,8 +123,9 @@ cat <<EOF
 Done. GitHub IdP '${IDP_NAME}' (${IDP_ID}) is active on the login policy.
 
 Verify: open https://${DOMAIN} in a private window — the login page should now
-show "Sign in with GitHub". Bifrost admin (llm.meirong.dev) and every other
-ZITADEL-OIDC app pick it up automatically; no app change needed.
+show "Sign in with GitHub". Every ZITADEL-OIDC app (Grafana/ArgoCD 等) picks it
+up automatically; no app change needed. (LiteLLM/llm.meirong.dev 不走 ZITADEL ——
+其管理面用 LiteLLM 自带 UI 认证，见 docs/decisions/litellm-llm-gateway.md)
 
 Reminders:
   • GitHub OAuth App "Authorization callback URL" must be EXACTLY (Login V2):
