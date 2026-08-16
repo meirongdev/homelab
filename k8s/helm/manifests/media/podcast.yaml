@@ -27,10 +27,12 @@ spec:
       labels: { app: podcast }
     spec:
       priorityClassName: bulk
+      # 官方 nginx 镜像以 root 直跑会自己降权；作为非 root(101) 跑时它要写
+      # /var/cache/nginx + /var/run/nginx.pid，配 emptyDir + chmod 太脆。
+      # 静态站点零风险，直接 uid 0（同 media ns 的 jellyfin 一样）。PSA baseline 覆盖。
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 101
-        runAsGroup: 101
+        runAsUser: 0
+        runAsGroup: 0
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: nginx
