@@ -75,16 +75,17 @@ homelab 负载必须显式写 `https://100.94.186.7:6443`，写错会把整套 h
   `cloud/oracle/manifests/argocd/homelab-cluster-external-secret.yaml`。
   （2026-08-02 之前方向相反——oracle 作外部集群的 `argocd-oracle-cluster` 凭据已退役。）
 
-## Application 清单（28 个，全部在 `homelab` project）
+## Application 清单（30 个，全部在 `homelab` project）
 
 核对: `kubectl --context oracle-k3s -n argocd get app`。源→目录映射见上方树；这里只记
 **destination 与踩过坑的备注**。
 
-**目标 homelab（显式 `https://100.94.186.7:6443`，18 个）**:
+**目标 homelab（显式 `https://100.94.186.7:6443`，20 个）**:
 `backup` · `cloudflare` · `external-dns` · `gateway` · `kube-bench` ·
 `kube-prometheus-stack` · `kyverno` · `kyverno-policies` · `monitoring-dashboards` ·
 `namespace-guardrails` · `opencost` · `otel-collector` · `personal-services` · `sloth` ·
-`tetragon` · `trivy-operator` · `vault-eso` · `jobs-sg`（2026-08-03 上线，kustomize 目录）
+`tetragon` · `trivy-operator` · `vault-eso` · `jobs-sg`（2026-08-03 上线，kustomize 目录）·
+`media`（2026-08-16 上线，plain manifest 目录）· `litellm`（2026-08-16 上线，plain manifest 目录）
 
 **目标 oracle-k3s（in-cluster `kubernetes.default.svc`，10 个）**:
 `root` · `oracle-k3s` · `calibre-metadata` · `cnpg-operator` · `external-dns-oracle` ·
@@ -142,7 +143,7 @@ homelab 负载必须显式写 `https://100.94.186.7:6443`，写错会把整套 h
 |------|-------------|
 | HashiCorp Vault | 需手动 init/unseal（重启恢复走 `just homelab-recover`） |
 | External Secrets Operator | 依赖 Vault（`just deploy-eso` / oracle `just install-eso`） |
-| Cilium | `just deploy-cilium`，pin v1.19.1（见 [networking-ingress.md](networking-ingress.md)） |
+| Cilium | `just deploy-cilium`，pin v1.20.0（见 [networking-ingress.md](networking-ingress.md)） |
 | Cloudflare Terraform | 非 K8s 资源 |
 
 ⚠️ kube-prometheus-stack / otel-collector / external-dns×2 已于 2026-07-31 迁入 ArgoCD，

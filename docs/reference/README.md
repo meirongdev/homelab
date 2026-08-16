@@ -44,7 +44,7 @@
 
 ### GitOps
 
-- [argocd-app-patterns.md](argocd-app-patterns.md) — 控制面部署形态、28 个 Application 清单与备注、pattern 对比、新增 Application 的 4 个坑
+- [argocd-app-patterns.md](argocd-app-patterns.md) — 控制面部署形态、30 个 Application 清单与备注、pattern 对比、新增 Application 的 4 个坑
 - [manifest-safety-checks.md](manifest-safety-checks.md) — CI 强制的清单结构规则 H1-H5 + 「静态查不出、只能靠人」的那几类
 
 ---

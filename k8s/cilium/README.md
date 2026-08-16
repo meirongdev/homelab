@@ -10,8 +10,8 @@ hand with the Helm CLI, so its configuration lived only in the live release.
 
 ## Version
 
-- Chart: `cilium/cilium`; running images pinned to **v1.19.1** (by digest, in-cluster).
-- Keep `--version 1.19.1` on upgrades so the chart matches the pinned images.
+- Chart: `cilium/cilium`; running images pinned to **v1.20.0** (by digest, in-cluster).
+- Keep `--version 1.20.0` on upgrades so the chart matches the pinned images.
 
 ## Apply / upgrade
 
@@ -22,7 +22,7 @@ kubectl --context k3s-homelab -n kube-system get secret cilium-ca \
   -o jsonpath='{.data.ca\.crt}' | base64 -d > /tmp/cilium-ca.crt
 
 helm --kube-context k3s-homelab upgrade --install cilium cilium/cilium \
-  --namespace kube-system --version 1.19.1 \
+  --namespace kube-system --version 1.20.0 \
   -f k8s/cilium/values.yaml \
   --set-file tls.caBundle.content=/tmp/cilium-ca.crt
 
@@ -30,7 +30,7 @@ kubectl --context k3s-homelab -n kube-system rollout restart deploy/cilium-opera
 ```
 
 > **Automated:** `cd k8s/helm && just deploy-cilium` runs exactly this — it restores the
-> live `cilium-ca` (or self-signs on a fresh install), pins `--version 1.19.1`, applies
+> live `cilium-ca` (or self-signs on a fresh install), pins `--version 1.20.0`, applies
 > this `values.yaml`, and refreshes the Hubble certs. Prefer it over the raw command above.
 
 After a config change that affects Gateway API translation, the operator regenerates
