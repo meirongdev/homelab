@@ -59,8 +59,20 @@
   把 master（5600H 笔记本）的周期 CPU/热峰值挪走。首个落点是 `monitoring/krr`（2026-08-14，无 PVC
   / 无 hostPath，只查集群内 Prometheus + K8s API + 推 Telegram）。
 - **也能放常驻的无状态服务**（2026-08-16 扩大）：`cf-analytics-exporter`、`media/podcast`（读的
-  只读 NFS 就在 106 本机，这一跳不出宿主机）、`sloth`、`external-dns`、`trivy-operator`
-  本体 + 它的**扫描 Job**（`trivyOperator.scanJobNodeSelector`，周期 CPU 脉冲，分担收益最大）。
+  只读 NFS 就在 106 本机，这一跳不出宿主机）、`sloth`、`external-dns`、trivy 的**扫描 Job**
+  （`trivyOperator.scanJobNodeSelector`，周期 CPU 脉冲，分担收益最大）。
+  ⚠️ trivy 的 **operator 本体不能一起搬**：chart 0.33.1 用同一个 `.Values.nodeSelector` 同时套
+  operator 和内置 trivy-server，而 server 的 PVC 在 master → 一钉就把 server 变成永久 Pending。
+- **媒体三件套已全部落 worker**（2026-08-16）：`podcast` / `navidrome` / `jellyfin`。共同理由是
+  **数据本体就在 106 的 ZFS 上**，跑在同一台宿主机的 VM 里，几百 MB 的顺序读不再经 pve NAT 绕 LAN。
+  jellyfin 实测峰值 380m/800Mi（初次扫库）、稳态 1m/332Mi。
+  ☠️ **前提是不转码**：106 是 Celeron J4105（4 核 1.5GHz，VM 分到 2 核），软解转码是死路，
+  QSV 硬解要给 VM 直通核显。哪天真需要转码，第一步是搬回 master（5600H），不是在这台上调参数。
+- **worker 的内存天花板已经用满**（2026-08-16）：VM 3G→4G 是靠把 106 的 ZFS ARC 从 2G 砍到 1G
+  换来的（allocatable 2311Mi → **3254Mi**）。106 只有 8G 物理内存，`StorageNodeMemoryLow` 那条
+  表达式的实测值已从 66% 掉到 **16%**（阈值 10%）。**再要内存只能加物理条**，别再从 ARC 里挤。
+  改 VM 内存要关机重启（`balloon: 0` 无热插拔）→ 先 drain，且 local-path PVC 跟不走，
+  navidrome/jellyfin 会中断到 VM 起来为止。
   绑定方式统一是 `nodeSelector: kubernetes.io/hostname: k8s-worker-106`。
   ⚠️ 逐个都要想清楚「worker 掉线时降级成什么」：external-dns 停 = 新子域名没记录（存量不受影响）、
   sloth 停 = SLO 规则不再重新生成（已生成的照常告警）、trivy 停 = 报告变旧。
