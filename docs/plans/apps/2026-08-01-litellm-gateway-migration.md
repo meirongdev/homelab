@@ -1,7 +1,7 @@
 # LiteLLM LLM 网关迁移（替换 Bifrost）
 
-> 日期: 2026-08-01（2026-08 补全：纳入第二自托管上游 MacPro M2 OMLX）
-> 状态: 📐 设计
+> 日期: 2026-08-01（2026-08-16 实施：纳入 MacPro M2 OMLX 第二上游，计划已落地）
+> 状态: ✅ 已完成（2026-08-16 部署 litellm 上线；现状见 decisions/litellm-llm-gateway.md 与 reference/services.md）
 > 结论: 把 homelab 的 LLM 网关从 **Bifrost**（`llm.meirong.dev`）整体换成 **LiteLLM proxy**（`litellm/litellm:v1.94.1`），
 > 同主机名、同 OpenAI 兼容面，Bifrost 无真实使用 → **不设计回退**。
 > 用 Rust 重写的是 LiteLLM 的 core/realtime 网关（截至 2026-08-01 只覆盖 `/v1/realtime`）；本次部署的是仍由

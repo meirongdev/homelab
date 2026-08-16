@@ -1,10 +1,11 @@
 # Bifrost LLM gateway (replaces Cloudflare AI Gateway)
 
 **Date**: 2026-06-07
-**Status**: ❌ **已退役（2026-08-08）** —— 曾于 2026-06-07 上线并生产运行（`llm.meirong.dev`，
+**Status**: ✅ **已被取代** —— 曾于 2026-06-07 上线并生产运行（`llm.meirong.dev`，
 ArgoCD `bifrost` App + oauth2-proxy 管理面 + virtual-key 网关面），2026-08-08 整个 App
 （网关 + oauth2-proxy + `dgx-proxy` 全局 Service）删除，域名下线。
-**接替者尚未落地**：[LiteLLM 迁移](../apps/2026-08-01-litellm-gateway-migration.md)仍是 📐 设计，
+**接替者已落地**：[LiteLLM 迁移](../apps/2026-08-01-litellm-gateway-migration.md) 已于 2026-08-16
+部署，`llm.meirong.dev` 复用于 LiteLLM（DGX 主 + Mac 兜底，见 [decisions/litellm-llm-gateway.md](../../decisions/litellm-llm-gateway.md)）；Vault secret / ZITADEL client 残留清理见 Task 9（client 需 ZITADEL console 手删）。
 当前 LLM 消费方（jobs-sg 富化、Open Notebook、calibre 元数据）**直连 DGX vLLM**，无网关层。
 本文保留只为回答「为什么 Cloudflare AI Gateway 被换掉」与「PVC-SQLite 配置漂移这个坑长什么样」，
 **不代表现状，别照着执行**。
