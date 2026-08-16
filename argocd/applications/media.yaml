@@ -1,0 +1,29 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: media
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: homelab
+
+  source:
+    repoURL: https://github.com/meirongdev/homelab
+    targetRevision: main
+    # 目录即清单：放进 k8s/helm/manifests/media/ 的 yaml 自动纳入同步。
+    # 单 ns + 单 App（仿 personal-services），Jellyfin/Navidrome/podcast 共享 media ns。
+    path: k8s/helm/manifests/media
+
+  destination:
+    # ☠️ 显式 homelab API server（控制面在 oracle 后，kubernetes.default.svc = oracle）
+    server: https://100.94.186.7:6443
+    namespace: media
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

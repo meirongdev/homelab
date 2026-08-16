@@ -1,0 +1,136 @@
+---
+# 静态只读 NFS PV/PVC —— 多媒体仓库 serving 层读 NAS 106 的媒体。
+#
+# ⚠️ 手动 PV（no external provisioner）：每个 media 子目录一个 ReadOnlyMany PV。
+#   服务器 = storage-106 (192.168.50.106)，对应 Ansible 的只读 export
+#   /storage/{movie,tv,anime,music,podcast}（ro,all_squash,anonuid=1000）。
+#   k8s-node 无 LAN 接口 → 经 pve NAT 源 IP 落在 192.168.50.0/24 内、worker=192.168.50.107，
+#   都覆盖 read-only export 授权。媒体是顺序读，NFS 安全兜住（见 docs/plans/apps/
+#   2026-08-16-multimedia-repository.md 决策 2）。
+#
+# 只读 + all_squash：serving 层永远没有 106 写权（所有写路径走非 k8s 侧）。
+# metadata 与 DB 不由这些卷承载，各自走 local-path PVC（见 jellyfin.yaml / navidrome.yaml）。
+#
+# 手动 PV 的 readOnly: true 是给 kubelet 的挂载提示；真正的只读由 NFS export 的 `ro`
+# 保证（客户端就算想写也会被 all_squash+ro 拒掉）。两者叠用。
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: media-movie
+spec:
+  capacity: { storage: 1Ti }
+  accessModes: [ReadOnlyMany]
+  persistentVolumeReclaimPolicy: Retain
+  nfs:
+    server: 192.168.50.106
+    path: /storage/movie
+    readOnly: true
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: media-tv
+spec:
+  capacity: { storage: 1Ti }
+  accessModes: [ReadOnlyMany]
+  persistentVolumeReclaimPolicy: Retain
+  nfs:
+    server: 192.168.50.106
+    path: /storage/tv
+    readOnly: true
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: media-anime
+spec:
+  capacity: { storage: 1Ti }
+  accessModes: [ReadOnlyMany]
+  persistentVolumeReclaimPolicy: Retain
+  nfs:
+    server: 192.168.50.106
+    path: /storage/anime
+    readOnly: true
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: media-music
+spec:
+  capacity: { storage: 500Gi }
+  accessModes: [ReadOnlyMany]
+  persistentVolumeReclaimPolicy: Retain
+  nfs:
+    server: 192.168.50.106
+    path: /storage/music
+    readOnly: true
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: media-podcast
+spec:
+  capacity: { storage: 100Gi }
+  accessModes: [ReadOnlyMany]
+  persistentVolumeReclaimPolicy: Retain
+  nfs:
+    server: 192.168.50.106
+    path: /storage/podcast
+    readOnly: true
+---
+# 对应 PVC（media ns 内，bind 到上面的 PV）
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: media-movie
+  namespace: media
+spec:
+  accessModes: [ReadOnlyMany]
+  volumeName: media-movie
+  storageClassName: ""
+  resources: { requests: { storage: 1Ti } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: media-tv
+  namespace: media
+spec:
+  accessModes: [ReadOnlyMany]
+  volumeName: media-tv
+  storageClassName: ""
+  resources: { requests: { storage: 1Ti } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: media-anime
+  namespace: media
+spec:
+  accessModes: [ReadOnlyMany]
+  volumeName: media-anime
+  storageClassName: ""
+  resources: { requests: { storage: 1Ti } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: media-music
+  namespace: media
+spec:
+  accessModes: [ReadOnlyMany]
+  volumeName: media-music
+  storageClassName: ""
+  resources: { requests: { storage: 500Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: media-podcast
+  namespace: media
+spec:
+  accessModes: [ReadOnlyMany]
+  volumeName: media-podcast
+  storageClassName: ""
+  resources: { requests: { storage: 100Gi } }

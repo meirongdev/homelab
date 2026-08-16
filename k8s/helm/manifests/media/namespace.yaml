@@ -1,0 +1,15 @@
+---
+# H1: Namespace 独占文件 —— 删清单文件 = prune 掉文件里全部对象，Namespace 混在
+# 其它对象里会连带删光同 ns 下的 PVC/数据（2026-08-03 级联删除事故）。
+#
+# 多媒体仓库 serving 层（Jellyfin/Navidrome/静态 RSS）共享一个 ns。
+# PSA baseline：这些容器跑非 root + 只读媒体挂载，但 Jellyfin 上游镜像对受限
+# environment 有要求（需要写缓存目录），交 baseline 而非 restricted，与 personal-services 同级。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: media
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline

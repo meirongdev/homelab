@@ -19,6 +19,28 @@
       - path: /storage/calibre
         clients:
           - "*(rw,insecure,sync,no_subtree_check,all_squash,anonuid=1000,anongid=1000)"
+      # --- 多媒体仓库 serving 用的只读 export（2026-08-16 multimedia-repository plan）---
+      # 只读 + all_squash：homelab 的 k8s serving 层（Jellyfin/Navidrome/静态 RSS）只能读，
+      # 永远没有 106 的写权（所有写路径走非 k8s 侧）。媒体是顺序读，NFS 安全兜住的那类。
+      # 授权 192.168.50.0/24 覆盖两个节点：k8s-node 无 LAN 接口，经 pve NAT 源 IP 落在
+      # 192.168.50.1 / 192.168.50.0/24 内；worker = 192.168.50.107。
+      # anonuid/anongid=1000（mr）与现有 /storage/calibre 的 all_squash 同规格，媒体属主兼容。
+      # 复用现有目录（movie/tv/anime/music），不迁移不动原数据；podcast 为新建。
+      - path: /storage/movie
+        clients:
+          - "192.168.50.0/24(ro,insecure,sync,no_subtree_check,all_squash,anonuid=1000,anongid=1000)"
+      - path: /storage/tv
+        clients:
+          - "192.168.50.0/24(ro,insecure,sync,no_subtree_check,all_squash,anonuid=1000,anongid=1000)"
+      - path: /storage/anime
+        clients:
+          - "192.168.50.0/24(ro,insecure,sync,no_subtree_check,all_squash,anonuid=1000,anongid=1000)"
+      - path: /storage/music
+        clients:
+          - "192.168.50.0/24(ro,insecure,sync,no_subtree_check,all_squash,anonuid=1000,anongid=1000)"
+      - path: /storage/podcast
+        clients:
+          - "192.168.50.0/24(ro,insecure,sync,no_subtree_check,all_squash,anonuid=1000,anongid=1000)"
     # mr_user_password is in vars/vault.yaml (ansible-vault encrypted)
   vars_files:
     - vars/vault.yaml
@@ -103,6 +125,21 @@
         owner: mr
         group: root
         mode: "0755"
+
+    # 多媒体仓库 serving 目录（复用现有 movie/tv/anime/music，podcast 新建）
+    - name: Ensure media serving directories exist
+      ansible.builtin.file:
+        path: "/storage/{{ item }}"
+        state: directory
+        owner: mr
+        group: root
+        mode: "0755"
+      loop:
+        - movie
+        - tv
+        - anime
+        - music
+        - podcast
 
     - name: Export NFS shares
       ansible.builtin.command:

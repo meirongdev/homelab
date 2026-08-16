@@ -1,0 +1,26 @@
+---
+# media 命名空间的防御性护栏（仿 personal-services-limits.yaml）。
+# 防止未声明资源的容器被当作 0-request/无界，热笔记本防 OOM/驱逐。
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: media-defaults
+  namespace: media
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 50m
+        memory: 64Mi
+      default:
+        cpu: 500m
+        memory: 256Mi
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: media-object-caps
+  namespace: media
+spec:
+  hard:
+    pods: "15"
