@@ -35,7 +35,11 @@ DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}-")
 DATE_ANY = re.compile(r"\d{4}-\d{2}-\d{2}|\d{8}")
 MD_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 # 非 docs 文件里对 docs/ 的引用（注释里最常见，markdown 链接检查抓不到）
-DOCS_REF = re.compile(r"docs/[A-Za-z0-9_./-]+\.md")
+# ⚠️ 前面紧邻 `<字词>/` 的**不算本仓库的引用** —— 那是别的仓库的路径，本检查管不着它。
+# 实例：prometheus-rules.yaml 里的 `nv-dgx-spark/docs/auto-mitigation-cn.md`（DGX 那个仓库的
+# 规格文档）被当成本仓 docs/ 的坏链，自 2026-08-15 起让本检查在 main 上常红。
+# 相对引用 `../docs/x.md` / `./docs/x.md` 不受影响（前一个字符是 `.` 不是 `[\w-]`），仍会被查。
+DOCS_REF = re.compile(r"(?<![\w-]/)docs/[A-Za-z0-9_./-]+\.md")
 # 文首的 `Last updated: YYYY-MM-DD` 字段（reference/ 必填，runbooks/guides 惯例也写）
 LAST_UPDATED = re.compile(r"Last updated:\s*(\d{4}-\d{2}-\d{2})")
 
