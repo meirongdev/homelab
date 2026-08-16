@@ -58,7 +58,19 @@
   （requests 40% / CPU 15%，Celeron 慢核），适合承接周期扫描/批处理这类「短、脉冲、可牺牲」负载，
   把 master（5600H 笔记本）的周期 CPU/热峰值挪走。首个落点是 `monitoring/krr`（2026-08-14，无 PVC
   / 无 hostPath，只查集群内 Prometheus + K8s API + 推 Telegram）。
-- **放不了有状态负载**：`local-path` PVC 落 106 盘后不在 restic 白名单（H4），要放先加白名单。
+- **也能放常驻的无状态服务**（2026-08-16 扩大）：`cf-analytics-exporter`、`media/podcast`（读的
+  只读 NFS 就在 106 本机，这一跳不出宿主机）、`sloth`、`external-dns`、`trivy-operator`
+  本体 + 它的**扫描 Job**（`trivyOperator.scanJobNodeSelector`，周期 CPU 脉冲，分担收益最大）。
+  绑定方式统一是 `nodeSelector: kubernetes.io/hostname: k8s-worker-106`。
+  ⚠️ 逐个都要想清楚「worker 掉线时降级成什么」：external-dns 停 = 新子域名没记录（存量不受影响）、
+  sloth 停 = SLO 规则不再重新生成（已生成的照常告警）、trivy 停 = 报告变旧。
+  ⚠️ 别把**入口**和**告警数据源**放上来：cloudflared 已显式钉 master（见其清单头注）；
+  kube-state-metrics 是 `kube_node_*` 的来源，放在最可能掉线的节点上是相关性故障。
+- ~~**放不了有状态负载**：`local-path` PVC 落 106 盘后不在 restic 白名单（H4），要放先加白名单。~~
+  **2026-08-16 起可以放了**：worker 有了自己的夜备（02:00，`--host homelab-worker`，整目录扫）
+  + 106 的整机周备 vzdump。但 PVC 本身**不跟随调度**——已有 PVC 的服务要搬，得按
+  [runbooks/stateful-service-cross-cluster-migration.md](../runbooks/stateful-service-cross-cluster-migration.md)
+  的节点内变体先搬数据，光加 `nodeSelector` 只会让 Pod 因卷节点亲和冲突永远 Pending。
 - **放不了要直连 DGX 的**：worker 是 tagged 设备，netmap 里没有 DGX 这个 shared peer
   （实测 pod `100.97.87.120:8000` 超时）；而 master 的用户所有身份能到。像 jobs-sg 的 `enrich`
   这类直连 DGX 的负载必须留 master（jobs-sg 另有共享 `jobs-sg-data` PVC，本就整体锁死 master）。

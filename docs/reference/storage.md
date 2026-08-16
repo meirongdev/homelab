@@ -50,20 +50,32 @@ sqlite 依赖 POSIX 字节区间锁（`fcntl`）+ 同步小写入；NFS 的 NLM 
 ## 当前 PVC 清单（全部 `local-path`）
 
 ⚠️ **2026-08-13 起 homelab 是双节点**，`local-path` 因此有了**两个物理落点**：
-`k8s-node`（现有全部 PVC 都在这）和新 worker `k8s-worker-106`（106 上那台 VM 的
-本地盘）。**备份边界 = control-plane 节点**，两道锁（2026-08-13 当日补）：
+`k8s-node`（现有全部 PVC 都在这）和 worker `k8s-worker-106`（106 上那台 VM 的
+本地盘）。备份边界原本 = control-plane 节点，**2026-08-16 起 worker 也被覆盖**：
 
 1. backup CronJob 钉 `nodeSelector: node-role.kubernetes.io/control-plane`
    （`backup/base/cronjob.yaml`）。不钉的话它可能被排到 worker——那里的 hostPath
    几乎为空，白名单循环对空目录静默 `continue`，产出**「近空快照 + rc=0」的假阴性
    备份**，比"漏备一个 PVC"更糟。
-2. 告警 `PVCOnUnbackedNode`（`k8s/helm/manifests/monitoring/alerts/prometheus-rules.yaml`
-   backups 组）：homelab 任何**非 control-plane** 节点上出现被 kubelet 统计的 PVC 即
-   warning——H4 只保证"进白名单"，这条保证"落对节点"。已知局限：负载缩到 0 后
-   kubelet_volume_stats 消失、告警自行恢复，但数据还躺在节点盘上，处置别只看告警消没消。
+2. worker 侧有**自己的**夜备 Job（`backup/overlays/homelab/worker-{cronjob,backup-script}.yaml`，
+   02:00 CST，`--host homelab-worker`）——同一个 106 仓库、独立保留策略、只 `forget`
+   不 `prune`（prune 交给 03:00 master 那次，两个 prune 抢独占锁只会互相失败）。
+   它**不筛 PVC 名**，整个 `/localpath` 目录扫：worker 就是用来接住漂过来的负载的，
+   谁落上来都该被备到。⚠️ 但 CI 的 H4 仍只解析 master 那份的 `for pat in …`——
+   新 PVC 照样要写进那份白名单才过 CI（在 master 上匹配不到目录、是无害 no-op）。
+3. 告警 `PVCOnUnbackedNode`（`k8s/helm/manifests/monitoring/alerts/prometheus-rules.yaml`
+   backups 组）：homelab 任何**既非 control-plane、又不在排除名单**的节点上出现被
+   kubelet 统计的 PVC 即 warning——H4 只保证"进白名单"，这条保证"落对节点"。
+   `k8s-worker-106` 已按节点名从中排除（它有了自己的备份路径）；**再加节点仍会被抓到**。
+   已知局限：负载缩到 0 后 kubelet_volume_stats 消失、告警自行恢复，但数据还躺在
+   节点盘上，处置别只看告警消没消。
 
-☠️ 结论不变：**有状态负载暂时别排到 worker**。要排，先给该节点建独立备份路径，
-再有意豁免告警。当前 worker 上只有 DaemonSet、无 PVC。
+☠️ **worker 上的 PVC 只有 restic 这一层保护，且比 master 少一层**：VM 200 的盘在 106 的
+`local-lvm`（LVM-thin，与 PVE 的 `local` 同在一块 238G 启动盘 sdd），**不在 `mrstorage`
+池里** —— sanoid 的 `[mrstorage] recursive=yes` 快照对它完全无效。2026-08-16 补了
+整机周备兜底：`just vzdump-worker`（`proxmox/ansible/playbooks/vzdump-worker-vm.yaml`）
+建的 `vzdump-worker106` 作业，周日 05:00 → ZFS 上的 `vmbackup` 存储（`mrstorage/vzdump`），
+keep-last=2。**dump 必须落 ZFS，不能用默认的 `local`**：那和 VM 盘同一块物理盘，等于没备。
 → [decisions/storage106-as-homelab-worker.md](../decisions/storage106-as-homelab-worker.md)
 
 
@@ -173,6 +185,11 @@ restic（`restic ls … | head` 会 SIGPIPE 杀掉 restic，2026-08-13 实测踩
   手动触发 `just backup-run`（`k8s/helm/`）。
   ⚠️ 两个 overlay 的备份脚本都是**显式白名单**（`for pat in …`）——新增有状态应用必须往里加，
   否则静默不备份（CI H4 兜底）。
+- **夜备有三个 Job，不是两个**（2026-08-16 起）：homelab master 03:00（`--host homelab`）、
+  homelab worker 02:00（`--host homelab-worker`，见上「当前 PVC 清单」第 2 条）、
+  oracle 03:30（`--host oracle-k3s`）。恢复时**按 host 过滤**，别默认 `latest` 就是要的那份：
+  `restic snapshots --host homelab-worker`。worker 那份只 `forget` 不 `prune`，
+  空间由 master 那次的全仓库 prune 统一回收。
 - **书库归属**: Calibre 书库在 restic 内；**2026-08-03 起随服务在 oracle overlay** 发现
   （`/localpath/*calibre-books-local*`，缺失时日志打 `[warn] books NOT in this backup`），
   homelab 侧逻辑已移除。
@@ -180,7 +197,9 @@ restic（`restic ls … | head` 会 SIGPIPE 杀掉 restic，2026-08-13 实测踩
   oracle 推备份；restic 无 server、oracle 经 Tailscale 直连仓库。
 - **保护层次**: ZFS raidz1（容 1 盘）→ sanoid 快照（秒级回滚，含 restic dataset）→ restic 仓库
   （护 local-path 关键数据）→ **离站 later**（`restic copy` → 云桶，待人工开通）。
-  PVE 每周 vzdump（VM 100 → 106，keep-last=3）不变。
+  PVE 每周 vzdump：pve-1 的 VM 100 → 106（keep-last=3）不变；**106 自己的 VM 200
+  （worker）2026-08-16 新增** → `mrstorage/vzdump`（keep-last=2）。
+  ⚠️ worker VM 的盘不在 `mrstorage` 里，sanoid 那层对它是**缺的**，只有 restic + vzdump 两层。
 - **告警**: `BackupTargetNodeDown`（106 失联 >15m，severity=**warning**）——2026-07-12 由
   `NFSStorageNodeDown`(critical/2m) 改名降级：106 已无运行时依赖，宕机只影响备份窗口。
   规则在 `manifests/monitoring/alerts/prometheus-rules.yaml`。

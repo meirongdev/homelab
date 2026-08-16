@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: restic-backup-worker-script
+  namespace: backup
+data:
+  backup.sh: |
+    #!/bin/sh
+    # k8s-worker-106 上的 local-path PVC → 同一个 restic 仓库 (106 ZFS, sftp)
+    #
+    # 为什么要**单独**一个 Job（2026-08-16）：restic-backup 钉在 control-plane，读的是
+    # **它自己那台**的 hostPath /var/lib/rancher/k3s/storage。worker 上的 PVC 对它完全
+    # 不可见 —— 在此之前 worker 上任何有状态负载都是三重裸奔：
+    #   ① restic 不覆盖（本 Job 补的就是这个）
+    #   ② VM 200 的盘在 106 的 local-lvm，**不在** mrstorage 池里 → sanoid 快照拍不到
+    #   ③ 106 当时没有任何 vzdump 作业（同批补上，见 proxmox/ansible/playbooks/vzdump-worker-vm.yaml）
+    #
+    # 与 master 那份脚本的四点差异，每条都是有意的：
+    #   1. 不做 vault raft / pg_dump / surrealdb 逻辑导出 —— 那些服务钉死在 master，
+    #      不会漂到这台；在这里跑只会连不上或备出空文件。
+    #   2. **不按 PVC 名白名单，而是整个 /localpath 目录扫**。worker 的定位就是接住漂过来的
+    #      轻负载，谁落上来都该被备到；宁可多备几 KB，也不要重演「白名单漏一个 → 静默不备份」。
+    #      ⚠️ 但 CI 的 H4 只解析 master 那份的 `for pat in ...`：新 PVC 仍必须写进那份白名单
+    #      才过 CI（在 master 上它匹配不到目录、是个无害 no-op），真正备份它的是这里的目录扫。
+    #      别把那条 CI 提示读成「本 Job 没干活」。
+    #   3. `--host homelab-worker`（master 是 `--host homelab`）：两边 forget 策略各管各的
+    #      快照集，互不误删。恢复时按 host 过滤，见 runbooks/backup-recovery.md。
+    #   4. **只 forget 不 prune**：prune 要拿仓库独占锁、且是全仓库操作。本 Job 02:00 跑，
+    #      1 小时后 master 03:00 那次的 `forget --prune` 会把这里 forget 掉的数据一并回收。
+    #      两个 prune 抢同一把锁只会让夜备互相失败。
+    set -eu
+
+    echo "[worker-backup] node=${NODE_NAME:-unknown} pod=${POD_NAME:-unknown}"
+
+    echo "[worker-backup] installing tools (restic/openssh/findutils)..."
+    apk add --no-cache restic openssh-client findutils >/dev/null
+
+    # --- SSH（同 master 脚本：走 ~/.ssh/config，避免每条命令重复 -o）---
+    install -d -m 700 /root/.ssh
+    base64 -d /creds/SSH_KEY_B64 > /root/.ssh/id_ed25519   # b64 存储，保尾部换行
+    chmod 600 /root/.ssh/id_ed25519
+    cat > /root/.ssh/config <<EOF
+    Host 192.168.50.106 100.110.27.111
+      User root
+      IdentityFile /root/.ssh/id_ed25519
+      StrictHostKeyChecking accept-new
+      UserKnownHostsFile /root/.ssh/known_hosts
+    EOF
+    chmod 600 /root/.ssh/config
+
+    export RESTIC_PASSWORD="$(cat /creds/RESTIC_PASSWORD)"
+    # worker 与 106 同在 192.168.50.0/24（它就是 106 上的 VM），这一跳不出宿主机。
+    export RESTIC_REPOSITORY="sftp:root@192.168.50.106:/storage/restic"
+
+    rm -rf /work/* 2>/dev/null || true
+    mkdir -p /work/pvc
+
+    # --- 1) 本节点 local-path PVC 的 sqlite/config 文件 ---
+    # 与 master 同样的文件模式（*.db* / *.sqlite* / 小 json）与剪枝（cache/thumbnails…），
+    # 差别只在**不筛 PVC 名**。sqlite 热拷由 restore 时的 WAL 自恢复兜住（同 master）。
+    echo "[worker-backup] sweep /localpath (all PVC dirs on this node)..."
+    if [ -d /localpath ]; then
+      for d in /localpath/*/; do
+        [ -d "$d" ] || continue
+        dest="/work/pvc/$(basename "$d")"
+        find "$d" -maxdepth 3 \
+          \( -name processed_books -o -name thumbnails -o -name cache -o -name .cache \) -prune -o \
+          -type f \( -name '*.db' -o -name '*.db-wal' -o -name '*.db-shm' -o -name '*.db-journal' -o -name '*.sqlite*' -o -name '*.json' \) -size -80M -print 2>/dev/null | \
+        while IFS= read -r f; do
+          rel="${f#"$d"}"
+          mkdir -p "$dest/$(dirname "$rel")"
+          cp -a "$f" "$dest/$rel" 2>/dev/null || true
+        done
+      done
+    fi
+    NFILES="$(find /work/pvc -type f 2>/dev/null | wc -l)"
+    echo "[worker-backup]   pvc files = $NFILES, size = $(du -sh /work/pvc 2>/dev/null | cut -f1)"
+    # 空快照是**预期状态**（worker 上暂时没有有状态负载），不是故障：照常打快照，
+    # 好让 BackupJobNotRunRecently（cronjob=~".*backup.*"，32h）继续有心跳可看。
+    [ "$NFILES" -gt 0 ] || echo "[worker-backup] note: no PVC files on this node yet — empty snapshot by design"
+
+    # --- 2) restic backup + 保留策略（不 prune，见文件头第 4 点）---
+    # ☠️ 锁：restic 判"锁陈旧"靠 hostname+PID，而每个 Job 的 Pod hostname 都不同 ——
+    # **跨 Pod 泄漏的锁 30 分钟内一律不算陈旧**，`restic unlock` 对它无效（2026-08-13
+    # 恢复演练两次撞上，取证见 restore-drill-script.yaml 头注）。所以这里同样靠
+    # --retry-lock 等：本 Job 02:00、master 03:00、oracle 03:30 本就错峰，
+    # 这条只兜"上一次跑超时被 activeDeadline 杀掉、锁还没到期"那种情况。
+    RETRY="--retry-lock 10m"
+    echo "[worker-backup] restic backup..."
+    restic cat config >/dev/null 2>&1 || restic init
+    restic unlock 2>/dev/null || true   # 只清死进程的陈旧锁，安全；对上面那种泄漏锁无效
+    # shellcheck disable=SC2086  # RETRY 要按词拆开
+    restic backup /work $RETRY --host homelab-worker --tag nightly --cleanup-cache
+    echo "[worker-backup] forget (prune 交给 03:00 的 master 那次)..."
+    restic forget $RETRY --host homelab-worker --keep-daily 7 --keep-weekly 4 --keep-monthly 6
+    restic snapshots --host homelab-worker --latest 2
+    echo "[worker-backup] DONE"

@@ -43,6 +43,11 @@ node-exporter-storage:
 storage-arc-limit:
     ansible-playbook storage-playbook.yaml --tags arc
 
+# 106 上给 worker VM(200) 建周备 vzdump → mrstorage/vzdump（raidz1，非同盘的 local）
+# 幂等，可重复跑。它兜的是"VM 整机没了"，PVC 里的数据由 backup/ 的 worker 夜备兜。
+vzdump-worker:
+    ansible-playbook playbooks/vzdump-worker-vm.yaml
+
 # ⛔ 实验田 k3s-exp 已退役（2026-08-13）：同一台 VM 改以 `k8s-worker-106` 入编
 #    homelab 集群，两者互斥。原 exp-k3s / exp-kubeconfig / exp-tunnel 三条配方随之删除。
 #    现在的入编流程在 k8s/ansible/：`just setup-tailscale-worker <key>` + `just join-worker`。

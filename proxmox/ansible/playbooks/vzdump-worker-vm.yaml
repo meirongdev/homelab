@@ -1,0 +1,95 @@
+---
+# storage-106：给 homelab worker 那台 VM（VMID 200，节点名 k8s-worker-106）建周备 vzdump。
+#
+# 为什么需要（2026-08-16）：worker 上的 local-path PVC 此前**三重裸奔** ——
+#   ① restic 夜备钉在 control-plane，读的是那台机自己的 hostPath（已由
+#      backup/overlays/homelab/worker-cronjob.yaml 补上）
+#   ② VM 的盘在 `local-lvm`（pve-vm--200--disk--0，LVM-thin），**不在** mrstorage 池里，
+#      所以 sanoid 的 [mrstorage] recursive 快照根本拍不到它
+#   ③ 106 的 /etc/pve/jobs.cfg 当时是空的 —— 一条 vzdump 作业都没有
+# 本 playbook 补的是 ③：整机快照，兜住"VM 系统盘坏掉/误删"这类 restic 兜不住的事。
+#
+# ☠️ 备份目标必须落 ZFS，不能用默认的 `local`：`local`(/var/lib/vz on pve-root) 与
+# `local-lvm`(VM 盘) **在同一块 sdd**（238G 启动盘）。dump 到 local = 盘一坏两份一起没，
+# 等于没备。mrstorage 是 sda/sdb/sdc 的 raidz1（6.29T 可用），才是有意义的落点。
+#
+# ⚠️ sanoid 的 [mrstorage] recursive=yes 会连带给 vzdump 数据集打快照
+# （hourly 24 / daily 14 / weekly 4 / monthly 3）：被 keep-last 删掉的旧 dump 仍会被
+# 快照留住一段时间，实际占用 ≈ 保留份数 × 单份大小 的数倍。单份 zstd 后 ~3-4G、
+# 6.29T 的池上无所谓，**但别把 keep-last 调大到几十份**再来算这笔账。
+#
+# 幂等：三步各有 creates/grep 守卫，重复跑不会重建数据集/存储/作业。
+# 用法：`just vzdump-worker`（proxmox/ansible/）
+- name: Weekly vzdump for the homelab worker VM (storage-106)
+  hosts: storage
+  gather_facts: false
+  vars:
+    vm_id: 200
+    zfs_dataset: mrstorage/vzdump
+    dump_mountpoint: /storage/vzdump
+    pve_storage_id: vmbackup
+    # 保留 2 份 ≈ 覆盖两周。worker 上的数据本体由 restic 夜备逐日覆盖，
+    # 这条只负责"整机能重建"，不追求细粒度 RPO。
+    keep_last: 2
+    # 周日 05:00：避开 restic 夜备（homelab 02:00/03:00、oracle 03:30）与
+    # 每月 1 号 04:00 的恢复演练 —— 那几个都在读写同一台 106 的盘。
+    schedule: "sun 05:00"
+    job_id: vzdump-worker106
+
+  tasks:
+    - name: Create ZFS dataset for VM dumps
+      ansible.builtin.command:
+        cmd: zfs create -o mountpoint={{ dump_mountpoint }} {{ zfs_dataset }}
+        creates: "{{ dump_mountpoint }}"
+
+    - name: Check whether PVE storage already exists
+      ansible.builtin.command:
+        # 整串加单引号：YAML 里未加引号的值中出现 `: ` 会被当成映射解析
+        cmd: 'grep -q "^dir: {{ pve_storage_id }}$" /etc/pve/storage.cfg'
+      register: storage_present
+      changed_when: false
+      failed_when: false
+
+    - name: Register the dataset as a backup-only PVE storage
+      ansible.builtin.command:
+        cmd: >-
+          pvesm add dir {{ pve_storage_id }}
+          --path {{ dump_mountpoint }}
+          --content backup
+          --prune-backups keep-last={{ keep_last }}
+      when: storage_present.rc != 0
+
+    - name: Check whether the backup job already exists
+      ansible.builtin.command:
+        cmd: 'grep -q "^vzdump: {{ job_id }}$" /etc/pve/jobs.cfg'
+      register: job_present
+      changed_when: false
+      failed_when: false
+
+    # --id 是显式的（API 默认自动生成一串随机 ID）—— 有固定 ID 才能像上面那样 grep 守卫，
+    # 也才能在 UI 之外用 `pvesh set /cluster/backup/{{ job_id }}` 改它。
+    # mode=snapshot：LVM-thin 支持快照，VM 不停机。
+    - name: Create the weekly vzdump job
+      ansible.builtin.command:
+        cmd: >-
+          pvesh create /cluster/backup
+          --id {{ job_id }}
+          --vmid {{ vm_id }}
+          --storage {{ pve_storage_id }}
+          --schedule "{{ schedule }}"
+          --mode snapshot
+          --compress zstd
+          --enabled 1
+          --notes-template "homelab worker (k8s-worker-106) weekly"
+          --comment "homelab worker VM weekly backup (ansible: playbooks/vzdump-worker-vm.yaml)"
+      when: job_present.rc != 0
+
+    - name: Show resulting backup jobs
+      ansible.builtin.command:
+        cmd: pvesh get /cluster/backup --output-format yaml
+      register: jobs_out
+      changed_when: false
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: "{{ jobs_out.stdout_lines }}"

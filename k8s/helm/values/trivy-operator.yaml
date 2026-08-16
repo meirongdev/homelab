@@ -156,3 +156,19 @@ priorityClassName: bulk
 
 trivyOperator:
   scanJobPodPriorityClassName: bulk
+
+  # 落 106 worker（2026-08-16）——**这一条才是真正的分担**：扫描 Job 是周期性 CPU 脉冲，
+  # 把它从 5600H 热笔记本挪到 106 的 VM 上，正是 decisions/cluster-placement 里
+  # 「无状态周期扫描 → k8s-worker-106」那条通道的本意。
+  # 键名与顶层的 `nodeSelector`（管 operator 本体）**不是同一个**，两个都要设 —— 同
+  # priorityClassName 那两处一样的层级坑。
+  # ⚠️ 代价：worker 只有 2 慢核 / 2311Mi allocatable，scanJobsConcurrentLimit=1 必须保持串行；
+  # 扫描会拉取镜像层，占 worker 的盘（29G，2026-08-16 时用了 26%）。
+  # 若 worker 长期下线，扫描会停 —— 与 bulk 档一致的 fail-open 语义，报告变旧但不影响管控。
+  scanJobNodeSelector:
+    kubernetes.io/hostname: k8s-worker-106
+
+# operator 本体（控制器，常驻）也落 worker：状态全在 CR（etcd）里，无 PVC、无节点语义，
+# 掉线只是暂停扫描。腾出 master 上约 194Mi 常驻内存（2026-08-16 实测 RSS）。
+nodeSelector:
+  kubernetes.io/hostname: k8s-worker-106

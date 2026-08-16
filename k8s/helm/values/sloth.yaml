@@ -40,3 +40,11 @@ resources:
   limits:
     cpu: 200m
     memory: 150Mi
+
+# 落 106 worker（2026-08-16）：无状态、无 PVC、无节点语义 —— 它只监听 CR 并生成
+# PrometheusRule，产物在 etcd 里、不在本地盘。worker 掉线时**已生成的规则照常告警**，
+# 只是 SLO CR 变更不再被翻译成规则（可接受的降级；不是数据丢失）。
+# ⚠️ 这个键在**顶层**（chart 0.16.0 的 values 第 73 行附近有注释示例），
+# 不在 `sloth.` 下面 —— 写错层级 Helm 会静默忽略，看着配了实际没配。
+nodeSelector:
+  kubernetes.io/hostname: k8s-worker-106
