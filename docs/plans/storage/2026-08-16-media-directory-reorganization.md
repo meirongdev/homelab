@@ -1,6 +1,6 @@
 # 多媒体目录重组（storage-106 /storage/tv 清理去重）
 
-> 日期：2026-08-16 ｜ 状态：🚧 执行中（dry-run 已完成，待确认后执行）
+> 日期：2026-08-16 ｜ 状态：✅ 已完成（2026-08-16 执行，回收 ~146G）
 > 目标主机：`root@192.168.50.106`（NAS storage-106，ZFS 池 `mrstorage` 挂 `/storage`）
 > 背景：多媒体仓库 Jellyfin/Navidrome 上线后，需让 Jellyfin 能正确索引 TV 存量。
 > 但 `/storage/tv` 现状目录混乱（规整目录 + release 平铺 + 散文件三重混存），
@@ -55,16 +55,35 @@
 
 ## 执行策略
 
-1. **先 dry-run**（`--dry-run`），逐条列出将删除项，全部显示（已跑通，见上）。
+1. **先 dry-run**（`--dry-run`），逐条列出将删除项，全部显示（已跑通）。
 2. **字节级安全兜底**：`--execute` 时每个待删文件删除前必须能在规整库找到**同名且 sha256 相同**的副本；找不到则跳过并报告，**绝不误删唯一副本**。
 3. 重复项确认后删除（`rm -rf`）。**不迁移**（规整库本身已在标准结构，无需搬）。
-4. 待定项（Mandalorian 正片 / screw）单独处理，默认不动。
+4. 待定项（Mandalorian 正片 / screw）单独处理。
 5. 整理完由 Jellyfin 新建库指向 `/media/tv` 扫描验证。
+
+## 执行结果（2026-08-16）
+
+**主去重**：删除 114 项重复（Annedroids ×4、Bluey 顶层散件 + S01 平铺、Disney Gallery ×3、
+Kipo S03 平铺 + 散件、MLP 散件、StoryBots ×2、We Bare Bears 平铺），均字节校验通过。
+
+**补充清理**（文件名带 `[组名]` 后缀导致严格 basename 不匹配的 3 目录）：Kipo eztv（10 视频）、
+Disney S03E01-EDITH、We Bare Bears S01E26，按 **SxxExx 集号 + size + sha** 校验后删除。
+
+**手动项**：`The Mandalorian.S02E03…ITA.ENG` → 新建 `/storage/tv/The Mandalorian/Season 2/` 归置。
+`screw/` 23 个散乱 mkv 确认垃圾删除。
+
+**最终 TV 结构**（8 个规整剧集，0 散件，全为标准 `剧名/Season N/`）：
+`Annedroids`(S1-4) · `Bluey`(S1-3) · `Disney Gallery - The Mandalorian`(S1-3) ·
+`Kipo and the Age of Wonderbeasts`(S2-3) · `My Little Pony - Make Your Mark`(S1,6) ·
+`StoryBots - Answer Time`(S1-2) · `The Mandalorian`(新建,S2) · `We Bare Bears`(S1)
+
+**空间**：`/storage/tv` 292G → **146G**，回收 **~146G**。ZFS mrstorage REFER 542G → 396G。
 
 ## 脚本
 
-- 分析/去重脚本：`/tmp/media_audit/reorg3.py`（106 上，dry-run 与 execute 同脚本）
-- 用法：`python3 /tmp/media_audit/reorg3.py --dry-run`（预演）／`--execute`（执行）
+- 分析：`/tmp/media_audit/analyze_tv.py`、`plan_tv2.py`（只读审计，已存 106 `/tmp/media_audit/`）
+- 主去重：`/tmp/media_audit/reorg3.py`（`--dry-run` 预演／`--execute` 执行，字节兜底）
+- 补充：`/tmp/media_audit/reorg_extra.py`（处理组名后缀目录）
 
 ## 关联
 
