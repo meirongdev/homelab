@@ -23,7 +23,7 @@
 | Calibre-Web | **oracle-k3s** | `personal-services` | `book.meirong.dev`（2026-08-03 迁移） |
 | Open Notebook (AI 研读) | homelab | `personal-services` | `notebook.meirong.dev`（模型走 DGX + Mac OMLX，见 [open-notebook.md](open-notebook.md)） |
 | jobs-sg (SG 岗位周报) | homelab | `jobs-sg` | `jobs.meirong.dev`（2026-08-03 上线；独立 ns + 3 个 CronJob，见 [jobs-sg.md](jobs-sg.md)） |
-| Jellyfin (视频) | homelab | `media` | `media.meirong.dev`（2026-08-16；媒体读 106 只读 NFS，config 走 local-path，见 [multimedia plan](../plans/apps/2026-08-16-multimedia-repository.md)） |
+| Jellyfin (视频) | homelab | `media` | `media.meirong.dev`（2026-08-16；媒体读 106 只读 NFS，config 走 local-path，[OIDC SSO 接入中](identity.md#jellyfin)） |
 | Navidrome (音乐) | homelab | `media` | `music.meirong.dev`（2026-08-16；媒体读 106 只读 NFS，DB 走 local-path） |
 | Podcast (自录 RSS 发布) | homelab | `media` | `podcast.meirong.dev`（2026-08-16；nginx 伺服 106 只读 NFS 的 mp3 + rss.xml） |
 | Grafana | homelab | `monitoring` | `grafana.meirong.dev` |
