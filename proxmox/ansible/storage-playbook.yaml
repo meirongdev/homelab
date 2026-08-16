@@ -158,26 +158,32 @@
         enabled: true
         state: started
 
-    # --- ZFS ARC 上限 2GiB（2026-08-13，给 k3s-exp 实验 VM 让内存）---
-    # 历史：512MB →（2026-07-06 为 NFS 读缓存）4GB → 2GB。4GB 是给 NFS 运行时
-    # 时代定的尺寸，而 NFS 五天后（07-11）就退役了——现在 106 只是备份目标：
-    # 写入是顺序 pack 文件，ARC 主要服务夜间 restic prune/check 的元数据
-    # （池子 1.2T/10.9T），2GB 足够；代价是备份窗口慢一点（白天机器 load~0.3 纯空转）。
-    # 让出的 2GB 给 proxmox/terraform-storage 的 k3s-exp（2c/3G）。
-    # 决策与内存账：docs/decisions/storage106-experiment-vm.md
+    # --- ZFS ARC 上限 1GiB（2026-08-16，给 worker VM 让内存到 4G）---
+    # 历史：512MB →（2026-07-06 为 NFS 读缓存）4GB → 2GB（08-13）→ **1GB（08-16）**。
+    # 4GB 是 NFS 运行时时代定的尺寸，而 NFS 五天后（07-11）就退役了。
+    #
+    # 为什么还能再砍一半（2026-08-16 实测账）：106 只有 8G，`free -m` available 仅 556MB
+    # 且已在用 188MB swap —— **给 VM 加内存没有第二个来源**。而 ARC 在这台机上的收益本来就低：
+    #   · 媒体只读 NFS = 几百 MB 的大文件顺序流，ARC 命中率接近零（读一次就过）
+    #   · restic 仓库 26G，真正吃缓存的是索引/元数据（几百 MB 量级），1G 仍装得下
+    #   · 白天 load ~0.3 纯空转，arcstat 读计数长期为 0
+    # 代价：夜间 restic prune/check 会慢一些（只影响备份窗口时长，不影响正确性）。
+    # 换来的 1GB 给 worker VM（2c/3G → 2c/4G），承接 jellyfin 这类需要内存的负载。
+    # ⚠️ 再想给 VM 加内存就没得挪了：下一步只能是给 106 加物理内存（DDR4 SO-DIMM）。
+    # 决策与内存账：docs/decisions/cluster-placement-for-new-services.md
     # 单独跑：just storage-arc-limit（--tags arc，不碰上面的 NFS/ZFS 任务）
-    - name: Cap ZFS ARC at 2 GiB (persist across reboots)
+    - name: Cap ZFS ARC at 1 GiB (persist across reboots)
       ansible.builtin.copy:
         dest: /etc/modprobe.d/zfs.conf
         content: |
           # ansible 管理（proxmox/ansible/storage-playbook.yaml, tags: arc）——别手改。
-          # 2GiB：备份目标的元数据缓存够用；让出的内存给 k3s-exp VM。
-          # 历史：512MB → 4GB（2026-07-06，NFS 读缓存，NFS 已于 07-11 退役）→ 2GB（2026-08-13）。
-          options zfs zfs_arc_max=2147483648
+          # 1GiB：备份目标的元数据缓存够用；让出的内存给 worker VM（k8s-worker-106，4G）。
+          # 历史：512MB → 4GB（2026-07-06，NFS 读缓存，NFS 已于 07-11 退役）→ 2GB（08-13）→ 1GB（08-16）。
+          options zfs zfs_arc_max=1073741824
         mode: "0644"
       tags: [arc]
 
     - name: Apply ARC cap at runtime (ARC evicts down within seconds)
-      ansible.builtin.shell: echo 2147483648 > /sys/module/zfs/parameters/zfs_arc_max
+      ansible.builtin.shell: echo 1073741824 > /sys/module/zfs/parameters/zfs_arc_max
       changed_when: true
       tags: [arc]

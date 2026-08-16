@@ -69,10 +69,11 @@ data:
       # jobs-sg-data：只捞走 jobs.db(+journal)。raw/ 归档是 *.jsonl.gz，**匹配不上**
       # 下面这组文件名模式 —— 它由第 3 步的 JOBS_ARCHIVE_DIR 整目录纳入，别以为这行
       # 就把 jobs-sg 备全了（上游 docs/04 §4 只写了加这一行，那是不够的）。
-      # ⚠️ `navidrome-data` 自 2026-08-16 起在**本节点上匹配不到任何目录** —— navidrome 已钉到
-      # k8s-worker-106，它的 PVC 由 worker 侧夜备（worker-backup-script.yaml，整目录扫）覆盖。
-      # 这条留着是给 CI 的 H4 用的（H4 只解析本文件的白名单），也留着以便将来搬回来。
-      # 别因为"这里有它"就以为 master 这份快照里有 navidrome —— 恢复时按 --host homelab-worker 找。
+      # ⚠️ `navidrome-data` 与 `jellyfin-config` 自 2026-08-16 起在**本节点上匹配不到任何目录**
+      # —— 两个 media 服务都已钉到 k8s-worker-106，它们的 PVC 由 worker 侧夜备
+      # （worker-backup-script.yaml，整目录扫）覆盖。这两条留着是给 CI 的 H4 用的
+      # （H4 只解析本文件的白名单），也留着以便将来搬回来。
+      # 别因为"这里有它"就以为 master 这份快照里有它们 —— 恢复时按 --host homelab-worker 找。
       for pat in open-notebook-data jobs-sg-data jellyfin-config navidrome-data; do
         for d in "$base"/*"$pat"*; do
           [ -d "$d" ] || continue
