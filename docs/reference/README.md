@@ -6,6 +6,13 @@
 
 改架构就必须同步这些文档。
 
+### 命名与用语
+
+- [terminology.md](terminology.md) — **术语与命名正典唯一真相源**：标识符 vs 散文用语的分界、
+  ☠️ 同一个集群在 6 个层各有不同官方名（context `k3s-homelab` 但 Cilium/ArgoCD/指标那层叫
+  `homelab`）、`oracle-k3s` 同时是集群名和节点名、"单节点"/"NFS 已退役"的确切范围。
+  CI 由 `scripts/check-terminology.py` 强制 T1-T3
+
 ### 服务与应用
 
 - [services.md](services.md) — **服务清单唯一真相源**（哪个服务在哪个集群/ns/域名）+ 按服务的运维备忘
