@@ -6,7 +6,7 @@
 | [`check-public-ips.py`](check-public-ips.py) | 禁止提交公网 IP。扫 git 跟踪的文本文件里的 IPv4 字面量，全球可路由的一律报错；Tailscale `100.64/10`、RFC1918、RFC5737 文档段、第三方 anycast DNS（1.1.1.1/8.8.8.8/…）放行，行内 `public-ip-ok: <理由>` 可豁免。**不设 paths 过滤**，每次 PR/push 全跑（`.github/workflows/no-public-ip.yml`）。只拦新提交，历史里的地址要单独重写 |
 | [`verify-oracle-node.sh`](verify-oracle-node.sh) | oracle-k3s 重启/变更后的巡检（主机层 sysctl/GRO/firewalld/DNS + 节点预留账目 + pod/App + ClusterMesh `retrieved=true` + 数据面）。只读，任一条不成立即非零退出；条数是循环动态累加的，结尾自报「N 项通过 / M 项失败」——别在文档里写死条数。`cd cloud/oracle && just verify-node`。**配套** `just check-node-drift`（`ansible-playbook --check`）查「配置有没有漂移」，本脚本查「结果对不对」 |
 | `sync-ebooks.sh` | calibre-web 电子书同步（下详） |
-| `cleanup-duplicates.sh` | 清理重复书目 |
+| `cleanup-duplicates.py` | 清理重复书目。归一化标题匹配（不是完全同名）+ **拿真实磁盘核对计划** + 同书 EPUB/PDF 合并 + `calibredb` 删除。`cd k8s/helm && just cleanup-calibre-dry-run` 先看判定 |
 
 ---
 
