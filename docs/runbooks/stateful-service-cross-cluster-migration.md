@@ -151,7 +151,7 @@ grep '^kind:' <要删的每个文件>
 | Vault path | 消费它的 ExternalSecret 删了，path 还在 | 两集群 ExternalSecret 交叉核对确认零消费者后 `vault kv metadata delete` |
 | containerd 镜像 | k3s 镜像 GC 阈值是磁盘 **85%**，低于此永不触发 | `k3s crictl rmi --prune` |
 
-⚠️ `crictl rmi --prune` 会刷一屏 `DeadlineExceeded`（默认 RPC 超时 2s，单节点笔记本
+⚠️ `crictl rmi --prune` 会刷一屏 `DeadlineExceeded`（默认 RPC 超时 2s，控制面那台笔记本
 的 containerd 跟不上），**但删除其实在后台完成了**。别看见报错就重跑，先 `df -h` 复核。
 
 完整的一次实例（2026-08-03，释放 9GB）见迁移文档的「残余清理」一节。

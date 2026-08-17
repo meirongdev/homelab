@@ -51,7 +51,7 @@ spec:
     spec:
       # 非核心：节点内存吃紧时优先被挤掉（面板缺一格 ≪ 业务被 OOM）。
       priorityClassName: bulk
-      # 无状态、无 PVC、无 hostPath → 任何节点可跑；落到 106 worker 分担 master。
+      # 无状态、无 PVC、无 hostPath → 任何节点可跑；落到 106 worker 分担控制面。
       nodeSelector:
         kubernetes.io/hostname: k8s-worker-106
       containers:

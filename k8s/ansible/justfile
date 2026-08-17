@@ -15,7 +15,7 @@ setup-k8s-remote:
 restart-k3s-remote:
     ansible k8s_masters -m systemd -a "name=k3s state=restarted" --become -e ansible_host=100.94.186.7 -e "ansible_ssh_common_args="
 
-# Fetch kubeconfig from master node to local machine
+# Fetch kubeconfig from the control-plane node to local machine
 fetch-kubeconfig:
     ansible-playbook playbooks/fetch-kubeconfig.yaml
 
@@ -45,7 +45,7 @@ setup-tailscale authkey:
       -e "tailscale_authkey={{ authkey }}" \
       --private-key ~/.ssh/vgio
 
-# 只给 106 上的 worker 装 Tailscale（master 已装；本配方 --limit 到 worker 避免误动 prod）
+# 只给 106 上的 worker 装 Tailscale（控制面已装；本配方 --limit 到 worker 避免误动 prod）
 # 密钥: cd ../../tailscale/terraform && just homelab-worker-authkey
 # Usage: just setup-tailscale-worker <authkey>
 setup-tailscale-worker authkey:

@@ -7,7 +7,7 @@
 # ⚠️ 前置：必须先跑 `just setup-tailscale-worker <key>`。不是为了连通性（LAN 路由
 #    已够），而是为了 **MTU 一致性** —— 见下面 ③。
 #
-# ☠️ 与 master（setup-k3s.yaml）不同、抄错会静默失效的四处：
+# ☠️ 与控制面（setup-k3s.yaml）不同、抄错会静默失效的四处：
 #
 #  ① 网络：worker 在 192.168.50.0/24，控制面在 10.10.10.0/24（pve vmbr0 的第二个
 #     地址段，pve 已开 ip_forward）。没有静态路由则 k3s agent 与 cilium-agent
@@ -19,7 +19,7 @@
 #     ☠️ 不是 5250 —— 那个优先级被 tailscaled 自己的 `fwmark ... unreachable` 占着。
 #
 #  ③ MTU：Cilium 的 MTU 是**每节点各自** auto-detect 最低设备。2026-08-13 实测
-#     master：tailscale0/cilium_vxlan/lxc*(pod 侧) 全是 **1280**，eth0 是 1500。
+#     控制面：tailscale0/cilium_vxlan/lxc*(pod 侧) 全是 **1280**，eth0 是 1500。
 #     本节点若不装 Tailscale，最低设备是 eth0=1500 → 它的 pod 拿 1500，跨节点
 #     pod↔pod 时 1500+50 的 VXLAN 外层超过 LAN 的 1500，大包碎/丢。
 #     ☠️ 不要改用显式 MTU 绕：Cilium 对显式值不减隧道开销，同一个坑 2026-07-07
@@ -31,10 +31,10 @@
 #     tempo 100.107.166.37:31317）。节点不在 tailnet 上，这个 pod 就够不着——
 #     日志/追踪**静默断流**，无任何报错。这是「worker 必须入 tailnet」的第一理由。
 #
-#  ④ 预留：本节点 3G 内存 / 2 vCPU（master 是 13G / 10 核）。reservation 按 3G
-#     缩放，**不可照抄 master 的 512Mi+512Mi** —— 那会吃掉本节点三分之一。
+#  ④ 预留：本节点 3G 内存 / 2 vCPU（控制面是 13G / 10 核）。reservation 按 3G
+#     缩放，**不可照抄控制面的 512Mi+512Mi** —— 那会吃掉本节点三分之一。
 #
-# Pod 的上游 DNS 用公网解析器即可：master 那边写 10.10.10.10 是因为
+# Pod 的上游 DNS 用公网解析器即可：控制面那边写 10.10.10.10 是因为
 # 「10.10.10.0/24 段公网 DNS 不通」（2026-07-07），本节点在 LAN 段，实测 1.1.1.1 / 8.8.8.8 均通。
 
 - name: Prepare the storage-106 k3s worker
@@ -47,7 +47,7 @@
           - curl
           - qemu-guest-agent
           # nfs-common：NFS **client**（mount.nfs helper）。worker 会承接读 NAS 106
-          # 只读媒体的 serving pod（media ns 的 podcast 等）；master 在 setup-k3s.yaml
+          # 只读媒体的 serving pod（media ns 的 podcast 等）；控制面在 setup-k3s.yaml
           # 里装了它，worker 漏掉会让 NFS pod FailedMount
           # （"bad option... need a /sbin/mount.nfs helper"。2026-08-16 实测）。
           - nfs-common
@@ -89,7 +89,7 @@
         port: 6443
         timeout: 30
 
-    # 与 master 同源的内核前置（值取自 setup-k3s.yaml，kubelet 的硬性要求）。
+    # 与控制面同源的内核前置（值取自 setup-k3s.yaml，kubelet 的硬性要求）。
     - name: Drop sysctl tuning for inotify + file-max
       ansible.builtin.copy:
         dest: /etc/sysctl.d/30-k8s-inotify.conf
@@ -145,7 +145,7 @@
         state: directory
         mode: "0755"
 
-    # Pod 的上游 DNS。本节点在 LAN 段，公网解析器可达（实测），无需 master 那个
+    # Pod 的上游 DNS。本节点在 LAN 段，公网解析器可达（实测），无需控制面那个
     # 指向 10.10.10.10 的 resolved stub 变通。
     - name: Write clean resolv.conf for kubelet (pods' upstream DNS)
       ansible.builtin.copy:
@@ -163,7 +163,7 @@
           node-name: {{ inventory_hostname }}
           kubelet-arg:
             - resolv-conf=/etc/rancher/k3s/resolv.conf
-            # ④ 按 3G 节点缩放 —— master 用的 512Mi+512Mi 会吃掉本节点三分之一。
+            # ④ 按 3G 节点缩放 —— 控制面用的 512Mi+512Mi 会吃掉本节点三分之一。
             - kube-reserved=cpu=100m,memory=256Mi,ephemeral-storage=1Gi
             - system-reserved=cpu=100m,memory=256Mi,ephemeral-storage=1Gi
             - eviction-hard=memory.available<150Mi,nodefs.available<10%

@@ -77,7 +77,7 @@ spec:
       labels:
         app: litellm
     spec:
-      # ⚠️ 网关必须钉在 master（control-plane）：只有它能直连 DGX/Mac OMLX ——
+      # ⚠️ 网关必须钉在控制面：只有它能直连 DGX/Mac OMLX ——
       # worker-106 是 tagged-device，netmap 里没有这两个源（见 decisions/cluster-placement 与
       # storage106-as-homelab-worker）。被调度到 worker 会既连不上上游、又在那台 3G VM 上 OOM。
       nodeSelector:
@@ -123,7 +123,7 @@ spec:
             requests: { cpu: 200m, memory: 512Mi }
             # ⚠️ limit 1Gi 实测 OOMKilled（Python proxy 首启 Prisma migration + 依赖载入峰值高，
             #    2026-08-16 在 worker-106 上 exit 137）。抬到 2Gi 给 migration/burst 余量；
-            #    master 有 ~6GB available，2Gi limit 占得起。稳定后可下探（见 KRR）。
+            #    控制面有 ~6GB available，2Gi limit 占得起。稳定后可下探（见 KRR）。
             limits: { cpu: "1", memory: 2Gi }
           livenessProbe:
             httpGet:

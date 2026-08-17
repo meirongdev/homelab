@@ -15,7 +15,7 @@ metadata:
   name: restic-backup-worker
   namespace: backup
 spec:
-  # 02:00：排在 master(03:00) 前面，让本 Job forget 掉的数据能被 master 那次的
+  # 02:00：排在控制面(03:00) 前面，让本 Job forget 掉的数据能被控制面那次的
   # `forget --prune` 顺手回收；也避开 oracle(03:30) 与月度恢复演练(每月 1 号 04:00)。
   # ⚠️ 名字必须含 "backup"：BackupJobNotRunRecently / BackupJobFailed 两条告警
   # 靠 `cronjob=~".*backup.*"` / `job_name=~".*backup.*"` 匹配（见 monitoring/alerts）。
@@ -35,7 +35,7 @@ spec:
         spec:
           restartPolicy: Never
           # ☠️ 钉死 worker：本 Job 的全部意义就是备份**这台**的 hostPath。
-          # 漂到 master 会备出与 restic-backup 重复的内容，还占着 homelab-worker 这个
+          # 漂到控制面会备出与 restic-backup 重复的内容，还占着 homelab-worker 这个
           # host 名 —— 快照看着是新鲜的，实际 worker 的数据一个字节都没进去。
           nodeSelector:
             kubernetes.io/hostname: k8s-worker-106
@@ -64,7 +64,7 @@ spec:
             - name: script
               configMap: { name: restic-backup-worker-script }
             - name: creds
-              # 与 master 同一个 Secret（external-secret.yaml，Vault secret/homelab/restic）。
+              # 与控制面同一个 Secret（external-secret.yaml，Vault secret/homelab/restic）。
               # 本脚本只用其中的 RESTIC_PASSWORD 与 SSH_KEY_B64。
               secret: { secretName: restic-backup, defaultMode: 0400 }
             - name: work

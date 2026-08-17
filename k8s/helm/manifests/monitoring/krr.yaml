@@ -76,7 +76,7 @@ spec:
           # 用它验证/固化「无状态周期扫描 → k8s-worker-106」这条分担通道（方案 A）。
           # ⚠️ 后果：KRR 调度自此依赖 106 worker 存活；该节点下线时本周报案静默缺失
           # （dead-man's switch 不覆盖 KRR——它不是 Checkmk 探针）。若 want all-green
-          # 语义，改为调度回 master 即可（去掉这两行）。
+          # 语义，改为调度回控制面即可（去掉这两行）。
           nodeSelector:
             kubernetes.io/hostname: k8s-worker-106
           # KRR 先跑完写文件，notify 再读 —— initContainer 保证顺序

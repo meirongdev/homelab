@@ -24,7 +24,7 @@
 IaC 落点：
 - `k8s/ansible/playbooks/setup-k3s-worker.yaml` + `just join-worker`
 - `k8s/ansible/playbooks/setup-tailscale.yaml` 扩到 `k8s_cluster`，`just setup-tailscale-worker`
-- `tailscale/terraform` 新增 `tailnet_key.homelab_worker`（旧的 `homelab` 是 `reusable=false`，已被 master 消费）
+- `tailscale/terraform` 新增 `tailnet_key.homelab_worker`（旧的 `homelab` 是 `reusable=false`，已被控制面消费）
 - `proxmox/ansible` 的 `exp-k3s` / `exp-kubeconfig` / `exp-tunnel` 三条配方退役
 
 ## 实测入伙税（2026-08-13，节点 Ready 后）
@@ -40,7 +40,7 @@ IaC 落点：
 `otel-collector-agent`（tetragon 也在）。**估算偏保守**——3G 的 VM 留给负载的
 远不止 0.5–0.9G。这是本决策成立的主要数据支撑。
 
-## ⚠️ 三条与 master 不同、错了会静默失效的约束
+## ⚠️ 三条与控制面不同、错了会静默失效的约束
 
 全部写进了 `setup-k3s-worker.yaml` 的文件头，这里只列索引：
 
@@ -52,17 +52,17 @@ IaC 落点：
 3. **必须装 Tailscale**，但**不是为了连通**（LAN 路由已够）。两个真实理由：
    - `otel-collector-agent` 是 DaemonSet，exporter 写死 oracle 的 tailnet NodePort
      （`100.107.166.37:31080/31317`）。节点不在 tailnet 上 = 日志/追踪**静默断流**。
-   - MTU：Cilium 按**每节点各自**的最低设备定 MTU。实测 master 的
+   - MTU：Cilium 按**每节点各自**的最低设备定 MTU。实测控制面的
      `cilium_vxlan`/`lxc*` 均 **1280**（来自 `tailscale0`）。worker 不装则最低是
      eth0=1500，两边 pod MTU 不一致，跨节点大包碎/丢。
 
 ## 验收（2026-08-13 实测）
 
 - `kubectl get nodes` → `k8s-worker-106 Ready`，v1.34.5+k3s1，InternalIP 192.168.50.107
-- worker 的 `cilium_vxlan` / `lxc_health` MTU = **1280**，与 master 一致
+- worker 的 `cilium_vxlan` / `lxc_health` MTU = **1280**，与控制面一致
 - `pgrep -x kube-proxy` 空、无 `KUBE-SERVICES` 链 —— agent 正确继承了 server 的
   `disable-kube-proxy`（⚠️ 该 flag 是 **server-only**，写进 agent config 会 fatal 拒启）
-- 跨节点 Service：worker 上的 pod → master 上的 grafana / prometheus 均 **HTTP 200**
+- 跨节点 Service：worker 上的 pod → 控制面上的 grafana / prometheus 均 **HTTP 200**
 - 跨集群：Loki（oracle）近 15 分钟收到 **317 条** 来自 `k8s-worker-106` 的日志
 
 ## Consequences
@@ -76,7 +76,7 @@ IaC 落点：
   整目录扫不筛 PVC 名）+ 106 上的整机周备 vzdump（`just vzdump-worker`）。
   当时查清的实况：worker 的 PVC 曾是**三重裸奔** —— restic 不覆盖、VM 盘在 `local-lvm`
   不在 `mrstorage` 故 sanoid 拍不到、106 的 `jobs.cfg` 一条 vzdump 都没有。
-  ⚠️ CI 的 H4 仍只解析 master 那份白名单，新 PVC 照样要写进去才过 CI。
+  ⚠️ CI 的 H4 仍只解析控制面那份白名单，新 PVC 照样要写进去才过 CI。
   细节见 [reference/storage.md](../reference/storage.md)。
 - `k8s/cilium/values.yaml` **未改也不需要改**：加节点不涉及 values，Cilium
   DaemonSet 自动排布。（Cilium 仍是 manual-helm。）

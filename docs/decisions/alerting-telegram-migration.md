@@ -15,7 +15,7 @@
 var metrics = make(map[string]int)   // 全局，无 mutex
 ```
 
-`handleCall`（处理每个 Alertmanager webhook 的函数）对该 map 做 `metrics["requests_received"]++` 等自增，无锁保护。Go 运行时对并发写 map **强制终止进程**（`fatal error: concurrent map writes`，不是 panic，`recover()` 拦不住）。触发条件：Alertmanager 同时投递 ≥2 个 webhook。上游仓库 `master` 分支至今仍是这段无锁代码，判定无维护。
+`handleCall`（处理每个 Alertmanager webhook 的函数）对该 map 做 `metrics["requests_received"]++` 等自增，无锁保护。Go 运行时对并发写 map **强制终止进程**（`fatal error: concurrent map writes`，不是 panic，`recover()` 拦不住）。触发条件：Alertmanager 同时投递 ≥2 个 webhook。上游仓库 `控制面` 分支至今仍是这段无锁代码，判定无维护。
 
 ## Alternatives Evaluated
 

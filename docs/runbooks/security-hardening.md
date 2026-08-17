@@ -19,7 +19,8 @@
 | CIS 巡检 | kube-bench CronJob（每周） | ArgoCD plain-manifest | homelab | 极低（周期一次） |
 | 网络可见性 | Hubble（已启用） | — | 双 | 已有 |
 
-**硬约束**：homelab = 单节点 5600H 笔记本，idle ~74°C，重启需 `just homelab-recover`。故全部选型 fail-open、控 CPU。
+**硬约束**：homelab 控制面 = 5600H 笔记本，idle ~74°C，重启需 `just homelab-recover`。故全部选型 fail-open、控 CPU。
+（2026-08-13 起集群另有 worker `k8s-worker-106`，但它只有 2c/4G —— 热预算与安全组件的判断仍以控制面为准。）
 
 **刻意延后**：Cilium 网络默认拒绝（单命名空间灰度，独立门控变更，见末节）；API 审计日志（磁盘紧）。
 

@@ -28,10 +28,10 @@ spec:
     spec:
       priorityClassName: bulk
       # 落 106 worker（2026-08-16）：它读的 media-podcast 是 106 自己的只读 NFS，
-      # 而 worker 就是 106 上的 VM —— 这一跳不出宿主机（master 无 LAN 接口，要经 pve NAT）。
+      # 而 worker 就是 106 上的 VM —— 这一跳不出宿主机（控制面无 LAN 接口，要经 pve NAT）。
       # 无 PVC、无 hostPath、无节点语义，是最干净的一类可搬负载。
       # ⚠️ 在此之前它是**调度器碰巧**放上去的（本清单没有 nodeSelector），
-      # 重建一次就会飘回 master —— 想要的位置必须写下来，不能靠运气维持。
+      # 重建一次就会飘回控制面 —— 想要的位置必须写下来，不能靠运气维持。
       nodeSelector:
         kubernetes.io/hostname: k8s-worker-106
       # 官方 nginx 镜像以 root 直跑会自己降权；作为非 root(101) 跑时它要写

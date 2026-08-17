@@ -9,7 +9,7 @@ all:
               tailscale_ip: 100.94.186.7
               ansible_ssh_common_args: '-o ProxyCommand="ssh -W %h:%p -i ~/.ssh/vgio root@192.168.50.4"'
         # 2026-08-13 入编：storage-106 上的 VM 以 worker 身份加入本集群。
-        # 与 master 不同，它直挂 LAN（192.168.50.0/24），无需经 pve 的 ProxyCommand。
+        # 与控制面不同，它直挂 LAN（192.168.50.0/24），无需经 pve 的 ProxyCommand。
         # 反向：它到控制面 10.10.10.10 靠一条静态路由经 pve 转发，见 setup-k3s-worker.yaml。
         k8s_workers:
           hosts:
@@ -17,7 +17,7 @@ all:
               ansible_host: 192.168.50.107
               tailscale_ip: ""   # 由 setup-tailscale 分配后回填
           # ip rule 断言清单已统一进 setup-tailscale.yaml 的默认 vars（2026-08-13）：
-          # 原以为 5240（to 10.10.10.0/24 lookup main）只有 worker 需要，实际 master
+          # 原以为 5240（to 10.10.10.0/24 lookup main）只有 worker 需要，实际控制面
           # 同样缺它 —— 自己网段的回包被劫进隧道，pve ProxyCommand 路径因此坏了一天
           # （docs/records/2026-08-13-k3s-worker-join-106.md §4）。两处清单必然漂移，
           # 故收敛为一份；各规则的存在理由见 playbook vars 注释。
