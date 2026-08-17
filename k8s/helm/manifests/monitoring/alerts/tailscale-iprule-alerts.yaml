@@ -57,8 +57,28 @@ spec:
 
         # 拉锯战：短窗口内反复补齐。networkd 清扫已在 drop-in 层根治，正常应恒为 0；
         # 偶发 +1（如新装节点首轮）不告警，6h 内 >3 次说明出现了新的系统性删除者。
+        #
+        # 2026-08-17 加开机窗口门（`and on (cluster, instance) 开机满 7h`）：
+        # 原判据 `> 3` 与 homelab 每节点 expected=3 **撞成同一个数** —— 节点一重启，
+        # 3 条规则全没、收敛器一次补齐，计数器恰好 +3；而 increase() 会向窗口边缘外推，
+        # 实测 **3.0004 > 3**，靠 0.013% 的零头点着告警，并烧满 6h 直到窗口滚过去。
+        # k8s-worker-106 08-17 00:01 重启即完整复现（00:05 触发 → 05:59 自愈）。
+        # ⚠️ **不能改成 `> 4` 收工**，三个理由，第三个才是关键：
+        #   ① oracle 的 expected 是 1，与 homelab 不同量纲，写死任何常数都只对一边；
+        #   ② 哪天给 homelab 加第 4 条规则，阈值会被再次静默追平，这个坑原样重来；
+        #   ③ **计数器随重启归零**，而 increase() 的重置补偿会把重启前的存量加回来。
+        #      当前存量：k8s-node 2、node0 6 —— 它们重启时 increase 分别是 2+3=5、
+        #      6+1=7，与 expected 已经毫无关系。只有按开机时间开窗能可靠压住这一类。
+        # 门限 25200s（7h）比窗口 6h 多留 1h：要等重启那一下彻底滚出 [6h] 窗口才解除盲区，
+        # 否则刚满 6h 解禁时窗口里还压着那根尖峰，等于没门。
+        # 代价：节点重启后 7h 内这条不判。收敛器本身照常工作，且同组的
+        # PersistentlyMissing / GuardStale / SeriesIncomplete 三条都不受本门影响 ——
+        # 真在这 7h 里失守，仍由它们兜底。
         - alert: TailscaleIpRuleRepeatedDrift
-          expr: increase(tailscale_iprule_reasserts_total[6h]) > 3
+          expr: |
+            increase(tailscale_iprule_reasserts_total[6h]) > 3
+              and on (cluster, instance)
+            (time() - node_boot_time_seconds > 25200)
           labels:
             severity: warning
             component: network
