@@ -1,6 +1,6 @@
 # Networking & Ingress — 入口链路与 DNS 自动化
 
-> Last updated: 2026-08-13
+> Last updated: 2026-08-17
 > Status: 生效事实
 >
 > 南北向入口（Cloudflare → Cilium Gateway）与 DNS 自动化（external-dns）。

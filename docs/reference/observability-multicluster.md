@@ -1,6 +1,6 @@
 # Multi-Cluster Observability Architecture
 
-> Last updated: 2026-08-14
+> Last updated: 2026-08-17
 > Status: 生效事实
 
 ## 速览
