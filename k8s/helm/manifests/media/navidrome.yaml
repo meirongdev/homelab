@@ -42,13 +42,13 @@ spec:
     spec:
       priorityClassName: bulk
       # 落 106 worker（2026-08-16）：它扫的整个音乐库是 106 自己的只读 NFS，而 worker
-      # 就是 106 上的 VM —— 扫库/转码取样这些顺序读全部不出宿主机（master 无 LAN 接口，
+      # 就是 106 上的 VM —— 扫库/转码取样这些顺序读全部不出宿主机（控制面无 LAN 接口，
       # 每个字节都要经 pve NAT 绕一圈）。
       # ☠️ **local-path PVC 不跟随调度**：光加这两行会让 Pod 因卷节点亲和冲突永远 Pending。
       # 本次是先停服务 → tar 出 5.1M 数据 → 删 PVC → 在 worker 上重建后灌回去（照
       # runbooks/stateful-service-cross-cluster-migration.md 的节点内变体）。
       # 备份归属随之变化：navidrome-data 现在由 **worker 侧夜备**（02:00，--host
-      # homelab-worker，整目录扫）覆盖，master 那份白名单里的同名条目已成 no-op。
+      # homelab-worker，整目录扫）覆盖，控制面那份白名单里的同名条目已成 no-op。
       nodeSelector:
         kubernetes.io/hostname: k8s-worker-106
       securityContext:

@@ -82,7 +82,7 @@ reach a host that is one LAN hop away. Keep the rule on **both** nodes.
 cilium-agent（`k8sServiceHost: 10.10.10.10`）的存活就挂在了 tailnet 上，还绕开了
 实测 0.8ms 的 LAN 直连。故需要 **5240** `to 10.10.10.0/24 lookup main`。
 
-**5240 两个节点都要**（2026-08-13 当天先只给了 worker，master 是漏配）：master 自己
+**5240 两个节点都要**（2026-08-13 当天先只给了 worker，控制面是漏配）：控制面自己
 就在 `10.10.10.0/24` 里，缺这条时 pve 发起到 `10.10.10.10` 的 TCP 全部非对称失败
 （SYN 走 vmbr0 进、SYN-ACK 走隧道出），`k8s/ansible/inventory/hosts.yaml` 里 k8s-node
 的 ProxyCommand 访问路径因此坏了一天。当日修复：三条规则统一进
@@ -102,7 +102,7 @@ cilium-agent（`k8sServiceHost: 10.10.10.10`）的存活就挂在了 tailnet 上
 
 ### `tailscale-cgnat-route` ip-rule —— Cilium 身份标记撞上 Tailscale 的 fwmark
 
-全部三台 k3s 节点（homelab master/worker + oracle）在优先级 **5200** 各有一条
+全部三台 k3s 节点（homelab 控制面/worker + oracle）在优先级 **5200** 各有一条
 `to 100.64.0.0/10 lookup 52`。它挡的是一个
 Cilium 与 Tailscale 之间的位段冲突，2026-08-09 定位并修复。
 

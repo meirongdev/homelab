@@ -6,12 +6,12 @@
   become: true
   vars:
     # 收敛器要断言的 ip rule 列表（每项直接拼进 `ip rule add`）。
-    # 2026-08-13 起 master 与 worker 同一份（此前 5240 只给 worker，master 是漏配）：
+    # 2026-08-13 起控制面与 worker 同一份（此前 5240 只给 worker，控制面是漏配）：
     #   5200  Cilium identity-mark 撞 Tailscale fwmark 的防护（取证见下方 tasks 注释）
     #   5240  到 10.10.10.0/24 走 main 不进隧道 —— 两个节点各有各的死法：
     #         worker：--accept-routes 从 pve 学到该段进 table 52，到控制面 API 的
     #                 流量被劫进隧道（详见 setup-k3s-worker.yaml 文件头 ②）；
-    #         master：自己就在这个网段，从 vmbr0 进来的连接（pve 的 ProxyCommand、
+    #         控制面：自己就在这个网段，从 vmbr0 进来的连接（pve 的 ProxyCommand、
     #                 同段邻居）回包被劫进隧道，非对称直接超时 —— inventory 里
     #                 k8s-node 的唯一声明访问路径因此一直是坏的
     #                 （docs/records/2026-08-13-k3s-worker-join-106.md §4）。
@@ -68,7 +68,7 @@
     # 防线二（兜底）：幂等断言脚本 + timer 每 5 分钟重申 —— 对**任何**删除者收敛，
     # 并写 node-exporter textfile 指标，失守可见可告警
     # （k8s/helm/manifests/monitoring/alerts/tailscale-iprule-alerts.yaml）。
-    # master 上这个目录早就存在，新节点没有 —— 2026-08-13 加 worker 时才暴露。
+    # 控制面上这个目录早就存在，新节点没有 —— 2026-08-13 加 worker 时才暴露。
     - name: Ensure networkd drop-in directory exists
       ansible.builtin.file:
         path: /etc/systemd/networkd.conf.d

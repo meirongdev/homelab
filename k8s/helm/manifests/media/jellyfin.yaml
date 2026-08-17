@@ -53,7 +53,7 @@ spec:
       # ☠️ **前提是不转码**：106 是 Celeron J4105（4 核 1.5GHz，VM 只分到 2 核），软解转码
       # 是死路；QSV 硬解要给 VM 直通核显，那是另一个项目。客户端必须直放
       # （plan 决策：docs/plans/apps/2026-08-16-multimedia-repository.md）。
-      # 哪天真需要转码，第一步是把它搬回 master（5600H），不是在这台上调参数。
+      # 哪天真需要转码，第一步是把它搬回控制面（5600H），不是在这台上调参数。
       # 备份归属：jellyfin-config 现由 worker 侧夜备（--host homelab-worker）覆盖。
       nodeSelector:
         kubernetes.io/hostname: k8s-worker-106

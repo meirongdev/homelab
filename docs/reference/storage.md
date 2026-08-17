@@ -70,10 +70,10 @@ sqlite 依赖 POSIX 字节区间锁（`fcntl`）+ 同步小写入；NFS 的 NLM 
    备份**，比"漏备一个 PVC"更糟。
 2. worker 侧有**自己的**夜备 Job（`backup/overlays/homelab/worker-{cronjob,backup-script}.yaml`，
    02:00 CST，`--host homelab-worker`）——同一个 106 仓库、独立保留策略、只 `forget`
-   不 `prune`（prune 交给 03:00 master 那次，两个 prune 抢独占锁只会互相失败）。
+   不 `prune`（prune 交给 03:00 控制面那次，两个 prune 抢独占锁只会互相失败）。
    它**不筛 PVC 名**，整个 `/localpath` 目录扫：worker 就是用来接住漂过来的负载的，
-   谁落上来都该被备到。⚠️ 但 CI 的 H4 仍只解析 master 那份的 `for pat in …`——
-   新 PVC 照样要写进那份白名单才过 CI（在 master 上匹配不到目录、是无害 no-op）。
+   谁落上来都该被备到。⚠️ 但 CI 的 H4 仍只解析控制面那份的 `for pat in …`——
+   新 PVC 照样要写进那份白名单才过 CI（在控制面上匹配不到目录、是无害 no-op）。
 3. 告警 `PVCOnUnbackedNode`（`k8s/helm/manifests/monitoring/alerts/prometheus-rules.yaml`
    backups 组）：homelab 任何**既非 control-plane、又不在排除名单**的节点上出现被
    kubelet 统计的 PVC 即 warning——H4 只保证"进白名单"，这条保证"落对节点"。
@@ -81,7 +81,7 @@ sqlite 依赖 POSIX 字节区间锁（`fcntl`）+ 同步小写入；NFS 的 NLM 
    已知局限：负载缩到 0 后 kubelet_volume_stats 消失、告警自行恢复，但数据还躺在
    节点盘上，处置别只看告警消没消。
 
-☠️ **worker 上的 PVC 只有 restic 这一层保护，且比 master 少一层**：VM 200 的盘在 106 的
+☠️ **worker 上的 PVC 只有 restic 这一层保护，且比控制面少一层**：VM 200 的盘在 106 的
 `local-lvm`（LVM-thin，与 PVE 的 `local` 同在一块 238G 启动盘 sdd），**不在 `mrstorage`
 池里** —— sanoid 的 `[mrstorage] recursive=yes` 快照对它完全无效。2026-08-16 补了
 整机周备兜底：`just vzdump-worker`（`proxmox/ansible/playbooks/vzdump-worker-vm.yaml`）
@@ -210,11 +210,11 @@ restic（`restic ls … | head` 会 SIGPIPE 杀掉 restic，2026-08-13 实测踩
   手动触发 `just backup-run`（`k8s/helm/`）。
   ⚠️ 两个 overlay 的备份脚本都是**显式白名单**（`for pat in …`）——新增有状态应用必须往里加，
   否则静默不备份（CI H4 兜底）。
-- **夜备有三个 Job，不是两个**（2026-08-16 起）：homelab master 03:00（`--host homelab`）、
+- **夜备有三个 Job，不是两个**（2026-08-16 起）：homelab 控制面 03:00（`--host homelab`）、
   homelab worker 02:00（`--host homelab-worker`，见上「当前 PVC 清单」第 2 条）、
   oracle 03:30（`--host oracle-k3s`）。恢复时**按 host 过滤**，别默认 `latest` 就是要的那份：
   `restic snapshots --host homelab-worker`。worker 那份只 `forget` 不 `prune`，
-  空间由 master 那次的全仓库 prune 统一回收。
+  空间由控制面那次的全仓库 prune 统一回收。
 - **书库归属**: Calibre 书库在 restic 内；**2026-08-03 起随服务在 oracle overlay** 发现
   （`/localpath/*calibre-books-local*`，缺失时日志打 `[warn] books NOT in this backup`），
   homelab 侧逻辑已移除。

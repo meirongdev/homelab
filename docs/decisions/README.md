@@ -16,7 +16,7 @@
 | [orphaned-resources](orphaned-resources.md) | 否决 kor（信噪比 0.6%、误判 secret），改用 ArgoCD 原生 `orphanedResources` + `warn: false` |
 | [argocd-image-updater](argocd-image-updater.md) | CRD 模型与约束（⚠️ 当前闲置，集群内无 `ImageUpdater` CR） |
 | [storage106-experiment-vm](storage106-experiment-vm.md) | ⛔ 已被取代 → `storage106-as-homelab-worker`；原结论"实验田独立小集群"，估算实测偏保守 |
-| [storage106-as-homelab-worker](storage106-as-homelab-worker.md) | 106 VM 以 `k8s-worker-106` 入编 homelab（取代上一条）；实测入伙税远低于估算，含三条与 master 不同的约束 |
+| [storage106-as-homelab-worker](storage106-as-homelab-worker.md) | 106 VM 以 `k8s-worker-106` 入编 homelab（取代上一条）；实测入伙税远低于估算，含三条与控制面不同的约束 |
 | [cluster-placement-for-new-services](cluster-placement-for-new-services.md) | 计算密集/大流量走 homelab、轻量无状态默认 oracle-k3s；含必写 CPU limit 与 thermal 代价 |
 | [dgx-clustermesh-not-adopted](dgx-clustermesh-not-adopted.md) | ❌ DGX 双机**不接 ClusterMesh**（共享节点不带 subnet route，VXLAN 节点 IP 不可达）；改 homelab Service + 手写 Endpoints |
 | [shared-postgres-platform](shared-postgres-platform.md) | 手搓 `rss-postgres` → CNPG `apps-pg`；**不**并入 `zitadel-pg`；备份改逐库 `pg_dump` |

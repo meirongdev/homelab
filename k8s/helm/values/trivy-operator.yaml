@@ -177,4 +177,4 @@ trivyOperator:
 # 想把 operator 也挪过去，得连 trivy-server 的 PVC 一起搬；但 worker 只有 2311Mi
 # allocatable、当时 requests 已 78%，再加 server 的 256Mi 会挤掉扫描 Job 自己的头寸。
 # 判断：CPU 脉冲在**扫描 Job**上，上面那条 scanJobNodeSelector 已经拿到了绝大部分收益，
-# operator(194Mi)/server(51Mi) 留在 master 是划算的取舍。
+# operator(194Mi)/server(51Mi) 留在控制面是划算的取舍。
