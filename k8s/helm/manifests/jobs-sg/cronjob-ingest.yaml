@@ -23,6 +23,12 @@ spec:
     spec:
       backoffLimit: 2
       activeDeadlineSeconds: 3600
+      # 2026-08-17 加：历史回收的**第二道**闸，理由见 limits.yaml 的 count/pods 段
+      # （Completed 的 pod 照样吃 count/pods 配额，顶格后新 Job 建不出 pod 且几乎无告警）。
+      # 对本 CronJob 它平时不生效 —— 日更 + successfulJobsHistoryLimit 3 意味着历史
+      # 只活 3 天，先于 7 天被剪掉。它兜的是「history limit 被调大/删掉」那种改动。
+      # 周更的 report 才是真受益者：7d TTL 让它稳态只留 1~2 个而不是 3 个。
+      ttlSecondsAfterFinished: 604800
       template:
         spec:
           serviceAccountName: jobs-sg

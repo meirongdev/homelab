@@ -48,6 +48,8 @@ spec:
     spec:
       backoffLimit: 2
       activeDeadlineSeconds: 10800
+      # 历史回收的第二道闸，理由见 limits.yaml 的 count/pods 段（与 ingest 同款）。
+      ttlSecondsAfterFinished: 604800
       template:
         spec:
           serviceAccountName: jobs-sg

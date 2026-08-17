@@ -25,6 +25,12 @@ spec:
     spec:
       backoffLimit: 2
       activeDeadlineSeconds: 1800
+      # 历史回收的第二道闸，理由见 limits.yaml 的 count/pods 段。
+      # ⚠️ 本 CronJob 是**周更**，7d TTL 会先于 successfulJobsHistoryLimit 3 生效：
+      # 每个 report Job 完成 7 天后即被删，稳态只留 1~2 个。这正是 08-17 那次
+      # 配额顶格（10/10）要回收的槽位，别把它当成"和 ingest 一样不生效"。
+      # 想留够 3 周的历史就把这里改成 1814400（21d），并同步把 count/pods 抬回去。
+      ttlSecondsAfterFinished: 604800
       template:
         spec:
           serviceAccountName: jobs-sg
