@@ -514,7 +514,7 @@ usage() {
 
 选项:
   --source DIR              源目录（默认: ~/Downloads/books）
-  --context NAME            K8s context（默认: k3s-homelab）
+  --context NAME            K8s context（默认: oracle-k3s，calibre 2026-08-02 起在那）
   --dry-run                 模拟运行
   --backup                  备份已导入文件（默认启用）
   --no-backup               禁用备份
