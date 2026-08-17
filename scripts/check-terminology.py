@@ -6,10 +6,14 @@
 故意不管 —— 那些只能靠 terminology.md + review，写成规则必然误报，误报多了整个检查就
 会被绕过。
 
-豁免（按 docs/RULES.md R1）：
-  · `docs/plans/` 全部 —— 写完即冻结的历史快照，不代表现状，改它反而抹掉历史
-  · `docs/records/` —— 故障复盘同为历史快照
+范围：**全仓，含 `docs/plans/` 与 `docs/records/`**（2026-08-18 纳入）。它们按 R1 是冻结
+快照，但"叫什么名字"不是事实陈述——统一命名不改写历史。真正与年代绑定的那条（T3
+「homelab 是单节点」）**只作用于 `reference/` 与 `runbooks/`**，所以 2026-03 的 plan 里
+"homelab 单节点"仍然合法，不会被判违规，也不该改。
+
+豁免：
   · `docs/reference/terminology.md` 自己 —— 它必须**列出**这些禁止写法才能说明规则
+  · 本文件 —— 同理，规则的正则里就带着被禁的字面量
   · fenced code block / 行内 code / 链接目标 —— 那些是标识符或命令，照抄才对
 """
 from __future__ import annotations
@@ -25,8 +29,6 @@ GLOBS = ("*.md", "*.yaml", "*.yml", "*.sh", "*.py", "*.tf", "justfile")
 
 SKIP_DIRS = {".git", "node_modules", ".terraform", "venv", ".venv", "__pycache__"}
 SKIP_PATHS = {
-    "docs/plans",                                  # R1：冻结快照
-    "docs/records",                                # 故障复盘同为快照
     "docs/reference/terminology.md",               # 正典本身要列出反例
     "scripts/check-terminology.py",                # 本文件
 }
@@ -87,7 +89,8 @@ SPELLING = [
 # 除此之外指节点时一律写 `控制面`（中文）/ `control-plane`（英文），或直呼 `k8s-node`。
 MASTER = re.compile(r"(?<![-\w/])master(?![-\w])")
 MASTER_OK = re.compile(
-    r"master[-_ ]?key|master 分支|\bbranch\b|Mastering"
+    r"master[-_ ]?key|master\s*[/、]\s*[^\n]{0,8}key"   # master key / `master/虚拟 key`
+    r"|master 分支|\bbranch\b|Mastering"
     r"|origin[/\s]+master"                       # origin/master 与 `git pull origin master`
     r"|\bgit\b[^\n]*\bmaster\b"                  # 任何 git 命令行里的分支名
     r"|master\s*[,/]\s*(etcd|controlplane)|(etcd|controlplane)\s*[,/]\s*master",
