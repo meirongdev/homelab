@@ -1,10 +1,37 @@
 ---
 # ResourceQuota 是护栏，不是容量规划：仓库先例里一个没设 history limit 的 CronJob
 # 泄漏了 92 个卡住的 Job Pod，把单节点推过 110-pod 上限，**阻塞了全集群调度**。
-# count/pods 封顶 10 保证 jobs-sg 再怎么坏也炸不了别的应用。
+# count/pods 封顶保证 jobs-sg 再怎么坏也炸不了别的应用。
 #
 # 单独一个 ns（而不是并进 personal-services）也是为这个：personal-services 的
 # quota 限死 count/jobs.batch，三个 CronJob 的历史 Job 会挤占那份为事故加的护栏。
+#
+# ── 2026-08-17：count/pods 10 → 16 ──────────────────────────────────────────
+# ⚠️ 前提知识（不直观，是这次的根）：`count/pods` 是**对象计数**配额，和 `pods`
+#    这个资源不一样 —— 它**不排除终态**，Completed 的 pod 照样占额。实测当天
+#    10 个 pod 对象里 9 个是 Completed，配额就报 used=10。
+# 10 这个数是在 report（周任务）的历史攒满之前定的，稳态其实要：
+#    enrich 3 + ingest 3 + report 3（各自 successfulJobsHistoryLimit）
+#    + jobs-sg-web 1 = 10，再加建新 pod 时与待回收旧 pod 的瞬时重叠 → 必然超。
+# 08-17 周一那轮 report 跑完，used 当场顶到 10/10，零余量。
+# ☠️ 顶格之后的坏法**几乎没有告警覆盖**：配额在准入层拒绝建 pod，于是 Job 对象
+#    建出来了、active=0、永远没有 pod、只无限刷 FailedCreate ——
+#    但它**不会被标记成 failed**。逐条核对过：
+#      · JobsSgCronJobFailed  查 kube_job_status_failed > 0    → 不会响
+#      · KubeJobNotCompleted  要求 kube_job_status_active > 0  → 不会响
+#      · KubeQuotaFullyUsed   会响，但 severity=info，Alertmanager 路由只放行
+#                             critical|warning                → 进不了 Telegram
+#      · KubeQuotaExceeded    判据 used/hard > 1，而准入控制保证 used 最多**等于**
+#                             hard、比值封顶 1.0                → **结构上永不触发**
+#                             （这条对集群里每个 ResourceQuota 都一样是死的）
+#    真正兜底的只有 JobsSgIngestStale，而它要等 36h 才响 = 先丢一天半数据。
+# 16 = 稳态 ~10 + 余量 6。护栏语义没变：真出现 92 个泄漏 pod 那种事故，仍然远在
+# 节点 110-pod 上限之前就被拦下。
+# ⚠️ **手工建的一次性 Job 不归 CronJob 的 history limit / TTL 管**：enrich-backfill
+#    （08-03 建，无 ownerReferences 无 TTL）就这么白占了一个槽直到 08-17 手工清掉。
+#    以后手工起 Job 请自带 TTL，例如
+#    `kubectl create job --from=cronjob/ingest <name>` 之后补
+#    `kubectl patch job <name> -p '{"spec":{"ttlSecondsAfterFinished":86400}}'`。
 apiVersion: v1
 kind: LimitRange
 metadata:
@@ -28,4 +55,4 @@ metadata:
 spec:
   hard:
     count/jobs.batch: "25"
-    count/pods: "10"
+    count/pods: "16"
