@@ -57,7 +57,17 @@ calibre-web auto-imports from the ingest folder a few minutes after the copy.
   re-running `--dry-run` after import is the safety check.
 - If the DB query fails the script **aborts** rather than treating everything as new
   (which would re-ingest duplicates).
+- ⚠️ **This script does not verify what `kubectl cp` actually transferred** — it trusts the
+  exit code (`sync_ebooks.py` prints `OK` on returncode 0 and never re-checks). `kubectl cp` is
+  known to exit 0 having copied nothing for non-ASCII filenames, so confirm the byte size in the
+  pod before believing an `OK`. Note calibre-web-automated *removes* files from the ingest folder
+  once imported, so an empty ingest dir means success, not a lost copy — verify against the
+  library DB, not the ingest listing.
 - Other ebook tooling in `scripts/` is separate: `sync-ebooks.sh` powers the in-cluster
-  `calibre-ebook-sync` CronJob + `just sync-ebooks*` recipes; `cleanup-duplicates.sh`
-  (`just calibre-cleanup*`) removes duplicate library entries. This skill is the
-  interactive, local-machine path.
+  `calibre-ebook-sync` CronJob + `just sync-ebooks*` recipes; `cleanup-duplicates.py`
+  (`cd k8s/helm && just cleanup-calibre-dry-run` / `cleanup-calibre-duplicates`) removes
+  duplicate library entries. This skill is the interactive, local-machine path.
+- ☠️ A calibre `books.path` that resolves to nothing does **not** mean the file is gone —
+  renaming an author leaves the path stale, and a title containing a newline is stored
+  literally in the DB while the on-disk dir has it sanitized. Treating such a record as empty
+  deletes live files. → [records/2026-08-18-calibre-dedup-stale-paths.md](../../../docs/records/2026-08-18-calibre-dedup-stale-paths.md)

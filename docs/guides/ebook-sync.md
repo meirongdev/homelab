@@ -43,6 +43,24 @@ git push   # ArgoCD 3 分钟内自动同步
 本机 ~/Downloads/books/ ──(kubectl cp + sha256 校验)──→ pod /cwa-book-ingest/ ──→ calibre-web 自动入库
 ```
 
+## 去重
+
+同一本书常以不同标题/格式反复入库（`:` 被文件名清洗成 `_`、副标题有无、EPUB 和 PDF 各一条）。
+
+```bash
+cd k8s/helm
+just cleanup-calibre-dry-run      # 先看判定：谁保留、谁删除、哪些格式会合并
+just cleanup-calibre-duplicates   # 交互确认后执行（会先校验 metadata.db 备份）
+just cleanup-logs                 # 历史清理记录
+```
+
+`scripts/cleanup-duplicates.py` 做归一化标题匹配（不是完全同名）、把同一本书的 EPUB/PDF
+合并成一个条目、用 pod 内的 `calibredb` 删除（会清 link 表，书移入 `.caltrash`，14 天可恢复）。
+
+☠️ **两条只能靠人看的**：Manning `MEAP` 是预售草稿，要输给无版本标记的正式版（哪怕草稿文件大得多）；
+`... Workbook` 这类配套分册标题前缀与主书完全一致，会被模糊匹配判成重复。
+判定依据与踩坑全文 → [records/2026-08-18-calibre-dedup-stale-paths.md](../records/2026-08-18-calibre-dedup-stale-paths.md)。
+
 ## 元数据补全
 
 导进来的书元数据往往不全（书名是文件名、无简介无标签、作者 Unknown）。

@@ -115,15 +115,15 @@ ebook-sync-logs:
 
 # ⬇️ 电子书清理 ⬇️
 
-# 测试模式查看重复书籍
+# 测试模式查看重复书籍（先跑这个，看清保留/删除的判定）
 cleanup-calibre-dry-run:
     @echo "🔍 测试模式: 显示会删除的重复书籍..."
-    bash ../../scripts/cleanup-duplicates.sh oracle-k3s --dry-run
+    python3 ../../scripts/cleanup-duplicates.py --dry-run
 
-# 清理 calibre 数据库中的重复书籍
+# 清理 calibre 数据库中的重复书籍（交互确认；会先校验 metadata.db 备份）
 cleanup-calibre-duplicates:
     @echo "🧹 清理 calibre 数据库中的重复书籍..."
-    bash ../../scripts/cleanup-duplicates.sh oracle-k3s
+    python3 ../../scripts/cleanup-duplicates.py
 
 # 查看清理日志
 cleanup-logs:

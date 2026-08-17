@@ -264,7 +264,7 @@ metadata:
   namespace: personal-services
 spec:
   # ⚠️ homelab 上这里是 NodePort:30083。迁 oracle 时改回 ClusterIP：全仓库无任何
-  # 消费者引用 30083（sync-ebooks.sh 与 cleanup-duplicates.sh 都走 kubectl exec/cp，
+  # 消费者引用 30083（sync-ebooks.sh 与 cleanup-duplicates.py 都走 kubectl exec/cp，
   # 不碰 NodePort），而 oracle 是公网节点、homelab 在 NAT 后面 —— 没理由在云主机上
   # 多开一个对外端口。入口只经 Cloudflare Tunnel → oracle-gateway → 本 Service。
   type: ClusterIP
