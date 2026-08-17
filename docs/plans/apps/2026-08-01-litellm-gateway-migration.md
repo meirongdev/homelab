@@ -43,7 +43,7 @@
 
 ### 1.3 双自托管来源的接线可行性（2026-08 补全，Open Notebook 实证）
 
-两个推理源对 **homelab master（k8s-node）都直连可达**，且已被 Open Notebook 生产使用——
+两个推理源对 **homelab 控制面（k8s-node）都直连可达**，且已被 Open Notebook 生产使用——
 [open-notebook.md](../../reference/open-notebook.md) 是接线事实的唯一真相源：
 
 | 来源 | 端点 | 模型 | ctx | 备注 |
@@ -54,7 +54,7 @@
 要点（决定 gateway 配置怎么写的坑）：
 
 - **两个后端对 k8s-node 直接可达，经 Open Notebook 已实测**：不需要任何代理/dgx-proxy 那类转发层。
-  ⚠️ **worker-106 不行**（tagged-device netmap 里没有这两个源），网关必须留在 master。
+  ⚠️ **worker-106 不行**（tagged-device netmap 里没有这两个源），网关必须留在控制面。
 - **Mac 也是"any token works"**（OMLX 忽略鉴权，Open Notebook 统一用 openai_compatible + dummy）——
   `api_key: dummy` 可留在 git，与 DGX 同理。
 - **via LiteLLM 加** fallback 链相对 Bifrost 是净收益：DGX 挂了自动切 Mac，而不是 client 手动换 base_url。

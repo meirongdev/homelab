@@ -3,7 +3,7 @@
 > 日期: 2026-08-13
 > 影响: worker `k8s-worker-106` 的 ip rule 收敛器自入编起（07:14）完全失效约 3 小时——
 >       规则本身在位（setup 时一次性加对），**无实际断连**；但期间任何清扫都将无法自愈，
->       等价于回到 8-11 那次 33h 静默失守的前夜。连带发现并修复 master 缺 5240
+>       等价于回到 8-11 那次 33h 静默失守的前夜。连带发现并修复控制面缺 5240
 >       规则（后者让 `hosts: k8s_masters` 的全部剧本坏了一天）。
 > 根因: `7abd676` 把断言行改成 Jinja `join('\n          ')`——在 YAML 块标量里
 >       Jinja 拿到的是**字面反斜杠+n**，整段 assert 渲染成一行；shell 把 `52\n` 吃成
@@ -35,8 +35,8 @@ assert 5200 to 100.64.0.0/10 lookup 52\n          assert 5260 to 192.168.50.0/24
    absent series 不参与 `== 0`（PromQL 的老陷阱，`promql-absent-and-per-target-split`
    同款）。这次是 5200 恰好排在第一、恰好有序列且恰好为 0，告警才响；若塌行方式稍有
    不同，一条告警都不会有。
-3. **master 是延迟引信**：它还在跑模板化之前部署的旧版好脚本，所以无告警；但下一次
-   对 master 重跑 playbook 就会拿到同样的坏渲染。"master 没告警"不等于"repo 没 bug"。
+3. **控制面是延迟引信**：它还在跑模板化之前部署的旧版好脚本，所以无告警；但下一次
+   对控制面重跑 playbook 就会拿到同样的坏渲染。"控制面没告警"不等于"repo 没 bug"。
 
 ## 为什么 `join('\n')` 会输出字面 `\n`
 
@@ -50,8 +50,8 @@ playbook 的脚本体是 YAML 块标量（`content: |`）：YAML 对块标量**�
 
 1. **渲染**：`join('\n          ')` → `{% for rule in tailscale_assert_rules %}` 逐行展开
    （`k8s/ansible/playbooks/setup-tailscale.yaml`）。
-2. **规则清单统一**：master/worker 共用一份三条（5200/5240/5260）。此前 5240 只给
-   worker（inventory 覆盖），实际 master 同样需要——它自己网段的回包被劫进隧道，
+2. **规则清单统一**：控制面/worker 共用一份三条（5200/5240/5260）。此前 5240 只给
+   worker（inventory 覆盖），实际控制面同样需要——它自己网段的回包被劫进隧道，
    pve 的 ProxyCommand 路径因此非对称超时（[worker 入编复盘 §4](2026-08-13-k3s-worker-join-106.md)
    当时标"未修"）。手工 `ip rule add to 10.10.10.0/24 lookup main priority 5240` 后
    `ip route get 10.10.10.1` 由 `tailscale0 table 52` 翻回 `eth0` 直连，ProxyCommand
@@ -63,9 +63,9 @@ playbook 的脚本体是 YAML 块标量（`content: |`）：YAML 对块标量**�
    - `TailscaleIpRuleExpectedMissing`：有 present 没 expected（节点跑旧版脚本，对账锁对它是盲的）。
    oracle 的同名脚本无此 bug（assert 行是硬编码），补了 expected（写死 1）保持对账覆盖。
 4. **部署**：`ansible-playbook … --start-at-task "Ensure networkd drop-in directory exists"`
-   跳过 tailscale up 段，只重铺收敛器（master 经修好的 ProxyCommand、worker 走 LAN、
+   跳过 tailscale up 段，只重铺收敛器（控制面经修好的 ProxyCommand、worker 走 LAN、
    oracle 走 tailnet）。验证判据：journal 无 `invalid table ID`；`.prom` 里 present=1 的
-   序列数 == expected；master `ip rule` 含 5240。
+   序列数 == expected；控制面 `ip rule` 含 5240。
 
 ## 教训
 
