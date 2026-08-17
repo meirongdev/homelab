@@ -1,10 +1,12 @@
-# 强制 docs/RULES.md 里的文档组织规则 R1-R7（能自动查的那几条）。
+# 强制两套文档纪律：
+#   1. docs/RULES.md 的组织规则 R1-R7（能自动查的那几条）—— check-docs.py
+#   2. docs/reference/terminology.md 的术语正典 T1-T3 —— check-terminology.py
 #
 # 为什么需要它：2026-07-31 把规则写下来并让全库符合，但规则没有强制手段就会重新腐化——
 # 上一次腐化的表现是 reference/ 混进带日期的建议快照、plans/ 类别目录没索引、四处死链。
 #
-# ⚠️ 本检查只看**结构**（命名/文首字段/索引/链接）。它查不出文档内容与集群漂移
-# ——那次 NFS 描述错误格式完美，是 kubectl 照出来的。内容准确性仍需人工实测。
+# ⚠️ 两个检查都只看**机械可判**的部分。结构合规 / 术语拼对 ≠ 内容正确：那次 NFS 描述
+# 错误格式完美，是 kubectl 照出来的。内容准确性仍需人工实测。
 name: docs check
 
 on:
@@ -13,18 +15,32 @@ on:
     paths:
       - docs/**
       - scripts/check-docs.py
+      - scripts/check-terminology.py
       - .github/workflows/docs-check.yml
+      # 术语检查扫全仓（含代码注释），不只 docs/
+      - "**/*.md"
+      - "**/justfile"
+      - argocd/**
+      - backup/**
+      - cloud/**
+      - k8s/**
+      - proxmox/**
+      - zitadel/**
   push:
     branches: [main]
     paths:
       - docs/**
       - scripts/check-docs.py
+      - scripts/check-terminology.py
       - .github/workflows/docs-check.yml
-      # 这些目录的注释里引用 docs/ 路径，改名后会失效
+      - "**/*.md"
+      # 这些目录的注释里引用 docs/ 路径，改名后会失效；术语检查也扫它们
       - "**/justfile"
       - argocd/**
+      - backup/**
       - cloud/**
       - k8s/**
+      - proxmox/**
       - zitadel/**
 
 permissions:
@@ -41,5 +57,12 @@ jobs:
           fetch-depth: 0
 
       # 只用标准库，不需要 setup-python / 装依赖
-      - name: 检查文档组织规则
+      - name: 检查文档组织规则 R1-R7
         run: python3 scripts/check-docs.py
+
+      - name: 检查术语正典 T1-T3
+        # 正典全文 docs/reference/terminology.md。只拦"判错就是事实错误"的三类：
+        # 不存在的 context 名（曾让脚本默认打错集群）、拼写正典、以及 reference/+runbooks/
+        # 里把 homelab 说成单节点（2026-08-13 起是双节点）。
+        # 风格类变体（K3s/K8s 语义、App/Application、106 简称）故意不查——写成规则必然误报。
+        run: python3 scripts/check-terminology.py

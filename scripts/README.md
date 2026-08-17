@@ -3,6 +3,7 @@
 | 脚本 | 用途 |
 |------|------|
 | [`check-docs.py`](check-docs.py) | 文档组织规则检查器（强制 [R1-R7](../docs/RULES.md)）。`python3 scripts/check-docs.py`，CI 每次 PR/push 跑 |
+| [`check-terminology.py`](check-terminology.py) | 术语正典检查（强制 [terminology.md](../docs/reference/terminology.md) 的 T1-T3）：不存在的 context 名（`homelab-k3s`/`k3s-oracle` —— 曾让脚本默认打错集群）、拼写正典（ArgoCD/ZITADEL/ClusterMesh/控制面/storage-106）、`reference/`+`runbooks/` 里把 homelab 说成单节点（2026-08-13 起双节点）。**故意不查风格类变体**（K3s vs K8s 的语义选择、App/Application、`106` 简称）——写成规则必然误报，误报多了检查就会被绕过。`plans/`+`records/` 按 R1 整体豁免（冻结快照）。`python3 scripts/check-terminology.py`，CI 走 `docs-check.yml` |
 | [`check-public-ips.py`](check-public-ips.py) | 禁止提交公网 IP。扫 git 跟踪的文本文件里的 IPv4 字面量，全球可路由的一律报错；Tailscale `100.64/10`、RFC1918、RFC5737 文档段、第三方 anycast DNS（1.1.1.1/8.8.8.8/…）放行，行内 `public-ip-ok: <理由>` 可豁免。**不设 paths 过滤**，每次 PR/push 全跑（`.github/workflows/no-public-ip.yml`）。只拦新提交，历史里的地址要单独重写 |
 | [`verify-oracle-node.sh`](verify-oracle-node.sh) | oracle-k3s 重启/变更后的巡检（主机层 sysctl/GRO/firewalld/DNS + 节点预留账目 + pod/App + ClusterMesh `retrieved=true` + 数据面）。只读，任一条不成立即非零退出；条数是循环动态累加的，结尾自报「N 项通过 / M 项失败」——别在文档里写死条数。`cd cloud/oracle && just verify-node`。**配套** `just check-node-drift`（`ansible-playbook --check`）查「配置有没有漂移」，本脚本查「结果对不对」 |
 | `sync-ebooks.sh` | calibre-web 电子书同步（下详） |
