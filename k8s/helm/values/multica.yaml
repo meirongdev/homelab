@@ -86,6 +86,12 @@ backend:
     #    2026-08-18 08:13 UTC workspace `homelab` 已建好，同日翻成 true 收口。
     #    ⚠️ 将来若要再建 workspace，得先把这里改回 false、push、等 backend 重启，
     #       建完再翻回来 —— 没有「管理员绕过」这种东西。
+    #    ⚠️ 核对生效状态时注意**三处名字都不一样**，拿错了就查不到、看着像没生效：
+    #         values         disableWorkspaceCreation
+    #         env/ConfigMap  DISABLE_WORKSPACE_CREATION
+    #         /api/config    workspace_creation_disabled   ← 词序是反的
+    #       （2026-08-18 就是拿 `disable_workspace_creation` 去查 /api/config，
+    #        字段压根不存在 → 恒为空 → 误判成「没生效」。）
     disableWorkspaceCreation: true
 
     # 自建 VCS 集成（Forgejo/Gitea/GitLab）。密钥 MULTICA_VCS_SECRET_KEY 由
