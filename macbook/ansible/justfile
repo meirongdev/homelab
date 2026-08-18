@@ -18,11 +18,28 @@ ai-clis:
 node-exporter:
     ansible-playbook playbooks/node-exporter.yaml
 
-# 部署/升级 Multica daemon LaunchAgent（无需 sudo，幂等）
-# ⚠️ 首次需先在这台 Mac 上手工跑一次 `multica login`（浏览器 OAuth，非交互做不了）。
-# 未登录时本 recipe 只安装 CLI + 配置 + 写 plist，**刻意不启动** daemon。
+# PAT 从 Vault 现取（secret/homelab/multica → daemon_pat）以 -e 传给 playbook，
+# 不落盘、不进 git。需要本机已有可用的 vault token（`vault token lookup` 能过）。
+#
+# ☠️ 别改回浏览器 OAuth：`multica login` 的回调监听在 **Mac 自己的 localhost**，
+#    在别处打开那个 URL 是空端口；`--callback-host <TS IP>` 端口虽可达，但有
+#    认证等待超时窗口，人机不同步就 timed out（2026-08-18 实测踩过两次）。
+#
+# PAT 轮换：web UI 生成新的 → `vault kv patch secret/homelab/multica daemon_pat=mul_...`
+#
+# 部署/升级 Multica daemon LaunchAgent（无需 sudo，幂等，认证全自动）
 multica-daemon:
-    ansible-playbook playbooks/multica-daemon.yaml
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export VAULT_ADDR="${VAULT_ADDR:-https://vault.meirong.dev}"
+    pat="$(vault kv get -field=daemon_pat secret/homelab/multica 2>/dev/null || true)"
+    if [ -z "$pat" ]; then
+      echo "⚠️  Vault 里没有 secret/homelab/multica → daemon_pat。" >&2
+      echo "    未认证时 playbook 会装好一切但**不启动** daemon（避免 crash-loop）。" >&2
+      ansible-playbook playbooks/multica-daemon.yaml
+    else
+      ansible-playbook playbooks/multica-daemon.yaml -e "md_pat=$pat"
+    fi
 
 # 应用 headless/clamshell 电源策略（保持远程可达；需 sudo 密码）
 power:

@@ -15,11 +15,27 @@
 #   或 VM；若日后要收紧，改这里的 hosts/become 与 LaunchAgent 的用户域即可。
 #
 # 前置：ai-clis.yaml 已装好 claude/qwen/codex/hermes（daemon 靠探测 PATH 发现它们）。
-# 一次性手工步骤：`multica login`（走浏览器 OAuth，无法在 ansible 里非交互完成）。
-#   未登录时本 playbook **刻意不 bootstrap LaunchAgent** —— 否则 KeepAlive 会把
-#   一个必然失败的进程反复拉起，日志刷屏而 UI 上什么都不会出现。
 #
-# 幂等：重复跑安全。
+# 实测哪些 agent 真能注册（2026-08-18，`multica daemon status --output json` +
+# 服务端 agent_runtime 表双向核对）：
+#   ✅ claude 0s · qwen 0s · hermes 11s（慢但过）—— 三个 runtime status=online
+#   ❌ codex  ：`codex --version` **永久挂住**（20s 看门狗打死也无输出），于是被
+#              daemon 的版本探测超时 kill，报 "version detection failed: signal: killed"。
+#              这是 codex 自身在这台机器上的问题，不是 multica 的 —— 别去调 multica。
+#   ❌ cursor ：CLI 在但 `No Cursor IDE installation found`，装了 IDE 才有意义。
+#   ❌ copilot：`--version` 返回空，版本解析不出来。
+# ⚠️ 冷启动第一轮 status 里可能多出几个 skipped_agents（qwen/hermes 都出现过），
+#    但下一轮心跳就正常了 —— 判据看**服务端 agent_runtime 表**，别只看首轮 status。
+#
+# 认证：**全自动，走 PAT**。`just multica-daemon` 会从 Vault
+#   (secret/homelab/multica → daemon_pat) 现取 PAT 并以 `-e md_pat=...` 传进来，
+#   未登录时自动 `multica login --token`。没传 md_pat 且未登录时，本 playbook
+#   **刻意不 bootstrap LaunchAgent** —— 否则 KeepAlive 会把一个必然失败的进程
+#   反复拉起（实测 last exit code = 1，日志刷 "not authenticated"），
+#   而 UI 上什么都不会出现。
+#   PAT 在 web UI 里生成（`mul_...`）；轮换后记得 `vault kv patch`。
+#
+# 幂等：重复跑安全（已认证时不会重复 login）。
 - name: Multica daemon (LaunchAgent)
   hosts: macbook
   gather_facts: true            # 需要 ansible_facts.user_dir
@@ -158,6 +174,44 @@
              and 'Not authenticated' not in (md_auth.stderr | default(''))
              and 'Not authenticated' not in (md_auth.stdout | default('')) }}
 
+    # 用 PAT 非交互认证。PAT 走 `-e md_pat=...` 传入，由 justfile 的
+    # `multica-daemon` 配方从 Vault (secret/homelab/multica → daemon_pat) 现取。
+    #
+    # ☠️ 为什么不走浏览器 OAuth：`multica login` 的回调监听在**这台 Mac 的
+    #    localhost**，在别处打开 `localhost:<port>` 是空端口；而 `--callback-host
+    #    <TS IP>` 虽然端口确实可达，却有**认证等待超时窗口**，人机不同步就
+    #    `timed out waiting for authentication`（2026-08-18 实测踩过）。
+    #    PAT 没有窗口、非交互、可重复 —— headless 机器上这是唯一靠得住的路。
+    #
+    # ⚠️ 不用 community.hashi_vault 的 lookup：它要 python `hvac`，而这台控制机的
+    #    brew python 是 externally-managed，为一处密钥装依赖不划算。仓库里其它地方
+    #    也没有 ansible→Vault 的直连（k8s 侧统一走 Vault→ESO）。
+    - name: Authenticate with the PAT when not logged in
+      when:
+        - not (md_logged_in | bool)
+        - md_pat | default('') | length > 0
+      ansible.builtin.command: "{{ md_bin }} login --token {{ md_pat }}"
+      register: md_pat_login
+      changed_when: true
+      no_log: true          # 别让 PAT 进 ansible 输出
+
+    - name: Re-check authentication after PAT login
+      when:
+        - not (md_logged_in | bool)
+        - md_pat | default('') | length > 0
+      ansible.builtin.command: "{{ md_bin }} auth status"
+      register: md_auth2
+      changed_when: false
+      failed_when: false
+
+    - name: Update authentication state after PAT login
+      when: md_auth2 is defined and not (md_auth2 is skipped)
+      ansible.builtin.set_fact:
+        md_logged_in: >-
+          {{ md_auth2.rc == 0
+             and 'Not authenticated' not in (md_auth2.stderr | default(''))
+             and 'Not authenticated' not in (md_auth2.stdout | default('')) }}
+
     - name: Install LaunchAgent plist
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../templates/ai.multica.daemon.plist.j2"
@@ -178,14 +232,15 @@
       register: md_unload
       changed_when: "'BOOTED_OUT' in md_unload.stdout"
 
-    - name: Tell the operator to log in (one-time, interactive)
+    - name: Explain why the daemon was not started
       when: not (md_logged_in | bool)
       ansible.builtin.debug:
         msg: >-
-          multica CLI 尚未登录 —— CLI/配置/plist 都已就位，但 LaunchAgent **刻意没启动**
-          （启动了只会 crash-loop）。在这台机器上手工跑一次
-          `~/.local/bin/multica login`（会开浏览器到 {{ md_app_url }}），
-          完成后重跑本 playbook 即可拉起 daemon。
+          multica CLI 未认证，且没有可用的 PAT —— CLI/配置/plist 都已就位，但
+          LaunchAgent **刻意没启动**（启动了只会 crash-loop）。
+          正常入口是 `just multica-daemon`，它会从 Vault 取 daemon_pat；
+          若 Vault 里没有，先在 {{ md_app_url }} 的 web UI 生成一个 PAT，然后
+          `vault kv patch secret/homelab/multica daemon_pat=mul_...` 再重跑。
 
     - name: Ensure LaunchAgent is loaded (bootstrap into the GUI domain)
       when: md_logged_in | bool
