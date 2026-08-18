@@ -117,13 +117,18 @@ grafana:
   # OOMKill 最近的容器（判据见 reference/k8s-qos-resource-management.md 的 >80% 规则）。
   # 面板数量随 sidecar 自动发现增长，峰值只会往上走，故给到 768Mi。
   # requests 同步抬到 256Mi：128Mi 与稳态严重不符，驱逐排序时算「大幅超 request」。
+  # 2026-08-18 再抬 768Mi→1Gi：上面那句「峰值只会往上走」应验了 ——
+  #   实测 7d 峰值 **725Mi / 768Mi = 94%**，`ContainerMemoryNearLimit` 自 08-16 17:56
+  #   起连续烧了 2 天、每 4h 往 Telegram 重复投递一次。这条告警是对的不是噪声，
+  #   处理方式是抬 limit 而不是调阈值（告警正文自己写的「现在抬 limit 还来得及」）。
+  #   k8s-node 当时 available 4.76GiB，且 limit 不预留内存，方向安全。
   resources:
     requests:
       cpu: 100m                 # ✅ 从默认值降低
       memory: 256Mi
     limits:
       cpu: 500m
-      memory: 768Mi
+      memory: 1Gi
   
   # 给 Loki/Tempo 赋稳定 uid 以支持 trace↔log↔metric 关联。
   # 关键坑（2026-06-15）：本集群 Grafana 用 NFS PVC 持久化，库里已有按 name 自动生成
@@ -315,13 +320,21 @@ prometheus:
     # 2026-08-10 抬 limit：实测 7d 峰值 2320Mi / limit 2560Mi = **93%**。
     #   与上面 1.5Gi→2560Mi 那次同因（堆压满 → GC 抖动 → 查询雪崩），只是被 series
     #   自然增长又推了上来。给到 3Gi，节点 available 仍有余量。
+    # 2026-08-18 再抬 3Gi→4Gi：同一条曲线又被 series 增长推上来 ——
+    #   实测 7d 峰值 **2715Mi / 3072Mi = 88%**，`ContainerMemoryNearLimit` 自 08-16 17:30
+    #   起连续烧 2 天。当时负载：active series 222,582 · 7.5k samples/s · TSDB 3.68GiB
+    #   （retention 7d / retentionSize 4608MB 不变，那是磁盘不是内存）。
+    #   ⚠️ 这是本节点最大的单一内存消耗者，抬到 4Gi 后若还逼近，**下一步不该继续抬**，
+    #      而是砍 series（active series 数是内存的主因）——节点物理内存就那么多。
+    #   ⚠️ 顺带记一笔：`ContainerMemoryNearLimit` 自己那条 7d `max_over_time` 全容器
+    #      查询就是 Prometheus 的内存大户之一，规则本身也在推高这个峰值。
     resources:
       requests:
         cpu: 200m
         memory: 512Mi
       limits:
         cpu: 1000m
-        memory: 3Gi
+        memory: 4Gi
 
 
     # 添加额外的抓取配置
