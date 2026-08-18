@@ -128,11 +128,24 @@ frontend:
     # 当前镜像不需要它，保持 false，否则会和 ns 内其它东西抢名字。
     backendAlias: false
   resources:
-    # 实测（2026-08-18）：Next.js standalone 空载 workingSet 177.1Mi ——
-    # 三个容器里唯一真吃内存的，request 保持 256Mi（低于实占会招来驱逐压力）；
-    # 上限从 768Mi 收到 512Mi，仍高于实测约 3 倍。
+    # ☠️ **这两个上限不能按空载实测来收**。2026-08-18 收过一次（memory 768Mi→512Mi，
+    #    理由写的是"空载 workingSet 177.1Mi，仍留 3 倍余量"），当晚 frontend 就
+    #    OOMKilled 崩循环：cgroup 里 memory.peak 顶死在 512Mi 整、memory.events 的
+    #    max 累计 697 次、oom_kill 6 次、pod 13 分钟内重启 3 次。
+    #    原因是 Next.js 的 /_next/image 优化器（sharp）是**突发型**负载：实测单个并发
+    #    优化任务 +68Mi（144Mi→212Mi，做完立刻释放），空载采样**永远看不见**这一段，
+    #    几个并发就能把 ~150Mi 的静息推过 512Mi。
+    # ⚠️ CPU 同理，500m 太紧：实测 125 个周期里 82 个被 throttle（66%），单张图要 2.3s，
+    #    且并发优化会把 SSR 的 / 从 0.21s 拖到 0.77s（集群内测）——公网上表现就是
+    #    "打开很慢/服务有问题"。判据是 cAdvisor 的 throttled_periods 比例而非
+    #    `kubectl top`，见 reference/k8s-qos-resource-management.md。
+    # 现值 = **chart 上游默认**（cpu 1000m / memory 1Gi），是厂商按这个镜像的真实负载
+    #    给的，不是我们拍的。requests 维持 50m/256Mi（静息实测 113–150Mi）；节点
+    #    k8s-node 的 requests 才占 24% CPU / 60% memory，抬上限不挤别人。
+    # 注：.next/cache/images 无持久卷，pod 每次重启都要重新付这 2.3s——崩循环期间
+    #    等于人人都撞冷缓存，症状会自我放大。
     requests: { cpu: 50m, memory: 256Mi }
-    limits: { cpu: 500m, memory: 512Mi }
+    limits: { cpu: 1000m, memory: 1Gi }
   affinity: *pin-control-plane
   tolerations: []
 
