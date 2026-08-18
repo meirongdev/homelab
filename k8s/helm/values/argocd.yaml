@@ -249,13 +249,23 @@ repoServer:
 server:
   # 2026-08-10: CPU request 25m→10m（实测 p95 1m）；
   # memory limit 128Mi→192Mi（实测 7d 峰值 97Mi = 76%，逼近 80% 判据）。
+  # 2026-08-18: memory limit 192Mi→256Mi。实测 7d 峰值 **175Mi / 192Mi = 91%**，
+  #   `ContainerMemoryNearLimit` 自 08-16 05:00 起在 oracle-k3s 连续烧 2 天。
+  #   峰值从 08-10 的 97Mi 涨到 175Mi（+80%）——印证那条告警正文的提醒：
+  #   控制面组件的内存随**被管对象规模**增长，不随流量增长。oracle available 3.94GiB。
+  # ⚠️ 本 release 是 **manual-helm**（CLAUDE.md 的例外清单）：改这里 **git push 不会生效**，
+  #    必须在 k8s/helm/ 跑 `just deploy-argocd`。
+  # ⚠️ 且这是 GitOps 控制器给自己做升级，SSA 字段所有权冲突有先例（见 justfile 里
+  #    argocd_chart_version 上方那段：application-controller 的 resources.memory 曾被
+  #    field manager `kubectl-patch` 劫持，导致 values 里的声明**静默失效**）。
+  #    若 helm 报 conflict，加 --force-conflicts 重跑，并回头核对 live 值真的变了。
   resources:
     requests:
       cpu: 10m
       memory: 64Mi
     limits:
       cpu: 250m
-      memory: 192Mi
+      memory: 256Mi
 
 redis:
   image:
