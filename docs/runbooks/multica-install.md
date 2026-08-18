@@ -10,7 +10,8 @@
 > ③ 登录时验证码到达邮箱，且 backend 日志里 **没有** `[DEV] Verification code`；
 > ④ 服务端 `agent_runtime` 表有 `status=online` 的行；⑤ 夜备能 `pg_dump` 出非零字节。
 > **回滚**：删 `argocd/applications/multica.yaml` 并 push（ArgoCD 会 prune 掉整套负载）。
-> ⚠️ 两个 PVC 带不带 `Prune=false` 都要**手工确认**是否残留（见文末「退役」）。
+> ☠️ **先 `pg_dump` 再回滚** —— multica 的 PVC 是 chart 生成的，仓库里没有 `Prune=false`
+> 保护（步骤 3b 是手工补的、不在 git）。详见文末「退役」。
 > **集群**：homelab · ns `personal-services` · chart
 > `oci://ghcr.io/multica-ai/charts/multica`（本仓库唯一 OCI chart 源）
 
@@ -121,6 +122,29 @@ values 里三处**必须保持**的设置（改了会静默失效或出事）：
 cd /Users/matthew/projects/homelab
 git push origin main      # ArgoCD ~3 分钟自动同步
 ```
+
+### 步骤 3b — 给两个 PVC 加 `Prune=false`（**不能进 git，必须手工**）
+
+☠️ **本仓库其它有状态服务的 PVC 都在清单里带 `Prune=false`，multica 的不是** ——
+它的 PVC 由 chart 模板生成，而 chart 既不支持 PVC 注解、也没有 `existingClaim` 选项
+（`claimName` 是写死的），所以没法用 GitOps 正途声明。不加保护的后果是：
+**删掉 Application 或让 chart 不再渲染 PVC，库会被 prune 掉。**
+
+pod 起来、PVC Bound 之后补上：
+
+```bash
+for p in multica-postgres-data multica-backend-uploads; do
+  kubectl --context k3s-homelab -n personal-services annotate pvc "$p" \
+    argocd.argoproj.io/sync-options=Prune=false --overwrite
+done
+```
+
+实测（2026-08-18）这个注解能在 `hard refresh` + 同步后存活 —— chart 不渲染注解，
+ArgoCD 也就不会去清它。但**它不在 git 里**：PVC 一旦重建（换节点、删卷重来）就得再加一次，
+所以每次重建都要跑这一步。
+
+⚠️ 它只防「同步时被 prune」。真正兜底的是夜备的 `pg_dump`（步骤 7），
+退役前先手动 dump 一份，别只依赖这个注解。
 
 ## 步骤 4 — 验证服务端
 
@@ -241,9 +265,19 @@ git rm argocd/applications/multica.yaml k8s/helm/values/multica.yaml \
 git push origin main
 ```
 
+☠️ **push 之前先留一份数据**（PVC 的保护是手工注解、可能已随重建丢失）：
+
+```bash
+kubectl --context k3s-homelab -n personal-services exec deploy/multica-postgres -- \
+  pg_dump -U multica -d multica -Fc > /tmp/multica-final.dump
+ls -l /tmp/multica-final.dump      # 确认非零字节
+```
+
 收尾三件容易忘的：
 
-1. **PVC 不会自动消失**，手工删 `multica-postgres-data` 与 `multica-backend-uploads`。
+1. **PVC**：若步骤 3b 的 `Prune=false` 还在，卷会残留、需手工删
+   `multica-postgres-data` 与 `multica-backend-uploads`；若注解已丢，它们会随
+   Application 一起被 prune —— 所以上面那份 dump 是唯一保险。
 2. **DNS 记录不会被删** —— external-dns 是 `upsert-only`，手工清 `multica.meirong.dev`。
 3. M2 上卸掉 daemon：`launchctl bootout gui/$(id -u)/ai.multica.daemon`，
    删 `~/Library/LaunchAgents/ai.multica.daemon.plist`，并吊销那个 PAT 与 Gmail 应用专用密码。
