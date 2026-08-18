@@ -171,9 +171,23 @@ def worker_plan(library: str) -> dict:
             if p:
                 real[fmt] = p
         flat = re.sub(r"\s+", " ", title)
+        # 这些字段不参与判重，但**去重不该把它们丢掉** —— 保留项缺、被删项有时要继承过来
+        pub = db.execute("SELECT p.name FROM books_publishers_link l JOIN publishers p"
+                         " ON p.id=l.publisher WHERE l.book=?", (bid,)).fetchone()
+        pd = db.execute("SELECT pubdate FROM books WHERE id=?", (bid,)).fetchone()[0]
+        cm = db.execute("SELECT text FROM comments WHERE book=?", (bid,)).fetchone()
         books.append(dict(id=bid, title=flat, author=authors, real=real,
                           size=sum(os.path.getsize(p) for p in real.values()),
-                          n=norm(title), a=author_tokens(authors), ed=edition(title)))
+                          n=norm(title), a=author_tokens(authors), ed=edition(title),
+                          ident={t: v for t, v in db.execute(
+                              "SELECT type,val FROM identifiers WHERE book=?", (bid,))},
+                          publisher=pub[0] if pub else None,
+                          # calibre 用 0101-01-01 当「未设置」的哨兵值
+                          pubdate=None if not pd or str(pd).startswith("0101") else str(pd)[:10],
+                          tags=[t[0] for t in db.execute(
+                              "SELECT g.name FROM books_tags_link l JOIN tags g"
+                              " ON g.id=l.tag WHERE l.book=?", (bid,))],
+                          comments=cm[0] if cm and cm[0] else None))
 
     # --- 分组：完全同名，或长前缀 + 作者交集
     #
@@ -207,7 +221,7 @@ def worker_plan(library: str) -> dict:
             seen.update(m["id"] for m in g)
             groups.append(g)
 
-    corrections, merges, dels, view = [], [], [], []
+    corrections, merges, dels, view, inherits = [], [], [], [], []
     for g in sorted(groups, key=lambda g: min(m["id"] for m in g)):
         have = [m for m in g if m["real"]]
         if not have:
@@ -230,6 +244,29 @@ def worker_plan(library: str) -> dict:
                 if fmt not in kept_fmts:
                     merges.append([keep["id"], fmt, p])
                     kept_fmts.add(fmt)
+        # ☠️ 去重不能顺手丢元数据：保留项缺、被删项有的字段要搬过来。
+        # 实测撞到：`Building Enterprise Projects with Go` 的 PDF（体积大、被选为保留项）
+        # 没有 ISBN，而要删的 EPUB 带 isbn + google id —— 直接删就静默丢了。
+        inh = {}
+        losers = [m for m in have if m["id"] != keep["id"]]
+        merged_ident = dict(keep["ident"])
+        for m in losers:
+            for t, v in m["ident"].items():
+                merged_ident.setdefault(t, v)
+        if merged_ident != keep["ident"]:
+            inh["identifiers"] = merged_ident
+        for f in ("publisher", "pubdate", "comments"):
+            if not keep[f]:
+                for m in losers:
+                    if m[f]:
+                        inh[f] = m[f]
+                        break
+        extra_tags = [t for m in losers for t in m["tags"] if t not in keep["tags"]]
+        if extra_tags:
+            inh["tags"] = keep["tags"] + sorted(set(extra_tags))
+        if inh:
+            inherits.append({"keep": keep["id"], "fields": inh,
+                             "from": [m["id"] for m in losers]})
         dels.extend(m["id"] for m in g if m["id"] != keep["id"])
         view.append(dict(keep=keep["id"],
                          members=[[m["id"], m["title"][:70], m["author"][:50],
@@ -238,7 +275,7 @@ def worker_plan(library: str) -> dict:
 
     assert not (set(dels) & {v["keep"] for v in view}), "同一本书既保留又删除"
     return dict(groups=view, merges=merges, dels=sorted(dels), corrections=corrections,
-                junk_titles=junk_titles,
+                junk_titles=junk_titles, inherits=inherits,
                 total_books=db.execute("SELECT COUNT(*) FROM books").fetchone()[0])
 
 
@@ -259,6 +296,23 @@ def worker_apply(library: str, plan: dict) -> dict:
             out["merge_failed"].append([keep, fmt, (r.stdout + r.stderr).strip()[:300]])
     if out["merge_failed"]:
         return out                                   # 合并有失败 -> 一本都不删
+    # 先把「保留项缺、被删项有」的元数据搬过去，再删 —— 顺序反了那些字段就永久没了
+    out["inherited"], out["inherit_failed"] = [], []
+    for item in plan.get("inherits", []):
+        args = []
+        for f, v in item["fields"].items():
+            if f == "identifiers":
+                v = ",".join(f"{k}:{x}" for k, x in v.items())
+            elif f == "tags":
+                v = ",".join(v)
+            args += ["--field", f"{f}:{v}"]
+        r = subprocess.run(cdb + ["set_metadata"] + args + [str(item["keep"])],
+                           capture_output=True, text=True)
+        (out["inherited"] if r.returncode == 0 else out["inherit_failed"]).append(
+            [item["keep"], sorted(item["fields"])] if r.returncode == 0
+            else [item["keep"], (r.stdout + r.stderr).strip()[:200]])
+    if out["inherit_failed"]:
+        return out                                   # 元数据没搬成 -> 一本都不删
     if plan["dels"]:
         r = subprocess.run(cdb + ["remove", ",".join(map(str, plan["dels"]))],
                            capture_output=True, text=True)
@@ -369,6 +423,10 @@ def main() -> int:
             print(f"  {'保留' if bid == g['keep'] else '删除'} {bid:<6}{human(size):>8} "
                   f"{fmt:<10} ed={ed if ed is not None else '-':<4} {title}")
             print(f"         {author}")
+    if plan.get("inherits"):
+        print(f"\n↪ 保留项将继承被删项的元数据 ({len(plan['inherits'])}) —— 去重不丢字段：")
+        for it in plan["inherits"]:
+            print(f"    id={it['keep']} <- {it['from']}: {', '.join(sorted(it['fields']))}")
     if plan.get("junk_titles"):
         print(f"\n⚠ 标题是占位符、**不参与判重**的书 ({len(plan['junk_titles'])}) —— "
               f"它们的标题不携带识别信息，据此判重会把不同的书合并。请手工补元数据：")
@@ -462,6 +520,14 @@ def main() -> int:
         for f in res["merge_failed"]:
             print(f"    {f}", file=sys.stderr)
         return 1
+    if res.get("inherit_failed"):
+        print(f"✗ {len(res['inherit_failed'])} 项元数据继承失败，**未删除任何书**：", file=sys.stderr)
+        for x in res["inherit_failed"]:
+            print(f"    {x}", file=sys.stderr)
+        return 1
+    if res.get("inherited"):
+        print(f"✓ 继承元数据 {len(res['inherited'])} 项: "
+              + "; ".join(f"id={k}({','.join(f)})" for k, f in res["inherited"]))
     if res.get("remove_rc", 0) != 0:
         print(f"✗ calibredb remove 失败: {res['remove_output']}", file=sys.stderr)
         return 1
