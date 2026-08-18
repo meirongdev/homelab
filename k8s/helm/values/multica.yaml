@@ -58,11 +58,11 @@ backend:
     frontendOrigin: https://multica.meirong.dev
     corsAllowedOrigins: ""
     cookieDomain: ""
-    # ⚠️ 不是 gmail：Resend 只允许从**你验证过的域**发信，gmail.com 不归你。
-    # onboarding@resend.dev 是 Resend 的免验证发信地址，代价是**只能发给你 Resend
-    # 账号本人的邮箱** —— 本实例只有 meirongdev@gmail.com 一个允许注册的地址，
-    # 恰好落在这个限制之内，所以够用。等在 Resend 里验证了 meirong.dev，
-    # 改成 noreply@meirong.dev 即可解除这条限制。
+    # ⚠️ 这个值**当前不生效**，留着只是为了不让它变成 chart 默认的 noreply@multica.ai。
+    # 2026-08-18 起邮件走 **Gmail SMTP**，发信人由 `SMTP_FROM_EMAIL` 决定
+    # （见 manifests/personal-services/multica-secret.yaml 的 SMTP 一段）：
+    # 源码 resolveFromEmail() 在 SMTP_HOST 有值时优先取 SMTP_FROM_EMAIL，
+    # 只有两者都空才回落到这里。改发信人请改 Vault 的 smtp_from_email，别改这行。
     resendFromEmail: onboarding@resend.dev
 
     # ── 注册闸门 ──────────────────────────────────────────────────────────
