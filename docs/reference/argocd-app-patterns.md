@@ -1,6 +1,6 @@
 # ArgoCD Application Patterns
 
-> Last updated: 2026-08-17
+> Last updated: 2026-08-18
 > Status: 生效事实
 >
 > 当前 ArgoCD 管理模式分析、可选 pattern 对比与取舍建议。
