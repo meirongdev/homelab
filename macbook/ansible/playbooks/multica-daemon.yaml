@@ -25,8 +25,24 @@
   gather_facts: true            # 需要 ansible_facts.user_dir
   vars:
     homebrew_prefix: /opt/homebrew
+    # 预编译 darwin-arm64 二进制，固定版本 + sha256 校验，**不走 Homebrew**
+    # （同 node-exporter.yaml 的做法）。两个理由：
+    #  1. Homebrew 2026 起拒绝加载未信任的第三方 tap，要么 `brew trust multica-ai/tap`
+    #     —— 那是对整个 tap 的无条件信任，且既不固定版本也不校验产物；
+    #  2. CLI 版本必须能与 service 端的 chart 版本对齐（见下 md_version 注释）。
+    # 升级步骤：改 md_version + md_sha256（取自 release 的 checksums.txt），重跑本 playbook。
+    #
+    # ⚠️ 与 argocd/applications/multica.yaml 的 chart targetRevision 保持同版本。
+    #    CLI 与 server 出自同一个 monorepo 的同一个 tag，对齐是安全默认值。
+    #    （未验证过实际的兼容窗口有多宽 —— 所以这里不是 CI 断言，只是约定。
+    #      升级时两处一起改，`/api/config` 的 server_version 可用来核对现网。）
+    # renovate: datasource=github-releases depName=multica-ai/multica
+    md_version: "0.4.28"
+    md_sha256: e42c1c6df05201d2d0feff1a9d8032a9ea11c6644721fd465496826124007acf
+    md_tarball: "/tmp/multica-cli-{{ md_version }}-darwin-arm64.tar.gz"
+    md_stage: "/tmp/multica-cli-{{ md_version }}"
     md_label: ai.multica.daemon
-    md_bin: "{{ homebrew_prefix }}/bin/multica"
+    md_bin: "{{ ansible_facts.user_dir }}/.local/bin/multica"
     md_plist: "{{ ansible_facts.user_dir }}/Library/LaunchAgents/{{ md_label }}.plist"
     # service 端入口。frontend 自带 runtime proxy 转发 /api /auth /ws，
     # 所以 server_url 与 app_url 是**同一个源**，不需要单独的 api.* 子域。
@@ -43,26 +59,64 @@
         state: directory
         mode: "0755"
       loop:
+        - "{{ ansible_facts.user_dir }}/.local/bin"
         - "{{ ansible_facts.user_dir }}/.local/var/log"
         - "{{ ansible_facts.user_dir }}/Library/LaunchAgents"
         - "{{ md_workspaces_root }}"
 
-    - name: Ensure the multica Homebrew tap is present
-      community.general.homebrew_tap:
-        name: multica-ai/tap
-        state: present
-      environment:
-        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    - name: Check installed multica CLI version
+      ansible.builtin.command: "{{ md_bin }} version"
+      register: md_ver
+      changed_when: false
+      failed_when: false
 
-    - name: Ensure the multica CLI is installed
-      community.general.homebrew:
-        name: multica
-        state: present
-        path: "{{ homebrew_prefix }}/bin"
-        update_homebrew: false
-      environment:
-        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    - name: Install multica CLI binary (when missing or version mismatch)
+      when: md_version not in (md_ver.stdout | default(''))
       notify: reload multica daemon
+      block:
+        - name: Download tarball (sha256-verified)
+          ansible.builtin.get_url:
+            url: "https://github.com/multica-ai/multica/releases/download/v{{ md_version }}/multica-cli-{{ md_version }}-darwin-arm64.tar.gz"
+            dest: "{{ md_tarball }}"
+            checksum: "sha256:{{ md_sha256 }}"
+            mode: "0644"
+
+        - name: Create a staging dir for extraction
+          # 归档是扁平结构（multica / LICENSE / NOTICE / README*），没有顶层目录 ——
+          # 直接解到 /tmp 会把这几个文件摊在那儿。
+          ansible.builtin.file:
+            path: "{{ md_stage }}"
+            state: directory
+            mode: "0755"
+
+        - name: Extract the binary
+          # ⚠️ 刻意**不用** ansible.builtin.unarchive：它在 macOS 上判定
+          #    /usr/bin/tar 是 bsdtar 后直接报 "GNU tar required" 而拒绝处理
+          #    （去掉 include: 也一样）。bsdtar 本身解这个 .tar.gz 毫无问题，
+          #    所以直接调命令。幂等性由外层 block 的版本比对保证。
+          ansible.builtin.command:
+            cmd: "/usr/bin/tar -xzf {{ md_tarball }} -C {{ md_stage }} multica"
+          changed_when: true
+
+        - name: Install binary
+          ansible.builtin.copy:
+            src: "{{ md_stage }}/multica"
+            dest: "{{ md_bin }}"
+            mode: "0755"
+            remote_src: true
+
+        - name: Strip Gatekeeper quarantine xattr (Apple Silicon)
+          ansible.builtin.command: "xattr -dr com.apple.quarantine {{ md_bin }}"
+          changed_when: false
+          failed_when: false
+
+        - name: Clean up tarball + extracted binary
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "{{ md_tarball }}"
+            - "{{ md_stage }}"
 
     # `multica config set` 写的是 ~/.multica/config.json。先读回来比对，
     # 避免每次跑都报 changed（也避免在已登录实例上无谓地改配置）。
@@ -85,13 +139,24 @@
       environment:
         PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
+    # ☠️ `multica auth status` **恒返回 rc=0**，未登录时只是往 stderr 打一行
+    #    "Not authenticated. Run 'multica login' to authenticate."（0.4.28 实测）。
+    #    按 rc 判断会误认为已登录 → 去 bootstrap 一个必然失败的 LaunchAgent，
+    #    KeepAlive 把它反复拉起（实测 last exit code = 1，日志刷
+    #    "not authenticated: run 'multica login' first"）。所以只认输出文本。
+    #    （文档里列的 `multica whoami` 在 0.4.28 里不存在，别拿它当探针。）
     - name: Check whether the CLI is authenticated
       ansible.builtin.command: "{{ md_bin }} auth status"
       register: md_auth
       changed_when: false
       failed_when: false
-      environment:
-        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Record authentication state
+      ansible.builtin.set_fact:
+        md_logged_in: >-
+          {{ md_auth.rc == 0
+             and 'Not authenticated' not in (md_auth.stderr | default(''))
+             and 'Not authenticated' not in (md_auth.stdout | default('')) }}
 
     - name: Install LaunchAgent plist
       ansible.builtin.template:
@@ -100,17 +165,30 @@
         mode: "0644"
       notify: reload multica daemon
 
+    # 未登录就不 bootstrap，并且要把可能残留的 agent 卸掉：
+    # KeepAlive 会把一个必然失败的进程无限拉起（ThrottleInterval 只是限速，不会停）。
+    - name: Ensure the LaunchAgent is NOT running while unauthenticated
+      when: not (md_logged_in | bool)
+      ansible.builtin.shell: |
+        uid=$(id -u)
+        if launchctl print "gui/${uid}/{{ md_label }}" >/dev/null 2>&1; then
+          launchctl bootout "gui/${uid}/{{ md_label }}" 2>/dev/null || true
+          echo BOOTED_OUT
+        fi
+      register: md_unload
+      changed_when: "'BOOTED_OUT' in md_unload.stdout"
+
     - name: Tell the operator to log in (one-time, interactive)
-      when: md_auth.rc != 0
+      when: not (md_logged_in | bool)
       ansible.builtin.debug:
         msg: >-
-          multica CLI 尚未登录 —— LaunchAgent 已安装但**刻意不启动**。
-          在这台机器上手工跑一次 `multica login`（会开浏览器到
-          {{ md_app_url }}），完成后重跑本 playbook 即可拉起 daemon。
+          multica CLI 尚未登录 —— CLI/配置/plist 都已就位，但 LaunchAgent **刻意没启动**
+          （启动了只会 crash-loop）。在这台机器上手工跑一次
+          `~/.local/bin/multica login`（会开浏览器到 {{ md_app_url }}），
+          完成后重跑本 playbook 即可拉起 daemon。
 
-    # 未登录就不 bootstrap：KeepAlive 会把必然失败的进程反复重启。
     - name: Ensure LaunchAgent is loaded (bootstrap into the GUI domain)
-      when: md_auth.rc == 0
+      when: md_logged_in | bool
       ansible.builtin.shell: |
         uid=$(id -u)
         if ! launchctl print "gui/${uid}/{{ md_label }}" >/dev/null 2>&1; then
@@ -120,26 +198,30 @@
       register: md_load
       changed_when: "'BOOTSTRAPPED' in md_load.stdout"
 
-    - name: Verify the daemon is running and registered
-      when: md_auth.rc == 0
+    # ☠️ 判据必须是 status 字段本身，不能是 rc。`daemon status` 在 daemon 根本
+    #    没起来时照样 rc=0 并输出 {"status":"stopped"} —— 用 rc 当判据等于
+    #    「没报错就算成功」，实测会让一个 crash-loop 的部署报绿。
+    - name: Verify the daemon actually reached running state
+      when: md_logged_in | bool
       ansible.builtin.command: "{{ md_bin }} daemon status --output json"
       register: md_status
       changed_when: false
-      retries: 5
+      retries: 10
       delay: 3
-      until: md_status.rc == 0
-      environment:
-        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+      until: (md_status.stdout | default('{}') | from_json).get('status') == 'running'
 
     - name: Show daemon status
-      when: md_auth.rc == 0
+      when: md_logged_in | bool
       ansible.builtin.debug:
         var: md_status.stdout
 
   handlers:
     # bootout 是异步的：没等它退干净就 bootstrap 会报
     # "Bootstrap failed: 5: Input/output error"（同 node-exporter.yaml 的处理）。
+    # ⚠️ 同样受 md_logged_in 保护：未登录时改 plist/升级二进制都会触发本 handler，
+    #    不设这个条件就会绕过上面的闸门，把 crash-loop 拉回来。
     - name: reload multica daemon
+      when: md_logged_in | default(false) | bool
       ansible.builtin.shell: |
         uid=$(id -u)
         label="{{ md_label }}"

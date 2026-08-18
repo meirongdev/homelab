@@ -174,6 +174,14 @@ kubectl --context oracle-k3s apply -f argocd/projects/homelab.yaml
 （`just deploy-argocd` 也行，但会连带 `helm upgrade` 整个 ArgoCD，通常没必要。
 ⚠️ AppProject 随控制面走，**apply 目标是 oracle-k3s**，不是 homelab。）
 
+**OCI registry 的写法与 HTTP repo 不同**（2026-08-18 加 multica 时确立，本仓库首个 OCI chart）：
+`repoURL` 与 `sourceRepos` 都写**不带 `oci://` 前缀**的裸地址（`ghcr.io/multica-ai/charts`），
+ArgoCD 官方文档原话 "note: the `oci://` syntax is not included."。公开 registry
+**不需要**注册 repository Secret（`enableOCI` 只对私有的有意义）——
+本仓库至今零个 repository Secret，公开 chart 全靠这条。
+本地核对版本用 `helm show values oci://ghcr.io/<org>/<path>/<chart>`（这里**要**带前缀，
+helm 与 ArgoCD 在这点上不一致，容易来回踩）。
+
 另注意 **chart 版本 pin**: `argocd/applications/*.yaml` 里 pin 的 `targetRevision`
 部署前须 `helm search repo <chart> --versions` 核对存在（Kyverno/Trivy 落地时因 pin 了
 不存在的版本 sync 失败过）。
