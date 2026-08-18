@@ -4,6 +4,7 @@
 
 | 日期 | 记录 | 内容 |
 |------|------|------|
+| 2026-08-18 | [multica-frontend-idle-rightsizing-oom](2026-08-18-multica-frontend-idle-rightsizing-oom.md) | 按「空载实测」把 frontend 上限收到 512Mi → OOM 崩循环（`memory.peak` 顶死上限、`oom_kill` 6 次）；sharp 图片优化单任务 +68Mi 是空载采样看不见的；CPU 500m throttle 66% 让首页间歇 4.5s，**全程对外 200 故无告警** |
 | 2026-08-18 | [calibre-dedup-stale-paths](2026-08-18-calibre-dedup-stale-paths.md) | 过期的 `books.path` / 被复用的 `(id)` 被当成空壳记录 → **误删 20 本**（当日从磁盘+快照全数恢复）；旧去重脚本只认完全同名（60 组里只抓 6 组）；`cat` 一个 WAL 库得到的「已校验」备份是假的 |
 | 2026-08-14 | [oracle-reboot-loop-and-blind-dead-mans-switch](2026-08-14-oracle-reboot-loop-and-blind-dead-mans-switch.md) | oracle 6 天硬重启 6 次、死人开关静默失明（非缺信号，是缺模式）；修 `NodeRebootLoop` + `DeadMansSwitchReceiverDown` |
 | 2026-08-13 | [iprule-guard-render-bug](2026-08-13-iprule-guard-render-bug.md) | Jinja `join('\n')` 渲染出字面 `\n` → ip rule 收敛器断言塌行、防线名存实亡；修渲染 + 规则清单统一 + 对账指标 |
