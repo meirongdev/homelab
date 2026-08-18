@@ -328,13 +328,25 @@ prometheus:
     #      而是砍 series（active series 数是内存的主因）——节点物理内存就那么多。
     #   ⚠️ 顺带记一笔：`ContainerMemoryNearLimit` 自己那条 7d `max_over_time` 全容器
     #      查询就是 Prometheus 的内存大户之一，规则本身也在推高这个峰值。
+    # 2026-08-18 当天收回 4Gi→3Gi：上面那句"下一步该砍 series"当天就做了 ——
+    #   本文件末尾的 kubelet/kubeApiServer metricRelabelings 丢掉了 k3s 单进程造成的
+    #   apiserver/etcd 重复副本，**实测抓取层每轮少留 104,509 个样本**
+    #   （kubelet kept 92,702→18,228、apiserver kept 57,357→27,322），即 -44.6%。
+    #   ☠️ 收 limit 的依据是**单调性**，不是"感觉够了"（今天 multica 就是靠感觉收
+    #      limit 崩的，见 records/2026-08-18-multica-frontend-idle-rightsizing-oom.md）：
+    #      3Gi 这个值**在 234,532 series 的更重负载下已经跑过**（7d 峰值 2715Mi=88%，
+    #      从未 OOM）。现在负载严格更小，回到 3Gi 必然比当时更宽裕 —— 这是"回到一个
+    #      已被验证的值"，不是"押一个没验过的新值"。
+    #   ⚠️ 想再往 3Gi 以下收，**必须等 7d 窗口滚完后重新测峰值**：`max_over_time[7d]`
+    #      在一周内仍会记着砍 series 之前的 2715Mi，此刻的低读数是假象。
+    #      head series 也要等 head compaction（约 2h）才会掉下来，别拿刚改完的瞬时值下结论。
     resources:
       requests:
         cpu: 200m
         memory: 512Mi
       limits:
         cpu: 1000m
-        memory: 4Gi
+        memory: 3Gi
 
 
     # 添加额外的抓取配置
