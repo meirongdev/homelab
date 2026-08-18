@@ -1,6 +1,6 @@
 # Multi-Cluster Observability Architecture
 
-> Last updated: 2026-08-17
+> Last updated: 2026-08-19
 > Status: 生效事实
 
 ## 速览
@@ -192,6 +192,25 @@ env:
 ### Homelab Prometheus (local scrape)
 
 Standard kube-prometheus-stack in-cluster scraping with `scrapeClasses` default relabeling (`cluster: homelab`).
+
+**采集面已按消费者裁剪**（2026-08-18，`values/kube-prometheus-stack.yaml` 末尾的
+`kubelet` / `kubeApiServer` `serviceMonitor.metricRelabelings`）：
+
+- ☠️ **k3s 把 apiserver 与 kubelet 跑在同一个进程里**，kubelet 的 `/metrics` 会把整个
+  进程的 registry 全吐出来，于是全套 `apiserver_*` / `etcd_*` 被**抓进来两遍**。
+  实测这批重复副本占 `job="kubelet"` 全部 93,056 条 series 的 **80%**。
+- 现状：kubelet 侧整族 drop `(apiserver|etcd)_.*`；apiserver 侧另 drop 7 族无 rule/无
+  panel 引用的 histogram。**保留** `apiserver_request_sli_duration_seconds_bucket`
+  的 apiserver 副本——`kube-apiserver-histogram.rules` 两条 recording rule 在用它。
+- 效果：active series **234,532 → 109,566（−53%）**、摄入 7,562 → 2,879 samples/s，
+  Prometheus limit 随之从 4Gi 收回 **3Gi**（cgroup peak 758Mi = 24%）。
+- ⚠️ 两个 key 的 chart 默认 `metricRelabelings` **不是空的**，list 是整体覆盖 ——
+  默认值原样抄进来再追加（当前抄自 chart **87.6.0**），升 chart 时要重新比对。
+- ⚠️ 面板查的是 recording rule 输出（`cluster_quantile:...`）而非原始 bucket，
+  所以看板不受影响；但**原始 bucket 已无法 ad-hoc 查询**。
+
+判据、被否决的选项与三层验证方法见
+[decisions/prometheus-series-reduction.md](../decisions/prometheus-series-reduction.md)。
 
 **Additional scrape targets** (`additionalScrapeConfigs`；⚠️ 这些配置**逐字注入**，
 scrapeClasses 不会给它们 relabel，`cluster`/`nodename` 必须逐 target 写)：
