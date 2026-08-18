@@ -286,32 +286,57 @@ spec:
               Check: `kubectl --context k3s-homelab -n {{ $labels.namespace }} describe pod {{ $labels.pod }}`
               逼近 limit 的容器排名与判读见 docs/reference/k8s-qos-resource-management.md「检测 OOMKill」。
 
-        # 2026-08-10 加：上面那条的**交叉验证**，只在 homelab 有数据。
-        # 动机：30d 窗口内两集群的 last_terminated_reason 只出现过 Unknown/Error/Completed，
-        # **从没有过 OOMKilled 样本**，所以上面那条的 reason 标签值拼写至今未经实测证实
-        # （依据是 kubelet 透传、kube-state-metrics 原样导出）。本条走 cAdvisor 计数器，
-        # 不依赖任何标签值。若某次本条响了而 ContainerOOMKilled 没响，就是那条的
-        # 标签值写错了 —— 查实际值：
-        #   count by (cluster,reason) (kube_pod_container_status_last_terminated_reason == 1)
-        # ⚠️ 覆盖面注意：**没有独立部署 cAdvisor**——container_* 全部来自 kubelet 内嵌
-        #    cAdvisor。homelab 经 kube-prometheus-stack 全量入库；oracle 的 otel-collector
-        #    `prometheus/cadvisor` receiver 的 keep 正则只保留
-        #    `container_(cpu_usage_seconds_total|memory_working_set_bytes)` 两个指标（为 KRR），
-        #    所以 container_oom_events_total（homelab 116 条 / oracle 0 条）与
-        #    container_cpu_cfs_throttled_*（homelab 41 条 / oracle 0 条）在 oracle 侧
-        #    不进入中枢 Prometheus。对 oracle 跑这类查询返回**空结果**，与「值为 0」
-        #    外观完全一致 —— 2026-08-10 据此误判过一次「oracle 无 CPU 节流」。
-        - alert: ContainerOOMKilledCadvisor
-          expr: increase(container_oom_events_total{container!=""}[15m]) > 0
-          for: 0m
+        # 上面那条的**交叉验证**。2026-08-18 重写：原本走 `container_oom_events_total`
+        # （cAdvisor 口径），**实测该指标在本集群恒为 0，这条规则根本不可能烧**：
+        #   count(container_oom_events_total)            → 156 条 series
+        #   sum(container_oom_events_total)              → 0
+        #   sum(increase(container_oom_events_total[30d])) → 0
+        # 而同一天 multica-frontend 真实 OOMKilled 6 次（cgroup v2 的
+        # memory.events `oom_kill 6` / `oom_group_kill 3`、kubectl 里 Reason=OOMKilled
+        # exit 137 都对得上）。kubelet 内嵌 cAdvisor 在 cgroup v2 + 新内核
+        # （本机 7.0.0-28-generic）下不填这个计数器。按本仓库自己的原则
+        # 「永不触发的规则比没有告警更糟」，换成实测可用的口径。
+        #
+        # ✅ 换成 node-exporter 的 `node_vmstat_oom_kill`（读 /proc/vmstat，与内核同源）：
+        #    2026-08-18 实测 k8s-node 上 24h **+6**，与 cgroup 的 oom_kill 6 完全吻合。
+        # ⚠️ 代价：**node 级粒度**，没有 namespace/pod/container 标签，指不出是谁被杀。
+        #    这对交叉验证够用 —— 它要回答的只是「内核杀了人，而 ContainerOOMKilled
+        #    却没响」，也就是归因链路本身坏了。
+        # ⚠️ 必须限定 `job="node-exporter"`：那是集群内 ServiceMonitor 抓的**两个真 k8s
+        #    节点**（k8s-node / k8s-worker-106，无 nodename 标签）。cluster=homelab 里
+        #    还有 pve 与 storage-106 两台**裸机宿主**（job=node-exporter-metal-nodes、
+        #    带 nodename），它们上面的 OOM 与容器归因无关，pve 的 available 只剩 ~0.6G，
+        #    不排除会真的 OOM —— 混进来就是恒亮误报。
+        # ⚠️ `unless` 用 6h 长窗口而非 15m：ContainerOOMKilled 只烧几分钟
+        #    （实测 2026-08-18 22:31→22:39），而 node 计数器的 increase 窗口会拖更久，
+        #    短窗口两边错位就会在尾部假阳性。长窗口把这个竞态抹平，代价是同一集群 6h 内
+        #    若有两次 OOM、其中一次被正确归因，另一次会被一并抑制 —— 可接受：
+        #    本条查的是「归因机制是否还活着」，不是逐事件报警。
+        # 复核指标是否还有效（换内核/升 kubelet 后值得重跑）：
+        #   sum(increase(node_vmstat_oom_kill{job="node-exporter"}[24h]))
+        - alert: OOMKillNotAttributedToContainer
+          expr: |
+            increase(node_vmstat_oom_kill{job="node-exporter"}[6h]) > 0
+              unless on (cluster)
+            max by (cluster) (
+              max_over_time(ALERTS{alertname="ContainerOOMKilled", alertstate="firing"}[6h])
+            )
+          for: 10m
           labels:
             severity: warning
             component: workload
           annotations:
-            summary: "{{ $labels.namespace }}/{{ $labels.pod }} [{{ $labels.container }}] 发生 OOM 事件（cAdvisor 口径，{{ $labels.cluster }}）"
+            summary: "{{ $labels.cluster }} 有节点发生 OOM kill，但没有任何 ContainerOOMKilled 与之对应"
             description: |
-              cAdvisor 计数器口径，仅 homelab 有数据。与 ContainerOOMKilled 互为验证：
-              本条响而那条没响 = 那条的 reason 标签值写错了，按本文件注释排查。
+              内核在 6h 内杀过进程（node_vmstat_oom_kill 增长），而容器级归因规则
+              ContainerOOMKilled 一次都没烧 —— **归因链路可能已失守**，别当成"没事发生"。
+              1) 先确认确实有容器被杀：
+                 `kubectl --context k3s-homelab get pods -A -o json | jq -r '.items[]|select(.status.containerStatuses[]?.lastState.terminated.reason=="OOMKilled")|.metadata.namespace+"/"+.metadata.name'`
+              2) 若有，说明 kube-state-metrics 的 reason 标签值变了，查实际值：
+                 `count by (cluster,reason) (kube_pod_container_status_last_terminated_reason == 1)`
+              3) 若没有，可能是节点上的**非容器进程**被杀（宿主侧内存压力），查 dmesg。
+              ⚠️ 注：`reason="OOMKilled"` 这个标签值 2026-08-18 已被实测证实可用
+              （当天 ContainerOOMKilled 正常烧了），此前一直是未经验证的假设。
 
         # 2026-08-10 加：**事前**预警。上面两条都是事后的——容器已经被杀了才响。
         # 本条是这一层唯一能提前动手的信号，判据取自
@@ -356,6 +381,65 @@ spec:
               一次尖峰就会 OOMKill，而 OOM 后干净重启、无人察觉。现在抬 limit 还来得及。
               ⚠️ 控制面组件（ArgoCD / Kyverno / trivy / opencost）的峰值随**被管对象规模**
               增长而非流量增长——每次新增大 CRD 的 App 或扩容之后要回头复查这条。
+
+        # 2026-08-18 加：CPU 节流的**可投递**版本。
+        # 动机：upstream 的 `CPUThrottlingHigh` severity 是 `info`，而 Alertmanager 路由
+        # 只收 `critical|warning`（info 由 InfoInhibitor 抑制）→ **它烧了也永远到不了
+        # Telegram**。当天 multica-frontend 的故障里，它是唯一提前数小时指向真因（CPU
+        # 被节流 66%、图片优化 2.3s、SSR 从 0.21s 退化到 0.77s）的信号，却被结构性丢弃；
+        # 人只看到"首页有时要 4.5s"，查不到方向。
+        # 不动 upstream 那条（沿用仓库既有做法：留着 info 版本做看板，另加 homelab 版本
+        # 做投递，同 KubeletDown / KubeCPUOvercommit 的处理方式）。
+        # ☠️ **阈值与窗口是实测标定出来的，别凭直觉改**。第一版写的是「10m 窗口 >50%
+        #    持续 30m」，拿 7d 真实数据回放后发现**它什么都抓不到**：multica-frontend
+        #    在 10m 窗口下的最长连续 >50% 只有 10 分钟（总计 35 分钟，是一阵一阵的），
+        #    `for: 30m` 会把这个唯一的真信号全部滤掉 —— 规则看着合理，实际是装饰品。
+        #    教训与内存那侧同构：**突发型负载要用长窗口平均，不能靠短窗口 + 长 for**。
+        # ✅ 现行参数：**1h 平均窗口 · >25% · for 90m**。2h 粒度回放 48h 实测分离度：
+        #      personal-services/frontend (multica, 768Mi 时代 jlbm5)  连续 **396 分钟**  → 烧
+        #      trivy-system/{frontend,postgres,backend} 的 scan pod     58–60 分钟        → 滤掉
+        #      personal-services/provision (open-notebook provisioner)  58 分钟           → 滤掉
+        #      monitoring/exporter (cf-analytics)                       12 分钟           → 滤掉
+        #      multica 修复后的新 pod                                   20–34 分钟        → 滤掉
+        #    396 与 60 之间留着 30 分钟以上的余量，for=90m 落在中间，两侧都不贴边。
+        # ⚠️ 那批 60 分钟的**不是噪声源而是标定基准**：trivy 的 scan job 是短命 pod，
+        #    天生被 bulk 优先级挤到高节流，且 1h 窗口会让它死后再"拖尾"约 1 小时——
+        #    所以任何 for < 60m 的取值都会把每晚的镜像扫描变成常亮黄灯。改小 for 之前
+        #    先重跑上面那段回放。
+        # ⚠️ 同理别把窗口从 1h 改小：窗口越短，突发型负载的比例越锯齿，for 就越抓不住。
+        # ⚠️ 只对 homelab 生效：`container_cpu_cfs_throttled_periods_total` 在 oracle
+        #    **压根不入库**（otel-collector 的 keep 正则只留 KRR 用的两个 container_* 指标，
+        #    实测 by(cluster) 计数：homelab 62 条 / oracle 0 条）。不写死 cluster 的话，
+        #    oracle 侧返回空结果，与"没有节流"外观完全一致 —— 2026-08-10 已据此误判过一次。
+        # ⚠️ 分母用 periods_total 而非墙钟：节流率的判据是**周期比例**，不是 CPU 用量。
+        #    `kubectl top` 在这里会给出个位数 m 的读数，看着像"完全没在用 CPU"。
+        - alert: ContainerCPUThrottlingSustained
+          expr: |
+            sum by (cluster, namespace, pod, container) (
+              increase(container_cpu_cfs_throttled_periods_total{container!="", cluster="homelab"}[1h])
+            )
+            /
+            sum by (cluster, namespace, pod, container) (
+              increase(container_cpu_cfs_periods_total{container!="", cluster="homelab"}[1h])
+            ) > 0.25
+          for: 90m
+          labels:
+            severity: warning
+            component: workload
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.container }} 的 CPU 节流率 {{ $value | humanizePercentage }}（1h 窗口），已持续 90m（{{ $labels.cluster }}）"
+            description: |
+              1h 窗口里超过四分之一的 CFS 周期在等配额，且已连续 90 分钟。症状通常是
+              "服务没挂但很慢"，且**不会**触发任何可用性告警——对外可能一直是 200。
+              先判是不是真的缺配额（而不是天生突发型采集器）：
+                `kubectl --context k3s-homelab -n {{ $labels.namespace }} get pod {{ $labels.pod }} -o jsonpath='{.spec.containers[*].resources}'`
+              抬 limit 前先想清楚这个容器的负载形状：
+                · 按请求分配大块工作的（图片/PDF/视频转码、模板编译）→ 抬 limit 是对的，
+                  且要同时看内存（这类负载内存也是突发型，见
+                  records/2026-08-18-multica-frontend-idle-rightsizing-oom.md）。
+                · 亚秒级突发的采集器/agent → 抬 limit 治不好，应考虑**不设 CPU limit**。
+              ⚠️ 控制面是热笔记本（reference/homelab-host-power-thermal.md），抬 CPU 有热代价，
+              别无脑往上加；优先抬到上游 chart 的默认值为止。
 
         - alert: CloudflaredAllReplicasDown
           expr: kube_deployment_status_replicas_available{deployment="cloudflared"} == 0
