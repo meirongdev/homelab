@@ -12,6 +12,7 @@
 "homelab 单节点"仍然合法，不会被判违规，也不该改。
 
 豁免：
+  · 行内写 `terminology-ok: <理由>`（与 check-public-ips.py 的 `public-ip-ok` 同一约定）
   · `docs/reference/terminology.md` 自己 —— 它必须**列出**这些禁止写法才能说明规则
   · 本文件 —— 同理，规则的正则里就带着被禁的字面量
   · fenced code block / 行内 code / 链接目标 —— 那些是标识符或命令，照抄才对
@@ -24,7 +25,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# 扫这些；对 .md 会剥掉代码块，对代码文件只看注释外的原文（见 scan_text）
+# 扫这些；.md 会先经 strip_noise 剥掉代码块/行内 code/链接目标，代码文件按原文扫
 GLOBS = ("*.md", "*.yaml", "*.yml", "*.sh", "*.py", "*.tf", "justfile")
 
 SKIP_DIRS = {".git", "node_modules", ".terraform", "venv", ".venv", "__pycache__"}
@@ -65,11 +66,11 @@ BOGUS = {
 # ---- T2：拼写正典 -------------------------------------------------------------
 # (正则, 正典, 说明)。只放全仓已经压倒性一致、另一种写法纯属漏网的。
 SPELLING = [
-    (re.compile(r"\bArgo CD\b"), "ArgoCD", "全仓 ArgoCD 455 : Argo CD 0"),
+    (re.compile(r"\bArgo CD\b"), "ArgoCD", "定正典时全仓 ArgoCD 455 : Argo CD 0"),
     (re.compile(r"\bCluster Mesh\b"), "ClusterMesh", "Cilium 官方写法无空格"),
     (re.compile(r"\bZitadel\b"), "ZITADEL", "产品名全大写"),
     (re.compile(r"\bK3S\b"), "K3s", None),
-    (re.compile(r"控制平面"), "控制面", "全仓 控制面 97 : 控制平面 1"),
+    (re.compile(r"控制平面"), "控制面", "定正典时全仓 控制面 97 : 控制平面 1"),
     # 只查裸 `storage106`（指主机时）。`storage106-as-homelab-worker` /
     # `storage106-experiment-vm` 是已定的 ADR 文件名 slug，重命名要动 R5 索引和一堆引用，
     # 不值得 —— 故后面跟 `-` 的一律放过。
@@ -81,21 +82,29 @@ SPELLING = [
 # homelab 2026-08-13 起是双节点（控制面 + worker）。oracle-k3s 仍是单节点，所以只在
 # 与 homelab 同句出现时才判违规。这两个目录按 R6 必须反映现状。
 # ---- T4：`master` 不再用来指控制面节点 ----------------------------------------
-# 2026-08-18 全仓改写 73 处。它在本仓库有三个**合法**含义，都必须放过：
+# 2026-08-18 全仓改写 79 处（74 行）。它在本仓库有三个**合法**含义，都必须放过：
 #   · LiteLLM / ZITADEL 的 `master key`
 #   · git 的 master 分支
 #   · kube-bench `--targets master,etcd,controlplane,node,policies` 里的 target 名
 #     （连解释它的注释也要放过，否则注释与实参脱节）
 # 除此之外指节点时一律写 `控制面`（中文）/ `control-plane`（英文），或直呼 `k8s-node`。
 MASTER = re.compile(r"(?<![-\w/])master(?![-\w])")
+# ⚠️ 豁免必须**按跨度**（span）判，不能按整行判。早先版本写成"整行含 git 或 branch 就放过"，
+# 结果 `master 节点上的 branch 保护策略` / `git 仓库 clone 到 master 节点` 这类**真违规
+# 被静默漏过**（2026-08-18 review 实测）。做法：先把合法形式整段抹白，再看还剩不剩裸 master。
 MASTER_OK = re.compile(
-    r"master[-_ ]?key|master\s*[/、]\s*[^\n]{0,8}key"   # master key / `master/虚拟 key`
-    r"|master 分支|\bbranch\b|Mastering"
-    r"|origin[/\s]+master"                       # origin/master 与 `git pull origin master`
-    r"|\bgit\b[^\n]*\bmaster\b"                  # 任何 git 命令行里的分支名
-    r"|master\s*[,/]\s*(etcd|controlplane)|(etcd|controlplane)\s*[,/]\s*master",
+    r"master[-_ ]?key"                            # master key（LiteLLM / ZITADEL）
+    r"|master\s*[/、]\s*[^\n]{0,8}key"            # `master/虚拟 key`
+    r"|master\s*分支|分支\s*master"                # git 分支（中文行文）
+    r"|origin[/\s]+master"                        # origin/master 与 `git pull origin master`
+    r"|(?:checkout|merge|rebase|push|pull|fetch|switch)\s+\S*\s*master"
+    r"|master\s*[,/]\s*(?:etcd|controlplane)"     # kube-bench --targets 及解释它的注释
+    r"|(?:etcd|controlplane)\s*[,/]\s*master"
+    r"|Mastering",                                # 书名
     re.I,
 )
+# 行内豁免，与 check-public-ips.py 的 `public-ip-ok` 同一约定：写理由，不许裸豁免。
+EXEMPT_MARKER = "terminology-ok"
 
 CURRENT_DIRS = ("docs/reference/", "docs/runbooks/")
 SINGLE_NODE = re.compile(r"单节点")
@@ -116,6 +125,8 @@ def scan(path: Path) -> None:
     text = strip_noise(raw) if path.suffix == ".md" else raw
 
     for n, line in enumerate(text.splitlines(), 1):
+        if EXEMPT_MARKER in line:                    # 行内豁免（须带理由，同 public-ip-ok）
+            continue
         for bad, hint in BOGUS.items():
             if bad in line:
                 fail("T1", path, n, f"`{bad}` 不是任何一层的真名 —— {hint}")
@@ -123,10 +134,12 @@ def scan(path: Path) -> None:
             if rx.search(line):
                 fail("T2", path, n,
                      f"`{rx.pattern}` -> 正典 `{canon}`" + (f"（{why}）" if why else ""))
-        if MASTER.search(line) and not MASTER_OK.search(line):
+        # 先把合法的 master 用法整段抹白，再看还剩不剩裸 master —— 按跨度判，不按整行判
+        if MASTER.search(MASTER_OK.sub(lambda m: " " * len(m.group(0)), line)):
             fail("T4", path, n,
                  "`master` 指控制面节点已废弃 -> 写 `控制面`/`control-plane`，或直呼 `k8s-node`"
-                 "（`master key` / git 分支 / kube-bench target 不在此列）")
+                 "（`master key` / git 分支 / kube-bench target 不在此列；"
+                 f"确有例外写行内 `{EXEMPT_MARKER}: <理由>`）")
         if (rel.startswith(CURRENT_DIRS) and SINGLE_NODE.search(line)
                 and HOMELAB_CTX.search(line) and not QUALIFIED.search(line)):
             fail("T3", path, n,

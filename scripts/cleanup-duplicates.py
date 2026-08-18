@@ -28,7 +28,6 @@ import base64
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import unicodedata
@@ -81,6 +80,24 @@ def is_companion(t1: str, t2: str) -> bool:
     w1 = set(re.findall(r"[a-z]+", t1.lower()))
     w2 = set(re.findall(r"[a-z]+", t2.lower()))
     return bool((w1 ^ w2) & COMPANION)
+
+
+# 占位符/工具残渣标题 —— 归一化后（去标点、小写）与这些相等或包含时，视为**不携带识别信息**，
+# 一律不参与判重。名单是实测撞到的，遇到新的就往这里加，别放宽判重规则去迁就它。
+JUNK_TITLE_EXACT = {
+    "booktitle", "title", "untitled", "unknown", "book", "ebook", "epub", "pdf",
+    "newdocument", "document", "noname", "默认", "无标题", "未命名",
+}
+# ⚠️ 只放**实测撞到过**的工具残渣。别加 "calibre" 这类泛词 —— 真有讲 Calibre 的书，
+# 加了会让它们从此静默不参与判重（不丢数据，但判重悄悄失效，比误报更难发现）。
+JUNK_TITLE_SUB = ("pdfreducer", "demoversion", "trialversion")
+
+
+def is_junk_title(normalized: str) -> bool:
+    """归一化标题是否只是占位符/工具残渣（据此判重会把不同的书合并）。"""
+    if normalized in JUNK_TITLE_EXACT:
+        return True
+    return any(s in normalized for s in JUNK_TITLE_SUB)
 
 
 def meta_score(title: str, author: str) -> float:
@@ -159,13 +176,22 @@ def worker_plan(library: str) -> dict:
                           n=norm(title), a=author_tokens(authors), ed=edition(title)))
 
     # --- 分组：完全同名，或长前缀 + 作者交集
+    #
+    # ☠️ 占位符标题不能用来判重。有些书的元数据是工具残渣而不是书名（实测撞到两例：
+    # `book title`、`PDF Reducer Demo version`），这种标题**不携带任何识别信息**，
+    # 两本毫无关系的书会因为"标题一样"被判成重复。2026-08-18 review 实测：`book title`
+    # 那两本 sha256 与体积都不同（0.52MB vs 1.37MB），是**两本不同的书**，差点被删掉一本。
+    junk_titles = []
     seen, groups = set(), []
     for i, x in enumerate(books):
         if x["id"] in seen or not x["n"]:
             continue
+        if is_junk_title(x["n"]):
+            junk_titles.append([x["id"], x["title"]])
+            continue
         g = [x]
         for y in books[i + 1:]:
-            if y["id"] in seen or not y["n"]:
+            if y["id"] in seen or not y["n"] or is_junk_title(y["n"]):
                 continue
             same = x["n"] == y["n"]
             shorter = min(x["n"], y["n"], key=len)
@@ -212,6 +238,7 @@ def worker_plan(library: str) -> dict:
 
     assert not (set(dels) & {v["keep"] for v in view}), "同一本书既保留又删除"
     return dict(groups=view, merges=merges, dels=sorted(dels), corrections=corrections,
+                junk_titles=junk_titles,
                 total_books=db.execute("SELECT COUNT(*) FROM books").fetchone()[0])
 
 
@@ -342,6 +369,11 @@ def main() -> int:
             print(f"  {'保留' if bid == g['keep'] else '删除'} {bid:<6}{human(size):>8} "
                   f"{fmt:<10} ed={ed if ed is not None else '-':<4} {title}")
             print(f"         {author}")
+    if plan.get("junk_titles"):
+        print(f"\n⚠ 标题是占位符、**不参与判重**的书 ({len(plan['junk_titles'])}) —— "
+              f"它们的标题不携带识别信息，据此判重会把不同的书合并。请手工补元数据：")
+        for bid, t in plan["junk_titles"]:
+            print(f"    id={bid:<6}{t[:64]}")
     if plan["corrections"]:
         print(f"\n判定说明 ({len(plan['corrections'])}):")
         for c in plan["corrections"]:
@@ -387,11 +419,21 @@ def main() -> int:
     if sqlite3.connect(dest).execute("PRAGMA integrity_check").fetchone()[0] != "ok":
         print("✗ 备份 integrity_check 不通过，中止", file=sys.stderr)
         return 1
+    # 关键校验：拿备份的 books 行数与**此刻**的现网比，不能与 plan 里那个旧数字比 ——
+    # calibre-web-automated 会随时从 ingest 目录自动入库，两者本就可能差几本；拿旧数字比
+    # 会把"库刚长了一本"误报成"快照落后"。真正要防的是 WAL 没被包含（那会差一大截）。
     n_backup = sqlite3.connect(dest).execute("SELECT COUNT(*) FROM books").fetchone()[0]
-    if n_backup != plan["total_books"]:
-        print(f"✗ 备份里是 {n_backup} 本、现网是 {plan['total_books']} 本——快照落后于现网"
-              f"（WAL 没被包含？），中止", file=sys.stderr)
+    n_live = int(in_pod(["sqlite3", f"{a.library}/metadata.db",
+                         "SELECT COUNT(*) FROM books;"]).stdout.strip() or -1)
+    if n_backup != n_live:
+        print(f"✗ 备份里是 {n_backup} 本、现网 {n_live} 本 —— 快照与现网不一致，"
+              f"最常见原因是 WAL 未被包含（.backup 失败？）。也可能是刚有新书入库；"
+              f"重跑一次即可区分。中止。", file=sys.stderr)
         return 1
+    if n_backup != plan["total_books"]:
+        print(f"⚠ 出计划时是 {plan['total_books']} 本，现在 {n_backup} 本 —— 期间有书入库/退库。"
+              f"新入库只会加 id、不动计划里的那些；但若期间**删过**书，计划就可能指向已消失的 id。"
+              f"不确定就 Ctrl-C 重跑一次（本库有过 id 被复用的历史，不要假设 id 永久唯一）。")
     in_pod(["rm", "-f", tmp])
     print(f"✓ 备份已校验: {dest} ({want} bytes, integrity_check=ok, books={n_backup} 与现网一致)")
 
