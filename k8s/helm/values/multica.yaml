@@ -31,11 +31,21 @@ postgres:
     requests: { cpu: 50m, memory: 192Mi }
     limits: { cpu: 500m, memory: 512Mi }
   affinity: &pin-control-plane
-    # ☠️ 必须钉在 control-plane（k8s-node），三个理由缺一不可：
-    #  1. 夜备 CronJob 自己也钉在 control-plane，读的是**所在节点**的 hostPath
-    #     /var/lib/rancher/k3s/storage。PVC 落到 worker = 夜备静默漏备（rc=0 的假阴性）。
-    #  2. worker（k8s-worker-106）allocatable 只有 1800m/3.2Gi，还跑着 media 两个服务。
-    #  3. local-path 的 PVC 一旦绑到某节点就固定了，不钉节点 = 落点由首次调度随机决定。
+    # ☠️ 必须钉在 control-plane（k8s-node）。理由**两条**（原先写三条，第一条已过期）：
+    #  1. worker（k8s-worker-106）allocatable 只有 1800m/3253Mi，且已用掉 63% 内存
+    #     requests（2058Mi，跑着 media 三个服务 + tetragon/opencost/otel-agent）。
+    #     multica 三个容器合计 requests 512Mi/150m，塞进去会把 worker 推到 ~79%，
+    #     挤掉 trivy 每次 1024Mi 的镜像扫描 Job。
+    #  2. local-path 的 PVC 一旦绑到某节点就固定了，不钉节点 = 落点由首次调度随机决定。
+    # ⚠️ **已作废的第三条理由**（2026-08-18 核实后删除，别再拿它当依据）：
+    #    原文说「夜备只钉 control-plane、读所在节点 hostPath，PVC 落到 worker = 静默漏备」。
+    #    这在 2026-08-16 之后不成立 —— `backup/overlays/homelab/worker-cronjob.yaml`
+    #    补上了 worker 侧夜备（02:00，同一个 106 仓库，`--host homelab-worker`），
+    #    且它**不按 PVC 名白名单，整个 /localpath 目录扫**。实测最近两次均 Complete
+    #    （21s，8 个文件 4.5M，snapshot be44070c）。所以「PVC 不能落 worker」这条
+    #    已经是错的，做落点决策时别再引用。
+    #    ⚠️ 但 CI 的 H4 仍只解析控制面那份脚本的 `for pat in ...` 白名单 ——
+    #       新增 PVC 照样要写进控制面那份，否则 H4 不放行（见 worker-backup-script.yaml 文件头）。
     nodeAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
         nodeSelectorTerms:
