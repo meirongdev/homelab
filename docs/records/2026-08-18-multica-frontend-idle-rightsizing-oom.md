@@ -67,19 +67,39 @@ sudo grep -E 'nr_periods|nr_throttled' $CG/cpu.stat
 
 `/` 在集群内只要 0.21s，公网那 4.5s 是「首页渲染 + 图片优化抢同一份 500m 配额」的结果。
 
-## 为什么没有告警
+## 告警其实响了两次——是它被忽略，不是它没响
 
-三件事叠在一起，各自都是**有意为之**，但合起来是盲区：
+> ⚠️ **本节 2026-08-18 当晚更正。** 初版写的是"容器级 OOM/重启没有告警、靠用户报障发现"，
+> **这是错的**。查 Prometheus 的 `ALERTS` 序列后确认：两条 warning 都按时烧了，且都投递成功
+> （同期 Telegram **103 条发送 / 0 失败**）。真正的问题不是缺告警，而是**在告警正响的时候
+> 把 limit 改小了**。
 
-1. `monitoring.prometheusRule` 刻意关闭（backend `/metrics` 返回 404，开了就是永不触发的
-   规则）——所以没有容器级 OOM/重启告警。
-2. Uptime Kuma 那条公网探测看的是可达性；崩循环期间 `/` 始终 200，**探测不会红**。
-3. chart **完全没有 probe 配置项**（`helm show values` 里 probe/readiness/liveness 一个都没有），
+| 告警 | 烧的时间（本地） | 内容 |
+|------|----------------|------|
+| `ContainerMemoryNearLimit` | pending 16:13 → **firing 16:43–22:47（365 分钟）** | `personal-services/frontend` 7d 峰值达 limit 的 **94%**（pod `76bcf66d98-jlbm5`，768Mi 时代） |
+| `ContainerOOMKilled` | **firing 22:31–22:39** | pod `7b497778f6-qv5lj` 被 OOMKilled |
+
+**时间顺序是关键**：16:43 告警就说"frontend 峰值已到 768Mi 的 94%"，实测 7d 峰值
+**721Mi**（16:18 那次尖峰；另有 19:18 的 485Mi、20:48 的 377Mi）。
+**5 小时 37 分钟后（22:20）limit 被改成 512Mi——比当时已知的峰值还低 209Mi。**
+这不是"没看见"，是把一个正在响的 94% 告警当成了"还有 3 倍余量"。
+
+⚠️ 顺带纠正一个采样陷阱：按 10 分钟步长取**瞬时值**看 jlbm5 的曲线，全程只有 124–185Mi，
+那 721Mi 的尖峰**一个都看不到**；必须用 `max_over_time`。`ContainerMemoryNearLimit`
+规则本身就是这么写的（文件里有注释说明），所以它抓到了，而人工瞄一眼曲线会漏掉。
+
+真正的盲区只剩两个：
+
+1. `CPUThrottlingHigh` **烧了但没投递**——它 16 点后为这个 container 烧过约 80 分钟，
+   但 severity 是 `info`，而 Alertmanager 路由只收 `critical|warning`（`info` 由
+   InfoInhibitor 抑制）。**CPU 饥饿这一半在告警链路里被结构性丢弃了。**
+2. chart **完全没有 probe 配置项**（`helm show values` 里 probe/readiness/liveness 一个都没有），
    所以 frontend 没有 readinessProbe——Kyverno 的 `require-probes` 一直在报
-   `PolicyViolation`（audit）。没有 readinessProbe 意味着容器一起来就被派流量，
-   重启期间请求直接打到还在启动的实例上。
+   `PolicyViolation`（audit）。没有 readinessProbe 意味着容器一起来就被派流量。
 
-⚠️ 这三条现在都没改。**这个服务目前只有"域名还通"这一层保障**，容器反复重启是看不见的。
+（`monitoring.prometheusRule` 关闭是对的：那是 chart 自带的 **service 级**规则，
+而容器级 OOM/内存告警由 `manifests/monitoring/alerts/prometheus-rules.yaml` 全集群覆盖，
+不依赖单个 chart。初版把这两件事混为一谈了。）
 
 ## 教训：这类服务该怎么量
 
@@ -108,6 +128,11 @@ srcset 里的一个变体）：
 ⚠️ **注意 420Mi 这个数**：它已经是旧上限 512Mi 的 82%。也就是说旧值不是"略紧"，而是
 基本没有余量——真实流量只要比这次测试再密一点就必然 OOM，这与当晚的现象一致。
 
+⚠️ **更正（同日）**：420Mi 是**人工压测**的峰值，**真实流量更凶**——768Mi 时代实测
+7d 峰值 **721Mi**（`max_over_time`，16:18）。所以现行 1Gi 上限的余量是 **1.42×**
+而非压测数字暗示的 2.4×。留 1Gi 的理由：它是 chart 上游默认，且 85% 阈值
+（≈870Mi）会在 OOM 之前先响。**这条要持续盯**，再出现逼近就直接抬到 1.5Gi。
+
 ## 遗留（已知、未修）
 
 - **突发并发下 CPU 仍会 throttle**：8 路冷缓存优化时 88 个周期里 100→79 个被 throttle（90%），
@@ -119,7 +144,13 @@ srcset 里的一个变体）：
   症状自我放大。没加 PVC——它会触发 H4（新增 PVC 必须有备份归属），而这只是可重算的缓存。
 - **frontend 没有 readinessProbe，且 chart 不提供该配置项**。Kyverno `require-probes` 会一直
   报 audit 违规。要修得等上游 chart 支持。
-- **容器级 OOM/重启仍然没有告警**（见上「为什么没有告警」）。这次是靠用户报障发现的。
+- **`CPUThrottlingHigh` 是 `info`，永远到不了 Telegram**（见上）。它是这次唯一提前
+  数小时就指向真因的信号，却被路由丢弃。
+- **`ContainerOOMKilledCadvisor` 这条规则根本不可能烧**：它依赖
+  `container_oom_events_total`，而本集群该指标 **156 条 series 全部恒为 0**
+  （30d increase = 0），今天 6 次真实 OOM 一次都没记上。而 `node_vmstat_oom_kill`
+  在 k8s-node 上 **24h +6，与 cgroup 的 `oom_kill 6` 完全吻合**——那才是可用的独立信号。
+  按本仓库自己的原则（"永不触发的规则比没有告警更糟"），这条要么改口径要么删。
 
 ## 相关
 
