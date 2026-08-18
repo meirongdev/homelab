@@ -18,6 +18,7 @@
 | [storage106-experiment-vm](storage106-experiment-vm.md) | ⛔ 已被取代 → `storage106-as-homelab-worker`；原结论"实验田独立小集群"，估算实测偏保守 |
 | [storage106-as-homelab-worker](storage106-as-homelab-worker.md) | 106 VM 以 `k8s-worker-106` 入编 homelab（取代上一条）；实测入伙税远低于估算，含三条与控制面不同的约束 |
 | [cluster-placement-for-new-services](cluster-placement-for-new-services.md) | 计算密集/大流量走 homelab、轻量无状态默认 oracle-k3s；含必写 CPU limit 与 thermal 代价 |
+| [multica-email-delivery](multica-email-delivery.md) | Multica 验证码改走 Gmail SMTP（动机是**停止把验证码写进 Loki**）；否决 Cloudflare（Workers Free 档 Outbound 不可用，实测卡在域名 onboard）与 Resend（接线成本不成比例） |
 | [dgx-clustermesh-not-adopted](dgx-clustermesh-not-adopted.md) | ❌ DGX 双机**不接 ClusterMesh**（共享节点不带 subnet route，VXLAN 节点 IP 不可达）；改 homelab Service + 手写 Endpoints |
 | [shared-postgres-platform](shared-postgres-platform.md) | 手搓 `rss-postgres` → CNPG `apps-pg`；**不**并入 `zitadel-pg`；备份改逐库 `pg_dump` |
 | [slo-availability-targets](slo-availability-targets.md) | 99% 推导 + 两维判据；☠️ 实测揭穿分母（vault/argocd 真实流量≈0）；预算只做信号不做闸门 |

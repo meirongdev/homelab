@@ -24,10 +24,12 @@ postgres:
     # ⚠️ local-path 不做容量限制，这个 10Gi 只是声明，实际吃的是节点 / 上的 85G。
     storageClass: local-path
   resources:
-    # ⚠️ 这三组 requests/limits 是**估值不是实测**。CLAUDE.md 的规矩是按实测填，
-    #    但部署前无从测起。上线跑满一周后按 rssBytes 回调，别信 kubectl top node。
-    requests: { cpu: 50m, memory: 256Mi }
-    limits: { cpu: 500m, memory: 768Mi }
+    # 按实测调整（2026-08-18，取 kubelet stats 的 rssBytes/workingSetBytes，
+    # 不看 kubectl top —— 见 reference/k8s-qos-resource-management.md）：
+    # postgres 空载 rss 34.8Mi / workingSet 73.7Mi。库很小（逻辑 dump 372KB），
+    # shared_buffers 走默认 128MB，512Mi 上限足够且留了 7 倍余量。
+    requests: { cpu: 50m, memory: 192Mi }
+    limits: { cpu: 500m, memory: 512Mi }
   affinity: &pin-control-plane
     # ☠️ 必须钉在 control-plane（k8s-node），三个理由缺一不可：
     #  1. 夜备 CronJob 自己也钉在 control-plane，读的是**所在节点**的 hostPath
@@ -104,8 +106,10 @@ backend:
     s3Bucket: ""
     localUploadBaseUrl: https://multica.meirong.dev
   resources:
-    requests: { cpu: 50m, memory: 128Mi }
-    limits: { cpu: 500m, memory: 512Mi }
+    # 实测（2026-08-18）：Go 二进制空载 rss 12.1Mi / workingSet 19.3Mi ——
+    # 原先填的 128Mi request 过宽。64Mi 仍留 3 倍余量，DB 连接池上限 25 也吃不到。
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
   affinity: *pin-control-plane
   tolerations: []
 
@@ -124,8 +128,11 @@ frontend:
     # 当前镜像不需要它，保持 false，否则会和 ns 内其它东西抢名字。
     backendAlias: false
   resources:
+    # 实测（2026-08-18）：Next.js standalone 空载 workingSet 177.1Mi ——
+    # 三个容器里唯一真吃内存的，request 保持 256Mi（低于实占会招来驱逐压力）；
+    # 上限从 768Mi 收到 512Mi，仍高于实测约 3 倍。
     requests: { cpu: 50m, memory: 256Mi }
-    limits: { cpu: 500m, memory: 768Mi }
+    limits: { cpu: 500m, memory: 512Mi }
   affinity: *pin-control-plane
   tolerations: []
 
@@ -138,8 +145,10 @@ ingress:
 
 monitoring:
   prometheusRule:
-    # 刻意不开。homelab 确实有 Prometheus Operator CRD，开了能装上，但这套规则
-    # 里的 sampler 指标是否真被本实例吐出来**没有验证过**。
-    # 装一条永不触发的告警比没有告警更危险（它会让人以为已经被监控了）——
-    # 同 docs 里 PromQL absent-series 那个坑。要开就先去 /api/v1/targets 确认指标存在。
+    # 刻意不开，且这是**实测结论不是保守起见**：backend 的 `/metrics` 返回
+    # **404**（2026-08-18 从集群内 curl `multica-backend:8080/metrics` 确认），
+    # 它压根不暴露 Prometheus 指标。开了就是一组永不触发的告警规则 ——
+    # 比没有告警更糟，因为它让人以为这个服务已被监控。
+    # 存活探测由 Uptime Kuma 的公网探测覆盖（cloud/oracle/.../uptime-kuma/provisioner.yaml）。
+    # ⚠️ 那条探测只证明 service 端活着；执行任务的 daemon 在 M2 上，它挂了探测**依然全绿**。
     enabled: false
