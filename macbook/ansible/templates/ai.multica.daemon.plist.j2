@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Managed by Ansible (macbook/ansible/playbooks/multica-daemon.yaml). Do not edit by hand. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{{ md_label }}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{ md_bin }}</string>
+        <string>daemon</string>
+        <string>start</string>
+        <!-- ☠️ --foreground 是必须的：`multica daemon start` 默认自己 fork 到后台并
+             立刻返回，launchd 会把「父进程退出」当成服务挂了，配合 KeepAlive
+             变成无限重启风暴（而真正的 daemon 每轮都被留下成为孤儿）。 -->
+        <string>--foreground</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- ☠️ LaunchAgent 拿到的是极简 PATH（/usr/bin:/bin:/usr/sbin:/sbin），
+             不含 /opt/homebrew/bin。不显式给 PATH 的话 daemon 起得来、
+             但探测不到任何 AI CLI —— 表现为 UI 里 runtime 显示 0 个 agent，
+             没有任何报错。claude/qwen 是 npm 全局（软链在 /opt/homebrew/bin），
+             codex/hermes 是 brew，都在同一目录。 -->
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>MULTICA_DAEMON_DEVICE_NAME</key>
+        <string>{{ md_device_name }}</string>
+        <!-- 这台 M2 只有它自己在跑任务，20 个并发对一台笔记本过量（每个任务
+             可能拉起一个 agent CLI + 一份 repo 副本）。压到 {{ md_max_concurrent }}。 -->
+        <key>MULTICA_DAEMON_MAX_CONCURRENT_TASKS</key>
+        <string>{{ md_max_concurrent }}</string>
+        <!-- 任务工作区根目录。默认就是 ~/multica_workspaces，显式写出来是因为
+             它会被 GC 按 TTL 清理，位置得让人一眼看见。 -->
+        <key>MULTICA_WORKSPACES_ROOT</key>
+        <string>{{ md_workspaces_root }}</string>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>{{ ansible_facts.user_dir }}/.local/var/log/multica-daemon.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{ ansible_facts.user_dir }}/.local/var/log/multica-daemon.err.log</string>
+</dict>
+</plist>

@@ -1,0 +1,45 @@
+---
+# Multica —— AI 编码 agent 协作平台（issue → Claude Code / Codex / Cursor 执行）
+# Chart: oci://ghcr.io/multica-ai/charts/multica
+# Values: k8s/helm/values/multica.yaml
+# 2026-08-18: 落 homelab。选 homelab 而非 oracle 的理由：自带有状态 Postgres(pgvector)，
+#   且 oracle 是 arm64 而这套镜像的主战场是 amd64；oracle 也只剩 ~2.6G available。
+#
+# ⚠️ 只部署 service 端。执行 agent 的 daemon 在 M2 MacBook 上，
+#   见 macbook/ansible/playbooks/multica-daemon.yaml。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: multica
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: homelab
+
+  sources:
+    - repoURL: ghcr.io/multica-ai/charts
+      chart: multica
+      targetRevision: "0.4.28"
+      helm:
+        valueFiles:
+          - $values/k8s/helm/values/multica.yaml
+    - repoURL: https://github.com/meirongdev/homelab
+      targetRevision: main
+      ref: values
+
+  destination:
+    # ☠️ 必须显式写 homelab。ArgoCD 控制面 2026-08-02 起在 oracle-k3s，
+    #   `kubernetes.default.svc` 指的是 **oracle**，写错会把整套装到 oracle 上去。
+    server: https://100.94.186.7:6443
+    namespace: personal-services
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # personal-services ns 由 homelab 的 personal-services App 拥有（含 PSA 标签），
+      # 这里不重复创建，避免双重所有权（同 loki.yaml / falco.yaml 的做法）。
+      - CreateNamespace=false
+      - ServerSideApply=true

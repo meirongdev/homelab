@@ -3,5 +3,8 @@
 # Run with: just site   (prompts for the sudo password, needed by power.yaml)
 - import_playbook: packages.yaml
 - import_playbook: ai-clis.yaml
+# 紧跟 ai-clis：multica daemon 靠探测 PATH 上的 claude/qwen/codex/hermes 来注册
+# 可用 runtime，CLI 没装齐时它起得来但一个 agent 都发现不了。
+- import_playbook: multica-daemon.yaml
 - import_playbook: node-exporter.yaml
 - import_playbook: power.yaml

@@ -132,6 +132,26 @@ data:
       rm -f /work/litellm.dump
     fi
 
+    # --- 2d) Multica：Postgres 逻辑 dump（pg_dump）---
+    # multica 的 workspace/task/agent 记录在 Postgres（multica-postgres, pgvector pg17,
+    # local-path）——同 litellm，数据目录不能原样拷贝，必须 pg_dump。
+    #
+    # ⚠️ 这个 PVC **CI 查不到**：它由 Helm chart 生成，不在 k8s/helm/manifests/ 清单树里，
+    #    而 H4 只解析清单树里的 PVC（同 CNPG 的 apps-pg-1/zitadel-pg-1）。
+    #    也就是说漏加这一段不会有任何检查报错，只会静默不备份。
+    # 凭据来自 external-secret.yaml 的 MULTICA_DB_PASSWORD（Vault secret/homelab/multica
+    # → postgres_password，与应用自己用的是同一个）。
+    echo "[backup] pg_dump multica DB..."
+    export PGPASSWORD="$(cat /creds/MULTICA_DB_PASSWORD 2>/dev/null || true)"
+    if [ -z "$PGPASSWORD" ]; then
+      echo "[warn] MULTICA_DB_PASSWORD absent (vault secret/homelab/multica not written?) — multica NOT in this backup"
+    elif pg_dump -h multica-postgres.personal-services.svc -U multica -d multica -Fc -f /work/multica.dump 2>/dev/null; then
+      echo "[backup]   multica.dump = $(wc -c < /work/multica.dump) bytes"
+    else
+      echo "[warn] pg_dump multica failed — multica NOT in this backup"
+      rm -f /work/multica.dump
+    fi
+
     # --- 3) restic backup + 保留策略 ---
     # jobs-sg 的 raw/ 归档（raw/<date>/NNN.jsonl.gz）直接纳入，不经 /work 中转：
     # /work 是 emptyDir，每晚拷一遍会白吃节点临时盘。同 oracle overlay 的 BOOKS_DIR 做法。
@@ -142,11 +162,17 @@ data:
     JOBS_ARCHIVE_DIR="$(ls -d /localpath/*jobs-sg-data*/raw 2>/dev/null | head -1 || true)"
     [ -n "$JOBS_ARCHIVE_DIR" ] || echo "[warn] jobs-sg raw/ archive not found under /localpath — jobs-sg archive NOT in this backup!"
 
+    # multica 的上传件（任务附件，PVC multica-backend-uploads → /app/data/uploads）。
+    # 第 2 步的文件名白名单是 *.db*/*.json，附件是任意扩展名，一个都匹配不上；
+    # 且 2d) 的 pg_dump 只含元数据，附件本体只有这里能保住。整目录纳入（量小）。
+    MULTICA_UPLOADS_DIR="$(ls -d /localpath/*multica-backend-uploads* 2>/dev/null | head -1 || true)"
+    [ -n "$MULTICA_UPLOADS_DIR" ] || echo "[warn] multica uploads dir not found under /localpath — multica uploads NOT in this backup"
+
     echo "[backup] restic backup..."
     restic cat config >/dev/null 2>&1 || restic init
     # 清理陈旧锁：activeDeadline 杀掉的上一次运行会留下 repo 锁（只清死进程的锁，安全）
     restic unlock 2>/dev/null || true
-    restic backup /work ${JOBS_ARCHIVE_DIR:+"$JOBS_ARCHIVE_DIR"} --host homelab --tag nightly --cleanup-cache
+    restic backup /work ${JOBS_ARCHIVE_DIR:+"$JOBS_ARCHIVE_DIR"} ${MULTICA_UPLOADS_DIR:+"$MULTICA_UPLOADS_DIR"} --host homelab --tag nightly --cleanup-cache
     echo "[backup] forget/prune..."
     restic forget --host homelab --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune
     restic snapshots --host homelab --latest 2

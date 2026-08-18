@@ -31,6 +31,11 @@ spec:
     - https://kubernetes-sigs.github.io/external-dns/
     # OTel Collector（homelab 节点代理：日志→Loki、OTLP 追踪→Tempo；2026-07-31）
     - https://open-telemetry.github.io/opentelemetry-helm-charts
+    # Multica（AI 编码 agent 协作平台，2026-08-18）。本条是全仓库**第一个 OCI**
+    # chart 源，写法与上面的 HTTP repo 不同：ArgoCD 要求 repoURL **不带 `oci://` 前缀**
+    # （官方文档原话 "note: the oci:// syntax is not included."）。公开 registry
+    # 无需注册 repository Secret —— 私有的才需要 enableOCI。
+    - ghcr.io/multica-ai/charts
 
   # ⚠️ 2026-08-02 ArgoCD 控制面迁到 oracle-k3s 后，`kubernetes.default.svc` 的所指
   # **变了**：它现在是 oracle 自己，不再是 homelab。homelab 变成需要显式列出的外部集群。

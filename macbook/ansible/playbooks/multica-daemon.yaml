@@ -1,0 +1,151 @@
+---
+# Multica daemon（`multica computer`）—— 真正执行 AI 编码任务的那一半。
+#
+# 架构：service 端（web/API/Postgres）跑在 homelab k3s 上
+#   （k8s/helm/values/multica.yaml + argocd/applications/multica.yaml），
+#   daemon 跑在这里。daemon **只做 outbound 注册**到 service，
+#   不监听任何端口、不需要入站放行，所以它在 NAT/Tailscale 后面完全没问题。
+#   —— 这也是它不该进 k3s 的原因：它要的是一台装好并登录了 AI CLI 的真实机器。
+#
+# ⚠️ 安全边界（上游文档原话："Tasks run with the full permissions of the user
+#   running the daemon — they can read and write everything that user can."）：
+#   本 playbook 按既有约定跑在登录用户 matthew 下，这是**明确接受**的取舍
+#   （2026-08-18 决定），不是疏忽。代价是被派发的任务能读写 matthew 能读写的一切，
+#   包括 ~/.ssh、各 AI CLI 的凭据、以及本仓库。上游建议的隔离做法是专用 Unix 用户
+#   或 VM；若日后要收紧，改这里的 hosts/become 与 LaunchAgent 的用户域即可。
+#
+# 前置：ai-clis.yaml 已装好 claude/qwen/codex/hermes（daemon 靠探测 PATH 发现它们）。
+# 一次性手工步骤：`multica login`（走浏览器 OAuth，无法在 ansible 里非交互完成）。
+#   未登录时本 playbook **刻意不 bootstrap LaunchAgent** —— 否则 KeepAlive 会把
+#   一个必然失败的进程反复拉起，日志刷屏而 UI 上什么都不会出现。
+#
+# 幂等：重复跑安全。
+- name: Multica daemon (LaunchAgent)
+  hosts: macbook
+  gather_facts: true            # 需要 ansible_facts.user_dir
+  vars:
+    homebrew_prefix: /opt/homebrew
+    md_label: ai.multica.daemon
+    md_bin: "{{ homebrew_prefix }}/bin/multica"
+    md_plist: "{{ ansible_facts.user_dir }}/Library/LaunchAgents/{{ md_label }}.plist"
+    # service 端入口。frontend 自带 runtime proxy 转发 /api /auth /ws，
+    # 所以 server_url 与 app_url 是**同一个源**，不需要单独的 api.* 子域。
+    md_server_url: https://multica.meirong.dev
+    md_app_url: https://multica.meirong.dev
+    md_device_name: mbp-m2-pro
+    md_max_concurrent: "4"
+    md_workspaces_root: "{{ ansible_facts.user_dir }}/multica_workspaces"
+
+  tasks:
+    - name: Ensure directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ ansible_facts.user_dir }}/.local/var/log"
+        - "{{ ansible_facts.user_dir }}/Library/LaunchAgents"
+        - "{{ md_workspaces_root }}"
+
+    - name: Ensure the multica Homebrew tap is present
+      community.general.homebrew_tap:
+        name: multica-ai/tap
+        state: present
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Ensure the multica CLI is installed
+      community.general.homebrew:
+        name: multica
+        state: present
+        path: "{{ homebrew_prefix }}/bin"
+        update_homebrew: false
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+      notify: reload multica daemon
+
+    # `multica config set` 写的是 ~/.multica/config.json。先读回来比对，
+    # 避免每次跑都报 changed（也避免在已登录实例上无谓地改配置）。
+    - name: Read current CLI config
+      ansible.builtin.command: "{{ md_bin }} config show"
+      register: md_config
+      changed_when: false
+      failed_when: false
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Point the CLI at the self-hosted service
+      ansible.builtin.command: "{{ md_bin }} config set {{ item.key }} {{ item.value }}"
+      loop:
+        - { key: server_url, value: "{{ md_server_url }}" }
+        - { key: app_url, value: "{{ md_app_url }}" }
+      when: item.value not in (md_config.stdout | default(''))
+      changed_when: true
+      notify: reload multica daemon
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Check whether the CLI is authenticated
+      ansible.builtin.command: "{{ md_bin }} auth status"
+      register: md_auth
+      changed_when: false
+      failed_when: false
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Install LaunchAgent plist
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/ai.multica.daemon.plist.j2"
+        dest: "{{ md_plist }}"
+        mode: "0644"
+      notify: reload multica daemon
+
+    - name: Tell the operator to log in (one-time, interactive)
+      when: md_auth.rc != 0
+      ansible.builtin.debug:
+        msg: >-
+          multica CLI 尚未登录 —— LaunchAgent 已安装但**刻意不启动**。
+          在这台机器上手工跑一次 `multica login`（会开浏览器到
+          {{ md_app_url }}），完成后重跑本 playbook 即可拉起 daemon。
+
+    # 未登录就不 bootstrap：KeepAlive 会把必然失败的进程反复重启。
+    - name: Ensure LaunchAgent is loaded (bootstrap into the GUI domain)
+      when: md_auth.rc == 0
+      ansible.builtin.shell: |
+        uid=$(id -u)
+        if ! launchctl print "gui/${uid}/{{ md_label }}" >/dev/null 2>&1; then
+          launchctl bootstrap "gui/${uid}" "{{ md_plist }}"
+          echo BOOTSTRAPPED
+        fi
+      register: md_load
+      changed_when: "'BOOTSTRAPPED' in md_load.stdout"
+
+    - name: Verify the daemon is running and registered
+      when: md_auth.rc == 0
+      ansible.builtin.command: "{{ md_bin }} daemon status --output json"
+      register: md_status
+      changed_when: false
+      retries: 5
+      delay: 3
+      until: md_status.rc == 0
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Show daemon status
+      when: md_auth.rc == 0
+      ansible.builtin.debug:
+        var: md_status.stdout
+
+  handlers:
+    # bootout 是异步的：没等它退干净就 bootstrap 会报
+    # "Bootstrap failed: 5: Input/output error"（同 node-exporter.yaml 的处理）。
+    - name: reload multica daemon
+      ansible.builtin.shell: |
+        uid=$(id -u)
+        label="{{ md_label }}"
+        launchctl bootout "gui/${uid}/${label}" 2>/dev/null || true
+        for _ in 1 2 3 4 5; do
+          launchctl print "gui/${uid}/${label}" >/dev/null 2>&1 || break
+          sleep 1
+        done
+        launchctl bootstrap "gui/${uid}" "{{ md_plist }}" 2>/dev/null || true
