@@ -81,12 +81,12 @@ backend:
     allowedEmails: "meirongdev@gmail.com"
     allowedEmailDomains: ""
 
-    # ⚠️ 必须先 false 引导：设 true 会让 POST /api/workspaces 对**所有调用者**
-    #    返回 403，包括你自己 —— 第一个 workspace 就再也建不出来了。
-    #    流程：部署 → 用 meirongdev@gmail.com 登录 → 建好 workspace →
-    #    把这里改成 true 并 push（backend 重启后生效）。之后新人只能靠邀请加入。
-    #    ⏳ TODO(bootstrap): workspace 建好后改 true。
-    disableWorkspaceCreation: false
+    # 设 true 后 POST /api/workspaces 对**所有调用者**返回 403，新人只能靠邀请加入。
+    # ⚠️ 引导期必须是 false，否则第一个 workspace 就建不出来（对自己也 403）。
+    #    2026-08-18 08:13 UTC workspace `homelab` 已建好，同日翻成 true 收口。
+    #    ⚠️ 将来若要再建 workspace，得先把这里改回 false、push、等 backend 重启，
+    #       建完再翻回来 —— 没有「管理员绕过」这种东西。
+    disableWorkspaceCreation: true
 
     # 自建 VCS 集成（Forgejo/Gitea/GitLab）。密钥 MULTICA_VCS_SECRET_KEY 由
     # multica-secret.yaml 经 envFrom 注入；没有它这个开关打开也连不上。
