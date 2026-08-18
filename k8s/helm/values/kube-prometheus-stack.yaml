@@ -340,6 +340,14 @@ prometheus:
     #   ⚠️ 想再往 3Gi 以下收，**必须等 7d 窗口滚完后重新测峰值**：`max_over_time[7d]`
     #      在一周内仍会记着砍 series 之前的 2715Mi，此刻的低读数是假象。
     #      head series 也要等 head compaction（约 2h）才会掉下来，别拿刚改完的瞬时值下结论。
+    #   📌 **有一条 7 天期的 Alertmanager 静默在跑**（2026-08-18 建，到期
+    #      2026-08-26，matchers: alertname=ContainerMemoryNearLimit ·
+    #      container=prometheus · cluster=homelab）。原因就是上面这个窗口错位：
+    #      分子仍是砍 series 前的 2715Mi、分母已是新的 3072Mi → 算出 88% 的**伪阳性**，
+    #      而实测改动后 cgroup peak 只有 758Mi（=24%）。不静默的话它会每 4h 往
+    #      Telegram 重复投递，连报一周。
+    #      ⚠️ 静默是 Alertmanager 运行时状态、**不在 git 里**，到期自动失效；
+    #         若到期后仍然报，那就是真的逼近了，别再续一条 —— 去查为什么。
     resources:
       requests:
         cpu: 200m
