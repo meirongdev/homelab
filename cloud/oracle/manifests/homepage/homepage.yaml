@@ -125,6 +125,14 @@ data:
             href: https://jobs.meirong.dev/ops
             description: 每日抓取统计（SGT 日历日）
 
+        # homelab 集群的服务：同上不写 kubernetes: 块。
+        # 注意这个入口只是 service 端（派活/看结果）；真正干活的 daemon 在 M2 MacBook 上，
+        # 它离线时这里照常 200，只是任务永远停在待执行 —— 首页看不出这种半死状态。
+        - Multica:
+            icon: mdi-robot-outline
+            href: https://multica.meirong.dev
+            description: AI 编码 agent 协作台（issue → Claude Code/Codex）
+
         - Open Notebook:
             icon: open-notebook.png
             href: https://notebook.meirong.dev

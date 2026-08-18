@@ -1,0 +1,139 @@
+# Multica —— 把 issue 派给 Claude Code / Codex / Cursor 等编码 agent 的开源协作平台
+# Chart: oci://ghcr.io/multica-ai/charts/multica   App: argocd/applications/multica.yaml
+# 入口: https://multica.meirong.dev   路由: k8s/helm/manifests/gateway/route-multica.yaml
+#
+# ☠️ 本服务是**两半**的，这份 values 只部署 service 端（frontend + backend + Postgres）。
+#    真正执行 agent 的是 daemon（`multica computer`），它**不在 k8s 里** ——
+#    跑在 M2 MacBook 上，见 macbook/ansible/playbooks/multica-daemon.yaml。
+#    daemon 只做 outbound 注册，不需要任何入站端口，所以它在 NAT 后面也无所谓。
+
+# ESO 生成的 Secret（k8s/helm/manifests/personal-services/multica-secret.yaml）。
+# chart 用 envFrom.secretRef 整个注入 backend，所以往这个 Secret 里加任何 key
+# 都会直接变成 backend 的环境变量 —— MULTICA_VCS_SECRET_KEY 就是这么进去的。
+existingSecret: multica-secrets
+
+postgres:
+  external:
+    enabled: false
+  database: multica
+  user: multica
+  persistence:
+    size: 10Gi
+    # 显式写死，不吃「集群默认 StorageClass」—— 本仓库全部 PVC 一律 local-path
+    # （nfs-client provisioner 已于 2026-07-11 卸载，引用它的 PVC 会永远 Pending）。
+    # ⚠️ local-path 不做容量限制，这个 10Gi 只是声明，实际吃的是节点 / 上的 85G。
+    storageClass: local-path
+  resources:
+    # ⚠️ 这三组 requests/limits 是**估值不是实测**。CLAUDE.md 的规矩是按实测填，
+    #    但部署前无从测起。上线跑满一周后按 rssBytes 回调，别信 kubectl top node。
+    requests: { cpu: 50m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 768Mi }
+  affinity: &pin-control-plane
+    # ☠️ 必须钉在 control-plane（k8s-node），三个理由缺一不可：
+    #  1. 夜备 CronJob 自己也钉在 control-plane，读的是**所在节点**的 hostPath
+    #     /var/lib/rancher/k3s/storage。PVC 落到 worker = 夜备静默漏备（rc=0 的假阴性）。
+    #  2. worker（k8s-worker-106）allocatable 只有 1800m/3.2Gi，还跑着 media 两个服务。
+    #  3. local-path 的 PVC 一旦绑到某节点就固定了，不钉节点 = 落点由首次调度随机决定。
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: In
+                values: ["true"]
+  tolerations: []
+
+backend:
+  replicas: 1
+  uploads:
+    persistence:
+      enabled: true
+      size: 5Gi
+      storageClass: local-path
+      accessModes:
+        - ReadWriteOnce
+  config:
+    appEnv: production
+    appUrl: https://multica.meirong.dev
+    frontendOrigin: https://multica.meirong.dev
+    corsAllowedOrigins: ""
+    cookieDomain: ""
+    # ⚠️ 不是 gmail：Resend 只允许从**你验证过的域**发信，gmail.com 不归你。
+    # onboarding@resend.dev 是 Resend 的免验证发信地址，代价是**只能发给你 Resend
+    # 账号本人的邮箱** —— 本实例只有 meirongdev@gmail.com 一个允许注册的地址，
+    # 恰好落在这个限制之内，所以够用。等在 Resend 里验证了 meirong.dev，
+    # 改成 noreply@meirong.dev 即可解除这条限制。
+    resendFromEmail: onboarding@resend.dev
+
+    # ── 注册闸门 ──────────────────────────────────────────────────────────
+    # ☠️ 语义与官方文档**相反**，以源码为准（server/internal/handler/auth.go
+    #    checkSignupAllowed，2026-08-18 读 main 分支确认）。判定顺序是：
+    #      1. 命中 ALLOWED_EMAILS      → 直接放行
+    #      2. 命中 ALLOWED_EMAIL_DOMAINS → 直接放行
+    #      3. ALLOW_SIGNUP=false        → 拒绝
+    #      4. 设了 allowlist 但没命中   → 拒绝
+    #    也就是说 **allowlist 是 allowSignup:false 的旁路，不是它的收窄**。
+    #    文档里"ALLOW_SIGNUP=false blocks all new account creation"那句在设了
+    #    allowlist 时是错的。好处是不用做「先开后关」的引导舞蹈；
+    #    代价是 allowlist 里的地址等于永久后门 —— 所以这里用**精确邮箱**而非域名。
+    #    用 allowedEmailDomains 的话，该域下任何人都能注册进来。
+    allowSignup: false
+    allowedEmails: "meirongdev@gmail.com"
+    allowedEmailDomains: ""
+
+    # ⚠️ 必须先 false 引导：设 true 会让 POST /api/workspaces 对**所有调用者**
+    #    返回 403，包括你自己 —— 第一个 workspace 就再也建不出来了。
+    #    流程：部署 → 用 meirongdev@gmail.com 登录 → 建好 workspace →
+    #    把这里改成 true 并 push（backend 重启后生效）。之后新人只能靠邀请加入。
+    #    ⏳ TODO(bootstrap): workspace 建好后改 true。
+    disableWorkspaceCreation: false
+
+    # 自建 VCS 集成（Forgejo/Gitea/GitLab）。密钥 MULTICA_VCS_SECRET_KEY 由
+    # multica-secret.yaml 经 envFrom 注入；没有它这个开关打开也连不上。
+    vcsIntegrationEnabled: true
+
+    googleClientId: ""
+    googleRedirectUri: ""
+    # 未接 S3：上传件落 uploads PVC，由 frontend 的同源代理 /uploads 提供
+    s3Bucket: ""
+    localUploadBaseUrl: https://multica.meirong.dev
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+  affinity: *pin-control-plane
+  tolerations: []
+
+frontend:
+  replicas: 1
+  config:
+    # 留空 = 走本 release 的 backend Service（multica-backend:8080）。
+    # frontend 自带 runtime proxy 转发 /api /auth /uploads /ws，
+    # 所以**只需要暴露 frontend 一个域名**，不用给 backend 开第二个 api.* 子域。
+    remoteApiUrl: ""
+    docsUrl: ""
+    publicApiUrl: ""
+    publicWsUrl: ""
+  compatibility:
+    # 该 ExternalName Service 名字不带 release 前缀，一个 ns 只能有一个。
+    # 当前镜像不需要它，保持 false，否则会和 ns 内其它东西抢名字。
+    backendAlias: false
+  resources:
+    requests: { cpu: 50m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 768Mi }
+  affinity: *pin-control-plane
+  tolerations: []
+
+ingress:
+  # ☠️ 必须关。chart 默认 enabled:true + className:traefik，而本集群唯一入口是
+  #    Cilium Gateway API，根本没有 traefik ingress controller ——
+  #    开着会生成一个永远不被任何控制器认领的 Ingress 对象（静默无效）。
+  #    真正的入口在 k8s/helm/manifests/gateway/route-multica.yaml。
+  enabled: false
+
+monitoring:
+  prometheusRule:
+    # 刻意不开。homelab 确实有 Prometheus Operator CRD，开了能装上，但这套规则
+    # 里的 sampler 指标是否真被本实例吐出来**没有验证过**。
+    # 装一条永不触发的告警比没有告警更危险（它会让人以为已经被监控了）——
+    # 同 docs 里 PromQL absent-series 那个坑。要开就先去 /api/v1/targets 确认指标存在。
+    enabled: false

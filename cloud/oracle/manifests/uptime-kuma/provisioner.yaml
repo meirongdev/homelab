@@ -40,6 +40,11 @@ data:
         # 也可能 3xx 跳 /login——两段都收，等实测出稳定状态码后再收紧。
         {"name": "Open Notebook",  "url": "https://notebook.meirong.dev/",      "accepted_statuscodes": ["200-299", "300-399"], "maxredirects": 0},
         {"name": "ArgoCD",         "url": "https://argocd.meirong.dev/",        "accepted_statuscodes": ["200-299", "300-399"]},
+        # Multica（homelab）。未登录时 Next.js 落地页大概率客户端渲染直接 200，
+        # 也可能 3xx 跳登录 —— 两段都收，等实测出稳定状态码再收紧（同 Open Notebook 的处理）。
+        # ⚠️ 这条只证明 service 端活着。执行任务的 daemon 在 M2 MacBook 上，
+        # 它挂了这个探测**依然全绿** —— daemon 的存活得看 `multica daemon status`。
+        {"name": "Multica",        "url": "https://multica.meirong.dev/",       "accepted_statuscodes": ["200-299", "300-399"], "maxredirects": 0},
         # ZITADEL（oracle）2026-08-12 补：此前**整个清单里没有它**——身份提供方是全站
         # SSO 的单点依赖，却是唯一没有存活探测的对外服务。
         # 副作用同样重要：它因此是 5 个 SLO 里唯一没有探测底噪的，7 天仅 138 个真实请求

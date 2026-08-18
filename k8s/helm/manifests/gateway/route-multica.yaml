@@ -1,0 +1,38 @@
+---
+# HTTPRoute: multica.meirong.dev -> multica-frontend (personal-services)
+#
+# 只暴露 frontend 一个域名就够：Next.js 侧自带 runtime proxy，把
+# /api /auth /uploads /ws 转给 multica-backend:8080（values 里 remoteApiUrl 留空即启用）。
+# 因此**不需要**再给 backend 开 api.multica.meirong.dev 第二个子域。
+#
+# /ws 是 WebSocket（backend 同时是 WS server）——Cilium Gateway 与 Cloudflare Tunnel
+# 都默认放行 HTTP Upgrade，无需额外配置。
+#
+# 本文件的存在即 DNS 变更：external-dns 监听 gateway-httproute 源，
+# 为 hostname 建代理 CNAME + 归属 TXT。不要去改 cloudflare/terraform。
+# ⚠️ policy 是 upsert-only —— 删掉这个路由**不会**删掉 DNS 记录，退役时要手工清。
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: multica
+  namespace: personal-services
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: homelab-gateway
+      namespace: kube-system
+      port: 80          # TLS 在 Cloudflare 边缘终止
+  hostnames:
+    - "multica.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: multica-frontend
+          port: 3000
+          weight: 1
