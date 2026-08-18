@@ -1,6 +1,6 @@
 # Calibre 元数据 — 覆盖率、污染与回补机制（架构事实）
 
-> Last updated: 2026-08-08
+> Last updated: 2026-08-18
 > Status: 生效事实
 > Scope: calibre 书库（oracle-k3s `personal-services`）的元数据现状、已知污染、
 > 回补作业的设计与判据 —— source of truth。书库本身的存储/备份口径见
@@ -13,7 +13,8 @@
 
 ## 覆盖率现状
 
-共 **2053** 本。「起始」是 2026-08-06 动手之前的基线，留着是因为它解释了
+共 **2053** 本（2026-08-08 那次统计时；现网 **2063** 本，下表整体是 08-08 的快照，
+未随书库增长重测）。「起始」是 2026-08-06 动手之前的基线，留着是因为它解释了
 为什么后来的修正才成为可能（见下方「ISBN 从 35% 涨到 77%」）。
 
 **四轮回补 + 三轮修正 + 封面 + 三轮 LLM 生成全部跑完后的终态**（2026-08-08 01:01）：
@@ -303,3 +304,49 @@ OpenLibrary 的评分主要来自大众读物。建这一列会得到一个 **98
 `metadata_change_logs/` 目录（calibre-web 自己编辑时才写日志）。
 所以批量写库**不会**引发 24G 书库的电子书文件重写与 restic 备份 churn。
 （`cover_enforcer.py` 的 `supported_formats` 也只有 epub/azw3，PDF 本就不受影响。）
+
+### ☠️ 反过来：`calibredb embed_metadata` 报成功但什么都没写
+
+上面那条的代价是——**DB 补得再全，书文件里的元数据还是旧的**。文件一旦被重新 ingest
+（或导出、发到设备），旧值就回来了。想把 DB 元数据写回文件，官方手段是
+`calibredb embed_metadata <id>`。**它在本库不生效，且完全不报错**（2026-08-18 实测）：
+
+```
+$ calibredb --with-library=/calibre-library embed_metadata 3063
+Processed Django 6 Cookbook, Second Edition: ... (1 of 1)
+$ echo $?
+0
+```
+
+然后文件 **mtime 纹丝不动**，zip 里 `OEBPS/opf.opf` 的 `dc:title` 还是原来那个
+`book title`。排除过的因素：权限没问题（`-rw-rw-rw- root abc`，以 root 跑）；
+EPUB 结构合规（有 `mimetype`、`META-INF/container.xml` 的 rootfile 指向确实存在的
+`OEBPS/opf.opf`）；prefs 里没有任何 embed 相关开关。**没有继续深挖 calibre 内部为什么
+no-op** —— 有能用的替代手段，不值得。
+
+**能用的是底层的 `ebook-meta`**（先在 `/tmp` 的副本上验证过再动库内文件）：
+
+```bash
+# 在 pod 内。值全部取自 metadata.db，保证文件与 DB 一致
+ebook-meta "<library>/<path>/<name>.epub" \
+  --title "<title>" --authors "<a1> & <a2>" --publisher "<pub>" \
+  --isbn "<isbn>" --comments "<html>" --date "2026-04-09T11:20:05+00:00"
+```
+
+两个坑：
+
+- ⚠️ **`--date` 只给日期会偏一天。** 传 `--date 2026-04-09`，ebook-meta 按 **pod 本地
+  时区**（UTC+8）解释再存成 UTC，落地是 `2026-04-08T16:00:00+00:00`。**传完整时间戳**
+  （EPUB 原本的 `dc:date` 就是现成的真值）。
+- ⚠️ **绕过了 calibre 的记账，`data.uncompressed_size` 会过期。** 文件被重写后体积会变
+  （实测 +638 / +688 字节），DB 里那一列不会自动更新，calibre-web 显示的大小就是旧的。
+  写完顺手 `UPDATE data SET uncompressed_size=? WHERE book=? AND format=?`。
+
+⚠️ 注意这**确实会**重写书文件，也就绕开了本节开头那条「不引发 churn」的前提 ——
+批量做要算 restic 增量代价（EPUB 每本几百字节，PDF 的元数据写入能力本就有限）。
+
+**为什么值得做**：这正是占位符标题问题反复的原因。`book title` / `PDF Reducer Demo
+version` 这类工具残渣只改 DB 是治标，文件重新入库就复发；而带这种标题的书在
+`scripts/cleanup-duplicates.py` 里是**被排除在判重之外**的（标题不携带识别信息，
+据此判重会把不同的书合并 —— 实测两本 `book title` 的 sha256 与体积都不同）。
+→ [records/2026-08-18-calibre-dedup-stale-paths.md](../records/2026-08-18-calibre-dedup-stale-paths.md)
