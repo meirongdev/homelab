@@ -18,10 +18,16 @@ ai-clis:
 node-exporter:
     ansible-playbook playbooks/node-exporter.yaml
 
+# 部署/升级 Multica daemon LaunchAgent（无需 sudo，幂等）
+# ⚠️ 首次需先在这台 Mac 上手工跑一次 `multica login`（浏览器 OAuth，非交互做不了）。
+# 未登录时本 recipe 只安装 CLI + 配置 + 写 plist，**刻意不启动** daemon。
+multica-daemon:
+    ansible-playbook playbooks/multica-daemon.yaml
+
 # 应用 headless/clamshell 电源策略（保持远程可达；需 sudo 密码）
 power:
     ansible-playbook playbooks/power.yaml --ask-become-pass
 
-# 一次跑全部 Ansible 能做的（node_exporter + 电源）
+# 一次跑全部 Ansible 能做的（包/AI CLI/multica daemon/node_exporter/电源）
 site:
     ansible-playbook playbooks/site.yaml --ask-become-pass

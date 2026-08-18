@@ -29,7 +29,7 @@
              没有任何报错。claude/qwen 是 npm 全局（软链在 /opt/homebrew/bin），
              codex/hermes 是 brew，都在同一目录。 -->
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>{{ ansible_facts.user_dir }}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         <key>MULTICA_DAEMON_DEVICE_NAME</key>
         <string>{{ md_device_name }}</string>
         <!-- 这台 M2 只有它自己在跑任务，20 个并发对一台笔记本过量（每个任务
