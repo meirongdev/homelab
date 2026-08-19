@@ -1,6 +1,6 @@
 # K8s 资源管理与 QoS 策略
 
-> Last updated: 2026-08-17
+> Last updated: 2026-08-19
 > Status: 生效事实（本文只定**原则**，不存具体数值）
 
 本文档记录 Homelab 中 CPU/Memory requests & limits 的设定**原则**。
@@ -98,7 +98,11 @@ Homelab 由两个集群组成：
 
 **Prometheus/Alertmanager 归 high、Grafana 留默认的理由**（2026-08-10）：前两者分别是
 **指标源**与**告警投递**，掉了不只是丢图，是所有告警一起哑（dead-man's switch 也走同一条路）；
-Grafana 只是 UI——真出事可以直接查 Prometheus，且它是 monitoring ns 里内存最大的一个。
+Grafana 只是 UI——真出事可以直接查 Prometheus。而 **Prometheus 本身是 monitoring ns 里内存
+最大的一个**，因此它也是这一层最值得先动的对象：2026-08-18 的处理方式是**砍 series 而不是
+继续抬 limit**（k3s 单进程让 apiserver/etcd 指标被两个 job 重复采集）。判据、被否决的选项
+与三层验证方法见 [decisions/prometheus-series-reduction.md](../decisions/prometheus-series-reduction.md)
+——本文只定原则，具体数值都在那边。
 
 **kyverno 全家归 bulk 的理由**（2026-08-10）：实测 webhook failurePolicy —— 唯一管
 **工作负载准入**的 `kyverno-resource-validating-webhook-cfg` 是 **Ignore**，其余 `Fail` 的
