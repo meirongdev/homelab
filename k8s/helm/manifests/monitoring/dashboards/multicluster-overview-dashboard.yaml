@@ -2,6 +2,24 @@
 # 展示 homelab 和 oracle-k3s 两个集群的资源使用情况与服务状态
 # 数据源: Prometheus (node-exporter + kube-state-metrics, cluster label 区分)
 # Auto-loaded via kube-prometheus-stack grafana-sc-dashboard sidecar
+#
+# ⚠️ 「节点概览」「CPU/内存趋势」两行的 node_* 查询全部硬编码 job="node-exporter"，
+#    别放宽成 job=~"node-exporter.*"。cluster="homelab" 不等于「homelab 集群成员」：
+#    pve(192.168.50.4) 与 storage-106(192.168.50.106) 是**跑着这两个节点 VM 的宿主机**，
+#    在 values/kube-prometheus-stack.yaml 的 additionalScrapeConfigs 里被写死
+#    `cluster: homelab`（job=node-exporter-metal-nodes）。放宽后果实测：
+#      - 节点在线数 homelab 报 4（真值 2）—— 2026-08-19 就是这么发现的
+#      - 平均内存使用率 homelab 报 70.8%（真值 51.1%）：pve 96% + 106 85% 被平均进来
+#    宿主机自己有专属 dashboard（proxmox-pve / storage-106），不该混进集群面板。
+#    同一个坑在 alerts/prometheus-rules.yaml 里也记了一遍（搜 node-exporter-metal-nodes）。
+#
+# ⚠️ 「K8s 节点在线数」用 sum(up) 而不是 count(up)：抓取失败时 up 序列仍然存在、值为 0，
+#    count 会把宕掉的节点一起数进去 —— 四台全挂也照样显示 4 且是绿的。
+#
+# ⚠️ 代价（已知并接受）：dgx-spark 与 macbook 这两个「伪集群」只有
+#    job=node-exporter-dgx-spark / -macbook，没有 job=node-exporter，
+#    因此在本 dashboard 的节点面板里是 No data。它们看 🌡️ DGX Spark /
+#    macbook-node 专属 dashboard，宕机由 prometheus-rules.yaml 的 up==0 规则覆盖。
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -131,12 +149,12 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "count by (cluster) (up{job=~\"node-exporter.*\", cluster=~\"$cluster\"})",
+              "expr": "sum by (cluster) (up{job=\"node-exporter\", cluster=~\"$cluster\"})",
               "legendFormat": "{{cluster}} nodes up",
               "refId": "A"
             }
           ],
-          "title": "节点在线数 by Cluster",
+          "title": "K8s 节点在线数 by Cluster",
           "type": "stat"
         },
         {
@@ -199,7 +217,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "avg by (cluster) (1 - rate(node_cpu_seconds_total{mode=\"idle\", cluster=~\"$cluster\"}[$__rate_interval]))",
+              "expr": "avg by (cluster) (1 - rate(node_cpu_seconds_total{job=\"node-exporter\", mode=\"idle\", cluster=~\"$cluster\"}[$__rate_interval]))",
               "legendFormat": "{{cluster}} CPU",
               "refId": "A"
             }
@@ -267,7 +285,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "avg by (cluster) (1 - (node_memory_MemAvailable_bytes{cluster=~\"$cluster\"} / node_memory_MemTotal_bytes{cluster=~\"$cluster\"}))",
+              "expr": "avg by (cluster) (1 - (node_memory_MemAvailable_bytes{job=\"node-exporter\", cluster=~\"$cluster\"} / node_memory_MemTotal_bytes{job=\"node-exporter\", cluster=~\"$cluster\"}))",
               "legendFormat": "{{cluster}} Memory",
               "refId": "A"
             }
@@ -335,7 +353,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "avg by (cluster) (1 - (node_filesystem_avail_bytes{cluster=~\"$cluster\", mountpoint=\"/\", fstype!=\"tmpfs\"} / node_filesystem_size_bytes{cluster=~\"$cluster\", mountpoint=\"/\", fstype!=\"tmpfs\"}))",
+              "expr": "avg by (cluster) (1 - (node_filesystem_avail_bytes{job=\"node-exporter\", cluster=~\"$cluster\", mountpoint=\"/\", fstype!=\"tmpfs\"} / node_filesystem_size_bytes{job=\"node-exporter\", cluster=~\"$cluster\", mountpoint=\"/\", fstype!=\"tmpfs\"}))",
               "legendFormat": "{{cluster}} Disk /",
               "refId": "A"
             }
@@ -400,7 +418,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "1 - avg by (cluster, instance) (rate(node_cpu_seconds_total{mode=\"idle\", cluster=~\"$cluster\"}[$__rate_interval]))",
+              "expr": "1 - avg by (cluster, instance) (rate(node_cpu_seconds_total{job=\"node-exporter\", mode=\"idle\", cluster=~\"$cluster\"}[$__rate_interval]))",
               "legendFormat": "{{cluster}} / {{instance}}",
               "refId": "A"
             }
@@ -453,7 +471,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "1 - (node_memory_MemAvailable_bytes{cluster=~\"$cluster\"} / node_memory_MemTotal_bytes{cluster=~\"$cluster\"})",
+              "expr": "1 - (node_memory_MemAvailable_bytes{job=\"node-exporter\", cluster=~\"$cluster\"} / node_memory_MemTotal_bytes{job=\"node-exporter\", cluster=~\"$cluster\"})",
               "legendFormat": "{{cluster}} / {{instance}}",
               "refId": "A"
             }
@@ -503,7 +521,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum by (cluster, instance) (rate(node_network_receive_bytes_total{cluster=~\"$cluster\", device!~\"lo|veth.*|br.*|docker.*|cilium.*\"}[$__rate_interval]))",
+              "expr": "sum by (cluster, instance) (rate(node_network_receive_bytes_total{job=\"node-exporter\", cluster=~\"$cluster\", device!~\"lo|veth.*|br.*|docker.*|cilium.*\"}[$__rate_interval]))",
               "legendFormat": "{{cluster}} / {{instance}} rx",
               "refId": "A"
             },
@@ -512,7 +530,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "- sum by (cluster, instance) (rate(node_network_transmit_bytes_total{cluster=~\"$cluster\", device!~\"lo|veth.*|br.*|docker.*|cilium.*\"}[$__rate_interval]))",
+              "expr": "- sum by (cluster, instance) (rate(node_network_transmit_bytes_total{job=\"node-exporter\", cluster=~\"$cluster\", device!~\"lo|veth.*|br.*|docker.*|cilium.*\"}[$__rate_interval]))",
               "legendFormat": "{{cluster}} / {{instance}} tx",
               "refId": "B"
             }
@@ -562,7 +580,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum by (cluster, instance) (rate(node_disk_read_bytes_total{cluster=~\"$cluster\"}[$__rate_interval]))",
+              "expr": "sum by (cluster, instance) (rate(node_disk_read_bytes_total{job=\"node-exporter\", cluster=~\"$cluster\"}[$__rate_interval]))",
               "legendFormat": "{{cluster}} / {{instance}} read",
               "refId": "A"
             },
@@ -571,7 +589,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "- sum by (cluster, instance) (rate(node_disk_written_bytes_total{cluster=~\"$cluster\"}[$__rate_interval]))",
+              "expr": "- sum by (cluster, instance) (rate(node_disk_written_bytes_total{job=\"node-exporter\", cluster=~\"$cluster\"}[$__rate_interval]))",
               "legendFormat": "{{cluster}} / {{instance}} write",
               "refId": "B"
             }
