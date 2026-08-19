@@ -86,17 +86,27 @@ opencost 的 collector 数据源用 WAL 文件在重启后重建内存中的统�
 - opencost CPU 从 ~55%（1.1/2 核）降至 0.6%；节点 CPU 从 65–95% 回落至 ~44%
   并继续向日常水平收敛。
 
-## 遗留事项
+## 遗留事项与处置结果（2026-08-20 处置）
 
-1. **WAL 未持久化**：跨 pod 重建保留成本历史需要把 `customPricing.configPath` 指向
-   持久卷。注意 chart 会在 configPath 挂载 emptyDir，嵌套挂载会遮蔽持久卷的同名路径，
-   只改 values 可能"渲染成功但数据仍写进 emptyDir"。如果以后做，必须登节点确认实际
-   挂载结果。
-2. **KubePodCrashLooping 无法覆盖这类故障**：容器每轮有约 3.5 分钟处于 Running，
-   `kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"}` 序列随之中断，
-   `for: 15m` 计时器被重置。实测该表达式最长连续成立 9.5 分钟，达不到 15 分钟。
-   本次未修改 mixin 规则；实际起到通知作用的是 KubePodNotReady（持续触发 23.5 小时）。
-   同类问题（短窗口配长 for）见 2026-08-12-slo-nan-poisoning.md。
+1. **WAL 持久化 —— 已评估，结论：不可行，维持现状。** 两条候选路径都被实测排除：
+   - 改 `customPricing.configPath` 指向持久卷：chart 把 custom-configs emptyDir 硬绑在
+     该路径上（deployment.yaml:398 挂载 / :529 定义），emptyDir 会跟着搬家；用持久卷的
+     子路径会被嵌套挂载遮蔽，用同一路径则 volumeMounts 重键。
+   - 用 `extraEnv` 覆盖 CONFIG_PATH（chart 在 :305 渲染、extraEnv 在 :358 后渲染）：
+     Kubernetes 运行时对重复 env 确实取后者，但两个 opencost App 都启用
+     ServerSideApply —— SSA 的 structured-merge 把 env 视为以 name 为键的 listMap，
+     重复键使 ArgoCD 直接报 ComparisonError，App 卡在 sync=Unknown，rollout 不会发生
+     （2026-08-19 实测，commit cf5fa5d 引入、e1eed34 回退）。
+   同时核实代价接近零：成本数据的全部消费方是 Grafana 看板，读中枢 Prometheus 的
+   :9003 指标（独立留存 7 天）；opencost-ui 没有路由、没有使用者。
+   复活条件：上游 chart 支持把 persistence 挂载到 configPath，或单独暴露 WAL 存储路径。
+2. **慢频崩溃循环告警 —— 已处置（commit cf5fa5d）。** 新增 `ContainerSlowCrashLoop`
+   （prometheus-rules.yaml workloads 组）：改用无断流的 restarts_total 计数器，
+   `increase[1h] >= 3` + `for: 90m`。7 天回放验证：本次事故连续满足 1,475 分钟
+   （同类故障 1.5 小时内可告警）；4 个真实瞬时突发全部恰好滞留 60.0 分钟（1h 回看窗
+   的结构上限），不会误报。部署后已确认装载（workloads 组，for=5400s），且旧崩溃 pod
+   的残余样本让它短暂 pending 并按预期在样本出窗后消退。盲区（接受）：慢于 20 分钟/轮
+   的循环，由 KubePodNotReady 兜底。
 
 ## 附：distroless 容器的取证方法
 
