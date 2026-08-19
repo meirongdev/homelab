@@ -44,10 +44,24 @@ opencost:
     startupProbe:
       failureThreshold: 120
 
-    # 刻意不配 persistence：那个 PVC 挂 /mnt/export（CSV 导出目录），与 collector WAL
-    # 无关，2026-07-30 建起到 2026-08-19 删除时始终 0 字节。WAL 落 emptyDir = pod 重建
-    # 即历史归零，已接受（homelab 08-16 丢过一次，无人受影响）。想跨重建保历史得把
-    # configPath 指到持久卷，但有 emptyDir 遮蔽坑 —— 见复盘"未做项"，别只改 values。
+    # WAL 持久化（复盘遗留项①的处置）：configPath 这条路走不通 —— chart 把
+    # custom-configs emptyDir 硬绑在 customPricing.configPath 上（deployment.yaml:398
+    # 挂载、:529 定义），改它只会把 emptyDir 一起搬走，嵌套挂载还会遮蔽持久卷。
+    # 可行通道是 env 覆盖：chart 在 :305 渲染 CONFIG_PATH=configPath，extraEnv 在 :358
+    # 渲染 —— 同名 env 后渲染者生效，WAL 根目录于是落进 PVC，成本历史跨 pod 重建保留。
+    # ⚠️ 这依赖渲染顺序，升 chart 后必须登节点重验（/proc/<pid>/environ 的 CONFIG_PATH
+    #    终值 + WAL 文件实际落盘路径，别信渲染），手法见复盘附录。
+    # 尺寸：稳态 2m×7d ≈ 5,040 个 × ~250KB ≈ 1.2GB，3Gi 留余量。local-path 不强制配额，
+    # 真正的上限是 retention1d 的清理线。刻意不进 restic 白名单：7d 滚动遥测、
+    # 每天 ~720 个新文件的高 churn，备份价值配不上成本。
+    persistence:
+      enabled: true
+      storageClass: local-path
+      accessMode: ReadWriteOnce
+      size: 3Gi
+      mountPath: /mnt/export
+    extraEnv:
+      CONFIG_PATH: /mnt/export
 
     # 2026-08-10: memory limit 384Mi→512Mi。实测 7d 峰值 338Mi = **88%**，
     # 过了 reference/k8s-qos-resource-management.md 的 80% 判据。
