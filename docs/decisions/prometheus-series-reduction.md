@@ -39,6 +39,87 @@ k3s 把 apiserver 与 kubelet 跑在**同一个进程**里，kubelet 的 `/metri
 
 即：**这个集群里近一半的 series 是重复的或没人看的**。
 
+### 机制：两个端点吐的是同一份 registry（2026-08-19 实测补充）
+
+不是「kubelet 顺带漏了几个 apiserver 指标」，而是**两个 `/metrics` 端点的内容完全一样**。
+Kubernetes 各组件都把指标注册进 `component-base` 的 `legacyregistry` —— 一个**进程级全局
+单例**；而 `/metrics` handler 只是把整个 registry dump 出来。k3s 把 apiserver / kubelet /
+scheduler / controller-manager 编译进同一个二进制、跑在同一个进程里（实测节点上只有
+`PID 898 /usr/local/bin/k3s server`，**不存在独立的 kubelet 进程**），于是谁来问都给同一份：
+
+| | kubelet `/metrics` | apiserver `/metrics` |
+|---|---|---|
+| 行数 | 84,693 | **84,693** |
+| 指标族数 | 459 | **459** |
+| 两边都有的族 | **459（100%）** | |
+| 其中 `apiserver_*` / `etcd_*` | **100 族 / 5 族** | 100 族 / 5 族 |
+| 其中 `kubelet_*` | 70 族 | **70 族** |
+
+逐指标的 series 数在**源头也完全相等**（19,776 = 19,776、13,860 = 13,860、10,392 = 10,392…）。
+
+⚠️ **为什么上游 chart 没防这个**：标准 k8s 的 apiserver 是独立进程（static pod 或托管
+控制面），kubelet 端点里 `apiserver_*` 是**零**。chart 按 job 分别配置 relabel 正是建立在
+这个分离假设上 —— k3s 的单二进制设计把假设打破了，而拿到全量的恰好是没人裁剪的那半。
+
+### 先理解 `le`：直方图为什么是 series 数的元凶
+
+`le` = **l**ess than or **e**qual，直方图分桶的**上界**。histogram 不存原始观测值，只存
+「落在各上界以下的次数」，**每个上界是一条独立 series**。同一个测量（cluster 范围
+LIST configmaps 的耗时）实际长这样：
+
+```
+le=0.005  count=16      ← 16 次 ≤ 5ms
+le=0.1    count=738     ← 738 次 ≤ 100ms
+le=0.8    count=1595
+le=3      count=1630
+le=+Inf   count=1630    ← 总次数（+Inf 恒等于总数）
+```
+
+两条性质决定了它的代价：
+
+1. **累积而非区间**。`le=0.1` 的 738 含 `le=0.05` 的 371；要区间得相减
+   （50–100ms = 738−371 = 367）。`histogram_quantile()` 就是从这些累积桶插值。
+2. **桶数是乘数**：`19,776 series = 824 个标签组合 × 24 个 le 桶`。标签组合本身已是
+   `verb`×`resource`×`scope`×`group`×`version` 的笛卡尔积，直方图在这之上**再乘一个桶数**。
+
+而砍高位桶几乎无损 —— 实测上面那个标签组合的 24 个桶里，**12 个计数完全相同（都是 1630）**：
+该组合的请求全在 3s 内完成，`le=4,5,…,60` 全等于 `+Inf`，不携带任何新信息，却各占一条
+series、各写一份 TSDB。分位数精度只在被砍掉的粗区间上变糙，p99 落在保留的细桶里。
+
+### 那么上表两侧条数为什么不相等？
+
+源头既然一模一样，`62,616`（kubelet）vs `42,163`（apiserver）就该相等 —— 差异**不在采集源，
+在 chart 默认 relabel 两边不对称**：
+
+- **kubeApiServer** job 的默认值 drop 掉
+  `(etcd_request|apiserver_request_slo|apiserver_request_sli|apiserver_request)_duration_seconds_bucket`
+  的一长串 `le` 分桶；
+- **kubelet** job 的默认值只碰 `csi_operations` / `storage_operation_duration`。
+
+即**厂商裁剪了他们知道很贵的那个端点，而 k3s 又从一个没被裁剪的端点把同样的数据完整送了
+一遍**。按这个假设算，五个指标全部精确命中（`源头 × 存活桶数 / 总桶数`）：
+
+| 指标 | 源头 | 掉的 le/总 le | 预测 apiserver 侧 | 实际 |
+|---|---|---|---|---|
+| `apiserver_request_duration_seconds_bucket` | 19,776 | 14/24 | **8,240** | 8,240 ✅ |
+| `apiserver_request_sli_duration_seconds_bucket` | 13,860 | 14/22 | **5,040** | 5,040 ✅ |
+| `etcd_request_duration_seconds_bucket` | 10,392 | 14/24 | **4,330** | 4,330 ✅ |
+| `apiserver_request_body_size_bytes_bucket` | 8,448 | **0**/32 | **8,448** | 8,448 ✅ |
+| `apiserver_response_sizes_bucket` | 3,056 | **0**/8 | **3,056** | 3,056 ✅ |
+
+规律很干净：**在那条 drop 正则里的指标两边不等，不在里面的两边分毫不差**。
+
+> 📎 顺带解释 chart 默认值里那个怪正则
+> `regex: '(csi_operations|...)_seconds_bucket;(0.25|2.5|...)(\.0)?'`：
+> 中间的 **`;`** 是分隔符 —— `sourceLabels: [__name__, le]` 有多个标签时，Prometheus 把它们
+> 的值用 `;` 拼成一个字符串再匹配，所以语义是「这几个指标的这几个桶，丢掉」。末尾
+> **`(\.0)?`** 是容错：不同版本可能把整数上界渲染成 `le="2"` 或 `le="2.0"`
+> （实测本机这版全是 `2` 这种写法，没有 `.0` 形式）。
+
+> 📌 `etcd_request_duration_seconds` 出现在这里**不是配置错误**：homelab 单 server 走的是
+> **kine(sqlite)** 而非真 etcd，但 kine 说的是 etcd3 gRPC 协议，apiserver 那套 etcd3 客户端
+> 仪表照常在计时 —— 它测的是对 kine 的调用，数据是真的。
+
 ## 决策一：砍 series，被否决的替代方案
 
 | 选项 | 结论 |
