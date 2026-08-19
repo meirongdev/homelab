@@ -441,6 +441,39 @@ spec:
               ⚠️ 控制面是热笔记本（reference/homelab-host-power-thermal.md），抬 CPU 有热代价，
               别无脑往上加；优先抬到上游 chart 的默认值为止。
 
+        # 慢频崩溃循环（每轮存活数分钟的那种）。mixin 的 KubePodCrashLooping 罩不住它：
+        # 那条规则看 waiting_reason{CrashLoopBackOff}，容器每轮 Running 的几分钟里序列
+        # 断流，for: 15m 计时器被重置 —— 2026-08-19 opencost 事故实测该表达式最长连续
+        # 成立仅 9.5 分钟，崩了 24 小时一次都没触发。
+        # 本条改用 restarts_total 计数器：pod 存续期间序列无断流，长 for 才立得住。
+        # 判据推导（2026-08-19，7d 回放实测）：
+        #   · ≥3 次/1h：可捕最慢 20min/轮的循环。当前最慢的真实形态 =
+        #     startupProbe 预算 10m + backoff 上限 5m = 15min/轮 = 4 次/h。
+        #   · for: 90m：瞬时突发（修好就停的那种）的条件滞留上限 = 1h 回看窗；回放里
+        #     4 个真实突发（multica OOM、节点重启后的 homepage 等）全部恰好 60.0min，
+        #     90m 留 30min 余量。事故本尊连续满足 1,475min，1.5h 即触发。
+        # 盲区（接受）：>20min/轮的更慢循环不在覆盖内，靠 KubePodNotReady 兜底。
+        # 复盘：records/2026-08-19-opencost-bingen-replay-crashloop.md
+        - alert: ContainerSlowCrashLoop
+          expr: |
+            increase(kube_pod_container_status_restarts_total{job="kube-state-metrics"}[1h]) >= 3
+          for: 90m
+          labels:
+            severity: warning
+            component: workload
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.pod }} 持续崩溃循环 ≥1.5h（{{ $labels.cluster }}，近 1h 重启 {{ $value | humanize }} 次）"
+            description: |
+              该容器连续 90 分钟保持每小时 ≥3 次重启 —— 是持续崩溃循环，不是瞬时抖动
+              （瞬时突发最多让条件滞留 60 分钟，到不了这里）。每轮存活几分钟的慢循环
+              KubePodCrashLooping 探测不到，本条就是为它设的。
+              先分死因是探针杀还是进程崩：
+                `kubectl -n {{ $labels.namespace }} describe pod {{ $labels.pod }}`
+                （Events 里 Unhealthy+Killing = 探针杀；OOMKilled/Error = 进程自身）
+              探针杀且日志"启动到一半就静默"的，参照复盘的取证手法
+              （/proc/<pid>/io 判 I/O 类型 + fdinfo 采样抓文件）：
+              records/2026-08-19-opencost-bingen-replay-crashloop.md
+
         - alert: CloudflaredAllReplicasDown
           expr: kube_deployment_status_replicas_available{deployment="cloudflared"} == 0
           for: 2m
