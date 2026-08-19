@@ -8,7 +8,7 @@
 #     只 keep 了 2 个指标，不含 container_fs_* / container_network_*），
 #     中枢 Prometheus 无法支撑 oracle 的 Prometheus 数据源
 #   - collector 直读 kubelet stats/summary（经 apiserver proxy，chart 已含 nodes/proxy RBAC），
-#     自带 15d 日粒度，不给 5Gi/7d 的 TSDB 加压，且 oracle 不必依赖 homelab 存活
+#     自带 7d 日粒度（2026-08-19 起收窄，见下），不给 5Gi/7d 的 TSDB 加压，且 oracle 不必依赖 homelab 存活
 #
 # 成本指标仍从 :9003 导出 → ServiceMonitor → 中枢 Prometheus → Grafana 按 cluster 聚合。
 
@@ -16,25 +16,27 @@ opencost:
   exporter:
     defaultClusterId: homelab
 
-    # 不依赖 Prometheus 的数据源：直采 kubelet + K8s API，自持 10m/1h/1d 三级 rollup
+    # 不依赖 Prometheus 的数据源：直采 kubelet + K8s API，自持 10m/1h/1d 三级 rollup。
+    # ⚠️ rollup 不在"进程内存里"（08-16 的旧结论只对了一半）：每次 scrape 落一个
+    #    ~250KB 的 .bingen WAL 到 emptyDir（CONFIG_PATH），启动时**全量重放完才 bind
+    #    :9003**，WAL 窗口 = retention1d。oracle 侧 30s×15d 积到 5.5GB，节点重启后
+    #    重放超探针预算 → 崩循环 24h。本文件参数与 oracle 同步收窄；机制与实测 →
+    #    docs/records/2026-08-19-opencost-bingen-replay-crashloop.md
     collectorDataSource:
       enabled: true
-      scrapeInterval: 30s
+      # 2m 而非默认 30s：WAL 文件量 ÷4。成本归因不需要 30s 粒度。
+      scrapeInterval: 2m
       retention10m: 36 # 6h
       retention1h: 49 # ~2d
-      retention1d: 15 # 15d
+      retention1d: 7 # 7d = WAL 重放窗口（这就是启动时要重放的量）
 
-    # ⚠️ 2026-08-16 实测更正：这个 PVC **不保 collector 的 rollup**。chart 把它挂在
-    # `PV_MOUNT_PATH=/mnt/export`（OpenCost 的 CSV 导出目录），而三级 rollup 在进程内存里
-    # —— 节点上那个目录自 2026-07-30 建起至今是**空的（0 字节）**，重启照样丢历史。
-    # 也就是说本条此前的注释（"跨 Pod 重启保留"）是想当然，不是实测。
-    # 暂时保留 PVC（成本≈0、且删 PVC 是另一码事），但**别拿它当持久化的依据**；
-    # 真要持久化 rollup 得先查清 OpenCost 支持哪个落盘路径，不是把 size 调大。
-    persistence:
-      enabled: true
-      storageClass: local-path
-      accessMode: ReadWriteOnce
-      size: 2Gi
+    # 重放期间 /healthz 不应答 → 预算必须 ≥ 最坏重放时长（10min ≈ 12× 稳态）。
+    startupProbe:
+      failureThreshold: 120
+
+    # 2026-08-19 删掉了此前的 2Gi PVC：08-16 已实测它是 0 字节（chart 挂它到
+    # /mnt/export = CSV 导出目录，与 WAL 的 CONFIG_PATH 无关），今日查清机制后
+    # 定案移除。pod 重建 = emptyDir 清零 = 成本历史归零，已接受；想改见复盘"未做项"。
 
     # opencost ns 不在 namespace-guardrails 的 LimitRange 覆盖范围内（该 App 只管 4 个既有 ns），
     # 故在此显式声明。
