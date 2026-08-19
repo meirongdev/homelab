@@ -44,24 +44,17 @@ opencost:
     startupProbe:
       failureThreshold: 120
 
-    # WAL 持久化（复盘遗留项①的处置）：configPath 这条路走不通 —— chart 把
-    # custom-configs emptyDir 硬绑在 customPricing.configPath 上（deployment.yaml:398
-    # 挂载、:529 定义），改它只会把 emptyDir 一起搬走，嵌套挂载还会遮蔽持久卷。
-    # 可行通道是 env 覆盖：chart 在 :305 渲染 CONFIG_PATH=configPath，extraEnv 在 :358
-    # 渲染 —— 同名 env 后渲染者生效，WAL 根目录于是落进 PVC，成本历史跨 pod 重建保留。
-    # ⚠️ 这依赖渲染顺序，升 chart 后必须登节点重验（/proc/<pid>/environ 的 CONFIG_PATH
-    #    终值 + WAL 文件实际落盘路径，别信渲染），手法见复盘附录。
-    # 尺寸：稳态 2m×7d ≈ 5,040 个 × ~250KB ≈ 1.2GB，3Gi 留余量。local-path 不强制配额，
-    # 真正的上限是 retention1d 的清理线。刻意不进 restic 白名单：7d 滚动遥测、
-    # 每天 ~720 个新文件的高 churn，备份价值配不上成本。
-    persistence:
-      enabled: true
-      storageClass: local-path
-      accessMode: ReadWriteOnce
-      size: 3Gi
-      mountPath: /mnt/export
-    extraEnv:
-      CONFIG_PATH: /mnt/export
+    # WAL 持久化：已评估，**两条路都不可行**（2026-08-19/20 实测），维持 emptyDir 现状：
+    #   ① 改 customPricing.configPath —— chart 把 custom-configs emptyDir 硬绑在该路径
+    #     （deployment.yaml:398/:529），emptyDir 跟着搬家；嵌套路径遮蔽持久卷，
+    #     同路径则 volumeMounts 重键。
+    #   ② extraEnv 覆盖 CONFIG_PATH —— 运行时确实后者生效，但本 App 开着
+    #     ServerSideApply：SSA 把 env 当 name 为键的 listMap，重复键直接
+    #     ComparisonError，App 卡死 sync=Unknown、rollout 不会发生（实测后回退）。
+    # 代价核实 ≈0：成本数据唯一消费方是 Grafana 看板，读中枢 Prometheus 的 :9003
+    # 指标（独立留存）；opencost-ui 无路由无消费者。pod 重建历史归零，接受。
+    # 复活条件 = 上游 chart 把 persistence 挂到 configPath 或单独暴露 WAL 路径。
+    # 全过程 → docs/records/2026-08-19-opencost-bingen-replay-crashloop.md
 
     # 2026-08-10: memory limit 384Mi→512Mi。实测 7d 峰值 338Mi = **88%**，
     # 过了 reference/k8s-qos-resource-management.md 的 80% 判据。

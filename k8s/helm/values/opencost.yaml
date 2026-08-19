@@ -34,19 +34,11 @@ opencost:
     startupProbe:
       failureThreshold: 120
 
-    # WAL 持久化：extraEnv 覆盖 CONFIG_PATH 把 WAL 落进 PVC（同名 env 后渲染者生效；
-    # 走 configPath 会把 emptyDir 一起搬走，不可行）。判据、脆弱点、升 chart 后的重验
-    # 手法见 opencost-oracle.yaml 同块注释与
-    # docs/records/2026-08-19-opencost-bingen-replay-crashloop.md。
-    # 刻意不进 restic 白名单（7d 滚动遥测、高 churn，备份价值配不上成本）。
-    persistence:
-      enabled: true
-      storageClass: local-path
-      accessMode: ReadWriteOnce
-      size: 3Gi
-      mountPath: /mnt/export
-    extraEnv:
-      CONFIG_PATH: /mnt/export
+    # WAL 持久化：已评估、不可行（configPath 被 emptyDir 硬绑；extraEnv 重复 env 被
+    # ServerSideApply 的 listMap 校验拒绝，App 会卡死 sync=Unknown）。代价 ≈0：
+    # 消费方只有 Grafana 读中枢 Prometheus 指标。维持 emptyDir、重建历史归零的现状。
+    # 证据与复活条件见 opencost-oracle.yaml 同块注释与
+    # docs/records/2026-08-19-opencost-bingen-replay-crashloop.md
 
     # opencost ns 不在 namespace-guardrails 的 LimitRange 覆盖范围内（该 App 只管 4 个既有 ns），
     # 故在此显式声明。
