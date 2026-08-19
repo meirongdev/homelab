@@ -23,18 +23,31 @@ opencost:
 
     # 直采本地 kubelet，不查 Prometheus —— oracle 本地无 Prometheus，
     # 也因此不必跨 Tailscale 依赖 homelab 存活（故障域自治）。
+    # ⚠️ collector 每次 scrape 落一个 ~250KB 的 .bingen WAL 到 emptyDir（CONFIG_PATH，
+    #    与 PVC 无关），启动时**全量重放完才 bind :9003**；WAL 窗口 = 最长那档 retention
+    #    （= retention1d）。30s×15d 的旧参数在 08-18 节点重启后重放 3m43s > 探针预算
+    #    → 崩循环 24h 烧 1.1/2 核。机制与判据 →
+    #    docs/records/2026-08-19-opencost-bingen-replay-crashloop.md
     collectorDataSource:
       enabled: true
-      scrapeInterval: 30s
+      # 2m 而非默认 30s：WAL 文件量 ÷4（720/天）。成本归因不需要 30s 粒度，
+      # 10m 一档 rollup 每桶仍有 5 个样本。
+      scrapeInterval: 2m
       retention10m: 36 # 6h
       retention1h: 49 # ~2d
-      retention1d: 15 # 15d
+      # 7 而非默认 15：这就是 WAL 重放窗口。稳态 ≈5,040 个/1.2GB，重放 ≈50s
+      # （A1 实测 ~107 文件/s）。看板与落点决策只用 ≤7d 窗口。
+      retention1d: 7 # 7d = WAL 重放窗口
 
-    persistence:
-      enabled: true
-      storageClass: local-path
-      accessMode: ReadWriteOnce
-      size: 2Gi
+    # 重放期间 /healthz 不应答 → startupProbe 预算必须 ≥ 最坏重放时长。
+    # 120×5s = 10min ≈ 12× 稳态重放；只作用于启动阶段，运行期无代价。
+    startupProbe:
+      failureThreshold: 120
+
+    # 刻意不配 persistence：那个 PVC 挂 /mnt/export（CSV 导出目录），与 collector WAL
+    # 无关，2026-07-30 建起到 2026-08-19 删除时始终 0 字节。WAL 落 emptyDir = pod 重建
+    # 即历史归零，已接受（homelab 08-16 丢过一次，无人受影响）。想跨重建保历史得把
+    # configPath 指到持久卷，但有 emptyDir 遮蔽坑 —— 见复盘"未做项"，别只改 values。
 
     # 2026-08-10: memory limit 384Mi→512Mi。实测 7d 峰值 338Mi = **88%**，
     # 过了 reference/k8s-qos-resource-management.md 的 80% 判据。
