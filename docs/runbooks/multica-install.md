@@ -1,6 +1,6 @@
 # Runbook — Multica 安装与配置
 
-> Last updated: 2026-08-18
+> Last updated: 2026-08-19
 >
 > **触发条件**：首次部署 Multica，或 homelab 重建后恢复它、或把它迁到另一个集群。
 > **成功判定**：五条同时成立 ——
@@ -14,6 +14,27 @@
 > 保护（步骤 3b 是手工补的、不在 git）。详见文末「退役」。
 > **集群**：homelab · ns `personal-services` · chart
 > `oci://ghcr.io/multica-ai/charts/multica`（本仓库唯一 OCI chart 源）
+
+## 前置条件 —— 兼本文的适用范围
+
+⚠️ **这是「在本 homelab 上重建 Multica」的手册，不是通用 k8s 安装指南。**
+下面每项都是**既有平台能力**，本文默认它们已经在跑，不重复其安装步骤：
+
+| 依赖 | 用在 | 缺了会怎样（多数不报错，只是静默不对） |
+|------|------|--------------------------------------|
+| Vault + ESO（`ClusterSecretStore/vault-backend`） | 步骤 1 · 3 | `vault` 命令无处可用；`ExternalSecret` CRD 不存在则清单同步直接失败 |
+| ArgoCD（☠️ 控制面在 **oracle-k3s**，不在 homelab） | 步骤 2 · 3 | 没人消费 Application；且 `destination.server` 必须显式写 homelab，写错会把整套装到 oracle |
+| Cilium Gateway API（`homelab-gateway` @ `kube-system`） | 步骤 4 | HTTPRoute 无控制器认领 —— **旧路由照常 200、新路由静默 503** |
+| external-dns + Cloudflare Tunnel | 步骤 4 | 域名不会自动出现。本文全程不用手改 DNS，正是因为有它 |
+| `local-path` StorageClass | 步骤 3 | 两个 PVC 永远 `Pending`（本仓库 NFS 已于 2026-07-11 退役） |
+| ns `personal-services`（由 `personal-services` App 以 `CreateNamespace=true` 创建，PSA `baseline`） | 全程 | multica App 刻意是 `CreateNamespace=false`，ns 不存在则同步失败 |
+| restic 夜备（homelab overlay） | 步骤 7 | `pg_dump` 段与 `MULTICA_DB_PASSWORD` 都在那边，漏配 = **静默不备份** |
+| 一台可 SSH 的 macOS 机器 | 步骤 6 | 见该步的「从零开始还需要什么」 |
+
+**若要装到别的集群**：上述能力得先有等价物，且**至少**这些值要换 —— 域名、Vault 路径
+`secret/homelab/multica`、`destination.server`、ns、`affinity` 里的节点名、Gateway 名与其 ns。
+本仓库**不维护**通用化版本（R1：runbook 只回答"出事了怎么办"）；要可移植的安装说明请看上游
+chart 自己的文档。
 
 ## ☠️ 先理解这件事：Multica 是两半的
 
@@ -194,8 +215,24 @@ kubectl --context k3s-homelab -n personal-services annotate httproute multica re
 
 ## 步骤 6 — daemon（M2 MacBook）
 
-前置：[`macbook/ansible/playbooks/ai-clis.yaml`](../../macbook/ansible/playbooks/ai-clis.yaml)
-已装好 AI CLI（daemon 靠探测 PATH 发现它们）。
+⚠️ **daemon 二进制是 `darwin-arm64` 预编译包**（GitHub release，固定版本 + sha256 校验，
+**不走 Homebrew**）。也就是说这一步要求一台 **Apple Silicon** 机器；Intel Mac 或 Linux
+需要换 release 资产，本仓库没有验证过。CLI 版本必须与 service 端 chart 同 tag（见「升级」）。
+
+**从零开始还需要什么**（下面这些不在本文范围，全部在
+[`macbook/ansible/README.md`](../../macbook/ansible/README.md)）：
+
+1. **开 Remote Login (SSH)** —— 系统设置 → 通用 → 共享 → 远程登录。GUI-only，
+   无头机器得先经 Screen Sharing 或接显示器做一次，否则 Ansible 连不上。
+2. **装好并登录 Tailscale**，且勾选 *Run Tailscale when logged out* —— 这台机是无头/合盖
+   运行，只经 Tailscale 访问。
+3. `just packages` —— Homebrew + 基础 CLI。⚠️ **Homebrew 首次安装需要交互式 admin 密码**，
+   无头 SSH 跑不过，重建机器时要单独手动跑一次。
+4. **自动登录 + FileVault 关闭** —— LaunchAgent 装在 **GUI 域**，没人登录就不会起。
+   机器重启后若停在登录界面，daemon 静默不上线而服务端一切正常（就是本文开头那个陷阱）。
+5. `just ai-clis` —— 装 AI CLI，daemon 靠**探测 PATH** 发现它们
+   （[`ai-clis.yaml`](../../macbook/ansible/playbooks/ai-clis.yaml)）。
+6. **电源策略** `just power`（`pmset disablesleep`），否则机器睡过去 daemon 就掉线。
 
 1. 在 web UI 生成一个 **PAT**（`mul_...` 开头）。
 2. 存进 Vault：
