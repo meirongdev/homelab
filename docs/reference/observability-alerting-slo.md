@@ -1,6 +1,6 @@
 # Observability — 告警、看板组织与 SLO
 
-> Last updated: 2026-08-15
+> Last updated: 2026-08-20
 > Status: 生效事实
 >
 > 遥测的**消费侧**：告警路由与覆盖盲区、Grafana 看板组织约定、SLI/SLO 体系。
@@ -101,6 +101,27 @@
   pod 踢出 Endpoints，Prometheus 连 `scrape_success=0` 都抓不到，抓取故障退化成"没数据"，
   告警自己把自己关掉；② `CFAnalyticsDataStale` 必须带 `> 0` 前置条件 ——
   首刷未成功时时间戳是 0，`time() - 0` 是天文数字，每次重启后都会假阳性。
+
+- **Prometheus 基数看门狗**（`manifests/monitoring/alerts/prometheus-rules.yaml` 的
+  `prometheus-self` 组，2026-08-20 新增，1 条）:
+  `PrometheusHeadSeriesHigh` —— active series 持续 2h >180k 即报。守的不是 Prometheus
+  死活（那有 chart 自带的 mixin：`PrometheusNotIngestingSamples` / `TSDBReloadsFailing` 等），
+  而是 [prometheus-series-reduction.md](../decisions/prometheus-series-reduction.md) 砍掉的
+  10.4 万条 series **被静默改回来**：升 chart 时默认 `metricRelabelings` 变了没跟，或改
+  values 时漏抄 chart 默认值（YAML 的 list 是整体覆盖）—— 两者都不报错、不影响任何服务，
+  只是内存悄悄涨回去，直到撞 3Gi limit 才以 OOM 的形式暴露。
+  阈值取自 48h 实测的两侧留白：砍后稳态 109k–114k（pod 换代时新旧序列并存于 head，
+  瞬时峰 120.7k），砍前稳态 218k–222k、峰 243k。
+  ⚠️ 三处**特意为之**：① 表达式**不按 cluster 拆** —— 它量的是本机 head 的总内存压力，
+  oracle 经 remote-write 进来的 21k 本就该算在内；序列上的 `cluster=homelab` 只表示
+  "谁报的这个指标"，不是成员关系。② 必须 `max by (cluster)` 折叠 `instance` —— Prometheus
+  换 pod IP 后 `instance` 变而 `pod` 名不变，新旧副本会共存于回看窗（实测 3 天内 3 个
+  instance），对裸指标做 min/avg 会读到已消失副本的陈旧值。③ 排查时**不要**用
+  `topk(20, count by (__name__)({__name__=~".+"}))` —— 那是全 head 扫描；用零成本的
+  `/api/v1/status/tsdb` 内置统计，命令写在告警 annotation 里。
+  📌 **覆盖范围有限**：它只抓**量**的回退。ADR 复核触发条件里另外两条 —— 重新启用
+  `kubeApiserverBurnrate`/`Slos`/`Availability`、新增消费原始 bucket 的看板 —— 表现为
+  规则哑掉或面板空白而非 series 变多，这条告警看不见，仍得靠人核。
 
 ### ⚠️ 告警覆盖 ≠ 抓取覆盖（2026-08-02 核实）
 
