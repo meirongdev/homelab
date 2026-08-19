@@ -950,3 +950,57 @@ spec:
               核实接收端：`kubectl --context oracle-k3s -n personal-services get pods | grep uptime-kuma`
               查心跳缺口是否真的没被记成 DOWN：
               `kubectl --context oracle-k3s -n personal-services exec deploy/uptime-kuma -c uptime-kuma -- sqlite3 /app/data/kuma.db "SELECT time,status FROM heartbeat WHERE monitor_id=1 ORDER BY time DESC LIMIT 20;"`
+
+    - name: prometheus-self
+      rules:
+        # Prometheus 自身的基数看门狗（2026-08-20 加）。
+        # 起因：decisions/prometheus-series-reduction.md 砍掉的 104,509 条 series 全靠
+        # values 里两个 job 的 metricRelabelings 撑着，而那份配置有**两种静默回退**的方式：
+        #   ① 升 kube-prometheus-stack 时 chart 默认 metricRelabelings 变了而我们没跟；
+        #   ② YAML 的 list 是整体覆盖 —— 谁改这两个 key 时漏抄 chart 默认值，drop 就少一条。
+        # 两者都**不报错、不改变任何服务行为**，只是 series 悄悄涨回去，直到 Prometheus
+        # 撞 3Gi limit 才以 OOM 的形式暴露。那份 ADR 的「复核触发条件」此前只靠人记得，
+        # 这条把它机械化。
+        #
+        # 阈值 180k 的双向校准（2026-08-20 拉 48h 实测，step 5m/15m 两档）：
+        #   · 砍完后稳态 109k–114k；pod 换代时新旧序列并存于 head 造成瞬时峰 120.7k
+        #     （即观测到的最大噪声 +11k，compaction 后回落）
+        #   · 砍之前稳态 218k–222k，峰 243k
+        #   180k 落在两者中间：真回退必触（离 pre-fix 下沿仍有 38k 余量），
+        #   正常波动够不着（离观测到的最高噪声还有 60k）。改阈值请照同样方式两向复验。
+        #
+        # ⚠️ 这个数是**整个 head**，含 oracle 经 remote-write 写进来的部分（实测
+        #   cluster=homelab 94.8k + cluster=oracle-k3s 21.2k）。它对应的正是本机
+        #   Prometheus 的内存压力，所以就该取全量，**不要按 cluster 拆**。序列上的
+        #   cluster=homelab 只表示"谁报的这个指标"，不是成员关系
+        #   （同类误读见 reference/observability-multicluster.md 的 Cluster Label Strategy）。
+        # ⚠️ 必须 `max by (cluster)` 折叠 instance：Prometheus 换 pod IP 后 `instance` 变、
+        #   `pod` 名不变，裸查会同时看到新旧两条（实测 3 天内 3 个 instance 共存于回看窗），
+        #   对裸指标做 min/avg 会读到已消失副本的陈旧值。
+        # for: 2h —— 越过 head compaction 周期（~2h）与重启后 head 重新填满的爬升期；
+        #   陈旧 instance 副本 5m 后失效，更够不到这里。
+        - alert: PrometheusHeadSeriesHigh
+          expr: |
+            max by (cluster) (prometheus_tsdb_head_series{job="kube-prometheus-stack-prometheus"}) > 180000
+          for: 2h
+          labels:
+            severity: warning
+            component: observability
+          annotations:
+            summary: "Prometheus active series {{ $value | humanize }}（>180k 持续 2h）——指标裁剪可能已静默回退"
+            description: |
+              active series 已连续 2 小时高于 180k。砍 series 前的稳态正是 218k–222k，
+              **首先怀疑 decisions/prometheus-series-reduction.md 的裁剪被回退了**
+              （升 chart 后默认 metricRelabelings 变了，或改 values 时漏抄 chart 默认值 —
+              两者都不报错）。
+              ① 先看谁在涨。用 TSDB 内置统计，**零成本**；不要用
+              `topk(20, count by (__name__)({__name__=~".+"}))`，那是全 head 扫描：
+                `curl -s http://100.94.186.7:31090/api/v1/status/tsdb | jq '.data.seriesCountByMetricName[:10], .data.seriesCountByLabelValuePair[:10]'`
+              ② 若榜首重新出现 kubelet 侧的 apiserver_*/etcd_* 副本，就是裁剪没生效。
+              核对 k8s/helm/values/kube-prometheus-stack.yaml 的 kubelet / kubeApiServer
+              两处 metricRelabelings，并照 ADR 的③在**抓取层**验证（不是看配置文件）：
+                `sum by (job) (scrape_samples_post_metric_relabeling{job=~"kubelet|apiserver"})`
+                基线 kubelet ≈18.2k / apiserver ≈27.3k；回退的表现是 kubelet 涨回 92.7k。
+              ③ 确认是真实增长而非回退时，内存影响参照：234k series 时 7d 峰值
+              2,715Mi / 3Gi（88%）。此时该继续按 ADR 的三层判据砍，**不是抬 limit** ——
+              节点物理内存已见底。

@@ -215,10 +215,25 @@ cAdvisor 220 条 · 61 个 target 全 `up` · Grafana `database: ok`。
 
 出现下列任一情况，回头重跑本文①②③三层验证：
 
-- 升 kube-prometheus-stack（默认 `metricRelabelings` 可能变）
-- 重新启用上面那三条 `defaultRules`
-- 新增消费 apiserver/etcd 原始 bucket 的看板或规则
-- k3s 改变 apiserver/kubelet 的进程模型（本优化的前提就是"同进程导致重复暴露"）
+| 触发条件 | 谁来发现 |
+|---|---|
+| 升 kube-prometheus-stack（默认 `metricRelabelings` 可能变） | **告警**（回退即 series 涨回 ~220k） |
+| 改这两个 key 时漏抄 chart 默认值（YAML 的 list 整体覆盖） | **告警**（同上） |
+| 重新启用上面那三条 `defaultRules` | ⚠️ 只能靠人 —— 表现为规则哑掉，series 不涨 |
+| 新增消费 apiserver/etcd 原始 bucket 的看板或规则 | ⚠️ 只能靠人 —— 表现为面板空白，series 不涨 |
+| k3s 改变 apiserver/kubelet 的进程模型（本优化的前提就是"同进程导致重复暴露"） | ⚠️ 只能靠人 |
+
+**前两条已在 2026-08-20 机械化**为 `PrometheusHeadSeriesHigh`
+（`manifests/monitoring/alerts/prometheus-rules.yaml` 的 `prometheus-self` 组）：
+active series 持续 2h >180k 即报。阈值落在砍后稳态（109k–114k，pod 换代瞬时峰 120.7k）
+与砍前稳态（218k–222k）之间，两侧各留 38k / 60k 余量。
+告警 annotation 里带了排查命令；⚠️ 查基数用零成本的 `/api/v1/status/tsdb`
+（`.data.seriesCountByMetricName`），**别用** `topk(20, count by (__name__)({__name__=~".+"}))`
+——那是全 head 扫描。设计取舍与两个 PromQL 陷阱见
+[observability-alerting-slo.md](../reference/observability-alerting-slo.md)。
+
+⚠️ **后三条告警看不见**：它们的症状是规则哑掉 / 面板空白，series 数不变甚至更少。
+别把"没报警"当成这三条也安全。
 
 ## 相关
 
