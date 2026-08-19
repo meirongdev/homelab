@@ -651,20 +651,12 @@ kubeScheduler:
 kubeControllerManager:
   enabled: false
 # ── 指标瘦身：丢掉 k3s 单进程造成的 apiserver/etcd 重复副本（2026-08-18）──────
-# k3s 把 apiserver 与 kubelet 跑在**同一个进程**里，kubelet 的 /metrics 端点会把
-# 整个进程的 registry 全吐出来，于是全套 apiserver_* / etcd_* 被**抓进来两次**
-# （job="kubelet" 一份、job="apiserver" 一份，标签不同故是两批独立 series）。
-# 实测（改动前 234,532 active series）：
-#   job="kubelet"  apiserver_* 62,616 + etcd_* 11,858 = 74,474  (31.7%)
-#     —— 占 kubelet 这个 job 全部 93,056 series 的 **80%**
-#   job="apiserver" 侧另有 7 族无人使用的 histogram        = 30,035  (12.8%)
-#   合计可丢 104,509 = **44.6%**
-# 依据（逐条核过，不是估的）：
-#   · 所有 loaded rule 里引用这两族的都写死 job="apiserver"，无一条用 job="kubelet"
-#   · 42 个 grafana_dashboard ConfigMap 里没有任何 panel 用 job="kubelet" 查它们
-#   · 面板走的是 recording rule 输出（cluster_quantile:...），不是原始 bucket
-# 动机：Prometheus 是那台 12G 节点上最大的单一内存消耗者，2026-08-18 因 7d 峰值
-#   2715Mi/3072Mi=88% 被迫把 limit 抬到 4Gi —— 砍 series 才是治本，抬 limit 只是止血。
+# 机制：k3s 把 apiserver 与 kubelet 编在**同一个进程**里，两个 /metrics 端点吐的是
+# **同一份 registry**（实测两端行数与指标族 100% 重合），于是 apiserver_* / etcd_*
+# 被按两个 job 各抓一遍。本段丢掉重复的那一份，实测 active series 降约 45%。
+# 📖 **论证与度量不在这里**（避免与 ADR 各存一份、日后一起过期）：机制实证 ·
+#    `le` 与 series 基数的关系 · 两个 job 条数为何不等 · 三层验证方法（规则层 /
+#    看板层 / 抓取层）· 被否决的选项 → docs/decisions/prometheus-series-reduction.md
 #
 # ☠️ **必须保留 chart 自带的那条再往后追加**：这两个 key 的 chart 默认值**不是空的**
 #    （分别 drop csi/storage 分桶与一长串 le 分桶）。YAML 里 list 是整体覆盖，
