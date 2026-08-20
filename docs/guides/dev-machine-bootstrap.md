@@ -1,6 +1,6 @@
 # 新机器开发环境 bootstrap（配到能改 homelab repo）
 
-> Last updated: 2026-08-10
+> Last updated: 2026-08-20
 > 面向「换了一台 Mac，要把本机环境配到能 clone、改、验证这个 repo」的流程。
 > 排障/恢复类走 [runbooks/](../runbooks/README.md)；AI 助手上下文见 [../AGENTS.md](../AGENTS.md)（唯一上下文文件，细节按域在 [reference/](../reference/README.md)）。
 
@@ -21,9 +21,11 @@ uv tool install ansible        # 提供 ansible-playbook（justfile 直接调它
 
 - `just`：repo 的主任务运行器（**不是 make**；只有 `cloud/oracle/terraform/` 用 make）。
 - `uv`：`check-manifests.py` 用 `uv run --with pyyaml`；ansible 建议 `uv tool install` 隔离。
-- `terraform`：**6 个 root** 都用它 —— `proxmox/terraform`、`cloudflare/terraform`、
-  `tailscale/terraform`、`zitadel/terraform`、`cloud/oracle/terraform`、`cloud/oracle/cloudflare`。
-  （⚠️ `2026-08-03-tf-state-r2.md` 的迁移表只列了其中 5 个，**没有覆盖 `zitadel/terraform`**。）
+- `terraform`：**7 个 root** 都用它 —— `proxmox/terraform`、**`proxmox/terraform-storage`**
+  （106 上的 worker VM，2026-08-15 新增）、`cloudflare/terraform`、`tailscale/terraform`、
+  `zitadel/terraform`、`cloud/oracle/terraform`、`cloud/oracle/cloudflare`。
+  （⚠️ `2026-08-03-tf-state-r2.md` 的迁移表只列了其中 5 个 —— 它写在
+  `proxmox/terraform-storage` 存在之前，也没覆盖 `zitadel/terraform`。）
 - `kubectl`：context 名固定为 `k3s-homelab` 与 `oracle-k3s`。
 
 ## 3. Clone 与接入 kubeconfig
@@ -59,11 +61,12 @@ uv run --with pyyaml python scripts/check-manifests.py   # 清单安全 H1-H5
 
 - `cloudflare/terraform/.env`：Cloudflare token（justfile `dotenv-load` 注入；裸跑
   `terraform plan` 会读到 tfvars 里的失效值而报错）。
-- **全部 6 个 root 的 `terraform.tfstate*`**：`proxmox/terraform`、`cloudflare/terraform`、
-  `tailscale/terraform`、`zitadel/terraform`、`cloud/oracle/terraform`、`cloud/oracle/cloudflare`。
-  **state 目前只在本地**（ROADMAP 开放项 #2，未离站）——漏拷哪个，那个 root 就只能
-  `terraform import` 重建（见 `cloud/oracle/terraform/IMPORT.md`）。
-  ⚠️ 别只照着 `2026-08-03-tf-state-r2.md` 的表拷，那张表漏了 `zitadel/terraform`。
+- **有本地 state 的 5 个 root 的 `terraform.tfstate*`**：`proxmox/terraform`、
+  `cloudflare/terraform`、`tailscale/terraform`、`cloud/oracle/terraform`、
+  `cloud/oracle/cloudflare`。**state 只在本地**（ROADMAP 开放项 #2，未离站）——漏拷哪个，
+  那个 root 就只能 `terraform import` 重建（见 `cloud/oracle/terraform/IMPORT.md`）。
+  另两个 root（`zitadel/terraform`、`proxmox/terraform-storage`）**当前没有 state 文件**，
+  拷不到不是漏了；判据是 `find . -name terraform.tfstate -not -path '*/.terraform/*'`。
 - 各 terraform root 的 `terraform.tfvars`（含明文密钥，勿提交）：对着
   `terraform.tfvars.example` 重建或直接拷。
 
@@ -76,7 +79,7 @@ token（`just vault-init` / `just vault-unseal` 只在 homelab 上跑）。日�
 
 ```bash
 cd k8s/helm && just status          # monitoring ns 状态
-cd k8s/helm && just argocd-status   # 28 个 App 的 Sync/Health
+cd k8s/helm && just argocd-status   # 全部 App 的 Sync/Health（条数对 argocd/applications/ 的文件数）
 cd cloud/oracle && just clustermesh-status   # 双集群 connected
 ```
 

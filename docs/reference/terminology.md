@@ -1,6 +1,6 @@
 # Terminology — 术语与命名正典
 
-> Last updated: 2026-08-18
+> Last updated: 2026-08-20
 > Status: 生效事实
 >
 > **这是全仓库技术用语的唯一真相源。** 写文档、写注释、写 commit message 前对一下这里。
@@ -53,7 +53,7 @@ ExternalSecret 的名字。这正是"标识符照抄、别统一"的例子：它
 | `k8s-worker-106` | homelab **worker** 节点（VM on `storage-106`） | k3s-homelab · amd64 · 2c/4G | `192.168.50.107` · TS `100.74.162.97` |
 | `oracle-k3s` | oracle 的**唯一节点**（与集群同名） | oracle-k3s · arm64 | `10.0.0.26` · TS `100.107.166.37` |
 | `pve` | Proxmox VE **宿主**（Ryzen 5600H 笔记本），不是 k8s 节点 | — | `192.168.50.4` |
-| `storage-106` | NAS **宿主**（Celeron J4105），冷备份目标 + 承载 worker VM | — | `192.168.50.106` · TS `100.110.27.111` |
+| `storage-106` | NAS **宿主**（Celeron J4105）。三个角色：备份目标 + 承载 worker VM + 媒体只读 NFS 源 | — | `192.168.50.106` · TS `100.110.27.111` |
 
 ⚠️ **`k8s-worker-106` 的 VM / Ansible inventory 名仍是 `k3s-exp`**（改名要 destroy/recreate，
 不值得）。所以同一个东西：节点叫 `k8s-worker-106`、VM 叫 `k3s-exp`。两个都是有效标识符，
@@ -126,14 +126,22 @@ ExternalSecret 的名字。这正是"标识符照抄、别统一"的例子：它
 
 | 该写 | 说明 |
 |---|---|
-| **local-path** | 唯一的 StorageClass，所有 PVC 都用它 |
+| **local-path** | 唯一的 StorageClass，所有**可写**卷都用它（媒体的 5 个只读 NFS PV 是静态 PV，不属于任何 SC）|
 | **restic 仓库** | 备份目标（106 上的 ZFS 加密仓库，sftp）。别写 "restic repo/repository" 混用 |
 | **vzdump** | PVE 每周整 VM 备份，与 restic 是两条独立路径 |
 
-☠️ **"NFS 已退役（2026-07-11）"的确切范围 = K8s PVC 不再用 NFS。** 不等于"哪儿都没有 NFS"：
-两个 export（`/storage`、`/storage/calibre`）**仍在**（Ansible 管理，运行时无人挂载），
-PVE 的 `backups` storage 也是 NFS。说退役时把范围讲清楚。
-→ [storage.md](storage.md)
+☠️ **"NFS 已退役（2026-07-11）"的确切范围 = 应用的可写数据不再放 NFS**，且 `nfs-client`
+provisioner 已卸载。它**不**等于"哪儿都没有 NFS"，而且 2026-08-16 之后连"运行时无人挂载"
+也不再成立：
+
+| 还在用 NFS 的地方 | 状态 |
+|---|---|
+| `media` ns 的 5 个静态只读 PV（`/storage/{movie,tv,anime,music,podcast}`） | **运行时挂着**，2026-08-16 起 |
+| `/storage`、`/storage/calibre` 两个遗留 export | 仍在（Ansible 管理），无人挂载 |
+| PVE 的 `backups` storage | 一直是 NFS |
+
+说"退役"时把范围讲清楚，别写成"运行时零依赖"。
+→ [storage.md](storage.md) · 例外的完整理由 [decisions/multimedia-repository-nfs-readonly.md](../decisions/multimedia-repository-nfs-readonly.md)
 
 ⚠️ **"备份"是显式白名单**，不是"默认都备"。新增有状态应用不加进去就静默不备份（H4 查这个）。
 反过来 `Prune=false` 意味着**退役服务时 PVC 不会被删**，要手工清。

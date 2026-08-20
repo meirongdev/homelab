@@ -1,6 +1,6 @@
 # Networking & Ingress — 入口链路与 DNS 自动化
 
-> Last updated: 2026-08-17
+> Last updated: 2026-08-20
 > Status: 生效事实
 >
 > 南北向入口（Cloudflare → Cilium Gateway）与 DNS 自动化（external-dns）。
@@ -103,10 +103,14 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 
 | 主机 | LAN | Tailscale |
 |------|-----|-----------|
-| homelab K8s node | `10.10.10.10` | `100.94.186.7` |
+| homelab 控制面节点 `k8s-node` | `10.10.10.10` | `100.94.186.7` |
+| homelab worker `k8s-worker-106`（VM on 106，2026-08-13 入编） | `192.168.50.107` | `100.74.162.97` |
 | Proxmox host (`pve`，跑 k8s-node VM 的 5600H 笔记本) | `192.168.50.4` | `100.118.193.51` |
 | oracle-k3s node | `10.0.0.26` | `100.107.166.37` |
-| storage-106 | `192.168.50.106` | `100.110.27.111` |
+| storage-106（worker 的宿主 + 备份/媒体源） | `192.168.50.106` | `100.110.27.111` |
+
+⚠️ **worker 与控制面不在同一网段**（LAN `192.168.50.0/24` vs pve 内的 `10.10.10.0/24`），
+它另有一条 ip rule；命名正典见 [terminology.md](terminology.md)。
 
 Pod CIDR: homelab `10.42.0.0/16`、oracle `10.52.0.0/16`。⚠️ Tailscale **不**路由 Pod CIDR
 （2026-07-07 起只做节点级 underlay，各节点只广播自身 /32）；跨集群 pod 流量走 Cilium

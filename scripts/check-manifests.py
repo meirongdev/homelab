@@ -3,7 +3,7 @@
 
     H1  Namespace / CRD 必须独占文件      ← 2026-08-03 级联删除事故
     H2  Application 的 path 与 destination 必须同集群  ← AGENTS.md 的 ☠️ 警告
-    H3  ReferenceGrant 必须声明 v1beta1   ← 声明 v1 会炸掉整个 App
+    H3  ReferenceGrant 必须声明 v1beta1   ← 声明集群未提供的版本会炸掉整个 App
     H4  清单里的 PVC 必须有备份归属        ← 备份脚本是显式白名单，漏了静默无声
     H5  Namespace 必须显式声明 PSA 等级    ← 漏写 = 静默吃内置默认 privileged，且无 warn/audit
 
@@ -63,8 +63,18 @@ PATH_CLUSTER = [
 ]
 
 # ── H3 ────────────────────────────────────────────────────────────────────
-# ReferenceGrant 至今未晋升到 v1。声明 v1 → 整个 App ComparisonError
+# 声明集群里**没有提供**的版本 → 整个 App ComparisonError
 # "unable to resolve parseableType"，不是单个对象失败，是整个 App 不可用。
+#
+# ⚠️ 2026-08-11 更正（规则不变，理由变了）：本处原写"ReferenceGrant 至今未晋升到 v1"，
+#    那是错的 —— 它早有 v1，而且 Cilium 1.20 反过来*要求* CRD 提供 v1（缺了则 Gateway API
+#    控制器整个不初始化，两集群曾静默瘫 30 小时）。现装 Gateway API v1.6.1 的
+#    referencegrants CRD **同时 served v1 与 v1beta1，且 v1beta1 仍是 storage 版本**，
+#    所以继续写 v1beta1 是对的（改 v1 是无谓 churn），但别再把理由说成"v1 不存在"。
+#    判据永远是：
+#      kubectl get crd referencegrants.gateway.networking.k8s.io \
+#        -o jsonpath='{.spec.versions[*].name}'
+#    详见 docs/reference/manifest-safety-checks.md 的 H3 节。
 REFERENCEGRANT_APIVERSION = "gateway.networking.k8s.io/v1beta1"
 
 # ── H5 ────────────────────────────────────────────────────────────────────
@@ -97,12 +107,12 @@ BACKUP_EXEMPT = {
     # 多媒体仓库的媒体是**只读 NFS**（media-movie/tv/anime/music/podcast）——数据真相源在 NAS
     # 106 的 ZFS（raidz1 + sanoid 快照保护），serving 层读的是只读副本；restic 目标也是 106，
     # 跨机冗余本就做不到，媒体再进 restic 无意义。决策与取舍见
-    # docs/plans/apps/2026-08-16-multimedia-repository.md 决策 1。
-    "media-movie": "只读 NFS → 106 ZFS 保护（raidz1+sanoid），见 multimedia-repository plan 决策 1",
-    "media-tv": "只读 NFS → 106 ZFS 保护（raidz1+sanoid），见 multimedia-repository plan 决策 1",
-    "media-anime": "只读 NFS → 106 ZFS 保护（raidz1+sanoid），见 multimedia-repository plan 决策 1",
-    "media-music": "只读 NFS → 106 ZFS 保护（raidz1+sanoid），见 multimedia-repository plan 决策 1",
-    "media-podcast": "只读 NFS → 106 ZFS 保护（raidz1+sanoid），见 multimedia-repository plan 决策 1",
+    # docs/decisions/multimedia-repository-nfs-readonly.md（唯一解释处）。
+    "media-movie": "只读 NFS → 106 ZFS 保护（raidz1+sanoid），见 decisions/multimedia-repository-nfs-readonly.md",
+    "media-tv": "只读 NFS → 106 ZFS 保护（raidz1+sanoid），见 decisions/multimedia-repository-nfs-readonly.md",
+    "media-anime": "只读 NFS → 106 ZFS 保护（raidz1+sanoid），见 decisions/multimedia-repository-nfs-readonly.md",
+    "media-music": "只读 NFS → 106 ZFS 保护（raidz1+sanoid），见 decisions/multimedia-repository-nfs-readonly.md",
+    "media-podcast": "只读 NFS → 106 ZFS 保护（raidz1+sanoid），见 decisions/multimedia-repository-nfs-readonly.md",
 }
 
 violations = defaultdict(list)
@@ -184,7 +194,8 @@ def check_h3(p, docs):
                 "H3",
                 p,
                 f"ReferenceGrant `{name}` 声明了 `{av}`，必须是 `{REFERENCEGRANT_APIVERSION}`"
-                f"——它从未晋升到 v1，写错会让**整个 App** ComparisonError 不可用。",
+                f"——本仓库统一用 v1beta1（它仍是 CRD 的 storage 版本）；"
+                f"声明集群未提供的版本会让**整个 App** ComparisonError 不可用。",
             )
 
 
@@ -263,7 +274,7 @@ def check_h4():
 RULES = [
     ("H1", "Namespace/CRD 必须独占文件", "2026-08-03 级联删除：删 calibre 清单 → prune 掉整个 ns → 删光同 ns 的 open-notebook 数据"),
     ("H2", "Application path ↔ destination 同集群", "控制面 2026-08-02 迁 oracle 后，kubernetes.default.svc 改指 oracle；写错会把 homelab 全套装到 oracle"),
-    ("H3", "ReferenceGrant 必须 v1beta1", "从未晋升 v1，写 v1 会让整个 App ComparisonError 不可用"),
+    ("H3", "ReferenceGrant 必须 v1beta1", "v1beta1 仍是 CRD 的 storage 版本；声明集群未提供的版本会让整个 App ComparisonError 不可用"),
     ("H4", "PVC 必须有备份归属", "备份脚本是显式白名单；trends-data 曾因此静默未备份 2 个月（45MB）"),
     ("H5", "Namespace 必须显式声明 PSA 等级", "漏写不是没定级，是静默吃内置默认 privileged；zitadel ns 就这样敞了一个多月（2026-07-06→08-10）"),
 ]

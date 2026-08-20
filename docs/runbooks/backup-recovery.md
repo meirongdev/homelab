@@ -1,6 +1,6 @@
 # Backup & Recovery Runbook
 
-> Last updated: 2026-08-17
+> Last updated: 2026-08-20
 > 设计与执行: [../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md](../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md)
 >
 > **触发条件**：备份/恢复运维（含月度恢复演练）、或数据丢失/损坏后需要从 restic 恢复。
@@ -15,10 +15,23 @@
 **离站（Phase 5）仍待做** —— 当前仅本地仓库（raidz1 + sanoid 保护），无异地副本；屋内灾难仍是敞口，属计划 Phase 5。
 
 - 清单：kustomize base+overlay `backup/`（2026-07-07 双集群合并；共用骨架在 `backup/base`）。
-- homelab: `backup/overlays/homelab`（ArgoCD `backup` App，CronJob 03:00）— Vault raft snapshot + sqlite（open-notebook / jobs-sg）。
-- oracle-k3s: `backup/overlays/oracle`（随 ArgoCD `oracle-k3s` App 同步，CronJob 03:30）— 逐库 `pg_dump`（`apps-pg`/miniflux → `miniflux.sql`，`zitadel-pg`/zitadel → `zitadel.sql`）+ sqlite + 书库整目录。
-  ⚠️ 2026-08-06 前是 `pg_dumpall` 出 `pg_all.sql`；**恢复更早的快照时找的是那个文件名**。改成逐库 dump 的原因见 [decisions/shared-postgres-platform.md](../decisions/shared-postgres-platform.md)。
-- 手动触发：`just backup-run`（homelab）/ `kubectl --context oracle-k3s -n backup create job --from=cronjob/restic-backup <name>`。
+- ☠️ **是三个 CronJob、三个 restic `--host`，不是两个**（漏掉第二个 = 恢复 worker 上的数据时
+  在错的 host 里找快照）：
+
+  | Job | 集群/节点 | 时刻 (CST) | `--host` | 内容 |
+  |---|---|---|---|---|
+  | `restic-backup` | homelab 控制面（钉 `node-role.kubernetes.io/control-plane`） | 03:00 | `homelab` | Vault raft snapshot · sqlite（open-notebook / jobs-sg）· SurrealDB 逻辑导出 · `pg_dump multica` + multica 上传件 |
+  | `restic-backup-worker` | homelab worker `k8s-worker-106`（钉 hostname） | 02:00 | `homelab-worker` | 整个 `/localpath` 目录扫（当前是 jellyfin-config / navidrome-data）；**只 forget 不 prune** |
+  | `restic-backup` | oracle-k3s | 03:30 | `oracle-k3s` | 逐库 `pg_dump`（`apps-pg`/miniflux → `miniflux.sql`，`zitadel-pg`/zitadel → `zitadel.sql`）+ sqlite + 书库整目录 |
+
+  worker 那份是 2026-08-16 补的：控制面那份读的是**它自己那台**的 hostPath，worker 上的
+  PVC 对它完全不可见。清单分别在 `backup/overlays/homelab`（前两个，ArgoCD `backup` App）
+  与 `backup/overlays/oracle`（随 ArgoCD `oracle-k3s` App 同步）；worker 那份的文件是
+  `backup/overlays/homelab/worker-{cronjob,backup-script}.yaml`。
+  ⚠️ 2026-08-06 前 oracle 那份是 `pg_dumpall` 出 `pg_all.sql`；**恢复更早的快照时找的是那个文件名**。改成逐库 dump 的原因见 [decisions/shared-postgres-platform.md](../decisions/shared-postgres-platform.md)。
+- 手动触发：`just backup-run`（homelab 控制面）/
+  `kubectl --context k3s-homelab -n backup create job --from=cronjob/restic-backup-worker <name>`（worker）/
+  `kubectl --context oracle-k3s -n backup create job --from=cronjob/restic-backup <name>`。
 - 查快照（在 106）：`RESTIC_PASSWORD=… restic -r /storage/restic snapshots`。
 
 ## 设计（serverless restic，取代 Kopia）
@@ -45,7 +58,9 @@
 | Vault (raft) | homelab | `vault operator raft snapshot save`（network API）|
 | ZITADEL PG | oracle（迁移后）| `pg_dump`（network）|
 | Miniflux PG | oracle | `pg_dump`（network）|
-| sqlite: open-notebook checkpoints / jobs-sg | homelab | 特权 CronJob hostPath 读 local-path + `sqlite3 ".backup"`（在线 API）|
+| sqlite: open-notebook checkpoints / jobs-sg | homelab 控制面 | 特权 CronJob hostPath 读 local-path + `sqlite3 ".backup"`（在线 API）|
+| **multica**（workspace/task/agent 记录 + 上传件） | homelab 控制面 | `pg_dump -Fc` → `multica.dump`（凭据 Vault `secret/homelab/multica` → ESO）+ `multica-backend-uploads` 目录纳入。⚠️ **两者失败都只 warn 不中断夜备**——绿灯不等于 multica 备到了，靠 `restic ls` 里有没有 `multica.dump` 判 |
+| **jellyfin / navidrome 的配置与库**（媒体本体不备） | homelab **worker** | worker 那个 Job 整目录扫 `/localpath`，快照在 `--host homelab-worker` 下 |
 | sqlite: uptime-kuma / timeslot / calibre-web-config / readlist | oracle | 同上（白名单见 `backup/overlays/oracle/backup-script.yaml`）。2026-08-11 移除 stirling-pdf（退役，接替者 BentoPDF 服务端零状态）；2026-08-14 移除 karakeep-data/meilisearch-data（karakeep 退役，PVC 已删除）|
 | SurrealDB: open-notebook | homelab | HTTP `GET /export` 逻辑导出 → `open-notebook.surql`（rocksdb 是活进程持有的 `.sst/MANIFEST`，热拷不一致）。口令走 optional 卷，缺失时只 warn 不中断夜备 |
 | **Calibre 书库** | oracle（2026-08-03 迁入）| **已进 restic**：`calibre-books-local`（~23G）目录整体纳入，增量去重。⚠️ 本行原写"不进 restic，留 NFS/ZFS"，NFS 退役后已不成立 |
@@ -64,8 +79,8 @@
 # 列快照
 restic -r sftp:root@192.168.50.106:/storage/restic snapshots
 
-# 恢复到临时目录
-restic -r <repo> restore latest --target /tmp/restore --host <homelab|oracle-k3s>
+# 恢复到临时目录（⚠️ --host 有三个值，worker 上的数据在 homelab-worker 里）
+restic -r <repo> restore latest --target /tmp/restore --host <homelab|homelab-worker|oracle-k3s>
 
 # Vault：新 Vault init+unseal 后 → vault operator raft snapshot restore -force /tmp/restore/vault.snap → 用旧 unseal keys 解封
 # PG  ：psql -U <user> -d <db> < /tmp/restore/<db>.sql（或 pg_restore）

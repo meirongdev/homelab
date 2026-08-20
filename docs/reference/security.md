@@ -1,6 +1,6 @@
 # K3s 集群安全架构 (Security Architecture)
 
-> Last updated: 2026-08-16
+> Last updated: 2026-08-20
 > Status: 生效事实
 > Scope: 双集群（homelab + oracle-k3s）的纵深防御模型 —— source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
@@ -96,11 +96,11 @@
 ⚠️ 残余缺口（有意接受）：worker 的 node 级检查项（kubelet 文件权限等）无覆盖；
 要补的话改 DaemonSet 式逐节点审计，或为 worker 加一个 `--targets node` 的第二 CronJob。
 
-- **等级矩阵**（2026-08-10 全量核对过 live，两集群一致）：
+- **等级矩阵**（2026-08-20 重新核对过 live；08-10 那版之后新增的 `litellm` ns 已补入）：
 
   | enforce | namespace |
   |---------|-----------|
-  | `baseline` | default, vault, personal-services, cloudflare, external-secrets, kyverno, external-dns, opencost, media（homelab）；argocd, cloudflare, external-dns, homepage, personal-services, rss-system, opencost, default, external-secrets, cnpg-system（oracle） |
+  | `baseline` | default, vault, personal-services, cloudflare, external-secrets, kyverno, external-dns, opencost, media, litellm（homelab）；argocd, cloudflare, external-dns, homepage, personal-services, rss-system, opencost, default, external-secrets, cnpg-system（oracle） |
   | `restricted` | jobs-sg（homelab）；databases（oracle，CNPG **apps-pg** 所在地）· **zitadel**（oracle，2026-08-10 起，SSO + 身份库 zitadel-pg） |
   | `privileged`（显式豁免, warn/audit 仍记 baseline） | kube-system, monitoring, trivy-system, tetragon, kube-bench, backup（homelab）；kube-system, monitoring, trivy-system, falco, backup（oracle） |
 

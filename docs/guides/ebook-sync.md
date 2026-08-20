@@ -20,22 +20,28 @@
 
 ## K8s CronJob
 
-`k8s/helm/manifests/personal-services/calibre-ebook-sync.yaml` — 每 6h 在 pod 内运行健康检查：
+⚠️ **calibre 全家 2026-08-03 迁到 oracle-k3s**，这个 CronJob 跟着走了 —— 清单与集群都变了。
+
+`cloud/oracle/manifests/personal-services/calibre-ebook-sync.yaml`（CronJob 名
+`ebook-sync-monitor`，`personal-services` ns，**oracle-k3s**）— 每 6h 在 pod 内运行健康检查：
 
 - 统计 ingest 堆积
 - 查询数据库新增
 - 上报磁盘用量
 - ingest > 50 文件堆积时标记为失败
 
-该文件由 ArgoCD `personal-services` App 管理（目录 `k8s/helm/manifests/personal-services/`），改动走 GitOps：
+该文件由 ArgoCD **`oracle-k3s`** App（kustomize 树 `cloud/oracle/manifests/`）管理，改动走 GitOps：
 
 ```bash
-git add k8s/helm/manifests/personal-services/calibre-ebook-sync.yaml
+git add cloud/oracle/manifests/personal-services/calibre-ebook-sync.yaml
+# ⚠️ kustomize 树是显式 resources: 列表——新增文件还要登记进同目录的 kustomization.yaml
 git commit -m "chore(calibre): 更新 ebook-sync 监控"
 git push   # ArgoCD 3 分钟内自动同步
+
+kubectl --context oracle-k3s -n personal-services get cronjob ebook-sync-monitor
 ```
 
-⚠️ **不要手动 `kubectl apply`**——该目录归 `personal-services` App（prune+selfHeal+SSA），手动应用会被 ArgoCD 改回去。
+⚠️ **不要手动 `kubectl apply`**——该树归 `oracle-k3s` App（prune+selfHeal+SSA），手动应用会被 ArgoCD 改回去。
 
 ## 传输流程
 

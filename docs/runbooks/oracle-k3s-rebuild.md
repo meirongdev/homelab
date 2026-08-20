@@ -2,14 +2,15 @@
 
 > **触发条件**：oracle-k3s 节点（OCI Always Free A1）不可恢复——VM 被终止/重建、
 > OS 损坏、boot volume 丢失，或需要从零重做集群。
-> **成功判定**：`just argocd-status`（`cd k8s/helm`）28 个 App 全部 Synced/Healthy；
+> **成功判定**：`just argocd-status`（`cd k8s/helm`）**全部** App Synced/Healthy
+> （条数对 `ls argocd/applications/*.yaml | wc -l`，**别写死**）；
 > `argocd.meirong.dev` 可登录；`just clustermesh-status`（`cd cloud/oracle`）双集群
 > connected；夜备恢复后跑一次 `just backup-run` 通过。
 > **回滚**：恢复类 runbook 本身即回滚——重建中途失败就回到本流程第 1 步重跑，
 > 数据一律从 restic 恢复（见 [backup-recovery.md](backup-recovery.md)），
 > 无更早状态可退。注豁免。
 >
-> Last updated: 2026-08-14
+> Last updated: 2026-08-20
 > Status: 生效 SOP
 
 ## 现状（一句话）
@@ -20,13 +21,18 @@
 
 ## 0. 数据盘点（先做，别跳过）
 
-oracle-k3s 的 local-path PVC（15 个，2026-08-06 对着 live 集群重新生成——上一版有三处漂移：
-`uptime-kuma-data` 实为 `uptime-kuma-data-v2`、漏了 `readlist-data`、`miniflux-db-pvc` 已退役）：
+oracle-k3s 的 local-path PVC（**11 个**，2026-08-20 对着 live 集群重新生成；上一版标题写
+"15 个"而正文只列了 12 个，且含已删的 `opencost-pvc`）：
 
-`storage-loki-0` · `storage-tempo-0` · `opencost-pvc` · `calibre-books-local` ·
+`storage-loki-0` · `storage-tempo-0` · `calibre-books-local` ·
 `calibre-web-automated-config-local` · `timeslot-pvc` ·
 `trends-data` · `uptime-kuma-data-v2` ·
 `readlist-data` · `data-trivy-server-0` · `apps-pg-1` · `zitadel-pg-1`
+
+> `opencost-pvc` 已于 2026-08-19 删除（挂的是 CSV 导出目录，不是 WAL，从来是空的）——
+> 见 [records/2026-08-19-opencost-bingen-replay-crashloop.md](../records/2026-08-19-opencost-bingen-replay-crashloop.md)。
+> 权威清单是 [reference/storage.md](../reference/storage.md)，核对用
+> `kubectl --context oracle-k3s get pvc -A`。
 
 > **两个 CNPG 卷（`apps-pg-1` / `zitadel-pg-1`）的恢复方式不同**：它们由 operator 按
 > `Cluster` CR 自动创建，**不要试图把 PVC 内容拷回去**。正确做法是让 ArgoCD 同步出
@@ -121,7 +127,7 @@ just deploy-cloudflare-tunnel    # cloudflare terraform（DNS + 通配路由）+
 ```bash
 cd k8s/helm
 just deploy-argocd          # chart + AppProject（只装控制面，不含 Application 注册）
-just deploy-argocd-apps     # 注册 28 个 Application
+just deploy-argocd-apps     # 注册 argocd/applications/ 下的全部 Application
 just argocd-status          # 等全部 Synced/Healthy
 ```
 
