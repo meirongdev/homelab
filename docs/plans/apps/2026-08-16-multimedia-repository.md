@@ -236,7 +236,13 @@ mount -t nfs 100.110.27.111:/storage/media /mnt/media-test -o ro && \
 
 ## Task 10 — 文档与索引
 
-- 新增 `docs/decisions/multimedia-repository-nfs-readonly.md`（决策 1–2 的 ADR，R3 字段）
+> **2026-08-20 补记**：本 Task 的 ADR 那一条当时**漏做了**，后果是四篇活文档
+> （`AGENTS.md` / `ARCHITECTURE.md` / `reference/storage.md` / `reference/terminology.md`）
+> 在四天里继续声称"NFS 已退役、106 非运行时依赖"，与已上线的只读 NFS 直接矛盾。
+> 已于当日补齐，见 [decisions/multimedia-repository-nfs-readonly.md](../../decisions/multimedia-repository-nfs-readonly.md)。
+
+- [x] 新增 `docs/decisions/multimedia-repository-nfs-readonly.md`（决策 1–2 的 ADR，R3 字段）
+      —— **2026-08-20 补做**
 - 更新 `docs/reference/services.md`（服务清单唯一真相源）、`docs/ROADMAP.md`（如适用）
 - 更新 `docs/plans/apps/README.md` 索引 + `docs/plans/README.md` 份数（apps 8→9）
 - `python3 scripts/check-docs.py` 期望 exit 0

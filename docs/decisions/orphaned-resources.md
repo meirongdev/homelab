@@ -97,7 +97,8 @@ manual-helm，设计如此，见 [`external-dns-adoption.md`](external-dns-adopt
 
 ### 首批捞到的真问题
 
-`k8s/helm/manifests/calibre-metadata/kustomization.yaml` 的 `resources:` 漏列了
+`k8s/helm/manifests/calibre-metadata/kustomization.yaml`（**当时**的路径 —— calibre 全家
+2026-08-03 迁 oracle，现在这棵树在 `cloud/oracle/manifests/calibre-metadata/`）的 `resources:` 漏列了
 `metadata-enrich.yaml`，而 `enrich-job.yaml` 要挂载它定义的 ConfigMap `metadata-enrich-script`。
 线上那份是当年手动 `kubectl apply` 的残留（同 App 的 `ebook-metadata-script` 有 tracking-id
 注解，它没有）—— 从 Git 重建集群时 `calibre-metadata-enrich` Job 会因缺 ConfigMap 起不来，

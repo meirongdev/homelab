@@ -1,6 +1,6 @@
 # ArgoCD Application Patterns
 
-> Last updated: 2026-08-18
+> Last updated: 2026-08-20
 > Status: 生效事实
 >
 > 当前 ArgoCD 管理模式分析、可选 pattern 对比与取舍建议。
@@ -25,7 +25,7 @@ root (Application)
      ├── vault-eso              → manifests/vault-eso/（目录源）
      ├── gateway / cloudflare / kube-bench / namespace-guardrails
      │                          → manifests/<同名目录>/（目录源）
-     ├── calibre-metadata       → manifests/calibre-metadata/（Kustomize）
+     ├── calibre-metadata       → cloud/oracle/manifests/calibre-metadata/（Kustomize，目标 oracle）
      └── kyverno-policies       → manifests/kyverno-policies/（目录源）
 ```
 
@@ -33,7 +33,7 @@ root (Application)
 
 | 子模式 | 代表 | 说明 |
 |--------|------|------|
-| Helm Chart + 本地 values | `loki.yaml`, `kyverno.yaml` | 多源：remote chart repo + `$values/k8s/helm/values/<app>.yaml`（oracle 变体 `<app>-oracle.yaml`） |
+| Helm Chart + 本地 values | `loki.yaml`, `kyverno.yaml` | 多源：remote chart repo + `$values/k8s/helm/values/<app>.yaml`（oracle 变体 `<app>-oracle.yaml`）。⚠️ chart 也可以来自 **OCI registry**（当前只有 `multica.yaml`）——那时 `repoURL` 写**不带 `https://`** 的 `ghcr.io/<org>/charts` |
 | Kustomize 目录 | `oracle-k3s.yaml` | `cloud/oracle/manifests/` 整棵 kustomize 树 |
 | 目录源（目录即清单） | `personal-services.yaml`, `monitoring-dashboards.yaml` | 一个 App ↔ `k8s/helm/manifests/` 下一个子目录，目录内文件全部纳管；2026-07-31 起取代 `directory.include` glob（所有权地图见 `k8s/helm/manifests/README.md`） |
 
@@ -75,17 +75,18 @@ homelab 负载必须显式写 `https://100.94.186.7:6443`，写错会把整套 h
   `cloud/oracle/manifests/argocd/homelab-cluster-external-secret.yaml`。
   （2026-08-02 之前方向相反——oracle 作外部集群的 `argocd-oracle-cluster` 凭据已退役。）
 
-## Application 清单（30 个，全部在 `homelab` project）
+## Application 清单（31 个，全部在 `homelab` project）
 
 核对: `kubectl --context oracle-k3s -n argocd get app`。源→目录映射见上方树；这里只记
 **destination 与踩过坑的备注**。
 
-**目标 homelab（显式 `https://100.94.186.7:6443`，20 个）**:
+**目标 homelab（显式 `https://100.94.186.7:6443`，21 个）**:
 `backup` · `cloudflare` · `external-dns` · `gateway` · `kube-bench` ·
 `kube-prometheus-stack` · `kyverno` · `kyverno-policies` · `monitoring-dashboards` ·
 `namespace-guardrails` · `opencost` · `otel-collector` · `personal-services` · `sloth` ·
 `tetragon` · `trivy-operator` · `vault-eso` · `jobs-sg`（2026-08-03 上线，kustomize 目录）·
-`media`（2026-08-16 上线，plain manifest 目录）· `litellm`（2026-08-16 上线，plain manifest 目录）
+`media`（2026-08-16 上线，plain manifest 目录）· `litellm`（2026-08-16 上线，plain manifest 目录）·
+`multica`（2026-08-18 上线，**本仓库唯一 OCI chart 源**，见下）
 
 **目标 oracle-k3s（in-cluster `kubernetes.default.svc`，10 个）**:
 `root` · `oracle-k3s` · `calibre-metadata` · `cnpg-operator` · `external-dns-oracle` ·
@@ -116,6 +117,12 @@ homelab 负载必须显式写 `https://100.94.186.7:6443`，写错会把整套 h
   `backup/overlays/oracle`。
 - **`external-dns` ×2** 的配置事实（upsert-only、token、通配路由）在
   [networking-ingress.md](networking-ingress.md)；oracle 侧 `helm.releaseName` 的坑见下文坑 2。
+- **`multica`**（homelab，2026-08-18）: 唯一从 **OCI registry** 拉 chart 的 App
+  （`repoURL: ghcr.io/multica-ai/charts` + `chart: multica`，**没有 `https://` 前缀**——
+  写了会被当成传统 Helm repo）。两点与别的 Helm App 不同：① 它自带有状态 Postgres，
+  两个 PVC 由 chart 生成，**CI 的 H4 看不见**（见 [storage.md](storage.md)）；
+  ② 服务是两半的，执行任务的 daemon 在 M2 MacBook 上，daemon 离线时集群侧一切正常。
+  安装/重建见 [../runbooks/multica-install.md](../runbooks/multica-install.md)。
 - ~~`argocd-image-updater`~~ ❌ 2026-08-03 退役（0 个 CR 空转数月）；机制存档
   [../decisions/argocd-image-updater.md](../decisions/argocd-image-updater.md)，替代方向
   Renovate（ROADMAP #12）。
@@ -229,9 +236,11 @@ sources:
 **必须同步把文件名加进 glob**，否则文件静静躺着不生效（OpenCost/KRR 落地时踩到的就是它）。
 
 现已按**一个 App 一个目录**重组（`docs/decisions/manifests-directory-per-app.md`），App 一律
-目录源，文件放进目录即生效。**显式清单仍残留在 kustomize 树**——`cloud/oracle/manifests/`
-与 `k8s/helm/manifests/calibre-metadata/` 的 `kustomization.yaml` `resources:` 列表，新文件
-必须登记（calibre-metadata 曾漏登记 `metadata-enrich.yaml`），此坑在那里仍然成立。
+目录源，文件放进目录即生效。**显式清单仍残留在 4 棵 kustomize 树**——
+`cloud/oracle/manifests/`、`cloud/oracle/manifests/calibre-metadata/`、
+`k8s/helm/manifests/jobs-sg/`、`k8s/helm/manifests/media/` 各自的 `kustomization.yaml`
+`resources:` 列表，新文件必须登记（calibre-metadata 曾漏登记 `metadata-enrich.yaml`），
+此坑在那 4 处仍然成立。核对：`find . -name kustomization.yaml -not -path './.git/*'`。
 
 ### 4. kustomize 全局 `namespace:` 是后置 transformer，会覆盖 JSON patch
 

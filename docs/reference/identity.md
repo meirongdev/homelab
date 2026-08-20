@@ -1,6 +1,6 @@
 # Identity — ZITADEL / OIDC 接入
 
-> Last updated: 2026-08-16
+> Last updated: 2026-08-20
 > Status: 生效事实
 >
 > 身份面的部署形态与各应用接入细节。安全视角的摘要在 [security.md §3](security.md)；
@@ -108,8 +108,10 @@
 
 **Bifrost** 曾是样板（OSS admin UI / config-API 无认证 → per-app `oauth2-proxy` 反代 +
 ZITADEL OIDC；推理 API 直连 + virtual key 把关），**2026-08-08 已随整个 `bifrost`
-ArgoCD App 退役**。`zitadel/scripts/configure-bifrost-oauth.sh` 与 Vault
-`secret/homelab/bifrost-oauth2-proxy` 已无消费者（保留作历史）。
+ArgoCD App 退役**；`zitadel/scripts/configure-bifrost-oauth.sh` 也已于 2026-08-16 删除
+（commit `caab498`），仓库里不再有这个模板 —— 要复用做法照下面 oauth2-proxy 的通用形态写。
+接替它的 LLM 网关是 **LiteLLM**（自带认证的 admin UI，不需要 oauth2-proxy），见
+[../decisions/litellm-llm-gateway.md](../decisions/litellm-llm-gateway.md)。
 
 **Excalidraw**（`draw`）曾用同模式，**2026-08-04 移除**：画布只存浏览器 localStorage、服务端
 无状态，那层 SSO 保护不了任何东西，只是登录摩擦；现在 HTTPRoute 直接分流到前端与协作 room，
@@ -132,6 +134,7 @@ ArgoCD App 退役**。`zitadel/scripts/configure-bifrost-oauth.sh` 与 Vault
 
 ## 配置脚本为何走 REST 而非 Terraform
 
-`zitadel/scripts/*.sh`（OIDC 应用、Bifrost OAuth、GitHub IdP、SMTP）统一用 REST API 幂等下发：
+`zitadel/scripts/*.sh`（当前 4 个：`configure-oidc-app.sh` / `configure-github-idp.sh` /
+`configure-smtp.sh` / `bootstrap-terraform-user.sh`）统一用 REST API 幂等下发：
 **Terraform/gRPC 的写操作过 Cloudflare edge 会坏**，而这些脚本从任何机器经公网 `auth.meirong.dev`
 都能跑。`zitadel/terraform/` 仅用于 bootstrap 期的用户/项目/客户端。

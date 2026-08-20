@@ -1,6 +1,7 @@
 # terraform-storage — storage-106 上的 VM
 
-管 storage-106（Proxmox VE）上的虚机。目前只有一台（2c/3G/30G）。
+管 storage-106（Proxmox VE）上的虚机。目前只有一台（**2c/4G/30G**，VMID 200，
+名字 `k3s-exp`；4G 是 2026-08-16 由 3G 抬上来的，见 `variables.tf` 里的分配链注释）。
 
 ⚠️ **它的角色 2026-08-13 变过一次**：先是「独立单节点 k3s 实验田（k3s-exp）」，
 同日改为 **homelab 集群的 worker `k8s-worker-106`**。VM 的 terraform 定义没变

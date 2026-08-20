@@ -25,6 +25,7 @@
 | [renovate-adoption](renovate-adoption.md) | 采纳 Renovate 管版本钉扎（🚧 待装 GitHub App）；与 V1-V3 分工；三条自我约束（不 automerge · 不开 pinDigests · 不管 docs/） |
 | [cf-analytics-custom-exporter](cf-analytics-custom-exporter.md) | 按域名访问 IP 数自写 exporter：官方/lablabs 实测在 Free zone 全废（`httpRequests1mGroups` 403），且**都只有 zone 级 uniques** |
 | [litellm-llm-gateway](litellm-llm-gateway.md) | Bifrost → **LiteLLM**：配置进 git + 自带认证 + Postgres；双自托管来源 DGX 主 + Mac 兜底 fallback |
+| [multimedia-repository-nfs-readonly](multimedia-repository-nfs-readonly.md) | 媒体 serving 重新引入 NFS，但**只读 + 只媒体 + 不装 provisioner** —— 2026-07-11 退役后的唯一例外；☠️ 副作用是 106 从此不再是"非运行时依赖" |
 | [prometheus-series-reduction](prometheus-series-reduction.md) | 砍 series 而非继续抬 limit：k3s 单进程让 kubelet 重复暴露 apiserver/etcd（占该 job 80%）→ 按 job 分别 drop，234k→110k（−53%）；三层证据（规则/看板/抓取层）+ chart 默认值必须原样保留再追加 |
 
 ## 写新 ADR

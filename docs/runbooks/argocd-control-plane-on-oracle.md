@@ -1,11 +1,12 @@
 # ArgoCD 控制面运行在 oracle-k3s
 
-> Last updated: 2026-08-06
+> Last updated: 2026-08-20
 > Status: 生效事实 + 迁移 SOP
 > 触发条件：重装/升级 ArgoCD、集群凭据过期、需要回滚到 homelab 控制面、
 > 或要完成 2026-08-02 迁移的收尾步骤。
-> 成功判定：`just argocd-status`（在 `k8s/helm/`）列出 28 个 App 全部 Synced/Healthy，
-> 且 `argocd.meirong.dev` 可登录。
+> 成功判定：`just argocd-status`（在 `k8s/helm/`）列出的 App **全部** Synced/Healthy，
+> 且数量与 `ls argocd/applications/*.yaml | wc -l` 一致（**别写死条数**——App 是持续增减的，
+> 2026-08-02 迁移当时 28 个、2026-08-20 已是 31 个），`argocd.meirong.dev` 可登录。
 
 ## 现状（一句话）
 
@@ -41,7 +42,7 @@
 
 ```bash
 cd k8s/helm
-just argocd-status        # 28 个 App 的 Sync/Health
+just argocd-status        # 全部 App 的 Sync/Health（条数对 argocd/applications/ 的文件数）
 just argocd-sync          # 触发全量 refresh
 just argocd-password      # 初始 admin 密码
 just deploy-argocd        # 重装/升级 chart（幂等）

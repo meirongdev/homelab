@@ -91,7 +91,8 @@ docs/                          # 见下方「Documentation Rules」
   ⚠️ 两边都不宽裕，**别照搬上游 manifest 的 requests**，按实测填。
 - 新服务的硬性要求（错了通常静默失效）：⚠️ arm64 先确认镜像有 `linux/arm64`，pin
   **多架构 index digest** 不是单架构的 · 跨 ns 引用要 ReferenceGrant（清单写 **`v1beta1`**，
-  理由见 H3）· PVC 一律 `local-path` · oracle 密钥放 `secret/oracle-k3s/<service>` ·
+  理由见 H3）· 可写 PVC 一律 `local-path`（唯一例外是只读媒体的静态 NFS PV，见 Storage
+  Notes）· oracle 密钥放 `secret/oracle-k3s/<service>` ·
   非核心挂 `priorityClassName: bulk`。
 - ⚠️ **判断内存余量看 `free -m` 的 available 或 `rssBytes`，别信 `kubectl top node`**；
   requests 只反映申报、不反映实占（两者可差数百 Mi）。→ [k8s-qos-resource-management.md](reference/k8s-qos-resource-management.md)
@@ -143,8 +144,16 @@ kube-bench → 节点 CIS → 网络 → Tetragon/Falco → restic。逐层状�
 
 ## Storage Notes
 
-- **NFS 已退役（2026-07-11）**：全部 PVC 用 `local-path`；106 只做冷备份目标，非运行时依赖。
+- **NFS 退役只覆盖读写型 PVC（2026-07-11）**：应用自己的数据一律 `local-path`，
   **sqlite 应用尤其不能用 NFS**（fcntl 锁极慢）。
-- **备份**：restic CronJob 直推 106 ZFS 加密仓库（sftp），双集群每夜；homelab 另有 PVE 每周
-  vzdump 整 VM。⚠️ 备份是**显式白名单**，新增有状态应用不加进去就静默不备份（H4 查的就是这个）。
+  ⚠️ **但 106 已不再是"非运行时依赖"**：2026-08-16 起 `media` ns 的 5 个**只读** NFS PV
+  （`media-{movie,tv,anime,music,podcast}`）挂 106 的 ZFS，且 worker `k8s-worker-106`
+  本身就是跑在 106 上的 VM —— **106 宕机 = 少一个节点 + 三个媒体服务无数据**，不再是
+  "只暂停备份窗口"。媒体是大文件顺序读，不踩 sqlite 那个锁坑。
+  这个例外的边界（只读 / 只媒体 / 不装 provisioner）→ [multimedia-repository-nfs-readonly.md](decisions/multimedia-repository-nfs-readonly.md)。
+- **备份**：restic CronJob 直推 106 ZFS 加密仓库（sftp）。⚠️ **是三个 Job 不是两个**：
+  homelab 控制面 03:00（`--host homelab`）· homelab worker 02:00（`--host homelab-worker`，
+  2026-08-16 新增，控制面那份读不到 worker 的 hostPath）· oracle 03:30。
+  两台 VM 另有 PVE 周备（k8s-node 在 pve、worker 在 106）。
+  ⚠️ 备份是**显式白名单**，新增有状态应用不加进去就静默不备份（H4 查的就是这个）。
 - 恢复演练 2026-07-06 通过。PVC 清单 / 迁移程序 / 备份设计 → [storage.md](reference/storage.md)。
