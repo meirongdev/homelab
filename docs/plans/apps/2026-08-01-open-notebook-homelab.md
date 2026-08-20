@@ -73,7 +73,7 @@ deprecated，UI 只用于看板/临时实验（provisioner 不 prune 手工加�
 
 - 两个凭据统一用 openai_compatible（早期表格写 Embedding 走 oMLX 凭据类型——两者都能用，
   统一成一种少一个变量；per-service URL 不需要，两台机器各一个 base_url 就够）。
-- 不经 Bifrost：这两个后端在 tailnet 上对 k8s-node 直接可达，走网关只是多一跳。
+- 不经 LLM 网关：这两个后端在 tailnet 上对 k8s-node 直接可达，走网关只是多一跳。
   `llm.meirong.dev` 继续只服务公网面（codex）。
 - **DGX 那条是跨境链路**：k8s-node 在新加坡（`tailscale netcheck` 最近 DERP = sin 4.2ms），
   spark 在国内，中间经 DERP(hkg)，无直连，RTT 66–83ms。对话流式感觉不到，

@@ -1,7 +1,7 @@
 # 服务资源分配优化建议
 
 > 状态: ⚠️ **已被取代（2026-08-13 归档）** —— 本文调的那套服务在 homelab 上**已经不存在了**：
-> calibre-web 2026-08-03 迁 oracle、Bifrost + oauth2-proxy 2026-08-08 退役、
+> calibre-web 2026-08-03 迁 oracle、旧 LLM 网关 + oauth2-proxy 2026-08-08 退役、
 > argocd-image-updater 2026-08-03 退役、restic 早已不写 NFS、VM 也从 12GB 变成 13312MB。
 > 逐条数值因此全部失效，**一条都不要照抄**。
 > - **原则**（requests 反映稳态 / limits 防抢占 / batch 按 peak 削）→
@@ -23,7 +23,7 @@
 homelab 集群跑在 5600H 笔记本的 12GB Proxmox VM 上，除 k3s 系统组件（Cilium、k3s 自身、CoreDNS）外，承载：
 
 - 个人服务: calibre-web（含 3 个 sidecars + 同步/元数据 CronJobs）
-- 网关: Bifrost（LLM 代理）+ oauth2-proxy
+- 网关: 旧 LLM 网关（网关代理）+ oauth2-proxy
 - 基础设施: Prometheus/Grafana/Alertmanager, Loki, Tempo, OTel Collector, Tetragon
 - 入口: cloudflared（2 副本）
 - 密钥/存储: Vault + 注入器, PostgreSQL, External Secrets
@@ -89,7 +89,7 @@ homelab 集群跑在 5600H 笔记本的 12GB Proxmox VM 上，除 k3s 系统组�
 **理由**: restic backup 到本地 NFS，非 CPU 密集型。
 **风险**: 低。256Mi 足够 restic + 管道操作。
 
-### 5. bifrost — 微调
+### 5. 旧 LLM 网关 — 微调
 
 | 维度 | 当前 | 目标 | 释放 |
 |------|------|------|------|
@@ -158,5 +158,5 @@ homelab 集群跑在 5600H 笔记本的 12GB Proxmox VM 上，除 k3s 系统组�
 git checkout HEAD~1 -- k8s/helm/manifests/
 git checkout HEAD~1 -- k8s/helm/values/tempo.yaml
 git checkout HEAD~1 -- k8s/helm/values/loki.yaml
-argocd app sync personal-services bifrost monitoring -l app.kubernetes.io/instance=...
+argocd app sync personal-services monitoring -l app.kubernetes.io/instance=...
 ```

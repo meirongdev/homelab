@@ -17,7 +17,7 @@
 
 | 核实项 | 怎么查 | 踩过的坑 |
 |---|---|---|
-| **镜像支持目标架构** | `docker manifest inspect <image>@<digest>` 看有没有 `linux/arm64` | oracle 是 aarch64。calibre 那次 digest 原样复用**是安全的**（核实过是多架构 manifest list）；但 bifrost 的 oauth2-proxy 就栽过——那次 pin 的是**单架构 digest**，搬过去直接起不来 |
+| **镜像支持目标架构** | `docker manifest inspect <image>@<digest>` 看有没有 `linux/arm64` | oracle 是 aarch64。calibre 那次 digest 原样复用**是安全的**（核实过是多架构 manifest list）；但此前的 oauth2-proxy 样例就栽过——那次 pin 的是**单架构 digest**，搬过去直接起不来 |
 | **目标集群容量** | `kubectl --context <target> get node -o wide`；`df -h` | 别只看 `kubectl top` 的百分比，页缓存会骗人（见迁移文档 §5） |
 | **是否真的能搬** | 依赖是否跨 tailnet / 是否必须贴着抓取目标 | open-notebook 搬不了：模型后端 DGX/Mac 是**按人共享**的节点，oracle 的 tagged-device 在 netmap 里看不到它们 |
 

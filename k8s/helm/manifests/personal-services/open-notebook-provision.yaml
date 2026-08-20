@@ -1,7 +1,7 @@
 # Open Notebook 模型接线的 GitOps 化 —— 声明式 provisioner（照抄 uptime-kuma-provisioner 的房子模式）
 #
 # 为什么存在：credentials / models / defaults 本来只能在 Settings UI 里配，落 SurrealDB——
-# 又一份"活在 DB、不在 git"的运行时状态（bifrost PVC-SQLite 同款债）。上游 API
+# 又一份"活在 DB、不在 git"的运行时状态（旧 LLM 网关 PVC-SQLite 同款债）。上游 API
 # （/api/credentials、/api/models、/api/models/defaults）足够完整，2026-08-01 已对活实例
 # 全程干跑验证（create → test → delete 全通，DGX 的 model test 拿到了真实补全）。
 #

@@ -69,23 +69,23 @@ ingest 约 02:20 SGT 落地，数字必须当场就是最新的。周报仍是�
 ⚠️ 数据量涨上来后，聚合页需要可写 `/tmp` 才不 500，见下文「只读根文件系统还要一个
 可写 `/tmp`」。
 
-## LLM 富化：直连 DGX，不经 Bifrost
+## LLM 富化：直连 DGX，不经 LLM 网关
 
 `enrich` 的 `LLM_BASE_URL` 指向 **DGX Spark vLLM `http://100.97.87.120:8000`**
 （Tailscale IP，pod 直连；同一台机器也在给 Open Notebook 供模型）。这样**完全不需要
-Bifrost virtual key**，也就少了一条 Vault 依赖。
+LLM 网关的 virtual key**，也就少了一条 Vault 依赖。
 
-⚠️ **模型 id 是后端相关的**：Bifrost 路由用带 provider 前缀的名字
+⚠️ **模型 id 是后端相关的**：LLM 网关路由用带 provider 前缀的名字
 （`custom_dgx/deepseek-v4-flash`），裸 vLLM 提供的是 `deepseek-v4-flash`，写前缀名
-会 404。上游原先把模型链**硬编码**成 Bifrost 形式，2026-08-03（`d833623`）才改成读
-`LLM_MODELS` / `LLM_CONCURRENCY` 环境变量（默认仍是 Bifrost 链，不破兼容）。
+会 404。上游原先把模型链**硬编码**成网关形式，2026-08-03（`d833623`）才改成读
+`LLM_MODELS` / `LLM_CONCURRENCY` 环境变量（默认仍是网关链，不破兼容）。
 
 实测（2026-08-03，`jobs-sg` ns 内的 pod）：DGX 可达、**无需认证**、`x-bf-vk` 头被
 vLLM 忽略；`deepseek-v4-flash`（1M ctx）返回的正是 enrich 要的严格 JSON。
 
-**取舍**：省掉 VK 与 Vault 依赖，但没有 Bifrost 的 `custom_m2` 回退，也没有用量计量；
+**取舍**：省掉 VK 与 Vault 依赖，但没有 LLM 网关的 `custom_m2` 回退，也没有用量计量；
 DGX 是跨 tailnet 共享的境内机器（RTT 66–83ms），不可用时 enrich fail-open 退回纯规则。
-（此前“切回 Bifrost”的三处改法已随 **bifrost 2026-08-08 退役**一并失效——直连 DGX
+（此前“切回网关”的三处改法已随 **LLM 网关 2026-08-08 退役**一并失效——直连 DGX
 是当前唯一形态，后续换 LLM 网关时另行规划。）
 
 **单次调用实测 66.5s**（2,326 字描述 / 497 prompt tokens / 937 completion tokens，
@@ -139,7 +139,7 @@ reasoning 占了这个模型 **约 95%** 的 output token。上游 `472aaf5` 加
 
 ⚠️ `reasoning_effort` 这个参数该模型**静默忽略**，只有 `chat_template_kwargs` 有效。
 且默认**不发**该字段（请求体与从前逐字节一致）—— 它是 vLLM/模板专用的，
-换成 Bifrost 或没有该模板的模型会被拒。
+换成 LLM 网关或没有该模板的模型会被拒。
 
 **用法定位**：只用来啃积压，不用于稳态。稳态每日约 200 条、reasoning 开着约 1 小时
 就跑完，精度留着更值。清单里因此**不设** `LLM_THINKING`（= 默认开启），
@@ -382,7 +382,7 @@ ArgoCD 应用常驻 `Degraded`。`optional: true` 保住了 Pod，但保不住�
 这次 `bot_token` 本来就在 Vault 里，chat/thread 本来就不是密钥，压根不需要新路径。
 
 ⚠️ **ESO 的 `data` 是全有全无的**，所以只声明真正要用的键。声明了却不用的键不是惰性的，
-是硬要求：曾多声明一个 `bifrost-vk`（直连 DGX 根本不用），等于逼着启用 Telegram 时
+是硬要求：曾多声明一个用不到的 virtual-key（直连 DGX 根本不用），等于逼着启用 Telegram 时
 必须连一个用不到的值一起写进 Vault，否则连 bot token 都同步不了。
 
 ### 话题路由

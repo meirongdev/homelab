@@ -146,7 +146,7 @@ kubectl -n <namespace> annotate httproute <name> reconcile-nudge="$(date +%s)" -
 kubectl -n <namespace> annotate httproute <name> reconcile-nudge-      # 生效后把注解删掉，避免 git 之外的漂移
 ```
 
-**Important**: the Gateway lives in `kube-system`, so cross-namespace backend refs need a ReferenceGrant in the *target* namespace. Grants already exist for homelab `personal-services`/`monitoring`/`vault`/`argocd`/`bifrost` and oracle `personal-services`/`homepage`/`rss-system` — verify with `kubectl get referencegrant -A`. For any other namespace, prepend:
+**Important**: the Gateway lives in `kube-system`, so cross-namespace backend refs need a ReferenceGrant in the *target* namespace. Grants already exist for homelab `personal-services`/`monitoring`/`vault`/`argocd` and oracle `personal-services`/`homepage`/`rss-system` — verify with `kubectl get referencegrant -A`. For any other namespace, prepend:
 
 ```yaml
 ---

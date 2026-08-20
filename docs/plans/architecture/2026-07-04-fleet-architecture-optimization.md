@@ -21,7 +21,7 @@
 > （[ADR](../../decisions/shared-postgres-platform.md)）；② 「LGTM 整体不搬」—— Loki/Tempo 已迁 oracle
 > （[迁移计划](2026-08-02-homelab-to-oracle-workload-migration.md)）；③ 「Gotify 迁 oracle」—— Gotify 整体退役，
 > 告警改 Alertmanager 原生 Telegram（[ADR](../../decisions/alerting-telegram-migration.md)）；
-> ④ 「Bifrost 配双 DGX fallback」—— Bifrost 2026-08-08 退役（[归档](../archive/2026-06-07-bifrost-llm-gateway.md)）。
+> ④ 「旧 LLM 网关配双 DGX fallback」—— 旧 LLM 网关 2026-08-08 退役。
 > 范围: 全舰队（homelab / oracle-k3s / storage-106 / DGX Spark ×2 / MacBook）机器角色与集群架构
 > 定位: 承接 `docs/plans/networking/2026-03-07-homelab-oracle-architecture-optimization.md` 与 `docs/plans/archive/../archive/2026-03-07-simplification-recommendations.md`，聚焦**物理层错配**而非新增组件
 
@@ -83,7 +83,7 @@
 | pve（5600H, 16GB 物理/13.5GB OS 可见） | 全家核心混载 | **数据面/有状态核心**（Vault、ArgoCD、LGTM）——先收核显 UMA 显存，加内存待核实可行性（见 §4） |
 | storage-106 | NFS + ZFS | 不变：**纯存储，保持 boring**，永不进集群 |
 | oracle-k3s（4C/24G） | 公网无状态服务 | 公网服务 + **身份面 + 告警面/状态面**（✅ ZITADEL 已迁入 2026-07-06 + Uptime Kuma + Gotify + dead-man's switch） |
-| DGX Spark ×2（128G） | 仅指标 | **裸金属推理层**，纳入 IaC + GPU 观测 + Bifrost 双机容错 |
+| DGX Spark ×2（128G） | 仅指标 | **裸金属推理层**，纳入 IaC + GPU 观测 + LLM 网关双机容错 |
 | MacBook | 仅指标 | 不变（roaming，不承担服务） |
 
 ### 4. pve 内存——2026-07-12 实测 + 加内存性价比重新评估
@@ -108,9 +108,9 @@
 
 两台 GB10 是舰队算力总和的 90%+，目前只有监控接入。建议（都在 `nv-dgx-spark` 仓库侧做，**不加入 K8s**）：
 
-- 推理服务（vLLM/MLX server）做成 systemd/compose 的 IaC + 健康检查端点，与 node_exporter/smartctl 同等待遇——现在 Bifrost `custom_dgx` 后端挂了应是无告警的。
+- 推理服务（vLLM/MLX server）做成 systemd/compose 的 IaC + 健康检查端点，与 node_exporter/smartctl 同等待遇——现在 LLM 网关 `custom_dgx` 后端挂了应是无告警的。
 - 补 **GPU 指标**：dcgm-exporter（有 arm64 镜像）或 nvidia-smi textfile collector，接入现有 Prometheus 抓取（照抄 `smartctl-dgx-spark` job 模式）。
-- **Bifrost 配双 DGX fallback**（Bifrost 支持 provider fallback 链），一台跑主力模型、另一台做备份/实验位；`llm.meirong.dev` 加进 Uptime Kuma，并在 `manifests/slos.yaml` 给 Bifrost 路由加一条 SLO——Sloth 基建现成。
+- **LLM 网关配双 DGX fallback**（支持 provider fallback 链），一台跑主力模型、另一台做备份/实验位；`llm.meirong.dev` 加进 Uptime Kuma，并在 `manifests/slos.yaml` 给网关路由加一条 SLO——Sloth 基建现成。
 
 ### 6. Oracle 24GB 余量的用法
 
@@ -147,7 +147,7 @@
 1. **本周末**：离站备份（P0-1）+ dead-man's switch（P0-2 前半）——消掉仅有的"不可逆损失"和"静默死亡"风险。
 2. **下个迭代**：Gotify 迁 oracle、zpool 冗余确认、恢复演练跑通一次。
 3. **一个月内**：pve 内存升级（下单即可）、Renovate 接入。
-4. **随后**：DGX 入编三件套（IaC + GPU 指标 + Bifrost fallback/SLO）。
+4. **随后**：DGX 入编三件套（IaC + GPU 指标 + LLM 网关 fallback/SLO）。
 
 其中第 1、2、8 项本质是把 `docs/ROADMAP.md` 里躺了三个月的 unchecked 项提到最前——方向早已判断正确，缺的只是排期。
 

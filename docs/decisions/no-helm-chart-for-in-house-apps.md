@@ -18,7 +18,7 @@
 | 目录 | 内容 | 举例 |
 |------|------|------|
 | `k8s/helm/values/` | **全部**是上游第三方 chart 的 values | loki、tempo、kyverno、falco、trivy、vault、cnpg、external-secrets、kube-prometheus-stack、opencost、sloth、argocd |
-| `k8s/helm/manifests/` | **全部**是自研 / 自组装清单 | bifrost、gateway、cloudflare、kube-bench、kyverno-policies、monitoring、namespace-guardrails、personal-services、vault-eso |
+| `k8s/helm/manifests/` | **全部**是自研 / 自组装清单 | gateway、cloudflare、kube-bench、kyverno-policies、monitoring、namespace-guardrails、personal-services、vault-eso |
 | `cloud/oracle/manifests/` | 同上（oracle 侧 kustomize 树） | calibre-metadata、homepage、uptime-kuma… |
 
 集群里**零个自研 chart**。

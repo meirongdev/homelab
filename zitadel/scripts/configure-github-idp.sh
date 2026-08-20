@@ -6,18 +6,18 @@
 # Cloudflare edge ("server closed the stream without sending trailers"), and a
 # direct/bypass connection fails ZITADEL's instance-host check. REST is plain
 # HTTP/JSON — no trailers — and works through the gateway. Same reason as
-# configure-smtp.sh and configure-bifrost-oauth.sh. See
+# configure-smtp.sh and 被移除的旧 OAuth 脚本. See
 # docs/records/2026-06-07-zitadel-console-grpc-404.md.
 #
-# Federates GitHub into ZITADEL so every OIDC / oauth2-proxy app (Bifrost admin,
-# etc.) gains a "Sign in with GitHub" button WITHOUT any app change — ZITADEL
+# Federates GitHub into ZITADEL so every OIDC / oauth2-proxy app (Grafana/ArgoCD
+# 等) gains a "Sign in with GitHub" button WITHOUT any app change — ZITADEL
 # stays the single IdP / unified login. Creates (idempotently) an instance-level
 # GitHub IdP and binds it to the instance login policy so the button shows.
 #
 # SECURITY — locked down by default: isCreationAllowed/isAutoCreation = false,
 # isLinkingAllowed = true, autoLinking = EMAIL. Only a GitHub account whose
 # verified primary email already matches an existing ZITADEL user can sign in;
-# no stranger can self-provision. This matters because Bifrost's oauth2-proxy
+# no stranger can self-provision. This matters because 旧网关的 oauth2-proxy
 # runs --email-domain=* (ANY authenticated email passes), so the real gate has
 # to live here. To open self-registration instead, run with
 # ALLOW_OPEN_SIGNUP=true and add per-app authorization (ZITADEL project roles +

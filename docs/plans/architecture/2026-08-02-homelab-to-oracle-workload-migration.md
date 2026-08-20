@@ -35,7 +35,7 @@
   Mac OMLX 是**跨 tailnet 按「人」共享**的节点，`meirongdev@` 的设备可达，
   oracle 的 tagged-device **在 netmap 里根本没有它们**。搬过去 = 模型后端全断。
   已记录在 [../../reference/open-notebook.md](../../reference/open-notebook.md)。
-- **bifrost（及设计中替换它的 LiteLLM）** —— 同一原因，`bifrost.yaml:4-6` 的注释就是为此写的。
+- **旧 LLM 网关（及设计中替换它的 LiteLLM）** —— 同一原因，旧网关清单里的注释就是为此写的。
 - **集群本地基础设施** —— 概念上不是「搬」，只能各集群一份：cilium / coredns /
   local-path / metrics-server / kyverno（准入 webhook）/ tetragon / kube-bench /
   trivy-operator / ESO / external-dns / cloudflared / opencost / restic CronJob /

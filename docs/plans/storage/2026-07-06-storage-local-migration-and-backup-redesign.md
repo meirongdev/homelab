@@ -6,7 +6,7 @@
 > | Phase | 状态 |
 > |-------|------|
 > | 0-1 restic 备份 | ✅ 2026-07-06 双集群上线，恢复演练通过。仓库 `881fb124bf` @ 106 `mrstorage/restic` |
-> | 2 sqlite/fsync PVC → local-path | ✅ 2026-07-06 Vault raft / bifrost / calibre-config 迁完 |
+> | 2 sqlite/fsync PVC → local-path | ✅ 2026-07-06 Vault raft / 旧网关 / calibre-config 迁完 |
 > | 3a Gotify → oracle-k3s | ✅ 2026-07-06（⚠️ Gotify 已于 2026-07 整体退役，见 [决策](../../decisions/alerting-telegram-migration.md)） |
 > | 3b ZITADEL → oracle-k3s | ✅ 2026-07-06 数据迁移 + masterkey 同源 + `auth.meirong.dev` 切换 + console gRPC 修复 + homelab 退役 |
 > | 4 dead-man's switch + SMART/zpool 告警 | ✅ 2026-07 |
@@ -59,7 +59,7 @@
 - ❌ **无任何备份**：Kopia 已于 2026-07-05 移除；106 上无 restic/rclone、无 `mrstorage/restic` dataset；全系统零备份。
 - ❌ **dead-man's switch 缺失**：Alertmanager Watchdog `receiver: "null"`（`kube-prometheus-stack.yaml:350`）。
 - ❌ **无 zpool/SMART 告警**：只有看板 `storage-106-dashboard.yaml`，无 PrometheusRule。
-- **待迁 PVC（homelab `nfs-client`）**：`data-vault-0`(10Gi/raft)、`data-zitadel-db-postgresql-0`(8Gi/PG)、`bifrost-data`(2Gi/sqlite)、`gotify-data`(1Gi/sqlite)、`calibre-web-automated-config`(1Gi/sqlite)、`alertmanager-…-db`(1Gi)、`audit-vault-0`(10Gi)、`data-trivy-server-0`(2Gi/cache)。
+- **待迁 PVC（homelab `nfs-client`）**：`data-vault-0`(10Gi/raft)、`data-zitadel-db-postgresql-0`(8Gi/PG)、旧网关数据 PVC(2Gi/sqlite)、`gotify-data`(1Gi/sqlite)、`calibre-web-automated-config`(1Gi/sqlite)、`alertmanager-…-db`(1Gi)、`audit-vault-0`(10Gi)、`data-trivy-server-0`(2Gi/cache)。
 - **留 NFS**：`calibre-books`(100Gi RWX 静态 PV)。**已在 local-path**（勿动）：grafana / prometheus / loki（2026-07-04 已迁）。
 
 ---
@@ -91,7 +91,7 @@
 ```
 homelab CronJob 03:00 ┐
   ├ Vault  : vault operator raft snapshot save   (network, 一致)
-  ├ sqlite : hostPath 读 local-path + sqlite3 ".backup"  (bifrost/calibre-config)
+  ├ sqlite : hostPath 读 local-path + sqlite3 ".backup"  (旧网关/calibre-config)
   └ (迁移后 ZITADEL/Gotify 不在此)                        ┐  homelab→LAN 192.168.50.106
                                                           ├─► restic -r sftp:root@<106>:/storage/restic
 oracle-k3s CronJob 03:30 ┐                                │  oracle→Tailscale 100.110.27.111
@@ -156,7 +156,7 @@ vault kv put secret/homelab/restic \
 #### Task 4 — homelab 备份 CronJob（03:00）
 - `backup` ns（PSA privileged）；特权 CronJob，hostPath 挂 `/var/lib/rancher/k3s/storage`（只读）+ Secret。脚本：
   1. `vault operator raft snapshot save /tmp/vault.snap`（经 vault svc）
-  2. 对 bifrost / calibre-config 的 sqlite：`sqlite3 <db> ".backup /tmp/<app>.db"`
+  2. 对旧网关 / calibre-config 的 sqlite：`sqlite3 <db> ".backup /tmp/<app>.db"`
   3. `restic backup /tmp --host homelab --tag nightly` + `restic forget --prune …`
 - **首次运行即 `restic init`**（若仓库空）。
 
@@ -213,14 +213,14 @@ restic -r <repo> restore latest --target /tmp/verify --host homelab
 
 | PVC | 决策 | 状态 | 备注 |
 |-----|------|------|------|
-| `bifrost-data`(sqlite) | ✅ 迁 | **✅ 已完成 2026-07-06** | Deployment；停 Pod→新建 `bifrost-data-local`(local-path)→`cp -a`→patch claim→起→验证→删旧。⚠️ 重启 ArgoCD auto-sync 前须先 push+`refresh=hard`，否则会 sync 到旧 revision 把 claim 还原成 NFS（本次踩到，已修）。json-patch by index 改 volume claim（strategic-merge 对 volumes 列表没生效）。 |
+| 旧网关数据 PVC(sqlite) | ✅ 迁 | **✅ 已完成 2026-07-06** | Deployment；停 Pod→新建 `-local`(local-path)→`cp -a`→patch claim→起→验证→删旧。⚠️ 重启 ArgoCD auto-sync 前须先 push+`refresh=hard`，否则会 sync 到旧 revision 把 claim 还原成 NFS（本次踩到，已修）。json-patch by index 改 volume claim（strategic-merge 对 volumes 列表没生效）。 |
 | `data-vault-0`(raft) | ✅ 迁 | **✅ 已完成 2026-07-06** | STS 停→双 local PVC 中转拷贝(vault ns baseline PSA 无 hostPath)→删旧 PVC+STS→helm 重建 STS 纳管 populated local `data-vault-0`→postStart auto-unseal 自动解封。审计留 NFS。验证: raft leader、12 secret、ESO Ready。**踩坑**: ①旧 NFS PVC 删除卡 Terminating(NFS reclaim)→清 finalizer；②helm upgrade 拉新 chart(0.33.0)滚动 injector，其硬 podAntiAffinity 单节点死锁→`injector.affinity:""`+scale 0/1；③ESO 在 Vault 重启窗口短暂 `EPERM`(Cilium 端点重编程)→重启 ESO controller 恢复。restic 快照 `fd32aa48` 兜底(未用上)。 |
 | `calibre-web-automated-config` | ✅ 迁(除 thumbnails) | **✅ 已完成 2026-07-06** | Deployment；停→拷贝(除 thumbnails)→patch config claim→起→验证→删旧。⚠️ **thumbnails 12252 个小文件(488M)未迁**：NFS 逐文件延迟使整目录拷贝 ~2MB/s(90min);它可由 calibre 按需重建,故排除,只迁 processed_books(133 大文件,11G)+ DB/config → ~2-3min。books(100Gi NFS)不动。 |
 | `alertmanager-…-db` | ❌ 留 NFS | — | operator 管的 bolt db，非 sqlite 锁敏感；silence 可再生。收益低。 |
 | `audit-vault-0` | ❌ 留 NFS | — | 追加型审计日志，NFS 顺序写无碍。 |
 | `data-trivy-server-0` | ❌ 留 NFS | — | 漏洞 DB 缓存可重建。 |
 
-- **✅ Phase 2 完成后实测 homelab nfs-client 仅剩**：`alertmanager-db`/`audit-vault-0`/`data-trivy-server-0`(设计保留) + `gotify-data`/`data-zitadel-db-postgresql-0`(待 Phase 3 迁 oracle) + `calibre-books`(100Gi RWX 静态,留)。所有 sqlite/fsync 受害者(Vault/bifrost/calibre-config)已在 local-path。
+- **✅ Phase 2 完成后实测 homelab nfs-client 仅剩**：`alertmanager-db`/`audit-vault-0`/`data-trivy-server-0`(设计保留) + `gotify-data`/`data-zitadel-db-postgresql-0`(待 Phase 3 迁 oracle) + `calibre-books`(100Gi RWX 静态,留)。所有 sqlite/fsync 受害者(Vault/旧网关/calibre-config)已在 local-path。
 - **通用迁移法(已跑通 3 次)**：停 workload → 建 `<pvc>-local`(local-path) → helper `cp -a`(大量小文件改按需排除) → `kubectl patch ... volumes/<idx>/persistentVolumeClaim/claimName`(**json-patch by index**,strategic-merge 对 volumes 列表不生效) → 起→验证 → **push git + `refresh=hard` 再开 auto-sync**(否则 ArgoCD sync 到旧 revision 把 claim 还原) → 删旧 PVC(NFS reclaim 慢/卡 Terminating 时清 finalizer)。
 
 ### Phase 3 — 服务重定位到 oracle-k3s
@@ -236,7 +236,7 @@ restic -r <repo> restore latest --target /tmp/verify --host homelab
 - oracle 建 `cloud/oracle/manifests/zitadel/zitadel.yaml`（镜像 homelab，PG→local-path，ExternalSecrets 读 `secret/homelab/zitadel` 同源 masterkey）。分阶段: 先起 PG(空) → 恢复 homelab `pg_dump`(作为 **zitadel 用户**，因 `--no-privileges` 剥了 grant，靠 ownership) → 再起 ZITADEL HelmChart。
 - **Login V2 坑**: `login-client` Secret（Login UI 的 PAT）——setup job 在**已恢复的 DB** 上跳过创建它 → login pod `FailedMount` 卡 Init。修复: 从 homelab 拷贝该 Secret（同 DB → PAT 有效）。**是 oracle 的 bootstrap 依赖（不入 git）**。
 - **console gRPC**: 需 oracle Cilium `enable-gateway-api-app-protocol=true`（否则 admin.v1 404）。**外科式**开启: patch `cilium-config` CM + `rollout restart deploy/cilium-operator`（重生成 Gateway Envoy 配置）——**零数据面中断**（仅 operator 重启；实测 rss/notify/auth 全程 200）。values 已回写 `cloud/oracle/values/cilium-values.yaml`。
-- **验证**: healthz 200 / OIDC discovery+JWKS(2 keys, masterkey 正确解密) / grafana authorize→302 login / Login V2 UI / 全 OIDC app 保留(argocd/grafana/karakeep/miniflux/stirling/bifrost) / console gRPC 200。`auth.meirong.dev` 已切 oracle tunnel（CF `just apply` 两侧）。ZITADEL PG 已入 oracle 备份。
+- **验证**: healthz 200 / OIDC discovery+JWKS(2 keys, masterkey 正确解密) / grafana authorize→302 login / Login V2 UI / 全 OIDC app 保留(argocd/grafana/karakeep/miniflux/stirling/旧网关) / console gRPC 200。`auth.meirong.dev` 已切 oracle tunnel（CF `just apply` 两侧）。ZITADEL PG 已入 oracle 备份。
 - **✅ homelab 退役完成**（用户确认真实登录后）: 删 `argocd/applications/zitadel.yaml` → root prune 触发 App finalizer 级联删除（HelmChart CR → helm uninstall → PG+zitadel/login 工作负载 + zitadel ns），删 `manifests/zitadel.yaml`，`gateway.yaml` 移除 auth + 悬空 notify 路由。zitadel ns/PVC 干净删除（NFS reclaim 未卡）。oracle SSO 全程 200。homelab nfs-client 现仅剩 alertmanager/audit-vault/trivy（设计保留）+ calibre-books。
 - 按该计划：oracle 建 `zitadel/`（PG on **local-path** 8Gi、ZITADEL、ESO→homelab Vault、HTTPRoute），`secret/oracle-k3s/zitadel` 同值 masterkey/db-password。
 - **数据**：homelab `pg_dump` → oracle 导入；确认 masterkey 一致（签发 key 不变，已登录用户不掉线）。
@@ -244,7 +244,7 @@ restic -r <repo> restore latest --target /tmp/verify --host homelab
 - 清理 homelab：删 `manifests/zitadel.yaml` + PG PVC、`argocd/applications/zitadel.yaml`、`gateway.yaml` 的 auth 路由。
 - ZITADEL PG 备份从 homelab CronJob 移到 oracle CronJob。
 
-> 迁完后 **homelab 有状态仅剩**：Vault、Bifrost、Calibre-Web(+books)、LGTM(Prometheus/Loki/Grafana/Alertmanager)。身份与告警喇叭均在 oracle。
+> 迁完后 **homelab 有状态仅剩**：Vault、旧 LLM 网关、Calibre-Web(+books)、LGTM(Prometheus/Loki/Grafana/Alertmanager)。身份与告警喇叭均在 oracle。
 
 ### Phase 4 — 韧性补齐
 
@@ -282,7 +282,7 @@ Phase 5(离站) / Phase 6(演练自动化) 随后，Phase 5 需 G3 云凭据
 ## 5. 完成定义（DoD）
 - [x] restic 仓库在 106 ZFS，两集群每夜自动备份、`restic snapshots` 可见。✅ 2026-07-06
 - [x] **从仓库成功恢复 Vault snapshot + 1 个 PG + 1 个 sqlite**（Phase 1 Task 6）。✅ 2026-07-06
-- [x] homelab sqlite/fsync PVC（Vault/bifrost/calibre-config）在 local-path、启动不再依赖 NFS ✅ 2026-07-06；alertmanager/audit/trivy 按设计留 NFS；gotify/zitadel-PG 待 Phase 3 迁 oracle；calibre-books 静态 RWX 留 NFS。
+- [x] homelab sqlite/fsync PVC（Vault/旧网关/calibre-config）在 local-path、启动不再依赖 NFS ✅ 2026-07-06；alertmanager/audit/trivy 按设计留 NFS；gotify/zitadel-PG 待 Phase 3 迁 oracle；calibre-books 静态 RWX 留 NFS。
 - [ ] Gotify + ZITADEL 在 oracle-k3s，`notify/auth.meirong.dev` 正常，OIDC 登录通。
 - [ ] Watchdog → oracle Uptime Kuma push；模拟 homelab 停跳能经 Telegram 收到。
 - [ ] zpool/SMART PrometheusRule 生效。

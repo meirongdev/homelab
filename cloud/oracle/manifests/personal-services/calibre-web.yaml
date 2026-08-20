@@ -7,7 +7,7 @@
 #
 # 镜像 digest 原样沿用 —— 已核实 sha256:4ff5be5c… 是**多架构 manifest list**
 # （含 linux/arm64），不是 amd64 专属 digest，故 aarch64 的 oracle 可直接拉。
-# （对照 memory 里 bifrost oauth2-proxy 那个坑：那次 pin 的是单架构 digest。）
+# （对照旧网关 oauth2-proxy 那个坑：那次 pin 的是单架构 digest。）
 #
 # ⚠️ NETWORK_SHARE_MODE=true / CWA_WATCH_MODE=poll 保持不变。它们当年是为 NFS 加的，
 # 2026-07-11 全面迁 local-path 后其实已无必要，但迁移期刻意不改行为 —— 一次只动一件事。

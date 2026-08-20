@@ -6,14 +6,14 @@
 # Cloudflare edge ("server closed the stream without sending trailers"), and a
 # direct/bypass connection fails ZITADEL's instance-host check. REST is plain
 # HTTP/JSON — no trailers — and works through the gateway. Same reason SMTP and
-# the Bifrost client are done by their own scripts. See
+# the 被移除的旧 OAuth 脚本 had its own. See
 # docs/records/2026-06-07-zitadel-console-grpc-404.md.
 #
-# Generalises configure-bifrost-oauth.sh: creates (idempotently) a WEB OIDC app
+# Generalises 被移除的旧 OAuth 脚本: creates (idempotently) a WEB OIDC app
 # with BASIC client auth in a project (default "Homelab"). On first create it
 # prints clientId + clientSecret ONCE and a ready-to-paste `vault kv put`. These
 # apps are confidential server-side clients (they hold the secret and exchange
-# the auth code themselves) — so WEB + BASIC, exactly like bifrost-admin.
+# the auth code themselves) — so WEB + BASIC, exactly like 旧网关的 oauth2-proxy admin.
 #
 # Config from zitadel/terraform/.env (ZITADEL_TOKEN = service-user PAT) or env.
 # Optional ZITADEL_ORG_ID targets a specific org (else the token's default org).

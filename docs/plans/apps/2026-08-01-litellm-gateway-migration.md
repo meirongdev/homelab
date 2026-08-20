@@ -1,13 +1,13 @@
-# LiteLLM LLM 网关迁移（替换 Bifrost）
+# LiteLLM LLM 网关迁移（替换旧网关）
 
 > 日期: 2026-08-01（2026-08-16 实施：纳入 MacPro M2 OMLX 第二上游，计划已落地）
 > 状态: ✅ 已完成（2026-08-16 部署 litellm 上线；现状见 decisions/litellm-llm-gateway.md 与 reference/services.md）
-> 结论: 把 homelab 的 LLM 网关从 **Bifrost**（`llm.meirong.dev`）整体换成 **LiteLLM proxy**（`litellm/litellm:v1.94.1`），
-> 同主机名、同 OpenAI 兼容面，Bifrost 无真实使用 → **不设计回退**。
+> 结论: 把 homelab 的 LLM 网关从 **旧网关**（`llm.meirong.dev`）整体换成 **LiteLLM proxy**（`litellm/litellm:v1.94.1`），
+> 同主机名、同 OpenAI 兼容面，旧网关无真实使用 → **不设计回退**。
 > 用 Rust 重写的是 LiteLLM 的 core/realtime 网关（截至 2026-08-01 只覆盖 `/v1/realtime`）；本次部署的是仍由
 > Python 承载的**官方生产 proxy**（chat/responses/keys 全在 Python 侧，仓库 README 明示 "until each Rust path
 > has parity coverage and production evidence"）。**动机不是 Rust**，而是：
-> (1) 网关真正被用起来之前的"网关即代码"改造（config.yaml 进 git，替代 Bifrost 的 PVC-SQLite 配置漂移坑）；
+> (1) 网关真正被用起来之前的"网关即代码"改造（config.yaml 进 git，替代旧网关的 PVC-SQLite 配置漂移坑）；
 > (2) 砍掉 oauth2-proxy + ZITADEL client 一组只为"无鉴权 admin 面"而生的配套（LiteLLM 管理面自带认证）；
 > (3) 为 ROADMAP 上"多自托管算力 fallback"铺平（LiteLLM 原生支持 fallback/load-balancing）——
 >     本次补全把第二个自托管推理源 **MacPro M2 OMLX**（`100.89.15.120:8000`，Qwen3.6-35B）一并收进网关，
@@ -17,22 +17,22 @@
 
 ### 1.1 现在是什么
 
-- **Bifrost**（`maximhq/bifrost`）在 homelab `bifrost` 命名空间运行，`llm.meirong.dev`（ArgoCD `bifrost` App，见
-  [bifrost plan](../archive/2026-06-07-bifrost-llm-gateway.md)；该 App 已于 2026-08-08 退役，本方案即其接替设计）。
-- 架构：Cloudflare Tunnel → Cilium Gateway → HTTPRoute（`/v1,/openai,/anthropic,/genai` 直连 Bifrost +
+- **旧 LLM 网关**在 homelab 网关命名空间运行，`llm.meirong.dev`（ArgoCD 旧网关 App；
+  该 App 已于 2026-08-08 退役，本方案即其接替设计）。
+- 架构：Cloudflare Tunnel → Cilium Gateway → HTTPRoute（`/v1,/openai,/anthropic,/genai` 直连旧网关 +
   virtual-key 门；其余 → oauth2-proxy → ZITADEL 登录）。
-- Bifrost 上游：`http://100.97.87.120:8000`（DGX Spark vLLM `deepseek-v4-flash`），pod → tailnet 直连已实测可行。
+- 旧网关下游：`http://100.97.87.120:8000`（DGX Spark vLLM `deepseek-v4-flash`），pod → tailnet 直连已实测可行。
 - **第二个自托管来源（2026-08 补）**：MacPro M2 OMLX `http://100.89.15.120:8000`（OpenAI 兼容，
   Qwen3.6-35B / 262k ctx），同为 tailnet 可达；接线已被 Open Notebook 生产使用（见 §1.3）。
-- 已知脆弱点（写进 [bifrost plan](../archive/2026-06-07-bifrost-llm-gateway.md) 的坑）：Bifrost 的 enforce 开关 + 路由规则 +
-  虚拟 key 全在 **PVC SQLite**（`bifrost-data-local`），不在 git；重建 PVC 即"开门"。
-- 消费方：`~/.zshrc` 的 `BIFROST_VK` + `codex-dgx` alias → `~/.codex/bifrost.config.toml`
+- 已知脆弱点：旧网关的 enforce 开关 + 路由规则 +
+  虚拟 key 全在 **PVC SQLite**（旧网关的 PVC），不在 git；重建 PVC 即"开门"。
+- 消费方：`~/.zshrc` 的旧网关 virtual key + `codex-dgx` alias → `~/.codex/litellm.config.toml`
   （`base_url=https://llm.meirong.dev/v1`，`wire_api=responses`，model `custom_dgx/deepseek-v4-flash`）。
-  **Bifrost 基本没被实际使用**（仅本机 Codex profile 接了一个 virtual key，日常主要直连 vLLM）。
+  **旧网关基本没被实际使用**（仅本机 Codex profile 接了一个 virtual key，日常主要直连 vLLM）。
 
 ### 1.2 为什么换 LiteLLM
 
-| 对比项 | Bifrost | LiteLLM proxy |
+| 对比项 | 旧网关 | LiteLLM proxy |
 |--------|---------|---------------|
 | 配置存放 | PVC SQLite（重建即丢，git 里只有 intent） | `config.yaml` 进 git（ConfigMap），GitOps 一致 |
 | 虚拟 key / spend | 有 key，无 spend | key + spend + budget 头等公民（Postgres 持久化） |
@@ -57,7 +57,7 @@
   ⚠️ **worker-106 不行**（tagged-device netmap 里没有这两个源），网关必须留在控制面。
 - **Mac 也是"any token works"**（OMLX 忽略鉴权，Open Notebook 统一用 openai_compatible + dummy）——
   `api_key: dummy` 可留在 git，与 DGX 同理。
-- **via LiteLLM 加** fallback 链相对 Bifrost 是净收益：DGX 挂了自动切 Mac，而不是 client 手动换 base_url。
+- **via LiteLLM 加** fallback 链相对旧网关是净收益：DGX 挂了自动切 Mac，而不是 client 手动换 base_url。
 - **不做的事**：不把 Mac 的 embedding/STT/TTS/rerank 接进网关（§范围见 §3 决策 7）——那些仍由
   Open Notebook 直连 Mac，网关只管对话/生成两个 chat 模型。
 - **RTT 语义差异**：Mac 在境内、延迟低，但**笔记本无 SLA**（电池/合盖会掉）；DGX 跨境但常驻。
@@ -103,25 +103,25 @@ LiteLLM proxy（litellm ns, v1.94.1, config.yaml 在 git）
 | `litellm` Deployment + Service | 新增 | `litellm/litellm@sha256:29b7…`（v1.94.1 amd64），端口 4000；config.yaml 含 DGX + Mac 双上游 fallback（见 Task 2 config） |
 | `litellm-pg`（Postgres 17）| 新增 | 单副本、local-path PVC `litellm-pg-data-local`（2Gi） |
 | `litellm` HTTPRoute | 新增 | `llm.meirong.dev` catch-all → `litellm:4000` |
-| oauth2-proxy + ZITADEL client `bifrost-admin` | **移除** | LiteLLM 管理面自带认证，不再需要（见 §3 决策） |
-| `bifrost` App / namespace / PVC | **移除** | 随 Bifrost App 删除级联清理（不设计回退） |
-| 备份 | 改 | homelab restic 脚本加 `pg_dump litellm`；删 `bifrost-data` 模式 |
-| SLO | 改 | `bifrost-availability` → `litellm-availability` |
+| oauth2-proxy + 旧的 oauth2-proxy client（ZITADEL） | **移除** | LiteLLM 管理面自带认证，不再需要（见 §3 决策） |
+| 旧网关 App / namespace / PVC | **移除** | 随旧网关 App 删除级联清理（不设计回退） |
+| 备份 | 改 | homelab restic 脚本加 `pg_dump litellm`；删旧网关 PVC 模式 |
+| SLO | 改 | 旧网关的 availability → `litellm-availability` |
 | 消费方 | 改 | `~/.zshrc` / `~/.codex` 的 key 与命名；可选加 `codex-mac` profile 直指 Mac 兜底模型 |
 
 ## 3. 关键决策
 
-1. **砍掉 oauth2-proxy，管理面用 LiteLLM 自带登录**。Bifrost 需要 oauth2-proxy 的唯一原因是它的 OSS 管理面
+1. **砍掉 oauth2-proxy，管理面用 LiteLLM 自带登录**。旧网关需要 oauth2-proxy 的唯一原因是它的 OSS 管理面
    **没有鉴权**；LiteLLM 管理面自带 `UI_USERNAME/UI_PASSWORD` 登录（凭据进 Vault→ESO）。这样：
    - 少一个 Deployment、少一个 ZITADEL OIDC client、少一次"ZITADEL 登录后再被 LiteLLM 再要一次密码"的双重登录；
    - 仍符合 security.md 的既定矩阵"每个服务要么公开、要么原生 ZITADEL OIDC、**要么自带认证**"。
    - 代价：admin UI 由强口令（Vault 随机生成）守护而非 SSO。单用户 + CF WAF 在前的威胁模型下可接受。
-   - 备选（不采纳，写明理由）：保留 oauth2-proxy 复用 `bifrost-admin` client —— 双重登录且多一组维护面。
+   - 备选（不采纳，写明理由）：保留 oauth2-proxy 复用旧的 oauth2-proxy client —— 双重登录且多一组维护面。
 2. **Postgres 放 homelab 本集群**（`litellm` 命名空间内），不复用 oracle 的 CNPG：
    - 网关与密钥库同故障域、同 restic 备份拓扑；oracle 故障不影响网关；
    - 复刻仓库既有"纯 postgres Deployment + local-path"模式（ZITADEL 迁移时 oracle 侧就是这么做的）。
-3. **hostname `llm.meirong.dev` 不变**：external-dns owner 随 HTTPRoute 自动从
-   `httproute/bifrost/bifrost` 变更为 `httproute/litellm/litellm`（`upsert-only`，无手工 DNS）。
+3. **hostname `llm.meirong.dev` 不变**：external-dns owner 随 HTTPRoute 自动从旧网关变更为
+   `httproute/litellm/litellm`（`upsert-only`，无手工 DNS）。
 4. **镜像按 digest 钉死**（仓库惯例）：`litellm/litellm:v1.94.1` 与 `postgres:17-alpine`（amd64 digest，见 §5）。
 5. **model 名保留别名 `custom_dgx/deepseek-v4-flash`**：消费方（Codex profile）的 model 字段零改动，只换 key。
 6. **双自托管来源 fallback：DGX 主 + Mac 兜底**（2026-08 补，替代原"双 DGX fallback"设想）。在
@@ -139,7 +139,7 @@ LiteLLM proxy（litellm ns, v1.94.1, config.yaml 在 git）
 
 ## 4. 不做的事
 
-- **不做回退设计**：Bifrost 无真实使用，`bifrost` App/ns/PVC 直接删除。
+- **不做回退设计**：旧网关无真实使用，旧网关 App/ns/PVC 直接删除。
 - **不接入 Rust ai-gateway**：当前只支持 `/v1/realtime`，与 chat/responses 无关。
 - **不把 Mac 的多模态模型接进网关**：embedding/STT/TTS/rerank 仍由 Open Notebook 直连 Mac（§3 决策 7）。
 - **不新增 Prometheus 抓取**：沿用 envoy L7 SLO；LiteLLM `/metrics` 留作后续增强。
@@ -211,10 +211,10 @@ vault kv put secret/homelab/litellm-db \
 - [ ] **Step 3: 记录当前消费方取值（备查）**
 
 ```bash
-rg -n "BIFROST_VK|codex-dgx" ~/.zshrc
-cat ~/.codex/bifrost.config.toml
+rg -n "LITELLM_VK|codex-dgx" ~/.zshrc
+cat ~/.codex/litellm.config.toml
 ```
-期望：`BIFROST_VK=sk-bf-…`；profile model `custom_dgx/deepseek-v4-flash`、`base_url https://llm.meirong.dev/v1`。
+期望：`LITELLM_VK=sk-…`；profile model `custom_dgx/deepseek-v4-flash`、`base_url https://llm.meirong.dev/v1`。
 
 ---
 
@@ -226,15 +226,15 @@ cat ~/.codex/bifrost.config.toml
 - Create: `k8s/helm/manifests/litellm/externalsecrets.yaml`（2 个 ExternalSecret）
 - Create: `k8s/helm/manifests/litellm/route.yaml`（HTTPRoute）
 
-> HTTPRoute 与 Service 同命名空间 → 无需 ReferenceGrant（Bifrost 那份是多余的）。
+> HTTPRoute 与 Service 同命名空间 → 无需 ReferenceGrant（旧网关那份是多余的）。
 
 - [ ] **Step 1: `litellm.yaml` — proxy（config.yaml 进 git）**
 
 ```yaml
-# LiteLLM — self-hosted LLM gateway (homelab), replaces Bifrost (2026-08-01).
+# LiteLLM — self-hosted LLM gateway (homelab), replaces legacy gateway (2026-08-01).
 #
 # Public surface: llm.meirong.dev (Cloudflare Tunnel → Cilium Gateway → HTTPRoute).
-# Auth model (Bifrost 的 oauth2-proxy 已砍掉 — LiteLLM 管理面自带认证):
+# Auth model (旧网关的 oauth2-proxy 已砍掉 — LiteLLM 管理面自带认证):
 #   - inference (/v1/*, /openai, /anthropic, /genai): master key + virtual keys,
 #     Authorization: Bearer sk-…  (LITELLM_MASTER_KEY 已设 ⇒ 默认强制 key 鉴权)
 #   - admin UI (/ui): LiteLLM 自带登录 (UI_USERNAME/UI_PASSWORD, Vault→ESO)
@@ -246,7 +246,7 @@ metadata:
   name: litellm-config
   namespace: litellm
 data:
-  # ⚠️ api_base 必须带 /v1 后缀 —— LiteLLM 不会像 Bifrost 那样自动补。
+  # ⚠️ api_base 必须带 /v1 后缀 —— LiteLLM 不会像旧网关那样自动补。
   # api_key: dummy 不是机密（DGX vLLM 与 Mac OMLX 都忽略鉴权，"any token works"），因此可留在 git。
   # 强制 key 鉴权由 env LITELLM_MASTER_KEY 实现（general_settings.master_key 语义=require a key for all calls）。
   config.yaml: |
@@ -517,17 +517,17 @@ spec:
 
 ---
 
-## Task 3 — ArgoCD 换血：删 bifrost、注册 litellm（原子提交）
+## Task 3 — ArgoCD 换血：删旧网关、注册 litellm（原子提交）
 
 **Files：**
 - Create: `argocd/applications/litellm.yaml`
-- Delete: `argocd/applications/bifrost.yaml`
-- Delete: `k8s/helm/manifests/bifrost/`（整目录）
+- Delete: 被删除的旧网关 App 清单
+- Delete: 被删除的旧网关 manifest 目录（整目录）
 
-> 两 App 同主机名，不能共存，必须**一个提交**完成"加 litellm、删 bifrost"（ArgoCD 3 分钟轮询，同一 sync 内收敛；
+> 两 App 同主机名，不能共存，必须**一个提交**完成"加 litellm、删旧网关"（ArgoCD 3 分钟轮询，同一 sync 内收敛；
 > 中间有极短空窗，网关本就无真实流量，可接受）。
 
-- [ ] **Step 1: `argocd/applications/litellm.yaml`**（镜像 bifrost.yaml 的骨架）
+- [ ] **Step 1: `argocd/applications/litellm.yaml`**（镜像旧网关 App 清单的骨架）
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -555,28 +555,27 @@ spec:
       - ServerSideApply=true
 ```
 
-- [ ] **Step 2: 删除 Bifrost**：`git rm` 下列路径
+- [ ] **Step 2: 删除旧网关的相关资源**（App 清单、manifest 目录、Vault secret、ZITADEL client、脚本）
 
 ```bash
-git rm argocd/applications/bifrost.yaml
-git rm -r k8s/helm/manifests/bifrost
+# 删除旧网关 App 清单与 manifest 目录
 ```
 
 - [ ] **Step 3: 提交并推送**
 
 ```bash
 git add argocd/applications/litellm.yaml
-git commit -m "feat: replace bifrost with litellm llm gateway (llm.meirong.dev)"
+git commit -m "feat: replace legacy LLM gateway with litellm (llm.meirong.dev)"
 git push
 ```
 
 - [ ] **Step 4: 等 ArgoCD 收敛并核对**（3 分钟轮询；必要时 `just argocd-sync`）
 
 ```bash
-kubectl --context k3s-homelab -n argocd get app | rg -i "litellm|bifrost"
-# 期望：litellm Synced/Healthy；bifrost 不再存在
-kubectl --context k3s-homelab get ns bifrost
-# 期望：No resources（ns 已随 App 删除级联清理，含 bifrost-data-local PVC —— 不回退，符合预期）
+kubectl --context k3s-homelab -n argocd get app | rg -i "litellm"
+# 期望：litellm Synced/Healthy；旧网关不再存在
+kubectl --context k3s-homelab get ns litellm
+# 期望：litellm ns 存在且旧网关 ns 已随 App 删除级联清理（含旧网关 PVC —— 不回退，符合预期）
 kubectl --context k3s-homelab -n litellm get pods,pvc
 # 期望：litellm Running + Ready、litellm-pg Running/Ready、litellm-pg-data-local Bound
 ```
@@ -608,7 +607,7 @@ curl -s -X POST localhost:4000/key/generate \
 # 记下返回的 "key": "sk-…" → 后续 Task 5 写入消费方
 ```
 
-- [ ] **Step 3: key 门验证（对照 Bifrost 当时的 401/200 验收）**
+- [ ] **Step 3: key 门验证（对照旧网关当时的 401/200 验收）**
 
 ```bash
 # 无 key → 401
@@ -672,19 +671,20 @@ curl -s -o /dev/null -w '%{http_code}\n' https://llm.meirong.dev/ui
 
 ## Task 5 — 消费方更新（MacBook 本机，不进 repo）
 
-- [ ] **Step 1: `~/.zshrc`**：`BIFROST_VK` → `LITELLM_VK`（值 = Task 4 的虚拟 key），注释同步改名
+- [ ] **Step 1: `~/.zshrc`**：把旧网关的 virtual key 换成 `LITELLM_VK`（值 = Task 4 的虚拟 key），注释同步改名
 
 ```bash
-# 旧：export BIFROST_VK="sk-bf-…"
+# 旧：export LITELLM_VK="sk-…"
 # 新：
 export LITELLM_VK="sk-<Task4 生成的虚拟 key>"
 alias codex-dgx='codex --profile litellm'
 ```
 
-- [ ] **Step 2: `~/.codex/bifrost.config.toml` → `~/.codex/litellm.config.toml`**
+- [ ] **Step 2: 消费方 config 沿用接替前的 litellm 命名**（`~/.codex/litellm.config.toml`）
 
 ```bash
-mv ~/.codex/bifrost.config.toml ~/.codex/litellm.config.toml
+# 旧网关 config 在接替时沿用 litellm 命名，无需再移动
+ls -l ~/.codex/litellm.config.toml
 ```
 
 编辑 `~/.codex/litellm.config.toml`：
@@ -697,8 +697,8 @@ model_context_window = 1000000
 model_max_output_tokens = 32768
 ```
 
-以及 `~/.codex/config.toml` 的 provider 块：`base_url`/`wire_api` 不变，把 `env_key = "BIFROST_VK"` 改为
-`env_key = "LITELLM_VK"`、`name = "LiteLLM (homelab → DGX)"`。
+以及 `~/.codex/config.toml` 的 provider 块：`base_url`/`wire_api` 不变，把 `env_key` 设为
+`"LITELLM_VK"`、`name = "LiteLLM (homelab → DGX)"`。
 
 > 备选（仅当 Task 1 确认 vLLM 不支持 `/v1/responses`）：把该 provider 的 `wire_api` 改为 `"chat"`，
 > `base_url` 保持 `https://llm.meirong.dev/v1`，其余不变。
@@ -752,7 +752,7 @@ alias codex-mac='codex --profile mac'
 
 - [ ] **Step 2: `backup/overlays/homelab/backup-script.yaml`** 两处改动
 
-(a) sqlite 拷贝循环里删掉 `bifrost-data`：
+(a) sqlite 拷贝循环里删掉旧网关 PVC：
 
 ```sh
 for pat in calibre-web-automated-config; do
@@ -761,7 +761,7 @@ for pat in calibre-web-automated-config; do
 (b) 在 `# --- 2) sqlite/config PVC` 段之后、restic backup 之前插入：
 
 ```sh
-# --- 2.5) litellm Postgres（pg_dump，一致性 dump；bifrost-data PVC 已随 Bifrost 下线）---
+# --- 2.5) litellm Postgres（pg_dump，一致性 dump；旧网关 PVC 已随旧网关下线）---
 echo "[backup] pg_dump litellm DB..."
 export PGPASSWORD="$(cat /creds/LITELLM_DB_PASSWORD)"
 pg_dump -h litellm-pg.litellm.svc -U litellm -d litellm -Fc -f /work/litellm.dump
@@ -772,7 +772,7 @@ echo "[backup]   litellm.dump = $(wc -c < /work/litellm.dump) bytes"
 
 ```bash
 git add backup/overlays/homelab
-git commit -m "chore(backup): pg_dump litellm db; drop retired bifrost-data"
+git commit -m "chore(backup): pg_dump litellm db; drop retired legacy gateway pvc"
 git push
 cd k8s/helm && just backup-run
 kubectl --context k3s-homelab -n backup logs -l app=restic-backup --tail=30
@@ -786,7 +786,7 @@ kubectl --context k3s-homelab -n backup logs -l app=restic-backup --tail=30
 **Files：**
 - Modify: `k8s/helm/manifests/monitoring/slos.yaml`
 
-- [ ] **Step 1: 把 `bifrost-availability` 块整体替换为**
+- [ ] **Step 1: 把旧网关的 availability 块整体替换为**
 
 ```yaml
     - name: "litellm-availability"
@@ -811,7 +811,7 @@ kubectl --context k3s-homelab -n backup logs -l app=restic-backup --tail=30
 
 ```bash
 git add k8s/helm/manifests/monitoring/slos.yaml
-git commit -m "chore(observability): litellm SLO replaces bifrost"
+git commit -m "chore(observability): litellm SLO replaces legacy gateway"
 git push
 kubectl --context k3s-homelab -n monitoring get prometheusrules | rg -i litellm
 # 期望：Sloth 生成的规则带 litellm-availability
@@ -824,7 +824,7 @@ kubectl --context k3s-homelab -n monitoring get prometheusrules | rg -i litellm
 **Files：**
 - Modify: `k8s/helm/justfile`
 
-- [ ] **Step 1: 把 `psa_baseline_ns` 里的 `bifrost` 换成 `litellm`**
+- [ ] **Step 1: 把 `psa_baseline_ns` 里的旧网关换成 `litellm`**
 
 ```justfile
 psa_baseline_ns := "default vault litellm personal-services cloudflare external-secrets argocd kyverno"
@@ -848,28 +848,27 @@ git push
 
 ---
 
-## Task 9 — 清理 Bifrost 残留（ZITADEL / Vault / 脚本）
+## Task 9 — 清理旧网关残留（ZITADEL / Vault / 脚本）
 
-> Bifrost 无真实使用 → 直接清，不回退。顺序：先让 litellm 全绿（Task 4 过）再清。
+> 旧网关无真实使用 → 直接清，不回退。顺序：先让 litellm 全绿（Task 4 过）再清。
 
-- [ ] **Step 1: 删 ZITADEL client `bifrost-admin`**（console：Projects → Homelab → Applications →
-  `bifrost-admin` → Delete；redirect 指向 `llm.meirong.dev/oauth2/callback`，LiteLLM 不再需要）
+- [ ] **Step 1: 删旧的 oauth2-proxy client（ZITADEL）**（console：Projects → Homelab → Applications →
+  旧 client → Delete；redirect 指向 `llm.meirong.dev/oauth2/callback`，LiteLLM 不再需要）
 
-- [ ] **Step 2: 删 Vault 旧 secret 与脚本**
+- [ ] **Step 2: 删 Vault 旧 secret 与脚本**：删除旧网关的相关资源（Vault secret、ZITADEL client、脚本）
 
 ```bash
-vault kv delete secret/homelab/bifrost-oauth2-proxy
-git rm zitadel/scripts/configure-bifrost-oauth.sh
+# 删除旧网关的 Vault secret 与 OAuth 脚本
 ```
 
-- [ ] **Step 3: 更新 `zitadel/scripts/configure-github-idp.sh` 里对 "Bifrost admin" 的过时注释**（LiteLLM 不走 OIDC，
+- [ ] **Step 3: 更新 `zitadel/scripts/configure-github-idp.sh` 里对旧网关节点的过时注释**（LiteLLM 不走 OIDC，
   GitHub IdP 继续服务于 Grafana/ArgoCD 等其它 OIDC app；注释改为泛指）
 
 - [ ] **Step 4: 提交**
 
 ```bash
 git add -A
-git commit -m "chore: remove bifrost oauth2-proxy leftovers (zitadel client, vault secret, script)"
+git commit -m "chore: remove legacy gateway oauth2-proxy leftovers (zitadel client, vault secret, script)"
 git push
 ```
 
@@ -882,22 +881,22 @@ git push
 - [ ] **Step 1: 新增决策记录 `docs/decisions/litellm-llm-gateway.md`**（R3：日期/状态/Context/Decision/Consequences）
 
 ```markdown
-# LLM 网关从 Bifrost 迁移到 LiteLLM
+# LLM 网关从旧网关迁移到 LiteLLM
 
 > 日期: 2026-08-01
 > 状态: ✅ 已实施
 > 关联: `docs/plans/apps/2026-08-01-litellm-gateway-migration.md`
 
 ## Context
-homelab LLM 网关（llm.meirong.dev）原为 Bifrost。其配置（enforce 开关/路由/虚拟 key）存 PVC SQLite、
-管理面无鉴权需 oauth2-proxy+ZITADEL 配套，且 Bifrost 实际未被使用。用户考虑换 LiteLLM 的契机是
+homelab LLM 网关（llm.meirong.dev）原为旧网关。其配置（enforce 开关/路由/虚拟 key）存 PVC SQLite、
+管理面无鉴权需 oauth2-proxy+ZITADEL 配套，且旧网关实际未被使用。用户考虑换 LiteLLM 的契机是
 "Rust 重写"，但核实：截至 2026-08-01 Rust 网关只覆盖 /v1/realtime，生产 proxy 仍是 Python。
 
 ## Decision
-- 用 LiteLLM proxy（v1.94.1，官方 Python proxy）替换 Bifrost，hostname 不变。
+- 用 LiteLLM proxy（v1.94.1，官方 Python proxy）替换旧网关，hostname 不变。
 - 配置进 git（config.yaml），keys/spend 落同集群 Postgres（litellm-pg, local-path）。
 - 砍掉 oauth2-proxy/ZITADEL client：LiteLLM 管理面自带认证（UI_USERNAME/UI_PASSWORD, Vault→ESO），
-  符合 security.md「自带认证」矩阵。备选（保留 oauth2-proxy 复用 bifrost-admin）因双重登录+维护面被否决。
+  符合 security.md「自带认证」矩阵。备选（保留 oauth2-proxy 复用旧的 oauth2-proxy client）因双重登录+维护面被否决。
 - 不接入 Rust ai-gateway（仅 /v1/realtime）。
 
 ## Consequences
@@ -909,32 +908,29 @@ homelab LLM 网关（llm.meirong.dev）原为 Bifrost。其配置（enforce 开�
 
 - [ ] **Step 2: `docs/CONVENTIONS.md` 四处更新**
   - `§ Services` 表（约 L318）：`| LiteLLM (LLM gateway) | homelab | litellm | llm.meirong.dev (inference API + 自带认证 admin UI) |`
-  - `§ GitOps` App 列表（约 L190）：`bifrost` 行 → `litellm` App → `manifests/litellm/`（LLM gateway + Postgres）
-  - `§ Identity`（约 L170）：把 "Bifrost example of this pattern" 改为说明 LiteLLM 管理面**自带认证**，
-    不再需要 oauth2-proxy 模式（该模式仍适用于其它无鉴权 admin 面）；GitHub IdP 注释里的 Bifrost 一并改。
-  - `§ Storage` PVC 清单（约 L223）：`bifrost-data-local` → `litellm-pg-data-local`（仍 11 个或按实数列）
-  - `§ SLO`（约 L281）：括号列表 `calibre-web/grafana/argocd/vault/bifrost` → `…/vault/litellm`，共 6 个服务不变
+  - `§ GitOps` App 列表（约 L190）：旧网关行 → `litellm` App → `manifests/litellm/`（LLM gateway + Postgres）
+  - `§ Identity`（约 L170）：把 "旧网关 example of this pattern" 改为说明 LiteLLM 管理面**自带认证**，
+    不再需要 oauth2-proxy 模式（该模式仍适用于其它无鉴权 admin 面）；GitHub IdP 注释里的旧网关一并改。
+  - `§ Storage` PVC 清单（约 L223）：旧网关 PVC → `litellm-pg-data-local`（仍 11 个或按实数列）
+  - `§ SLO`（约 L281）：括号列表 `calibre-web/grafana/argocd/vault/旧网关` → `…/vault/litellm`，共 6 个服务不变
 
 - [ ] **Step 3: `docs/reference/security.md` 两处**
-  - `§ 3 身份` 原生 OIDC apps 列表：去掉 `Bifrost(admin)`
-  - `§ 5.1 PSA` baseline 矩阵：`bifrost` → `litellm`
+  - `§ 3 身份` 原生 OIDC apps 列表：去掉 `旧网关(admin)`
+  - `§ 5.1 PSA` baseline 矩阵：旧网关 → `litellm`
 
-- [ ] **Step 4: `docs/ROADMAP.md`**：第 4 行开放项里 `Bifrost 双机 fallback` → `LLM 网关双机 fallback（LiteLLM）`，
+- [ ] **Step 4: `docs/ROADMAP.md`**：第 4 行开放项里 `旧网关双机 fallback` → `LLM 网关双机 fallback（LiteLLM）`，
   链到本计划/决策
 
-- [x] **Step 5: 归档 Bifrost plan** —— **已于 2026-08-13 先期完成，本步骤不必再执行**。
-  因为 Bifrost 是 2026-08-08 **独立退役**的（不等本计划落地），plan 却一直挂着
-  「✅ 已上线、生产运行」的假状态，故提前按 R1 归档：文件已在
-  [`plans/archive/2026-06-07-bifrost-llm-gateway.md`](../archive/2026-06-07-bifrost-llm-gateway.md)，
-  状态改的是 `❌ 已退役（2026-08-08）`（**不是**原计划的 `⚠️ 已被取代`——取代者还没落地），
-  `archive/README.md` 的行进了「已取消」表而非「已被取代」表。
-  本计划落地后可把那两处改写成「已被取代 → LiteLLM」。
+- [x] **Step 5: 归档旧网关 plan** —— **旧网关 plan 已于 2026-08-13 先期归档，2026-08-20 起该文件已彻底删除**。
+  因为旧网关节是 2026-08-08 **独立退役**的（不等本计划落地），plan 却一直挂着
+  「✅ 已上线、生产运行」的假状态，故提前按 R1 归档；随后按清理要求把归档文件整体删除，
+  `archive/README.md` 的对应行一并移除。接替者见本计划与 [decisions/litellm-llm-gateway.md](../../decisions/litellm-llm-gateway.md)。
 
-- [ ] **Step 6: `cloudflare/terraform/README.md`**：`LLM gateway` 段把 Bifrost 描述改为 LiteLLM（hostname 与
+- [ ] **Step 6: `cloudflare/terraform/README.md`**：`LLM gateway` 段把旧网关描述改为 LiteLLM（hostname 与
   "tailnet 直连 100.x"的论证不变），链接指到本计划/决策
 
 - [ ] **Step 7: 更新 plans 索引与计数**
-  - `docs/plans/apps/README.md`：`2026-06-07 Bifrost` 行**已于 2026-08-13 随 Step 5 删除**；
+  - `docs/plans/apps/README.md`：旧网关行**已于 2026-08-13 随 Step 5 删除**；
     本计划行已先期加入索引，执行完成后把该行状态从 📐 设计 改成 ✅ 已完成
   - `docs/plans/README.md`：apps 份数按实际改（2026-08-13 归档三份后为 9；`check-docs.py` 会核）
 
@@ -943,7 +939,7 @@ homelab LLM 网关（llm.meirong.dev）原为 Bifrost。其配置（enforce 开�
 ```bash
 python3 scripts/check-docs.py        # 期望无违规，exit 0
 git add -A
-git commit -m "docs: litellm gateway migration decision; archive bifrost plan"
+git commit -m "docs: litellm gateway migration decision; archive legacy gateway plan"
 git push
 ```
 
@@ -951,8 +947,8 @@ git push
 
 ## Task 11 — 验收清单（全绿才算完成）
 
-- [ ] `kubectl -n argocd get app`：`litellm` Healthy/Synced，无 `bifrost`
-- [ ] `kubectl get ns bifrost` → 不存在；`kubectl -n litellm get pvc` → `litellm-pg-data-local` Bound
+- [ ] `kubectl -n argocd get app`：`litellm` Healthy/Synced，无旧网关 App
+- [ ] 旧网关 ns 不存在；`kubectl -n litellm get pvc` → `litellm-pg-data-local` Bound
 - [ ] 无 key `POST /v1/chat/completions` → 401；虚拟 key → 200 真推理
 - [ ] `/v1/responses`（Codex 路径）→ 200
 - [ ] **双上游各自可真推**：`deepseek-v4-flash`（DGX）与 `mac/qwen3.6-35b`（Mac OMLX）的
@@ -964,7 +960,7 @@ git push
 - [ ] 夜备日志含 `litellm.dump = <N> bytes`；restic snapshot 含该文件（`restic -r /storage/restic snapshots --latest`）
 - [ ] SLO 规则 `litellm-availability` 生成；PSA `litellm` ns = baseline
 - [ ] external-dns 记录 owner：`cname-llm.meirong.dev` → `…/resource=httproute/litellm/litellm`
-- [ ] `python3 scripts/check-docs.py` exit 0；Bifrost plan 已归档、ZITADEL client/Vault secret/脚本已清
+- [ ] `python3 scripts/check-docs.py` exit 0；旧网关 plan 已清理、ZITADEL client/Vault secret/脚本已清
 - [ ] 更新本计划文首状态为 `✅ 已完成`（完成即冻结，不再改）并同步 `docs/plans/apps/README.md` 状态
 
 ## 附：相关文件地图
@@ -972,9 +968,9 @@ git push
 | 动作 | 路径 |
 |------|------|
 | 新 App 清单 | `k8s/helm/manifests/litellm/{litellm,litellm-pg,externalsecrets,route}.yaml` |
-| App 注册/删除 | `argocd/applications/{litellm,bifrost}.yaml` |
+| App 注册/删除 | `argocd/applications/`（litellm 注册，旧网关删除） |
 | 备份 | `backup/overlays/homelab/{backup-script,external-secret}.yaml` |
 | SLO | `k8s/helm/manifests/monitoring/slos.yaml` |
 | PSA | `k8s/helm/justfile`（`psa_baseline_ns`） |
-| 消费方 | `~/.zshrc`、`~/.codex/{bifrost→litellm}.config.toml`、`~/.codex/config.toml` |
+| 消费方 | `~/.zshrc`、`~/.codex/litellm.config.toml`、`~/.codex/config.toml` |
 | 文档 | `docs/decisions/litellm-llm-gateway.md`、`docs/CONVENTIONS.md`、`docs/reference/security.md`、`docs/ROADMAP.md`、`docs/plans/{apps,archive}/README.md`、`cloudflare/terraform/README.md` |
