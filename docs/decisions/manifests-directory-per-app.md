@@ -41,7 +41,7 @@
   生效的那份 spec 渲染出的对象集合与迁移前完全一致；tracking 注解不变，同步 diff 为零。
 - 竞态窗口（子 App 先于 root 拿到新 revision 刷新，旧 glob 匹配为空）被 ArgoCD 默认
   `automated.allowEmpty=false` 挡住：自动同步拒绝"渲染为空 → 全量裁剪"。
-- 数据兜底：bifrost / calibre-web 的 PVC 本就带 `argocd.argoproj.io/sync-options: Prune=false`。
+- 数据兜底：calibre-web 的 PVC 本就带 `argocd.argoproj.io/sync-options: Prune=false`。
 
 ## 后果
 

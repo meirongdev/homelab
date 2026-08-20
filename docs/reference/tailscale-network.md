@@ -349,7 +349,7 @@ The autoApprovers entry survives untagging (`"10.0.0.26/32"` lists both
 the 2026-08-01 plan — is unfounded. Key expiry is the real hazard.
 
 **Adopted workaround: proxy the capability instead of moving the node.**
-`k8s/helm/manifests/bifrost/dgx-proxy.yaml` ran an nginx on homelab (which *can*
+A cross-cluster `dgx-proxy` Service ran an nginx on homelab (which *can*
 reach the Sparks) and published it as a Cilium **global Service**, so oracle pods
 reached the DGX vLLM cross-cluster:
 
@@ -360,13 +360,13 @@ oracle pod → ClusterMesh VXLAN → dgx-proxy (homelab) → Tailscale → DGX v
 Verified 2026-08-07 end to end from an oracle pod: `/v1/models` → 200, a real
 `/v1/chat/completions` → 2.7 s.
 
-⚠️ **2026-08-08 retired with the `bifrost` ArgoCD App**；接替的 LLM 网关 **LiteLLM 已于
+⚠️ **2026-08-08 retired with the old LLM-gateway App**；接替的 LLM 网关 **LiteLLM 已于
 2026-08-16 上线**（homelab `litellm` ns，`llm.meirong.dev`）。两集群 global-Service 计数
 回到 0，ClusterMesh 回到纯备用能力。
 ☠️ **一处遗留没跟上**（2026-08-20 复核）：oracle 的 `calibre-metadata-llm` CronJob 仍是
-suspend + `schedule: 0 5 31 2 *`（永不触发），其 `LLM_URL` 默认值还写着已经不存在的
-`dgx-proxy.bifrost.svc.cluster.local:8080`
-（`cloud/oracle/manifests/calibre-metadata/metadata-llm.yaml`）。**照现状 unsuspend 只会连不上。**
+suspend + `schedule: 0 5 31 2 *`（永不触发），其 `LLM_URL` 曾指向已经不存在的跨集群
+`dgx-proxy` 服务（`cloud/oracle/manifests/calibre-metadata/metadata-llm.yaml`），已置空并行
+标记退役。**照现状 unsuspend 只会连不上。**
 复活的两条路（都不是改一行就完事：LiteLLM 走 ClusterIP + 强制 key 鉴权，oracle 要么再搭一个
 全局 Service、要么走公网并新开 virtual key）与"直接退役"的判据，已写在该清单的文件头，
 不在此重复。
@@ -378,8 +378,8 @@ on oracle (so propagation worked), yet oracle pods got
 concerns: Cilium merges remote backends into a *local* Service, but the
 `*.svc.cluster.local` record still comes from the local cluster's CoreDNS reading
 the local Service object. The oracle half **was** a backend-less shadow Service —
-`cloud/oracle/manifests/bifrost/dgx-proxy-service.yaml`, deleted with the rest of
-bifrost on 2026-08-08. The *rule* survives the example: if you ever publish a global
+the same-named `dgx-proxy` Service in the oracle cluster, deleted with the rest on
+2026-08-08. The *rule* survives the example: if you ever publish a global
 Service again, create the Service object in **both** clusters.
 
 ## Cluster DNS on the homelab node (related, bit us 2026-07-07)

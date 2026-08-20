@@ -1,6 +1,6 @@
 # Cloudflare AI Gateway Implementation Plan
 
-> **❌ Deprecated（已退役）**: 落地后 `cloudflare_ai_gateway` Terraform 资源已整体移除（`terraform state rm`），AI 网关需求改由自建 **Bifrost** 满足，见 [2026-06-07-bifrost-llm-gateway.md](2026-06-07-bifrost-llm-gateway.md)。本仓库当前不存在任何 Cloudflare AI Gateway 资源。
+> **❌ Deprecated（已退役）**: 落地后 `cloudflare_ai_gateway` Terraform 资源已整体移除（`terraform state rm`），AI 网关需求改由自建 LLM 网关满足。本仓库当前不存在任何 Cloudflare AI Gateway 资源。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -262,7 +262,7 @@ Cloudflare AI Gateway custom providers require a **Cloudflare-reachable HTTPS up
 
 - A Tailscale `100.x` address is reachable from your tailnet, but not from Cloudflare's edge.
 - Before wiring `nv-dgx-spark` or `100.89.15.120` into AI Gateway, expose each model endpoint behind a Cloudflare-reachable HTTPS hostname.
-- For DGX Spark, prefer exposing the Bifrost gateway rather than individual `vLLM` ports so AI Gateway only targets one stable upstream.
+- For DGX Spark, prefer exposing the self-hosted gateway rather than individual `vLLM` ports so AI Gateway only targets one stable upstream.
 ```
 
 - [ ] **Step 3: Update the file structure section**

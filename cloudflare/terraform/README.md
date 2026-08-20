@@ -43,14 +43,13 @@ just plan   # Preview changes
 just apply  # Apply changes
 ```
 
-> **LLM gateway**: there is **no LLM gateway right now**. Bifrost (`llm.meirong.dev`)
-> served that role from 2026-06-07 until it was retired on **2026-08-08**; today the
-> consumers (jobs-sg enrichment, Open Notebook, calibre metadata) talk to the DGX vLLM
-> endpoints directly over the tailnet. A Cloudflare AI Gateway is still not an option
+> **LLM gateway**: served by **LiteLLM** (`llm.meirong.dev`, homelab) with its own
+> authenticated admin UI at `/ui`. Migration: `docs/plans/apps/2026-08-01-litellm-gateway-migration.md`
+> (implemented 2026-08-16); current state: `docs/reference/services.md`. The consumers
+> (jobs-sg enrichment, Open Notebook, calibre metadata) go through the gateway or talk to the
+> DGX vLLM endpoints directly over the tailnet. A Cloudflare AI Gateway is still not an option
 > either way: its custom providers need a CF-edge-reachable HTTPS upstream, and the
-> models live on Tailscale `100.x` addresses the edge can't see. Replacement design:
-> `docs/plans/apps/2026-08-01-litellm-gateway-migration.md` (📐 design, not deployed).
-> History: `docs/plans/archive/2026-06-07-bifrost-llm-gateway.md`.
+> models live on Tailscale `100.x` addresses the edge can't see.
 
 ## Adding a New Subdomain
 

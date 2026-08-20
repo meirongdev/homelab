@@ -15,8 +15,8 @@
 #
 # ☠️☠️ **本作业当前是坏的（2026-08-20 复核）—— 别照现状 unsuspend，它连不上。**
 #
-# 下面所有 `LLM_URL` 默认值与 env 都指向 `dgx-proxy.bifrost.svc.cluster.local:8080`，
-# 那个 Service **随 bifrost App 一起在 2026-08-08 退役了**，现在两集群的全局 Service
+# 下面所有 `LLM_URL` 默认值与 env 曾指向跨集群的 `dgx-proxy`（Cilium 全局服务），
+# 那个 Service **随旧 LLM 网关一起在 2026-08-08 退役了**，现在两集群的全局 Service
 # 计数都是 0。作业本身是 suspend + `schedule: 0 5 31 2 *`（2 月 31 日 = 永不触发），
 # 所以它不会自己失败、也不会告警 —— 坏得完全安静。
 #
@@ -65,7 +65,7 @@ data:
     CALIBRE_ENV = dict(os.environ, LD_LIBRARY_PATH="/app/calibre/lib")
 
     LLM_URL = os.environ.get(
-        "LLM_URL", "http://dgx-proxy.bifrost.svc.cluster.local:8080/v1/chat/completions")
+        "LLM_URL", "")   # 曾指向跨集群 dgx-proxy；2026-08-08 随网关退役，置空并 suspend
     LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-v4-flash")
     LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "300"))
 
@@ -514,9 +514,10 @@ spec:
                 # 候选池 234 本，实测约 10s/本 ≈ 40 分钟。
                 - name: LIMIT
                   value: "300"
-                # ⚠️ 必须走 dgx-proxy：oracle 直连不到 DGX（见文件头）。
+                # ⚠️ 曾必须走跨集群的 dgx-proxy（oracle 直连不到 DGX，见文件头）；
+                # 该路由已随 LLM 网关于 2026-08-08 退役，本作业 suspend，恢复前需重设。
                 - name: LLM_URL
-                  value: "http://dgx-proxy.bifrost.svc.cluster.local:8080/v1/chat/completions"
+                  value: ""
                 - name: LLM_MODEL
                   value: "deepseek-v4-flash"
                 # 与 jobs-sg 同口径；nginx 代理侧也是 300s，两边要一致，

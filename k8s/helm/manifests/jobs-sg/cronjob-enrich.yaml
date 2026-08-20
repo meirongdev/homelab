@@ -3,20 +3,19 @@
 # （baseline 全量扫描实测 29 分钟 / 884 页，所以 19:10 开始不会撞上）。
 # fail-open：LLM 出错时保留规则结果并 exit 0；积压由 JobsSgEnrichBacklog 告警兜底。
 #
-# ⚠️ **直连 DGX vLLM，不经 Bifrost**：省掉 virtual key 这条 Vault 依赖。
-# 模型 id 是后端相关的 —— Bifrost 路由用带 provider 前缀的名字
+# ⚠️ **直连 DGX vLLM，不经 LLM 网关**：省掉 virtual key 这条 Vault 依赖。
+# 模型 id 是后端相关的 —— 网关路由用带 provider 前缀的名字
 # （`custom_dgx/deepseek-v4-flash`），裸 vLLM 提供的是 `deepseek-v4-flash`，
 # 写前缀名会 404。上游 2026-08-03 (d833623) 把模型链改成读 LLM_MODELS 后才可配。
 # 实测（2026-08-03，jobs-sg ns 内的 pod）：DGX 可达、无需认证、`x-bf-vk` 头被忽略。
 #
-# 代价：没有 Bifrost 的 custom_m2 回退，也没有用量计量；DGX 是跨 tailnet 共享的
+# 代价：没有网关的 custom_m2 回退，也没有用量计量；DGX 是跨 tailnet 共享的
 # 境内机器（RTT 66–83ms），不可用时 enrich fail-open 退回纯规则模式。
-# （此前“切回 Bifrost”的改法已随 bifrost 2026-08-08 退役一并失效——直连 DGX 是当前
-# 唯一形态，后续换 LLM 网关时另行规划。）
+# 直连 DGX 是目前唯一形态（曾走 LLM 网关，已于 2026-08-08 随网关退役一并失效），
+# 后续换路由时另行规划。
 #
-# BIFROST_VK 保留且标 optional：走 DGX 时它是空值且无害（vLLM 忽略该头），
-# 留着让切回 Bifrost 只需改 base URL。Vault 未写时也不会 CreateContainerConfigError
-# 卡死（见 external-secret.yaml）。
+# 网关的 virtual key 环境变量不在此处：走 DGX 时它是空值且无害（vLLM 忽略该头）。
+# Vault 未写时也不会 CreateContainerConfigError 卡死（见 external-secret.yaml）。
 #
 # activeDeadlineSeconds 3h + 并发 8。
 #
@@ -69,7 +68,7 @@ spec:
                 # 同一台机器也在给 Open Notebook 供模型，见 reference/open-notebook.md。
                 - name: LLM_BASE_URL
                   value: http://100.97.87.120:8000
-                # 裸 vLLM 的模型 id，不带 Bifrost 的 provider 前缀。
+                # 裸 vLLM 的模型 id，不带网关的 provider 前缀。
                 - name: LLM_MODELS
                   value: deepseek-v4-flash
                 - name: LLM_CONCURRENCY
@@ -83,9 +82,9 @@ spec:
                 # 显式写成 300s（= 上游 llm.DefaultTimeout），要调不用重新构镜像。
                 - name: LLM_TIMEOUT
                   value: "300"
-                # 这里**没有** BIFROST_VK：直连 DGX 不需要 virtual key，
-                # external-secret.yaml 也不再声明该键。切回 Bifrost 时才需要补回
-                # （改 LLM_BASE_URL + 删 LLM_MODELS + 两处加回 bifrost-vk）。
+                # 这里**没有**网关的 virtual key：直连 DGX 不需要，
+                # external-secret.yaml 也不再声明该键。若改走 LLM 网关才需要补回
+                # （改 LLM_BASE_URL + 删 LLM_MODELS + 声明对应的 key）。
               # CPU limit 3000m：节点是 8 核 / 7600m allocatable，实测 idle 用量约 9%、
               # requests 合计仅 27%，容量宽裕（2026-08-03 核对）。
               #

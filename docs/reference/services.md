@@ -52,7 +52,7 @@ DNS-only、绕过 WAF、DNS 通了≠站点通了）见
 - **Homepage 配置更新**: 配置 ConfigMap 用 `subPath` 挂载、**不会热加载** —— `git push` 让 ArgoCD
   同步 ConfigMap 后，必须 `kubectl --context oracle-k3s rollout restart deployment/homepage -n homepage`
   才生效。不要 `kubectl delete configmap`（会和 ArgoCD 冲突）。
-  判据（2026-08-08 拆 bifrost 时实踩）：ConfigMap 已是新版但 UI 还显示旧磁贴时，**先别改清单**——
+  判据（2026-08-08 拆服务时实踩）：ConfigMap 已是新版但 UI 还显示旧磁贴时，**先别改清单**——
   ① `kubectl --context oracle-k3s get cm homepage-config -n homepage -o jsonpath='{.data.services.yaml}'`
   确认内容已更新；② 再看运行中 Pod 的挂载 `kubectl --context oracle-k3s exec -n homepage deploy/homepage
   -- grep -ri <关键词> /app/config/`；subPath 会让 ① 与 ② 不一致，属正常——以 `rollout restart` 收尾。

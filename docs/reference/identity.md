@@ -13,7 +13,7 @@
   **公开**、**原生 ZITADEL OIDC**、或**自带认证**（如 Vault、Timeslot admin Basic Auth）。
 - **方向约定**: `HTTPRoute` 保持 controller-neutral，认证放应用层。优先原生 OIDC；
   应用不会说 OIDC 时才用 per-app `oauth2-proxy` 反代（当前**无实例**：Excalidraw 那个
-  2026-08-04 拆了，Bifrost 2026-08-08 退役）。
+  2026-08-04 拆了，LLM 网关那个 2026-08-08 一并退役）。
 
 ## ZITADEL 部署形态（oracle-k3s）
 
@@ -106,9 +106,9 @@
 
 ## 无法直连 OIDC 的应用：per-app oauth2-proxy
 
-**Bifrost** 曾是样板（OSS admin UI / config-API 无认证 → per-app `oauth2-proxy` 反代 +
-ZITADEL OIDC；推理 API 直连 + virtual key 把关），**2026-08-08 已随整个 `bifrost`
-ArgoCD App 退役**；`zitadel/scripts/configure-bifrost-oauth.sh` 也已于 2026-08-16 删除
+**LLM 网关**（已退役）曾是样板（OSS admin UI / config-API 无认证 → per-app `oauth2-proxy` 反代 +
+ZITADEL OIDC；推理 API 直连 + virtual key 把关），**2026-08-08 已随整个 ArgoCD
+App 退役**；它当年那条 oauth2-proxy 的配置脚本也已于 2026-08-16 删除
 （commit `caab498`），仓库里不再有这个模板 —— 要复用做法照下面 oauth2-proxy 的通用形态写。
 接替它的 LLM 网关是 **LiteLLM**（自带认证的 admin UI，不需要 oauth2-proxy），见
 [../decisions/litellm-llm-gateway.md](../decisions/litellm-llm-gateway.md)。

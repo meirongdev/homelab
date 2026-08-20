@@ -44,7 +44,7 @@
 
 1. **永不 automerge**。仓库有一批 manual-helm 组件（Cilium / Vault / ESO / ArgoCD 本体），
    合并只改 git、现网不动。自动合并会制造"git 说新版、现网是旧版"的假象——
-   Bifrost 那份挂着"✅ 生产运行"的死文档误导过 5 天，同一类伤害。
+   那种挂着"✅ 生产运行"的死文档误导过 5 天，同一类伤害。
    这批的 PR 打 `manual-helm` label + PR 正文写明"合并 ≠ 部署"。
 2. **不开 `pinDigests`**。仓库要求 arm64 关键镜像钉**多架构 index digest**，
    让 Renovate 给所有镜像铺 digest 会淹掉 PR 队列；已有 digest 的它会自动跟着升。

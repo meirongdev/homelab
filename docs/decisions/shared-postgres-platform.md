@@ -12,7 +12,7 @@ oracle-k3s 上有两个 postgres，形态完全不同：
 | `rss-postgres`（rss-system） | 手搓 Deployment，`Recreate` 策略防双写，外挂 postgres-exporter sidecar + NodePort 31087 | **15** | miniflux | 108Mi |
 | `zitadel-pg`（zitadel） | CNPG `Cluster` | 17 | ZITADEL | 90Mi |
 
-homelab 集群**一个 postgres 都没有**（bifrost/jobs-sg 是 sqlite，open-notebook 是 SurrealDB，
+homelab 集群**一个 postgres 都没有**（jobs-sg 是 sqlite，open-notebook 是 SurrealDB，
 Vault 是 raft）。所以"合并两个集群的数据库"这个动作从一开始就不存在——两个库本来就同集群、
 同节点。真正的问题是**两套并存的模式**：新服务要库时没有可复用的东西，只能再抄一遍
 Deployment + PVC + Service + exporter。

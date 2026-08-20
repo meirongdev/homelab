@@ -75,7 +75,7 @@
    | `cname-argocd.meirong.dev` | `"heritage=external-dns,external-dns/owner=homelab-externaldns,external-dns/resource=httproute/argocd/argocd"` | `argocd/argocd` |
    | `cname-book.meirong.dev` | `"…owner=homelab-externaldns,…/resource=httproute/personal-services/calibre-web"` | `personal-services/calibre-web` |
    | `cname-grafana.meirong.dev` | `"…owner=homelab-externaldns,…/resource=httproute/monitoring/grafana"` | `monitoring/grafana` |
-   | `cname-llm.meirong.dev` | `"…owner=homelab-externaldns,…/resource=httproute/bifrost/bifrost"` | `bifrost/bifrost` |
+   | `cname-llm.meirong.dev` | `"…owner=homelab-externaldns,…/resource=httproute/litellm/litellm"` | `litellm/litellm` |
    | `cname-vault.meirong.dev` | `"…owner=homelab-externaldns,…/resource=httproute/vault/vault"` | `vault/vault` |
 
 2. 等 reconcile，零停机验证通过：external-dns 连续多轮日志 `All records are already up to date`，5 条 CNAME 的 `modified_on` 与迁移前逐字节一致（证明是接管、非删重建）。

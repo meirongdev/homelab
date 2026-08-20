@@ -1,7 +1,7 @@
 # Cloudflare AI Gateway 配置设计文档
 
 **日期**: 2026-05-31  
-**状态**: 已批准 → **❌ Deprecated（已退役）**: 落地后 `cloudflare_ai_gateway` Terraform 资源已整体移除（`terraform state rm`），AI 网关需求改由自建 **Bifrost** 满足，见 [2026-06-07-bifrost-llm-gateway.md](2026-06-07-bifrost-llm-gateway.md)。本仓库当前不存在任何 Cloudflare AI Gateway 资源。  
+**状态**: 已批准 → **❌ Deprecated（已退役）**: 落地后 `cloudflare_ai_gateway` Terraform 资源已整体移除（`terraform state rm`），AI 网关需求改由自建 LLM 网关满足。本仓库当前不存在任何 Cloudflare AI Gateway 资源。  
 **目标**: 在 `cloudflare/terraform/` 中引入 Cloudflare AI Gateway 的基础 Terraform 配置，为后续接入自建模型与多集群 AI 应用提供统一出口。
 
 ---
@@ -70,7 +70,7 @@ homelab / oracle-k3s / external clients
   -> Cloudflare AI Gateway
   -> Custom Provider (HTTPS endpoint)
   -> 自建模型入口
-     - DGX Spark Bifrost / vLLM
+     - DGX Spark 自建网关 / vLLM
      - 100.89.15.120 上的模型服务
 ```
 
@@ -84,7 +84,7 @@ Cloudflare AI Gateway 的 custom provider `base_url` 必须是 **Cloudflare 可�
 1. **Cloudflare Tunnel + hostname**（推荐）
 2. 其他 Cloudflare 可访问的 **HTTPS 公网入口**
 
-对于 `nv-dgx-spark`，优先暴露 **Bifrost 网关**，而不是直接暴露每个 vLLM 节点端口。原因是 Bifrost 已经承担了：
+对于 `nv-dgx-spark`，优先暴露 **自建网关**，而不是直接暴露每个 vLLM 节点端口。原因是自建网关已经承担了：
 
 - 统一 OpenAI-compatible 入口
 - provider 级路由
@@ -216,7 +216,7 @@ resource "cloudflare_ai_gateway" "shared" {
 
 建议顺序：
 
-1. 给 DGX Spark 的 Bifrost 入口加 HTTPS 暴露层
+1. 给 DGX Spark 的自建网关入口加 HTTPS 暴露层
 2. 在 Cloudflare AI Gateway 中创建 custom provider，例如 `dgx-spark`
 3. 客户端通过 AI Gateway 调用 `custom-dgx-spark`
 

@@ -137,7 +137,7 @@ subsets:
 
 ⚠️ **只有 homelab 能这么做，oracle 不能** —— oracle 的 `node0` 是 `tagged-devices`
 （tailnet 所有，非用户所有），共享节点根本不在它的 netmap 里。
-oracle 侧若要消费 DGX，仍需 homelab 上的代理（历史方案 `dgx-proxy` 已随 bifrost 于
+oracle 侧若要消费 DGX，仍需 homelab 上的代理（历史方案 `dgx-proxy` 已随旧 LLM 网关于
 2026-08-08 退役），细节见 [tailscale-network.md](../reference/tailscale-network.md)。
 
 ## Consequences

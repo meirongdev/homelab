@@ -1,7 +1,7 @@
-# LiteLLM — self-hosted LLM gateway (homelab), replaces Bifrost (2026-08-01).
+# LiteLLM — self-hosted LLM gateway (homelab).
 #
 # Public surface: llm.meirong.dev (Cloudflare Tunnel → Cilium Gateway → HTTPRoute).
-# Auth model (Bifrost 的 oauth2-proxy 已砍掉 — LiteLLM 管理面自带认证):
+# Auth model (此前的 oauth2-proxy 已不需要 — LiteLLM 管理面自带认证):
 #   - inference (/v1/*, /openai, /anthropic, /genai): master key + virtual keys,
 #     Authorization: Bearer sk-…  (LITELLM_MASTER_KEY 已设 ⇒ 默认强制 key 鉴权)
 #   - admin UI (/ui): LiteLLM 自带登录 (UI_USERNAME/UI_PASSWORD, Vault→ESO)
@@ -15,7 +15,7 @@ metadata:
   name: litellm-config
   namespace: litellm
 data:
-  # ⚠️ api_base 必须带 /v1 后缀 —— LiteLLM 不会像 Bifrost 那样自动补。
+  # ⚠️ api_base 必须带 /v1 后缀 —— LiteLLM 不会自动补。
   # api_key: dummy 不是机密（DGX vLLM 与 Mac OMLX 都忽略鉴权，"any token works"），因此可留在 git。
   # 强制 key 鉴权由 env LITELLM_MASTER_KEY 实现（general_settings.master_key 语义=require a key for all calls）。
   config.yaml: |

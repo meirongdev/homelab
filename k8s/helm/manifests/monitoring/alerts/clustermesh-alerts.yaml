@@ -27,13 +27,13 @@
 # severity warning → routed by Alertmanager (see values/kube-prometheus-stack.yaml). The
 # `release` label is REQUIRED so the kube-prometheus-stack ruleSelector adopts this rule.
 #
-# **2026-08-07 → 2026-08-08: severity tracked live traffic.** `dgx-proxy` (bifrost ns,
-# homelab) was the **first** `service.cilium.io/global` Service — oracle-side jobs
-# resolved it cross-cluster to reach the DGX vLLM, so a mesh break meant those jobs
-# failed outright; that is why these were `critical` from 2026-08-07. bifrost + dgx-proxy
-# were retired on 2026-08-08 (the whole `bifrost` ArgoCD App was removed), the
-# global-Service count is back to 0 on both clusters, so these drop back to `warning` —
-# an outage now only degrades a standby capability, not live traffic.
+# **2026-08-07 → 2026-08-08: severity tracked live traffic.** `dgx-proxy` (homelab,
+# in the former LLM-gateway namespace) was the **first** `service.cilium.io/global`
+# Service — oracle-side jobs resolved it cross-cluster to reach the DGX vLLM, so a mesh
+# break meant those jobs failed outright; that is why these were `critical` from
+# 2026-08-07. `dgx-proxy` was retired on 2026-08-08 (the whole LLM-gateway ArgoCD App was
+# removed), the global-Service count is back to 0 on both clusters, so these drop back to
+# `warning` — an outage now only degrades a standby capability, not live traffic.
 #
 # Deployed via the ArgoCD `monitoring-dashboards` Application (git push → 3-min sync).
 apiVersion: monitoring.coreos.com/v1

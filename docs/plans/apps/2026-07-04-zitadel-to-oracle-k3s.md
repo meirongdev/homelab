@@ -36,7 +36,7 @@ ZITADEL (homelab)
 
 下游 OIDC 客户端（配 `https://auth.meirong.dev`，域名不变则无需改动）:
 - Miniflux (oracle-k3s)
-- Bifrost oauth2-proxy (homelab)
+- 旧 LLM 网关的 oauth2-proxy (homelab)
 - ArgoCD (homelab)
 
 ## 3. 前置条件
@@ -127,7 +127,7 @@ flowchart LR
 3. **验证**：
    - `curl -sI https://auth.meirong.dev` 返回 200
    - OIDC discovery endpoint (`/.well-known/openid-configuration`) 正常
-   - 任一 OIDC client 能完成登录（Miniflux 或 Bifrost）
+   - 任一 OIDC client 能完成登录（Miniflux 或旧网关）
 
 4. **清理**：
    - 从 homelab tunnel ingress 移除 `auth.meirong.dev`

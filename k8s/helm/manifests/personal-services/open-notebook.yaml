@@ -15,7 +15,7 @@
 # 模型不在这里配：v1 推荐在 Settings → API Keys 里加 OpenAI-Compatible / oMLX 凭据，
 # 配置落 SurrealDB（env 变量那套已被上游标记 deprecated）。具体填什么值见
 # docs/plans/apps/2026-08-01-open-notebook-homelab.md，**该 PVC 必须进 restic 夜备**，
-# 否则重建即丢——与 bifrost PVC-only 配置同一类债。
+# 否则重建即丢——与旧网关 PVC-only 配置同一类债。
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

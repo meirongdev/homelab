@@ -8,7 +8,7 @@
 ```
 zitadel/
 ├── terraform/    # bootstrap 用户 / 项目 / 应用客户端（入口见 terraform/README.md）
-└── scripts/      # 一次性/幂等的配置脚本：OIDC 应用、GitHub IdP、SMTP、Bifrost OAuth
+└── scripts/      # 一次性/幂等的配置脚本：OIDC 应用、GitHub IdP、SMTP（旧 OAuth 配置脚本已移除）
 ```
 
 ## 快速上手
