@@ -1,6 +1,6 @@
 # Services — 服务清单
 
-> Last updated: 2026-08-18
+> Last updated: 2026-08-21
 > Status: 生效事实
 >
 > **这张表是服务清单的唯一真相源** —— `docs/README.md`、`docs/ARCHITECTURE.md` 与各 runbook
