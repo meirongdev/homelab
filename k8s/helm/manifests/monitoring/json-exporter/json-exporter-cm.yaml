@@ -1,0 +1,138 @@
+# json-exporter 的模块配置 —— 把 Mac OMLX 的两个 JSON 端点翻译成 Prometheus 指标。
+#
+# 为什么需要它：**OMLX 自己没有 /metrics**（0.6.3rc2 实测 `/metrics` 与 `/v1/metrics` 都是
+# 404，整个 site-packages 里没有 prometheus/openmetrics 依赖）。它把运行状态放在两个
+# **免鉴权**的 JSON 端点上，而更细的 `/admin/api/stats`（含 per-model token 账本）只认
+# admin **会话 cookie**（`omlx/admin/auth.py::require_admin`，没有 Bearer 通路），
+# 只能靠登录流程拿——不做。
+#
+# 为什么不自己写 exporter：现成的 prometheus-community/json_exporter 实测能覆盖这两个端点
+# 的全部有用字段（含数组展开成 per-model 标签）。踩过的坑与口径 →
+# docs/reference/omlx-inference-metrics.md（唯一真相源）。
+#
+# ☠️ **值为 null 的字段会被丢弃，并且每次抓取都刷一条 ERROR 日志**（11 个模型 × 2 字段
+#    × 每 30s = 稳定的日志噪音）。`actual_size` / `last_access` 只在模型驻留时非 null，
+#    所以它们**单独放在 omlx_model_resident 里、用 `?(@.loaded == true)` 过滤**，
+#    不要合并回 omlx_model —— 合并回去就是上面那串 ERROR。
+#
+# ⚠️ custom_kernels 是**字典不是数组**，jsonpath 带不出 key 名，所以 4 个内核只能一条条写死；
+#    OMLX 升级新增内核时这里不会自动出现（面板少一格，不报错）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: json-exporter-config
+  namespace: monitoring
+data:
+  config.yml: |
+    modules:
+      # ── /api/status：流量与吞吐（全局累计，进程重启归零）──
+      omlx_status:
+        metrics:
+          - name: omlx_uptime_seconds
+            help: OMLX server uptime in seconds (labels carry version + default model)
+            path: '{ .uptime_seconds }'
+            labels:
+              version: '{ .version }'
+              default_model: '{ .default_model }'
+          - name: omlx_requests_total
+            help: Requests served since server start (resets on restart)
+            path: '{ .total_requests }'
+          - name: omlx_requests_active
+            help: Requests currently executing (scheduler.max_concurrent_requests = 2)
+            path: '{ .active_requests }'
+          - name: omlx_requests_waiting
+            help: Requests queued behind the concurrency limit
+            path: '{ .waiting_requests }'
+          - name: omlx_prompt_tokens_total
+            help: Prompt tokens accepted since start
+            path: '{ .total_prompt_tokens }'
+          - name: omlx_completion_tokens_total
+            help: Completion tokens generated since start
+            path: '{ .total_completion_tokens }'
+          - name: omlx_cached_tokens_total
+            help: Prompt tokens served from cache since start
+            path: '{ .total_cached_tokens }'
+          - name: omlx_cache_efficiency_percent
+            help: cached/prompt tokens since start, already in percent (0-100)
+            path: '{ .cache_efficiency }'
+          # ⚠️ 这两条是**自启动以来的累计平均**（token 数 ÷ 累计 prefill/generate 秒数），
+          #    不是当前速度：跑久了几乎不动。要看"现在快不慢"用 rate(*_tokens_total)。
+          - name: omlx_avg_prefill_tps
+            help: Lifetime average prefill tokens/s since start (NOT instantaneous)
+            path: '{ .avg_prefill_tps }'
+          - name: omlx_avg_generation_tps
+            help: Lifetime average generation tokens/s since start (NOT instantaneous)
+            path: '{ .avg_generation_tps }'
+          # 能力位：这台机器上 4 个自定义内核当前全部 import 失败（面板上一眼可见）。
+          - name: omlx_custom_kernel_available
+            help: Whether an OMLX custom Metal kernel loaded successfully
+            path: '{ .custom_kernels.bonsai.available }'
+            labels: { kernel: bonsai }
+          - name: omlx_custom_kernel_available
+            help: Whether an OMLX custom Metal kernel loaded successfully
+            path: '{ .custom_kernels.glm_moe_dsa.available }'
+            labels: { kernel: glm_moe_dsa }
+          - name: omlx_custom_kernel_available
+            help: Whether an OMLX custom Metal kernel loaded successfully
+            path: '{ .custom_kernels.minimax_m3.available }'
+            labels: { kernel: minimax_m3 }
+          - name: omlx_custom_kernel_available
+            help: Whether an OMLX custom Metal kernel loaded successfully
+            path: '{ .custom_kernels.qwen35_prefill.available }'
+            labels: { kernel: qwen35_prefill }
+          - name: omlx_ane_prefill_patch_available
+            help: Whether the Apple Neural Engine prefill patch is available
+            path: '{ .ane_prefill.patch_available }'
+          - name: omlx_ane_prefill_configured_models
+            help: Models configured to prefill on the ANE
+            path: '{ .ane_prefill.configured_models }'
+
+      # ── /v1/models/status：驻留与内存（engine pool 的换入换出真相）──
+      omlx_models:
+        metrics:
+          - name: omlx_model
+            type: object
+            help: Per-model engine-pool state
+            path: '{ .models[*] }'
+            labels:
+              model: '{ .id }'
+              engine: '{ .engine_type }'
+              source: '{ .source_type }'
+            values:
+              loaded: '{ .loaded }'
+              loading: '{ .is_loading }'
+              pinned: '{ .pinned }'
+              estimated_size_bytes: '{ .estimated_size }'
+              context_length: '{ .model_context_length }'
+          # 只对**已驻留**的模型取这两个字段：未驻留时它们是 null（见文件头 ☠️）。
+          - name: omlx_model_resident
+            type: object
+            help: Fields that only exist while a model is resident
+            path: '{ .models[?(@.loaded == true)] }'
+            labels:
+              model: '{ .id }'
+              engine: '{ .engine_type }'
+            values:
+              # 实际驻留字节：**比 estimated_size 大**（实测 reranker 0.35G 估算 / 0.50G 实际），
+              # 而天花板核算用的是 estimated —— 两者不是一回事，别混着算余量。
+              actual_size_bytes: '{ .actual_size }'
+              # unix 秒。空闲时长 = time() - 本值；per-model TTL 现为 900s。
+              last_access_seconds: '{ .last_access }'
+          - name: omlx_pool_ceiling_bytes
+            help: Engine-pool memory ceiling (settings.json memory_guard_custom_ceiling_gb = 30G)
+            path: '{ .final_ceiling }'
+          - name: omlx_pool_current_memory_bytes
+            help: Sum of resident models' ESTIMATED sizes (the pool's own accounting)
+            path: '{ .current_model_memory }'
+          - name: omlx_pool_model_count
+            help: Models discovered on disk
+            path: '{ .model_count }'
+          - name: omlx_pool_loaded_count
+            help: Models currently resident
+            path: '{ .loaded_count }'
+          - name: omlx_pool_load_seconds_per_gb
+            help: Rolling estimate of model load time per GB
+            path: '{ .load_seconds_per_gb_estimate }'
+          - name: omlx_pool_load_observations
+            help: Number of load-time samples behind the per-GB estimate
+            path: '{ .load_time_observations }'

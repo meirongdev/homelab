@@ -462,6 +462,45 @@ prometheus:
               cluster: macbook
               nodename: macbook-pro
 
+      # MacBook OMLX 本地推理服务（http://100.89.15.120:8000）—— **OMLX 自己没有 /metrics**，
+      # 由集群内 json-exporter.monitoring 把它两个免鉴权 JSON 端点翻成指标。
+      # 形态同 blackbox：抓的是 exporter 的 /probe，target 参数写死在这里。
+      #   omlx-status  ← /api/status        流量/吞吐（累计值，OMLX 重启归零）
+      #   omlx-models  ← /v1/models/status  驻留/内存（engine pool 换入换出）
+      # ⚠️ up{job="omlx-*"} = 「exporter 活着 **且** Mac 应答」，两者分不开；笔记本合盖
+      #    即 down，与 node-exporter-macbook 一样属于预期抖动（未纳入 TargetDown 告警）。
+      # ⚠️ 30s/20s 而不是 15s：OMLX 是单进程 Python，大 prefill 期间事件循环会卡住，
+      #    抓超时正好发生在最该看数据的时候。宁可分辨率低一点。
+      # 见: k8s/helm/manifests/monitoring/json-exporter/
+      #     docs/reference/omlx-inference-metrics.md（指标口径与陷阱，唯一真相源）
+      - job_name: 'omlx-status'
+        scrape_interval: 30s
+        scrape_timeout: 20s
+        metrics_path: /probe
+        params:
+          module: ['omlx_status']
+          target: ['http://100.89.15.120:8000/api/status']
+        static_configs:
+          - targets:
+              - json-exporter.monitoring.svc:7979
+            labels:
+              cluster: macbook
+              nodename: macbook-pro
+
+      - job_name: 'omlx-models'
+        scrape_interval: 30s
+        scrape_timeout: 20s
+        metrics_path: /probe
+        params:
+          module: ['omlx_models']
+          target: ['http://100.89.15.120:8000/v1/models/status']
+        static_configs:
+          - targets:
+              - json-exporter.monitoring.svc:7979
+            labels:
+              cluster: macbook
+              nodename: macbook-pro
+
       # oracle-k3s 指标均为 push 模式（OTel Collector → prometheusremotewrite）
       # 包含: node-exporter, kube-state-metrics, cloudflared, traefik
       # See: cloud/oracle/manifests/monitoring/otel-collector.yaml

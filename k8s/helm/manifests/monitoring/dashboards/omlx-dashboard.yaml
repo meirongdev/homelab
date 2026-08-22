@@ -1,0 +1,1576 @@
+---
+# Grafana Dashboard: Mac OMLX 本地推理
+# 数据源：集群内 json-exporter（monitoring ns）把 OMLX 的两个免鉴权 JSON 端点翻成指标，
+# 由 homelab Prometheus 以 job omlx-status / omlx-models 抓取（经 Tailscale 打到
+# mbp-m2-pro 100.89.15.120:8000）。**OMLX 自己没有 /metrics**。
+#   端点/指标口径/陷阱 → docs/reference/omlx-inference-metrics.md（唯一真相源）
+#   exporter 清单     → k8s/helm/manifests/monitoring/json-exporter/
+#   抓取配置          → k8s/helm/values/kube-prometheus-stack.yaml
+# 面板取舍：这台机器的故障模式是**换模型**（2026-08-22 播客整集失败），
+# 所以「驻留时间线 + 换入换出事件 + 空闲 TTL」排在吞吐之前。
+# 同 dgx-vllm-dashboard 的形态：sidecar 靠 grafana_dashboard:"1" 自动加载，
+# grafana_folder 注解决定文件夹，ArgoCD monitoring-dashboards App 目录源自动同步。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: omlx-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Hardware"
+data:
+  omlx.json: |-
+    {
+      "annotations": {
+        "list": []
+      },
+      "description": "Mac OMLX（mbp-m2-pro）本地推理：模型驻留/换入换出、30G 天花板、请求队列与 token 吞吐。指标由集群内 json-exporter 翻译两个 JSON 端点而来（OMLX 无原生 /metrics）。",
+      "editable": true,
+      "graphTooltip": 1,
+      "links": [
+        {
+          "asDropdown": true,
+          "icon": "external link",
+          "includeVars": false,
+          "keepTime": true,
+          "tags": [
+            "macbook"
+          ],
+          "title": "MacBook 主机面板",
+          "type": "dashboards",
+          "targetBlank": false
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": [
+        "curated",
+        "metrics",
+        "inference",
+        "omlx",
+        "macbook"
+      ],
+      "title": "Hardware / Mac OMLX 推理",
+      "uid": "omlx-inference",
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "constant",
+            "query": "prometheus",
+            "current": {
+              "text": "prometheus",
+              "value": "prometheus"
+            },
+            "hide": 2
+          },
+          {
+            "name": "model",
+            "type": "query",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "query": "label_values(omlx_model_loaded{job=\"omlx-models\"}, model)",
+            "refresh": 2,
+            "includeAll": true,
+            "multi": true,
+            "sort": 1,
+            "current": {
+              "text": "All",
+              "value": "$__all"
+            }
+          },
+          {
+            "name": "engine",
+            "type": "query",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "query": "label_values(omlx_model_loaded{job=\"omlx-models\"}, engine)",
+            "refresh": 2,
+            "includeAll": true,
+            "multi": true,
+            "sort": 1,
+            "current": {
+              "text": "All",
+              "value": "$__all"
+            }
+          }
+        ]
+      },
+      "panels": [
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 0
+          },
+          "id": 100,
+          "panels": [],
+          "title": "📊 概览 / Overview",
+          "type": "row"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "0": {
+                      "text": "离线",
+                      "color": "red",
+                      "index": 0
+                    },
+                    "1": {
+                      "text": "在线",
+                      "color": "green",
+                      "index": 1
+                    }
+                  }
+                }
+              ],
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 0,
+            "y": 1
+          },
+          "id": 1,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "up{job=\"omlx-status\"}",
+              "refId": "A"
+            }
+          ],
+          "title": "服务状态 / OMLX",
+          "type": "stat",
+          "description": "up = 「json-exporter 活着 **且** Mac 应答」，两者分不开。笔记本合盖即 down，属预期。"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "mappings": [],
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 3,
+            "y": 1
+          },
+          "id": 2,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "omlx_uptime_seconds{job=\"omlx-status\"}",
+              "refId": "A",
+              "legendFormat": "{{version}}"
+            }
+          ],
+          "title": "运行时长",
+          "type": "stat",
+          "description": "OMLX 进程 uptime；图例是 version 标签。**进程重启会把所有 *_total 归零**。"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "mappings": [],
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 6,
+            "y": 1
+          },
+          "id": 3,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value_and_name"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "omlx_pool_loaded_count{job=\"omlx-models\"}",
+              "refId": "A",
+              "legendFormat": "驻留"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "omlx_pool_model_count{job=\"omlx-models\"}",
+              "refId": "B",
+              "legendFormat": "发现"
+            }
+          ],
+          "title": "驻留 / 发现模型数",
+          "type": "stat",
+          "description": "发现 = 磁盘上注册的模型数；驻留 = 此刻真在内存里的。"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "mappings": [],
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 85
+                  },
+                  {
+                    "color": "red",
+                    "value": 95
+                  }
+                ]
+              },
+              "decimals": 1
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 5,
+            "x": 9,
+            "y": 1
+          },
+          "id": 4,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "omlx_pool_current_memory_bytes{job=\"omlx-models\"} / omlx_pool_ceiling_bytes{job=\"omlx-models\"} * 100",
+              "refId": "A"
+            }
+          ],
+          "title": "内存占用 / 30G 天花板",
+          "type": "stat",
+          "description": "分子是 engine pool 按 **estimated_size** 的核算口径，不是实际 RSS —— 差多少因模型而异（实测 reranker 单个 +41%，它与 4B 嵌入模型同驻时合计只 +4%）。85%/95% 两档对应 settings.json 的 soft/hard threshold。"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "mappings": [],
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 2
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 14,
+            "y": 1
+          },
+          "id": 5,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "omlx_requests_active{job=\"omlx-status\"}",
+              "refId": "A"
+            }
+          ],
+          "title": "在飞请求",
+          "type": "stat",
+          "description": "scheduler.max_concurrent_requests = **2**：到 2 就满了，多的进排队。"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "mappings": [],
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 3
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 17,
+            "y": 1
+          },
+          "id": 6,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "omlx_requests_waiting{job=\"omlx-status\"}",
+              "refId": "A"
+            }
+          ],
+          "title": "排队请求",
+          "type": "stat",
+          "description": "并发上限之外的等待队列。播客那种 5 路齐发时这里必然 >0。"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "mappings": [],
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "decimals": 1
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 20,
+            "y": 1
+          },
+          "id": 7,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "omlx_avg_generation_tps{job=\"omlx-status\"}",
+              "refId": "A"
+            }
+          ],
+          "title": "累计平均生成 TPS",
+          "type": "stat",
+          "description": "⚠️ **自启动以来的累计平均**（completion tokens ÷ 累计生成秒数），不是当前速度；跑久了几乎不动。看「现在快不快」请用下面的 Token 速率。"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 5
+          },
+          "id": 101,
+          "panels": [],
+          "title": "🧩 模型驻留 / 换入换出（这台机器的头号故障源）",
+          "type": "row"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "OMLX 是**按需换入换出**的：另一个模型要内存时，当前模型被标记待卸载，期间它对所有请求回 `is busy`（2026-08-22 播客整集失败就是这个）。这一栏就是当时唯一能一眼看出真相的视图。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "custom": {
+                "fillOpacity": 80,
+                "lineWidth": 0,
+                "spanNulls": false
+              },
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "0": {
+                      "text": "卸载",
+                      "color": "text",
+                      "index": 0
+                    },
+                    "1": {
+                      "text": "驻留",
+                      "color": "green",
+                      "index": 1
+                    }
+                  }
+                }
+              ],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "transparent",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 24,
+            "x": 0,
+            "y": 6
+          },
+          "id": 8,
+          "options": {
+            "alignValue": "left",
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": false
+            },
+            "mergeValues": true,
+            "rowHeight": 0.9,
+            "showValue": "never",
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "omlx_model_loaded{job=\"omlx-models\", model=~\"$model\", engine=~\"$engine\"}",
+              "refId": "A",
+              "legendFormat": "{{model}}"
+            }
+          ],
+          "title": "模型驻留状态时间线",
+          "type": "state-timeline"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "bars",
+                "fillOpacity": 60,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                }
+              },
+              "unit": "none",
+              "mappings": [],
+              "color": {
+                "mode": "palette-classic"
+              },
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 15
+          },
+          "id": 9,
+          "options": {
+            "legend": {
+              "calcs": [
+                "sum",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (model) (changes(omlx_model_loaded{job=\"omlx-models\", model=~\"$model\", engine=~\"$engine\"}[$__rate_interval]))",
+              "refId": "A",
+              "legendFormat": "{{model}}"
+            }
+          ],
+          "title": "换入/换出事件",
+          "type": "timeseries",
+          "description": "`changes()` 数的是 0↔1 翻转次数：一次「换入又换出」= 2。这条抬头 + 上面的 `is busy` 时段重合，就是模型争抢，不是模型坏了。"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "line"
+                }
+              },
+              "unit": "s",
+              "mappings": [],
+              "color": {
+                "mode": "palette-classic"
+              },
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 900
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 15
+          },
+          "id": 10,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "time() - omlx_model_resident_last_access_seconds{job=\"omlx-models\", model=~\"$model\", engine=~\"$engine\"}",
+              "refId": "A",
+              "legendFormat": "{{model}}"
+            }
+          ],
+          "title": "驻留模型空闲时长（TTL 900s 到点即卸载）",
+          "type": "timeseries",
+          "description": "只有驻留中的模型有这条线（未驻留时 OMLX 给 null，指标不存在）。model_settings.json 里语音/嵌入/重排模型的 `ttl_seconds` 都是 900：越线就会被卸载，下一次调用要重新装载（约 1s/GB）。两个 21G 的 VLM 没配 TTL，只受内存压力驱逐。"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 22
+          },
+          "id": 102,
+          "panels": [],
+          "title": "🧠 内存 / 30G 天花板",
+          "type": "row"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                }
+              },
+              "unit": "bytes",
+              "mappings": [],
+              "color": {
+                "mode": "palette-classic"
+              },
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 14,
+            "x": 0,
+            "y": 23
+          },
+          "id": 11,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "omlx_pool_current_memory_bytes{job=\"omlx-models\"}",
+              "refId": "A",
+              "legendFormat": "核算（estimated 之和）"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(omlx_model_resident_actual_size_bytes{job=\"omlx-models\"})",
+              "refId": "B",
+              "legendFormat": "实际驻留（actual 之和）"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "omlx_pool_ceiling_bytes{job=\"omlx-models\"}",
+              "refId": "C",
+              "legendFormat": "天花板 30G"
+            }
+          ],
+          "title": "engine pool 内存：核算口径 vs 实际驻留 vs 天花板",
+          "type": "timeseries",
+          "description": "☠️ **两条口径不是一回事**：天花板核算用 `estimated_size`，实际驻留是 `actual_size`。实测 reranker 估算 0.35G / 实际 0.50G（+41%）；换成 4B 嵌入模型同驻时两者只差 4% —— 偏差因模型而异，别当固定系数用。「核算没到 30G」也不等于「机器还有那么多余量」——余量看 macbook 主机面板的 available。"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "各模型的 estimated_size（磁盘/常驻估算）。两个 35B/26B 的 VLM 各 16–21G，**同时驻留两个就顶穿 30G 天花板** —— 换入换出的物理原因。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "continuous-BlYlRd"
+              },
+              "mappings": [],
+              "unit": "bytes",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 10,
+            "x": 14,
+            "y": 23
+          },
+          "id": 12,
+          "options": {
+            "displayMode": "gradient",
+            "orientation": "horizontal",
+            "showUnfilled": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "omlx_model_estimated_size_bytes{job=\"omlx-models\", model=~\"$model\", engine=~\"$engine\"}",
+              "refId": "A",
+              "legendFormat": "{{model}}",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "title": "各模型体积（estimated）",
+          "type": "bargauge"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 31
+          },
+          "id": 103,
+          "panels": [],
+          "title": "⚡ 请求 / Token 吞吐",
+          "type": "row"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                }
+              },
+              "unit": "none",
+              "mappings": [],
+              "color": {
+                "mode": "palette-classic"
+              },
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 0,
+            "y": 32
+          },
+          "id": 13,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "rate(omlx_requests_total{job=\"omlx-status\"}[$__rate_interval]) * 60",
+              "refId": "A",
+              "legendFormat": "requests/min"
+            }
+          ],
+          "title": "请求速率（次/min）",
+          "type": "timeseries",
+          "description": "计数器随 OMLX 重启归零；`rate()` 会自动跨过重置。"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                }
+              },
+              "unit": "none",
+              "mappings": [],
+              "color": {
+                "mode": "palette-classic"
+              },
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 8,
+            "y": 32
+          },
+          "id": 14,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "omlx_requests_active{job=\"omlx-status\"}",
+              "refId": "A",
+              "legendFormat": "在飞（上限 2）"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "omlx_requests_waiting{job=\"omlx-status\"}",
+              "refId": "B",
+              "legendFormat": "排队"
+            }
+          ],
+          "title": "在飞 vs 排队",
+          "type": "timeseries",
+          "description": "排队常驻 >0 就说明请求方的并发比 max_concurrent_requests=2 大得多，拉长的是每个请求的墙上时间，不是吞吐。"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                }
+              },
+              "unit": "none",
+              "mappings": [],
+              "color": {
+                "mode": "palette-classic"
+              },
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 16,
+            "y": 32
+          },
+          "id": 15,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "rate(omlx_prompt_tokens_total{job=\"omlx-status\"}[$__rate_interval])",
+              "refId": "A",
+              "legendFormat": "prompt"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "rate(omlx_completion_tokens_total{job=\"omlx-status\"}[$__rate_interval])",
+              "refId": "B",
+              "legendFormat": "completion"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "rate(omlx_cached_tokens_total{job=\"omlx-status\"}[$__rate_interval])",
+              "refId": "C",
+              "legendFormat": "cached"
+            }
+          ],
+          "title": "Token 速率（tok/s，墙上时间口径）",
+          "type": "timeseries",
+          "description": "这是**含空闲时间**的窗口平均，不是「推理时的 TPS」。OMLX 只暴露累计平均 TPS，拿不到分窗口的纯推理速度。"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                }
+              },
+              "unit": "none",
+              "mappings": [],
+              "color": {
+                "mode": "palette-classic"
+              },
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 12,
+            "x": 0,
+            "y": 39
+          },
+          "id": 16,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "omlx_avg_prefill_tps{job=\"omlx-status\"}",
+              "refId": "A",
+              "legendFormat": "prefill"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "omlx_avg_generation_tps{job=\"omlx-status\"}",
+              "refId": "B",
+              "legendFormat": "generation"
+            }
+          ],
+          "title": "累计平均 TPS（自启动以来，不是当前速度）",
+          "type": "timeseries",
+          "description": "口径：prefill = (prompt-cached)/累计 prefill 秒；generation = completion/累计生成秒。**只在 OMLX 重启后才会明显变化**，当实时指标看会得出「机器一直很快」的错觉。"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "mappings": [],
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 20
+                  }
+                ]
+              },
+              "decimals": 1
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 6,
+            "x": 12,
+            "y": 39
+          },
+          "id": 17,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "omlx_cache_efficiency_percent{job=\"omlx-status\"}",
+              "refId": "A"
+            }
+          ],
+          "title": "Prompt 缓存命中率",
+          "type": "stat",
+          "description": "OMLX 直接给的百分数（cached/prompt×100，自启动累计）。"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "mappings": [],
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "decimals": 2
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 6,
+            "x": 18,
+            "y": 39
+          },
+          "id": 18,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value_and_name"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "omlx_pool_load_seconds_per_gb{job=\"omlx-models\"}",
+              "refId": "A",
+              "legendFormat": "s/GB"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "omlx_pool_load_observations{job=\"omlx-models\"}",
+              "refId": "B",
+              "legendFormat": "样本数"
+            }
+          ],
+          "title": "装载速度估计",
+          "type": "stat",
+          "description": "OMLX 自己的滚动估计：21G 的 VLM 换入约需 s/GB × 21 秒。这决定了调用方的重试耐心该配多长（播客那次 15s 就不够）。"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 45
+          },
+          "id": 104,
+          "panels": [],
+          "title": "🔧 能力与口径",
+          "type": "row"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "0": {
+                      "text": "不可用",
+                      "color": "orange",
+                      "index": 0
+                    },
+                    "1": {
+                      "text": "可用",
+                      "color": "green",
+                      "index": 1
+                    }
+                  }
+                }
+              ],
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 12,
+            "x": 0,
+            "y": 46
+          },
+          "id": 19,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value_and_name"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "omlx_custom_kernel_available{job=\"omlx-status\"}",
+              "refId": "A",
+              "legendFormat": "{{kernel}}"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "omlx_ane_prefill_patch_available{job=\"omlx-status\"}",
+              "refId": "B",
+              "legendFormat": "ANE prefill patch"
+            }
+          ],
+          "title": "自定义内核 / ANE",
+          "type": "stat",
+          "description": "0.6.3rc2 实测 4 个自定义 Metal 内核**全部 import 失败**（缺编译产物 `_ext`），推理走的是通用路径。这里由红转绿说明换了带内核的安装方式。"
+        },
+        {
+          "gridPos": {
+            "h": 5,
+            "w": 12,
+            "x": 12,
+            "y": 46
+          },
+          "id": 20,
+          "options": {
+            "mode": "markdown",
+            "content": "**口径速查**（细节 → `docs/reference/omlx-inference-metrics.md`）\n\n- `up` 只有一个：exporter 挂了和 Mac 合盖了长得一样。\n- `*_total` 随 OMLX 进程重启归零；`avg_*_tps` 是**自启动累计平均**，不是当前速度。\n- 天花板核算用 `estimated_size`，实际驻留是 `actual_size`（后者更大）。\n- 未驻留的模型没有 `last_access` / `actual_size` 指标（源端是 null）。\n- 抓取 30s，模型换入换出可能比一个采样点还短 —— 事件计数比时间线更可靠。\n"
+          },
+          "title": "读这张图之前",
+          "type": "text"
+        }
+      ],
+      "refresh": "1m",
+      "time": {
+        "from": "now-6h",
+        "to": "now"
+      },
+      "timezone": "browser"
+    }
