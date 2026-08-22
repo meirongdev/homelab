@@ -1,6 +1,6 @@
 # Open Notebook — AI 研读知识库（架构事实）
 
-> Last updated: 2026-08-02
+> Last updated: 2026-08-22
 > Status: 生效事实
 > Scope: Open Notebook（NotebookLM 自托管替代）在 homelab 集群的部署形态、模型接线、
 > 配置真相源地图、备份口径 —— source of truth。
@@ -40,12 +40,45 @@
 | Embedding | Mac OMLX | Qwen3-Embedding-4B（2560 维） |
 | STT / TTS | Mac OMLX | Qwen3-ASR / Qwen3-TTS |
 
+### 播客 profiles 是**第二套**接线，不吃上面这张表
+
+☠️ `/models/defaults`（上表）与播客的 episode/speaker profile 是两套独立配置。前端的
+`needsModelSetup()` 只看三个字段——episode 的 `outline_llm`/`transcript_llm`、speaker 的
+`voice_model`——上游首启 seed 出来时**全是 null**。所以 defaults 七个位置全配好、
+对话/embedding/STT 的 test 全绿，
+Podcasts 页照样常驻黄条 `Setup required: Some profiles don't have models configured yet`
+（2026-08-22 实测：3 个 episode + 3 个 speaker 全部未接线）。
+
+第二层坑：**seed 的 `speaker.voice_id` 是 OpenAI 音色名**（`nova`/`alloy`/`echo`/`shimmer`/`ash`），
+Qwen3-TTS 一律 `500 Speaker 'nova' not supported`。只补 `voice_model` 会让黄条消失、
+播客却推迟到合成那步才炸——**音色必须一起换**。可用音色向后端现取，不要抄文档：
+
+```bash
+curl -s "http://100.89.15.120:8000/v1/audio/voices?model=mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit"
+```
+
+现由同一个 provisioner 的 `EPISODE_PROFILE_LLMS` / `SPEAKER_VOICES` / `PODCAST_LANGUAGE`
+纳管（read-modify-write：`PUT` 收的是 *Create* 模型即整体替换，故 seed 的文案/backstory
+原样回填，只覆盖这几个字段）。当前音色分配：
+
+| speaker profile | 音色 |
+|---|---|
+| `tech_experts` | Dr. Alex Chen → `eric` · Jamie Rodriguez → `aiden` |
+| `business_panel` | Marcus Thompson → `ryan` · Elena Vasquez → `serena` · Johny Bing → `dylan` |
+| `solo_expert` | Professor Sarah Kim → `vivian` |
+
+- 音色按 profile 内不重复分配；**性别是按名字推的，没逐个试听**。
+- 播客语言 `PODCAST_LANGUAGE` 目前 `None`（沿用上游默认的英文）；要中文播客填 `"zh"`。
+- 声明了后端不认的音色时 provisioner **拒绝写入并只告警**（黄条继续亮 = 告警本身），
+  不把已知坏值落库；Mac 睡着取不到白名单则跳过校验。
+
 已知边界：
 
 - **Rerank 无消费位**：Mac 已加载 Qwen3-Reranker 且 OMLX `/v1/rerank` 可用，但 Open Notebook
   v1.14 的 providers/defaults/search 三处都没有 rerank 概念——刻意未注册。
-- **TTS 的 model test 永远 WARN**：上游 test 硬编码 voice=`alloy`；Qwen3-TTS 实际音色
-  `serena/vivian/uncle_fu/ryan/aiden/ono_anna/sohee/eric/dylan`，做播客在 speaker profile 里选。
+- **TTS 的 model test 永远 WARN**：上游 test 硬编码 voice=`alloy`，Qwen3-TTS 不认。
+  这条只是 test 的显示问题（功能本身好的：voice=`serena` 直打出真 WAV）；
+  ⚠️ 但**别把它当孤立瑕疵**——同一个原因也让 seed 的 speaker profile 生不出播客，见上一节。
 - **DGX 是跨境链路**（k8s-node 在 SG，spark 在 CN，DERP hkg 中继，RTT 66–83ms）：流式对话无感，
   逐条同步调用会被 RTT 吃掉。
 - **Mac 是笔记本**，多模型按需换入换出；embedding 批任务与 TTS/35B 并发时延迟会跳。
@@ -56,6 +89,7 @@
 |---|---|---|
 | Deployment/Service/Route/探针 | git（manifests） | ArgoCD 重建 |
 | 模型 credentials/models/defaults | git 声明（provisioner）→ SurrealDB | 任意一次 sync 的 hook 重建 |
+| 播客 profiles 的模型/音色接线 | 同上 provisioner（**profile 文案/backstory 仍只活在 DB**，是上游 seed 的默认值、非我们的决策，故不纳管） | hook 重建接线；文案随 SurrealDB 恢复 |
 | 摄取参数（notebook id / pattern / 上限） | git（`open-notebook-ingest.yaml` 的 params ConfigMap）| 即历史记录，"灌过什么"可追溯 |
 | 三个密钥（encryption-key / app-password / surreal-password） | Vault `secret/homelab/open-notebook` → ESO | ⚠️ **encryption-key 丢失 = 库内所存模型凭据永久解不开** |
 | notebooks / sources / 笔记 / 向量 | SurrealDB（PVC `open-notebook-surreal-local`） | restic 夜备的 `open-notebook.surql`（逻辑导出）恢复 |

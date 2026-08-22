@@ -8,6 +8,9 @@
 # 行为：
 #   - 幂等 reconcile：credential 按 name、model 按 (name,type) 对账，缺则建，漂移则改/告警
 #   - defaults 每次同步都 PUT（七个默认位全部指向下面声明的模型）
+#   - 播客 profiles（episode 的 outline/transcript 模型 + speaker 的 TTS 模型与音色）
+#     按 name 对账、read-modify-write。**这是与 defaults 分开的第二套接线**：不配它，
+#     Podcasts 页就常驻 "Setup required" 横幅，defaults 配得多全都没用（2026-08-22 补）
 #   - **不 prune**：UI 里手工加的实验性模型/凭据只告警不删（与 uptime-kuma 的 prune 相反——
 #     哑监控项会永久变红，孤儿模型无害）
 #   - 连通性 test 只告警不失败：DGX/Mac 是外部机器，它们睡着不该把 personal-services
@@ -18,8 +21,10 @@
 #     （venv 里 mlx-audio 其实装着，进程重启后全部消失）——不是缺依赖。
 #   - 唯一常驻 WARN：TTS 的 model test。Open Notebook 的 test 硬编码 voice='alloy'，
 #     Qwen3-TTS 只有 serena/vivian/uncle_fu/ryan/aiden/ono_anna/sohee/eric/dylan。
-#     功能本身是好的（voice=serena 直打出真 WAV，STT 能转录回来）；
-#     实际做播客时在 speaker profile 里选上述音色即可。
+#     功能本身是好的（voice=serena 直打出真 WAV，STT 能转录回来）。
+#     ⚠️ 2026-08-22：这不只是 test 的显示问题 —— 上游 seed 的 speaker profile 里
+#     voice_id 也是 OpenAI 音色名，真去生成播客同样 500。现由 SPEAKER_VOICES 纳管，
+#     白名单从 OMLX 的 /v1/audio/voices 现取（不写死，模型换了不会静默失真）。
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -28,7 +33,7 @@ metadata:
   namespace: personal-services
 data:
   provision.py: |
-    import json, os, sys, urllib.request, urllib.error
+    import json, os, sys, urllib.parse, urllib.request, urllib.error
 
     API = os.environ.get("API", "http://open-notebook.personal-services.svc:5055/api")
     PW = os.environ["OPEN_NOTEBOOK_PASSWORD"]
@@ -65,6 +70,28 @@ data:
         "default_embedding_model": "mlx-community__Qwen3-Embedding-4B-4bit-DWQ",
         "default_text_to_speech_model": "mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
         "default_speech_to_text_model": "mlx-community__Qwen3-ASR-1.7B-8bit",
+    }
+    # 播客 profiles 的接线 —— 与上面 DEFAULTS 是**两套东西**：Podcasts 页的
+    # "Setup required" 横幅只看 episode 的 outline_llm/transcript_llm 与 speaker 的
+    # voice_model（frontend/src/lib/types/podcasts.ts::needsModelSetup），defaults 配得
+    # 再全也不影响它。上游首启 seed 出来的三个 episode + 三个 speaker 这三个字段全是 null。
+    EPISODE_PROFILE_LLMS = {   # profile 名 -> 出大纲/台本的 language 模型
+        "tech_discussion": "deepseek-v4-flash",     # 1M ctx，整本书塞得进去
+        "business_analysis": "deepseek-v4-flash",
+        "solo_expert": "deepseek-v4-flash",
+    }
+    PODCAST_TTS = "mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit"
+    PODCAST_LANGUAGE = None    # None = 沿用上游默认（英文）；要中文播客填 "zh"
+    # ☠️ seed 的 speaker.voice_id 是 **OpenAI 音色名**（nova/alloy/echo/shimmer/ash），
+    # Qwen3-TTS 收到直接 500 `Speaker 'nova' not supported`。只补 voice_model 会让横幅消失、
+    # 播客却在合成那步才炸 —— 音色必须一起换掉，否则修的是症状。
+    # 白名单不写死在这里：provision 时从 OMLX 现取（见 live_voices()）。
+    # 同 profile 内不重复分配（两人同音色听不出谁在说）。性别是按名字推的，没逐个试听。
+    SPEAKER_VOICES = {         # speaker profile 名 -> {speaker 名: 音色}
+        "tech_experts": {"Dr. Alex Chen": "eric", "Jamie Rodriguez": "aiden"},
+        "business_panel": {"Marcus Thompson": "ryan", "Elena Vasquez": "serena",
+                           "Johny Bing": "dylan"},
+        "solo_expert": {"Professor Sarah Kim": "vivian"},
     }
     # ----------------------------------------------
 
@@ -152,10 +179,100 @@ data:
     if must(st, resp, "PUT /models/defaults"):
         print(f"[provision] defaults set: {sorted(want_defaults)}")
 
+    # 4) 播客 profiles：read-modify-write。PUT 收的是 *Create* 模型（整体替换，不是 patch），
+    #    所以要把 seed 的文案/backstory 原样回填，只覆盖上面声明的那几个字段 ——
+    #    好处是几十行上游 prose 不必抄进 git，坏处是 prose 仍只活在 DB（可接受：它是
+    #    上游默认值，不是我们的决策；真要改文案就在 UI 改，provisioner 不会覆盖回去）。
+    #    **不创建**：profile 由应用首启 seed，缺了只告警（说明库是空的或被手工删过）。
+    def live_voices():
+        """从 OMLX 现取该 TTS 模型的音色白名单；Mac 睡着就返回 None（跳过校验）。"""
+        base = next(c["base_url"] for c in CREDENTIALS if c["name"] == "mac-omlx")
+        url = f"{base}/audio/voices?model={urllib.parse.quote(PODCAST_TTS)}"
+        try:
+            with urllib.request.urlopen(url, timeout=10) as r:
+                return set(json.loads(r.read()).get("voices", []))
+        except Exception as e:
+            print(f"[provision] WARN cannot fetch TTS voices ({e}); skipping voice validation")
+            return None
+
+    tts_id = model_ids.get(PODCAST_TTS)
+    if tts_id is None:
+        print(f"[provision] WARN TTS model {PODCAST_TTS} not registered; skipping speaker profiles")
+    else:
+        allowed = live_voices()
+        st, existing = req("GET", "/speaker-profiles")
+        if must(st, existing, "GET /speaker-profiles"):
+            by_name = {p["name"]: p for p in existing}
+            for name, voices in SPEAKER_VOICES.items():
+                have = by_name.get(name)
+                if have is None:
+                    print(f"[provision] WARN speaker profile {name} absent (app seeds it on first boot); skipped")
+                    continue
+                bad = sorted(v for v in voices.values() if allowed is not None and v not in allowed)
+                if bad:
+                    # 不写已知坏值：voice_model 保持 null，UI 横幅继续亮 —— 那就是告警
+                    print(f"[provision] WARN speaker profile {name}: voice(s) {bad} not offered by the "
+                          f"backend (has {sorted(allowed)}); left unchanged, banner stays as the alarm")
+                    continue
+                # 过滤无名 speaker：sorted() 混 None 与 str 会 TypeError，把整个 hook 炸掉
+                unmapped = sorted(n for n in {s.get("name") for s in have["speakers"]}
+                                  if n and n not in voices)
+                if unmapped:
+                    print(f"[provision] WARN speaker profile {name}: speaker(s) {unmapped} have no voice "
+                          f"in SPEAKER_VOICES; keeping the seeded voice_id (an OpenAI name → TTS will 500)")
+                speakers = [dict(s, voice_id=voices.get(s.get("name"), s.get("voice_id")))
+                            for s in have["speakers"]]
+                if have.get("voice_model") == tts_id and speakers == have["speakers"]:
+                    print(f"[provision] speaker profile {name} up-to-date")
+                    continue
+                st, resp = req("PUT", f"/speaker-profiles/{have['id']}",
+                               {"name": have["name"], "description": have.get("description", ""),
+                                "voice_model": tts_id, "speakers": speakers})
+                if must(st, resp, f"update speaker profile {name}"):
+                    print(f"[provision] updated speaker profile {name}: voice_model + "
+                          f"voices {[s['voice_id'] for s in speakers]}")
+            unmanaged = sorted(set(by_name) - set(SPEAKER_VOICES))
+            if unmanaged:
+                print(f"[provision] note: unmanaged speaker profiles (left alone): {unmanaged}")
+
+    st, existing = req("GET", "/episode-profiles")
+    if must(st, existing, "GET /episode-profiles"):
+        by_name = {p["name"]: p for p in existing}
+        for name, llm in EPISODE_PROFILE_LLMS.items():
+            have = by_name.get(name)
+            if have is None:
+                print(f"[provision] WARN episode profile {name} absent (app seeds it on first boot); skipped")
+                continue
+            llm_id = model_ids.get(llm)
+            if llm_id is None:
+                print(f"[provision] WARN episode profile {name}: model {llm} not registered; skipped")
+                continue
+            if have.get("speaker_config") is None:
+                # PUT 的必填字段，null 补不出来（该 profile 的 speaker 被删过）
+                print(f"[provision] WARN episode profile {name} has no speaker_config (orphaned); skipped")
+                continue
+            if (have.get("outline_llm") == llm_id and have.get("transcript_llm") == llm_id
+                    and have.get("language") == PODCAST_LANGUAGE):
+                print(f"[provision] episode profile {name} up-to-date")
+                continue
+            st, resp = req("PUT", f"/episode-profiles/{have['id']}",
+                           {"name": have["name"], "description": have.get("description", ""),
+                            "speaker_config": have["speaker_config"],
+                            "outline_llm": llm_id, "transcript_llm": llm_id,
+                            "language": PODCAST_LANGUAGE,
+                            "default_briefing": have["default_briefing"],
+                            "num_segments": have["num_segments"],
+                            "max_tokens": have.get("max_tokens")})
+            if must(st, resp, f"update episode profile {name}"):
+                print(f"[provision] updated episode profile {name}: outline+transcript -> {llm}")
+        unmanaged = sorted(set(by_name) - set(EPISODE_PROFILE_LLMS))
+        if unmanaged:
+            print(f"[provision] note: unmanaged episode profiles (left alone): {unmanaged}")
+
     if fatal:
         print(f"[provision] {fatal} fatal error(s)"); sys.exit(1)
 
-    # 4) 连通性冒烟（只告警：外部机器睡着不该 fail 掉整个 sync）
+    # 5) 连通性冒烟（只告警：外部机器睡着不该 fail 掉整个 sync）
     for name, cid in cred_ids.items():
         st, resp = req("POST", f"/credentials/{cid}/test", None, timeout=20)
         ok = isinstance(resp, dict) and resp.get("success")
