@@ -16,3 +16,5 @@ just site                           # 全量（packages + ai-clis + node-exporte
 
 - 配置归档: [ansible/README.md](ansible/README.md)
 - 模型接线（Open Notebook → Mac OMLX）: [docs/reference/open-notebook.md](../docs/reference/open-notebook.md)
+- OMLX 指标采集与面板（**OMLX 无原生 `/metrics`**，集群内 json-exporter 翻两个 JSON 端点）:
+  [docs/reference/omlx-inference-metrics.md](../docs/reference/omlx-inference-metrics.md)
