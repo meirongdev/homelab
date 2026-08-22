@@ -242,6 +242,21 @@ spec:
             # （切片/向量化/播客渲染）压到 2 条，避免和 LGTM/Vault 抢 CPU。
             - name: OPEN_NOTEBOOK_WORKER_MAX_TASKS
               value: "2"
+            # ☠️ 播客合成的重试耐心。上游默认 3 次 / 退避 5s→10s = 只等约 15 秒，
+            # 而 Mac 是**按需换入换出模型**的笔记本：另一个模型要内存时 OMLX 会把 TTS
+            # 标成 `unload pending`，此时它对所有请求回
+            # `Model '...' is busy; cannot start work while unload is pending`，
+            # 一直持续到对面那个在飞的请求跑完（长音频 STT 可占 170s+）。
+            # asyncio.gather 不吞异常，所以一个 clip 失败 = 整集失败，
+            # 而它前面已经烧掉几分钟的 DGX outline+transcript（实测 4–9 分钟，随 DGX 负载浮动）。
+            # 2026-08-22 真这样炸过一次 → docs/records/2026-08-22-podcast-tts-unload-pending.md
+            # 6 次 / 上限 60s ≈ 5+10+20+40+60 = 135s 耐心，足够跨过一次模型换入换出。
+            # ⚠️ 别去调 TTS_BATCH_SIZE（默认 5）：实测 5 路并发在空闲 Mac 上全 200 且
+            # 比串行快一倍（16.6s vs 33.9s，OMLX 会合批）——并发不是这次的病因，改它只会更慢。
+            - name: PODCAST_RETRY_MAX_ATTEMPTS
+              value: "6"
+            - name: PODCAST_RETRY_WAIT_MAX
+              value: "60"
           ports:
             # 8502 = Next.js 前端，对外只需这一个：/api/* 由它内部转发到 5055。
             - name: web
