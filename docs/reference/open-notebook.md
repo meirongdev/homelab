@@ -102,6 +102,11 @@ curl -s "http://100.89.15.120:8000/v1/audio/voices?model=mlx-community__Qwen3-TT
 - **DGX 是跨境链路**（k8s-node 在 SG，spark 在 CN，DERP hkg 中继，RTT 66–83ms）：流式对话无感，
   逐条同步调用会被 RTT 吃掉。
 - **Mac 是笔记本**，多模型按需换入换出；embedding 批任务与 TTS/35B 并发时延迟会跳。
+  ☠️ 换入换出还会**整集打掉播客**：被选中卸载的模型进入 `unload pending` 后对所有请求报
+  `is busy`，直到对面在飞的请求跑完。重试耐心已从上游默认 ~15s 提到 ~135s
+  （`PODCAST_RETRY_*`），但**跨不过一个 10 分钟音频的 STT 请求**（172.8s）——
+  在 Mac 上跑批量模型活儿时别同时生成播客。复盘与实测（并发不是病因）见
+  [records/2026-08-22-podcast-tts-unload-pending.md](../records/2026-08-22-podcast-tts-unload-pending.md)。
 
 ## 配置真相源地图
 
