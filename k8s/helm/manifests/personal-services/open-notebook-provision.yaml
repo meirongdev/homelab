@@ -19,6 +19,9 @@
 # 已知现状（2026-08-01 晚，Mac 侧经 macbook/ansible 排障后）：7 个 test 里 6 个绿。
 #   - 之前 embedding 500 / "No module named mlx_audio.*" 的根因是 **omlx-server 旧进程**
 #     （venv 里 mlx-audio 其实装着，进程重启后全部消失）——不是缺依赖。
+#   - ⚠️ **想换 STT/TTS 型号先读 docs/decisions/omlx-speech-model-selection.md**：
+#     TTS 只能收音色名（空音色表的模型直接出局），STT 单次请求要吃满 10 分钟音频
+#     （content_core 的分段长度写死在库里），两个新 ASR 在这个长度上都是 HTTP 200 的静默失败。
 #   - 唯一常驻 WARN：TTS 的 model test。Open Notebook 的 test 硬编码 voice='alloy'，
 #     Qwen3-TTS 只有 serena/vivian/uncle_fu/ryan/aiden/ono_anna/sohee/eric/dylan。
 #     功能本身是好的（voice=serena 直打出真 WAV，STT 能转录回来）。
@@ -61,6 +64,17 @@ data:
         #     Open Notebook v1.14 没有 rerank 消费位（providers 无该 modality、defaults 无该
         #     字段、search.py 无重排步骤），注册进来只会是个假接线。留给未来的网关/RAG 消费方。
         #   - gemma-4 / diffusiongemma —— mlx-learning 项目的实验模型，不属于这套阅读栈。
+        #   ☠️ 2026-08-22 起 Mac 上另有 4 个**看着像升级、实测全部不可用**的语音模型。
+        #     逐项数字与复现见 docs/decisions/omlx-speech-model-selection.md，摘要：
+        #   - Qwen3-TTS-...-VoiceDesign-8bit —— /v1/audio/voices 返回 []，要 `instruct`
+        #     描述音色；podcast_creator/nodes.py:273 只发 text/voice/output_file，发不出去。
+        #   - chatterbox-multilingual-v3 —— 同样空音色表，要参考音频做零样本克隆，
+        #     没有「按音色名选人」的入口。这两个换上去横幅照样消失、只在合成那步 500。
+        #   - Mega-ASR-8bit —— 短句/退化英文比现役略准（1.3–2.1%），但 420s 起长音频
+        #     重复崩塌（571s: 7475 token / 172.8s / WER 470%）。而 content_core 是按
+        #     **10 分钟**切段送 STT，正好落在崩塌区。
+        #   - GLM-ASR-Nano-2512-8bit —— 硬截断在约 45 秒：103s 样本 102 token、571s 样本
+        #     112 token，输出量与输入时长无关。10 分钟音频只转出 8%，且 HTTP 200。
     ]
     DEFAULTS = {  # 值是上面 MODELS 里的 name
         "default_chat_model": "deepseek-v4-flash",

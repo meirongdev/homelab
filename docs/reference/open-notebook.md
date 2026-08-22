@@ -38,7 +38,26 @@
 | 对话/转换/长上下文/工具（默认） | DGX vLLM `100.97.87.120:8000` | `deepseek-v4-flash`（1M ctx） |
 | 对话兜底（非默认，UI 手动切） | Mac OMLX `100.89.15.120:8000` | Qwen3.6-35B（262k ctx） |
 | Embedding | Mac OMLX | Qwen3-Embedding-4B（2560 维） |
-| STT / TTS | Mac OMLX | Qwen3-ASR / Qwen3-TTS |
+| STT | Mac OMLX | `Qwen3-ASR-1.7B-8bit` |
+| TTS | Mac OMLX | `Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit`（9 个具名音色）|
+
+### 语音模型换不动：调用口径把选择锁死了
+
+Mac 上 2026-08-22 已有 6 个语音模型（新增的 4 个是 Mega-ASR / GLM-ASR-Nano /
+TTS-VoiceDesign / chatterbox-multilingual-v3），**四个新的全部不采纳**，理由与实测数字见
+[decisions/omlx-speech-model-selection.md](../decisions/omlx-speech-model-selection.md)。
+挑模型前必须知道这两条口径 —— 它们比模型能力更能决定结果：
+
+| | 调用方 | 实际发出去的 |
+|---|---|---|
+| TTS | `podcast_creator/nodes.py:273` | **只有 `text` / `voice` / `output_file`**。传不了音色描述，也传不了参考音频 |
+| STT | `content_core/processors/media/audio.py:146` | 音频按 **10 分钟**切段 → 转 **mp3** → **不带 language 提示** → 多段并发。**单次请求最长 10 分钟** |
+
+☠️ 由此推出两条反直觉的事：①**空音色表 = 不可用**（`/v1/audio/voices` 返回 `[]` 的 TTS
+要 `instruct` 或参考音频，我们没有那个通道，换上去只在合成那一步 500）；
+②**短句准确率几乎不影响 STT 选型**，能不能扛住 10 分钟才是 —— 两个新 ASR 在 571s 样本上
+一个截断到只剩 8%、一个重复崩塌到 516%，**都返回 HTTP 200**。
+换模型前先跑 ADR 末尾那段复现，只看开头一眼看不出来。
 
 ### 播客 profiles 是**第二套**接线，不吃上面这张表
 
@@ -79,6 +98,7 @@ curl -s "http://100.89.15.120:8000/v1/audio/voices?model=mlx-community__Qwen3-TT
 - **TTS 的 model test 永远 WARN**：上游 test 硬编码 voice=`alloy`，Qwen3-TTS 不认。
   这条只是 test 的显示问题（功能本身好的：voice=`serena` 直打出真 WAV）；
   ⚠️ 但**别把它当孤立瑕疵**——同一个原因也让 seed 的 speaker profile 生不出播客，见上一节。
+- **mp3 是默认口径且 OMLX 支持**：esperanto 的 TTS 默认 `response_format=mp3`，STT 侧的分段也重编码成 mp3 —— 2026-08-22 实测 OMLX 两头都吃（TTS 出 MPEG ADTS、STT 收 mp3 正常），播客合成不会在这里炸。
 - **DGX 是跨境链路**（k8s-node 在 SG，spark 在 CN，DERP hkg 中继，RTT 66–83ms）：流式对话无感，
   逐条同步调用会被 RTT 吃掉。
 - **Mac 是笔记本**，多模型按需换入换出；embedding 批任务与 TTS/35B 并发时延迟会跳。
