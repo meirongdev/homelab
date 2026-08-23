@@ -74,6 +74,9 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 
 ## 不走这条链的 meirong.dev 主机名（集群外托管）
 
+> 跨仓库那条（`stack.meirong.dev` 由 home-stack 自己的 terraform 拥有）的取舍与完整
+> 归属表见 [decisions/home-stack-repo-boundary.md](../decisions/home-stack-repo-boundary.md)。
+
 ⚠️ **"写 HTTPRoute 即建 DNS" 只覆盖跑在集群里的服务**。集群外托管的站点没有 HTTPRoute，
 两套自动化都够不着它：external-dns 的 source 只有 `gateway-httproute`（看不见），通配隧道
 路由只对 CNAME 指向隧道的主机名生效（用不上）。这类记录**通常必须**在
