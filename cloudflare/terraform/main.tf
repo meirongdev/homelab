@@ -77,6 +77,21 @@ locals {
   }
 }
 
+# ⚠️ 第三类主机名：**Workers 自定义域名** —— 不在上面那个 map 里，也不该加进去。
+#
+# `stack.meirong.dev`（home-stack，https://github.com/meirongdev/home-stack，
+# Cloudflare Workers 上的 wasm SSR 站）2026-08-23 上线。它的 DNS 记录
+# （`AAAA 100::`，橙云）是 `cloudflare_workers_custom_domain` 让 Cloudflare **自己建**的，
+# 声明在 **home-stack 仓库**的 `cloudflare/terraform`，不在本仓库的 state 里。
+#
+# ☠️ **两件事都别做**：
+#   1. 不要在这里再声明一份 —— Workers 自定义域名不能建在已存在 CNAME 的主机名上，
+#      两边各写一份必然打架（谁先 apply 谁赢，另一边永久报错）。
+#   2. 不要因为「它不在代码里」就删掉那条记录 —— 那等于把站点的域名解析摘掉，
+#      而本仓库里没有任何线索指向原因。自动化不会动它（两个 external-dns 都是
+#      upsert-only，terraform 也不 prune 不在自己 state 里的记录），唯一的风险是人。
+#
+# 归属与机制：docs/reference/networking-ingress.md 的「不走这条链的 meirong.dev 主机名」。
 resource "cloudflare_dns_record" "external_origins" {
   for_each = local.external_origin_dns
 

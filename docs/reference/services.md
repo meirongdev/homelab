@@ -1,6 +1,6 @@
 # Services — 服务清单
 
-> Last updated: 2026-08-21
+> Last updated: 2026-08-23
 > Status: 生效事实
 >
 > **这张表是服务清单的唯一真相源** —— `docs/README.md`、`docs/ARCHITECTURE.md` 与各 runbook
@@ -46,6 +46,7 @@ DNS-only、绕过 WAF、DNS 通了≠站点通了）见
 |------|------|-----|
 | Blog | Cloudflare Pages (`meirongdevblog.pages.dev`) | `meirong.dev`（apex） |
 | Playgrounds（各语言官方在线 Playground 导航） | GitHub Pages，repo `meirongdev/playgrounds` | `playgrounds.meirong.dev`（2026-08-13 接域名；DNS 记录在 `cloudflare/terraform` 的 `local.external_origin_dns`） |
+| Home Stack（homelab 自托管技术选型目录，97 条） | Cloudflare Workers（Rust→wasm SSR + 静态资源层），repo `meirongdev/home-stack` | `stack.meirong.dev`（2026-08-23 上线；DNS 记录由 Workers 自定义域名**自建**，声明在 home-stack 仓库的 terraform，**不在本仓库 state 里**） |
 
 ## 运维备忘（按服务）
 
