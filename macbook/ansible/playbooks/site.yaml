@@ -7,4 +7,7 @@
 # 可用 runtime，CLI 没装齐时它起得来但一个 agent 都发现不了。
 - import_playbook: multica-daemon.yaml
 - import_playbook: node-exporter.yaml
+# 必须在 node-exporter 之后：读取端（--collector.textfile.directory）由它加上，
+# 反过来先跑本条的话，快照写出来没人读，而且两边都不报错。
+- import_playbook: omlx-metrics.yaml
 - import_playbook: power.yaml

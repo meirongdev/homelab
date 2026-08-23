@@ -1,8 +1,15 @@
 ---
 # Grafana Dashboard: Mac OMLX 本地推理
-# 数据源：集群内 json-exporter（monitoring ns）把 OMLX 的两个免鉴权 JSON 端点翻成指标，
-# 由 homelab Prometheus 以 job omlx-status / omlx-models 抓取（经 Tailscale 打到
-# mbp-m2-pro 100.89.15.120:8000）。**OMLX 自己没有 /metrics**。
+# **OMLX 自己没有 /metrics**，指标来自两条互补链路：
+#   A. 集群内 json-exporter（monitoring ns）翻译 OMLX 的两个免鉴权 JSON 端点，
+#      homelab Prometheus 以 job omlx-status / omlx-models 抓取（经 Tailscale 打到
+#      mbp-m2-pro 100.89.15.120:8000）—— 实时状态：驻留/内存/队列/能力位。
+#   B. Mac 上的 LaunchAgent 每 60s 把 ~/.omlx/stats.json 渲染成 node_exporter 的
+#      textfile 快照，随 job node-exporter-macbook 一起进来，抓取时改名 omlx_alltime_*
+#      —— 累计 prefill/generate 秒数（速度的分母）与 per-model token 账本。
+#      生产端 macbook/ansible/playbooks/omlx-metrics.yaml（`just omlx-metrics`）。
+# ☠️ 两套指标**同名不同义**（重启归零 vs 跨重启累加），靠 omlx_alltime_ 前缀分开；
+#    所有 target 都显式写 job= 或用带前缀的名字，别去掉。
 #   端点/指标口径/陷阱 → docs/reference/omlx-inference-metrics.md（唯一真相源）
 #   exporter 清单     → k8s/helm/manifests/monitoring/json-exporter/
 #   抓取配置          → k8s/helm/values/kube-prometheus-stack.yaml
@@ -25,7 +32,7 @@ data:
       "annotations": {
         "list": []
       },
-      "description": "Mac OMLX（mbp-m2-pro）本地推理：模型驻留/换入换出、30G 天花板、请求队列与 token 吞吐。指标由集群内 json-exporter 翻译两个 JSON 端点而来（OMLX 无原生 /metrics）。",
+      "description": "Mac OMLX（mbp-m2-pro）本地推理：模型驻留/换入换出、30G 天花板、请求队列与 token 吞吐。指标来自两条互补链路 —— 集群内 json-exporter 翻译两个 JSON 端点（实时状态），加 Mac 上 node_exporter 的 textfile 快照（omlx_alltime_*，带秒数分母与 per-model 账本）。OMLX 本身没有 /metrics。",
       "editable": true,
       "graphTooltip": 1,
       "links": [
@@ -574,7 +581,7 @@ data:
           ],
           "title": "累计平均生成 TPS",
           "type": "stat",
-          "description": "⚠️ **自启动以来的累计平均**（completion tokens ÷ 累计生成秒数），不是当前速度；跑久了几乎不动。看「现在快不快」请用下面的 Token 速率。"
+          "description": "⚠️ **自启动以来的累计平均**（completion tokens ÷ 累计生成秒数），不是当前速度；跑久了几乎不动。看「现在快不快」用下面的「纯推理速度（30m 窗口）」那格。"
         },
         {
           "collapsed": false,
@@ -1237,7 +1244,7 @@ data:
           ],
           "title": "Token 速率（tok/s，墙上时间口径）",
           "type": "timeseries",
-          "description": "这是**含空闲时间**的窗口平均，不是「推理时的 TPS」。OMLX 只暴露累计平均 TPS，拿不到分窗口的纯推理速度。"
+          "description": "这是**含空闲时间**的窗口平均（「这半小时产出了多少 token」），不是「推理时的 TPS」。想要后者看下面「纯推理速度（30m 窗口）」—— 那格的分母是累计 prefill/generate 秒数，机器闲下来时这格掉到 0、那格不动。"
         },
         {
           "datasource": {
@@ -1317,7 +1324,7 @@ data:
           ],
           "title": "累计平均 TPS（自启动以来，不是当前速度）",
           "type": "timeseries",
-          "description": "口径：prefill = (prompt-cached)/累计 prefill 秒；generation = completion/累计生成秒。**只在 OMLX 重启后才会明显变化**，当实时指标看会得出「机器一直很快」的错觉。"
+          "description": "口径：prefill = (prompt-cached)/累计 prefill 秒；generation = completion/累计生成秒，**自启动累计**。**只在 OMLX 重启后才会明显变化**，当实时指标看会得出「机器一直很快」的错觉。同样的分子分母、改成分窗口的版本在下面「纯推理速度」那格。"
         },
         {
           "datasource": {
@@ -1461,6 +1468,352 @@ data:
             "x": 0,
             "y": 45
           },
+          "id": 105,
+          "panels": [],
+          "title": "🔬 纯推理速度 / 累计账本（链路 B：Mac textfile 快照）",
+          "type": "row"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "**干活时有多快**（分母是累计 prefill/generate 秒数，**不含空闲**），与上面「Token 速率」那格的墙上时间口径互补：机器闲下来时那格掉到 0，这格不动。\n\n⚠️ 窗口写死 `[30m]` 不用 `$__rate_interval`：源文件 `~/.omlx/stats.json` 每 300s 才落一次盘，计数器是台阶状的，窗口一短大部分点读到 0。\n\nprefill 的分子是 `processed`（prompt 减 cached）—— 缓存命中的 token 从没被 prefill 过，不扣掉会被命中率放大（本机 78.5% → 4.6 倍虚高）。",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                }
+              },
+              "unit": "none",
+              "mappings": [],
+              "color": {
+                "mode": "palette-classic"
+              },
+              "min": 0,
+              "decimals": 1
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 46
+          },
+          "id": 21,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "rate(omlx_alltime_processed_prompt_tokens_total[30m]) / rate(omlx_alltime_prefill_seconds_total[30m])",
+              "refId": "A",
+              "legendFormat": "prefill tok/s"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "rate(omlx_alltime_completion_tokens_total[30m]) / rate(omlx_alltime_generation_seconds_total[30m])",
+              "refId": "B",
+              "legendFormat": "decode tok/s"
+            }
+          ],
+          "title": "纯推理速度（30m 窗口，不含空闲）",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "解码速度按模型拆开 —— 大 VLM 与 1.7B 的 ASR 差一个数量级，混在一起的全局曲线只反映**最近谁在跑**。\n\n没在跑的模型分子分母同为 0，结果是 NaN，自动不出线（包括早已退役、但计数器永远留在 `stats.json` 里的那些）。",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                }
+              },
+              "unit": "none",
+              "mappings": [],
+              "color": {
+                "mode": "palette-classic"
+              },
+              "min": 0,
+              "decimals": 1
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 46
+          },
+          "id": 22,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "rate(omlx_alltime_model_completion_tokens_total{model=~\"$model\"}[30m]) / rate(omlx_alltime_model_generation_seconds_total{model=~\"$model\"}[30m])",
+              "refId": "A",
+              "legendFormat": "{{model}}"
+            }
+          ],
+          "title": "解码速度 · 按模型（30m 窗口）",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "per-model 累计解码 token，**跨 OMLX 进程重启累加**（源是落盘的 alltime，不是 /api/status 那套重启归零的计数器）。原本这份账本只有认 cookie 的 admin API 有。\n\n☠️ `stats.json` **从不清理退役模型**（今天 27 个），所以早就删掉的模型会一直挂着它当年的总数 —— 这是账本不是现状。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "continuous-BlYlRd"
+              },
+              "mappings": [],
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 54
+          },
+          "id": 23,
+          "options": {
+            "displayMode": "gradient",
+            "orientation": "horizontal",
+            "showUnfilled": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "omlx_alltime_model_completion_tokens_total{model=~\"$model\"}",
+              "refId": "A",
+              "legendFormat": "{{model}}",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "title": "累计解码 token · 按模型（全时账本）",
+          "type": "bargauge"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "距上次渲染 `.prom` 的时间。**这才是采集器的死活**：Mac 上的 LaunchAgent 每 60s 跑一轮，超过 ~3 分钟说明它停了（或 Mac 睡了）。\n\n☠️ 渲染失败时**故意保留旧文件**而不是写归零的 —— 归零会被读成计数器重置，在每条跨越空档的 rate() 上打个洞。代价就是只能靠这一格看出采集器死没死。\n\n修：`cd macbook/ansible && just omlx-metrics`",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "mappings": [],
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 180
+                  },
+                  {
+                    "color": "red",
+                    "value": 600
+                  }
+                ]
+              },
+              "decimals": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 12,
+            "y": 54
+          },
+          "id": 24,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "time() - omlx_alltime_stats_collected_timestamp_seconds",
+              "refId": "A"
+            }
+          ],
+          "title": "采集器新鲜度",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "距 OMLX 上次写 `stats.json` 的时间。**老了不是故障**：OMLX 每 300s 才落一次盘，而且只在这期间有过请求才落 —— 机器闲着，这格就一路涨。\n\n它跟左边那格是两回事：这格老 = OMLX 没活干；左边那格老 = 采集器死了。别拿一个当另一个。",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "mappings": [],
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "decimals": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 6,
+            "x": 18,
+            "y": 54
+          },
+          "id": 25,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "time() - omlx_alltime_stats_file_mtime_seconds",
+              "refId": "A"
+            }
+          ],
+          "title": "源数据新鲜度（闲着就会老）",
+          "type": "stat"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 61
+          },
           "id": 104,
           "panels": [],
           "title": "🔧 能力与口径",
@@ -1510,7 +1863,7 @@ data:
             "h": 5,
             "w": 12,
             "x": 0,
-            "y": 46
+            "y": 62
           },
           "id": 19,
           "options": {
@@ -1556,12 +1909,12 @@ data:
             "h": 5,
             "w": 12,
             "x": 12,
-            "y": 46
+            "y": 62
           },
           "id": 20,
           "options": {
             "mode": "markdown",
-            "content": "**口径速查**（细节 → `docs/reference/omlx-inference-metrics.md`）\n\n- `up` 只有一个：exporter 挂了和 Mac 合盖了长得一样。\n- `*_total` 随 OMLX 进程重启归零；`avg_*_tps` 是**自启动累计平均**，不是当前速度。\n- 天花板核算用 `estimated_size`，实际驻留是 `actual_size`（后者更大）。\n- 未驻留的模型没有 `last_access` / `actual_size` 指标（源端是 null）。\n- 抓取 30s，模型换入换出可能比一个采样点还短 —— 事件计数比时间线更可靠。\n"
+            "content": "**口径速查**（细节 → `docs/reference/omlx-inference-metrics.md`）\n\n- 指标有**两套**：`omlx_*`（json-exporter 抓端点，实时状态，**重启归零**）与 `omlx_alltime_*`（Mac textfile 快照，**跨重启累加**）。同名不同义，靠前缀分开 —— 别 `sum()` 到一起。\n- `up` 只有一个：exporter 挂了和 Mac 合盖了长得一样。\n- `avg_*_tps` 是**自启动累计平均**，不是当前速度；要「现在多快」看「纯推理速度」那格。\n- `omlx_alltime_*` 的 `rate()` 窗口**不得短于 15m**（源文件 300s 才落盘）。\n- 天花板核算用 `estimated_size`，实际驻留是 `actual_size`（后者更大）。\n- 未驻留的模型没有 `last_access` / `actual_size` 指标（源端是 null）。\n- 抓取 30s，模型换入换出可能比一个采样点还短 —— 事件计数比时间线更可靠。\n"
           },
           "title": "读这张图之前",
           "type": "text"
