@@ -60,6 +60,13 @@ docs/                          # 见下方「Documentation Rules」
   ClusterMesh VXLAN。⚠️ `AdvertiseRoutes` 只该有本节点 /32（Pod CIDR 子网路由 2026-07-07 已移除）。
   → [tailscale-network.md](reference/tailscale-network.md)
 - **外部流量**：Internet → Cloudflare DNS → Tunnel → Cilium Gateway → Service
+- ☠️ **跨仓库边界（2026-08-23）**：`stack.meirong.dev` 不是本仓库的东西 —— 它是
+  `~/projects/meirongdev/home-stack`（公开仓库）用**自己的** terraform 部到 Cloudflare
+  Workers 的，那条 DNS 记录由 Cloudflare 自建、**不在本仓库 state 里**。本仓库
+  **既不许再声明一份**（Workers 自定义域名不能建在已有 CNAME 的主机名上），
+  **也不许当游离记录清理**（删掉 = 站点域名解析消失，且本仓库无线索）。反过来 zone
+  设置/WAF/隧道/R2 桶本体归本仓库独占。完整归属表 →
+  [decisions/home-stack-repo-boundary.md](decisions/home-stack-repo-boundary.md)
 - **节点**：homelab 自 2026-08-13 起是**双节点**——control-plane `k8s-node` `10.10.10.10`
   / TS `100.94.186.7`（Ryzen 5600H 笔记本）+ worker `k8s-worker-106` `192.168.50.107` /
   TS `100.74.162.97`（跑在 NAS 106 上的 2c/4G VM）· oracle-k3s `10.0.0.26` / TS
