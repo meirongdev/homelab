@@ -250,7 +250,32 @@ data:
             print(f"  removed stale monitor '{name}' (id={mon['id']}, no longer declared)")
 
     # --- Public status page ---
-    monitor_entries  = [{"id": m["id"], "sendUrl": False} for m in api.get_monitors()]
+    # ☠️ **不能直接拿 add 之后的 get_monitors() 去拼状态页。** 客户端那份监控列表由
+    # 服务端推事件填充，`add_monitor()` 返回时新监控还没进去 —— 于是 publicGroupList
+    # 会**漏掉本次新增的那几条**，状态页因此「落后一次运行」。
+    #
+    # 2026-08-23 实测到全过程：加 Blog/Playgrounds/Home Stack 三条，ArgoCD 的 PostSync
+    # hook 报 Succeeded、日志三条 add 全绿、集群里 ConfigMap 也是新的，**可状态页上一条
+    # 都没有**；而同一次运行却把上一次（08-18）新增的 Multica 补了上去 —— 同一种滞后。
+    # 症状之坏在于：监控其实在跑、告警也会响，只是公开状态页上「看不见它们」，
+    # 日志里没有任何异常可查（三条都是绿的 `added`）。
+    #
+    # 所以这里改成「等到所有声明的监控都出现在服务端返回里再存状态页」。
+    # 等不到就**响亮地警告但不失败**：本脚本是 PostSync hook，失败会让整个 App 的
+    # sync 失败，而「状态页少一条」远不值那个代价 —— 且下一次运行会自愈。
+    expected_names = {m["name"] for m in MONITORS} | {PUSH_MONITOR_NAME}
+    monitors_now, missing = [], expected_names
+    for attempt in range(1, 7):
+        monitors_now = api.get_monitors()
+        missing = expected_names - {m["name"] for m in monitors_now}
+        if not missing:
+            break
+        print(f"  status page: 服务端还没返回 {sorted(missing)}，重取 {attempt}/6")
+        time.sleep(2)
+    if missing:
+        print(f"WARNING: 状态页可能漏掉 {sorted(missing)}（下次运行会自愈）", file=sys.stderr)
+
+    monitor_entries  = [{"id": m["id"], "sendUrl": False} for m in monitors_now]
     existing_pages   = {p["slug"] for p in api.get_status_pages()}
 
     if STATUS_PAGE_SLUG not in existing_pages:
