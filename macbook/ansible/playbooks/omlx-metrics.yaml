@@ -1,0 +1,182 @@
+---
+# OMLX 推理指标的**生产端** —— 把 OMLX 的累计计数器渲染成 node_exporter 的
+# textfile 快照（LaunchAgent，每 60s 一次）。读取端是 node-exporter.yaml
+# （它负责给 node_exporter 加 --collector.textfile.directory）。
+#
+# 为什么要这条链路（已经有 json-exporter 在抓 OMLX 了）：
+#   集群内的 json-exporter 抓的是 OMLX 的 /api/status 与 /v1/models/status，
+#   那两个端点**没有累计 prefill/generate 秒数**，只有「自启动以来的累计平均 TPS」，
+#   跑久了几乎不动 —— 拿不到「最近半小时到底多快」。stats.json 里有秒数分母，
+#   于是 rate(tokens)/rate(seconds) 才成立。它还顺带给出 per-model token 账本
+#   （原本只有 admin API 有，而 admin API 只认会话 cookie）。
+#   两条链路是互补关系，不是替代 → docs/reference/omlx-inference-metrics.md
+#
+# 数据源：~/.omlx/stats.json —— **免鉴权**，OMLX 每 300s 原子重写一次。
+#   ☠️ 不要为了拿更细的 /admin/api/stats 去开 skip_api_key_verification：
+#      server.host 是 0.0.0.0 且 cors_origins 是 "*"，那等于把「改设置、删模型、
+#      重启服务」的整个 admin 面板开放给 LAN 和整个 tailnet。
+#
+# ☠️ **跨仓依赖**：渲染器 `omlx-textfile-collector` 不在本仓，它是
+#    ~/projects/meirongdev/mlx-learning 的 venv 里的 console script
+#    （src/mlx_learning/omlx_textfile_collector.py）。本 playbook **不创建那个 venv**：
+#    缺了就明确失败并给出修复命令，而不是装一个必然空转的 LaunchAgent。
+#    升级那个 repo 后不需要重跑本 playbook —— plist 指的是 venv 里的脚本本身。
+#
+# NO sudo。幂等：重复跑安全（plist 未变则不重载，只 kickstart 一次刷新快照）。
+- name: OMLX textfile collector (LaunchAgent)
+  hosts: macbook
+  gather_facts: true            # 需要 ansible_facts.user_dir
+  vars:
+    otc_label: com.meirongdev.omlx-textfile-collector
+    otc_repo_dir: "{{ ansible_facts.user_dir }}/projects/meirongdev/mlx-learning"
+    otc_bin: "{{ otc_repo_dir }}/.venv/bin/omlx-textfile-collector"
+    otc_stats_path: "{{ ansible_facts.user_dir }}/.omlx/stats.json"
+    # 与 node-exporter.yaml 的 ne_textfile_dir **必须一致**（不一致时两边都不报错）。
+    otc_textfile_dir: "{{ ansible_facts.user_dir }}/.local/var/lib/node_exporter/textfile_collector"
+    otc_prom_file: "{{ otc_textfile_dir }}/omlx.prom"
+    otc_interval_seconds: 60
+    otc_plist: "{{ ansible_facts.user_dir }}/Library/LaunchAgents/{{ otc_label }}.plist"
+
+  tasks:
+    - name: Ensure directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ otc_textfile_dir }}"
+        - "{{ ansible_facts.user_dir }}/.local/var/log"
+        - "{{ ansible_facts.user_dir }}/Library/LaunchAgents"
+
+    - name: Locate the renderer (cross-repo dependency)
+      ansible.builtin.stat:
+        path: "{{ otc_bin }}"
+      register: otc_bin_stat
+
+    - name: Fail early when the mlx-learning venv is missing
+      ansible.builtin.fail:
+        msg: >-
+          找不到 {{ otc_bin }}。渲染器在 mlx-learning 仓，不在本仓，本 playbook 不负责建它。
+          在 Mac 上先跑: cd {{ otc_repo_dir }} && uv sync
+          （仓库不在？git clone 到 {{ otc_repo_dir }}，或改本 playbook 的 otc_repo_dir。）
+      when: not otc_bin_stat.stat.exists
+
+    # stats.json 只有在 OMLX 至少服务过一次请求之后才存在。它不在 = 没有可渲染的数据，
+    # 这时装上 LaunchAgent 只会每 60s 往 .err.log 刷一行。照 multica-daemon 的做法：
+    # 装好一切但**不 bootstrap**，把话说清楚，而不是让 `just site` 整体失败。
+    - name: Check whether OMLX has ever written stats.json
+      ansible.builtin.stat:
+        path: "{{ otc_stats_path }}"
+      register: otc_stats_stat
+
+    - name: Install LaunchAgent plist
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/com.meirongdev.omlx-textfile-collector.plist.j2"
+        dest: "{{ otc_plist }}"
+        mode: "0644"
+      notify: reload omlx textfile collector
+
+    - name: Warn and stop when there is nothing to render yet
+      ansible.builtin.debug:
+        msg: >-
+          ⚠️ {{ otc_stats_path }} 不存在 —— OMLX 还没服务过任何请求。
+          plist 已就位但**刻意没有 bootstrap**（否则每 60s 报一次错）。
+          OMLX 跑起来并处理过一次请求之后重跑 `just omlx-metrics`。
+      when: not otc_stats_stat.stat.exists
+
+    - name: Deploy the agent
+      when: otc_stats_stat.stat.exists
+      block:
+        - name: Ensure LaunchAgent is loaded (bootstrap into the GUI domain)
+          ansible.builtin.shell: |
+            uid=$(id -u)
+            if ! launchctl print "gui/${uid}/{{ otc_label }}" >/dev/null 2>&1; then
+              launchctl bootstrap "gui/${uid}" "{{ otc_plist }}"
+              echo BOOTSTRAPPED
+            fi
+          register: otc_load
+          changed_when: "'BOOTSTRAPPED' in otc_load.stdout"
+
+        - name: Apply pending reloads before verifying
+          ansible.builtin.meta: flush_handlers
+
+        # plist 没变时 bootstrap 是 no-op，RunAtLoad 也不会再触发 —— 不 kickstart
+        # 的话下面的「快照是新的」要等最多 60s 才成立。kickstart 强制跑一轮。
+        - name: Kick one collection round so verification isn't racing StartInterval
+          ansible.builtin.command: "launchctl kickstart gui/{{ ansible_facts.user_uid }}/{{ otc_label }}"
+          changed_when: false
+
+        - name: Wait for a fresh snapshot
+          ansible.builtin.shell: |
+            set -o pipefail
+            [ -f '{{ otc_prom_file }}' ] || { echo "no {{ otc_prom_file }}"; exit 1; }
+            age=$(( $(date +%s) - $(stat -f %m '{{ otc_prom_file }}') ))
+            echo "prom_age=${age}s"
+            [ "$age" -le 120 ]
+          args:
+            executable: /bin/bash
+          register: otc_fresh
+          until: otc_fresh.rc == 0
+          retries: 6
+          delay: 2
+          changed_when: false
+
+        # 一段脚本查三段链路，每段有各自的判据和各自的修法。失败时 stdout 会被
+        # Ansible 原样打出来，所以诊断信息写在脚本里而不是 fail_msg 里。
+        #   1. 渲染器  → .prom 里的 omlx_ 条数 > 0
+        #   2. 源数据  → omlx_stats_file_mtime_seconds 存在（不是空壳文件）
+        #   3. 读取端  → node_exporter 的 node_textfile_scrape_error == 0 且看得见 omlx_
+        - name: Verify the whole chain — renderer, source, node_exporter
+          ansible.builtin.shell: |
+            set -o pipefail
+            prom='{{ otc_prom_file }}'
+            fail() { echo "❌ $*"; exit 1; }
+
+            series="$(grep -c '^omlx_' "$prom" || true)"
+            [ "$series" -gt 0 ] || fail "渲染器写出了空快照（$prom 里没有 omlx_ 系列）"
+
+            src_mtime="$(awk '/^omlx_stats_file_mtime_seconds /{print int($2)}' "$prom")"
+            [ -n "$src_mtime" ] || fail "快照里没有 omlx_stats_file_mtime_seconds —— 渲染器版本对不上？"
+            src_age=$(( $(date +%s) - src_mtime ))
+
+            body="$(curl -sf --max-time 10 http://127.0.0.1:9100/metrics)" \
+              || fail "node_exporter :9100 不应答 —— 先跑 \`just node-exporter\`"
+            err="$(printf '%s\n' "$body" | awk '/^node_textfile_scrape_error /{print $2}')"
+            [ -n "$err" ] \
+              || fail "node_exporter 没带 --collector.textfile.directory（指标 node_textfile_scrape_error 根本不存在）—— 跑 \`just node-exporter\`"
+            [ "$err" = "0" ] \
+              || fail "node_textfile_scrape_error=$err —— {{ otc_textfile_dir }} 里有解析不了的 .prom"
+            scraped="$(printf '%s\n' "$body" | grep -c '^omlx_' || true)"
+            [ "$scraped" -gt 0 ] \
+              || fail "node_exporter 读的目录不是 {{ otc_textfile_dir }}（快照有 $series 条，它一条没看见）"
+
+            echo "✅ 渲染 ${series} 条 · node_exporter 暴露 ${scraped} 条 · scrape_error=0"
+            # 源文件每 300s 才落盘，且只在这期间有过请求才落。久不更新不是故障，
+            # 但要说一声，免得回头对着一条平的 rate() 曲线怀疑采集。
+            if [ "$src_age" -gt 1800 ]; then
+              echo "ℹ️  stats.json 已 ${src_age}s 未更新 —— OMLX 闲着或已停，rate() 会读到平段，不是采集坏了"
+            else
+              echo "ℹ️  stats.json 新鲜度 ${src_age}s（OMLX 每 300s 落盘一次）"
+            fi
+          args:
+            executable: /bin/bash
+          register: otc_verify
+          changed_when: false
+
+        - name: Show the verification result
+          ansible.builtin.debug:
+            msg: "{{ otc_verify.stdout_lines }}"
+
+  handlers:
+    # bootout 是异步的：没等它消失就 bootstrap 会拿到
+    # "Bootstrap failed: 5: Input/output error"（同 node-exporter.yaml 的 handler）。
+    - name: reload omlx textfile collector
+      ansible.builtin.shell: |
+        uid=$(id -u)
+        label="{{ otc_label }}"
+        launchctl bootout "gui/${uid}/${label}" 2>/dev/null || true
+        for _ in 1 2 3 4 5; do
+          launchctl print "gui/${uid}/${label}" >/dev/null 2>&1 || break
+          sleep 1
+        done
+        launchctl bootstrap "gui/${uid}" "{{ otc_plist }}"

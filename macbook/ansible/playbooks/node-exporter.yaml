@@ -4,6 +4,12 @@
 # - runs on :9100, scraped over Tailscale by homelab Prometheus (job node-exporter-macbook)
 # - NO sudo required (user-domain LaunchAgent in ~/Library/LaunchAgents)
 # Idempotent: re-running with the same version is a no-op.
+#
+# 本 playbook 同时是 **OMLX 推理指标的读取端**：它给 node_exporter 加
+# `--collector.textfile.directory`，OMLX 那份 .prom 快照由 omlx-metrics.yaml 生产。
+# 两者缺一都不报错，只是指标静默不出现 —— 所以下面的验收会**同时**断言
+# node_textfile_scrape_error==0 与 omlx_ 系列条数 >0。
+# 口径/陷阱 → docs/reference/omlx-inference-metrics.md（唯一真相源）
 - name: Deploy node_exporter (LaunchAgent)
   hosts: macbook
   gather_facts: true            # need ansible_user_dir
@@ -15,6 +21,9 @@
     ne_label: com.prometheus.node_exporter
     ne_listen: ":9100"
     ne_bin: "{{ ansible_facts.user_dir }}/.local/bin/node_exporter"
+    # textfile collector 的投放目录。与 omlx-metrics.yaml 的 otc_textfile_dir
+    # **必须一致**（改一处就要改另一处；不一致时两边都不报错，指标直接消失）。
+    ne_textfile_dir: "{{ ansible_facts.user_dir }}/.local/var/lib/node_exporter/textfile_collector"
     ne_plist: "{{ ansible_facts.user_dir }}/Library/LaunchAgents/{{ ne_label }}.plist"
     ne_tarball: "/tmp/node_exporter-{{ node_exporter_version }}.{{ node_exporter_arch }}.tar.gz"
 
@@ -28,6 +37,7 @@
         - "{{ ansible_user_dir }}/.local/bin"
         - "{{ ansible_user_dir }}/.local/var/log"
         - "{{ ansible_user_dir }}/Library/LaunchAgents"
+        - "{{ ne_textfile_dir }}"
 
     - name: Check installed node_exporter version
       ansible.builtin.command: "{{ ne_bin }} --version"
@@ -89,6 +99,11 @@
       register: ne_load
       changed_when: "'BOOTSTRAPPED' in ne_load.stdout"
 
+    # 验收之前先把 handler 兑现：bootstrap 过的进程带的是**旧** ProgramArguments，
+    # 不 flush 就会拿着老进程的 /metrics 去断言新加的 flag，稳过但毫无意义。
+    - name: Apply pending node_exporter restarts before verifying
+      ansible.builtin.meta: flush_handlers
+
     - name: Verify it is serving metrics
       ansible.builtin.uri:
         url: "http://127.0.0.1:9100/metrics"
@@ -97,6 +112,40 @@
       retries: 5
       delay: 2
       until: ne_check.status == 200
+
+    # textfile collector 的两条独立判据：
+    #   node_textfile_scrape_error == 0 → 目录里的 .prom 都解析成功（缺 flag 时该指标**根本不存在**）
+    #   omlx_ 系列条数 > 0             → 生产端（omlx-metrics.yaml）确实投放了快照
+    # 前者失败 = 本 playbook 的问题；后者为 0 = 去跑 `just omlx-metrics`。
+    - name: Read textfile-collector state from /metrics
+      ansible.builtin.shell: |
+        set -o pipefail
+        body="$(curl -sf --max-time 10 http://127.0.0.1:9100/metrics)" || exit 1
+        err="$(printf '%s\n' "$body" | awk '/^node_textfile_scrape_error /{print $2}')"
+        series="$(printf '%s\n' "$body" | grep -c '^omlx_' || true)"
+        echo "scrape_error=${err:-ABSENT} omlx_series=${series}"
+      args:
+        executable: /bin/bash
+      register: ne_textfile
+      changed_when: false
+
+    - name: Assert the textfile collector is enabled and parsing cleanly
+      ansible.builtin.assert:
+        that:
+          - "'scrape_error=0' in ne_textfile.stdout"
+        fail_msg: >-
+          node_textfile_scrape_error 不是 0（实际: {{ ne_textfile.stdout }}）。
+          ABSENT = 进程没带 --collector.textfile.directory（plist 改了但没重启）；
+          非 0 = {{ ne_textfile_dir }} 里有解析不了的 .prom。
+        success_msg: "textfile collector OK — {{ ne_textfile.stdout }}"
+
+    # 生产端缺席不算本 playbook 失败（可能只是还没部署 collector），但要吵一声。
+    - name: Warn when no omlx snapshot is being produced
+      ansible.builtin.debug:
+        msg: >-
+          ⚠️ node_exporter 在读 {{ ne_textfile_dir }}，但里面没有 omlx_ 系列。
+          OMLX 推理指标的生产端还没装 —— 跑 `just omlx-metrics`。
+      when: "'omlx_series=0' in ne_textfile.stdout"
 
   handlers:
     # bootout is async — bootstrapping before it finishes fails with

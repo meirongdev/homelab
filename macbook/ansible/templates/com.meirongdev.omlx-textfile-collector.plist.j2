@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Managed by Ansible (macbook/ansible/playbooks/omlx-metrics.yaml). Do not edit by hand. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{{ otc_label }}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <!-- venv 的 console script，shebang 直指同一个 venv 的 python3 —— 不经 uv、
+             不依赖 PATH。LaunchAgent 拿到的是极简 PATH（见 ai.multica.daemon 的注释），
+             `uv run` 在这里会找不到 uv。 -->
+        <string>{{ otc_bin }}</string>
+        <string>--stats-path</string>
+        <string>{{ otc_stats_path }}</string>
+        <string>--output-dir</string>
+        <string>{{ otc_textfile_dir }}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <!-- ☠️ **绝对不要加 KeepAlive**。collector 是跑完就退的一次性程序（实测 0.03s），
+         KeepAlive 会把「正常退出」读成崩溃并立刻重启，ThrottleInterval 兜底也只是
+         压到每 10s 一轮 —— 变成一个每天重写文件 8640 次的重启风暴，而且看起来
+         完全正常（文件是新的、指标是对的），只有 CPU 曲线上多一条毛刺。
+         周期靠 StartInterval，不靠 KeepAlive。
+         （与 ai.multica.daemon 正好相反：那个是常驻进程，必须 KeepAlive + --foreground。） -->
+    <key>StartInterval</key>
+    <integer>{{ otc_interval_seconds }}</integer>
+    <!-- 源文件 ~/.omlx/stats.json 每 300s 才落一次盘，所以 60s 是**故意冗余**的：
+         多出来的那几轮不产生新数据，只让 .prom 的 mtime 保持新鲜，从而
+         node_textfile_mtime_seconds 能区分「collector 死了」和「OMLX 闲着」。 -->
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>LowPriorityIO</key>
+    <true/>
+    <!-- 成功时无输出；失败时每轮一行到 .err.log（唯一现实成因是 stats.json 没了）。 -->
+    <key>StandardOutPath</key>
+    <string>{{ ansible_facts.user_dir }}/.local/var/log/omlx-textfile-collector.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{ ansible_facts.user_dir }}/.local/var/log/omlx-textfile-collector.err.log</string>
+</dict>
+</plist>

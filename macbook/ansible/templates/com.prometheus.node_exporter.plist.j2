@@ -9,6 +9,12 @@
     <array>
         <string>{{ ne_bin }}</string>
         <string>--web.listen-address={{ ne_listen }}</string>
+        <!-- ☠️ 没有这个 flag，textfile collector 是**启用但目录为空**的状态：
+             omlx-metrics.yaml 每 60s 老老实实写 omlx.prom，node_exporter 一个字节
+             都不读，Prometheus 那边表现为「指标从来没出现过」而不是任何报错。
+             加/改本行后必须重启进程（handler 会做），仅重写 plist 不生效。
+             验收：/metrics 里有 node_textfile_scrape_error 0 且有 omlx_ 系列。 -->
+        <string>--collector.textfile.directory={{ ne_textfile_dir }}</string>
     </array>
     <key>RunAtLoad</key>
     <true/>

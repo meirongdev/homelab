@@ -1,6 +1,6 @@
 # Multi-Cluster Observability Architecture
 
-> Last updated: 2026-08-19
+> Last updated: 2026-08-23
 > Status: 生效事实
 
 ## 速览
@@ -220,7 +220,7 @@ scrapeClasses 不会给它们 relabel，`cluster`/`nodename` 必须逐 target �
 | `node-exporter-metal-nodes` | `192.168.50.106:9100` (storage-node) | `cluster=homelab` |
 | `node-exporter-metal-nodes` | `192.168.50.4:9100` (proxmox-node) | `cluster=homelab` |
 | `node-exporter-dgx-spark` | `100.97.87.120:9100` / `100.67.164.92:9100`（经 Tailscale） | `cluster=dgx-spark` |
-| `node-exporter-macbook` | `100.89.15.120:9100`（经 Tailscale） | `cluster=macbook` / `nodename=macbook-pro` |
+| `node-exporter-macbook` | `100.89.15.120:9100`（经 Tailscale） | `cluster=macbook` / `nodename=macbook-pro`；⚠️ 唯一带 `metric_relabel_configs` 的 job（OMLX 那批 `omlx_*` → `omlx_alltime_*`，见下）|
 | `smartctl-storage-106` / `smartctl-proxmox-pve` / `smartctl-dgx-spark` | `:9633`，120s | `nodename` 与 node-exporter job 对齐 |
 
 ### 外部主机（非 K8s，metrics-only）
@@ -236,6 +236,12 @@ scrapeClasses 不会给它们 relabel，`cluster`/`nodename` 必须逐 target �
   （`macbook/ansible/`，`just node-exporter` / `just power`）；GUI-only 步骤在其 README。
   ⚠️ 笔记本会睡眠/登出，target 抖动导致间歇 `TargetDown`(warning) → Telegram 噪音，
   烦了就在 Alertmanager silence 掉 `node-exporter-macbook` job。
+  - **它同时驮着 OMLX 的推理计数器**（2026-08-23 起）：Mac 上另一个 LaunchAgent
+    每 60s 把 `~/.omlx/stats.json` 渲染成 `.prom`，node_exporter 用
+    `--collector.textfile.directory` 一起吐出来，抓取时改名为 `omlx_alltime_*`。
+    部署 `cd macbook/ansible && just omlx-metrics`（读取端的 flag 由 `just node-exporter` 加，
+    **两个都要跑**，少一个不报错、指标静默不出现）。
+    口径/陷阱/验收 → [omlx-inference-metrics.md](omlx-inference-metrics.md)（唯一真相源）。
 - **SMART 磁盘健康**（2026-06-27）: Linux 裸机跑 `smartctl_exporter`（:9633）。
   部署：storage-106 + pve（amd64）走 `cd proxmox/ansible && just node-exporter`（一个 playbook
   同装 node_exporter + smartctl_exporter）；DGX ×2（arm64）走 `nv-dgx-spark` repo

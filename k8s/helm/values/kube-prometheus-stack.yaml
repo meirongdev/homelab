@@ -461,6 +461,30 @@ prometheus:
             labels:
               cluster: macbook
               nodename: macbook-pro
+        # 这个 job 顺带驮着 **OMLX 的累计计数器**：Mac 上一个 LaunchAgent 每 60s 把
+        # ~/.omlx/stats.json 渲染成 .prom 快照，node_exporter 用 textfile collector 吐出来
+        # （生产端 macbook/ansible/playbooks/omlx-metrics.yaml，读取端 node-exporter.yaml）。
+        # 它补的正是 json-exporter 那两个 job 拿不到的东西：**累计 prefill/generate 秒数**
+        # （有了分母，rate(tokens)/rate(seconds) 才是真的「最近半小时多快」）
+        # 与 **per-model token 账本**（原本只有认 cookie 的 admin API 有）。
+        #
+        # ☠️ 必须改名，否则与 job=omlx-status 的指标**同名不同义**：
+        #    omlx_prompt_tokens_total 在那边是「自 OMLX 进程启动以来」（重启归零），
+        #    在这边是 stats.json 的**持久化 all-time**（跨重启累加）。两者会互相跟随，
+        #    所以 sum() 掉进去得到的是一条**看起来很合理的双倍曲线**，不会报错。
+        #    统一加 alltime 前缀，Grafana 指标浏览器里一眼分得清：
+        #      omlx_requests_total          → omlx_alltime_requests_total
+        #      omlx_prefill_seconds_total   → omlx_alltime_prefill_seconds_total
+        #      omlx_model_*                 → omlx_alltime_model_*{model=…}
+        #      omlx_stats_file_mtime_seconds→ omlx_alltime_stats_file_mtime_seconds
+        #    ⚠️ mlx-learning 仓里那份 serving 说明的 PromQL 示例用的是**未加前缀**的名字
+        #       （那是 Mac 本地 .prom 里的原名）；照抄到 Grafana 一定查不到，补上前缀。
+        # 见: docs/reference/omlx-inference-metrics.md（口径与陷阱，唯一真相源）
+        metric_relabel_configs:
+          - source_labels: [__name__]
+            regex: 'omlx_(.*)'
+            target_label: __name__
+            replacement: 'omlx_alltime_${1}'
 
       # MacBook OMLX 本地推理服务（http://100.89.15.120:8000）—— **OMLX 自己没有 /metrics**，
       # 由集群内 json-exporter.monitoring 把它两个免鉴权 JSON 端点翻成指标。
