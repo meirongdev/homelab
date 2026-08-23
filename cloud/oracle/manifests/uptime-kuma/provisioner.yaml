@@ -66,6 +66,22 @@ data:
         # 探 /healthz 而不是 / —— / 服务的是 report/latest.html，第一份周报出来前是 404，
         # 拿它当探针会让监控在首周一直红。/healthz 只验 DB 能打开。
         {"name": "Jobs SG",        "url": "https://jobs.meirong.dev/healthz"},
+        # --- 集群外托管的站点（2026-08-23 补：此前这三个**一个监控都没有**）---
+        # 它们既不在 homelab 也不在 oracle：Cloudflare Pages / GitHub Pages / Cloudflare
+        # Workers。所以这三条探的是「外部托管 + DNS 记录」还活着，与两个集群无关。
+        # ⚠️ **别把它们当集群存活信号** —— 下面 dead-man's switch 那段只认
+        # Grafana/Vault/Open Notebook 那组；这三条全绿完全不代表集群还在。
+        # 📌 副作用（这次是好的）：它们不经 Cilium Gateway，所以不会像上面那组一样给
+        # gateway 指标灌进探测底噪；代价是这三个也就没有 gateway 侧的 SLI。
+        # 归属与「谁该监控它们」见 docs/decisions/home-stack-repo-boundary.md。
+        {"name": "Blog",           "url": "https://meirong.dev/"},
+        # DNS-only（灰云）+ GitHub Pages → 这条探的是 GitHub，**不经 Cloudflare 边缘**，
+        # 所以 WAF/限流那几层对它一条都不生效（见 reference/networking-ingress.md）。
+        {"name": "Playgrounds",    "url": "https://playgrounds.meirong.dev/"},
+        # home-stack（另一个仓库部署的 Worker）。⚠️ 探针必须是真实存在的路径：
+        # 2026-08-23 起它的未知路径返回**真 404**（此前是 soft 404 的 200），
+        # 拿一个不存在的路径当探针会永久红。`/` 是 SSR 首页，稳定 200。
+        {"name": "Home Stack",     "url": "https://stack.meirong.dev/"},
     ]
 
     # 300s（原 120s）：v2 全新安装要先跑完全部 old_migrations 补丁才开始监听，

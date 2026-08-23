@@ -40,10 +40,15 @@
 > `stack.meirong.dev` 与本仓库的分工（谁拥有 DNS / WAF / 凭据 / 监控）见
 > [decisions/home-stack-repo-boundary.md](../decisions/home-stack-repo-boundary.md)。
 
-⚠️ 这两个**不在**上表里，也查不到 HTTPRoute（`kubectl get httproute` 核对不到不等于没上线），
+⚠️ 这三个**不在**上表里，也查不到 HTTPRoute（`kubectl get httproute` 核对不到不等于没上线），
 但它们占着 `meirong.dev` 的主机名、且在 Homepage 上有磁贴。机制与注意事项（GitHub Pages 必须
 DNS-only、绕过 WAF、DNS 通了≠站点通了）见
 [networking-ingress.md](networking-ingress.md#不走这条链的-meirongdev-主机名集群外托管)。
+
+✅ **可用性监控 2026-08-23 补齐**（此前三个都没有，即"站点挂了没人知道"）：oracle 的
+uptime-kuma provisioner 的 `MONITORS` 里各一条 HTTP 探测（`/`，收 200-299），并自动进
+`status.meirong.dev` 状态页。⚠️ **它们不是集群存活信号** —— 三条全绿只说明外部托管与
+DNS 还在，dead-man's switch 仍只认 Grafana/Vault/Open Notebook 那组。
 
 | 站点 | 托管 | URL |
 |------|------|-----|

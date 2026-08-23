@@ -146,6 +146,15 @@ data:
             href: https://playgrounds.meirong.dev
             description: 各语言官方在线 Playground 导航
 
+        # 同样是集群外站点，但归属更特殊：它由**另一个仓库**（meirongdev/home-stack）
+        # 用自己的 terraform 部到 Cloudflare Workers，连 DNS 记录都是那边建的 ——
+        # 本仓库对它只有"别声明第二份、别当游离记录清理"两条禁令，
+        # 见 docs/decisions/home-stack-repo-boundary.md。所以这里同样不写 kubernetes: 块。
+        - Home Stack:
+            icon: mdi-view-list-outline
+            href: https://stack.meirong.dev
+            description: homelab 自托管选型目录（97 条，10 个域）
+
         # 只发元数据与评分，**不发书** —— 与 Calibre-Web(book.meirong.dev) 是两个东西，
         # 域名刻意用 readlist. 而不是 books.，差一个字母的误配代价太高。
         - readlist:

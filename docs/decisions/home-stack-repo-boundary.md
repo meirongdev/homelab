@@ -71,8 +71,10 @@
   若站点被 `cf.threat_score gt 14` 那条 managed challenge 误伤（公开文档站会有爬虫），
   改动落在 homelab —— 而 **Free 档规则位已满**（自定义规则 5/5、限流 1/1），
   真要给它开口子得先砍一条现有规则。
-- ⚠️ **监控缺口**：按上表 homelab 拥有可用性监控，但目前 `stack.meirong.dev`
-  既没有 Uptime Kuma 监控项也没有 Homepage 磁贴 —— 即「站点挂了不会有人知道」。
-  记为 [ROADMAP #13](../ROADMAP.md)。
+- ✅ **监控缺口当天就补了**（2026-08-23）：uptime-kuma 的 `MONITORS` 里加了
+  `Home Stack`，顺带把同样一个监控都没有的 `Playgrounds` 与 apex `Blog` 一起加上，
+  Homepage 也补了 Home Stack 磁贴。⚠️ 但**这三条不是集群存活信号**（不经集群、
+  不经隧道），dead-man's switch 仍只认 Grafana/Vault/Open Notebook 那组。
+  GitOps 意味着 push 后才生效 —— 状态见 [ROADMAP #13](../ROADMAP.md)。
 - **home-stack 侧的对称文档**在它自己的 `docs/reference/cross-repo-boundary.md`，
   内容是本表的消费方视角。两份都改才叫改完。
