@@ -1,6 +1,6 @@
 # Networking & Ingress — 入口链路与 DNS 自动化
 
-> Last updated: 2026-08-20
+> Last updated: 2026-08-23
 > Status: 生效事实
 >
 > 南北向入口（Cloudflare → Cilium Gateway）与 DNS 自动化（external-dns）。
@@ -76,20 +76,32 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 
 ⚠️ **"写 HTTPRoute 即建 DNS" 只覆盖跑在集群里的服务**。集群外托管的站点没有 HTTPRoute，
 两套自动化都够不着它：external-dns 的 source 只有 `gateway-httproute`（看不见），通配隧道
-路由只对 CNAME 指向隧道的主机名生效（用不上）。这类记录**必须**在
+路由只对 CNAME 指向隧道的主机名生效（用不上）。这类记录**通常必须**在
 `cloudflare/terraform/main.tf` 的 `local.external_origin_dns` 里显式声明 —— 这是"加子域名别动
-那个模块"的唯一例外。
+那个模块"的例外。⚠️ 而 Workers 自定义域名是**例外的例外**：它自己建记录，反倒不能写进那个
+map（见下表第 3 行）。
 
 | 主机名 | 托管 | 记录归属 | 代理 |
 |--------|------|----------|------|
 | `meirong.dev`（apex，博客） | Cloudflare Pages `meirongdevblog.pages.dev` | Cloudflare Pages 自建，**不在 terraform state 里** | 橙云 |
 | `playgrounds.meirong.dev` | GitHub Pages `meirongdev.github.io`（repo `meirongdev/playgrounds`） | `local.external_origin_dns`（2026-08-13） | **DNS-only** |
+| `stack.meirong.dev` | Cloudflare Workers（repo `meirongdev/home-stack`，Rust→wasm SSR + 静态资源层） | **home-stack 仓库**的 terraform（`cloudflare_workers_custom_domain`），不在本仓库 state 里（2026-08-23） | 橙云 |
 
 - ⚠️ **GitHub Pages 必须 DNS-only（灰云）**：GitHub 给自定义域签 Let's Encrypt 证书走 HTTP-01，
   橙云 + 全区 *Always Use HTTPS* 会把校验重定向到「还没有证书的 HTTPS 源」，成死循环。
   仓库 Settings → Pages 显示证书已签发后，才可以按需改回 `proxied = true`。
 - ⚠️ **DNS-only 的主机名完全绕过边缘** —— WAF / 限流 / 缓存（[security.md §2](security.md)）
   对它一条都不生效，别把它算进那几层防护的覆盖面。
+- ⚠️ **Workers 自定义域名：别在本仓库声明，也别删它**。`cloudflare_workers_custom_domain`
+  会自己建 DNS 记录并签证书，而 Cloudflare **不允许**把它建在已存在 CNAME 的主机名上 ——
+  两个仓库各写一份必然打架。反过来，那条记录既不在本仓库 state、也没有 external-dns 的
+  ownership TXT，看着像"游离记录"，**但不要清理**：删掉就是把站点域名摘掉，而线索在另一个
+  仓库。自动化不会动它（两个 external-dns 都是 `policy: upsert-only`，terraform 也不 prune
+  不在自己 state 里的记录），唯一的风险是人。
+- 记录长相是 `AAAA → 100::`（IPv6 丢弃地址段）。**这不是配错**：Workers 自定义域名的记录
+  就是这种占位，真实流量在边缘被截走，压根不会去解析它。
+- ⚠️ 与上面的 GitHub Pages 相反，这个主机名走**橙云**，所以 zone 级 WAF/限流对它**全部生效**
+  （[security.md §2](security.md)）—— 加规则时记得它也在覆盖面里。
 - ⚠️ **DNS 通了 ≠ 站点通了**：Pages 用自定义 Actions workflow（`actions/deploy-pages`）发布时，
   仓库里提交的 `CNAME` 文件**被忽略**，自定义域得在仓库 Pages 设置里登记，否则解析正常但
   返回 "There isn't a GitHub Pages site here"（`gh api -X PUT repos/<o>/<r>/pages -f cname=…`）。
