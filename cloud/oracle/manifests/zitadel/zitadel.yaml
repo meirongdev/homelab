@@ -159,7 +159,16 @@ spec:
           # timeoutSeconds(恒为 API 默认 1s),所以让它在争抢时也能 1 秒内答上探针的
           # 唯一杠杆就是给足 CPU。requests 不动(25m)→ 不占节点可调度额度。
           cpu: 500m
-          memory: 192Mi
+          # 2026-08-24: 192Mi→320Mi。7d 峰值 162Mi = **84%**，且是本轮 KRR 分诊里
+          # 唯一「基线在爬」的形状：一周内空闲底噪 96→106Mi、尖峰 131→145→160Mi。
+          # （其余 >80% 的都是 08-18 / 08-22 两次一次性尖峰，不动。）
+          # ⚠️ 这不是 grafana 那种 GOMEMLIMIT 随 limit 联动的假象（见
+          #   k8s/helm/values/kube-prometheus-stack.yaml 的 2026-08-24 更正）——
+          #   zitadel-login 是 Next.js/Node，没有把 limit 接成 GC 目标的机制，
+          #   抬 limit 就是真的多给头寸。抬完峰值占比约 51%。
+          # requests 不动（96Mi）：底噪 ~105Mi 只略高于 request，不值得在 oracle
+          #   内存 requests 73% 的账本上再占 32Mi。
+          memory: 320Mi
       # ☠️ 2026-08-09:补 startupProbe + 放宽 liveness。zitadel-login 累计重启 27 次,
       # 其中 08-09 00:33 那半小时内连崩 6 次 —— 全部挤在节点重启之后。
       # 判据:lastState 是 exitCode **0** / reason=Completed。这不是"正常退出",
