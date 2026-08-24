@@ -142,7 +142,12 @@
   `count by (cluster)` 显示分子分母两边都有序列。6d 回放：homelab CPU 25.2–28.3% /
   内存 57.9–64.8%，**oracle CPU 60.1–71.2% / 内存 73.6–85.2%**。
   ☠️ **教训：写死集群的选择器会在采集面变化后静默失效** —— 规则照常评估、健康、不报错，
-  只是永远看不到另半个舰队。同类未修的还有 external-dns 的 4 条（[ROADMAP](../ROADMAP.md) #7）。
+  只是永远看不到另半个舰队。同类的 external-dns 那条也已在同日修掉（原开放项 #7）——
+  但它的改法不同：`absent()` 只能断言**一个**具名标签集缺失，覆盖 N 个集群就要硬编码 N 个
+  集群名，所以改成拿 `kube_deployment_status_replicas_available` 当参照序列做
+  `count by (cluster) (...) unless count by (cluster) (...)` —— **自维护**（新集群自动纳入），
+  且语义更准：只在「deployment 在跑但指标没了」时响 = **遥测路径断了**，而「pod 挂了」
+  由 `KubePodNotReady`/`CrashLooping` 各管一段。旧写法把两件事混在一条里。
   📌 两集群的**出路不对称**，所以 annotation 里分开写：homelab 满了可按
   [cluster-placement 决策](../decisions/cluster-placement-for-new-services.md)把轻量无状态挪去
   oracle；**oracle 满了没有这条路** —— 已单向缩容到 2 OCPU/12GB，只能砍 requests 或退役。

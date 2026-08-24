@@ -207,7 +207,10 @@ spec:
       # 写死 cluster="homelab"，注释给的理由是"oracle 的序列不进中枢 Prometheus
       # （otel 白名单只放行 KRR 所需）"—— 复核发现**那个理由已经不成立**，两边都有
       # 序列，而逼近阈值的恰恰是没被覆盖的 oracle。教训：写死集群的选择器要定期复核，
-      # 它会在采集面变化后静默失效（同类问题见 ROADMAP 开放项 #7 的 external-dns 规则）。
+      # 它会在采集面变化后静默失效 —— 规则照常评估、health=ok、不报错，只是永远看不到
+      # 另半个舰队。同类的 external-dns 元故障告警也在同日修掉（原开放项 #7），但改法
+      # 不同：absent() 只能断言一个具名标签集缺失，那条改成拿参照序列做
+      # `count by (cluster) (...) unless count by (cluster) (...)`，自维护、不硬编码集群名。
       rules:
         # 2026-08-24：替代 chart 的 KubeQuotaAlmostFull + KubeQuotaFullyUsed
         # （已在 values 的 defaultRules.disabled 关掉，理由见彼处：那两条是 info，
