@@ -59,5 +59,19 @@ metadata:
   namespace: jobs-sg
 spec:
   hard:
+    # ── 2026-08-24：count/pods 16 → pods 12（换的是**类型**，不是余量）───────────
+    # 前面 08-17 那次 10→16 是在给**错的维度**加余量。`count/pods` 是对象计数配额，
+    # 不排除终态；实测当天 10 个槽里 **9 个是 Succeeded**（纯历史，零节点开销），
+    # 真在跑的只有 web 那一个。于是 5 个手工一次性 Job 就把它顶到 15/16。
+    #
+    # `pods` 是「非终态 pod 数」，正好对应护栏想防的东西。临时 ns 实测两种语义：
+    #        Succeeded pod → pods=0 / count/pods=1     ← 历史不再占额
+    #        Pending   pod → pods=1 / count/pods=2     ← 卡住的照样计数，护栏不减弱
+    # 而当年那 92 个泄漏由 count/jobs.batch 兜（personal-services 的注释就是这么写的）。
+    #
+    # 12 = 稳态非终态 1（web）的十几倍余量：三个 CronJob 全撞车 3 + web rollout 2
+    # + 手工 Job 若干 ≈ 9，仍远低于节点 110-pod 上限。
+    # 与舰队对齐：media 用 pods 15、personal-services（两集群）用 pods 30
+    # + count/jobs.batch —— jobs-sg 此前是**全舰队唯一**用 count/pods 的 ns。
+    pods: "12"
     count/jobs.batch: "25"
-    count/pods: "16"

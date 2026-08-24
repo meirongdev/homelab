@@ -242,6 +242,25 @@ defaultRules:
     # manifests/monitoring/alerts/prometheus-rules.yaml 的 capacity 组替代提供。
     KubeCPUOvercommit: true
     KubeMemoryOvercommit: true
+    # ── 2026-08-24：配额告警的三条 chart 规则里，有用的两条都是 info ──────────
+    # chart 把配额分成三档，而 Alertmanager 顶层 matcher 只放行 critical|warning：
+    #   KubeQuotaAlmostFull  >0.9 <1  severity=**info**     → 进不了 Telegram
+    #   KubeQuotaFullyUsed   ==1      severity=**info**     → 进不了 Telegram
+    #   KubeQuotaExceeded    >1       severity=warning      → 准入控制保证 used 最多
+    #                                                        **等于** hard，比值封顶
+    #                                                        1.0 → **结构上永不触发**
+    # 即配额满了之后几乎无告警覆盖：准入层拒绝建 pod，Job 对象建出来了、active=0、
+    # 永远没有 pod、只无限刷 FailedCreate，而它**不会被标记成 failed**，所以
+    # KubeJobFailed / KubeJobNotCompleted 都不响（后者要求 active>0）。
+    # 2026-08-24 jobs-sg 手工起 5 个一次性 Job 顶到 15/16 时，唯一响的是
+    # InfoInhibitor —— 那正是被抑制掉的那条。
+    #
+    # 关掉这两条 info，改由 manifests/monitoring/alerts/prometheus-rules.yaml 的
+    # capacity 组提供**一条 >= 0.9 的 warning 版**（不设上界，避免恰好 ==1 时
+    # AlmostFull 停响而 FullyUsed 接不上的覆盖空洞）。
+    # KubeQuotaExceeded 不关：它永不触发，留着无害，关掉反而要解释为什么。
+    KubeQuotaAlmostFull: true
+    KubeQuotaFullyUsed: true
 
 prometheus:
   prometheusSpec:

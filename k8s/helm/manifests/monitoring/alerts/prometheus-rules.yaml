@@ -205,6 +205,42 @@ spec:
       # kube_node_status_allocatable，不过滤会让分母翻倍、比值减半（写本组时抓到的现行）。
       # 只写 homelab：oracle 的这些序列不进中枢 Prometheus（otel 白名单只放行 KRR 所需）。
       rules:
+        # 2026-08-24：替代 chart 的 KubeQuotaAlmostFull + KubeQuotaFullyUsed
+        # （已在 values 的 defaultRules.disabled 关掉，理由见彼处：那两条是 info，
+        # 而 Alertmanager 只放行 critical|warning，于是配额满了几乎无覆盖）。
+        # 表达式照抄 chart 的形状 —— `topk by(cluster,...)` + `max without(instance,job,type)`
+        # 是它对付「多集群 + 多 KSM 副本」的去重手法。
+        # ☠️ 别改成 `on(namespace,resourcequota,resource)`：两个集群都上报
+        # kube_resourcequota 且 personal-services 两边都有，join 会直接报
+        # `found duplicate series for the match group`（2026-08-24 实测踩到）。
+        # ⚠️ 与本组其它规则不同，这条**不限定 cluster="homelab"**：oracle 的
+        # kube_resourcequota 确实进了中枢 Prometheus（实测 7 个 series 覆盖两集群），
+        # 不像 CPU/内存那些被 otel 白名单挡在外面。
+        # 阈值 >= 0.9 不设上界：chart 分成 >0.9<1 与 ==1 两条，恰好满的那一刻
+        # 前者停响、后者是 info，会出现"最糟时反而没告警"的空洞。
+        # 写入时实测：命中 0（最高是 jobs-sg 的 count/pods 62.5%），7 天历史峰值 75%。
+        - alert: ResourceQuotaNearlyExhausted
+          expr: |
+            topk by (cluster, namespace, resource, resourcequota) (1,
+              max without (instance, job, type) (kube_resourcequota{job="kube-state-metrics", type="used"}))
+              / on (cluster, namespace, resource, resourcequota) group_left ()
+            topk by (cluster, namespace, resource, resourcequota) (1,
+              max without (instance, job, type) (kube_resourcequota{job="kube-state-metrics", type="hard"}) > 0)
+              >= 0.9
+          for: 30m
+          labels:
+            severity: warning
+            component: capacity
+          annotations:
+            summary: "{{ $labels.cluster }}/{{ $labels.namespace }} 配额 {{ $labels.resource }} 已用 {{ $value | humanizePercentage }}"
+            description: |
+              ResourceQuota {{ $labels.resourcequota }} 的 {{ $labels.resource }} 逼近上限。
+              满了之后准入层会**静默**拒绝建 pod：Job 对象建得出来、active=0、永远没有
+              pod、只刷 FailedCreate，且不会被标记成 failed —— KubeJobFailed 与
+              KubeJobNotCompleted 都不会响。所以这条是那种情形唯一的前置信号。
+              先看 `kubectl -n {{ $labels.namespace }} describe quota`；若是终态 pod
+              占额，注意 `count/pods` 不排除终态、`pods` 才排除。
+
         - alert: HomelabCpuRequestsSaturated
           expr: |
             sum(namespace_cpu:kube_pod_container_resource_requests:sum{cluster="homelab"})

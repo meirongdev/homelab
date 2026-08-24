@@ -129,7 +129,7 @@ spec:
           labels: { severity: warning }
           annotations:
             summary: jobs-sg 全量 reconcile >10d 没成功过（含从未成功）—— 在架职位数可能失真
-        # report 是四个 kind 里最后一个裸奔的（2026-08-10 补）。JobsSgCronJobFailed
+        # report 是四个 kind 里最后一个裸奔的（2026-08-10 补）。全舰队的 KubeJobFailed
         # 只抓「跑了但失败」，抓不到「根本没被调度」——suspend 忘了恢复、schedule 写错、
         # CronJob 对象被误删，这三种都是静默的。周报每周一 01:00Z 跑一次，健康间隔
         # 恰好 7d；阈值 8d 给一天余量：周一那轮失败或没跑，周二 01:30Z 左右烧起来。
@@ -174,9 +174,3 @@ spec:
           labels: { severity: warning }
           annotations:
             summary: jobs-sg 富化积压地板每日抬升 >500 —— LLM 不可用或跟不上进量
-        - alert: JobsSgCronJobFailed
-          expr: 'kube_job_status_failed{namespace="jobs-sg"} > 0'
-          for: 10m
-          labels: { severity: warning }
-          annotations:
-            summary: jobs-sg 有 CronJob 失败
