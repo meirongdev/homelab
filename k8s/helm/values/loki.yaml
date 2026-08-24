@@ -110,6 +110,20 @@ resultsCache:
 sidecar:
   image:
     tag: 2.8.1
+  # 2026-08-24: chart 默认 `resources: {}`，于是 loki-0 里的 loki-sc-rules 容器
+  # 一直裸奔 —— 实测常驻 ~85Mi / 峰值 101Mi 对调度器完全隐身（oracle 内存 requests
+  # 已 73%），且无 limit 可以无限涨。
+  # ☠️ 这类漏网**逃得过 runbook §5 那条「数 BestEffort pod 收敛到 0」的判据**：
+  #   QoS 是 pod 级的，主容器 loki 有 requests → 整个 pod 记作 Burstable，
+  #   裸奔的 sidecar 不体现。要按**容器**扫 `.resources.requests.memory == ""`。
+  #   同一天在 falco 的 falcoctl-artifact-follow 上抓到同样的形状。
+  # 取值：memory limit 192Mi ≈ 峰值的 1.9 倍；CPU limit 100m ≈ 实测峰值 30m 的 3 倍
+  #   （k8s-sidecar 是 ConfigMap watcher，突发只在启动时列一遍，节流也只是晚点加载
+  #   规则，不影响 Loki 收日志）。⚠️ oracle 侧无法用节流率验证——otel-collector 不
+  #   keep `container_cpu_cfs_throttled_*`，查询返回空与「无节流」外观相同。
+  resources:
+    requests: { cpu: 10m, memory: 128Mi }
+    limits: { cpu: 100m, memory: 192Mi }
 
 # ✅ 禁用 self-monitoring (grafanaAgent operator etc.)
 monitoring:

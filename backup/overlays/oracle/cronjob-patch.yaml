@@ -12,13 +12,23 @@ spec:
           containers:
             - name: backup
               # 2026-08-10: memory limit 512Mi→768Mi。实测 7d 峰值 460Mi = **90%**，
-              # 是全仓库离 OOMKill 最近的几个之一。restic 的内存随**仓库快照数**增长
-              # （索引要载入内存），所以这个比值只会单调变差 —— 而备份被 OOM 杀掉
-              # 属于「静默失效」：CronJob 失败不一定有人看，且 OOM 后干净退出、
-              # 不进 CrashLoopBackOff。本批同时补了 oom-alerts.yaml 兜底。
+              # 是全仓库离 OOMKill 最近的几个之一。备份被 OOM 杀掉属于「静默失效」：
+              # CronJob 失败不一定有人看，且 OOM 后干净退出、不进 CrashLoopBackOff。
+              # 该批同时补了 oom-alerts.yaml 兜底。
+              #
+              # 2026-08-24: 768Mi→1Gi。7d 峰值已到 **622Mi = 81%**（两周 +35%）。
+              # ☠️ 同时更正上面那条的**因果**：不是「随仓库快照数单调增长」。同一周
+              #   七次运行的峰值是 97 / 104 / 111 / 160 / 240 / 579 / **622**Mi，
+              #   相邻两晚能差 6 倍 —— 决定峰值的是**当晚增量的大小**（要哈希/打包多少
+              #   新数据），不是索引累积。所以判据不是「看趋势」而是「留倍数」：
+              #   1Gi ≈ 已观测峰值的 1.65 倍，与上一次抬的倍数一致。
+              #   下次触发线：周报里 7d 峰值 > 820Mi（=80%）就再抬到 1.5Gi。
+              # ⚠️ requests 刻意留在 base 的 128Mi 不动：稳态中位 ~570Mi 已是 request 的
+              #   445%，抬到 384Mi 仍在「超 request」那个驱逐桶里、换不来档位，
+              #   却要在 oracle 内存 requests 73% 的账本上长期占位。limit 才是这里的解。
               # ⚠️「oracle CPU 余量大」这句已过期：2026-08-05 缩到 2 OCPU，
               #   allocatable 1800m，requests 一度到 83%。CPU limit 保持 "1" 不动
               #   （备份是夜间错峰的一次性任务，让它跑快点是对的），但别再据此
               #   给别的工作负载放宽 request。
               resources:
-                limits: { cpu: "1", memory: "768Mi" }
+                limits: { cpu: "1", memory: "1Gi" }

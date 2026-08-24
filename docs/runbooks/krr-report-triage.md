@@ -1,6 +1,6 @@
 # KRR 报告分诊与采纳
 
-> Last updated: 2026-08-10
+> Last updated: 2026-08-24
 > Status: 生效 SOP
 > 触发条件：周一收到 KRR 推送到 Telegram 的两份报告（homelab 09:00 / oracle-k3s 09:15）；
 > 或改 shape、加服务、扩容之后主动跑一次核对。
@@ -98,6 +98,12 @@ system-*-critical）：补 requests 会把 oracle 内存 requests 从 85% 推到
 
 **判据一句话**：BestEffort + priority 0 + 掉了会出事 = 必补；
 BestEffort + system-critical = 可以不补；BestEffort + priority 0 + 纯观测 = 看余量再说。
+
+☠️ **报告里永远不会出现 `kube-system` 的任何一行**（2026-08-24 核实：连续三周两集群
+全部 0 行）。已排除两个常见原因——KRR 的 SA 对 kube-system 的 `list deployments/daemonsets`
+是 `yes`，KSM 里两集群的 kube-system 工作负载系列也都在中枢 Prometheus 里，
+所以是 KRR 自己的过滤。**后果**：cilium 全家 / coredns / hubble / local-path-provisioner
+这些恰恰是裸奔重灾区的组件，靠周报永远发现不了，只能靠 §5 的容器级扫描兜底。
 
 ⚠️⚠️ **补 resources 时给不给 CPU limit，要单独判断——给错会引入原本不存在的问题。**
 BestEffort 容器此前**没有任何 CPU limit，不可能被节流**；补上就可能被节流。
@@ -212,6 +218,8 @@ KRR 只报「当前 spec 的数值」与「实测用量」的差。有三类问�
 | values 里明明写了 resources，报告却显示 `unset` | **配置写错层级被 chart 静默忽略** | `helm template <chart> --version <ver> -f <values>` 看渲染出的容器 spec 是不是 `resources: {}` |
 | git 里有 resources，集群里没有 | **改了但从没部署**（manual-helm 组件） | `helm get values <release> -n <ns> --kube-context <ctx>` 与 git 对比；再比 commit 时间和 `helm list` 的 UPDATED |
 | ns 有 LimitRange，个别 Pod 仍 BestEffort | **Pod 早于 LimitRange**（只在准入时注入，不追溯） | 比 Pod 的 `creationTimestamp` 与 LimitRange 的；修法是 `rollout restart` |
+| 某行的 CPU 建议高得离谱（如 `10m -> 1.168`） | **读到了已死副本的历史用量**——窗口内换过 pod，旧 pod 的尖峰仍在 7d 里 | 按 **pod** 分组复查，别只看聚合值：<br>`max_over_time(rate(container_cpu_usage_seconds_total{...}[2m])[7d:1m])` 然后 `jq` 按 `.metric.pod` 分组。⚠️ 写 jq 时别只取 `result[0]`——多 pod 时会**静默只显示一个系列**，看起来完全正常 |
+| 某容器 7 天里换过十几个 pod，p95 被启动尖峰抬高 | **不是稳态需求**，是每次重建时的冷启动（扫库/建索引/加载规则） | 数窗口内的 pod 数（上式的分组数）；pod 多且大部分只有 1–2 个样本 = 冷启动占了分位数。按稳态定 request，不按 p95 |
 
 三种都在 2026-08-10 实际命中过。第一种最隐蔽：
 `kubeStateMetrics.resources` 写在了父 chart 的开关键下（正确位置是子 chart 别名
@@ -259,7 +267,20 @@ kubectl --context <ctx> -n <ns> get pods -o json | jq -r \
  '.items[] | select(.status.phase=="Running") | .metadata.name as $n | .status.qosClass as $q |
   .spec.containers[] | "\($q)  \($n)  \(.name)  req=\(.resources.requests // "❌无")"'
 
-# 2) 两集群还剩多少 BestEffort（分类 B 的收敛判据）
+# 2) 分类 B 的收敛判据 —— ☠️ 必须按**容器**扫，不能数 BestEffort **Pod**
+#    QoS 是 Pod 级的：主容器有 requests 就整个 Pod 记作 Burstable，
+#    同 Pod 里裸奔的 sidecar 一个都不体现。2026-08-24 就是这样漏掉两个的
+#    （loki-0/loki-sc-rules 实测 101Mi、falco/falcoctl-artifact-follow 50Mi，
+#    两个 ns 都没有 LimitRange 兜底 → 对调度器隐身 ~151Mi）。
+for ctx in oracle-k3s k3s-homelab; do
+  echo "== $ctx"
+  kubectl --context $ctx get pods -A -o json | jq -r '.items[]
+    | select(.status.phase=="Running") | . as $p | .spec.containers[]
+    | select((.resources.requests.memory // "") == "")
+    | "\($p.metadata.namespace)/\($p.metadata.name)/\(.name) prio=\($p.spec.priority)"'
+done
+
+# 2b) Pod 级视角仍有用（驱逐分桶看的是 Pod），但只作为**补充**不作为收敛判据
 for ctx in oracle-k3s k3s-homelab; do
   printf "%-12s " "$ctx"
   kubectl --context $ctx get pods -A -o json | jq '[.items[]|select(.status.phase=="Running" and .status.qosClass=="BestEffort")]|length'
