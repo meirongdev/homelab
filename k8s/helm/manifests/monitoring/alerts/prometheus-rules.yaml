@@ -203,7 +203,14 @@ spec:
       # 写入时实测（与 kubectl describe node 的 kubelet 视图对过账）：CPU 20% / 内存 52%。
       # ⚠️ 分母必须限定 job="kube-state-metrics"：opencost 也吐同名
       # kube_node_status_allocatable，不过滤会让分母翻倍、比值减半（写本组时抓到的现行）。
-      # 只写 homelab：oracle 的这些序列不进中枢 Prometheus（otel 白名单只放行 KRR 所需）。
+      # ⚠️ 只写 homelab —— **但这个理由已经过期，别照抄**。原注释说"oracle 的这些序列
+      # 不进中枢 Prometheus（otel 白名单只放行 KRR 所需）"，2026-08-24 复核发现不成立：
+      # count by (cluster) 显示 kube_node_status_allocatable 与
+      # namespace_{cpu,memory}:kube_pod_container_resource_requests:sum 两边都有序列。
+      # 实测 CPU homelab 26.6% / oracle **60.1%**、内存 homelab 61.5% / oracle **73.6%**
+      # —— 逼近阈值的恰是没被覆盖的 oracle。改法是把 sum() 换成 sum by (cluster) 并
+      # 重命名（现名与 annotation 里"迁去 oracle"的建议都是 homelab 专属）。
+      # 已记为开放项，见 docs/ROADMAP.md。
       rules:
         # 2026-08-24：替代 chart 的 KubeQuotaAlmostFull + KubeQuotaFullyUsed
         # （已在 values 的 defaultRules.disabled 关掉，理由见彼处：那两条是 info，

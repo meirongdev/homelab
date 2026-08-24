@@ -123,6 +123,34 @@
   `kubeApiserverBurnrate`/`Slos`/`Availability`、新增消费原始 bucket 的看板 —— 表现为
   规则哑掉或面板空白而非 series 变多，这条告警看不见，仍得靠人核。
 
+- **homelab 调度容量饱和**（`prometheus-rules.yaml` 的 `capacity` 组，2026-08-13 新增，2 条）:
+  `HomelabCpuRequestsSaturated` / `HomelabMemoryRequestsSaturated` —— requests 占**总**
+  allocatable >90% 持续 30m。它们替代 chart 的 `KubeCPUOvercommit` / `KubeMemoryOvercommit`
+  （已在 values 的 `defaultRules.disabled` 关掉）。
+  **关掉的理由是语义在本拓扑下恒真**：上游那两条量的是「挂掉最大节点后剩余容量能否装下
+  全部 requests」（N-1 冗余），而 homelab 是 **1 大 + 1 小的不对称双节点** —— 控制面的
+  requests 永远塞不进 2c/3G 的 worker，且控制面挂 = 控制面没了，N-1 在此拓扑下没有意义，
+  该告警也不可能靠加资源"修好"。永久黄灯只会训练人忽略告警页（2026-08-13 worker 入编
+  当天开始 firing）。替代版改测真实饱和：新 pod 会不会开始排不进去。
+  ⚠️ **分母必须限定 `job="kube-state-metrics"`** —— opencost 也吐同名
+  `kube_node_status_allocatable`，不过滤会让分母翻倍、比值减半。2026-08-24 复核这个坑
+  **仍然活着**：`count by (job)(kube_node_status_allocatable{resource="cpu",cluster="homelab"})`
+  返回 `job=kube-state-metrics` 2 条 + `job=opencost` 2 条。
+  ☠️ **只覆盖 homelab，而 oracle 是更紧的那个** —— 两条都写死 `cluster="homelab"`。
+  清单注释里说理由是"oracle 的序列不进中枢 Prometheus"，**2026-08-24 复核发现那已不成立**：
+  `count by (cluster)` 显示 `kube_node_status_allocatable` 与
+  `namespace_{cpu,memory}:kube_pod_container_resource_requests:sum` 两边都有序列。
+  按 cluster 分组实测：**CPU homelab 26.6% / oracle 60.1%**、
+  **内存 homelab 61.5% / oracle 73.6%** —— 逼近 90% 阈值的是 oracle，而它没有告警。
+  且 oracle 是**单向缩容过**（4 OCPU/24GB → 2/12，A1 无容量涨不回去）的那个集群。
+  → 已记为开放项，见 [../ROADMAP.md](../ROADMAP.md)。
+  （同组的 `ResourceQuotaNearlyExhausted` 不受影响：它本来就覆盖两集群。）
+  📌 **它只说明"排程账面"快满了，不代表真实内存压力** —— 判真实压力永远看节点
+  `free -m` 的 available / `rssBytes`（requests 只反映申报，两者可差数百 Mi）。
+  口径见 [k8s-qos-resource-management.md](k8s-qos-resource-management.md)（唯一真相源）。
+  实测趋势：CPU 20%→**26.6%**、内存 52%→**61.5%**（2026-08-13 写入 → 08-24 复核）。
+  内存这条离 90% 阈值还有余量但在稳步上涨，值得留意。
+
 - **ResourceQuota 逼近上限**（`prometheus-rules.yaml` 的 `capacity` 组，2026-08-24 新增，1 条）:
   `ResourceQuotaNearlyExhausted` —— 任一集群任一 ns 的配额用量 ≥90% 持续 30m 即报。
   它替代 chart 的 `KubeQuotaAlmostFull` + `KubeQuotaFullyUsed`（已在 values 的
