@@ -93,6 +93,25 @@ resources:
     cpu: "1"
     memory: 512Mi
 
+# falcoctl —— 2026-08-24 补 resources。chart 9.1.0 两处默认都是 `resources: {}`，
+# 于是 falco DaemonSet 里的 falcoctl-artifact-follow sidecar 一直裸奔：实测在
+# 15–50Mi 之间来回（拉规则包时涨），CPU 几乎为 0。
+# ☠️ 与 loki 的 loki-sc-rules 同一形状：pod 级 QoS 因主容器 falco 有 requests 而记作
+#   Burstable，所以 runbook §5「数 BestEffort pod」的收敛判据**看不见它**，
+#   要按容器扫 `.resources.requests.memory == ""`。详见 k8s/helm/values/loki.yaml。
+# artifact.install 是 initContainer：请求量按 max(init, sum(containers)) 计入调度，
+#   falco 容器本身就是 30m/160Mi，所以给它 10m/64Mi 不改变节点账面，只是补齐口径。
+falcoctl:
+  artifact:
+    install:
+      resources:
+        requests: { cpu: 10m, memory: 64Mi }
+        limits: { cpu: 100m, memory: 128Mi }
+    follow:
+      resources:
+        requests: { cpu: 10m, memory: 64Mi }
+        limits: { cpu: 50m, memory: 128Mi }
+
 # Falcosidekick：把告警扇出到 Telegram（原生 output，chatid/messagethreadid 走
 # 明文 values——非敏感；existingSecret 只覆盖 TELEGRAM_TOKEN 一个键，与其余
 # telegram.* 明文键叠加生效，机制同旧 gotify 配置，见 falcosidekick chart
