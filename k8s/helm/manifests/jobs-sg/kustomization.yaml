@@ -122,8 +122,8 @@ resources:
 # 三个坑的实测数据都在 docs/reference/jobs-sg.md。
 images:
   - name: ghcr.io/meirongdev/jobs-sg
-    # 73aa949 (2026-08-24)：规则层技术栈假阳性收口（8b3040a + dry-run 修复
-    # 73aa949，一起上）。三个缺陷，两个会让「修好了」变成假的：
+    # fba4fcf (2026-08-24)：规则层技术栈假阳性收口（8b3040a + 73aa949 + fba4fcf
+    # 一起上）。三个缺陷，两个会让「修好了」变成假的：
     #   ① 别名同时是普通英文词 → 大面积假阳性（`express` 精度 25% —— 命中的是
     #      Meta 简介 "express themselves" 和猎头签名档 "Recruit Express Pte Ltd"；
     #      `go` 65% —— "go-to-market"/"go-live"/"go-getter"）。加**词义门**：这类
@@ -147,11 +147,16 @@ images:
     # `?ts=`）、`pg`（幼儿园 playgroup "PG/Nursery Class"）、`tf`（`.tf` 是
     # Terraform 不是 TensorFlow）—— 三者各有无歧义别名覆盖真实情况。
     #
-    # 73aa949 修的是 8b3040a 自己带的一个坑：retech 的 dry-run 路径也调 `Seed()`，
-    # 而同一批改动刚让 Seed 会剪枝 → 「只报告不写库」实际改了 tech_taxonomy
-    # （110→109 行）。现在 replay 读 `store.TechSeeds()`，`Seed()` 只在 --apply
-    # 路径跑；实测 dry-run 前后三张表内容哈希一致。**别回滚到 8b3040a** ——
-    # 那个版本的 dry-run 不是只读的。
+    # 后两个 commit 修的都是 8b3040a 自己带的坑，**别回滚到 8b3040a 或 73aa949**：
+    #   73aa949 — retech 的 dry-run 路径也调 `Seed()`，而同一批改动刚让 Seed 会
+    #     剪枝 →「只报告不写库」实际改了 tech_taxonomy（110→109）。现在 replay 读
+    #     `store.TechSeeds()`，`Seed()` 只在 --apply 跑；实测 dry-run 前后三张表
+    #     内容哈希一致。
+    #   fba4fcf — 重放把一个岗位的 rule 行清空后，它可能掉回 enrich 积压（实测
+    #     173 条）。根因是历史形状：4140 条岗位在 `enrich_done` 表存在之前就富化了，
+    #     对它们 `job_tech` 行就是「这层跑过」的唯一证据。现在补标记（INSERT OR
+    #     IGNORE：缺的补、已有的不重新盖时间戳）。⚠️ 这个退化**指标看不出来** ——
+    #     `jobs_sg_enrich_backlog` 只数 LLM 层。
     #
     # 其前身 4b91fe8 (2026-08-10 晚)：对账关闭闸门改读覆盖率 scanned/max(total) ≥ 80%
     # （2% 偏差对 ±10% 的 total 噪声带量级不配，末页凹陷会反向误跳）；且干净
@@ -164,4 +169,4 @@ images:
     # store.addedColumns 在写者启动时 ALTER 补上。
     # ⚠️ 回滚到早于 4af8944 的镜像是安全的（多出来的列不碍旧代码），但审计列
     # 停更、/metrics 的 reconcile 偏差/覆盖率指标消失。
-    digest: sha256:b2bf9299abd6418c009951cb6be359007797c3252d4bdda616816a86c0a2fa00
+    digest: sha256:17362634d69c1f509b3c9785e8ed1a4172ef4010e15b51493b986262cf68548f

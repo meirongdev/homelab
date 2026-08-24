@@ -1,6 +1,6 @@
 # jobs-sg — 新加坡 SWE 岗位趋势周报（架构事实）
 
-> Last updated: 2026-08-21
+> Last updated: 2026-08-24
 > Status: 生效事实
 > Scope: jobs-sg 在 homelab 集群的部署形态、镜像固定方式、备份口径、首次上线依赖顺序
 > —— source of truth。应用代码在 [meirongdev/jobs-sg](https://github.com/meirongdev/jobs-sg)。
@@ -669,10 +669,17 @@ kubectl --context k3s-homelab -n jobs-sg create job retech-dry --dry-run=client 
    把表也收敛掉：每晚 enrich 读的是**表**，历史清干净了而表里还留着退役别名，
    新岗位照样会被它命中。
    ⚠️ 上游 `8b3040a` 那一版的 dry-run **会**写 tech_taxonomy（110→109），别回滚到它。
-4. **`enrich_done` 不动**。标记的含义是「这层处理过这条」，重放后依然成立；清掉它
-   会把几千条推回积压让 enrich 一条条重做。
+4. **`enrich_done` 只补不盖**（`fba4fcf` 起）。已有的标记绝不重新盖时间戳 ——
+   那等于宣称每晚那轮 enrich 干了它没干的事（几千行）；但**缺的必须补上**：
+   有 4140 条岗位是在 `enrich_done` 表存在之前富化的，对它们来说 `job_tech` 行
+   **就是**「这层跑过」的唯一证据，重放把它清空 = 它掉回 `enrichBacklog`。
+   实测：不补标记时 `rule_backlog` 0 → **173**，补了之后 0 → 0
+   （`llm_backlog` 始终 0，不会重烧 LLM）。
+   ⚠️ 判据别看 `jobs_sg_enrich_backlog` 指标 —— 它只数 **LLM** 层，rule 层积压
+   涨了它一动不动。要自己查
+   `NOT EXISTS job_tech(source='rule') AND NOT EXISTS enrich_done(source='rule')`。
 
-## 别名表的三个坑（2026-08-24，上游 8b3040a 修）
+## 别名表的三个坑（2026-08-24，上游 8b3040a + 73aa949 + fba4fcf）
 
 规则层是纯文本词边界匹配，**分不清词义**。三个缺陷叠在一起，其中两个会让「修好了」
 变成假的：
