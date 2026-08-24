@@ -15,6 +15,15 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 1
+      # 2026-08-24 补：**断卡死的开关，不是性能预算**。concurrencyPolicy 是 Forbid，
+      # 卡住的 Job 会一直占着「上一轮还在跑」把后续周更全顶掉，而没 deadline 就没人
+      # 杀它（此前只能靠 KubeJobNotCompleted 12h 兜）。到点标 Failed →
+      # KubeJobFailed(warning) 当晚响。
+      # 实测两次运行都是 **6 秒**（14d 窗口内的全部样本）→ 600s ≈ 100x 余量；
+      # 周更任务的可行区间宽到 168h，没有理由贴着实测值定。
+      # ⚠️ 它是 JobSpec 字段，必须在 jobTemplate.spec 下（放 CronJob 的 spec 下会被
+      #    静默丢弃）。判据：kubectl get cronjob -o custom-columns 从服务端回读。
+      activeDeadlineSeconds: 600
       ttlSecondsAfterFinished: 604800   # 完成 7 天后清理 Job 对象
       template:
         metadata:
