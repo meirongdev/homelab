@@ -32,6 +32,11 @@
 #    以后手工起 Job 请自带 TTL，例如
 #    `kubectl create job --from=cronjob/ingest <name>` 之后补
 #    `kubectl patch job <name> -p '{"spec":{"ttlSecondsAfterFinished":86400}}'`。
+# ⚠️ **光有 TTL 不够，TTL 要短于「到下一次 cron 之前」**：2026-08-24 修技术栈假阳性
+#    时一口气起了 5 个一次性 Job（retech dry/apply + 3 个 report 重算），每个都带了
+#    86400s TTL，但当时距下一轮 ingest 只有约 16 小时 —— used 一度到 **15/16**，
+#    再多一个就会静默卡住当晚的 ingest。手工 Job 跑完**当场删**，别指望 TTL；
+#    要连开好几个就先 `kubectl -n jobs-sg describe quota jobs-sg-quota` 看余量。
 apiVersion: v1
 kind: LimitRange
 metadata:
