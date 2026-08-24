@@ -31,7 +31,18 @@ resources:
 #     -H 'Accept: application/vnd.oci.image.index.v1+json' \
 #     https://ghcr.io/v2/meirongdev/jobs-sg/manifests/sha-<short12> | grep -i docker-content-digest
 #
-# 当前 = jobs-sg eaf5db1（2026-08-08）：修 reclassify 的缺口指标口径。
+# 当前 digest 与每次 bump 的理由都在下面 `images:` 块的注释里（按时间倒序链
+# 「其前身」）。这里只留跨 bump 仍然成立的东西。
+#
+# 镜像里有 6 个二进制：4 个管线阶段（ingest/enrich/report/web，由 CronJob 和
+# Deployment 拉起）+ 2 个运维工具 **没有任何 CronJob 跑它们**、靠一次性 Job 手动起：
+#   jobs-sg-reclassify — 重放归档重算分类（is_swe/role_family/seniority/work_mode）
+#   jobs-sg-retech     — 重放归档重算规则层技术栈（job_tech 的 source='rule'）
+# 两者都**默认 dry-run**、`--apply` 才写，都要挂 jobs-sg-data 到 /data（可写）。
+# 之所以必须进镜像：要 replay 的归档在节点 local-path 卷上、几百 MB，
+# 「拷到本地跑」不是真选项。用法见 docs/reference/jobs-sg.md。
+#
+# eaf5db1（2026-08-08）修的是 reclassify 的缺口指标口径。
 # 线上首次 dry-run 报「archived but not in jobs.db 190418」，看着像丢了 19 万条，
 # 实际一条没丢 —— ingest 归档整块板但只有 IsCandidate 的才入库，那 19 万是新加坡
 # 市场里的非 SWE 岗位，本来就不该入库；而且数的是**记录**不是岗位（每轮 reconcile
@@ -111,7 +122,38 @@ resources:
 # 三个坑的实测数据都在 docs/reference/jobs-sg.md。
 images:
   - name: ghcr.io/meirongdev/jobs-sg
-    # 4b91fe8 (2026-08-10 晚)：对账关闭闸门改读覆盖率 scanned/max(total) ≥ 80%
+    # 73aa949 (2026-08-24)：规则层技术栈假阳性收口（8b3040a + dry-run 修复
+    # 73aa949，一起上）。三个缺陷，两个会让「修好了」变成假的：
+    #   ① 别名同时是普通英文词 → 大面积假阳性（`express` 精度 25% —— 命中的是
+    #      Meta 简介 "express themselves" 和猎头签名档 "Recruit Express Pte Ltd"；
+    #      `go` 65% —— "go-to-market"/"go-live"/"go-getter"）。加**词义门**：这类
+    #      别名只在技术枚举上下文里算命中。上门后 express 5/5、go 16/17。
+    #   ② `Seed()` 原是纯 upsert，而 `LoadTaxonomy` 读**表**不读代码 → 从
+    #      `techSeeds` 删别名对已存在的库是空操作，别名照样命中。现在 Seed 会剪枝。
+    #      ⚠️ 代价：手工 INSERT 进 tech_taxonomy 的别名会被下次 ingest/enrich 清掉。
+    #   ③ enrich 积压跳过做过的岗位 → 改别名修不了历史。新增第 6 个二进制
+    #      `jobs-sg-retech`（运维工具，无 CronJob）重放规则层，默认 dry-run。
+    # ⚠️ **只换 digest 不修历史**，要两步收尾（都在 docs/reference/jobs-sg.md）：
+    #   1. `jobs-sg-retech --apply` —— 已富化的 6749 条岗位仍带旧的假阳性行
+    #      （实测 811 条要改）。`/`、`/tech`、`/pay` 随请求渲染，跑完立即正确。
+    #   2. **`report --week` 逐周重算** —— `weekly_metric` 是物化的，retech 不碰。
+    #      当前 3 周有 tech_freq：2026-08-03 / 08-10 / 08-17，三周的 `go` 都是靠
+    #      假阳性挤进 top-30 的（rule 层报 132/95/152，独立的 LLM 层只认 49/42/65；
+    #      修完 rule 变 47/40/73，三周全部掉出榜、让位给 kafka）。
+    #      ⚠️ 重算历史周要用**不带 Telegram env 的 Job**（cmd/report 的推送是
+    #      env-driven、unset 即跳过）—— `--from=cronjob/report` 会把 env 一起抄过来，
+    #      等于把三份历史周报重新推一遍进 Telegram。
+    # 顺带删了实测 100% 假阳性的三个别名：`ts`（命中 "IMDA TS RG-SEC"、URL 的
+    # `?ts=`）、`pg`（幼儿园 playgroup "PG/Nursery Class"）、`tf`（`.tf` 是
+    # Terraform 不是 TensorFlow）—— 三者各有无歧义别名覆盖真实情况。
+    #
+    # 73aa949 修的是 8b3040a 自己带的一个坑：retech 的 dry-run 路径也调 `Seed()`，
+    # 而同一批改动刚让 Seed 会剪枝 → 「只报告不写库」实际改了 tech_taxonomy
+    # （110→109 行）。现在 replay 读 `store.TechSeeds()`，`Seed()` 只在 --apply
+    # 路径跑；实测 dry-run 前后三张表内容哈希一致。**别回滚到 8b3040a** ——
+    # 那个版本的 dry-run 不是只读的。
+    #
+    # 其前身 4b91fe8 (2026-08-10 晚)：对账关闭闸门改读覆盖率 scanned/max(total) ≥ 80%
     # （2% 偏差对 ±10% 的 total 噪声带量级不配，末页凹陷会反向误跳）；且干净
     # 扫描的对账轮（含 close_skipped）照常盖 incremental 新鲜戳 —— 谨慎的周日
     # 不再点着 JobsSgIngestStale。
@@ -122,4 +164,4 @@ images:
     # store.addedColumns 在写者启动时 ALTER 补上。
     # ⚠️ 回滚到早于 4af8944 的镜像是安全的（多出来的列不碍旧代码），但审计列
     # 停更、/metrics 的 reconcile 偏差/覆盖率指标消失。
-    digest: sha256:ce72b232430d0baad779fb1c9eaf7f676d37458bd9e58842ed85c215ea1f1c62
+    digest: sha256:b2bf9299abd6418c009951cb6be359007797c3252d4bdda616816a86c0a2fa00

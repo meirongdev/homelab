@@ -8,7 +8,9 @@
 ## 速览
 
 - **在哪**：homelab 集群独立 ns `jobs-sg`，`jobs.meirong.dev`（无认证，公开统计）。
-  四个二进制一个镜像（ingest / enrich / report / web），3 个 CronJob + 1 Deployment。
+  一个镜像里 6 个二进制：4 个管线阶段（ingest / enrich / report / web）= 3 个 CronJob
+  + 1 Deployment；另外 2 个是运维工具、**没有任何 CronJob 跑**，手动起一次性 Job
+  （`reclassify` 重算分类、`retech` 重算规则层技术栈，都默认 dry-run）。
 - **跑什么**：每日抓 SG 岗位 → 规则 + LLM 富化（直连 DGX，fail-open）→ 周报推 Telegram；
   页面全部随请求渲染（`/`、`/tech`、`/pay`、`/companies`、`/ops`）。
 - **备份两条路径，缺一不可**：`jobs.db` 走白名单 `*.db*`；`raw/*.jsonl.gz` 单独纳 restic
@@ -629,9 +631,93 @@ kubectl --context k3s-homelab -n jobs-sg create job reclassify-dry --dry-run=cli
 3. **归档里有、库里没有的 uuid 只计数不插入**（那种行没有诚实的 `first_seen_at`
    可填）。这个计数顺带就是「partial 那几轮到底漏了几条」的答案。
 
-它**不重跑 LLM**。技术栈（`job_tech`）是 enrich 那层，本来就只读归档，但重跑 enrich
-只处理积压（`NOT EXISTS job_tech AND NOT EXISTS enrich_done`），做过的不会重算 ——
-要强制重算得另加清标记的开关，目前没有。
+它**不重跑 LLM**，也不动技术栈 —— `job_tech` 是 enrich 那层，重放它是
+`jobs-sg-retech`（下一节）。
+
+## 重放规则层重算技术栈（`jobs-sg-retech`，2026-08-24 起）
+
+同一个病，另一张表。`job_tech` 里 `source='rule'` 的行是 enrich 当时按
+`tech_taxonomy` 别名表算好存下的，而 enrich 的积压口径是
+`NOT EXISTS job_tech AND NOT EXISTS enrich_done` —— **做过的永远不会重算**。
+所以修了别名表或匹配逻辑，只有新岗位吃到修复，已富化的那几千条保留旧结论，
+`/tech`、`/pay` 和周报的技术栈趋势就一直错着。
+
+`retech` 是 `reclassify` 的技术栈版：扫归档、用当前别名表重算规则层、重写
+`job_tech`。零 API 调用，**只碰 `source='rule'`** —— `source='llm'` 的行没有模型
+重放不出来，读都不读。
+
+```sh
+# 1) dry-run：报告哪些 slug 增减了多少条，不写库
+kubectl --context k3s-homelab -n jobs-sg create job retech-dry --dry-run=client -o yaml \
+  --image=ghcr.io/meirongdev/jobs-sg@sha256:<当前digest> -- \
+  /usr/local/bin/jobs-sg-retech --data-dir /data > /tmp/j.yaml
+# 补上 PVC 挂载后 apply（PVC: jobs-sg-data，挂 /data，**可写**）
+# 2) 看完增减再决定是否加 --apply 重跑一次
+```
+
+⚠️ 四条必须知道的：
+
+1. **默认 dry-run**，`--apply` 才写。
+2. **报告里的变化不都是规则造成的**。重放用的是**最后一次归档**的文本，所以描述
+   被改过的岗位也会进 diff。判据：规则改动一次动几百条，描述编辑是长尾的单条。
+   2026-08-24 首次实测 811 条变化里，`expressjs -406`、`go -398`、`typescript -9`
+   是规则；其余十几个 slug 各 1 条，抽验 `kibana`/`swift` 两条确认是 JD 原文
+   已不提该工具。
+3. **dry-run 真的只读**（`73aa949` 起）。它 replay 的是代码里的 `store.TechSeeds()`
+   而不是 `tech_taxonomy` 表 —— Seed 之后两者相等，但读列表不必先写库，老库里残留
+   的退役别名也就不会被 replay 用上（那正是要修的 bug）。`--apply` 才会跑 `Seed()`
+   把表也收敛掉：每晚 enrich 读的是**表**，历史清干净了而表里还留着退役别名，
+   新岗位照样会被它命中。
+   ⚠️ 上游 `8b3040a` 那一版的 dry-run **会**写 tech_taxonomy（110→109），别回滚到它。
+4. **`enrich_done` 不动**。标记的含义是「这层处理过这条」，重放后依然成立；清掉它
+   会把几千条推回积压让 enrich 一条条重做。
+
+## 别名表的三个坑（2026-08-24，上游 8b3040a 修）
+
+规则层是纯文本词边界匹配，**分不清词义**。三个缺陷叠在一起，其中两个会让「修好了」
+变成假的：
+
+1. **别名同时是普通英文词** → 大面积假阳性。实测（一天归档 483 条 IT 岗位人工判定）：
+   `express` 24 命中只 6 真（25%，剩下是 Meta 简介里的 "express themselves" 和猎头
+   签名档 "Recruit Express Pte Ltd"）；`go` 26 命中 17 真（65%，假阳性是
+   "go-to-market"/"go-live"/"go-getter"/"go/no-go"）。修法是**词义门**：这类别名只在
+   技术枚举上下文里算命中（一侧紧邻 `( , / ; [` 或 `) . ]` 等分隔符）。上门后
+   `express` 5 命中 5 真、`go` 17 命中 16 真。
+   ⚠️ 门有代价（漏掉 "Node.js Express REST APIs" 这种散文里的真命中），所以**只给
+   实测精度差的加** —— 同批 `spark` 10/10、`node` 27/29、`swift` 9/10 故意不加门。
+2. **删别名在已存在的库里是空操作**。`Seed()` 原来是纯 upsert，而 `LoadTaxonomy`
+   读的是**表**不是代码 —— 从 `techSeeds` 删一行，线上那条别名照样活着命中，
+   提交、CI 绿、部署，行为一个字节都没变。现在 `Seed()` 会删掉表里不在 seed 列表
+   的别名。**代价**：手工 `INSERT` 进 `tech_taxonomy` 的别名会被下一次
+   ingest/enrich 清掉，加别名只能改代码。
+3. **改别名表修不了历史** → 就是上一节的 `retech`。
+
+对指标的实际影响（在生产数据副本上验的）：`expressjs` 在高薪档从 14.4% / lift 2.67×
+掉到 0.6% / 0.61×（**它从来不是高薪信号**）；`go` 从 22.8% / 2.62× 变成 18.9% /
+**3.94×**（删掉的假阳性扎堆在低薪那半边，所以清完溢价反而更明显）。
+`go` 还因此**掉出周报 top-30 技术榜**（2026-W33 从 96 条降到 47 条，榜尾门槛 59），
+让位给 `kafka` —— 之前那个名次是假阳性撑起来的。
+
+### 判一个别名准不准：拿 LLM 层当对照，不用人工判
+
+规则层和 LLM 层是**两套独立方法**看同一批 JD（正则匹配 vs 模型阅读），
+所以两层命中集合的 Jaccard 重合度就是一个不需要人工标注的精度代理。
+2026-08-24 实测（全量 job_tech）：
+
+| slug | 修前重合 | 修后重合 | 说明 |
+|---|---|---|---|
+| `expressjs` | **12.6%** | **77.2%** | 加词义门 |
+| `go` | **47.7%** | **78.7%** | 加词义门 |
+| `spark` | 78.7% | 78.7% | 故意不加门 |
+| `kubernetes` | 85.7% | 85.7% | 故意不加门 |
+| `python` | 91.9% | 91.9% | 故意不加门 |
+
+健康区间是 **~79–92%**。两个坏别名是唯一显著低于这个带的，加门后都被抬进带内；
+刻意不加门的三个本来就在带内 —— 这同时印证了「只给实测差的加门」那条判据。
+`go` 的两层**共同命中**只从 411 掉到 385（-26），而 rule 单方面的命中掉了约 400 ——
+删掉的几乎全是 LLM 不认可的那部分，recall 基本没伤。
+
+新增或怀疑一个别名时先看这个数：明显低于 79% 就去看命中上下文，别直接信。
 
 ## work_mode 的口径：Unknown 是一等状态（2026-08-08 起）
 
