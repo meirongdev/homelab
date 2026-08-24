@@ -165,6 +165,35 @@ trivy:
       - id: CVE-2026-42010
         statement: "libgnutls30 deb12u6(修复 u7); uptime-kuma:2.5.0-slim 基底待上游重建; 需服务端启用 RSA-PSK 套件, 本实例不作 TLS 服务端; RedHat 定级 7.1, NVD 9.8 过度评分, 2026-11 复审"
       #
+      # --- uptime-kuma 的 jsonata 三条 Critical（2026-08-24 新增）---
+      # `TrivyImageCriticalVulnerabilities` 自 2026-08-22 16:35 UTC 起烧 —— 这是本条
+      # 告警上线以来**第一次真的响**（在此之前两集群 Critical 计数长期为 0）。
+      # 三条同一根因：npm `jsonata` 2.1.1，修复版 **2.2.1**（1.x 线是 1.8.8）。
+      # ☠️ **上游无版本可升，别去追新 tag**：uptime-kuma 最新 2.5.3（2026-08-22 发布，
+      #   正好在公告次日）的 package.json 仍写 `"jsonata": "~2.1.0"`，
+      #   `~` 只放行 2.1.x → package-lock 实测锁死在 **2.1.1**，与 2.5.0 一模一样。
+      #   2.5.1/2.5.2/2.5.3 的 release notes 全是通知渠道与版本号修正，无一条涉及 jsonata；
+      #   上游也还没有相关 issue/PR。**升到 2.5.3 不会让这三条消失**。
+      # 实际暴露面：jsonata 只在 `src/util.js` 的 `evaluateJsonQuery()` 里被调用，且是
+      #   `jsonPath ? await jsonata(jsonPath).evaluate(...) : response` —— 表达式来自
+      #   monitor 记录的 `json_path` 字段。本实例实测（2026-08-24 读 kuma.db）：
+      #     21 个 monitor = 20 × `http` + 1 × `push`，**`json_path` 全为 NULL**
+      #   → 该调用点一次都没被走到。要走到它得由**已认证管理员**新建
+      #   json-query / snmp / globalping / mqtt / mongodb 类型的 monitor 并亲手填表达式；
+      #   status.meirong.dev 不开放注册。同 protobufjs 那条的口径（投喂需管理员）。
+      # ⚠️ 覆盖范围：这三条（外加同包的 HIGH CVE-2026-52746）在两集群的
+      #   vulnerabilityreports 里**只命中 uptime-kuma 一个镜像**（2026-08-24 全量核过），
+      #   所以按 ID 全集群生效不掩盖任何别的东西；**若将来出现在别的镜像上，说明那个
+      #   镜像引入了带洞的 jsonata，别当成本豁免的正常覆盖范围**（同上面两段的口径）。
+      # 复审触发条件比日期更有用：uptime-kuma 的 package.json 把 `~2.1.0` 抬到 `^2.2.1`
+      #   或以上的那个版本一出，直接升镜像、删这三条。
+      - id: CVE-2026-77413
+        statement: "jsonata 2.1.1(修复 2.2.0/2.2.1); uptime-kuma 2.5.3 仍锁 ~2.1.0 无版本可升; 需已认证管理员填 jsonata 表达式, 本实例 21 个 monitor 全 http/push 且 json_path 全空, 调用点走不到, 2026-10 复审"
+      - id: CVE-2026-77414
+        statement: "jsonata 2.1.1(修复 2.2.1); 同 CVE-2026-77413 一并处理: 上游锁 ~2.1.0, 本实例 json_path 全空调用点走不到, 2026-10 复审"
+      - id: CVE-2026-77415
+        statement: "jsonata 2.1.1(修复 2.2.1); 同 CVE-2026-77413 一并处理: 上游锁 ~2.1.0, 本实例 json_path 全空调用点走不到, 2026-10 复审"
+      #
       # --- 上游已停更、无已修镜像可升（同批分诊，均已逐一实测确认）---
       # excalidraw-room 是自建镜像，但 minimist 来自 upstream 按 commit pin 的 yarn.lock
       # (ROOM_REF=03ff435, 2023-12)，重建不会变；要修得动 lockfile 或抬 ROOM_REF。
