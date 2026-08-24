@@ -99,12 +99,26 @@ metadata:
   name: calibre-metadata-updater
   namespace: personal-services
 spec:
+  # ── 2026-08-24：补 startingDeadlineSeconds（CronJobSpec 字段）──────────────
+  # Forbid 下每次"上一轮还在跑"都记作 missed，累计 >100 次后 CronJob **永久停止
+  # 调度**且不自愈（上游 CronJob 文档的 "too many missed start times"）。设了它，
+  # 控制器改为从该窗口往前数 missed，而不是从上次排期一路数下去。
+  # 3600s 照 backup 的先例：本作业独立、无级间依赖（不像 readlist 那条流水线要
+  # 压到 600s），语义是"一小时内没起来就等下一轮"。
+  startingDeadlineSeconds: 3600
   schedule: "0 4 * * *"  # 每天凌晨 4:00 UTC 执行（错开 restic backup 03:00）
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
+      # activeDeadlineSeconds 是 **JobSpec** 字段，必须在 jobTemplate.spec 下 ——
+      # 放到 CronJob 的 spec 下是未知字段、会被静默丢弃。
+      # 它是**断卡死的开关，不是性能预算**：Forbid 下卡住的 Job 无限期占着
+      # "上一轮还在跑"，把后续排期全顶掉，而没 deadline 就没人杀它。到点标 Failed
+      # → KubeJobFailed(warning) 当晚响，不再静默堵下去。
+      # 实测 10 次 max 6s（中位 5s）→ 900s ≈ 150x 余量
+      activeDeadlineSeconds: 900
       backoffLimit: 1
       template:
         spec:

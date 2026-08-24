@@ -270,7 +270,13 @@ prometheus:
     # 真出事可以直接查 Prometheus；且 Grafana 是 monitoring ns 里内存最大的一个。
     # 键路径已用 `helm template --set` 实证命中（chart 87.6.0）。
     priorityClassName: high
-    retention: 7d
+    # 7d → 14d（2026-08-24）。动机：定 CronJob 的 activeDeadlineSeconds 需要运行时长
+    # 历史，而 7d 窗口下日更任务只有 9 个样本、`readlist-ingest` 就出现 4s 中位数 /
+    # 279s 峰值的 21× 方差 —— 样本量不足以定值。
+    # ☠️ **只改这一行是白改**：time/size 先到者生效，而改之前 size 就已经是那个"先到"的
+    # —— runtimeinfo 实测数据跨度 **5.21 天**（不是 7 天），retentionSize 4608MB 在裁。
+    # 所以必须连 retentionSize 一起抬，见下。
+    retention: 14d
     # retentionSize（2026-08-12）：TSDB+WAL 的**硬上限**，time/size 先到者生效。
     # 为什么需要它：PVC 的"5Gi"在 local-path 上是**装饰性的**——该 provisioner 不强制
     # 配额，实测 TSDB 已 4.67Gi 仍在随 series 增长（oracle remote-write、新告警一路加），
@@ -284,7 +290,18 @@ prometheus:
     # /api/v1/status/runtimeinfo 或 TSDB 体积变化。
     # ⚠️ 想真正扩容不能改 PVC（volumeClaimTemplate 不可变 + local-path 不支持 expand），
     # 得删 STS+PVC 重建，见上方 storageSpec 注释。
-    retentionSize: 4608MB
+    # 4608MB → 10240MB（2026-08-24，随 retention 7d→14d）。
+    # 算法：实测 3.66 GiB blocks / 5.21 天 = **0.70 GiB/天**；14 天 ≈ 9.8 GiB blocks，
+    # 加 WAL/churn 头 → 10240MB。写入时节点余量 **83G avail / 116G**（local-path 全部
+    # PVC 才 6.1G），涨到 ~12G 后节点仍只用 34%，离撑爆很远。
+    # ⚠️ PVC 仍声明 5Gi 且**没动** —— local-path 不强制配额，这个声明本来就是装饰性的
+    # （上面 retentionSize 那段注释已定过这个调）。这次让声明与实占的差距从 ~1x 拉到
+    # ~2x，是**刻意接受**的：真扩 PVC 要删 STS+PVC 重建、代价是丢掉全部历史，
+    # 而 retentionSize 已经承担了真实闸门的角色。若将来换成强制配额的 provisioner，
+    # 这里会变成硬故障 —— 那时必须先重建 PVC。
+    # 判据（与直觉相反，见下条注释）：**不要**看 /api/v1/status/flags 的 retention.size，
+    # 它恒显 0B；看 /api/v1/status/runtimeinfo 的 storageRetention 与数据跨度。
+    retentionSize: 10240MB
     # 启动宽限安全网（2026-07-04）：TSDB 已迁到 local-path（见下 storageSpec），启动重放走
     #   本地盘、很快，operator 默认 ~900s 窗口本已够用；保留 1800s 仅作 WAL 增大后的余量。
     #   历史（NFS 上曾因 head/WAL 读被慢 NFS 拖过 900s 死线 → CrashLoop，故迁 local-path）。

@@ -25,6 +25,13 @@ metadata:
   name: calibre-metadata-backfill
   namespace: personal-services
 spec:
+  # ── 2026-08-24：补 startingDeadlineSeconds（CronJobSpec 字段）──────────────
+  # Forbid 下每次"上一轮还在跑"都记作 missed，累计 >100 次后 CronJob **永久停止
+  # 调度**且不自愈（上游 CronJob 文档的 "too many missed start times"）。设了它，
+  # 控制器改为从该窗口往前数 missed，而不是从上次排期一路数下去。
+  # 3600s 照 backup 的先例：本作业独立、无级间依赖（不像 readlist 那条流水线要
+  # 压到 600s），语义是"一小时内没起来就等下一轮"。
+  startingDeadlineSeconds: 3600
   # 2026-08-08 从「永不自动跑」改成**每周日 06:00 UTC**。
   # 起因：新导入的书此前只能拿到夜间 updater 从文件内嵌抠的封面，
   # 标识符/简介/标签/出版社全都要人手动跑一次才有 —— 等于整条流水线只对存量有效。
@@ -44,6 +51,13 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
+      # activeDeadlineSeconds 是 **JobSpec** 字段，必须在 jobTemplate.spec 下 ——
+      # 放到 CronJob 的 spec 下是未知字段、会被静默丢弃。
+      # 它是**断卡死的开关，不是性能预算**：Forbid 下卡住的 Job 无限期占着
+      # "上一轮还在跑"，把后续排期全顶掉，而没 deadline 就没人杀它。到点标 Failed
+      # → KubeJobFailed(warning) 当晚响，不再静默堵下去。
+      # 实测**只有 2 次**、均 ~593s；且它走网络抓 Google Books（方差风险高）→ 给到 7200s ≈ 12x
+      activeDeadlineSeconds: 7200
       # 2026-08-06 从 0 改成 2，理由同 correct-job.yaml：脚本**幂等**（每次重新查
       # 「还有空字段的书」，已填好的不再命中），而作业跑在 bulk(-10)、
       # 节点内存常年 90%+，被驱逐是常态。backoffLimit=0 会让一次驱逐判死整个作业。
