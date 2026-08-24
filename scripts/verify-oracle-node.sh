@@ -53,7 +53,9 @@ echo "gro_script=$([ -x /etc/networkd-dispatcher/routable.d/50-tailscale-ethtool
 echo "ipfwd=$(sysctl -n net.ipv4.ip_forward 2>/dev/null)"
 echo "guard=$(sudo firewall-cmd --permanent --direct --get-all-rules 2>/dev/null | grep -c 41641)"
 echo "fwdpolicy=$(sudo iptables -S FORWARD 2>/dev/null | awk "/^-P FORWARD/{print \$3}")"
-echo "fallbackdns=$(grep -h FallbackDNS /etc/systemd/resolved.conf.d/*.conf 2>/dev/null | head -1 | cut -d= -f2)"
+echo "resolv_extra=$(awk "/^nameserver/{print \$2}" /run/systemd/resolve/resolv.conf 2>/dev/null | grep -vFx 169.254.169.254 | tr "\n" " ")"
+echo "dropin_dns=$(sed -n "s/^DNS=//p" /etc/systemd/resolved.conf.d/*.conf 2>/dev/null | head -1)"
+echo "dropin_fbonly=$(sed -n "s/^FallbackDNS=//p" /etc/systemd/resolved.conf.d/*.conf 2>/dev/null | head -1)"
 echo "ts_routes=$(sudo tailscale debug prefs 2>/dev/null | tr -d " \n" | grep -o "\"AdvertiseRoutes\":\[[^]]*\]")"
 echo "k3s=$(systemctl is-active k3s)"
 echo "tailscaled=$(systemctl is-active tailscaled)"
@@ -83,8 +85,20 @@ if [ -n "$HOST" ]; then
   # FORWARD 链时必然把它们丢掉，永远无法收敛。所以这里只查 policy。
   [ "$(g fwdpolicy)" = "ACCEPT" ] && ok "iptables FORWARD policy = ACCEPT" \
     || bad "FORWARD policy = $(g fwdpolicy)（期望 ACCEPT）—— pod↔pod 转发会断"
-  [ -n "$(g fallbackdns)" ] && ok "DNS 备用上游已配：$(g fallbackdns)" \
-    || bad "无 FallbackDNS —— 单点 169.254.169.254 曾致全网 ~20min 不可达"
+  # ☠️ 断言的是 /run/systemd/resolve/resolv.conf 里的**实际上游**，不是 drop-in 的字面量。
+  # 2026-08-12 定论（records/2026-08-01-oracle-k3s-dns-outage.md「后续」节）：
+  # `FallbackDNS=` 只服务 resolved 自己的 stub(127.0.0.53) 路径、**不写进该文件**，
+  # 而 kubelet 正是把该文件快照进 CoreDNS pod —— 2026-08-01 真正断掉的就是这条集群路径。
+  # 本检查第一版 grep "FallbackDNS"，两头都错：对现行正确配置（DNS=1.1.1.1 1.0.0.1）误报，
+  # 而若有人为了消红把 FallbackDNS= 加回来反倒变绿 —— 把已证伪的那版修复认成合格。
+  # 2026-08-23 改为直接断言生效结果（当天复盘 Telegram 告警时它正误报着这一条）。
+  if [ -n "$(g resolv_extra)" ]; then
+    ok "DNS 上游冗余生效：resolv.conf 含非 OCI 上游 $(g resolv_extra)（kubelet 快照给 CoreDNS）"
+  elif [ -n "$(g dropin_fbonly)" ]; then
+    bad "只有 FallbackDNS=$(g dropin_fbonly) —— 2026-08-12 已证伪该版无效（不进 resolv.conf，CoreDNS 上游仍是单点 OCI）；改用 DNS="
+  else
+    bad "resolv.conf 上游只有 169.254.169.254 —— 单点曾致全网 ~20min 不可达；见 setup-k3s.yaml 的 10-oci-fallback.conf"
+  fi
   # ⚠️ 期望**只有**本节点 /32：Pod CIDR 子网路由 2026-07-07 已移除，跨集群走 ClusterMesh VXLAN
   case "$(g ts_routes)" in
     *10.52.0.0/16*) bad "Tailscale 又在广播 Pod CIDR 10.52.0.0/16 —— 2026-07-07 已废弃该设计" ;;
