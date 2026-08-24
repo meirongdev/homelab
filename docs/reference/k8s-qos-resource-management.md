@@ -1,6 +1,6 @@
 # K8s 资源管理与 QoS 策略
 
-> Last updated: 2026-08-19
+> Last updated: 2026-08-24
 > Status: 生效事实（本文只定**原则**，不存具体数值）
 
 本文档记录 Homelab 中 CPU/Memory requests & limits 的设定**原则**。
@@ -291,6 +291,46 @@ max by (cluster,namespace,pod,container) (kube_pod_container_resource_limits{res
 2026-08-02 的 `argocd-application-controller` 属后者：基线 0.54–0.68G、尖峰 0.85G+、limit 1Gi
 （[ROADMAP #3](../ROADMAP.md)）。控制面组件的峰值随**被管对象规模**增长（App 数、CRD 大小），
 不随流量——扩容后要回头复查这类 limit。
+
+> ☠️ **2026-08-24 补第三种形状：峰值跟着 limit 走 —— 抬 limit 是无效动作。**
+>
+> Go 程序如果拿到 `GOMEMLIMIT`，GC 目标就由它决定；若某个 chart 把 `GOMEMLIMIT`
+> **硬接成 `limits.memory` 本身**，那么每次抬 limit 都等量抬高 GC 目标，
+> 7d 峰值/limit 的比值几乎不动，`ContainerMemoryNearLimit` 必然在几天内回来。
+> grafana 就是这样连抬两次都没解决：
+>
+> | limit | 7d 峰值 | 比值 | 动作 |
+> |---|---|---|---|
+> | 512Mi | 503Mi | 98% | 2026-08-10 抬到 768Mi |
+> | 768Mi | 725Mi | 94% | 2026-08-18 抬到 1Gi |
+> | 1Gi | 931Mi | 91% | 2026-08-24 改按 GOGC 处理 |
+>
+> **先分清是哪个约束在绑定**，再决定动哪个旋钮：
+>
+> - 取 `go_gc_gogc_percent` / `go_gc_gomemlimit_bytes` / `go_memstats_next_gc_bytes`；
+> - **GC 频率是判据**：`rate(go_gc_cycles_total_gc_cycles_total[5m])` 很低（grafana 峰值
+>   0.059/s ≈ 17s 一次、进程 CPU 峰值 0.04 核）说明 Go **毫无内存压力**，绑定约束是
+>   GOGC 的「活跃堆翻倍」——让它早点回收即可，且 CPU 有余量。真被 GOMEMLIMIT 钳住时
+>   GC 会连轴转，频率高一两个数量级，那才是真的头寸不够、该抬 limit。
+> - GOGC 取值可以推导而不是拍：活跃堆 ≈ `next_gc`/2，非堆 ≈ working_set 峰值 −
+>   `heap_alloc` 峰值；`GOGC = ((目标峰值 − 非堆)/活跃堆 − 1) × 100`。
+>
+> ⚠️ **想覆盖 chart 的 `GOMEMLIMIT` 之前先看 env 渲染顺序**：多数 chart 的
+> `.Values.env` 渲染在内置 env **之后**，同名会造成 env 列表重复键；开了
+> `ServerSideApply` 的 App 会直接 ComparisonError 卡在 `sync=Unknown`
+> （见 [records/2026-08-19-opencost-bingen-replay-crashloop.md](../records/2026-08-19-opencost-bingen-replay-crashloop.md)）。
+> grafana chart 12.7.2 就没有比例开关，只能改 GOGC 绕过去。
+> 正常口径可参照 otel-collector：`GOMEMLIMIT` 307MiB / limit 384Mi = **80%**。
+>
+> ⚠️ **改完不能拿「告警灭了」当验收**：规则分子是 `max_over_time(...[7d])`，
+> 旧 pod 的历史峰值会一直被读到，要等它滚出 7d 窗口才可能自己灭
+> （与 [observability-alerting-slo.md](observability-alerting-slo.md) 里「换 pod 后旧
+> `instance` 的陈旧值仍在回看窗内」是同一类陷阱）。真验收看**新 pod** 的
+> `next_gc` 与 working_set 峰值。
+>
+> ⚠️ 同样把 `GOMEMLIMIT` 接成 `limits.memory` 的还有两集群的 `cilium-agent`
+> （chart 默认）。它今天没报，但一旦报，别按「抬 limit」处理 —— 且改它要重跑
+> `just deploy-cilium` + `just connect-clustermesh`。
 
 ---
 
