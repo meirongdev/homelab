@@ -348,6 +348,15 @@ metadata:
   name: readlist-snapshot
   namespace: personal-services
 spec:
+  # ── 2026-08-24：补 startingDeadlineSeconds（CronJobSpec 字段）──────────────
+  # 600s，**不能照抄 backup 的 3600s**：snapshot(01:05) → ingest(01:20) →
+  # score(01:40) 是有先后依赖的流水线，级间隔只有 15/20 分钟。3600s 会允许迟到的
+  # run 越过下一级，而乱序会产生真实可见的 artifact（"空标题 = 旧 run 残影"：
+  # snapshot 清了孤儿 works，旧 run 的 lists 行还指着它们）。600s < 15min，
+  # 迟到的 run 要么按序跑、要么直接跳过等明天。
+  # 另一层作用：Forbid 下每次"上一轮还在跑"都记作 missed，累计 >100 次后 CronJob
+  # **永久停止调度**且不自愈；设了它，控制器改为从该窗口往前数 missed 而非从上次排期。
+  startingDeadlineSeconds: 600
   schedule: "5 1 * * *"
   timeZone: Etc/UTC # 与代码里一律 Now().UTC() 的口径对齐；不写则跟随**节点**时区
   concurrencyPolicy: Forbid
@@ -355,6 +364,15 @@ spec:
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
+      # activeDeadlineSeconds 是 **JobSpec** 字段，必须在 jobTemplate.spec 下 ——
+      # 写到 CronJob 的 spec 下是未知字段、静默丢弃（2026-08-24 差点这么写）。
+      # 它在这里是**断卡死的开关，不是性能预算**：concurrencyPolicy 是 Forbid，
+      # 卡住的 Job 会无限期占着"上一轮还在跑"把后续排期全顶掉，而没 deadline 就没人
+      # 杀它。到点标 Failed → KubeJobFailed(warning) 当晚就响，不再静默堵下去。
+      # 实测 9 次 max 7s（中位 5s）→ 900s ≈ 128x 余量
+      # ⚠️ 样本只有 9 次 / 6 天（写入时 retention 7d，同批已改 14d）。余量给得大是
+      #    刻意的：这个值只需"比任何合法运行长、比排期间隔短"，日更的可行区间宽到 20h。
+      activeDeadlineSeconds: 900
       backoffLimit: 2
       template:
         metadata:
@@ -429,6 +447,15 @@ metadata:
   name: readlist-ingest
   namespace: personal-services
 spec:
+  # ── 2026-08-24：补 startingDeadlineSeconds（CronJobSpec 字段）──────────────
+  # 600s，**不能照抄 backup 的 3600s**：snapshot(01:05) → ingest(01:20) →
+  # score(01:40) 是有先后依赖的流水线，级间隔只有 15/20 分钟。3600s 会允许迟到的
+  # run 越过下一级，而乱序会产生真实可见的 artifact（"空标题 = 旧 run 残影"：
+  # snapshot 清了孤儿 works，旧 run 的 lists 行还指着它们）。600s < 15min，
+  # 迟到的 run 要么按序跑、要么直接跳过等明天。
+  # 另一层作用：Forbid 下每次"上一轮还在跑"都记作 missed，累计 >100 次后 CronJob
+  # **永久停止调度**且不自愈；设了它，控制器改为从该窗口往前数 missed 而非从上次排期。
+  startingDeadlineSeconds: 600
   schedule: "20 1 * * *"
   timeZone: Etc/UTC # 与代码里一律 Now().UTC() 的口径对齐；不写则跟随**节点**时区
   concurrencyPolicy: Forbid
@@ -436,6 +463,15 @@ spec:
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
+      # activeDeadlineSeconds 是 **JobSpec** 字段，必须在 jobTemplate.spec 下 ——
+      # 写到 CronJob 的 spec 下是未知字段、静默丢弃（2026-08-24 差点这么写）。
+      # 它在这里是**断卡死的开关，不是性能预算**：concurrencyPolicy 是 Forbid，
+      # 卡住的 Job 会无限期占着"上一轮还在跑"把后续排期全顶掉，而没 deadline 就没人
+      # 杀它。到点标 Failed → KubeJobFailed(warning) 当晚就响，不再静默堵下去。
+      # 实测 9 次 max **279s**、中位仅 13s（21x 方差）→ 1800s ≈ 6.5x
+      # ⚠️ 样本只有 9 次 / 6 天（写入时 retention 7d，同批已改 14d）。余量给得大是
+      #    刻意的：这个值只需"比任何合法运行长、比排期间隔短"，日更的可行区间宽到 20h。
+      activeDeadlineSeconds: 1800
       backoffLimit: 1 # 配额受限，失败别急着重试
       template:
         metadata:
@@ -494,6 +530,15 @@ metadata:
   name: readlist-score
   namespace: personal-services
 spec:
+  # ── 2026-08-24：补 startingDeadlineSeconds（CronJobSpec 字段）──────────────
+  # 600s，**不能照抄 backup 的 3600s**：snapshot(01:05) → ingest(01:20) →
+  # score(01:40) 是有先后依赖的流水线，级间隔只有 15/20 分钟。3600s 会允许迟到的
+  # run 越过下一级，而乱序会产生真实可见的 artifact（"空标题 = 旧 run 残影"：
+  # snapshot 清了孤儿 works，旧 run 的 lists 行还指着它们）。600s < 15min，
+  # 迟到的 run 要么按序跑、要么直接跳过等明天。
+  # 另一层作用：Forbid 下每次"上一轮还在跑"都记作 missed，累计 >100 次后 CronJob
+  # **永久停止调度**且不自愈；设了它，控制器改为从该窗口往前数 missed 而非从上次排期。
+  startingDeadlineSeconds: 600
   schedule: "40 1 * * *"
   timeZone: Etc/UTC # 与代码里一律 Now().UTC() 的口径对齐；不写则跟随**节点**时区
   concurrencyPolicy: Forbid
@@ -501,6 +546,15 @@ spec:
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
+      # activeDeadlineSeconds 是 **JobSpec** 字段，必须在 jobTemplate.spec 下 ——
+      # 写到 CronJob 的 spec 下是未知字段、静默丢弃（2026-08-24 差点这么写）。
+      # 它在这里是**断卡死的开关，不是性能预算**：concurrencyPolicy 是 Forbid，
+      # 卡住的 Job 会无限期占着"上一轮还在跑"把后续排期全顶掉，而没 deadline 就没人
+      # 杀它。到点标 Failed → KubeJobFailed(warning) 当晚就响，不再静默堵下去。
+      # 实测 9 次 max 8s（中位 7s）→ 900s ≈ 112x 余量
+      # ⚠️ 样本只有 9 次 / 6 天（写入时 retention 7d，同批已改 14d）。余量给得大是
+      #    刻意的：这个值只需"比任何合法运行长、比排期间隔短"，日更的可行区间宽到 20h。
+      activeDeadlineSeconds: 900
       backoffLimit: 2
       template:
         metadata:
