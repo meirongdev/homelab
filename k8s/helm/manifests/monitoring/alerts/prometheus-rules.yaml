@@ -203,14 +203,11 @@ spec:
       # 写入时实测（与 kubectl describe node 的 kubelet 视图对过账）：CPU 20% / 内存 52%。
       # ⚠️ 分母必须限定 job="kube-state-metrics"：opencost 也吐同名
       # kube_node_status_allocatable，不过滤会让分母翻倍、比值减半（写本组时抓到的现行）。
-      # ⚠️ 只写 homelab —— **但这个理由已经过期，别照抄**。原注释说"oracle 的这些序列
-      # 不进中枢 Prometheus（otel 白名单只放行 KRR 所需）"，2026-08-24 复核发现不成立：
-      # count by (cluster) 显示 kube_node_status_allocatable 与
-      # namespace_{cpu,memory}:kube_pod_container_resource_requests:sum 两边都有序列。
-      # 实测 CPU homelab 26.6% / oracle **60.1%**、内存 homelab 61.5% / oracle **73.6%**
-      # —— 逼近阈值的恰是没被覆盖的 oracle。改法是把 sum() 换成 sum by (cluster) 并
-      # 重命名（现名与 annotation 里"迁去 oracle"的建议都是 homelab 专属）。
-      # 已记为开放项，见 docs/ROADMAP.md。
+      # ⚠️ 本组三条**都覆盖两个集群**（2026-08-24 起）。曾有一段时间 CPU/内存 那两条
+      # 写死 cluster="homelab"，注释给的理由是"oracle 的序列不进中枢 Prometheus
+      # （otel 白名单只放行 KRR 所需）"—— 复核发现**那个理由已经不成立**，两边都有
+      # 序列，而逼近阈值的恰恰是没被覆盖的 oracle。教训：写死集群的选择器要定期复核，
+      # 它会在采集面变化后静默失效（同类问题见 ROADMAP 开放项 #7 的 external-dns 规则）。
       rules:
         # 2026-08-24：替代 chart 的 KubeQuotaAlmostFull + KubeQuotaFullyUsed
         # （已在 values 的 defaultRules.disabled 关掉，理由见彼处：那两条是 info，
@@ -248,38 +245,54 @@ spec:
               先看 `kubectl -n {{ $labels.namespace }} describe quota`；若是终态 pod
               占额，注意 `count/pods` 不排除终态、`pods` 才排除。
 
-        - alert: HomelabCpuRequestsSaturated
+        # 2026-08-24（开放项 #14）：由 Homelab* 改名为 Cluster*、按 cluster 分组，
+        # 从此覆盖两个集群。改名不是洁癖 —— 旧名与旧 annotation 里"迁负载去 oracle"
+        # 的建议都是 homelab 专属，对 oracle 自己讲不通。
+        # ⚠️ 分母仍必须限定 job="kube-state-metrics"（opencost 吐同名
+        # kube_node_status_allocatable，实测两集群各 2+2 series，不过滤则分母翻倍）。
+        # 阈值/for 未改，实测依据（6d 回放，5min 步长 1729 点）：
+        #   homelab  CPU 25.2–28.3%   内存 57.9–64.8%
+        #   oracle   CPU 60.1–71.2%   内存 73.6–**85.2%**   ← 逼近阈值的是它
+        #   >90% 采样点 0（零误报）；oracle 内存 >85% **只持续 5 分钟**（单点，
+        #   rollout 期间新旧 pod requests 并存的尖峰，for:30m 正好滤掉），
+        #   而 >75% 有过 115 分钟连续 —— 即 90% 既够不着又不会哑火。
+        - alert: ClusterCpuRequestsSaturated
           expr: |
-            sum(namespace_cpu:kube_pod_container_resource_requests:sum{cluster="homelab"})
-              / sum(kube_node_status_allocatable{resource="cpu", cluster="homelab", job="kube-state-metrics"})
+            sum by (cluster) (namespace_cpu:kube_pod_container_resource_requests:sum)
+              / sum by (cluster) (kube_node_status_allocatable{resource="cpu", job="kube-state-metrics"})
               > 0.9
           for: 30m
           labels:
             severity: warning
             component: capacity
           annotations:
-            summary: "homelab CPU requests 已达总 allocatable 的 {{ $value | humanizePercentage }}"
+            summary: "{{ $labels.cluster }} CPU requests 已达总 allocatable 的 {{ $value | humanizePercentage }}"
             description: |
-              集群 CPU requests 占总 allocatable 超过 90%——新负载将开始排不进去
-              （实际可用还要再扣节点碎片：单 pod 的 requests 必须整块塞进某一个节点）。
+              {{ $labels.cluster }} 的 CPU requests 占总 allocatable 超过 90%——新负载
+              将开始排不进去（实际可用还要再扣节点碎片：单 pod 的 requests 必须整块
+              塞进某一个节点）。
               先核对 requests 是否虚高（对照实占，见 k8s-qos-resource-management.md），
-              再考虑砍 requests 或按 cluster-placement 决策迁负载去 oracle。
-        - alert: HomelabMemoryRequestsSaturated
+              再决定砍 requests 还是挪负载。⚠️ **两个集群的出路不对称**：homelab 满了
+              可按 cluster-placement 决策把轻量无状态挪去 oracle；而 **oracle 满了没有
+              这个出路** —— 它已单向缩容到 2 OCPU/12GB（A1 长期无容量，涨不回去），
+              只能砍 requests 或退役服务。
+        - alert: ClusterMemoryRequestsSaturated
           expr: |
-            sum(namespace_memory:kube_pod_container_resource_requests:sum{cluster="homelab"})
-              / sum(kube_node_status_allocatable{resource="memory", cluster="homelab", job="kube-state-metrics"})
+            sum by (cluster) (namespace_memory:kube_pod_container_resource_requests:sum)
+              / sum by (cluster) (kube_node_status_allocatable{resource="memory", job="kube-state-metrics"})
               > 0.9
           for: 30m
           labels:
             severity: warning
             component: capacity
           annotations:
-            summary: "homelab 内存 requests 已达总 allocatable 的 {{ $value | humanizePercentage }}"
+            summary: "{{ $labels.cluster }} 内存 requests 已达总 allocatable 的 {{ $value | humanizePercentage }}"
             description: |
-              集群内存 requests 占总 allocatable 超过 90%。⚠️ 判断真实内存压力永远看
-              节点 `free -m` 的 available / rssBytes（requests 只反映申报）——这条只
-              说明"排程账面"快满了：新 pod 会 Pending，与实占多少无关。
-              见 docs/reference/k8s-qos-resource-management.md。
+              {{ $labels.cluster }} 的内存 requests 占总 allocatable 超过 90%。
+              ⚠️ 判断真实内存压力永远看节点 `free -m` 的 available / rssBytes
+              （requests 只反映申报）——这条只说明"排程账面"快满了：新 pod 会 Pending，
+              与实占多少无关。见 docs/reference/k8s-qos-resource-management.md。
+              ⚠️ oracle 满了没有"挪去另一个集群"的出路（已单向缩容），只能砍或退役。
 
     - name: workloads
       rules:
