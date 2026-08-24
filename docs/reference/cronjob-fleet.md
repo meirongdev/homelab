@@ -40,8 +40,13 @@
 **断卡死的开关，不是性能预算。** 它只需同时满足"比任何合法运行长"和"比排期间隔短"；
 日更任务的可行区间宽到 20h，所以现有取值给到实测峰值的 6×–150× 是刻意的。
 ☠️ 它是 **JobSpec** 字段，必须写在 `spec.jobTemplate.spec` 下 —— 写到 CronJob 的
-`spec` 下是未知字段、**会被静默丢弃**，而 YAML 解析与文件级校验都看不出来。
-判据只有 `kubectl apply --dry-run=server -o json` 回读。
+`spec` 下是未知字段、**会被静默丢弃**。⚠️ 之前这里写"判据只有 server dry-run"，
+**说过头了**：纯 YAML 解析看不出来，但这是**静态可查**的（在 git 的清单里判断
+`activeDeadlineSeconds` 挂在哪一层），只是本仓库还没有这条 CI 规则。
+两条可用判据，任选：
+- 从**服务端**读回（最强，能覆盖手工 apply 的对象）：
+  `kubectl get cronjob -A -o custom-columns=…` 或 `kubectl apply --dry-run=server -o json`
+- 提交前静态查：`grep -A2 '^  jobTemplate:' <清单>` 看该字段是否在 `jobTemplate.spec` 缩进下
 
 ## 配额口径
 

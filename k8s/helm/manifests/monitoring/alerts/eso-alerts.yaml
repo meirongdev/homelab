@@ -64,7 +64,16 @@ spec:
         # Meta-failure: if ESO metrics vanish entirely (controller crashed or the
         # scrape broke), the condition alerts above CAN'T fire — no data, no alert.
         # Scoped to homelab, where the ServiceMonitor guarantees the series exists
-        # whenever ESO is healthy. (oracle metrics are best-effort via OTel.)
+        # whenever ESO is healthy.
+        # ⚠️ The trailing reason once given here — "oracle metrics are best-effort
+        # via OTel" — was **measured false on 2026-08-24** for the same OTel path
+        # (external-dns: oracle 8637 samples over 6d, one 3-minute gap; homelab
+        # zero). external-dns-alerts.yaml therefore moved to a per-cluster
+        # comparison against a reference series and now covers both clusters
+        # (ROADMAP, closed #7). This rule has NOT been given the same treatment:
+        # doing it needs the ESO-side reference series picked and its own 6d
+        # replay, so it stays homelab-only for now — but do not cite the old
+        # rationale to justify leaving it that way.
         - alert: ExternalSecretsMetricsAbsent
           expr: absent(externalsecret_status_condition{cluster="homelab"})
           for: 15m

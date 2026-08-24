@@ -306,8 +306,9 @@ prometheus:
     # ~2x，是**刻意接受**的：真扩 PVC 要删 STS+PVC 重建、代价是丢掉全部历史，
     # 而 retentionSize 已经承担了真实闸门的角色。若将来换成强制配额的 provisioner，
     # 这里会变成硬故障 —— 那时必须先重建 PVC。
-    # 判据（与直觉相反，见下条注释）：**不要**看 /api/v1/status/flags 的 retention.size，
-    # 它恒显 0B；看 /api/v1/status/runtimeinfo 的 storageRetention 与数据跨度。
+    # 判据：看 /api/v1/status/runtimeinfo 的 storageRetention，**不要**看
+    # /api/v1/status/flags —— 理由与实测见上面 retention 那条注释（那里是唯一一处，
+    # 这里不复制；2026-08-24 曾在同一文件里留下两份互相矛盾的说法）。
     retentionSize: 10240MB
     # 启动宽限安全网（2026-07-04）：TSDB 已迁到 local-path（见下 storageSpec），启动重放走
     #   本地盘、很快，operator 默认 ~900s 窗口本已够用；保留 1800s 仅作 WAL 增大后的余量。
