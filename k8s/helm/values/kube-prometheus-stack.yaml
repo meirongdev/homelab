@@ -122,6 +122,31 @@ grafana:
   #   起连续烧了 2 天、每 4h 往 Telegram 重复投递一次。这条告警是对的不是噪声，
   #   处理方式是抬 limit 而不是调阈值（告警正文自己写的「现在抬 limit 还来得及」）。
   #   k8s-node 当时 available 4.76GiB，且 limit 不预留内存，方向安全。
+  #
+  # ☠️ 2026-08-24 更正上面两条的因果：**抬 limit 治不了这个容器**，因为 chart 把
+  #   `GOMEMLIMIT` 硬接成 `resources.limits.memory` 本身（grafana chart 12.7.2 的
+  #   `templates/_pod.tpl`：`resourceFieldRef: limits.memory` / `divisor: "1"`，
+  #   无开关、无比例）。Go 的 GC 目标于是随 limit 等量上移，三次实测排成一条直线：
+  #     512Mi → 7d 峰值 503Mi (98%) · 768Mi → 725Mi (94%) · 1Gi → 931Mi (91%)
+  #   每次抬完 `ContainerMemoryNearLimit` 都在几天内回来 —— 是机制不是巧合。
+  #   （对照：otel-collector 的 GOMEMLIMIT 是 307MiB / limit 384Mi = 80%，才是正常口径。）
+  # ✅ 真正的杠杆是 GOGC。判据（08-19 16:00 UTC 那次 931Mi 峰值的现场读数）：
+  #     next_gc 914Mi · gomemlimit 1024Mi · heap_alloc 793Mi（故非堆约 138Mi）
+  #     GC 频率峰值 **0.059 次/秒（约 17s 一次）** · 进程 CPU 峰值 **0.04 核**
+  #   → 绑定约束是 GOGC=100 的「活跃堆翻倍」，**不是** GOMEMLIMIT 的钳制（真被钳住时
+  #     GC 连轴转，频率高一两个数量级）。所以让 Go 早点回收即可压住峰值，CPU 有余量。
+  #   取值推导：活跃堆 ≈ next_gc/2 = 457Mi；目标峰值 ≤ 75% × 1Gi = 768Mi
+  #     → 堆预算 768 − 138 = 630Mi → GOGC = (630/457 − 1)×100 ≈ 38，取 40（预期约 76%）。
+  #   同一 release 里 prometheus-operator 容器本就跑 GOGC=30，这不是新奇旋钮。
+  # ⚠️ **别改用 `env: GOMEMLIMIT` 去覆盖 chart 那份**：`env` 在模板里渲染**在 GOMEMLIMIT
+  #   之后**，同名即 env 列表重复键；本 App 开了 ServerSideApply → ArgoCD 直接
+  #   ComparisonError、卡在 sync=Unknown 且 rollout 不发生
+  #   （records/2026-08-19-opencost-bingen-replay-crashloop.md §重复键）。
+  # ⚠️ 验收别只看告警灭没灭：规则分子是 `max_over_time(...[7d])`，会一直读**旧 pod**
+  #   的历史峰值，931Mi 要到 2026-08-26 16:00 UTC 才滚出窗口（期间挂了到期自解的
+  #   silence）。真验收看新 pod 的 `go_memstats_next_gc_bytes` 与 working_set 峰值。
+  env:
+    GOGC: "40"
   resources:
     requests:
       cpu: 100m                 # ✅ 从默认值降低
