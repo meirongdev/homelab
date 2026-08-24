@@ -124,8 +124,9 @@
   规则哑掉或面板空白而非 series 变多，这条告警看不见，仍得靠人核。
 
 - **homelab 调度容量饱和**（`prometheus-rules.yaml` 的 `capacity` 组，2026-08-13 新增，2 条）:
-  `HomelabCpuRequestsSaturated` / `HomelabMemoryRequestsSaturated` —— requests 占**总**
-  allocatable >90% 持续 30m。它们替代 chart 的 `KubeCPUOvercommit` / `KubeMemoryOvercommit`
+  `ClusterCpuRequestsSaturated` / `ClusterMemoryRequestsSaturated` —— requests 占**总**
+  allocatable >90% 持续 30m，**按 cluster 分组、覆盖两集群**（2026-08-24 起；此前叫
+  `Homelab*` 且写死 homelab，见下）。它们替代 chart 的 `KubeCPUOvercommit` / `KubeMemoryOvercommit`
   （已在 values 的 `defaultRules.disabled` 关掉）。
   **关掉的理由是语义在本拓扑下恒真**：上游那两条量的是「挂掉最大节点后剩余容量能否装下
   全部 requests」（N-1 冗余），而 homelab 是 **1 大 + 1 小的不对称双节点** —— 控制面的
@@ -136,15 +137,18 @@
   `kube_node_status_allocatable`，不过滤会让分母翻倍、比值减半。2026-08-24 复核这个坑
   **仍然活着**：`count by (job)(kube_node_status_allocatable{resource="cpu",cluster="homelab"})`
   返回 `job=kube-state-metrics` 2 条 + `job=opencost` 2 条。
-  ☠️ **只覆盖 homelab，而 oracle 是更紧的那个** —— 两条都写死 `cluster="homelab"`。
-  清单注释里说理由是"oracle 的序列不进中枢 Prometheus"，**2026-08-24 复核发现那已不成立**：
-  `count by (cluster)` 显示 `kube_node_status_allocatable` 与
-  `namespace_{cpu,memory}:kube_pod_container_resource_requests:sum` 两边都有序列。
-  按 cluster 分组实测：**CPU homelab 26.6% / oracle 60.1%**、
-  **内存 homelab 61.5% / oracle 73.6%** —— 逼近 90% 阈值的是 oracle，而它没有告警。
-  且 oracle 是**单向缩容过**（4 OCPU/24GB → 2/12，A1 无容量涨不回去）的那个集群。
-  → 已记为开放项，见 [../ROADMAP.md](../ROADMAP.md)。
-  （同组的 `ResourceQuotaNearlyExhausted` 不受影响：它本来就覆盖两集群。）
+  📌 **曾经只覆盖 homelab，而 oracle 恰恰是更紧的那个**（2026-08-24 修，原开放项 #14）。
+  清单注释当时给的理由是"oracle 的序列不进中枢 Prometheus"，复核发现**已不成立** ——
+  `count by (cluster)` 显示分子分母两边都有序列。6d 回放：homelab CPU 25.2–28.3% /
+  内存 57.9–64.8%，**oracle CPU 60.1–71.2% / 内存 73.6–85.2%**。
+  ☠️ **教训：写死集群的选择器会在采集面变化后静默失效** —— 规则照常评估、健康、不报错，
+  只是永远看不到另半个舰队。同类未修的还有 external-dns 的 4 条（[ROADMAP](../ROADMAP.md) #7）。
+  📌 两集群的**出路不对称**，所以 annotation 里分开写：homelab 满了可按
+  [cluster-placement 决策](../decisions/cluster-placement-for-new-services.md)把轻量无状态挪去
+  oracle；**oracle 满了没有这条路** —— 已单向缩容到 2 OCPU/12GB，只能砍 requests 或退役。
+  📌 `for: 30m` 是**必需的**，不是保守：oracle 内存曾达 85.2%，但**只持续 5 分钟** ——
+  rollout 期间新旧 pod 的 requests 并存造成的尖峰。而 >75% 有过 115 分钟连续，
+  所以 90% 阈值既够不着又不会哑火。
   📌 **它只说明"排程账面"快满了，不代表真实内存压力** —— 判真实压力永远看节点
   `free -m` 的 available / `rssBytes`（requests 只反映申报，两者可差数百 Mi）。
   口径见 [k8s-qos-resource-management.md](k8s-qos-resource-management.md)（唯一真相源）。
