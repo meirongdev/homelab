@@ -285,9 +285,16 @@ prometheus:
     # 缩短**，而不是磁盘静默膨胀。生效当天即裁掉最老 block（实测 4.81→4.38GiB，P2 级可丢）。
     # 应用机制（2026-08-12 实测，和直觉相反）：operator 0.92 + Prometheus 3 把 retention
     # 渲染进**配置文件**（config_out/prometheus.env.yaml 的 storage: 段）由 reloader
-    # 热加载——**不重启 pod、不改 STS args**。所以 /api/v1/status/flags 恒显
-    # retention.size=0B（旗标未用，是默认值），别拿它判断生效与否，看
-    # /api/v1/status/runtimeinfo 或 TSDB 体积变化。
+    # 热加载——**不重启 pod、不改 STS args**（2026-08-24 再次证实：改完 pod
+    # restarts=0、创建时间仍是 08-18，配置文件里 storage.tsdb.retention 两项
+    # time/size 都已是新值）。
+    # ⚠️ 判据修正（2026-08-24 实测，此前这里写的不准）：`/api/v1/status/flags`
+    #    **不是**"恒显 0B"，而是**进程启动那一刻的快照** —— 改完当时它显示的是
+    #    `retention.time=1w` / `retention.size=4GiB512MiB`，即**上一次启动时的旧值**，
+    #    而 runtimeinfo 已是 `2w or 10GiB`。pod args 里根本没有 retention 旗标。
+    #    所以拿 flags 判会得到"没生效"的错误结论。**唯一判据是
+    #    /api/v1/status/runtimeinfo 的 storageRetention**（要看真实裁剪效果再看
+    #    数据跨度，那要几天才长起来）。
     # ⚠️ 想真正扩容不能改 PVC（volumeClaimTemplate 不可变 + local-path 不支持 expand），
     # 得删 STS+PVC 重建，见上方 storageSpec 注释。
     # 4608MB → 10240MB（2026-08-24，随 retention 7d→14d）。
