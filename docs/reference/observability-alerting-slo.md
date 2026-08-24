@@ -1,6 +1,6 @@
 # Observability — 告警、看板组织与 SLO
 
-> Last updated: 2026-08-20
+> Last updated: 2026-08-24
 > Status: 生效事实
 >
 > 遥测的**消费侧**：告警路由与覆盖盲区、Grafana 看板组织约定、SLI/SLO 体系。
@@ -122,6 +122,40 @@
   📌 **覆盖范围有限**：它只抓**量**的回退。ADR 复核触发条件里另外两条 —— 重新启用
   `kubeApiserverBurnrate`/`Slos`/`Availability`、新增消费原始 bucket 的看板 —— 表现为
   规则哑掉或面板空白而非 series 变多，这条告警看不见，仍得靠人核。
+
+- **ResourceQuota 逼近上限**（`prometheus-rules.yaml` 的 `capacity` 组，2026-08-24 新增，1 条）:
+  `ResourceQuotaNearlyExhausted` —— 任一集群任一 ns 的配额用量 ≥90% 持续 30m 即报。
+  它替代 chart 的 `KubeQuotaAlmostFull` + `KubeQuotaFullyUsed`（已在 values 的
+  `defaultRules.disabled` 关掉）。**关掉的理由是严重级，不是表达式** —— chart 把配额
+  分三档，而 Alertmanager 只放行 `critical|warning`：
+
+  | chart 规则 | 判据 | severity | 结果 |
+  |---|---|---|---|
+  | `KubeQuotaAlmostFull` | `>0.9 <1` | **info** | 进不了 Telegram |
+  | `KubeQuotaFullyUsed` | `==1` | **info** | 进不了 Telegram |
+  | `KubeQuotaExceeded` | `>1` | warning | 准入控制保证 used 最多**等于** hard → **结构上永不触发** |
+
+  ☠️ 为什么这个盲区特别坏：配额满了之后准入层**静默**拒绝建 pod —— Job 对象建得出来、
+  `active=0`、永远没有 pod、只无限刷 `FailedCreate`，而它**不会被标记成 failed**。于是
+  `KubeJobFailed`（判 `kube_job_failed>0`）不响，`KubeJobNotCompleted`（要求
+  `active>0`）也不响。2026-08-24 jobs-sg 手工起 5 个一次性 Job 顶到 15/16 时，
+  唯一响的是 `InfoInhibitor` —— 正是被抑制掉的那条。
+  自建版取 **`>= 0.9` 不设上界**：chart 分成 `>0.9<1` 与 `==1` 两条，恰好满的那一刻
+  前者停响、后者是 info，会出现「最糟时反而没告警」的空洞。
+  ⚠️ 两个实现细节：① 表达式照抄 chart 的 `topk by(cluster,…)` +
+  `max without(instance,job,type)` 去重形状 —— 改成朴素的
+  `on(namespace,resourcequota,resource)` 会直接报 `found duplicate series for the
+  match group`（两集群都上报 `kube_resourcequota`，且 `personal-services` 两边都有）。
+  ② 与 `capacity` 组其它规则不同，这条**不限定 `cluster="homelab"`**：oracle 的
+  `kube_resourcequota` 确实进了中枢 Prometheus（实测 7 个 series 覆盖两集群），
+  不像 CPU/内存那些被 otel 白名单挡在外。
+  写入时实测：命中 0（最高是 jobs-sg 的 `count/pods` 62.5%），7 天历史峰值 75%。
+
+  📌 配套的口径修正：`count/pods` 是**对象计数**配额、**不排除终态**，`pods` 才排除。
+  jobs-sg 曾是全舰队唯一用 `count/pods` 的 ns，10 个槽里 9 个是 `Succeeded`；
+  2026-08-24 已改为 `pods: 12`，与 media / personal-services 对齐。实测语义对照与
+  手工一次性 Job 的纪律写在 `k8s/helm/manifests/jobs-sg/limits.yaml` 的注释里
+  （唯一真相源，此处不留副本）。
 
 ### ⚠️ 告警覆盖 ≠ 抓取覆盖（2026-08-02 核实）
 
