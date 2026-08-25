@@ -99,37 +99,55 @@ master key 也看不到 = 配置还没进容器，往坑 C 查。
 ⚠️ 所以**不要手改那个注解**，改完 config 在 `k8s/helm/` 跑 `just gen-embedded-scripts`。
 注解一旦被摘掉，上面那个静默失效会原样回来。
 
-## ☠️ 上游 `nvidia/*` 的通配透传是个假象 —— NVIDIA 的 key 按模型授权
+## ☠️ 上游 `nvidia/*` 打不通 —— 是 `model` 字段的双前缀，不是 key 的问题
 
-**约束（build.nvidia.com 的平台行为，不是 LiteLLM 的问题）**：
-一把 NVIDIA API key **只能调用它被授权的那个模型**。想用别的免费模型，**得为那个模型
-另外生成一把 key**。**没有「一把 key 打通所有免费模型」这种用法。**
+清单里写的是 `model_name: "nvidia/*"` → `model: "openai/nvidia/*"`。LiteLLM 用别名里被
+`*` 捕获的部分去替换 `model` 里的 `*`，于是发给上游的模型名**带上了多余的 `nvidia/`**。
 
-所以清单里 `model_name: "nvidia/*"` 这条通配**在「一把 key」的前提下根本不成立**：
-它对外宣称能透传任意 `nvidia/<模型 ID>`，实际只有当前那把 key 授权的那一个能用。
+2026-08-25 在 litellm pod 里直连 `integrate.api.nvidia.com` 实测（用的就是网关自己那把
+`NVIDIA_API_KEY`）：
 
-⚠️ **当前这把 key（Vault `secret/homelab/litellm-nvidia`）绑的是哪个模型，仓库里没有记录**
-（2026-08-16 加它的 commit `b45955a` 也没写）。要查只能去 build.nvidia.com 看这把 key 是从
-哪个模型页面生成的。**下次轮换或新增 key 时请把模型 ID 写进清单注释**，否则又会丢。
+| 发出去的 model | 结果 |
+|---|---|
+| `meta/llama-3.3-70b-instruct`（裸名）| **200 OK** |
+| `nvidia/meta/llama-3.3-70b-instruct`（网关实际发的形状）| **404 `page not found`** —— 与经网关调用时报的错逐字相同 |
 
-**想再加一个免费模型，正确做法**（不要去改通配）：
+**所以 key 是好的、上游是通的，坏的是 `model` 字段的写法。**
 
-1. 在 build.nvidia.com 上为该模型单独生成一把 key；
-2. 进 Vault：`secret/homelab/litellm-nvidia-<模型简称>`，经 ESO 注入成**独立的**环境变量；
-3. 在 config.yaml 里加一条**显式**的 model 条目（不是通配），`api_key` 指向那个新环境变量；
-4. 别忘了把新别名加进虚拟 key 的白名单（坑 A）。
+⚠️ **一个曾经的误判，写下来免得重复**：一度以为「NVIDIA 一把 key 只授权一个模型、要用别的
+免费模型得另外生成 key」。**实测不成立** —— 拿这把 key 查 `GET /v1/models` 返回 **102 个模型**
+（`deepseek-ai/deepseek-v4-flash-0731`、`meta/llama-3.3-70b-instruct`、`google/gemma-4-31b-it`、
+`minimaxai/minimax-m3`、`mistralai/mistral-large` 等），且裸名调用成功。判据很简单：
+**授权问题回 401/403，`404 page not found` 是路由/模型名对不上**——别把这两类混起来。
 
-**两条观察，写下来免得下次重复排查**：
+**怎么修（未部署验证）**：把 `model` 改成 `"openai/*"`，让捕获到的通配内容**单独**成为模型名：
 
-- 实测 `nvidia/meta/llama-3.3-70b-instruct` 返回的是
-  `litellm.NotFoundError: OpenAIException - 404 page not found`。⚠️ 纯粹的授权范围问题通常
-  回 401/403，而 `404 page not found` 更像 URL/模型名对不上 —— 所以**换对 key 之后仍要单独
-  验证模型 ID 的写法**（现在是 `model: "openai/nvidia/*"`，`nvidia/` 这一段是否被当成模型名的
-  一部分发给上游，没有验证过）。别假设「key 换对了就通了」。
-- 它还**污染 `/v1/models`**：master key 查询会看到 200+ 个 `nvidia/` 前缀条目，内容却是
-  **OpenAI 的模型名**（`nvidia/gpt-4o`、`nvidia/dall-e-3`、`nvidia/sora-2`、`nvidia/o3` …），
-  这些在 NVIDIA 上并不存在。是 LiteLLM 按 openai provider 的静态模型表展开通配的结果。
-  **别拿 `/v1/models` 里出现某个 `nvidia/X` 当作它可用的证据。**
+```yaml
+      - model_name: "nvidia/*"
+        litellm_params:
+          model: "openai/*"                       # 不是 openai/nvidia/* —— 后者会多带一层前缀
+          api_base: https://integrate.api.nvidia.com/v1
+          api_key: os.environ/NVIDIA_API_KEY
+```
+
+改完必须实调一次确认（`nvidia/meta/llama-3.3-70b-instruct` 应回 200），**别只看
+`/v1/models` 里有没有它** —— 见下条。
+
+⚠️ 它还**污染 `/v1/models`**：master key 查询会看到 200+ 个 `nvidia/` 前缀条目，内容却是
+**OpenAI 的模型名**（`nvidia/gpt-4o`、`nvidia/dall-e-3`、`nvidia/sora-2`、`nvidia/o3` …），
+NVIDIA 上并不存在。这是 LiteLLM 按 openai provider 的静态模型表展开通配的结果，与 key 能
+访问什么无关。**别拿 `/v1/models` 里出现某个 `nvidia/X` 当作它可用的证据。**
+
+**这把 key 实际能用的模型清单**（102 个，随 NVIDIA 目录变）现取：
+
+```bash
+POD=$(kubectl --context k3s-homelab -n litellm get pod -l app=litellm -o jsonpath='{.items[0].metadata.name}')
+kubectl --context k3s-homelab -n litellm exec "$POD" -- python3 -c "
+import os,json,urllib.request
+r=urllib.request.Request('https://integrate.api.nvidia.com/v1/models',
+    headers={'Authorization':'Bearer '+os.environ['NVIDIA_API_KEY']})
+print('\n'.join(m['id'] for m in json.load(urllib.request.urlopen(r,timeout=30))['data']))"
+```
 
 ## 上游是思维链模型：小 `max_tokens` 会把思维链漏进 `content`
 

@@ -63,15 +63,15 @@ data:
           api_base: https://openrouter.ai/api/v1
           api_key: os.environ/OPENROUTER_API_KEY
       # ── NVIDIA（第四来源：build.nvidia.com 免费 API，独立透传，2026-08-16）──
-      # ☠️ 这条通配是个假象，别照着它加模型（2026-08-25 查清）：
-      #    **NVIDIA 的一把 key 只授权一个模型**，别的免费模型要另外生成 key。
-      #    所以能用的只有当前 key 授权的那一个，而这条通配对外宣称任意 nvidia/X 都行。
-      #    ⚠️ 当前这把 key 绑的是哪个模型**没有记录** —— 轮换/新增时请把模型 ID 写在这里。
-      #    加新免费模型的正确做法（新 key + 新 Vault 路径 + 新 env + **显式** model 条目，
-      #    而不是改这条通配）见 docs/reference/litellm-gateway.md。
+      # ☠️ 这条现在是坏的（2026-08-25 查清）：`openai/nvidia/*` 会让发给上游的模型名
+      #    多带一层 `nvidia/`，实测 404 page not found。key 和上游都没问题 ——
+      #    pod 内直连 NVIDIA：裸名 meta/llama-3.3-70b-instruct 回 200，
+      #    带前缀的 nvidia/meta/llama-3.3-70b-instruct 回同样的 404。
+      #    修法是把 model 改成 "openai/*"（让捕获的通配内容单独成为模型名）。
+      # ⚠️ 这把 key 不是单模型授权：查 NVIDIA 的 /v1/models 返回 102 个模型。
+      #    授权问题回 401/403，404 page not found 是路由/模型名对不上，别混。
       # ⚠️ nvidia 不是 LiteLLM 原生 provider，需用 openai/ 前缀声明 OpenAI 兼容调用。
-      #    实测 nvidia/meta/llama-3.3-70b-instruct 回 404 page not found（不是 401/403），
-      #    所以 model 字段的写法本身也未验证 —— 换对 key 后仍要单独验。
+      #    详情与取模型清单的命令见 docs/reference/litellm-gateway.md。
       # ⚠️ key 是真实凭据：环境变量引用（os.environ/NVIDIA_API_KEY），
       #    值由 Vault secret/homelab/litellm-nvidia → ESO → Deployment env 注入，不进 git。
       - model_name: "nvidia/*"
@@ -100,7 +100,7 @@ spec:
         #    ⇒ ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按**旧路由表**继续跑。
         #    2026-08-25 实际踩过一次（改了 mac/ornith 后必须手动 rollout restart 才生效）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py 的 STAMP_ONLY），别手改。
-        checksum/config: "02dcd83b5ef6d645"
+        checksum/config: "dbb9b94c20a96368"
       labels:
         app: litellm
     spec:
