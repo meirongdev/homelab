@@ -1,0 +1,17 @@
+---
+# H1: Namespace 独占文件 —— 删这个文件会 prune 掉整个 ns，连带删光 ns 下**其它**应用的
+#     对象（PVC 的 Prune=false 拦不住，被 prune 的是 ns）。见 jobs-sg/namespace.yaml。
+# H5: 显式声明 PSA。用 **baseline** 而不是 oracle 那个同名 ns 的 restricted ——
+#     理由是形态不同：oracle 的 databases 跑 CNPG（operator 生成的 pod 自带完整
+#     securityContext），这里跑的是官方 postgres 镜像的裸 Deployment，其 entrypoint
+#     先以 root 建/chown 数据目录再 gosu 降权，restricted 的 runAsNonRoot 会直接挡住它
+#     （要跑 restricted 得钉 runAsUser/runAsGroup/fsGroup=999，本环境未验证过，不在这次改动里赌）。
+#     与 litellm ns 同档，不是新开的口子。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: databases
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline
