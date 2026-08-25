@@ -892,29 +892,31 @@ spec:
               ⚠️ 刚重启后别做性能基准（冷启动 ~30% 慢，且首个请求含 Triton JIT 尖峰）。
 
         # ⚠️ 防过载/前兆规则（2026-08-15 落地，规格见 nv-dgx-spark/docs/auto-mitigation-cn.md §3）。
-        # 这是规格 A3/A4/A5 的实现；A1/A2（MemAvailable 百分比阈值）在 08-09 已按实测判定为
+        # 这是规格 A4/A5 的实现；A1/A2（MemAvailable 百分比阈值）在 08-09 已按实测判定为
         # 误报陷阱而删除（GB10 统一内存里模型常驻把 MemAvailable 长期压低、对"会否 OOM"无预测力，
         # 见本组上方 DgxSparkMemoryPressure 的长注释），已由 PSI stall + OOM-kill 两条替代，
-        # 这里**不**重新引入；A6（SMART 失败）已由 storage-alerts.yaml 的 SmartHealthFailed /
+        # 这里**不**重新引入；A3（KV 缓存占用）2026-08-25 也按实测删除，见下方墓碑注释；
+        # A6（SMART 失败）已由 storage-alerts.yaml 的 SmartHealthFailed /
         # SmartMediaErrors / NVMe 磨损规则覆盖（无 job 过滤 → 天然匹配 smartctl-dgx-spark）；
         # A7（load1>8 info）因 Alertmanager 路由只收 critical|warning、info 被丢弃，写了也是
         # 死规则，且 GB10 load 探针有噪音，故省略。
-        - alert: DgxSparkKVCacheHigh
-          # KV 缓存占用接近打满 = 排队与吞吐骤降的前兆。kv_cache_usage_perc 是 vLLM 直接导出的
-          # 0..1 比例（vllm-dgx-spark job，只抓 dgx-spark-1 的 :8000/metrics）。
-          # 0.90 是起始建议：max_num_seqs=6 下 KV 打满会让新请求排队甚至被拒。首月按实测回校。
-          expr: vllm:kv_cache_usage_perc{job="vllm-dgx-spark"} > 0.90
-          for: 5m
-          labels:
-            severity: warning
-            component: inference
-          annotations:
-            summary: "dgx-spark vLLM KV 缓存占用 > 90%（{{ $labels.nodename }}）"
-            description: |
-              KV cache 占用即将打满（当前 {{ $value | printf "%.0f" }}），新请求会开始排队 /
-              吞吐骤降。先看谁占着引擎：`cd ~/projects/meirongdev/nv-dgx-spark && make v4flash-load`
-              （running/waiting 数 + 客户端 IP）。KV 打满是 `max_num_seqs=6` 下的正常饱和，
-              通常等长请求跑完自愈；若持续打满说明并发客户太多，需减负。
+        #
+        # ☠️ 2026-08-25：删掉 `DgxSparkKVCacheHigh`（A3，kv_cache_usage_perc > 0.90 / for 5m）。
+        # 规则注释里那句「首月按实测回校」到期了，回校结论是删。它是当期最大的单一噪声源：
+        # 7 天 firing 1368 个样本、6 个窗口（最长 7.3h；多数从凌晨 ~03:30 的批处理开始），
+        # warning 4h repeat + sendResolved 下一周 ≈14 条 Telegram —— 而**它预警的危害
+        # （排队/吞吐骤降）一次都没发生**。7 天实测：
+        #   kv_cache_usage_perc：p50 .671 / p90 .810 / p99 .975 / max 1.0，
+        #     >0.90 的时间占比 8.1% —— 0.90 压在正常工作带里。批处理把 KV 打满
+        #     是 max_num_seqs=6 下的正常饱和（规则自己的 description 也这么写），自愈。
+        #   同期 num_requests_waiting：7d max = 6、p99 = 2；最长那个 7.3h 窗口里
+        #     max 也只有 3 —— 即 A4（waiting>4，真正的「排队挨饿」判据）同期 **0 触发**。
+        # 结论与 08-09 删 DgxSparkMemoryLow 同型：KV 占用高对「会不会饿死请求」没有预测力，
+        # 饱和是否有害只能看队列，而队列有自己的规则（下面的 A4）。
+        # 回校成别的阈值也救不了：>0.98 仍占全周 0.73%（正常批处理照样常驻）；
+        # avg_over_time[30m]>0.95 占 5.9%；avg[1h]>0.97 全周 0 触发，但「钉死打满 1h」
+        # 要么伴随排队（A4 接住）要么零进度（DgxSparkVllmStuck 接住），单独成条不增加信息量。
+        # KV 占用仍在 dgx-vllm dashboard 上，排查时去看图，不需要为它挨报。
         - alert: DgxSparkRequestsQueued
           # 排队饱和前兆：max_num_seqs=6，waiting>4 意味着基本打满、有人在挨饿
           # （2026-08-02 事故类型——饱和时交互请求会被长批处理拖死）。
