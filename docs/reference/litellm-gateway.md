@@ -149,6 +149,96 @@ r=urllib.request.Request('https://integrate.api.nvidia.com/v1/models',
 print('\n'.join(m['id'] for m in json.load(urllib.request.urlopen(r,timeout=30))['data']))"
 ```
 
+## 怎么查「哪些模型能免费用」（两个 provider 口径完全不同）
+
+下次要挑模型解决问题，从这里开始查，别凭印象。
+
+### OpenRouter —— **按模型**分免费/付费，公开 API 免鉴权可查
+
+| 入口 | 用途 |
+|---|---|
+| `https://openrouter.ai/models` | UI，可按价格筛选 |
+| `GET https://openrouter.ai/api/v1/models` | **免鉴权**，419 个模型的全量元数据（含 pricing / context_length / knowledge_cutoff）|
+| [openrouter.ai/docs/api_reference/limits](https://openrouter.ai/docs/api_reference/limits) | 官方限额（注意路径是下划线 `api_reference`，连字符版本 404）|
+
+判据是 **pricing 两个字段都为 0**，本机任意目录：
+
+```bash
+curl -s https://openrouter.ai/api/v1/models | python3 -c '
+import sys,json
+d = json.load(sys.stdin)["data"]
+def is_free(m):
+    p = m.get("pricing") or {}
+    return float(p.get("prompt") or 1) == 0 and float(p.get("completion") or 1) == 0
+free = sorted(filter(is_free, d), key=lambda m: -(m.get("context_length") or 0))
+print("免费模型:", len(free), "/", len(d))
+for m in free:
+    print(" ", m["id"].ljust(56), "ctx=", m.get("context_length"))'
+```
+
+（2026-08-25 实测输出 `免费模型: 21 / 419`。**别在 f-string 里嵌双引号** —— 那样在单引号
+shell 里会 SyntaxError，我第一版就这么写错过。）
+
+⚠️ **别用 `:free` 后缀当判据**。官方文档只提后缀，但实测（2026-08-25）21 个零价模型里
+**有 4 个没有后缀**（`stealth/ox-alpha`、`google/lyria-3-{clip,pro}-preview`、`openrouter/free`）。
+接口的 pricing 字段才是权威。
+
+**免费档限额**（官方 docs 原文）：**20 请求/分**；终身购买信用 **< $10 → 50 请求/天**，
+**≥ $10 → 1000 请求/天**（买过一次就永久提档）。负余额会让免费模型也报 402。
+
+### NVIDIA build.nvidia.com —— **不按模型**分，是信用点制
+
+**「哪些模型免费」对 NVIDIA 是个错问题**：所有 NIM 托管模型**共用同一份免费额度** ——
+注册赠 **1000 点**（约 1 点 = 1 次调用），可申请加到 5000；**40 RPM**（可申请 200）。
+用完的是点数，不是某个模型的权限。
+
+所以对 NVIDIA 要问的是「**这把 key 能调哪些**」，命令见上一节（查 `/v1/models` 的那条）。
+单个模型的发布日期/能力/许可看 `https://build.nvidia.com/<model-id>/modelcard`。
+
+⚠️ **列表里有 ≠ 能调**，实测（2026-08-25）：`moonshotai/kimi-k2.6` 在那 102 个里但调用回
+**404**；`nvidia/nemotron-3-ultra-550b-a55b` 回 **503 service temporarily overloaded`**。
+
+### ☠️ 同一个模型换 provider，思维链是否分离会变
+
+这是挑模型时最容易踩的一条：**`reasoning_content` 能不能正确分离，取决于 provider 的
+托管实现，不是模型本身**。同一个 `nemotron-3.5-lightning`，同一个提示词：
+
+| 路径 | finish | content | reasoning_content |
+|---|---|---|---|
+| NVIDIA 直连 | `stop` | 84 字符，干净代码 | 1331 字符 ✅ |
+| 经 OpenRouter（`openrouter/nvidia/nemotron-3.5-lightning:free`）| **`length`** | **思维链原文在这里** | **无** ❌ |
+
+**所以「这个模型能用吗」必须按 `(provider, model)` 组合验证，不能只按模型名。**
+判断办法就是发一次真实请求看 `message` 的 key 和 `content` 首行 —— 与 Mac OMLX 那个坑同源
+（见下一节），只是这次变量是 provider 而不是 `max_tokens`。
+
+### 可用性实测（2026-08-25，绕过网关直连 NVIDIA）
+
+同一编码任务，`max_tokens=700`：
+
+| 模型 | 状态 | 延迟 | 出 tok | reasoning 分离 |
+|---|---|---|---|---|
+| `poolside/laguna-xs-2.1` | stop | **0.7–1.0s** | 34 | 无思维链 |
+| `nvidia/nemotron-3-super-120b-a12b` | stop | 2.5s | 90 | ✅ |
+| `minimaxai/minimax-m3` | stop | 4.4s | 50 | 无思维链 |
+| `nvidia/nemotron-3.5-lightning-30b-a3b` | stop | 9.0–15.8s | 424–456 | ✅ |
+| `moonshotai/kimi-k3` | stop | 19.3s | 46 | ✅ |
+| `stepfun-ai/step-3.7-flash` | stop | 44.6s | 342 | ✅ |
+| `deepseek-ai/deepseek-v4-flash-0731` | stop / **超时** | **221.5s** / >70s | 33 | 无思维链 |
+| `nvidia/nemotron-3-ultra-550b-a55b` | **503** | — | — | — |
+| `openai/gpt-oss-120b` | **超时** | >240s | — | — |
+
+**能用的输出全部正确、`content` 全部干净**（NVIDIA 托管端的 parser 是对的）。
+
+⚠️ **修正一条先前的推荐**：本文档曾把 `deepseek-v4-flash-0731` 标为「与 DGX 主力同款，
+适合做同模型兜底」。**推理成立但实测否掉了它** —— 221.5s 才吐 33 个 token，比本地 DGX（~4s）
+慢两个数量级，当兜底只会让请求挂死。按数据要在 NVIDIA 里选一个，是
+**`poolside/laguna-xs-2.1`**（0.7s、零思维链、专做 agentic coding，比本地 DGX 还快），
+`nemotron-3.5-lightning-30b-a3b` 作为要多模态/更强推理时的第二选择。
+
+⚠️ **免费档不能当兜底**：503 / 超时 / 429 都实际撞到过（`poolside/laguna-xs-2.1:free`
+经 OpenRouter 直接 429）。它只配当「碰运气的额外一档」，不能进 `fallbacks` 链当依赖。
+
 ## NVIDIA provider 可用模型（只列近 3 个月发布的）
 
 **口径**：只考虑**发布日期在最近 3 个月内**的模型；更早的一律不用（模型迭代太快，
@@ -165,7 +255,7 @@ print('\n'.join(m['id'] for m in json.load(urllib.request.urlopen(r,timeout=30))
 |---|---|---|
 | `nvidia/nemotron-3.5-lightning-30b-a3b` | 2026-08-11 | 30B MoE / 3B 激活，为 agent 执行做的「快」档，单 H100 可跑 |
 | `meta/muse-glimmer-30b` | 2026-08-10 | Meta 自 Llama 4 后首个开放权重模型；30B dense 多模态、agent 调优、Apache 2.0 |
-| `deepseek-ai/deepseek-v4-flash-0731` | 2026-07-31 | ⭐ **与 DGX 上跑的主力同款**（见下方「为什么它特别」）|
+| `deepseek-ai/deepseek-v4-flash-0731` | 2026-07-31 | 与 DGX 主力同款，但**免费档实测 221.5s / 超时，不可用**（见上方实测表）|
 | `moonshotai/kimi-k3` | 2026-07-16（权重 07-27）| 2.8T MoE、1M ctx、原生视觉；agentic coding 强 |
 | `poolside/laguna-xs-2.1` | 2026-07-02 | 33B MoE / 3B 激活，**专做 agentic coding** |
 | `minimaxai/minimax-m3` | 2026-05-31 | 1M ctx + 原生多模态 + 前沿编码，开放权重 |
@@ -205,14 +295,7 @@ reranker / nemoguard / 视觉 / riva-translate / palmyra 垂类）**全部早于
 `nvidia/llama-3.1-nemotron-safety-guard-8b-v3`、`writer/palmyra-creative-122b`。
 **要用它们之前先查日期**，别假设在窗口内。
 
-### 为什么 `deepseek-v4-flash-0731` 特别
-
-它和 DGX 上那个主力是**同一个模型**。当前兜底链是 DGX（别人的机器、跨境、无告警）→
-Mac（笔记本、无 SLA），两端都不可控，而且**兜底会换模型**（deepseek → Ornith，行为不一致）。
-把 NVIDIA 上的同款接成一档兜底，语义连续性明显好于切到 Ornith，且不依赖那两台机器任何一台。
-
-⚠️ 但**这些模型现在一个都调不通** —— `nvidia/*` 那条路由的双前缀 bug 还没修（见上一节）。
-修完必须逐个实调确认，别只看 `/v1/models`。
+⚠️ 上表只说明「发布在窗口内」，**不代表可用** —— 可用性看上方实测表。
 
 ## 上游是思维链模型：小 `max_tokens` 会把思维链漏进 `content`
 

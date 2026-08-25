@@ -20,7 +20,9 @@
 - [litellm-gateway.md](litellm-gateway.md) — LLM 网关运维事实：☠️ **配置真相源分两半** ——
   模型/路由在 git，**虚拟 key 的模型白名单在 Postgres**，改别名不同步改 key 就「配置正确 + 调用全挂」；
   `/v1/models` 返回的是「该 key 能访问什么」不是 live config（自查会误判）；subPath + 只在启动时读
-  配置（已由 `checksum/config` 注解自动化）；`nvidia/*` 透传坏在 `model` 字段的**双前缀**（不是 key 的问题，key 能访问 102 个模型），且它污染 `/v1/models`；附**只列近 3 个月发布**的可用模型表（API 的 `created` 是常量假值，日期只能来自厂商公告）
+  配置（已由 `checksum/config` 注解自动化）；`nvidia/*` 透传坏在 `model` 字段的**双前缀**（不是 key 的问题，key 能访问 102 个模型），且它污染 `/v1/models`；附**怎么查哪些模型能免费用**（OpenRouter 按模型、公开 API 免鉴权可查，`:free` 后缀不可靠；
+  NVIDIA 不按模型而是信用点制）+ 只列近 3 个月发布的模型表 + 可用性实测；
+  ☠️ **同一模型换 provider，思维链是否分离会变**，要按 (provider, model) 组合验证
 - [jobs-sg.md](jobs-sg.md) — SG 岗位周报：独立 ns + 3 个 CronJob、digest 固定、备份两条路径、bootstrap 依赖
 - [calibre-metadata.md](calibre-metadata.md) — 书库元数据：覆盖率实测、mtime 冒充出版日期（487 本）、回补匹配门与判据、拿不到书评/评分的边界
 
