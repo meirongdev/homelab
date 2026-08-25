@@ -154,10 +154,10 @@ git push origin main      # ArgoCD ~3 分钟自动同步
 pod 起来、PVC Bound 之后补上：
 
 ```bash
-for p in multica-postgres-data multica-backend-uploads; do
-  kubectl --context k3s-homelab -n personal-services annotate pvc "$p" \
-    argocd.argoproj.io/sync-options=Prune=false --overwrite
-done
+# 2026-08-25 起 chart 不再自带 postgres（库在共享实例 databases/apps-pg），
+# 所以只剩上传件这一个卷要保护。
+kubectl --context k3s-homelab -n personal-services annotate pvc multica-backend-uploads \
+  argocd.argoproj.io/sync-options=Prune=false --overwrite
 ```
 
 实测（2026-08-18）这个注解能在 `hard refresh` + 同步后存活 —— chart 不渲染注解，
@@ -271,8 +271,10 @@ localhost**，在别的机器打开那个 URL 是空端口；而 `--callback-hos
 ### 验证 daemon（判据在服务端，不在 CLI）
 
 ```bash
-kubectl --context k3s-homelab -n personal-services exec deploy/multica-postgres -- \
-  psql -U multica -d multica -tAc \
+# 库在共享实例上（databases/apps-pg 的 multica 库）；容器内走本地 socket 用 postgres 超管，
+# 不能写 -U multica —— peer auth 只认 postgres。
+kubectl --context k3s-homelab -n databases exec deploy/apps-pg -- \
+  psql -U postgres -d multica -tAc \
   "select name||' | '||provider||' | '||status from agent_runtime order by name;"
 ```
 
@@ -289,8 +291,8 @@ kubectl --context k3s-homelab -n personal-services exec deploy/multica-postgres 
 不要等到夜里才知道漏备。直接跑一次夜备用的那条命令：
 
 ```bash
-kubectl --context k3s-homelab -n personal-services exec deploy/multica-postgres -- \
-  psql -U multica -d multica -c '\dt' | head -3      # 库通
+kubectl --context k3s-homelab -n databases exec deploy/apps-pg -- \
+  psql -U postgres -d multica -c '\dt' | head -3      # 库通
 kubectl --context k3s-homelab -n backup get secret restic-backup \
   -o jsonpath='{.data.MULTICA_DB_PASSWORD}' | wc -c  # 夜备凭据已同步（非 0）
 ```
@@ -320,8 +322,8 @@ git push origin main
 ☠️ **push 之前先留一份数据**（PVC 的保护是手工注解、可能已随重建丢失）：
 
 ```bash
-kubectl --context k3s-homelab -n personal-services exec deploy/multica-postgres -- \
-  pg_dump -U multica -d multica -Fc > /tmp/multica-final.dump
+kubectl --context k3s-homelab -n databases exec deploy/apps-pg -- \
+  pg_dump -U postgres -d multica -Fc > /tmp/multica-final.dump
 ls -l /tmp/multica-final.dump      # 确认非零字节
 ```
 

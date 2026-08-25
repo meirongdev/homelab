@@ -115,12 +115,20 @@ kind: ReferenceGrant
 | `k8s/helm/manifests/…` | `backup/overlays/homelab/backup-script.yaml` |
 | `cloud/oracle/manifests/…` | `backup/overlays/oracle/backup-script.yaml` |
 
-当前豁免（每条都必须说清替代保护手段，这是数据合法地不进 restic 的唯一出口）：
+当前豁免（每条都必须说清替代保护手段，这是数据合法地不进 restic 的唯一出口）。
+⚠️ **真相源是 `check-manifests.py` 的 `BACKUP_EXEMPT`**，下表是给人读的摘要，
+以那里为准（2026-08-25 核过一遍，此前这张表只列了前两条、漏了 6 条）：
 
 | PVC | 靠什么保住 |
 |---|---|
 | `open-notebook-surreal-local` | SurrealDB，由 HTTP `/export` 逻辑导出覆盖 |
 | `calibre-books-local` | 23G 书库，由 `BOOKS_DIR` 整目录纳入 restic，不走 sqlite 白名单 |
+| `apps-pg-data-local` | homelab 共享 Postgres（租户 litellm+multica），由逐库 `pg_dump` 覆盖；数据目录无 WAL 自恢复，不能原样拷贝 |
+| `media-{movie,tv,anime,music,podcast}`（5 个） | 只读 NFS，真身在 106 的 ZFS（raidz1+sanoid）；restic 目标也是 106，再进一遍没有跨机冗余意义 |
+
+☠️ **逻辑 dump 类的豁免有个共同盲区**：豁免保的是"卷不用进 restic"，
+**保不住"库有没有被 dump"**。共享实例里加一个库、CNPG 里加一个租户，H4 都看不见
+（它只扫清单里的 PVC），必须手工去备份脚本加一行 `pg_dump`。
 
 **这条规则上线即抓到一个真实缺口**：`trends-data`（45MB SQLite，且 PVC 带
 `Prune=false`，本就是当作要紧数据对待的）自 2026-06-05 起静默未备份约两个月，

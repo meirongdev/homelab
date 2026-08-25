@@ -115,7 +115,13 @@ spec:
           #    加一条 CREATE EXTENSION vector 的迁移，alpine 上就会启动即炸，而症状是
           #    backend 的 `./migrate up` 卡死在 startupProbe，一点不像"缺扩展"。
           #    这个镜像是官方 postgres:17（bookworm）的超集，换过来零功能损失。
-          image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+          # ⚠️ registry 前缀 `docker.io/` 必须显式写 —— Kyverno 的
+          #    restrict-image-registries 是**字面前缀匹配**（pattern 里是
+          #    `docker.io/* | ghcr.io/* | ...`），省略前缀虽然 docker 会隐式补全，
+          #    策略却判不通过。它是 failureAction: Audit（fail-open），所以 pod 照样
+          #    跑得起来，只会在 PolicyReport / 事件里留一条永久违规 —— 静默的那种。
+          #    （合并前的 litellm-pg 与 multica-postgres 两个都在违规，实测确认。）
+          image: docker.io/pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
           ports:
             - containerPort: 5432
               name: postgres

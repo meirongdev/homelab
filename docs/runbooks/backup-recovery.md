@@ -20,7 +20,7 @@
 
   | Job | 集群/节点 | 时刻 (CST) | `--host` | 内容 |
   |---|---|---|---|---|
-  | `restic-backup` | homelab 控制面（钉 `node-role.kubernetes.io/control-plane`） | 03:00 | `homelab` | Vault raft snapshot · sqlite（open-notebook / jobs-sg）· SurrealDB 逻辑导出 · `pg_dump multica` + multica 上传件 |
+  | `restic-backup` | homelab 控制面（钉 `node-role.kubernetes.io/control-plane`） | 03:00 | `homelab` | Vault raft snapshot · sqlite（open-notebook / jobs-sg）· SurrealDB 逻辑导出 · 逐库 `pg_dump`（共享实例 `apps-pg` 的 `litellm` 与 `multica` 两个库，2026-08-25 起同一实例）· multica 上传件 |
   | `restic-backup-worker` | homelab worker `k8s-worker-106`（钉 hostname） | 02:00 | `homelab-worker` | 整个 `/localpath` 目录扫（当前是 jellyfin-config / navidrome-data）；**只 forget 不 prune** |
   | `restic-backup` | oracle-k3s | 03:30 | `oracle-k3s` | 逐库 `pg_dump`（`apps-pg`/miniflux → `miniflux.sql`，`zitadel-pg`/zitadel → `zitadel.sql`）+ sqlite + 书库整目录 |
 

@@ -1,6 +1,6 @@
 # K3s 集群安全架构 (Security Architecture)
 
-> Last updated: 2026-08-20
+> Last updated: 2026-08-25
 > Status: 生效事实
 > Scope: 双集群（homelab + oracle-k3s）的纵深防御模型 —— source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
@@ -100,7 +100,7 @@
 
   | enforce | namespace |
   |---------|-----------|
-  | `baseline` | default, vault, personal-services, cloudflare, external-secrets, kyverno, external-dns, opencost, media, litellm（homelab）；argocd, cloudflare, external-dns, homepage, personal-services, rss-system, opencost, default, external-secrets, cnpg-system（oracle） |
+  | `baseline` | default, vault, personal-services, cloudflare, external-secrets, kyverno, external-dns, opencost, media, litellm, **databases**（homelab，2026-08-25；共享 Postgres 用官方镜像，entrypoint 先 root 建/chown 数据目录再 gosu 降权，restricted 的 runAsNonRoot 会直接挡住它）；argocd, cloudflare, external-dns, homepage, personal-services, rss-system, opencost, default, external-secrets, cnpg-system（oracle） |
   | `restricted` | jobs-sg（homelab）；databases（oracle，CNPG **apps-pg** 所在地）· **zitadel**（oracle，2026-08-10 起，SSO + 身份库 zitadel-pg） |
   | `privileged`（显式豁免, warn/audit 仍记 baseline） | kube-system, monitoring, trivy-system, tetragon, kube-bench, backup（homelab）；kube-system, monitoring, trivy-system, falco, backup（oracle） |
 
