@@ -103,7 +103,7 @@ jobs:
         # ConfigMap 里内嵌的脚本 vs 同目录的源 `.py`，以及 pod 模板上的 checksum 注解。
         # 两者任一漂移都是同一种静默：git 干净、ArgoCD Synced、pod Running，跑的是旧代码。
         # 修复：cd k8s/helm && just gen-embedded-scripts
-        run: uv run python scripts/check-embedded-scripts.py
+        run: uv run --with pyyaml python scripts/check-embedded-scripts.py
 
       - name: justfile 冒烟（just --list）
         run: |

@@ -232,12 +232,32 @@ ArgoCD 自然滚动重启。
 `STAMP_ONLY`，不查 (a)「两份副本一致」，只查 (b)「hash 进 pod 模板」——
 因为让它出事的是同一个机制：**subPath 挂载不接收 ConfigMap 更新，且进程只在启动时读配置**。
 
-`STAMP_ONLY` 的块**不要求位于文件末尾**（按缩进读到 dedent 为止），所以 ConfigMap
+`STAMP_ONLY` **只读不写**，所以直接用 YAML 解析器取 `data[key]`——取到的就是
+Kubernetes 实际看到的值。不像 `TARGETS` 那样按缩进硬读（那条路要求块位于文件末尾，
+且对 `docker.yaml: ""` 这种空标量直接找不到，2026-08-25 踩到）。因此 ConfigMap
 和消费它的 Deployment 可以留在同一个文件里，加保护不需要拆清单。
 
-当前目标：`litellm.yaml` 的 `config.yaml` → pod 模板 `checksum/config`。
-2026-08-25 真实踩过：改完 `mac/ornith` 后 ConfigMap 同步成功、ArgoCD Synced/Healthy、
-pod Running、探针全绿，而网关按**旧路由表**继续跑，必须手动 `rollout restart` 才生效。
+⚠️ 也因此 `check-embedded-scripts.py` **依赖 pyyaml**——
+[static-checks.yml](../../.github/workflows/static-checks.yml) 里它必须用
+`uv run --with pyyaml python` 跑（原来是裸 `uv run python`）。
+
+`key` 可以写成列表：一个 ConfigMap 的多个 key 合成**一个**注解。哈希只覆盖值
+（按列表顺序、`\0` 分隔），不含 key 名——重命名 key 必然同时改 pod 模板里的 `subPath`，
+模板本身就变了，不需要哈希再兜一遍。
+
+当前目标：
+
+| 清单 | key | 注解 | 踩过的坑 |
+|---|---|---|---|
+| `litellm.yaml` | `config.yaml` | `checksum/config` | 2026-08-25：改完 `mac/ornith` 后 ConfigMap 同步成功、ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按**旧路由表**继续跑，必须手动 `rollout restart` |
+| `homepage/homepage.yaml` | 6 个（settings/bookmarks/services/widgets/kubernetes/docker）| `checksum/config` | 同款机制：改配置后仪表盘静默不变 |
+
+**验哈希对不对**，别只看 CI 绿：拿集群里 ConfigMap 的真实 data 反算一遍，应与注解相等 ——
+```bash
+kubectl --context oracle-k3s -n homepage get cm homepage-config -o json \
+  | python3 -c 'import sys,json,hashlib; d=json.load(sys.stdin)["data"]; \
+    print(hashlib.sha256(b"\0".join(d[k].encode() for k in ["settings.yaml","bookmarks.yaml","services.yaml","widgets.yaml","kubernetes.yaml","docker.yaml"])).hexdigest()[:16])'
+```
 
 **「ConfigMap 变了 pod 不重启」目前有两种合法的解**，加新负载时挑一个：
 
@@ -247,9 +267,8 @@ pod Running、探针全绿，而网关按**旧路由表**继续跑，必须手�
 | pod 模板 `checksum/*` 注解 + `STAMP_ONLY` | 裸 manifest，不走 kustomize | litellm |
 
 ⚠️ **仍未覆盖**（subPath 挂 ConfigMap、既无哈希名也无 checksum 注解）：
-`cloud/oracle/manifests/homepage/homepage.yaml`（6 个 subPath key）与
 `k8s/helm/manifests/media/podcast.yaml`（nginx `default.conf`）。
-两者改配置都会静默不生效，加进 `STAMP_ONLY` 各只需一条目 + 一个注解。
+改它会静默不生效，加进 `STAMP_ONLY` 只需一条目 + 一个注解。
 
 ## 查不出来的那些（仍需人判断）
 
@@ -258,7 +277,7 @@ pod Running、探针全绿，而网关按**旧路由表**继续跑，必须手�
 | 失效模式 | 为什么静态查不了 | 真实案例 |
 |---|---|---|
 | 配置值写错嵌套层级 | 语法完全合法，多余的键静默忽略 | Tempo 的 `persistence` 是 chart 顶层键，写在 `tempo.` 之下 → 一直跑在 emptyDir，每次重启丢光 trace，而 values 里宣称保留 7 天 |
-| 改了配置但 Pod 不重启 | 清单本身没错，错在下发机制 | oracle otel-collector 是裸 manifest，ConfigMap 更新不改 DaemonSet spec → Pod 不重启，而 Collector 只在启动时读一次配置。**此前对该配置的任何修改都是静默无效的**。已改用 kustomize `configMapGenerator`。2026-08-25 litellm 又踩一次同款（改完路由表网关仍按旧表跑），已由 E1 的 `STAMP_ONLY` 覆盖。⚠️ **不再是通例但仍有缺口**：homepage 与 podcast 两处 subPath 挂载至今无保护，见 E1 章节末尾的表 |
+| 改了配置但 Pod 不重启 | 清单本身没错，错在下发机制 | oracle otel-collector 是裸 manifest，ConfigMap 更新不改 DaemonSet spec → Pod 不重启，而 Collector 只在启动时读一次配置。**此前对该配置的任何修改都是静默无效的**。已改用 kustomize `configMapGenerator`。2026-08-25 litellm 又踩一次同款（改完路由表网关仍按旧表跑），已由 E1 的 `STAMP_ONLY` 覆盖。⚠️ **不再是通例但仍有缺口**：podcast 一处 subPath 挂载至今无保护（homepage 已于同日纳管），见 E1 章节末尾的表 |
 | ReferenceGrant 寄生在别人的文件里 | 语法与作用都正确，问题是**位置** | `allow-gateway-to-calibre` 没限定 Service 名（作用于整个 ns），却住在 `route-calibre-web.yaml` 里 → 删 calibre 路由会连带断掉 `notebook.meirong.dev`。现改为每个 route 文件各带一条自己的 grant（Gateway API 是累加式授权），删任一文件都不影响另一个 |
 | 文档与集群漂移 | 文档格式可以完美而内容全错 | 2026-07-31 那次 NFS 描述格式合规、内容过期，是 `kubectl` 照出来的 |
 | **operator 动态创建的 PVC 逃出 H4** | H4 只扫**清单里声明**的 PVC；CNPG 的卷由 operator 按 `Cluster` 的 `instances` 生成，仓库里没有对应的 PVC 对象 | `apps-pg-1` / `zitadel-pg-1` 两个库的备份归属完全靠 `backup/overlays/oracle/backup-script.yaml` 里的逐库 `pg_dump` 行。**apps-pg 上加一个租户就必须手工加一行**，H4 不会提醒——性质等同于 sqlite 白名单，而那份白名单曾让 `trends-data` 静默漏备两个月。见 [decisions/shared-postgres-platform.md](../decisions/shared-postgres-platform.md) |

@@ -306,6 +306,12 @@ spec:
       app: homepage
   template:
     metadata:
+      annotations:
+        # E1(b)/STAMP_ONLY: 上面 homepage-config 六个块的 sha256 前 16 位。
+        # ☠️ 没有它就是静默失效：六个块全是 subPath 挂载，改配置后文件不刷新、进程不重启
+        #    ⇒ ArgoCD Synced、pod Running，而仪表盘还是旧的（"我改了但页面没变"）。
+        # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py），别手改。
+        checksum/config: "1249a250caa94362"
       labels:
         app: homepage
     spec:
