@@ -1,6 +1,6 @@
 # Open Notebook — AI 研读知识库（架构事实）
 
-> Last updated: 2026-08-22
+> Last updated: 2026-08-25
 > Status: 生效事实
 > Scope: Open Notebook（NotebookLM 自托管替代）在 homelab 集群的部署形态、模型接线、
 > 配置真相源地图、备份口径 —— source of truth。
@@ -36,7 +36,7 @@
 | 角色 | 后端 | 模型 |
 |---|---|---|
 | 对话/转换/长上下文/工具（默认） | DGX vLLM `100.97.87.120:8000` | `deepseek-v4-flash`（1M ctx） |
-| 对话兜底（非默认，UI 手动切） | Mac OMLX `100.89.15.120:8000` | Qwen3.6-35B（262k ctx） |
+| 对话兜底（非默认，UI 手动切） | Mac OMLX `100.89.15.120:8000` | `ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit`（262k ctx；2026-08-25 由 Qwen3.6-35B 换入） |
 | Embedding | Mac OMLX | Qwen3-Embedding-4B（2560 维） |
 | STT | Mac OMLX | `Qwen3-ASR-1.7B-8bit` |
 | TTS | Mac OMLX | `Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit`（9 个具名音色）|
