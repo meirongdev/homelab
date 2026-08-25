@@ -157,7 +157,7 @@ data:
 
         # 只发元数据与评分，**不发书** —— 与 Calibre-Web(book.meirong.dev) 是两个东西，
         # 域名刻意用 readlist. 而不是 books.，差一个字母的误配代价太高。
-        - readlist:
+        - Readlist:
             icon: mdi-book-open-page-variant
             href: https://readlist.meirong.dev
             description: 技术书多维评分与书单（下一本读什么）
@@ -311,7 +311,7 @@ spec:
         # ☠️ 没有它就是静默失效：六个块全是 subPath 挂载，改配置后文件不刷新、进程不重启
         #    ⇒ ArgoCD Synced、pod Running，而仪表盘还是旧的（"我改了但页面没变"）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py），别手改。
-        checksum/config: "1249a250caa94362"
+        checksum/config: "c4e0fa06bedcd04d"
       labels:
         app: homepage
     spec:
