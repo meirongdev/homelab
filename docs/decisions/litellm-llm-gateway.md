@@ -3,6 +3,9 @@
 > 日期: 2026-08-01（2026-08-16 实施，纳入 Mac OMLX 第二上游）
 > 状态: ✅ 已实施
 > 关联: `docs/plans/apps/2026-08-01-litellm-gateway-migration.md`
+> 修订: 2026-08-25 —— Mac 兜底模型由 `Qwen3.6-35B` 换为 `Ornith-1.5-35B-A3B`，
+>   网关别名 `mac/qwen3.6-35b` → `mac/ornith`（下方 Decision 记录的是 2026-08-01 的原始决策，
+>   不改写；换型理由与实测见本文件末尾「2026-08-25 修订」）。
 
 ## Context
 
@@ -50,3 +53,33 @@ homelab LLM 网关（llm.meirong.dev）原为一个自托管的 LLM 网关。其
 - [dgx-clustermesh-not-adopted](dgx-clustermesh-not-adopted.md)（DGX 网络边界）
 - `/docs/reference/open-notebook.md`（双上游接线唯一真相源）
 - `/docs/plans/apps/2026-08-01-litellm-gateway-migration.md`（实施计划，冻结快照）
+
+## 2026-08-25 修订：Mac 兜底模型换成 Ornith-1.5-35B-A3B
+
+**换型理由不是「Qwen3.6 有 bug」**，而是它思考得太多，在小 `max_tokens` 下必然被截断：
+
+思维链模型的 `reasoning_content` 切分依赖 `</think>` 闭合标签。token 用完时标签不会出现，
+OMLX 的 parser 就失去切分依据，**把整段思维链原样放进 `content`** —— 不报错、不告警，
+只是答案变成一坨思考过程。实测（同一提示词，`max_tokens=4096`）：
+
+| 模型 | finish_reason | completion | content | reasoning_content |
+|---|---|---|---|---|
+| Qwen3.6-35B-A3B | `length` | 4096（截断） | 8438 字符（思维链） | 字段消失 |
+| Qwen3.6-35B-A3B（`max_tokens=16384`）| `stop` | 3761 | 232 字符 | 9485 字符 ✅ |
+| Ornith-1.5-35B-A3B | `stop` | 278 | 298 字符 | 813 字符 ✅ |
+
+⚠️ **Ornith 并没有消除这个失效模式**，只是把触发概率降下来：给它一个需要深想的设计题
+（多集群 Postgres 故障转移），同样 `max_tokens=4096` 下它一样 `finish_reason=length`、
+一样把 16362 字符思维链漏进 `content`。**结构性的解只有两条**：把 `max_tokens` 给够，
+或者走 OMLX 的 `fast` profile（`enable_thinking: false`，两个模型都已建好，
+暴露为 `<model>:fast`，与基础模型共用同一份驻留权重、不触发换入换出）——
+网关已把它接成别名 **`mac/ornith-fast`**，k8sgpt 用的就是这条。
+
+☠️ **只暴露一个 Mac 35B**：OMLX 池天花板 30GB 装不下两个（Qwen3.6 19.95GB + Ornith 19.08GB
+= 39.03GB）。两个别名并存 = 交替调用持续换入换出，按 `load_seconds_per_gb ≈ 0.88` 每次
+~18s，期间 OMLX 对请求回 `is busy`（这台机器的头号故障模式，见
+[reference/omlx-inference-metrics.md](../reference/omlx-inference-metrics.md)）。
+Qwen3.6 仍在盘上、仍可直连 OMLX 指名调用，只是不再从网关暴露。
+
+Mac 侧的 `is_default` 已于 2026-08-25 指向 Ornith，因此**不带模型名**的 OMLX 调用
+（如 `codex --profile m2`）也随之切换。

@@ -6,7 +6,7 @@
 #     Authorization: Bearer sk-…  (LITELLM_MASTER_KEY 已设 ⇒ 默认强制 key 鉴权)
 #   - admin UI (/ui): LiteLLM 自带登录 (UI_USERNAME/UI_PASSWORD, Vault→ESO)
 # Config: config.yaml in git (model_list); keys/spend live in Postgres (litellm-pg).
-# 双自托管上游: DGX (deepseek-v4-flash, 主) + MacPro M2 OMLX (Qwen3.6-35B, 兜底),
+# 双自托管上游: DGX (deepseek-v4-flash, 主) + MacPro M2 OMLX (Ornith-1.5-35B, 兜底),
 #   fallbacks 键 = 严格的"主→兜底"链（见 docs/plans/apps/2026-08-01-litellm-gateway-migration.md §3 决策 6）。
 # 升版：改 image digest + 注释 tag → git push。不要追 main-stable。
 apiVersion: v1
@@ -32,11 +32,25 @@ data:
           model: openai/deepseek-v4-flash
           api_base: http://100.97.87.120:8000/v1
           api_key: dummy
-          fallbacks: ["mac/qwen3.6-35b"]
+          fallbacks: ["mac/ornith"]
       # ── Mac 兜底（也是独立可用的实际模型）──
-      - model_name: mac/qwen3.6-35b
+      # 2026-08-25 由 Qwen3.6-35B 换为 Ornith-1.5-35B-A3B（OMLX 的 is_default 同日已指向它）。
+      # ☠️ 只暴露一个 Mac 35B：OMLX 池天花板 30GB 装不下两个（19.95 + 19.08GB），
+      #    两个别名并存会让交替调用持续换入换出（~18s/次，期间对请求回 "is busy"）。
+      # Qwen3.6 仍在盘上、仍可直连 OMLX 指名调用，只是不再从网关暴露。
+      - model_name: mac/ornith
         litellm_params:
-          model: openai/mlx-community__Qwen3.6-35B-A3B-nvfp4
+          model: openai/ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit
+          api_base: http://100.89.15.120:8000/v1
+          api_key: dummy
+      # ── Mac 无思维链变体（OMLX 的 fast profile: enable_thinking=false）──
+      # 给「小 max_tokens + 要求简短输出」的消费方（k8sgpt 就是）：思维链模型的
+      # reasoning_content 切分依赖 </think> 闭合标签，token 用完标签不出现 → OMLX 的 parser
+      # 失去切分依据、把整段思考原样放进 content（不报错、不告警，只是答案变成一坨思考）。
+      # 与 mac/ornith 共用同一份驻留权重：profile 只覆盖 universal field，不触发引擎重载。
+      - model_name: mac/ornith-fast
+        litellm_params:
+          model: "openai/ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit:fast"
           api_base: http://100.89.15.120:8000/v1
           api_key: dummy
       # ── OpenRouter（第三来源，独立透传，2026-08-16）──

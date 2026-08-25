@@ -55,7 +55,10 @@ data:
         {"name": "deepseek-v4-flash", "type": "language", "credential": "dgx-vllm"},
         # 备用对话模型（非默认）：DGX 是跨境共享机器且暂无告警（ROADMAP #4），
         # 它不可达时在 UI 里一键切到这个本地 35B（262k ctx）兜底。
-        {"name": "mlx-community__Qwen3.6-35B-A3B-nvfp4", "type": "language", "credential": "mac-omlx"},
+        # ⚠️ 这里走 mac-omlx 凭据直连 OMLX，所以填的是 OMLX 的模型 ID，
+        #    不是 LiteLLM 的别名 mac/ornith（那个名字在 OMLX 上不存在）。
+        # 2026-08-25 由 Qwen3.6-35B 换为 Ornith-1.5-35B-A3B（OMLX 的 is_default 同日已指向它）。
+        {"name": "ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit", "type": "language", "credential": "mac-omlx"},
         {"name": "mlx-community__Qwen3-Embedding-4B-4bit-DWQ", "type": "embedding", "credential": "mac-omlx"},
         {"name": "mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit", "type": "text_to_speech", "credential": "mac-omlx"},
         {"name": "mlx-community__Qwen3-ASR-1.7B-8bit", "type": "speech_to_text", "credential": "mac-omlx"},
