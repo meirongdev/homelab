@@ -78,8 +78,10 @@ docs/                          # 见下方「Documentation Rules」
   **别在文档里写死它报的条数**，那是动态累加的）。
 
 **按域查细节（`docs/reference/`）**：**术语/命名正典 `terminology.md`（写文档或注释前先对
-一眼）**· 服务清单 `services.md`（唯一真相源）· GitOps/App
-`argocd-app-patterns.md` · 入口/DNS `networking-ingress.md` · 跨集群 `tailscale-network.md` ·
+一眼）**· 服务清单 `services.md`（唯一真相源）· ☠️ **LLM 网关 `litellm-gateway.md`** —— 配置真相源分两半：
+模型/路由在 git，**虚拟 key 的模型白名单在 Postgres**；改网关别名不同步改 key 就
+「清单正确 + ArgoCD Synced + 调用全挂」，且用虚拟 key 查 `/v1/models` 会误判成配置没生效 ·
+GitOps/App `argocd-app-patterns.md` · 入口/DNS `networking-ingress.md` · 跨集群 `tailscale-network.md` ·
 存储/备份 `storage.md` · 身份/OIDC `identity.md` · 安全逐层 `security.md` · 可观测
 `observability-multicluster.md` + `observability-otel-logging.md` · 告警/SLO
 `observability-alerting-slo.md` · **公网访问分析（谁在访问、真人/爬虫/自建监控）**

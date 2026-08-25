@@ -3,6 +3,8 @@
 > 日期: 2026-08-01（2026-08-16 实施，纳入 Mac OMLX 第二上游）
 > 状态: ✅ 已实施
 > 关联: `docs/plans/apps/2026-08-01-litellm-gateway-migration.md`
+> 生效事实与运维坑（虚拟 key 白名单 / 配置生效路径 / 上游可用性）:
+>   [reference/litellm-gateway.md](../reference/litellm-gateway.md)
 > 修订: 2026-08-25 —— Mac 兜底模型由 `Qwen3.6-35B` 换为 `Ornith-1.5-35B-A3B`，
 >   网关别名 `mac/qwen3.6-35b` → `mac/ornith`（下方 Decision 记录的是 2026-08-01 的原始决策，
 >   不改写；换型理由与实测见本文件末尾「2026-08-25 修订」）。
