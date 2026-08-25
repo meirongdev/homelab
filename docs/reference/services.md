@@ -34,6 +34,7 @@
 | ZITADEL (SSO) | oracle-k3s | `zitadel` | `auth.meirong.dev` |
 | PostgreSQL (`apps-pg`, CNPG 共享应用库) | oracle-k3s | `databases` | Internal only（2026-08-06 取代手搓的 `rss-postgres`；当前租户只有 miniflux。加库见 [decisions/shared-postgres-platform.md](../decisions/shared-postgres-platform.md)） |
 | PostgreSQL (`zitadel-pg`, CNPG) | oracle-k3s | `zitadel` | Internal only（身份面**刻意独立**，不并入 `apps-pg`） |
+| PostgreSQL (`apps-pg`, 共享应用库) | **homelab** | `databases` | Internal only（2026-08-25 合并 `litellm-pg` + `multica-postgres` 而来，租户 litellm/multica。☠️ **与 oracle 那个同名同角色但形态不同**：这边是裸 Deployment，加租户 = 改 initdb 脚本 + 手工建库 + 备份脚本加一行，**不是** `Database` CR。homelab 刻意不装 CNPG，理由见 [decisions/shared-postgres-platform.md](../decisions/shared-postgres-platform.md) 决策四） |
 
 ## 集群外托管的 meirong.dev 站点
 

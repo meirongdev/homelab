@@ -5,7 +5,8 @@
 #   - inference (/v1/*, /openai, /anthropic, /genai): master key + virtual keys,
 #     Authorization: Bearer sk-…  (LITELLM_MASTER_KEY 已设 ⇒ 默认强制 key 鉴权)
 #   - admin UI (/ui): LiteLLM 自带登录 (UI_USERNAME/UI_PASSWORD, Vault→ESO)
-# Config: config.yaml in git (model_list); keys/spend live in Postgres (litellm-pg).
+# Config: config.yaml in git (model_list); keys/spend live in Postgres —— 2026-08-25 起
+#   是共享实例 `databases/apps-pg` 的 litellm 租户，不再是本 ns 自带的 litellm-pg。
 # 双自托管上游: DGX (deepseek-v4-flash, 主) + MacPro M2 OMLX (Ornith-1.5-35B, 兜底),
 #   fallbacks 键 = 严格的"主→兜底"链（见 docs/plans/apps/2026-08-01-litellm-gateway-migration.md §3 决策 6）。
 # 升版：改 image digest + 注释 tag → git push。不要追 main-stable。

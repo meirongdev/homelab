@@ -27,7 +27,7 @@ homelab LLM 网关（llm.meirong.dev）原为一个自托管的 LLM 网关。其
 ## Decision
 
 - 用 **LiteLLM proxy**（v1.94.1，官方 Python proxy）替换旧 LLM 网关，hostname 不变（`llm.meirong.dev`）。
-- **配置进 git**（config.yaml 的 ConfigMap），keys/spend 落同集群 Postgres（`litellm-pg`，local-path PVC）。
+- **配置进 git**（config.yaml 的 ConfigMap），keys/spend 落同集群 Postgres（2026-08-25 起是共享实例 `databases/apps-pg` 的 `litellm` 库；此前为本 ns 自带的 `litellm-pg`）。
 - **砍掉 oauth2-proxy/ZITADEL client**：LiteLLM 管理面**自带认证**（`UI_USERNAME/UI_PASSWORD`，
   Vault→ESO），符合 security.md「自带认证」矩阵。备选（保留 oauth2-proxy 复用旧的 oauth2-proxy client）因双重登录
   +维护面被否决。

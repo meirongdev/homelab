@@ -15,7 +15,7 @@
 | 推理鉴权 | master key + 虚拟 key（`Authorization: Bearer sk-…`）|
 | 管理面 | `/ui`，LiteLLM 自带登录（`UI_USERNAME`/`UI_PASSWORD`，Vault→ESO）|
 | 路由表 | `k8s/helm/manifests/litellm/litellm.yaml` 的 ConfigMap（**在 git 里**）|
-| key / spend | 同集群 Postgres `litellm-pg`（**不在 git 里** —— 见坑 A）|
+| key / spend | 同集群共享 Postgres `databases/apps-pg` 的 `litellm` 库（**不在 git 里** —— 见坑 A；2026-08-25 前是本 ns 自带的 `litellm-pg`）|
 
 **配置真相源分成两半，这是本文档存在的理由**：
 

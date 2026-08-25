@@ -117,15 +117,18 @@ data:
     # ⚠️ 直接经 UI 拖拽上传、且不在书库里的原件是唯一真丢的东西（提取文本/向量在 DB 里）。
 
     # --- 2c) LiteLLM：Postgres 逻辑 dump（pg_dump）---
-    # litellm 的 keys/spend 在 Postgres（litellm-pg, local-path）——数据目录**不能**像 sqlite
-    # 那样原样拷贝（无 WAL 自恢复），必须 pg_dump 一致性 dump（与 ZITADEL/它的 DB 同哲理）。
+    # litellm 的 keys/spend 在 Postgres——数据目录**不能**像 sqlite 那样原样拷贝
+    # （无 WAL 自恢复），必须 pg_dump 一致性 dump（与 ZITADEL/它的 DB 同哲理）。
+    # ⚠️ 2026-08-25 起库在**共享实例** databases/apps-pg 上（原 litellm-pg 已退役）。
+    #    下面 2c/2d 两段现在打的是同一个实例的两个库 —— 这也是"实例里加一个库就必须
+    #    来这里加一行"的地方，H4 查不到"多了个库"（见 decisions/shared-postgres-platform.md）。
     # backup 容器 alpine:3.22 自带 postgresql-client（pg17），与服务端版本匹配。
     # 凭据来自 external-secret.yaml 的 LITELLM_DB_PASSWORD（Vault secret/homelab/litellm-db → db_password）。
     echo "[backup] pg_dump litellm DB..."
     export PGPASSWORD="$(cat /creds/LITELLM_DB_PASSWORD 2>/dev/null || true)"
     if [ -z "$PGPASSWORD" ]; then
       echo "[warn] LITELLM_DB_PASSWORD absent (vault secret/homelab/litellm-db not written?) — litellm NOT in this backup"
-    elif pg_dump -h litellm-pg.litellm.svc -U litellm -d litellm -Fc -f /work/litellm.dump 2>/dev/null; then
+    elif pg_dump -h apps-pg.databases.svc -U litellm -d litellm -Fc -f /work/litellm.dump 2>/dev/null; then
       echo "[backup]   litellm.dump = $(wc -c < /work/litellm.dump) bytes"
     else
       echo "[warn] pg_dump litellm failed — litellm NOT in this backup"
@@ -133,19 +136,19 @@ data:
     fi
 
     # --- 2d) Multica：Postgres 逻辑 dump（pg_dump）---
-    # multica 的 workspace/task/agent 记录在 Postgres（multica-postgres, pgvector pg17,
-    # local-path）——同 litellm，数据目录不能原样拷贝，必须 pg_dump。
+    # multica 的 workspace/task/agent 记录在 Postgres——同 litellm，数据目录不能原样拷贝。
+    # ⚠️ 2026-08-25 起也在共享实例 databases/apps-pg 上（chart 自带的 multica-postgres
+    #    已随 postgres.external.enabled=true 退役）。
     #
-    # ⚠️ 这个 PVC **CI 查不到**：它由 Helm chart 生成，不在 k8s/helm/manifests/ 清单树里，
-    #    而 H4 只解析清单树里的 PVC（同 CNPG 的 apps-pg-1/zitadel-pg-1）。
-    #    也就是说漏加这一段不会有任何检查报错，只会静默不备份。
+    # ⚠️ 漏加这一段不会有任何检查报错，只会静默不备份：H4 查的是"清单里的 PVC 有没有
+    #    备份归属"，而"实例里多了一个库"它看不见（同 CNPG 的 apps-pg-1/zitadel-pg-1）。
     # 凭据来自 external-secret.yaml 的 MULTICA_DB_PASSWORD（Vault secret/homelab/multica
     # → postgres_password，与应用自己用的是同一个）。
     echo "[backup] pg_dump multica DB..."
     export PGPASSWORD="$(cat /creds/MULTICA_DB_PASSWORD 2>/dev/null || true)"
     if [ -z "$PGPASSWORD" ]; then
       echo "[warn] MULTICA_DB_PASSWORD absent (vault secret/homelab/multica not written?) — multica NOT in this backup"
-    elif pg_dump -h multica-postgres.personal-services.svc -U multica -d multica -Fc -f /work/multica.dump 2>/dev/null; then
+    elif pg_dump -h apps-pg.databases.svc -U multica -d multica -Fc -f /work/multica.dump 2>/dev/null; then
       echo "[backup]   multica.dump = $(wc -c < /work/multica.dump) bytes"
     else
       echo "[warn] pg_dump multica failed — multica NOT in this backup"

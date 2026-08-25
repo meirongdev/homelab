@@ -1,6 +1,6 @@
 # Storage & Backup — 存储与备份
 
-> Last updated: 2026-08-20
+> Last updated: 2026-08-25
 > Status: 生效事实
 >
 > 双集群存储布局（可写卷全 `local-path` + 媒体只读 NFS）、NFS 退役的确切范围、
@@ -114,12 +114,19 @@ keep-last=2。**dump 必须落 ZFS，不能用默认的 `local`**：那和 VM �
 
 **集群里没有 `nfs-client` StorageClass** —— 引用它的 PVC 会永久 Pending。
 
-- **homelab（19 个，其中 5 个是只读 NFS）**:
-  - 落 `k8s-node`（12 个）: `data-vault-0`、`audit-vault-0`、`data-trivy-server-0`、
+- **homelab（18 个在用 + 2 个待删的孤儿，其中 5 个是只读 NFS）**:
+  - 落 `k8s-node`（11 个）: `data-vault-0`、`audit-vault-0`、`data-trivy-server-0`、
     `alertmanager-…-db`、`prometheus-…-db`、`kube-prometheus-stack-grafana`、
     `open-notebook-data-local`、`open-notebook-surreal-local`、`jobs-sg-data`（2026-08-03 新增）、
-    `litellm-pg-data-local`（2026-08-16 新增）、
-    `multica-postgres-data` + `multica-backend-uploads`（2026-08-18 新增，见下方 ⚠️）
+    `apps-pg-data-local`（2026-08-25 新增，共享 Postgres）、
+    `multica-backend-uploads`（2026-08-18 新增，见下方 ⚠️）
+  - ⚠️ **两个孤儿卷（2026-08-25 起）**：`litellm-pg-data-local` 与 `multica-postgres-data`
+    —— 两个旧 postgres 实例的数据目录，库已并入 `apps-pg`，卷因带 `Prune=false`
+    **没有被 ArgoCD 回收**，仍占着盘。副作用不只是占盘：`multica` 那个 App 会
+    **一直 OutOfSync**（`requiresPruning=True` 但被注解拦住），从而掩盖将来真实的漂移。
+    确认新库无恙后手工删掉才算收口：
+    `kubectl --context k3s-homelab -n litellm delete pvc litellm-pg-data-local` 与
+    `kubectl --context k3s-homelab -n personal-services delete pvc multica-postgres-data`。
   - 落 `k8s-worker-106`（2 个，2026-08-16 迁入）: `navidrome-data-local`、`jellyfin-config-local`
     —— 由 worker 侧夜备覆盖，见上文第 2 条
   - `media` ns 的 **5 个只读 NFS PV**（`media-movie/tv/anime/music/podcast`，2026-08-16 新增）
@@ -141,7 +148,8 @@ keep-last=2。**dump 必须落 ZFS，不能用默认的 `local`**：那和 VM �
 | 卷 | 谁生成的 | 备份归属靠什么 |
 |---|---|---|
 | `apps-pg-1` · `zitadel-pg-1` | CNPG operator 按 `Cluster` CR | `backup/overlays/oracle/backup-script.yaml` 的逐库 `pg_dump` 行，**加租户必须手工加一行** |
-| `multica-postgres-data` · `multica-backend-uploads` | 上游 OCI chart `multica`（2026-08-18） | `backup/overlays/homelab/backup-script.yaml` 的 `pg_dump multica` + `multica-backend-uploads` 目录纳入（两者失败时**只 warn 不中断夜备**，所以要定期核 `restic ls` 里真有 `multica.dump`） |
+| `multica-backend-uploads` | 上游 OCI chart `multica`（2026-08-18） | `backup/overlays/homelab/backup-script.yaml` 里 `multica-backend-uploads` 目录整体纳入（失败时**只 warn 不中断夜备**，所以要定期核 `restic ls` 里真有它） |
+| （homelab `apps-pg` 的 `litellm`/`multica` 两个库） | 清单里的 `apps-pg-data-local`，H4 **看得见**、走 `BACKUP_EXEMPT` | `backup/overlays/homelab/backup-script.yaml` 的 2c)/2d) 两段逐库 `pg_dump`（2026-08-25 起打的是同一个实例）。⚠️ **实例里加一个库，H4 一样看不见** —— 必须手工加一行 `pg_dump`，同 oracle 的 CNPG |
 
 没有任何检查会提醒你——**加这类应用时必须手工确认备份归属**。
 

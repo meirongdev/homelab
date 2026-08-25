@@ -103,7 +103,8 @@ BACKUP_EXEMPT = {
     #    加租户必须手工加一行，本检查器不会提醒。见 decisions/shared-postgres-platform.md。
     "open-notebook-surreal-local": "SurrealDB 数据目录，由 HTTP /export 逻辑导出覆盖（见 runbooks/backup-recovery.md）",
     "calibre-books-local": "23G 书库，由 backup-script.yaml 的 BOOKS_DIR 整目录纳入 restic，不走 sqlite 白名单",
-    "litellm-pg-data-local": "litellm keys/spend 的 Postgres（litellm-pg），由 backup-script.yaml 的 2c) 段 pg_dump 逻辑导出覆盖（与 CNPG 的 apps-pg/zitadel-pg 同哲理，见 decisions/shared-postgres-platform.md）",
+    # litellm-pg-data-local 于 2026-08-25 随 litellm-pg 退役（库并入共享实例 apps-pg），
+    # 故移除其豁免条目 —— 同 miniflux-db-pvc 的先例：留着会让将来任何同名 PVC 被静默豁免。
     # homelab 的共享实例（2026-08-25 起承载 litellm + multica 两个租户）。
     # ⚠️ 同 CNPG 那两个：**这条豁免只保住"卷不用进 restic"，保不住"库有没有被 dump"。**
     #    实例里加一个库，就必须去 backup/overlays/homelab/backup-script.yaml 加一行

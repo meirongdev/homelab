@@ -1,6 +1,6 @@
-# 共享 PostgreSQL 平台：一套模式、两个 Cluster
+# 共享 PostgreSQL 平台：每个集群一个共享实例
 
-> 日期: 2026-08-06
+> 日期: 2026-08-06（决策一~三，oracle-k3s）· 2026-08-25 增补决策四（homelab）
 > 状态: ✅ 已实施
 
 ## 上下文
@@ -16,6 +16,12 @@ homelab 集群**一个 postgres 都没有**（jobs-sg 是 sqlite，open-notebook
 Vault 是 raft）。所以"合并两个集群的数据库"这个动作从一开始就不存在——两个库本来就同集群、
 同节点。真正的问题是**两套并存的模式**：新服务要库时没有可复用的东西，只能再抄一遍
 Deployment + PVC + Service + exporter。
+
+> ⚠️ **上面这句"homelab 一个 postgres 都没有"只在 2026-08-06 成立，别再引用。**
+> 之后 homelab 进了两个：`litellm-pg`（2026-08-16，手搓 Deployment）与
+> `multica-postgres`（2026-08-18，上游 chart 自带 pgvector）。两者都**没走**本 ADR 定的
+> CNPG 租户流程 —— 也就是说"一套模式"在 2026-08-25 之前只在 oracle 生效。
+> 收敛过程与为什么 homelab 不用 CNPG 见下面的**决策四**。
 
 顺带查清的两件事实：
 
@@ -85,6 +91,88 @@ bulk 应用之上、控制面之下。
 > apps-pg 上每加一个租户，就必须在 `backup/overlays/oracle/backup-script.yaml` 里加一行
 > `pg_dump`，否则该库静默不备份。`trends-data` 曾因同类失误静默漏备 2 个月。
 > CI 的 H4 规则**查不到这个**：它只扫清单里声明的 PVC，而 CNPG 的 PVC 由 operator 动态创建。
+
+## 决策四（2026-08-25）：homelab 也收敛成一个实例，但**不装 CNPG**
+
+到 2026-08-25，homelab 上长出了两个各自独立的 postgres —— 都没走上面那套流程：
+
+| | 形态 | 镜像 | 实测内存 | 消费者 |
+|---|---|---|---|---|
+| `litellm-pg`（litellm ns） | 手搓 Deployment | `postgres:17-alpine` | rss 12.4Mi / ws 47.1Mi | LiteLLM 的 key/spend |
+| `multica-postgres`（personal-services） | 上游 chart 自带 | `pgvector/pgvector:pg17` | rss 37.6Mi / ws 76.1Mi | Multica |
+
+合并成 `databases/apps-pg` 一个实例，两个租户（`litellm` / `multica`）。
+
+### 为什么不顺手装 CNPG 统一形态
+
+实测 oracle 上 `cnpg-operator` 自己就吃 **rss 45Mi / ws 69Mi**，比合并省下的那个
+postmaster（rss 12–38Mi）还贵。**"一套模式"在 homelab 是净亏内存的**，所以这里的形态
+是裸 Deployment + initdb 脚本，与 oracle 的 CNPG **刻意不一致**。
+
+☠️ 代价是**同名不同物**：两个集群都有 `databases/apps-pg`，但 oracle 那个 pod 叫
+`apps-pg-1`、服务是 `apps-pg-rw`、加租户 = 加 `Database`/`DatabaseRole` CR；homelab 这个
+pod 前缀是 `apps-pg-`、服务就叫 `apps-pg`、加租户 = 改 initdb 脚本 + 手工建库 + 备份脚本加
+一行。照抄对面的运维命令会全部对不上。取这个名字仍然值：角色一致比名字唯一重要，
+而两边的差异在清单文件头写死了。
+
+### 这次合并**不是**为省内存
+
+`k8s-node` 当时 requests 61% / available 3951Mi，不缺这 40–50Mi。真收益是少一套要维护的
+手搓清单、少一个 PVC。**如果哪天有人拿"省内存"当理由再做一次类似合并，先看这一行。**
+
+### 镜像取 pgvector 而不是 alpine
+
+multica 的上游镜像就是 `pgvector/pgvector:pg17`。它现在**没有**建 vector 扩展（实测库里
+只有 `pg_trgm`/`pgcrypto`/`plpgsql`），但上游哪天加一条 `CREATE EXTENSION vector` 的迁移，
+alpine 上就会启动即炸，而症状是 backend 的 `./migrate up` 卡死在 startupProbe ——
+一点不像"缺扩展"。pgvector 镜像是官方 `postgres:17`(bookworm) 的超集，换过去零损失。
+
+### 隔离：一处变严，一处变松
+
+- **变严**：租户不再是 superuser（旧实例的 `POSTGRES_USER` 是），且 initdb 里
+  `REVOKE CONNECT ON DATABASE <t> FROM PUBLIC` —— 实测跨租户连库被拒
+  （`permission denied for database "multica"`）。
+- **变松**：两个库共享一个 memory limit、一次重启、一个 postmaster 故障域。
+  ⚠️ 具体后果是 **multica 的库故障能把 LLM 网关一起拖下去** —— LiteLLM 设了
+  `DATABASE_URL` 就硬依赖库（虚拟 key 校验走库）。两者都不在关键路径上，且本来就同节点
+  同盘，所以接受；但这是这次合并唯一真实的可用性代价，别忘了它存在。
+
+### 迁移方式：逻辑 dump，不是拷数据目录
+
+集群内 `pg_dump | psql`（`--no-owner --no-privileges` + `--single-transaction`），
+以租户身份灌进新库。**不能拷数据目录**：旧的 litellm-pg 是 alpine(musl)、新实例是
+bookworm(glibc)，跨 libc 搬 PGDATA 的排序规则不安全。逻辑恢复顺带绕开了这一点。
+
+逐表对账（这次真做了，不是"看着对"）：
+
+| | 表 | 行 | 其它 |
+|---|---|---|---|
+| litellm | 68 | 374 | 虚拟 key 17 条、SpendLogs 86 条 |
+| multica | 108 | 2558 | 索引 365、扩展 3、`schema_migrations` 381 行（所以 backend 启动的 migrate up 是 no-op）|
+
+### 决策二在这次一并复核了：**仍然不并 `zitadel-pg`**
+
+2026-08-25 复测 oracle 节点：requests **75%**、limits 超卖 **226%**（当初是 87%/224%），
+`zitadel-pg` 仍带 `critical`、`apps-pg` 仍是默认档。前提没变，所以决策二不变。
+真正的代价也说清楚：合并后一个实例只能有一个 priorityClass，等于**失去单独给 SSO 的库
+设 limit 和优先级的能力**，收益仍只是一个 postmaster（zitadel-pg 实测 rss 47.7Mi）。
+
+### 这次踩到的四个坑
+
+1. ☠️ **删 chart values 里的 `postgres:` 块会带走 YAML 锚点。** `&pin-control-plane` 原先
+   定义在 `postgres.affinity` 上，frontend 还在 `*pin-control-plane` 引用它。锚点丢了
+   **不报错**，是整份 values 解析失败 → `helm template` 渲染出**空文件**。
+   删块前先 grep `&`。
+2. chart 的 `postgres.external.enabled=true` 不只是"不建 postgres"：它同时让 backend
+   不再注入 `env: DATABASE_URL`、ConfigMap 不再有 `POSTGRES_*` —— 连接串**只**能从
+   `existingSecret` 经 envFrom 进来。好处是不会和 chart 的 env 撞成 SSA 重复键硬失败。
+3. Kyverno 的 `restrict-image-registries` 是**字面前缀匹配**，镜像必须显式写
+   `docker.io/`。省略前缀虽然能拉到镜像，策略却判违规（`failureAction: Audit` 所以
+   fail-open，pod 照跑，只在 PolicyReport 里留一条永久违规）。合并前的两个旧实例
+   **都在违规**，实测确认。
+4. ⚠️ **旧 PVC 不会被 prune**（都带 `Prune=false`，multica 那个是集群侧注解），
+   所以旧数据还在盘上，而 multica 那个 App 会**一直 OutOfSync**（`requiresPruning=True`
+   但被拦住）。手工删掉旧 PVC 才收口 —— 挂着 OutOfSync 的 App 会掩盖将来真实的漂移。
 
 ## 后果
 

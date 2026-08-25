@@ -39,7 +39,7 @@ At the end of this runbook:
 - ☠️ **本条 2026-08-20 更正 —— 原文写的是"有状态数据在 NFS 后端上，重建 VM 不会删掉它"，
   那个前提已经在 2026-07-11 消失了。** 现在控制面上所有应用数据都在 **`local-path`**，
   也就是**这台 VM 自己的盘上**：重建 VM = 这些数据全没。控制面上现有 12 个 local-path PVC
-  （vault raft、prometheus/alertmanager/grafana、open-notebook、jobs-sg、litellm-pg、
+  （vault raft、prometheus/alertmanager/grafana、open-notebook、jobs-sg、apps-pg（2026-08-25 起共享实例，含 litellm/multica 两个库）、
   multica ×2、trivy-server；清单见 [reference/storage.md](../reference/storage.md)）。
   **唯一安全网是 106 上的 restic 夜备** —— 开工前先确认仓库里有当天的新快照，恢复步骤见
   [backup-recovery.md](backup-recovery.md)。
