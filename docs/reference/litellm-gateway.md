@@ -99,26 +99,37 @@ master key 也看不到 = 配置还没进容器，往坑 C 查。
 ⚠️ 所以**不要手改那个注解**，改完 config 在 `k8s/helm/` 跑 `just gen-embedded-scripts`。
 注解一旦被摘掉，上面那个静默失效会原样回来。
 
-## 上游 `nvidia/*` 当前不可用
+## ☠️ 上游 `nvidia/*` 的通配透传是个假象 —— NVIDIA 的 key 按模型授权
 
-清单里 `nvidia/*` 这条通配透传（`model: "openai/nvidia/*"` → `integrate.api.nvidia.com/v1`）
-**实测打不通**：
+**约束（build.nvidia.com 的平台行为，不是 LiteLLM 的问题）**：
+一把 NVIDIA API key **只能调用它被授权的那个模型**。想用别的免费模型，**得为那个模型
+另外生成一把 key**。**没有「一把 key 打通所有免费模型」这种用法。**
 
-```
-nvidia/meta/llama-3.3-70b-instruct
-→ litellm.NotFoundError: OpenAIException - 404 page not found
-```
+所以清单里 `model_name: "nvidia/*"` 这条通配**在「一把 key」的前提下根本不成立**：
+它对外宣称能透传任意 `nvidia/<模型 ID>`，实际只有当前那把 key 授权的那一个能用。
 
-而且它**污染 `/v1/models`**：master key 查询会看到 200+ 个 `nvidia/` 前缀的条目，
-内容却是 **OpenAI 的模型名**（`nvidia/gpt-4o`、`nvidia/dall-e-3`、`nvidia/sora-2`、
-`nvidia/o3` …），这些在 NVIDIA 上并不存在。
+⚠️ **当前这把 key（Vault `secret/homelab/litellm-nvidia`）绑的是哪个模型，仓库里没有记录**
+（2026-08-16 加它的 commit `b45955a` 也没写）。要查只能去 build.nvidia.com 看这把 key 是从
+哪个模型页面生成的。**下次轮换或新增 key 时请把模型 ID 写进清单注释**，否则又会丢。
 
-**推测（未验证）**：`openai/nvidia/*` 这个写法让 LiteLLM 按 openai provider 的静态模型表去
-展开通配，并且很可能把 `nvidia/` 当成模型名的一部分发给上游 —— 这与上面那个 404 吻合
-（NVIDIA 期望的是 `meta/llama-3.3-70b-instruct`，不带 `nvidia/` 前缀）。
+**想再加一个免费模型，正确做法**（不要去改通配）：
 
-**结论**：把这条源当**不可用**对待，别拿它当兜底。要修得先确认 LiteLLM 实际发出的 model
-字段（开 verbose 或抓包），再决定是改通配写法还是改成逐个显式声明。
+1. 在 build.nvidia.com 上为该模型单独生成一把 key；
+2. 进 Vault：`secret/homelab/litellm-nvidia-<模型简称>`，经 ESO 注入成**独立的**环境变量；
+3. 在 config.yaml 里加一条**显式**的 model 条目（不是通配），`api_key` 指向那个新环境变量；
+4. 别忘了把新别名加进虚拟 key 的白名单（坑 A）。
+
+**两条观察，写下来免得下次重复排查**：
+
+- 实测 `nvidia/meta/llama-3.3-70b-instruct` 返回的是
+  `litellm.NotFoundError: OpenAIException - 404 page not found`。⚠️ 纯粹的授权范围问题通常
+  回 401/403，而 `404 page not found` 更像 URL/模型名对不上 —— 所以**换对 key 之后仍要单独
+  验证模型 ID 的写法**（现在是 `model: "openai/nvidia/*"`，`nvidia/` 这一段是否被当成模型名的
+  一部分发给上游，没有验证过）。别假设「key 换对了就通了」。
+- 它还**污染 `/v1/models`**：master key 查询会看到 200+ 个 `nvidia/` 前缀条目，内容却是
+  **OpenAI 的模型名**（`nvidia/gpt-4o`、`nvidia/dall-e-3`、`nvidia/sora-2`、`nvidia/o3` …），
+  这些在 NVIDIA 上并不存在。是 LiteLLM 按 openai provider 的静态模型表展开通配的结果。
+  **别拿 `/v1/models` 里出现某个 `nvidia/X` 当作它可用的证据。**
 
 ## 上游是思维链模型：小 `max_tokens` 会把思维链漏进 `content`
 
