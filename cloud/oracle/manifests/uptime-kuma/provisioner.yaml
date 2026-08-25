@@ -50,6 +50,10 @@ data:
         # ⚠️ 这条仍然只证明 service 端活着。执行任务的 daemon 在 M2 MacBook 上，
         # 它挂了这个探测**依然全绿** —— daemon 的存活得看 `multica daemon status`。
         {"name": "Multica",        "url": "https://multica.meirong.dev/api/config", "accepted_statuscodes": ["200-299"], "maxredirects": 0},
+        # Nakama：探客户端 API 的 /healthcheck（2026-08-25 实测 200）。
+        # 只探这一条就够：console(7351) 与 API(7350) 是**同一个进程**的两个监听器，
+        # 进程活着两边都活。反过来说这条绿了不代表 console 的口令没被改坏。
+        {"name": "Nakama",         "url": "https://nakama.meirong.dev/healthcheck", "accepted_statuscodes": ["200-299"], "maxredirects": 0},
         # ZITADEL（oracle）2026-08-12 补：此前**整个清单里没有它**——身份提供方是全站
         # SSO 的单点依赖，却是唯一没有存活探测的对外服务。
         # 副作用同样重要：它因此是 5 个 SLO 里唯一没有探测底噪的，7 天仅 138 个真实请求

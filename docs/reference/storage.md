@@ -149,7 +149,7 @@ keep-last=2。**dump 必须落 ZFS，不能用默认的 `local`**：那和 VM �
 |---|---|---|
 | `apps-pg-1` · `zitadel-pg-1` | CNPG operator 按 `Cluster` CR | `backup/overlays/oracle/backup-script.yaml` 的逐库 `pg_dump` 行，**加租户必须手工加一行** |
 | `multica-backend-uploads` | 上游 OCI chart `multica`（2026-08-18） | `backup/overlays/homelab/backup-script.yaml` 里 `multica-backend-uploads` 目录整体纳入（失败时**只 warn 不中断夜备**，所以要定期核 `restic ls` 里真有它） |
-| （homelab `apps-pg` 的 `litellm`/`multica` 两个库） | 清单里的 `apps-pg-data-local`，H4 **看得见**、走 `BACKUP_EXEMPT` | `backup/overlays/homelab/backup-script.yaml` 的 2c)/2d) 两段逐库 `pg_dump`（2026-08-25 起打的是同一个实例）。⚠️ **实例里加一个库，H4 一样看不见** —— 必须手工加一行 `pg_dump`，同 oracle 的 CNPG |
+| （homelab `apps-pg` 的 `litellm`/`multica`/`nakama` 三个库） | 清单里的 `apps-pg-data-local`，H4 **看得见**、走 `BACKUP_EXEMPT` | `backup/overlays/homelab/backup-script.yaml` 的 2c)/2d)/2e) 三段逐库 `pg_dump`（都打同一个实例）。⚠️ **实例里加一个库，H4 一样看不见** —— 必须手工加一行 `pg_dump`，同 oracle 的 CNPG。`nakama` 尤其要紧：那个服务**没有 PVC**，2e) 那一行是它唯一的备份 |
 
 没有任何检查会提醒你——**加这类应用时必须手工确认备份归属**。
 

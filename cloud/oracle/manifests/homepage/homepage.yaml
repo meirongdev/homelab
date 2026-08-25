@@ -133,6 +133,17 @@ data:
             href: https://multica.meirong.dev
             description: AI 编码 agent 协作台（issue → Claude Code/Codex）
 
+        - Nakama:
+            # dashboard-icons 没有 nakama 图标（2026-08-25 实测 404），用 mdi 兜底。
+            icon: mdi-gamepad-variant-outline
+            href: https://nakama.meirong.dev
+            description: 游戏后端服务器（客户端 API）
+
+        - Nakama Console:
+            icon: mdi-shield-account-outline
+            href: https://nakama-console.meirong.dev
+            description: Nakama 管理控制台（自带口令，未接 SSO）
+
         - Open Notebook:
             icon: open-notebook.png
             href: https://notebook.meirong.dev
@@ -311,7 +322,7 @@ spec:
         # ☠️ 没有它就是静默失效：六个块全是 subPath 挂载，改配置后文件不刷新、进程不重启
         #    ⇒ ArgoCD Synced、pod Running，而仪表盘还是旧的（"我改了但页面没变"）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py），别手改。
-        checksum/config: "c4e0fa06bedcd04d"
+        checksum/config: "fefcc3a2c25723a8"
       labels:
         app: homepage
     spec:

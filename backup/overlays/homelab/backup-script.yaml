@@ -155,6 +155,22 @@ data:
       rm -f /work/multica.dump
     fi
 
+    # --- 2e) Nakama：Postgres 逻辑 dump（pg_dump）---
+    # nakama 的账号/存储/排行榜/match 记录全在 Postgres（共享实例 apps-pg 的第三个租户），
+    # 且它**没有 PVC** —— 这一行是这个服务唯一的备份。漏了它整个服务的数据零备份，
+    # 而 H4 完全不会报错（它查"清单里的 PVC 有没有归属"，查不出"实例里多了个库"）。
+    # 凭据来自 external-secret.yaml 的 NAKAMA_DB_PASSWORD（Vault secret/homelab/nakama → db_password）。
+    echo "[backup] pg_dump nakama DB..."
+    export PGPASSWORD="$(cat /creds/NAKAMA_DB_PASSWORD 2>/dev/null || true)"
+    if [ -z "$PGPASSWORD" ]; then
+      echo "[warn] NAKAMA_DB_PASSWORD absent (vault secret/homelab/nakama not written?) — nakama NOT in this backup"
+    elif pg_dump -h apps-pg.databases.svc -U nakama -d nakama -Fc -f /work/nakama.dump 2>/dev/null; then
+      echo "[backup]   nakama.dump = $(wc -c < /work/nakama.dump) bytes"
+    else
+      echo "[warn] pg_dump nakama failed — nakama NOT in this backup"
+      rm -f /work/nakama.dump
+    fi
+
     # --- 3) restic backup + 保留策略 ---
     # jobs-sg 的 raw/ 归档（raw/<date>/NNN.jsonl.gz）直接纳入，不经 /work 中转：
     # /work 是 emptyDir，每晚拷一遍会白吃节点临时盘。同 oracle overlay 的 BOOKS_DIR 做法。

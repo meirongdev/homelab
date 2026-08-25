@@ -358,7 +358,16 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
    它们**目前只靠 OCI Security List 这一层挡在云边界**，纵深只有一层厚。
    收口有真实风险（`enp0s3` 也在 `public` zone，误删可能切断节点自身到 API 的路径），
    需要先逐端口确认归属再动；在那之前**不要往 Security List 里新增任何 `0.0.0.0/0` 规则**。
-7. **git 历史里的旧对象**（2026-08-10）：公网 IP 与两个已失效的 ZITADEL 凭据已从全历史抹除并
+7. **Nakama 管理控制台裸挂公网**（2026-08-25，**有意接受**，非疏忽）：
+   `nakama-console.meirong.dev` → Nakama 内嵌 console(7351)，它能看/删账号、改任意存储数据、
+   调用任意 RPC，而前面**只有 Nakama 自带的用户名+口令** —— 没有 ZITADEL OIDC、没有
+   oauth2-proxy、没有 Cloudflare Access。这是本仓库当前**唯一**一个公网可达却不过第 2 层
+   身份的管理面（Grafana/ArgoCD/Vault 都在 OIDC 后面）。
+   现有缓解只有两条：口令是 32 字节随机值（Vault `secret/homelab/nakama` → `console_password`）、
+   Nakama 那 6 个带不安全默认值的 key 全部换掉了。
+   ⚠️ **收紧的正确方向是在那条 HTTPRoute 前面加 oauth2-proxy 或 Cloudflare Access**，
+   不是改口令 —— 改口令不减少暴露面。清单：`k8s/helm/manifests/gateway/route-nakama-console.yaml`。
+8. **git 历史里的旧对象**（2026-08-10）：公网 IP 与两个已失效的 ZITADEL 凭据已从全历史抹除并
    force-push，但 GitHub 上重写前的悬空对象**仍可按 commit SHA 访问**，直到向 GitHub Support
    申请 GC。彻底了结的替代手段是轮换 OCI 公网 IP，让旧对象里的值失去意义。
 
