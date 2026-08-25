@@ -182,7 +182,13 @@ kubectl --context k3s-homelab -n personal-services logs deploy/multica-backend -
 
 curl -sS https://multica.meirong.dev/api/config | python3 -m json.tool
 
-# 首页重定向（2026-08-25 起）：期望 302 + location: /homelab/issues
+# 首页重定向（2026-08-25 起）。期望**一字不差**是这两行：
+#   HTTP/2 302
+#   location: https://multica.meirong.dev:443/homelab/issues
+# ⚠️ `:443` 是对的、不要去"修" —— Cilium 不遵守规范里 https+443 应省略端口那句，
+#    但默认端口不参与 URL 序列化，浏览器和同源判定都无感。
+# ☠️ 若 location 是 `http://...:80/...`，说明 requestRedirect 漏了 `scheme: https`
+#    （listener 是 80，Envoy 会按 listener 拼）——那会把访客降级到明文一跳。
 curl -sSI https://multica.meirong.dev/ | grep -iE '^(HTTP/|location:)'
 ```
 

@@ -76,8 +76,12 @@ spec:
             #    把访客降级到明文 HTTP 还带上了 `:80`。zone 的 always_use_https=on
             #    会把它再弹回 HTTPS，所以**症状是「能用，只是多两跳」** ——
             #    但那一跳明文请求会带上所有非 `Secure` 的 cookie，别靠边缘兜。
-            #    写了 https 后 port 按规范自动取 443 且不出现在 Location 里
             #    （supportedFeatures 有 HTTPRouteSchemeRedirect，实测生效）。
+            # ⚠️ 实测 Location 是 `https://multica.meirong.dev:443/homelab/issues` ——
+            #    Cilium **没有**遵守规范那句「implementations SHOULD NOT add the port
+            #    number ... HTTPS and port 443」。这是纯外观、**不是 bug，别来"修"它**：
+            #    按 WHATWG URL 规范默认端口不参与序列化，浏览器地址栏会抹掉 `:443`，
+            #    同源判定也不受影响（curl -L 跟随后 200）。没有旋钮能让它不写端口。
             scheme: https
             path:
               type: ReplaceFullPath
