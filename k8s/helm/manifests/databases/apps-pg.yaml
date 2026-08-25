@@ -1,0 +1,173 @@
+---
+# homelab 的共享应用 Postgres —— 一个实例、两个租户（litellm / multica）。
+# 2026-08-25 由 litellm ns 的 litellm-pg + personal-services 的 multica-postgres 合并而来。
+#
+# ☠️ **与 oracle 的 `databases/apps-pg` 同名、同角色，但形态完全不同**：
+#    oracle 那个是 CNPG `Cluster`（pod 叫 apps-pg-1、服务叫 apps-pg-rw/-ro/-r，
+#    加租户 = 加 Database/DatabaseRole CR）；这里是**裸 Deployment**（pod 前缀 apps-pg-、
+#    服务就叫 apps-pg，加租户 = 改下面的 initdb 脚本 + 手工建库）。
+#    照抄 oracle 的运维命令会全部对不上。为什么不在 homelab 也装 CNPG：operator 自己
+#    实测 rss 45Mi / ws 69Mi，比合并省下的那个 postmaster 还贵 —— 见
+#    docs/decisions/shared-postgres-platform.md 的「决策四」。
+#
+# 备份：**不是**靠 PVC 快照，靠 backup/overlays/homelab/backup-script.yaml 里的逐库
+# pg_dump（2c/2d 两段）。加租户必须去那里加一行，否则该库静默不备份（H4 查不到这个：
+# 它只看清单里 PVC 的白名单归属，看不见"实例里多了个库"）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apps-pg-initdb
+  namespace: databases
+data:
+  # ⚠️ 官方 entrypoint **只在数据目录为空时**执行 /docker-entrypoint-initdb.d/ 里的东西。
+  #    也就是说：改这个脚本对已经跑起来的实例**毫无作用**，不会重跑、也不需要重启 pod
+  #    （所以刻意没挂 checksum 注解 —— 那只会制造无意义的滚动重启）。
+  #    要给已有实例加租户，照脚本里的 SQL 手工执行一遍，别指望改文件生效。
+  # 脚本以 0755 挂载 → 被 entrypoint 当子进程执行而不是 source；否则 `set -u` 会
+  # 泄漏到 entrypoint 后续代码里。
+  10-tenants.sh: |
+    #!/bin/bash
+    set -Eeuo pipefail
+
+    # 每个租户 = 一个 LOGIN 角色 + 一个同名库（角色是库的 owner）。
+    # 租户**不是** superuser（旧的两个实例里 POSTGRES_USER 是 superuser）——
+    # 这是合并后唯一"变严"的地方，代价见下面 REVOKE 那行的说明。
+    create_tenant() {
+      local role="$1" pw="$2"
+      if [ -z "$pw" ]; then
+        echo "[init] FATAL: 租户 $role 的口令为空 —— Secret apps-pg-bootstrap 同步了吗？" >&2
+        exit 1
+      fi
+      psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres \
+           -v role="$role" -v pw="$pw" <<'SQL'
+    SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'role', :'pw')
+      WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'role')\gexec
+    SELECT format('CREATE DATABASE %I OWNER %I', :'role', :'role')
+      WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'role')\gexec
+    -- 合并后两个租户住进同一个 postmaster，默认**任何角色都能 CONNECT 任何库**。
+    -- 收回 PUBLIC 的 CONNECT，把「合并」的隔离损失压到只剩 postgres 级故障
+    -- （内存上限 / 连接耗尽 / 一起重启）。owner 的权限是隐含的，不受这行影响。
+    SELECT format('REVOKE CONNECT ON DATABASE %I FROM PUBLIC', :'role')\gexec
+    SQL
+    }
+
+    create_tenant litellm "${LITELLM_PASSWORD:-}"
+    create_tenant multica "${MULTICA_PASSWORD:-}"
+---
+# homelab local-path（全集群唯一 SC）。
+# H4：本 PVC 在 scripts/check-manifests.py 的 BACKUP_EXEMPT 里带理由豁免 ——
+#     数据目录不能原样拷贝（无 WAL 自恢复），备份走逐库 pg_dump，同 CNPG 两个库的口径。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: apps-pg-data-local
+  namespace: databases
+  annotations:
+    # DB 是运行时数据，禁止 ArgoCD prune 级联删除
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      # local-path 不做容量限制，这个数只是声明（两个库合计实测 28MB）。
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apps-pg
+  namespace: databases
+  labels:
+    app: apps-pg
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: apps-pg
+  strategy:
+    type: Recreate # 单 RWO PVC
+  template:
+    metadata:
+      labels:
+        app: apps-pg
+    spec:
+      # ☠️ 必须钉 control-plane：local-path 的 PVC 一旦绑到某节点就固定了，不钉节点 =
+      #    落点由首次调度随机决定；而 litellm/multica 的 pod 都在 control-plane，
+      #    库跑到 worker 上等于每次查询多一跳跨网段（worker 在 LAN，控制面在 pve 的
+      #    10.10.10.0/24）。合并前那两个实例本来就都在 control-plane 上。
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: In
+                    values: ["true"]
+      # priorityClassName 刻意**不设**（默认 0）：bulk(-10) 会让**库比用库的应用更容易被
+      # 驱逐**，方向反了；critical 是留给控制面和 SSO 的。与 oracle 的 apps-pg 同口径
+      # （见 decisions/shared-postgres-platform.md 决策二）。
+      containers:
+        - name: postgres
+          # pgvector/pgvector:pg17 —— 多架构 index digest（linux/amd64 + linux/arm64）。
+          # ☠️ 用 pgvector 而不是官方 postgres:17-alpine 的理由：multica 上游镜像就是这个，
+          #    它现在**没建** vector 扩展（实测只有 pg_trgm/pgcrypto/plpgsql），但哪天上游
+          #    加一条 CREATE EXTENSION vector 的迁移，alpine 上就会启动即炸，而症状是
+          #    backend 的 `./migrate up` 卡死在 startupProbe，一点不像"缺扩展"。
+          #    这个镜像是官方 postgres:17（bookworm）的超集，换过来零功能损失。
+          image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            # 超级用户固定叫 postgres（旧实例是 POSTGRES_USER=litellm/multica，
+            # 那让应用账号成了 superuser）。租户由 initdb 脚本建。
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: apps-pg-bootstrap, key: POSTGRES_PASSWORD }
+            - name: LITELLM_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: apps-pg-bootstrap, key: LITELLM_PASSWORD }
+            - name: MULTICA_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: apps-pg-bootstrap, key: MULTICA_PASSWORD }
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d
+          resources:
+            # 合并前实测（kubelet summary 的 rssBytes，不看 kubectl top）：
+            # litellm-pg rss 12.4Mi / ws 47.1Mi + multica-postgres rss 37.6Mi / ws 76.1Mi。
+            # 合并后一个 postmaster + 一份 shared_buffers(128MB 默认)，取两者中较宽的那档。
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 500m, memory: 1Gi }
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: apps-pg-data-local
+        - name: initdb
+          configMap:
+            name: apps-pg-initdb
+            defaultMode: 0755
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: apps-pg
+  namespace: databases
+spec:
+  type: ClusterIP
+  selector:
+    app: apps-pg
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres

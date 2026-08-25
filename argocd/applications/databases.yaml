@@ -1,0 +1,36 @@
+---
+# homelab 的共享应用 Postgres（一个实例、两个租户：litellm / multica）。
+# 2026-08-25 由 litellm-pg + multica-postgres 合并而来，见
+# docs/decisions/shared-postgres-platform.md 决策四。
+#
+# ⚠️ 与 oracle 的 databases ns **同名不同物**：那边是 CNPG Cluster（由 cnpg-operator
+#   这个 App 管），这里是裸 Deployment。homelab 刻意不装 CNPG（operator 自己就比
+#   合并省下的 postmaster 还贵）。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: databases
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: homelab
+
+  source:
+    repoURL: https://github.com/meirongdev/homelab
+    targetRevision: main
+    path: k8s/helm/manifests/databases
+
+  destination:
+    # ☠️ 必须写显式 homelab API server —— 控制面在 oracle-k3s，
+    #    `kubernetes.default.svc` 指的是 oracle（H2 会拦这类错配）。
+    server: https://100.94.186.7:6443
+    namespace: databases
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
