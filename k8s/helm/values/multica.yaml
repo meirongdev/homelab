@@ -13,47 +13,23 @@
 existingSecret: multica-secrets
 
 postgres:
+  # ☠️ 2026-08-25：multica **不再自带 postgres**。库搬到了 homelab 的共享实例
+  #    `databases/apps-pg`（租户 multica，见 decisions/shared-postgres-platform.md 决策四）。
+  #    external.enabled=true 会让 chart 不渲染 postgres 的 Deployment/PVC/Service，
+  #    **也不再注入 env DATABASE_URL**（templates/backend.yaml 里那段有守卫）——
+  #    连接串改由 existingSecret 的 DATABASE_URL 经 envFrom 进来，
+  #    真相源是 Vault `secret/homelab/multica` 的 `database_url`
+  #    （清单：manifests/personal-services/multica-secret.yaml）。
+  #
+  # ⚠️ 下面刻意**不留** database/user/persistence/resources 那几项：
+  #    external 模式下它们一行都不渲染，留着只会让人以为还有个自带库。
+  #    历史值（PVC 10Gi local-path、requests 50m/192Mi、钉 control-plane）
+  #    见 git 历史 —— 需要回滚就从那里取。
+  #
+  # ⚠️ 翻回 false 不等于回滚：那会起一个**空**的新库并跑一遍 migrate，
+  #    旧 PVC 已随本次改动被 prune 掉了。回滚要先从 restic 的 multica.dump 恢复。
   external:
-    enabled: false
-  database: multica
-  user: multica
-  persistence:
-    size: 10Gi
-    # 显式写死，不吃「集群默认 StorageClass」—— 本仓库全部 PVC 一律 local-path
-    # （nfs-client provisioner 已于 2026-07-11 卸载，引用它的 PVC 会永远 Pending）。
-    # ⚠️ local-path 不做容量限制，这个 10Gi 只是声明，实际吃的是节点 / 上的 85G。
-    storageClass: local-path
-  resources:
-    # 按实测调整（2026-08-18，取 kubelet stats 的 rssBytes/workingSetBytes，
-    # 不看 kubectl top —— 见 reference/k8s-qos-resource-management.md）：
-    # postgres 空载 rss 34.8Mi / workingSet 73.7Mi。库很小（逻辑 dump 372KB），
-    # shared_buffers 走默认 128MB，512Mi 上限足够且留了 7 倍余量。
-    requests: { cpu: 50m, memory: 192Mi }
-    limits: { cpu: 500m, memory: 512Mi }
-  affinity: &pin-control-plane
-    # ☠️ 必须钉在 control-plane（k8s-node）。理由**两条**（原先写三条，第一条已过期）：
-    #  1. worker（k8s-worker-106）allocatable 只有 1800m/3253Mi，且已用掉 63% 内存
-    #     requests（2058Mi，跑着 media 三个服务 + tetragon/opencost/otel-agent）。
-    #     multica 三个容器合计 requests 512Mi/150m，塞进去会把 worker 推到 ~79%，
-    #     挤掉 trivy 每次 1024Mi 的镜像扫描 Job。
-    #  2. local-path 的 PVC 一旦绑到某节点就固定了，不钉节点 = 落点由首次调度随机决定。
-    # ⚠️ **已作废的第三条理由**（2026-08-18 核实后删除，别再拿它当依据）：
-    #    原文说「夜备只钉 control-plane、读所在节点 hostPath，PVC 落到 worker = 静默漏备」。
-    #    这在 2026-08-16 之后不成立 —— `backup/overlays/homelab/worker-cronjob.yaml`
-    #    补上了 worker 侧夜备（02:00，同一个 106 仓库，`--host homelab-worker`），
-    #    且它**不按 PVC 名白名单，整个 /localpath 目录扫**。实测最近两次均 Complete
-    #    （21s，8 个文件 4.5M，snapshot be44070c）。所以「PVC 不能落 worker」这条
-    #    已经是错的，做落点决策时别再引用。
-    #    ⚠️ 但 CI 的 H4 仍只解析控制面那份脚本的 `for pat in ...` 白名单 ——
-    #       新增 PVC 照样要写进控制面那份，否则 H4 不放行（见 worker-backup-script.yaml 文件头）。
-    nodeAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        nodeSelectorTerms:
-          - matchExpressions:
-              - key: node-role.kubernetes.io/control-plane
-                operator: In
-                values: ["true"]
-  tolerations: []
+    enabled: true
 
 backend:
   replicas: 1
@@ -120,7 +96,25 @@ backend:
     # 原先填的 128Mi request 过宽。64Mi 仍留 3 倍余量，DB 连接池上限 25 也吃不到。
     requests: { cpu: 50m, memory: 64Mi }
     limits: { cpu: 500m, memory: 256Mi }
-  affinity: *pin-control-plane
+  affinity: &pin-control-plane
+    # ☠️ 必须钉在 control-plane（k8s-node）。理由两条：
+    #  1. worker（k8s-worker-106）allocatable 只有 1800m/3253Mi，且已用掉 63% 内存
+    #     requests（跑着 media 三个服务 + tetragon/opencost/otel-agent）。
+    #     multica 两个容器塞进去会挤掉 trivy 每次 1024Mi 的镜像扫描 Job。
+    #  2. 库在 control-plane（databases/apps-pg，local-path PVC 绑死在那个节点），
+    #     backend 跑到 worker 上等于每次查询多一跳跨网段（worker 在 LAN，
+    #     控制面在 pve 的 10.10.10.0/24）。
+    # ⚠️ 2026-08-25 起锚点定义在这里 —— 原先定义在 postgres.affinity 上，那段随
+    #    「库搬到共享实例」一起删了。锚点是 YAML 级的，定义没了 frontend 的
+    #    `*pin-control-plane` 会让**整份 values 解析失败**，症状是 helm template
+    #    渲染出空文件（不是报错说少了 affinity）。
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: In
+                values: ["true"]
   tolerations: []
 
 frontend:
