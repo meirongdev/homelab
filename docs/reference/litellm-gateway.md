@@ -149,6 +149,71 @@ r=urllib.request.Request('https://integrate.api.nvidia.com/v1/models',
 print('\n'.join(m['id'] for m in json.load(urllib.request.urlopen(r,timeout=30))['data']))"
 ```
 
+## NVIDIA provider 可用模型（只列近 3 个月发布的）
+
+**口径**：只考虑**发布日期在最近 3 个月内**的模型；更早的一律不用（模型迭代太快，
+旧版在编码/agent/工具调用上差一代就明显吃亏）。本表窗口 = **2026-05-25 ~ 2026-08-25**。
+
+☠️ **日期不能从 API 拿**：NVIDIA 的 `GET /v1/models` 里 `created` 字段是**常量假值**
+（102 个模型全是 `735790403` = 1993-04-26）。所以下表日期全部来自**厂商公告/模型卡**，
+刷新本表时必须重查，不能指望接口。每个模型的权威来源是
+`https://build.nvidia.com/<model-id>/modelcard`。
+
+### 窗口内 · 适合开发用途
+
+| 模型 | 发布 | 是什么 |
+|---|---|---|
+| `nvidia/nemotron-3.5-lightning-30b-a3b` | 2026-08-11 | 30B MoE / 3B 激活，为 agent 执行做的「快」档，单 H100 可跑 |
+| `meta/muse-glimmer-30b` | 2026-08-10 | Meta 自 Llama 4 后首个开放权重模型；30B dense 多模态、agent 调优、Apache 2.0 |
+| `deepseek-ai/deepseek-v4-flash-0731` | 2026-07-31 | ⭐ **与 DGX 上跑的主力同款**（见下方「为什么它特别」）|
+| `moonshotai/kimi-k3` | 2026-07-16（权重 07-27）| 2.8T MoE、1M ctx、原生视觉；agentic coding 强 |
+| `poolside/laguna-xs-2.1` | 2026-07-02 | 33B MoE / 3B 激活，**专做 agentic coding** |
+| `minimaxai/minimax-m3` | 2026-05-31 | 1M ctx + 原生多模态 + 前沿编码，开放权重 |
+| `stepfun-ai/step-3.7-flash` | 2026-05-29 | 198B MoE VLM（~11B 激活），面向编码 agent 与检索流程 |
+| `nvidia/nemotron-3-ultra-550b-a55b` | 2026-06-04 | 550B/55B 激活推理模型；最强但也最慢，按需用 |
+
+### 窗口内 · 但与开发无关（列出以免重复筛查）
+
+| 模型 | 发布 | 为什么不用 |
+|---|---|---|
+| `nvidia/ising-calibration-1.5-31b` | 2026-07-20 | 量子标定图像解读专用 VLM |
+| `thinkingmachines/inkling` | 2026-07-15 | **base 模型**（给你微调用的），不是 instruct，直接当助手用会很怪 |
+| `google/diffusiongemma-26b-a4b-it` | 2026-06-10 | 文本扩散，实验性；快但不是通用助手 |
+| `nvidia/nemotron-3.5-content-safety` | 2026-06-04 | 4B 护栏/审核模型 |
+
+### 刚好落在窗口外（别再考虑）
+
+`moonshotai/kimi-k2.6`（2026-04-20）· `google/gemma-4-31b-it`（2026-04-02）·
+`nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`（2026-04-28）·
+`nvidia/nemotron-3-super-120b-a12b`（2026-03-11）·
+`nvidia/nemotron-3-nano-30b-a3b` 与 `nvidia/nemotron-nano-3-30b-a3b`（2025-12）·
+`nvidia/cosmos-reason2-8b`（2025-12-19）· `openai/gpt-oss-120b` / `gpt-oss-20b`（2025-08）。
+
+⚠️ **那 8 个名字带 code 的是陷阱**：`starcoder2-15b`、`codegemma-*`、
+`deepseek-coder-6.7b-instruct`、`granite-*-code`、`codellama-70b`、`codestral-22b` 是
+**补全式**老模型，不跟随指令、不会用工具，拿来当开发助手很难用。别被名字骗了。
+
+其余约 70 个（`llama-3.1/3.2`、`gemma-2b/3`、`mistral-7b-v0.3`、`phi-3`、`granite-3.0`、
+`yi-large`、`llama2-70b`、`mixtral-8x22b`、`nemotron-4-340b`、各类 embedding /
+reranker / nemoguard / 视觉 / riva-translate / palmyra 垂类）**全部早于窗口或非对话用途**。
+
+**未逐一核实日期的**（都不是对话模型，用不到就没查）：`mistralai/mistral-nemotron`、
+`nvidia/llama-3.3-nemotron-super-49b-v1.5`、`nvidia/nemotron-3-embed-1b`、
+`nvidia/llama-nemotron-embed-1b-v2`、`nvidia/llama-nemotron-embed-vl-1b-v2`、
+`nvidia/nemotron-parse`、`nvidia/nemotron-nano-12b-v2-vl`、
+`nvidia/ai-synthetic-video-detector`、`nvidia/riva-translate-4b-instruct-v2`、
+`nvidia/llama-3.1-nemotron-safety-guard-8b-v3`、`writer/palmyra-creative-122b`。
+**要用它们之前先查日期**，别假设在窗口内。
+
+### 为什么 `deepseek-v4-flash-0731` 特别
+
+它和 DGX 上那个主力是**同一个模型**。当前兜底链是 DGX（别人的机器、跨境、无告警）→
+Mac（笔记本、无 SLA），两端都不可控，而且**兜底会换模型**（deepseek → Ornith，行为不一致）。
+把 NVIDIA 上的同款接成一档兜底，语义连续性明显好于切到 Ornith，且不依赖那两台机器任何一台。
+
+⚠️ 但**这些模型现在一个都调不通** —— `nvidia/*` 那条路由的双前缀 bug 还没修（见上一节）。
+修完必须逐个实调确认，别只看 `/v1/models`。
+
 ## 上游是思维链模型：小 `max_tokens` 会把思维链漏进 `content`
 
 `reasoning_content` 的切分依赖 `</think>` 闭合标签；token 用完标签不出现，parser 就失去切分
