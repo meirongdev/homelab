@@ -69,6 +69,16 @@ spec:
       filters:
         - type: RequestRedirect
           requestRedirect:
+            # ☠️ `scheme: https` 不能省。本 Gateway 的 listener 是 **80**（TLS 在
+            #    Cloudflare 边缘终止），而 Envoy 在 scheme 留空时按 listener 拼绝对
+            #    URL —— 2026-08-25 第一版就漏了它，实测吐出
+            #    `location: http://multica.meirong.dev:80/homelab/issues`：
+            #    把访客降级到明文 HTTP 还带上了 `:80`。zone 的 always_use_https=on
+            #    会把它再弹回 HTTPS，所以**症状是「能用，只是多两跳」** ——
+            #    但那一跳明文请求会带上所有非 `Secure` 的 cookie，别靠边缘兜。
+            #    写了 https 后 port 按规范自动取 443 且不出现在 Location 里
+            #    （supportedFeatures 有 HTTPRouteSchemeRedirect，实测生效）。
+            scheme: https
             path:
               type: ReplaceFullPath
               replaceFullPath: /homelab/issues
