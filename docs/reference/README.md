@@ -20,7 +20,7 @@
 - [litellm-gateway.md](litellm-gateway.md) — LLM 网关运维事实：☠️ **配置真相源分两半** ——
   模型/路由在 git，**虚拟 key 的模型白名单在 Postgres**，改别名不同步改 key 就「配置正确 + 调用全挂」；
   `/v1/models` 返回的是「该 key 能访问什么」不是 live config（自查会误判）；subPath + 只在启动时读
-  配置（已由 `checksum/config` 注解自动化）；`nvidia/*` 透传实测不可用且污染 `/v1/models`
+  配置（已由 `checksum/config` 注解自动化）；**NVIDIA 一把 key 只授权一个模型**，所以 `nvidia/*` 通配是假象（且污染 `/v1/models`）
 - [jobs-sg.md](jobs-sg.md) — SG 岗位周报：独立 ns + 3 个 CronJob、digest 固定、备份两条路径、bootstrap 依赖
 - [calibre-metadata.md](calibre-metadata.md) — 书库元数据：覆盖率实测、mtime 冒充出版日期（487 本）、回补匹配门与判据、拿不到书评/评分的边界
 
