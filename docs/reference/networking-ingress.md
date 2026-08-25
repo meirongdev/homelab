@@ -1,6 +1,6 @@
 # Networking & Ingress — 入口链路与 DNS 自动化
 
-> Last updated: 2026-08-23
+> Last updated: 2026-08-25
 > Status: 生效事实
 >
 > 南北向入口（Cloudflare → Cilium Gateway）与 DNS 自动化（external-dns）。
@@ -49,6 +49,19 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
   声明成 `v1` 会让整个 App `ComparisonError`（CI H3 拦截）。
 - **HTTPRoute 模板纪律**: `parentRefs` 写全 `group`/`kind`，`backendRefs` 写全
   `group`/`kind`/`weight` —— 否则 Gateway controller 补默认值导致 ArgoCD 永久 OutOfSync。
+- **单个路径开小灶用 `Exact`，☠️ 不能用 `PathPrefix`** —— 规范原文「precedence must be
+  given to the match having: * "Exact" path match. * "Prefix" path match with largest
+  number of characters.」（就在本集群 HTTPRoute CRD 的 `rules.matches` description 里），
+  所以 Exact 稳赢 Prefix、**与 rule 顺序无关**，不用赌平局。反过来用 `PathPrefix: /`
+  给单个路径挂 filter 会把**全站**吃进去。某个 filter 能不能用，查
+  `kubectl get gatewayclass <class> -o yaml` 的 `status.supportedFeatures`
+  （Cilium v1.20 列了 `HTTPRoutePathRedirect` 等）。
+- ☠️ **被网关 filter 就地应答的路径，不能拿来当存活探针** —— `RequestRedirect` 之类的
+  响应由 Envoy 直接返回，**请求根本到不了 pod**。2026-08-25 给 `multica.meirong.dev` 的
+  `/` 挂 302 → `/homelab/issues`（收掉上游 SaaS 营销页）时踩到：Uptime Kuma 原本探的就是
+  `/`，改完等于「探网关」，后端死透也全绿；探测已改打 `/api/config`。这是本仓库目前
+  **唯一**用 HTTPRoute filter 的地方，见
+  [`route-multica.yaml`](../../k8s/helm/manifests/gateway/route-multica.yaml)。
 
 ## DNS 自动化（external-dns）
 

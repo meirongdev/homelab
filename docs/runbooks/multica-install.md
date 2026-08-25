@@ -1,6 +1,6 @@
 # Runbook — Multica 安装与配置
 
-> Last updated: 2026-08-19
+> Last updated: 2026-08-25
 >
 > **触发条件**：首次部署 Multica，或 homelab 重建后恢复它、或把它迁到另一个集群。
 > **成功判定**：五条同时成立 ——
@@ -123,7 +123,7 @@ kubectl --context oracle-k3s apply -f argocd/projects/homelab.yaml
 | [`argocd/applications/multica.yaml`](../../argocd/applications/multica.yaml) | Application。`destination.server` **必须显式写** `https://100.94.186.7:6443`（控制面在 oracle，`kubernetes.default.svc` 指的是 oracle） |
 | [`k8s/helm/values/multica.yaml`](../../k8s/helm/values/multica.yaml) | chart values。**资源数值以此文件为准**，不在本文档复制 |
 | [`k8s/helm/manifests/personal-services/multica-secret.yaml`](../../k8s/helm/manifests/personal-services/multica-secret.yaml) | ESO：Vault → `multica-secrets` |
-| [`k8s/helm/manifests/gateway/route-multica.yaml`](../../k8s/helm/manifests/gateway/route-multica.yaml) | HTTPRoute（写它即建 DNS，别动 `cloudflare/terraform`） |
+| [`k8s/helm/manifests/gateway/route-multica.yaml`](../../k8s/helm/manifests/gateway/route-multica.yaml) | HTTPRoute（写它即建 DNS，别动 `cloudflare/terraform`）。**两条规则**：`/` 走 `RequestRedirect` 跳 `/homelab/issues`（收掉上游 SaaS 营销页），其余给 frontend |
 | [`backup/overlays/homelab/backup-script.yaml`](../../backup/overlays/homelab/backup-script.yaml) | 夜备的 `pg_dump` 段 + uploads 目录 |
 | [`backup/overlays/homelab/external-secret.yaml`](../../backup/overlays/homelab/external-secret.yaml) | 夜备用的 `MULTICA_DB_PASSWORD` |
 
@@ -181,7 +181,16 @@ kubectl --context k3s-homelab -n personal-services get httproute multica \
 kubectl --context k3s-homelab -n personal-services logs deploy/multica-backend --tail=200 | grep EmailService
 
 curl -sS https://multica.meirong.dev/api/config | python3 -m json.tool
+
+# 首页重定向（2026-08-25 起）：期望 302 + location: /homelab/issues
+curl -sSI https://multica.meirong.dev/ | grep -iE '^(HTTP/|location:)'
 ```
+
+⚠️ 这个 302 **由 Envoy 就地应答，请求到不了 pod** —— 所以它不能当存活证据（frontend 死透
+了它照样 302）。Uptime Kuma 那条探测因此打的是 `/api/config` 而不是 `/`，别改回去；
+理由与推广版教训见 [reference/networking-ingress.md](../reference/networking-ingress.md)。
+换 workspace slug 或换落地页时，☠️ 先 curl 新路径确认不是 404 —— `/homelab` 裸路径就是 404，
+dashboard 页全在 `/homelab/<page>` 之下。
 
 若 `ResolvedRefs=False`，碰一下路由强制 reconcile（Service 后建时 Cilium 不会自动重算）：
 
