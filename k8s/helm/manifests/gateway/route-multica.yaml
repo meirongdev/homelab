@@ -26,6 +26,57 @@ spec:
   hostnames:
     - "multica.meirong.dev"
   rules:
+    # ── 规则 1（2026-08-25 加）：把 `/` 从上游营销页改成直达工作区 ──────────────
+    # 上游镜像在 `/` 服务的是 **SaaS 官网落地页**：372KB HTML，"Start free trial" /
+    # "Talk to sales" / "Download Desktop" / "Your next 10 hires won't be human"。
+    # 对单人自建实例这是纯噪音，且没有开关能关掉 —— 三处都查过（2026-08-25，v0.4.28）：
+    #   · chart values 只有 remoteApiUrl / docsUrl / publicApiUrl / publicWsUrl
+    #   · `/api/config` 的 feature_flags 里没有 landing/branding 相关项
+    #   · 前端 `middleware-manifest.json` 的 `sortedMiddleware` 是**空的**
+    #     → 上游不会自己把已登录用户从 `/` 送走，指望它没用
+    #   （`/homepage` 那条路由**也是同一张营销页**，不是可用的替代首页）
+    # 剩下的选择只有「网关层截」「自建静态页」「fork 前端镜像」，取最便宜的第一条。
+    #
+    # ☠️ 目标必须带子路径：`/homelab` 裸路径是 **404** —— 前端没有
+    #    `[workspaceSlug]/page.js`，dashboard 页全在 `/homelab/<page>` 之下
+    #    （inbox · my-issues · issues · projects · agents · squads · skills ·
+    #     autopilots · runtimes · chat · usage · settings）。换 workspace slug 或
+    #    换落地页时，**先 curl 一下新路径确认不是 404** 再改这里。
+    # ☠️ 必须 Exact 不能 PathPrefix：PathPrefix `/` 会把**所有**请求吃进重定向，
+    #    包括 /homelab/issues 自己 → 无限跳转，整站打不开。
+    #    Exact 只匹配字面 `/`；query string 不参与路径匹配，所以 `/?foo=1` 照样命中。
+    # 优先级不靠 rule 顺序、也不用赌平局：HTTPRoute 规范明文
+    #    「precedence must be given to the match having: * "Exact" path match.
+    #      * "Prefix" path match with largest number of characters.」
+    #    （原文就在本集群 CRD 的 `rules.matches` description 里）—— 规则 1 与规则 2
+    #    谁写在前面结果一样。
+    # Cilium 支持这个 filter 有据可查：GatewayClass `cilium-nodeport` 的
+    #    `status.supportedFeatures` 列了 **HTTPRoutePathRedirect**（v1.20.0 实测）。
+    #
+    # ☠️ 副作用一（已处理，别退回去）：**重定向由 Envoy 就地应答，请求到不了 pod。**
+    #    原先 Uptime Kuma 探的就是 `/` —— 那条探测在此改动后会变成「探网关」，
+    #    frontend 死透了它**依然全绿**。探测已同步改打 `/api/config`（穿 frontend 的
+    #    runtime proxy 打到 backend，一条验两半），见
+    #    cloud/oracle/manifests/uptime-kuma/provisioner.yaml。
+    #    推广版教训：**任何被网关 filter 就地应答的路径都不能拿来当存活探针。**
+    # ⚠️ 副作用二（已知并接受）：未登录访客访问 `/` 现在拿到的是 dashboard 的 SSR
+    #    空壳（实测 283KB、可见文本只有 <title>），要等前端 JS 水合后才跳登录页 ——
+    #    不再像营销页那样立刻有内容。单人实例日常是带 cookie 的，接受。
+    - matches:
+        - path:
+            type: Exact
+            value: /
+      filters:
+        - type: RequestRedirect
+          requestRedirect:
+            path:
+              type: ReplaceFullPath
+              replaceFullPath: /homelab/issues
+            statusCode: 302
+    # ── 规则 2：其余一切照旧交给 frontend ─────────────────────────────────────
+    # ⚠️ 营销页的其余入口（/about · /usecases · /contact-sales · /download ·
+    #    /changelog · /homepage）**仍然可达**，这次只收了 `/`。要一并收掉就照规则 1
+    #    的写法给每条加一个 Exact match（/changelog 与 /download 有点用，慎收）。
     - matches:
         - path:
             type: PathPrefix
