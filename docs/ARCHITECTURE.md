@@ -1,7 +1,7 @@
 # Homelab Architecture
 
 > 单页架构总览，双集群 homelab（homelab + oracle-k3s）。
-> Last updated: 2026-08-20
+> Last updated: 2026-08-25
 
 ## Network Topology
 

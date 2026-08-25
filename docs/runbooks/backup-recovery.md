@@ -1,6 +1,6 @@
 # Backup & Recovery Runbook
 
-> Last updated: 2026-08-20
+> Last updated: 2026-08-25
 > 设计与执行: [../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md](../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md)
 >
 > **触发条件**：备份/恢复运维（含月度恢复演练）、或数据丢失/损坏后需要从 restic 恢复。

@@ -150,6 +150,14 @@ bookworm(glibc)，跨 libc 搬 PGDATA 的排序规则不安全。逻辑恢复顺
 | litellm | 68 | 374 | 虚拟 key 17 条、SpendLogs 86 条 |
 | multica | 108 | 2558 | 索引 365、扩展 3、`schema_migrations` 381 行（所以 backend 启动的 migrate up 是 no-op）|
 
+### 加租户的流程当天就被走了一遍（nakama）
+
+2026-08-25 同日新增 `nakama`（游戏后端）作为第三个租户，四步一步没少：
+① initdb 脚本加一行 `create_tenant` + ESO 加一个口令 key（为重建准备，脚本本身**不会**对
+已初始化的实例生效）→ ② 在活实例上手工执行同样的 SQL 建角色/库/`REVOKE CONNECT` →
+③ 备份脚本加 2e) 段 `pg_dump` → ④ 应用侧 ESO 渲染连接串。
+第 ③ 步是唯一没有任何检查兜底的一步，而 nakama **没有 PVC**，漏了它整个服务零备份。
+
 ### 决策二在这次一并复核了：**仍然不并 `zitadel-pg`**
 
 2026-08-25 复测 oracle 节点：requests **75%**、limits 超卖 **226%**（当初是 87%/224%），

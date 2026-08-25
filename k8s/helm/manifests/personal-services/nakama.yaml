@@ -1,0 +1,232 @@
+---
+# Nakama —— 开源游戏后端服务器（Heroic Labs，Apache-2.0）。
+# 入口: https://nakama.meirong.dev（客户端 API 7350）
+#       https://nakama-console.meirong.dev（内嵌管理控制台 7351）
+# 路由: manifests/gateway/route-nakama.yaml · route-nakama-console.yaml
+#
+# ☠️ **控制台是公网可达的管理面，且只有 Nakama 自带的用户名/口令，没有接 ZITADEL OIDC。**
+#    它能看/删账号、改任意存储数据、调用任意 RPC。所以：
+#      · 口令是 32 字节随机值（Vault secret/homelab/nakama → console_password），不是默认的 `password`
+#      · 另外 5 个带不安全默认值的 key 也全部换掉了（见下面 ExternalSecret 的注释）
+#    要再收紧的话方向是给 console 那条 HTTPRoute 前面加 oauth2-proxy 或 Cloudflare Access，
+#    而不是靠改口令。这是**有意接受**的残余风险（2026-08-25 决定）。
+#
+# 状态全在 Postgres：**没有 PVC**。库是共享实例 databases/apps-pg 的第三个租户
+# （litellm / multica / nakama），备份靠 backup/overlays/homelab/backup-script.yaml
+# 的 2e) 段 pg_dump —— H4 看不见"实例里多了个库"，那一行是唯一的保命绳。
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: nakama-config
+  namespace: personal-services
+spec:
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: nakama-config
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    # 整份 config.yml 由 ESO 渲染成 Secret 的一个 key，再挂成文件。
+    # ☠️ 刻意**不用命令行传密钥**：Nakama 的密钥都是 `--session.encryption_key=…` 这类 flag，
+    #    写进 pod spec 就等于任何能 `kubectl get pod -o yaml` 的人都看得见，
+    #    容器里 `ps` 也看得见。Nakama 支持 `--config <file>`，走文件是唯一干净的路。
+    #    （Nakama **不读环境变量**配置 —— 只有 flag 和 YAML 两条路，2026-08-25 查 --help 确认。）
+    template:
+      engineVersion: v2
+      data:
+        config.yml: |
+          name: nakama-homelab
+          data_dir: "/nakama/data"
+          logger:
+            level: INFO
+            format: JSON
+          database:
+            # ⚠️ 不是 URL！格式是 `user:pass@host:port/dbname`，前面加 postgres:// 会连不上。
+            address:
+              - "nakama:{{ .db_password }}@apps-pg.databases.svc:5432/nakama"
+          socket:
+            server_key: "{{ .socket_server_key }}"
+          session:
+            encryption_key: "{{ .session_encryption_key }}"
+            refresh_encryption_key: "{{ .session_refresh_encryption_key }}"
+          runtime:
+            http_key: "{{ .runtime_http_key }}"
+          console:
+            username: "{{ .console_username }}"
+            password: "{{ .console_password }}"
+            signing_key: "{{ .console_signing_key }}"
+          metrics:
+            # 0 = 关闭。设了才有 Prometheus 端点（下面的 ServiceMonitor 抓它）。
+            prometheus_port: 9100
+  # ⚠️ 这 6 个 key 在 Nakama 里**都有可用的默认值**，不换掉等于零安全：
+  #    socket.server_key=defaultkey · session.encryption_key=defaultencryptionkey ·
+  #    session.refresh_encryption_key=defaultrefreshencryptionkey ·
+  #    runtime.http_key=defaulthttpkey · console.username=admin · console.password=password ·
+  #    console.signing_key=defaultsigningkey
+  #    （2026-08-25 从 3.40.0 的 --help 逐条抄的实际默认值，不是从文档猜的。）
+  data:
+    - secretKey: db_password
+      remoteRef: { key: homelab/nakama, property: db_password }
+    - secretKey: socket_server_key
+      remoteRef: { key: homelab/nakama, property: socket_server_key }
+    - secretKey: session_encryption_key
+      remoteRef: { key: homelab/nakama, property: session_encryption_key }
+    - secretKey: session_refresh_encryption_key
+      remoteRef: { key: homelab/nakama, property: session_refresh_encryption_key }
+    - secretKey: runtime_http_key
+      remoteRef: { key: homelab/nakama, property: runtime_http_key }
+    - secretKey: console_username
+      remoteRef: { key: homelab/nakama, property: console_username }
+    - secretKey: console_password
+      remoteRef: { key: homelab/nakama, property: console_password }
+    - secretKey: console_signing_key
+      remoteRef: { key: homelab/nakama, property: console_signing_key }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nakama
+  namespace: personal-services
+  labels:
+    app: nakama
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nakama
+  template:
+    metadata:
+      labels:
+        app: nakama
+      annotations:
+        # config.yml 是**整份配置**（含 DB 地址与全部密钥），改 Vault → ESO 刷新后
+        # pod 不会自己重启（挂的是 Secret 卷，且进程只在启动时读一次）。
+        # 轮换任何一个 key 之后必须 `kubectl rollout restart deployment/nakama -n personal-services`。
+        # 这里不放 checksum：Secret 的内容不在 git 里，算不出稳定的 hash。
+        reloader-note: "rotate a key in Vault -> rollout restart required"
+    spec:
+      # priorityClassName 刻意**不设**（默认 0）：这是公网服务，`bulk`(-10) 会让它成为
+      # 节点吃紧时第一个被驱逐的东西 —— 对用户会碰到的服务来说方向是反的
+      # （add-service skill 明确写了这条）。
+      initContainers:
+        # Nakama 首次启动前必须建表。migrate 是幂等的（已应用的会跳过），所以每次
+        # 启动都跑一遍是安全的，也顺带覆盖了"升版本带新迁移"的情况。
+        # ⚠️ 镜像 entrypoint 是 `tini -- /nakama/nakama`，所以这里只给 args、不覆盖 command，
+        #    实际执行 `tini -- /nakama/nakama migrate up --config …`。
+        - name: migrate
+          image: docker.io/heroiclabs/nakama:3.40.0@sha256:92fb184e3271be12fd4d239766afb285322a50aaf769a59433445d59624c78cd
+          args: ["migrate", "up", "--config", "/etc/nakama/config.yml"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nakama
+              readOnly: true
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+      containers:
+        - name: nakama
+          # 多架构 index digest（linux/amd64 + linux/arm64）。3.40.0 = 2026-07-13 的最新版。
+          # ⚠️ 上游文档里给的是 registry.heroiclabs.com/heroiclabs/nakama，这里用 Docker Hub 的
+          #    同名镜像（tag 与版本一致），因为本仓库的镜像来源都收在几个公共 registry 里。
+          image: docker.io/heroiclabs/nakama:3.40.0@sha256:92fb184e3271be12fd4d239766afb285322a50aaf769a59433445d59624c78cd
+          args: ["--config", "/etc/nakama/config.yml"]
+          ports:
+            # 7350 = 客户端 HTTP API + WebSocket（游戏客户端连这个）
+            - containerPort: 7350
+              name: api
+            # 7351 = 内嵌管理控制台
+            - containerPort: 7351
+              name: console
+            # 9100 = Prometheus（由 config 的 metrics.prometheus_port 打开）
+            - containerPort: 9100
+              name: metrics
+          # 注：7349 是 gRPC API，本部署**没有暴露**。Nakama 的客户端 SDK 走 7350 的
+          # HTTP/WS 就够；真要 gRPC 得另加 Service 端口 + appProtocol（Cilium 网关下
+          # 少了 appProtocol 会让 gRPC 静默 404，见 records/ 里 ZITADEL console 那次）。
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nakama
+              readOnly: true
+          resources:
+            # ⚠️ **上限刻意不按空载实测收**。2026-08-25 本地实测空载仅 **15.55 MiB**
+            #    （单 pod + 单库，无连接），但游戏后端的内存随在线连接数/match 数增长，
+            #    空载采样看不见那一段 —— 本仓库已经在 multica frontend 上按空载收过一次上限，
+            #    当晚 OOM 崩循环（见 reference/k8s-qos-resource-management.md）。
+            #    所以 requests 按实测给（64Mi 已是空载的 4 倍），limits 留到 512Mi。
+            #    真实负载跑起来后再按 rssBytes / memory.peak 校准，别按 requests 反推。
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+          # /healthcheck 在客户端 API 端口上，返回 200（2026-08-25 实测）。
+          readinessProbe:
+            httpGet:
+              path: /healthcheck
+              port: 7350
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthcheck
+              port: 7350
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          securityContext:
+            # ⚠️ 镜像里进程是 **root**(uid 0) 跑的，这里没有加 runAsNonRoot ——
+            #    没验证过它对 /nakama/data 的写需求，公网服务上不赌未测过的改动。
+            #    personal-services 是 PSA `baseline`，允许 root；要收紧的话先在测试环境
+            #    验 runAsUser/fsGroup 再动。丢掉能力集和禁止提权是无风险的部分，先做上。
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: config
+          secret:
+            secretName: nakama-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nakama
+  namespace: personal-services
+  labels:
+    app: nakama
+spec:
+  type: ClusterIP
+  selector:
+    app: nakama
+  ports:
+    - name: api
+      protocol: TCP
+      port: 7350
+      targetPort: 7350
+    - name: console
+      protocol: TCP
+      port: 7351
+      targetPort: 7351
+    - name: metrics
+      protocol: TCP
+      port: 9100
+      targetPort: 9100
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: nakama
+  namespace: personal-services
+  labels:
+    # ⚠️ 必须带这个 label —— operator 靠它认领 ServiceMonitor，漏了就**静默不采集**
+    # （不报错、指标就是没有）。同 jobs-sg/monitoring.yaml 的注释。
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels: { app: nakama }
+  endpoints:
+    # ☠️ path 是 **`/`** 不是 `/metrics` —— Nakama 的 Prometheus 监听器把指标挂在根路径上
+    #    （2026-08-25 实测 `curl :9100/` 拿到 52 条 `nakama_*`；`/metrics` 未验证）。
+    #    写错 path 与漏 label 一样：operator 不报错，只是永远抓不到东西。
+    - port: metrics
+      path: /
+      interval: 60s

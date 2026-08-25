@@ -1,0 +1,38 @@
+---
+# HTTPRoute: nakama.meirong.dev -> nakama:7350（客户端 API，personal-services）
+#
+# 7350 同时是 HTTP API 和 WebSocket（Nakama 客户端建的实时连接走它的 Upgrade）——
+# Cilium Gateway 与 Cloudflare Tunnel 都默认放行 HTTP Upgrade，不用额外配置。
+# ⚠️ 7349 的 gRPC API **没有**暴露：真要用得给 Service 端口配 appProtocol，
+#    否则 Cilium 网关下 gRPC 会静默 404（ZITADEL console 踩过，见 identity.md）。
+#
+# 管理控制台是**另一条路由** route-nakama-console.yaml（另一个子域）。
+#
+# 本文件的存在即 DNS 变更：external-dns 监听 gateway-httproute 源，
+# 为 hostname 建代理 CNAME + 归属 TXT。不要去改 cloudflare/terraform。
+# ⚠️ policy 是 upsert-only —— 删掉这个路由**不会**删掉 DNS 记录，退役时要手工清。
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: nakama
+  namespace: personal-services
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: homelab-gateway
+      namespace: kube-system
+      port: 80          # TLS 在 Cloudflare 边缘终止
+  hostnames:
+    - "nakama.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: nakama
+          port: 7350
+          weight: 1

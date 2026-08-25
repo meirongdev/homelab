@@ -1,0 +1,42 @@
+---
+# HTTPRoute: nakama-console.meirong.dev -> nakama:7351（内嵌管理控制台）
+#
+# ☠️ **这条路由把一个管理面挂到了公网上。** Nakama 的 console 能看/删账号、
+#    改任意存储数据、调用任意 RPC，而它前面**只有 Nakama 自带的用户名+口令**：
+#    没有 ZITADEL OIDC，没有 oauth2-proxy，没有 Cloudflare Access。
+#    2026-08-25 有意如此（用户明确选择"两个都公网"），风险以两件事压住：
+#      · console_password 是 32 字节随机值（Vault secret/homelab/nakama）
+#      · console_signing_key / session 相关 key 全部换掉了默认值
+#    ⚠️ 要收紧的正确方向是在**这条路由前面**加 oauth2-proxy 或 Cloudflare Access，
+#       不是改口令。改口令不会减少暴露面。
+#
+# 为什么用独立子域而不是同域下的 /console 路径：console 的前端资源是挂在自己根路径上的，
+# 用 PathPrefix 截会把静态资源路径打断（同类问题在 multica 那条路由上有记录）。
+#
+# 本文件的存在即 DNS 变更（external-dns）；policy 是 upsert-only，
+# 删路由不会删 DNS 记录，退役时手工清。
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: nakama-console
+  namespace: personal-services
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: homelab-gateway
+      namespace: kube-system
+      port: 80          # TLS 在 Cloudflare 边缘终止
+  hostnames:
+    - "nakama-console.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: nakama
+          port: 7351
+          weight: 1

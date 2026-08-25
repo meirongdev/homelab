@@ -1,5 +1,5 @@
 ---
-# homelab 的共享应用 Postgres —— 一个实例、两个租户（litellm / multica）。
+# homelab 的共享应用 Postgres —— 一个实例、三个租户（litellm / multica / nakama）。
 # 2026-08-25 由 litellm ns 的 litellm-pg + personal-services 的 multica-postgres 合并而来。
 #
 # ☠️ **与 oracle 的 `databases/apps-pg` 同名、同角色，但形态完全不同**：
@@ -53,6 +53,14 @@ data:
 
     create_tenant litellm "${LITELLM_PASSWORD:-}"
     create_tenant multica "${MULTICA_PASSWORD:-}"
+    create_tenant nakama "${NAKAMA_PASSWORD:-}"
+
+    # nakama 的 migrate 会 `CREATE EXTENSION pg_trgm`。pg_trgm 在 PG13+ 是 trusted 扩展，
+    # 库 owner 自己也建得起来（multica 的 pg_trgm/pgcrypto 就是租户自己建的），
+    # 这里由超管预建只是把这条依赖去掉 —— 免得哪天上游改用非 trusted 扩展时，
+    # 症状是 initContainer 的 migrate 失败而不是一句"缺权限"。
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname nakama \
+         -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm'
 ---
 # homelab local-path（全集群唯一 SC）。
 # H4：本 PVC 在 scripts/check-manifests.py 的 BACKUP_EXEMPT 里带理由豁免 ——
@@ -139,6 +147,9 @@ spec:
             - name: MULTICA_PASSWORD
               valueFrom:
                 secretKeyRef: { name: apps-pg-bootstrap, key: MULTICA_PASSWORD }
+            - name: NAKAMA_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: apps-pg-bootstrap, key: NAKAMA_PASSWORD }
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data

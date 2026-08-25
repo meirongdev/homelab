@@ -1,6 +1,6 @@
 # Homelab Roadmap
 
-> Last updated: 2026-08-24
+> Last updated: 2026-08-25
 > 本文只回答两件事：**还剩什么没做**，和**做过什么/为什么不做**。
 > 实施细节不写在这里——每条都链到 `decisions/`（取舍）或 `plans/`（执行过程）。
 >
@@ -152,6 +152,7 @@ homelab + oracle-k3s 双双从 Flannel 迁 Cilium
 | 2026-08-06 | **PriorityClass 去个人前缀**：`meirong-{critical,high,bulk}` → `critical`/`high`/`bulk`，33 处引用。三步走（加新 class → 改引用 → 删旧），因为 PriorityClass 与引用它的工作负载分属不同 ArgoCD App、同步无先后保证。收尾时三处不跟 GitOps 滚需单独处理：Vault(manual-helm **且 STS 是 OnDelete**，helm upgrade 不重启 pod)、ArgoCD(不自管自己)、`zitadel-pg`(CNPG 不为 priorityClassName 变更滚动) |
 | 2026-08-08 | **jobs-sg 缺陷收口**：升级 `90cd4e8`（web 端口拆分 8080/9090、告警改口径、路由重排）后，按 [三处问题诊断](plans/apps/2026-08-08-jobs-sg-three-defect-diagnosis.md) 修掉 `JobsSgReconcileStale` 结构性哑火（97ad3fc）、`work_mode` 拿排班冒充办公地点（7dfd873，上游 `af34eed`）、`JobsSgIngestStale` 同类哑火（35b3c69）、写事务撞锁重跑（80c91cb，上游 `730c6f3`） |
 | 2026-08-08 | **LLM 网关注册退役**：整个旧网关 ArgoCD App（LLM 网关 + oauth2-proxy + dgx-proxy）删除；LLM 网关由 LiteLLM 接替（[计划](plans/apps/2026-08-01-litellm-gateway-migration.md)，**已于 2026-08-16 落地**，见下） |
+| 2026-08-25 | **Nakama 游戏后端上线**（homelab，`nakama.meirong.dev` 客户端 API + `nakama-console.meirong.dev` 管理台）：3.40.0，多架构 index digest 固定；**无 PVC**，状态全在共享实例 `apps-pg` 的第三个租户 —— 也就顺带把「加租户」那套流程实跑了一遍（含备份脚本 2e 段，那步没有任何检查兜底）。密钥走 ESO 渲染整份 `config.yml` 挂成文件，**不进命令行**（Nakama 的密钥都是 flag，写进 pod spec 等于人人可读；它也不读环境变量）。上线前在本地 throwaway 容器实测过：migrate 19 条、`/healthcheck` 200、metrics 52 条真实 `nakama_*`（路径是 **`/`** 不是 `/metrics`）、空载仅 15.55 MiB（**上限刻意没按这个收**）。☠️ 管理台裸挂公网、只有自带口令,已记入 [security.md 已知缺口 #7](reference/security.md) |
 | 2026-08-25 | **homelab 的两个 Postgres 收敛成一个**：`litellm-pg`(手搓 Deployment) + `multica-postgres`(上游 chart 自带) → 共享实例 `databases/apps-pg`（裸 Deployment，租户 litellm/multica）。逻辑 `pg_dump\|psql` 迁入并逐表对账（litellm 68 表/374 行含 17 个虚拟 key；multica 108 表/2558 行、365 索引、`schema_migrations` 381 行）。**刻意不装 CNPG**：operator 自己实测 rss 45Mi/ws 69Mi，比省下的 postmaster 还贵 —— 所以两个集群的 `databases/apps-pg` 同名同角色但形态不同。租户不再是 superuser 且 `REVOKE CONNECT FROM PUBLIC`（跨租户连库实测被拒）；代价是 multica 的库故障能把 LLM 网关一起拖下去。顺手修掉三处：Kyverno 镜像白名单要显式 `docker.io/` 前缀（旧的两个实例都在违规）、`manifest-safety-checks.md` 的 H4 豁免表漏了 6 条、夜备清单漏记 `litellm.dump` ([决策四](decisions/shared-postgres-platform.md)) |
 | 2026-08-16 | **LiteLLM LLM 网关落地**：`litellm` App 上线 `llm.meirong.dev`（DGX `deepseek-v4-flash` 主 + Mac `Qwen3.6-35B` 兜底 fallback，[决策](decisions/litellm-llm-gateway.md)）；旧 LLM 网关全线退役（Vault secret / ZITADEL client 残留清理，client 需 ZITADEL console 手删）。网关钉控制面、litellm 清单走 GitOps |
 | 2026-08-09 | **探针误杀修复 ×2**：Uptime Kuma（4 天 11 次重启）与 ZITADEL login（27 次重启）都补上 `startupProbe`——此前是探针在重启风暴里误杀 |
