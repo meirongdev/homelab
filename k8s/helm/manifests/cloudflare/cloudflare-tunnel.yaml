@@ -43,7 +43,21 @@ spec:
                     operator: Exists
       containers:
         - name: cloudflared
-          image: cloudflare/cloudflared@sha256:18626b1baac4450214535cd5bc40ef44c0635244d585ebf707749c22b6f3408f
+          # 2026-08-26 digest 刷新：2026.7.2 → **2026.8.2**（当前 :latest 的多架构
+          # index digest，实测含 linux/amd64 + linux/arm64，两个集群共用同一个 digest）。
+          # 动因：当天 04:52Z 与 06:06–06:21Z 两次公网 530（Cloudflare 1033），
+          # 后一次持续 **15 分钟** —— 6 个 homelab 服务全不可达，而 cloudflared 自己
+          # 从头到尾认为 4 条边缘连接健康：`cloudflared_tunnel_ha_connections` 恒为 4，
+          # 直到 06:21:07Z 才一次性 `Lost connection` 全部 4 条并立刻重连、服务即恢复。
+          # 即**它握着 4 条僵尸连接却不自知**，本地指标一个都看不见这次故障
+          # （抓到它的是 oracle 上 Uptime Kuma 的跨集群黑盒探测）。
+          # ⚠️ 同期 homelab↔oracle 的 Tailscale 采样 211/211 零缺口，所以不是整体出网挂了，
+          #    坏的是到 Cloudflare 边缘（sin* colo）那条路。
+          # ⚠️ **升级不是已证实的修复**，只是唯一现成的杠杆 —— 旧版自己在日志里喊
+          #    `Your version 2026.7.2 is outdated`。复发判据：再出现「530 期间
+          #    ha_connections 仍为 4」就说明升级没解决，那时再评估换 `--protocol quic`
+          #    （QUIC 对路径失效的探测比 http2 快，但会改变入口传输层，别顺手改）。
+          image: cloudflare/cloudflared@sha256:0aa26e284f05e6c77ae375b8c9c11d9eb6a448fb7bcd8d40f31cb6176189eb38
           args:
             - tunnel
             - --no-autoupdate

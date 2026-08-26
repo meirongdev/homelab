@@ -45,7 +45,12 @@ spec:
         - name: cloudflared
           # 2026-08-04 digest 刷新（原 sha256:404528c1…，已落后 upstream :latest）。
           # 动因：旧 digest 带 libssl3t64 CVE-2026-31789（deb13u2 已修）。
-          image: cloudflare/cloudflared@sha256:e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf  # 当前 :latest 的多架构 index digest
+          # 2026-08-26 再刷新：2026.7.3 → **2026.8.2**，与 homelab 同一个多架构 index
+          # digest（`k8s/helm/manifests/cloudflare/cloudflare-tunnel.yaml`）。
+          # ⚠️ oracle 侧**当天并没有出问题**（本次 530 只发生在 homelab 隧道）；
+          #    一起升是为了让两侧版本对齐 —— 版本分叉会让下次比对「是不是版本差异」
+          #    这件事失去对照组。arm64 由该 index 覆盖，实测确认。
+          image: cloudflare/cloudflared@sha256:0aa26e284f05e6c77ae375b8c9c11d9eb6a448fb7bcd8d40f31cb6176189eb38  # 2026.8.2 多架构 index digest
           args:
             - tunnel
             - --no-autoupdate
