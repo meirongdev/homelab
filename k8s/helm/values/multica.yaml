@@ -143,13 +143,43 @@ frontend:
     #    且并发优化会把 SSR 的 / 从 0.21s 拖到 0.77s（集群内测）——公网上表现就是
     #    "打开很慢/服务有问题"。判据是 cAdvisor 的 throttled_periods 比例而非
     #    `kubectl top`，见 reference/k8s-qos-resource-management.md。
-    # 现值 = **chart 上游默认**（cpu 1000m / memory 1Gi），是厂商按这个镜像的真实负载
-    #    给的，不是我们拍的。requests 维持 50m/256Mi（静息实测 113–150Mi）；节点
-    #    k8s-node 的 requests 才占 24% CPU / 60% memory，抬上限不挤别人。
+    # ☠️ 2026-08-26：memory 上限**高于 chart 上游默认**（1Gi → 1536Mi），这是实测结论。
+    #    08-18 回到上游默认 1Gi 后不再 OOM，于是看起来"够了"——但那只是**回收还打得赢**，
+    #    峰值其实一直顶在天花板上。判决书是 cgroup 三个数一起看（`kubectl top` 看不出来）：
+    #      memory.peak   1073741824  ← 与 memory.max **完全相等** = 峰值是被上限截断的
+    #      memory.max    1073741824
+    #      memory.events max 69 / oom_kill 0  ← 撞顶后被迫回收 69 次，只是每次都回收成功
+    #    cAdvisor 侧同期 7d workingSet 峰值 946.3Mi = limit 的 92.4%，触发
+    #    ContainerMemoryNearLimit（08-25 07:16Z 起连烧一整天）。
+    #    ⚠️ 946Mi 这个数**本身是被截断的**，真实需求未知且 ≥1Gi ——所以不能拿它当基准
+    #    去算"留了多少余量"。1536Mi 是给突发型 sharp 负载的一档，不是标定值：
+    #    复查判据仍是 `memory.events` 的 `max` 计数**是否还在涨**（涨 = 仍在撞顶，继续抬），
+    #    别等 oom_kill（那是几百次 max 之后的事）。
+    #
+    # ☠️ **触发者不是"有人在用"——是匿名爬虫**，这点反直觉，别再按"没人用怎么会撞顶"
+    #    去否定告警。08-25 06:45:45→06:46:15Z 的 45 秒里（15s 分辨率还原）：
+    #      workingSet 250Mi → 660 → 946 → 693 → 落回 250；同分钟 CPU 0.442 core
+    #      cloudflared 同秒连报 `context canceled`（客户端等不及自己断了）
+    #      cloudflared_tunnel_concurrent_requests_per_tunnel 峰值 **13**
+    #      pod 内 .next/cache/images 有 **4 条 mtime = Aug 25 06:46** 的新条目
+    #    最后一条是关键实证：确实在做 /_next/image 优化，机制与 08-18 同源。
+    #    ⚠️ 但**首页匿名访问时不引用任何 /_next/image**（08-26 curl 实测 0 个），
+    #    所以"打开首页 = 触发优化"是错的推断，别照抄——是爬虫爬到了更深的路径。
+    #    归属看 Cloudflare Analytics（reference/public-traffic-analysis.md）：
+    #      multica.meirong.dev 2500–4700 req/天，其中 self_monitor 恒 1440（=Uptime Kuma
+    #      60s 探测，1 个 IP），browser 类 1000–3100 req 却只有 4–12 个 IP
+    #      —— 每 IP 每天几百次请求，不是人。且该域的 `/` 是 cf-cache-status: DYNAMIC，
+    #      边缘一个字节都不缓存，每次爬取都打到 origin。
+    #    → 抬上限只是"扛住"，治本是在边缘缓存 /_next/image（Cache Rule，不占 WAF 的
+    #      Free 档 5 个自定义规则槽）。没做，因为那要动 cloudflare/terraform 且影响公网行为。
+    #    requests 维持 50m/256Mi（静息实测 113–150Mi，本次实测 memory.current 209Mi）；
+    #    k8s-node available 5230Mi，容得下这档突发。
     # 注：.next/cache/images 无持久卷，pod 每次重启都要重新付这 2.3s——崩循环期间
-    #    等于人人都撞冷缓存，症状会自我放大。
+    #    等于人人都撞冷缓存，症状会自我放大。chart 没有给 frontend 暴露缓存卷或
+    #    extraEnv 的口子（2026-08-26 查 `helm show values` 确认），所以这条只能靠抬上限，
+    #    治本要么等上游给钩子、要么在 Cloudflare 边缘缓存 /_next/image。
     requests: { cpu: 50m, memory: 256Mi }
-    limits: { cpu: 1000m, memory: 1Gi }
+    limits: { cpu: 1000m, memory: 1536Mi }
   affinity: *pin-control-plane
   tolerations: []
 
