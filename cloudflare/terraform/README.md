@@ -123,21 +123,32 @@ Zone-level security settings and WAF rules are defined in `waf.tf`. These are zo
 | SSL Mode | `full` | Encrypt origin ↔ Cloudflare (tunnels already do this) |
 | Min TLS Version | `1.2` | Block TLS 1.0/1.1 (BEAST, POODLE vulnerabilities) |
 | Always Use HTTPS | `on` | Auto-redirect HTTP → HTTPS |
-| Security Level | `medium` | Challenge suspicious IPs (Cloudflare reputation DB) |
+| Security Level | `medium` | ⚠️ 已**不再**做信誉挑战——如今只是 Under Attack 开关，`medium` = 关（见下方注） |
 | Browser Integrity Check | `on` | Block requests with abnormal HTTP headers |
 | Email Obfuscation | `on` | Hide emails from scrapers |
 | Hotlink Protection | `on` | Prevent resource hotlinking |
 | Opportunistic Encryption | `on` | TLS for HTTP content when supported |
 
-### Custom WAF Rules (5/5 used)
+### Custom WAF Rules (4/5 used — 1 slot free)
 
 | # | Action | Description |
 |---|--------|-------------|
 | 1 | Block | WordPress/PHP/admin scanner paths (`/wp-*`, `/phpmyadmin`, `/cgi-bin`, etc.) |
 | 2 | Block | Sensitive files (`.env`, `.git`, `.htaccess`, `/server-status`, etc.) |
 | 3 | Block | Known scanner user agents (sqlmap, nikto, nmap, acunetix, etc.) |
-| 4 | Managed Challenge | High threat score visitors (score > 14) |
-| 5 | Block | Non-standard HTTP methods (TRACE, CONNECT, etc.) |
+| 4 | Block | Non-standard HTTP methods (TRACE, CONNECT, etc.) |
+
+> ☠️ **2026-08-26：原第 4 条「High threat score → Managed Challenge」已删除，它是条死规则。**
+> `cf.threat_score` 已被 Cloudflare 停止填充、**恒为 0**，`cf.threat_score gt 14` 永远 false ——
+> 它一次都没命中过，却占着 5 个槽位之一（[字段文档][cf-ts]原话："the threat score is always `0`"，
+> 并明确 "we do not recommend creating rules based on the threat score"）。
+> **Free 档没有替代品**：`cf.waf.score` 是 Enterprise 独有，Business 也只有分类字段
+> `cf.waf.score.class`。所以这个槽位是**空着的**，别为填满而硬塞规则。
+> ⚠️ 同一个信号还让 zone 设置 **Security Level 也失去了原有含义**：它如今只是
+> Under Attack 模式的开关，`medium` 与 `low/high` 之间没有可观测差别（保留 `medium`
+> = 没开 Under Attack）。两处的旧描述都已在 `waf.tf` 行内更正。
+
+[cf-ts]: https://developers.cloudflare.com/ruleset-engine/rules-language/fields/reference/cf.threat_score/
 
 ### Rate Limiting (1/1 used — Free plan allows exactly one rule)
 

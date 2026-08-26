@@ -28,8 +28,13 @@ resource "cloudflare_zone_setting" "always_use_https" {
   value      = "on"
 }
 
-# Security Level: medium — challenge visitors from moderately suspicious IPs
-# (uses Cloudflare IP reputation database)
+# Security Level: medium
+# ⚠️ 这个设置**不再做基于 IP 信誉的挑战**（注释此前是这么写的，与事实不符，2026-08-26 更正）。
+# 它背后的信号就是 cf.threat_score，而该字段现在恒为 0（见下方自定义规则段的说明）。
+# Cloudflare 已把 Security Level 重新定义为「Under Attack 模式的开关」：只有
+# `under_attack` 有行为，`low/medium/high/essentially_off` 之间没有可观测差别。
+# 保留 `medium` 的唯一含义是「没开 Under Attack 模式」——那才是想要的常态
+# （Under Attack 会给所有访客弹 Managed Challenge，API 流量会被打断）。
 resource "cloudflare_zone_setting" "security_level" {
   zone_id    = data.cloudflare_zone.meirong.id
   setting_id = "security_level"
@@ -66,8 +71,20 @@ resource "cloudflare_zone_setting" "opportunistic_encryption" {
 }
 
 # ---------------------------------------------------------------------------
-# Custom WAF Rules (Free plan: 5 rules)
+# Custom WAF Rules — Free plan quota 5, currently 4 used (1 slot free)
 # Phase: http_request_firewall_custom
+#
+# 2026-08-26：删掉了原 Rule 4「Managed Challenge for high threat score」。
+# 它是条**死规则**：`cf.threat_score` 已被 Cloudflare 停止填充、恒为 0，
+# `cf.threat_score gt 14` 永远 false，所以这条规则从未命中过任何一次请求，
+# 却实打实占着 5 个槽位里的 1 个。官方文档原话是 "the threat score is always 0"
+# 且 "we do not recommend creating rules based on the threat score"：
+# https://developers.cloudflare.com/ruleset-engine/rules-language/fields/reference/cf.threat_score/
+#
+# ⚠️ **Free 档没有替代品**：基于分数的 `cf.waf.score` 是 **Enterprise 独有**，
+# Business 也只拿得到分类字段 `cf.waf.score.class`。所以这个槽位就是**空出来**的，
+# 不要为了填满而硬塞一条；有真实场景（某个具体扫描模式）时再用。
+# 也就是说：**「额度已满、新规则只能并进第 2 条」这个前提已经不成立了。**
 # ---------------------------------------------------------------------------
 
 resource "cloudflare_ruleset" "waf_custom_rules" {
@@ -90,8 +107,8 @@ resource "cloudflare_ruleset" "waf_custom_rules" {
     # Rule 2: Block access to sensitive files and directories
     # Prevents leaking config files, version control data, and server info
     #
-    # ⚠️ 新的敏感路径**只能往这条规则里塞**，不能新开一条：免费版自定义规则上限就是 5 条，
-    # 上面这 5 条已经用满。想单独成条得先砍掉一条现有的。
+    # 敏感路径**默认仍并进这条规则**（同类判据放一处，便于整体验收），但这已是风格选择、
+    # 不再是配额所迫：2026-08-26 删掉死规则后是 4/5，还剩 1 个槽位（见文件上方说明）。
     #
     # 2026-08-14 12:00 UTC 一个法国托管 IP（AS211590）在 1 小时内对 apex 打了 991 次
     # 配置/密钥扫描，全部 404（没有任何敏感内容真的存在）。下面这批 term 就是从那次
@@ -120,17 +137,7 @@ resource "cloudflare_ruleset" "waf_custom_rules" {
       enabled     = true
     },
 
-    # Rule 4: Managed Challenge for high threat score visitors
-    # Cloudflare assigns threat scores (0-100) based on IP reputation;
-    # score > 14 = suspicious traffic → present a JS challenge
-    {
-      action      = "managed_challenge"
-      expression  = "(cf.threat_score gt 14)"
-      description = "Challenge visitors with high threat score"
-      enabled     = true
-    },
-
-    # Rule 5: Block non-standard HTTP methods
+    # Rule 4: Block non-standard HTTP methods
     # Only allow methods actually used by our services (REST APIs + browser navigation)
     {
       action      = "block"

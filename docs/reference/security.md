@@ -1,6 +1,6 @@
 # K3s 集群安全架构 (Security Architecture)
 
-> Last updated: 2026-08-25
+> Last updated: 2026-08-26
 > Status: 生效事实
 > Scope: 双集群（homelab + oracle-k3s）的纵深防御模型 —— source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
@@ -52,7 +52,17 @@
   **现存公网入站仅 3 条**：`22/tcp`（tailnet 全挂时的唯一进入手段，密钥认证）、
   `41641/udp`（Tailscale NAT 穿透，缺了会全程走 DERP 中继）、`ICMP 3/4`（PMTU）。
   规则与逐条实测依据写在 `cloud/oracle/terraform/main.tf` 的注释里。
-- **WAF**（zone 级，覆盖两条 Tunnel 所有子域；`cloudflare/terraform/waf.tf`，`just apply` 部署）：5 条自定义规则用满免费额度（拦 WordPress/PHP 扫描、敏感文件、漏扫 UA、非标 HTTP 方法、高威胁分 Managed Challenge）—— **额度已满，新的敏感路径只能并进「敏感文件」那条的表达式**（`.env/.git/.htaccess` 之外，2026-08-15 起还含 `.tfstate`/`.aws/credentials`/`serviceaccount.json`/`id_rsa`/`.pem`/`web.config`/`/etc/passwd` 等，新 term 一律套 `lower()`，因为 `contains` 区分大小写；哪些路径**刻意不拦**见 `waf.tf` 行内注释）+ **1 条**限流规则（免费额度就 1 条，共用一个计数器）：认证端点（`/login`,`/oauth2`,`/api/login`,`/signin`,`/v1/auth`）**外加** `draw.meirong.dev` 的 `/socket.io/`（Excalidraw 2026-08-04 去掉 SSO 后，那是个公开的协作中继），30 req/10s/IP+colo → 封 10s。Pro 计划才有 Managed Ruleset (SQLi/XSS/RCE)/OWASP CRS/泄漏凭据检测（见 `waf.tf` 注释段）。**怎么判断一次可疑访问要不要加规则**（下钻查询 + 判读 + 改完怎么验收）见 [../runbooks/suspicious-traffic-investigation.md](../runbooks/suspicious-traffic-investigation.md)。
+- **WAF**（zone 级，覆盖两条 Tunnel 所有子域；`cloudflare/terraform/waf.tf`，`just apply` 部署）：**4 条**自定义规则（拦 WordPress/PHP 扫描、敏感文件、漏扫 UA、非标 HTTP 方法），免费额度 5 条、**还剩 1 个槽位**。敏感路径**默认仍并进「敏感文件」那条**（同类判据放一处便于验收），但这是风格选择、不再是配额所迫（`.env/.git/.htaccess` 之外，2026-08-15 起还含 `.tfstate`/`.aws/credentials`/`serviceaccount.json`/`id_rsa`/`.pem`/`web.config`/`/etc/passwd` 等，新 term 一律套 `lower()`，因为 `contains` 区分大小写；哪些路径**刻意不拦**见 `waf.tf` 行内注释）+ **1 条**限流规则（免费额度就 1 条，共用一个计数器）：认证端点（`/login`,`/oauth2`,`/api/login`,`/signin`,`/v1/auth`）**外加** `draw.meirong.dev` 的 `/socket.io/`（Excalidraw 2026-08-04 去掉 SSO 后，那是个公开的协作中继），30 req/10s/IP+colo → 封 10s。Pro 计划才有 Managed Ruleset (SQLi/XSS/RCE)/OWASP CRS/泄漏凭据检测（见 `waf.tf` 注释段）。
+- ☠️ **信誉/评分类防护在 Free 档已经彻底没有了（2026-08-26 查明）**。原第 4 条规则
+  `cf.threat_score gt 14 → managed_challenge` 是**死规则**：Cloudflare 已停止填充
+  `cf.threat_score`，该字段[恒为 0](https://developers.cloudflare.com/ruleset-engine/rules-language/fields/reference/cf.threat_score/)，
+  表达式永远 false，**它从未拦下过任何一次请求**，却占着 5 个槽位之一 —— 已删除并回收槽位。
+  替代品 `cf.waf.score` 是 **Enterprise 独有**（Business 也只有分类字段 `cf.waf.score.class`），
+  故 Free 档**无可替代，槽位就空着**，别为填满硬塞规则。
+  ⚠️ 同一个信号也让 zone 设置 **Security Level 失去原义**：它如今只是 Under Attack 模式的开关，
+  `medium` 与 `low/high` 之间没有可观测差别（留 `medium` = 没开 Under Attack，正是想要的常态）。
+  **结论**：现存边缘防护全部是**确定性规则**（路径 / UA / 方法 / 限流）+ Browser Integrity Check，
+  一条基于 IP 信誉的自适应防线都没有 —— 评估「WAF 挡住了什么」时不要把信誉类算进去。**怎么判断一次可疑访问要不要加规则**（下钻查询 + 判读 + 改完怎么验收）见 [../runbooks/suspicious-traffic-investigation.md](../runbooks/suspicious-traffic-investigation.md)。
 - **Zone settings**：SSL Full、TLS 1.2+、Always HTTPS、Security Level Medium、Browser Integrity Check、Email Obfuscation、Hotlink Protection、Opportunistic Encryption。
 - **API Token 权限**：Zone DNS Edit + Zone WAF Edit + Zone Settings Edit + Cloudflare Tunnel Edit。
 
