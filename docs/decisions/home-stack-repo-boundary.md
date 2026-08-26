@@ -68,9 +68,11 @@
   的记录归属表、`services.md` 的集群外托管清单）。
 - **改名要动两个仓库**：换主机名 = home-stack 改 `custom_domain` + homelab 改那三处注释。
 - ⚠️ **WAF 例外要跨仓库提**：`stack.meirong.dev` 走橙云，于是吃 zone 级 WAF 与限流。
-  若站点被 `cf.threat_score gt 14` 那条 managed challenge 误伤（公开文档站会有爬虫），
-  改动落在 homelab —— 而 **Free 档规则位已满**（自定义规则 5/5、限流 1/1），
-  真要给它开口子得先砍一条现有规则。
+  站点若被 zone 级规则误伤，改动落在 homelab。
+  **2026-08-26 更正**：原文担心的是 `cf.threat_score gt 14` 那条 managed challenge 误伤爬虫 ——
+  **那条规则从来就没生效过**（`cf.threat_score` 恒为 0），已删除。所以现在：
+  自定义规则 **4/5、剩 1 个槽位**（给它开例外不必再砍现有规则），限流仍是 **1/1 用满**。
+  另外公开文档站不会被"信誉挑战"误伤了 —— Free 档已无任何信誉类防护。
 - ✅ **监控缺口当天就补了**（2026-08-23）：uptime-kuma 的 `MONITORS` 里加了
   `Home Stack`，顺带把同样一个监控都没有的 `Playgrounds` 与 apex `Blog` 一起加上，
   Homepage 也补了 Home Stack 磁贴。⚠️ 但**这三条不是集群存活信号**（不经集群、

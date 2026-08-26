@@ -6,7 +6,7 @@
 > **成功判定**：能回答三个问题 —— ①是不是我自己的 ②有没有真读到东西 ③要不要拦。
 > **回滚**：§1–§3 是纯查询，无需回滚；§4 若改了 WAF，回滚 = revert 那次提交后重新
 > `just apply`（⚠️ apply 前必看 plan，见 §4 的告警框）。
-> Last updated: 2026-08-15
+> Last updated: 2026-08-26
 >
 > 口径、来源分类法、免费版能力边界、指标清单是
 > [reference/public-traffic-analysis.md](../reference/public-traffic-analysis.md) 的地盘，
@@ -97,7 +97,10 @@ whois "$IP" | grep -iE '^(netname|descr|country|org-name|origin)'
 那说明扫的东西根本不存在。逐条确认 200 命中的是哪些 path：是真实页面还是敏感文件。
 
 **② `403` 表示 WAF 已经拦下了。** 具体命中哪条规则要去 Cloudflare 面板的 Security Events；
-仓库侧的 5 条自定义规则见 [reference/security.md](../reference/security.md) 的「边缘」一节。
+仓库侧的 4 条自定义规则见 [reference/security.md](../reference/security.md) 的「边缘」一节。
+⚠️ 归因时**别再往「威胁分」上想**：那条规则 2026-08-26 已删（`cf.threat_score` 恒为 0、
+从未命中）。现在能产生 403 的只有四条确定性规则（路径 / 敏感文件 / 漏扫 UA / 非标方法）
+和 zone 级 Browser Integrity Check。
 
 **③ UA 里带 `early hints` 的不是访客**（实测见过 `nginx-ssl early hints`、`bastion early hints`）——
 那是 Cloudflare 边缘的 Early Hints 预取。它携带**真实访客的 IP**，所以既不能算成爬虫、
@@ -130,7 +133,10 @@ just plan     # ⚠️ 先看 plan，见下方告警框
 just apply
 ```
 
-- ☠️ **免费版自定义规则上限 5 条且已用满**，新路径只能**并进第 2 条**，不能新开一条。
+- 免费版自定义规则上限 5 条，**当前 4/5、还剩 1 个槽位**（2026-08-26 删掉死的威胁分规则后腾出来的）。
+  新路径**默认仍并进第 2 条** —— 同类判据放一处便于整体验收，而不是因为没槽位了。
+  真要单独成条（比如需要不同 action、或想在 Security Events 里单独看命中数）是可以的，
+  但**用掉就没有了**，且 Free 档没有别的来源能再腾一个。
 - ⚠️ 新 term 一律套 `lower()`：Rules 语言的 `contains` **区分大小写**，实测扫描器会发
   `/serviceAccount.json` 这种混合大小写。
 - ⚠️ 有几类**加了会误伤自己**，理由写在 `waf.tf` 行内注释里：`/version`、`/apis/`、`/swagger`
@@ -156,6 +162,10 @@ for u in https://meirong.dev/ https://argocd.meirong.dev/api/version https://boo
 
 ⚠️ apply 后头几秒边缘还没传播完，**第一条请求可能仍是旧结果** —— 拿到非预期值先重测一次再排查。
 
+> ⚠️ **验「非标方法」那条规则别用 `TRACE`/`CONNECT`**：Cloudflare 边缘自己就先回
+> `405`/`400`，根本走不到自定义规则，看着像规则没生效（2026-08-26 实测）。
+> 用 `curl -X PROPFIND https://meirong.dev/` —— 命中规则才是 **403**。
+
 ### C. 什么都不做
 
 全 404 的扫描**不需要任何动作**。加 WAF 规则只是降噪（让 404 曲线只反映真实错误），
@@ -169,6 +179,13 @@ for u in https://meirong.dev/ https://argocd.meirong.dev/api/version https://boo
 | 时间 | 单个小时内 991 次，打完就走 |
 | 目标 | 全部打 apex `meirong.dev`（该域由 Cloudflare Pages 提供，不经隧道、不碰集群） |
 | 手法 | `terraform.tfstate` / `~/.aws/credentials` / `serviceAccount.json` / `s3.properties` / `settings/development.py` / `/etc/passwd` 目录穿越 / `web.config` |
-| 结果 | 642×404、147×200（**只有三个真实博客页**）、18×403（WAF 拦，走的是威胁分/伪装 UA 那批）、9×405、162×504（全落在 Early Hints 预取上） |
+| 结果 | 642×404、147×200（**只有三个真实博客页**）、18×403（WAF 拦）、9×405、162×504（全落在 Early Hints 预取上） |
 | 处置 | 12 个 term 并进 WAF 第 2 条（commit `1776f06`），验收 12 条拦截路径 403、12 个真实端点无误伤 |
-| 结论 | **纯降噪**。路径规则一条都没命中过这次扫描，真正拦住它的是威胁分规则；敏感内容一个都不存在 |
+| 结论 | **纯降噪**。路径规则一条都没命中过这次扫描；敏感内容一个都不存在 |
+
+> ⚠️ **本表 2026-08-26 更正**：原文把那 18 个 403 记成「威胁分规则拦下的」，**不可能** ——
+> `cf.threat_score` 恒为 0，那条规则一次都没命中过（已删，见
+> [reference/security.md](../reference/security.md) 的「边缘」一节）。这 18 个只能来自
+> 漏扫 UA 规则或 zone 级 Browser Integrity Check；Free 档 Security Events 保留期已过，
+> 无法回溯到底是哪一条。**教训**：403 的归因必须当场去 Security Events 看，
+> 事后按「哪条规则听起来像」倒推会写出假因果。
