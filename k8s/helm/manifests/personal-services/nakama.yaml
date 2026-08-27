@@ -11,6 +11,17 @@
 #    要再收紧的话方向是给 console 那条 HTTPRoute 前面加 oauth2-proxy 或 Cloudflare Access，
 #    而不是靠改口令。这是**有意接受**的残余风险（2026-08-25 决定）。
 #
+# ☠️ **游戏逻辑不在本仓库**：服务端 Lua 模块由 `~/projects/meirongdev/godot-games`
+#    构建成 OCI 镜像发布，本文件用 initContainer 拷进 `/nakama/data/modules`。
+#    两个仓库之间**只有镜像和一份契约**（https://github.com/meirongdev/godot-games/blob/main/docs/deployment-contract.md）——
+#    不共享 YAML 片段、不互相引用文件路径。发版 = 换下面那个 tag。
+#    ⚠️ Nakama 只在**进程启动时**加载 Lua：换 tag 会改 pod template → 自动滚动，
+#       这正是那边放弃 ConfigMap 方案的原因（ConfigMap 改了 pod 不重启，等于改了没生效）。
+#    ☠️ **网页版的客户端不连这个域名**：它从页面自身来源推导服务器地址，所以
+#       `game.meirong.dev` 上必须有 `/v2/*` 与 `/ws` 打到本服务 7350 的路由
+#       （契约 §3.3.1，清单在 manifests/gateway/route-godot-games-web.yaml）。
+#       少了那两条路由，网页就是打不开游戏 —— 而 e2e 工具直连本域名 443，**照样全绿**。
+#
 # 状态全在 Postgres：**没有 PVC**。库是共享实例 databases/apps-pg 的第三个租户
 # （litellm / multica / nakama），备份靠 backup/overlays/homelab/backup-script.yaml
 # 的 2e) 段 pg_dump —— H4 看不见"实例里多了个库"，那一行是唯一的保命绳。
@@ -47,12 +58,28 @@ spec:
             address:
               - "nakama:{{ .db_password }}@apps-pg.databases.svc:5432/nakama"
           socket:
-            server_key: "{{ .socket_server_key }}"
+            # ☠️ **这个值不是密钥，是契约常量，必须与游戏客户端里的一致。**
+            #    它跟着 web 制品公开发布（任何人都能从页面里把它取出来），所以按
+            #    上游契约 §3.4/§5 刻意**不当机密对待**：放 git 里可 diff、可对着契约
+            #    review；塞进 Vault 反而让"两边是否一致"变得看不见。
+            #    真相源：godot-games 的 `godot/src/autoload/NakamaConfig.gd` 的
+            #    `SERVER_KEY`。改那边就必须同时改这里，否则**所有**客户端调用 401。
+            #    防滥用不靠藏它，靠上游 lobby_rpc 的建房限流（5 次/60s per user_id）。
+            # ⚠️ Vault `secret/homelab/nakama` 里还留着一个同名的 `socket_server_key`，
+            #    2026-08-27 起**已不再被读取**（值也是旧的随机串）。可以删掉它。
+            server_key: "family-lobby-2026"
           session:
             encryption_key: "{{ .session_encryption_key }}"
             refresh_encryption_key: "{{ .session_refresh_encryption_key }}"
           runtime:
             http_key: "{{ .runtime_http_key }}"
+            # ☠️ 这两个必须**成对**给。`lua_min_count` 默认 16，Nakama 启动时校验
+            #    `min <= max`，只调 max 会**直接启动失败**（godot-games 的部署契约 §3.2）。
+            # 为什么要调：每个 Lua VM 各加载一份全部模块。现在模块才 17KB 无所谓，
+            # 但 M4（成语接龙）的 1.12MB 词库 × 默认 48 个 VM ≈ 400MB，会顶穿下面的
+            # 512Mi limit —— 这是上游仓库明确点名的前置条件，先设好省一次事故。
+            lua_min_count: 1
+            lua_max_count: 4
           console:
             username: "{{ .console_username }}"
             password: "{{ .console_password }}"
@@ -60,17 +87,17 @@ spec:
           metrics:
             # 0 = 关闭。设了才有 Prometheus 端点（下面的 ServiceMonitor 抓它）。
             prometheus_port: 9100
-  # ⚠️ 这 6 个 key 在 Nakama 里**都有可用的默认值**，不换掉等于零安全：
-  #    socket.server_key=defaultkey · session.encryption_key=defaultencryptionkey ·
+  # ⚠️ 这些 key 在 Nakama 里**都有可用的默认值**，不换掉等于零安全：
+  #    session.encryption_key=defaultencryptionkey ·
   #    session.refresh_encryption_key=defaultrefreshencryptionkey ·
   #    runtime.http_key=defaulthttpkey · console.username=admin · console.password=password ·
   #    console.signing_key=defaultsigningkey
   #    （2026-08-25 从 3.40.0 的 --help 逐条抄的实际默认值，不是从文档猜的。）
+  #    `socket.server_key` 曾经也在这张表里，2026-08-27 移出去了 —— 它是公开常量，
+  #    见上面 socket 段的说明。别"顺手"把它挪回 Vault。
   data:
     - secretKey: db_password
       remoteRef: { key: homelab/nakama, property: db_password }
-    - secretKey: socket_server_key
-      remoteRef: { key: homelab/nakama, property: socket_server_key }
     - secretKey: session_encryption_key
       remoteRef: { key: homelab/nakama, property: session_encryption_key }
     - secretKey: session_refresh_encryption_key
@@ -111,6 +138,24 @@ spec:
       # 节点吃紧时第一个被驱逐的东西 —— 对用户会碰到的服务来说方向是反的
       # （add-service skill 明确写了这条）。
       initContainers:
+        # 把游戏的服务端 Lua 模块拷进共享 emptyDir。镜像基底刻意是 busybox ——
+        # 消费方式需要容器里有 `cp`（上游契约 §2.1 写明了这一点，别"优化"成 scratch）。
+        # 放在 migrate 之前：它不依赖数据库，拉镜像/拷贝类问题能更早暴露。
+        # ⚠️ tag 是 git short-sha，与 web 镜像**各自独立**（两条 CI 触发路径不同，
+        #    sha 经常不一样，别以为要保持一致）。此处刻意用 tag 而不是 digest：
+        #    上游契约的发版模型就是"换 tag 即发版"，且 CI 从不重推同一个 sha。
+        - name: copy-game-modules
+          image: ghcr.io/meirongdev/godot-games-nakama-modules:34b1128
+          command: ["sh", "-c", "cp -r /modules/. /nakama-modules/"]
+          volumeMounts:
+            - name: game-modules
+              mountPath: /nakama-modules
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 200m, memory: 64Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
         # Nakama 首次启动前必须建表。migrate 是幂等的（已应用的会跳过），所以每次
         # 启动都跑一遍是安全的，也顺带覆盖了"升版本带新迁移"的情况。
         # ⚠️ 镜像 entrypoint 是 `tini -- /nakama/nakama`，所以这里只给 args、不覆盖 command，
@@ -152,6 +197,11 @@ spec:
             - name: config
               mountPath: /etc/nakama
               readOnly: true
+            # 游戏模块（由上面的 initContainer 填充）。Nakama 默认 data_dir=/nakama/data，
+            # 模块目录就是它下面的 modules/。
+            - name: game-modules
+              mountPath: /nakama/data/modules
+              readOnly: true
           resources:
             # ⚠️ **上限刻意不按空载实测收**。2026-08-25 本地实测空载仅 **15.55 MiB**
             #    （单 pod + 单库，无连接），但游戏后端的内存随在线连接数/match 数增长，
@@ -185,6 +235,9 @@ spec:
         - name: config
           secret:
             secretName: nakama-config
+        # 只是 initContainer → 主容器的搬运通道，不需要持久化（真相源是镜像）。
+        - name: game-modules
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

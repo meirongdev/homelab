@@ -133,11 +133,14 @@ data:
             href: https://multica.meirong.dev
             description: AI 编码 agent 协作台（issue → Claude Code/Codex）
 
-        - Nakama:
-            # dashboard-icons 没有 nakama 图标（2026-08-25 实测 404），用 mdi 兜底。
+        - 游戏大厅:
+            # dashboard-icons 没有 nakama/godot 图标（2026-08-25 实测 404），用 mdi 兜底。
             icon: mdi-gamepad-variant-outline
-            href: https://nakama.meirong.dev
-            description: 游戏后端服务器（客户端 API）
+            href: https://game.meirong.dev
+            description: 家庭游戏大厅（石头剪刀布淘汰赛）
+            # ⚠️ 这里刻意**不放** nakama.meirong.dev 的磁贴：那是给游戏客户端调的 API，
+            #    浏览器打开是**空白页**（GET / 返回 200 + content-length: 0），
+            #    放上去只会让人以为服务坏了。服务器存活看 Uptime Kuma。
 
         - Nakama Console:
             icon: mdi-shield-account-outline
@@ -322,7 +325,7 @@ spec:
         # ☠️ 没有它就是静默失效：六个块全是 subPath 挂载，改配置后文件不刷新、进程不重启
         #    ⇒ ArgoCD Synced、pod Running，而仪表盘还是旧的（"我改了但页面没变"）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py），别手改。
-        checksum/config: "fefcc3a2c25723a8"
+        checksum/config: "ebd3fe10ff4418e5"
       labels:
         app: homepage
     spec:

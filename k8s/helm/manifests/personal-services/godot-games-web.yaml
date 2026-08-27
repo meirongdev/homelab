@@ -1,0 +1,82 @@
+---
+# 家庭游戏大厅的 Web 前端（Godot 4 导出 + nginx）。
+# 入口: https://game.meirong.dev   路由: manifests/gateway/route-godot-games-web.yaml
+#
+# ☠️ **游戏不在本仓库**：镜像由 `~/projects/meirongdev/godot-games` 的 CI 构建发布，
+#    两仓库之间只有镜像 + 一份契约：https://github.com/meirongdev/godot-games/blob/main/docs/deployment-contract.md
+#    发版 = 换下面的 tag。本仓库拥有 namespace / 域名 / 密钥 / 限额，那边拥有游戏。
+#    对应的服务端 Lua 模块走 nakama.yaml 的 copy-game-modules initContainer。
+#
+# 无状态：所有游戏状态在 Nakama（→ 共享 Postgres）。这个 pod 挂掉只是页面打不开，
+# **不影响进行中的对局** —— 所以没有 PVC，也不进备份。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: godot-games-web
+  namespace: personal-services
+  labels:
+    app: godot-games-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: godot-games-web
+  template:
+    metadata:
+      labels:
+        app: godot-games-web
+    spec:
+      # priorityClassName 不设（默认 0）：公网服务，bulk 会让它最先被驱逐。
+      containers:
+        - name: web
+          # tag 是 git short-sha（上游契约的发版模型），**不是** digest：
+          #  · Kyverno 的 disallow-latest-tag 是 Enforce，`:latest` 会被直接拒；sha tag 天然合规
+          #  · 上游 CI 从不重推同一个 sha，所以这个 tag 事实上不可变
+          # ⚠️ 与 nakama 模块镜像的 sha **各自独立**（两条 CI 触发路径不同），别以为要一致。
+          image: ghcr.io/meirongdev/godot-games-web:34b1128
+          ports:
+            # ☠️ 8080 不是 80 —— 上游用的是 nginx-unprivileged（uid 101）。
+            #    官方 nginx 镜像才是 root+80，照那个写会连不上。
+            - containerPort: 8080
+              name: http
+          resources:
+            # 静态文件服务 + 预压 gzip（wasm 39.5MB→10.1MB，nginx 用 gzip_static
+            # 直接送 .gz，不在请求路径上现压），所以突发画像是有界的。
+            # ⚠️ 这组数字来自上游契约 §3.3 的建议（10m/32Mi 级别），**本仓库还没实测过**
+            #    （镜像当时拉不到）。真有人玩之后按 rssBytes 校准一次。
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          securityContext:
+            # 上游契约 §3.3 明确声明兼容 runAsNonRoot + runAsUser 101。
+            # ⚠️ readOnlyRootFilesystem **必须留 false** —— nginx 要写 /tmp。
+            #    收成 true 会让 pod 起不来（那边已经写明，别"顺手加固"）。
+            runAsNonRoot: true
+            runAsUser: 101
+            runAsGroup: 101
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: godot-games-web
+  namespace: personal-services
+  labels:
+    app: godot-games-web
+spec:
+  type: ClusterIP
+  selector:
+    app: godot-games-web
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8080
+      targetPort: 8080

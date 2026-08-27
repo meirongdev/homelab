@@ -1,0 +1,76 @@
+---
+# HTTPRoute: game.meirong.dev -> 家庭游戏大厅（静态前端 + 同源的 Nakama API）
+#
+# ☠️ **下面那两条打到 Nakama 的规则不是优化，是游戏能不能打开的前提。**
+#    Web 客户端从**页面自身的地址**推导 Nakama 地址（上游
+#    `godot/src/autoload/NakamaConfig.gd`），镜像里零环境事实 —— 代价就是
+#    部署侧必须把 API 收到同一个源下。契约 §3.3.1 明确要求这三条路由。
+#    路径不是我们选的，来自 Nakama SDK 本身：HTTP 全是 `/v2/…`，socket 是 `/ws?…`。
+#
+#    为什么不让客户端直连 nakama.meirong.dev（两个死结，同源之后一起消失）：
+#      · 页面是 https，直连 http 的 Nakama 会被浏览器按**混合内容**拦掉；
+#      · Nakama 的 7350 不在 Cloudflare 可代理端口白名单里，直连在这套基础设施上根本连不通。
+#
+# ☠️ **e2e 结构上覆盖不到这里。** 上游的 `tools/e2e_match.py` 直连
+#    `nakama.meirong.dev:443`，完全绕过本文件 —— 路由写错/漏写/WebSocket 没放 Upgrade，
+#    e2e 一样全绿。唯一的判据是**真的用浏览器开一次页面**（契约 §4.2.1）。
+#
+# 历史：2026-08-26 首次部署时上游客户端还是硬编码 `127.0.0.1:7350`，网页连不上；
+# 上游 `c1bae87` 改成按页面来源推导后才有了本文件的这个形态。别再退回"客户端配地址"。
+#
+# 本文件的存在即 DNS 变更（external-dns 建代理 CNAME + 归属 TXT）；
+# policy 是 upsert-only —— 删路由不会删 DNS 记录，退役时手工清。
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: godot-games-web
+  namespace: personal-services
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: homelab-gateway
+      namespace: kube-system
+      port: 80          # TLS 在 Cloudflare 边缘终止
+  hostnames:
+    - "game.meirong.dev"
+  rules:
+    # ── Nakama HTTP API（设备认证、RPC）────────────────────────────────
+    # Gateway API 按**最长前缀**定优先级，所以 /v2 一定压过下面的 /。
+    # ⚠️ 打到的是 7350（客户端 API）。管理控制台在 7351/7348，**不在这条链路上** ——
+    #    别以为这里把 console 也暴露到 game 域名下了。
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v2
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: nakama
+          port: 7350
+          weight: 1
+    # ── Nakama WebSocket ──────────────────────────────────────────────
+    # Cilium Gateway 与 Cloudflare Tunnel 都默认放行 HTTP Upgrade（multica 的 /ws
+    # 走同一条链路已验证），所以这里不需要额外开关。
+    # ⚠️ 若日后出现"对局中每隔一段时间掉线"，先怀疑网关的 idle timeout 而不是游戏逻辑。
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /ws
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: nakama
+          port: 7350
+          weight: 1
+    # ── 其余全部：静态站点 ─────────────────────────────────────────────
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: godot-games-web
+          port: 8080
+          weight: 1

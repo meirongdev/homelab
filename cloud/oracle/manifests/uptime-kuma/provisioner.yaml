@@ -54,6 +54,9 @@ data:
         # 只探这一条就够：console(7351) 与 API(7350) 是**同一个进程**的两个监听器，
         # 进程活着两边都活。反过来说这条绿了不代表 console 的口令没被改坏。
         {"name": "Nakama",         "url": "https://nakama.meirong.dev/healthcheck", "accepted_statuscodes": ["200-299"], "maxredirects": 0},
+        # 游戏大厅的**页面**（静态 nginx 的 /healthz）。
+        # ⚠️ 它绿 ≠ 游戏能玩：客户端能不能连上 Nakama 是另一条链路，这条只证明页面在被伺服。
+        {"name": "Game Lobby",     "url": "https://game.meirong.dev/healthz", "accepted_statuscodes": ["200-299"], "maxredirects": 0},
         # ZITADEL（oracle）2026-08-12 补：此前**整个清单里没有它**——身份提供方是全站
         # SSO 的单点依赖，却是唯一没有存活探测的对外服务。
         # 副作用同样重要：它因此是 5 个 SLO 里唯一没有探测底噪的，7 天仅 138 个真实请求
