@@ -33,7 +33,7 @@ spec:
           #  · Kyverno 的 disallow-latest-tag 是 Enforce，`:latest` 会被直接拒；sha tag 天然合规
           #  · 上游 CI 从不重推同一个 sha，所以这个 tag 事实上不可变
           # ⚠️ 与 nakama 模块镜像的 sha **各自独立**（两条 CI 触发路径不同），别以为要一致。
-          image: ghcr.io/meirongdev/godot-games-web:fb35fd5
+          image: ghcr.io/meirongdev/godot-games-web:834ea7b
           ports:
             # ☠️ 8080 不是 80 —— 上游用的是 nginx-unprivileged（uid 101）。
             #    官方 nginx 镜像才是 root+80，照那个写会连不上。
