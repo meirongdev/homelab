@@ -122,7 +122,16 @@ resources:
 # 三个坑的实测数据都在 docs/reference/jobs-sg.md。
 images:
   - name: ghcr.io/meirongdev/jobs-sg
-    # fba4fcf (2026-08-24)：规则层技术栈假阳性收口（8b3040a + 73aa949 + fba4fcf
+    # fdb3b59 (2026-08-27)：修首页 work_mode 图例的过期文案 —— 数据已是
+    # Unknown 九成，旧文案却还在教读者 "say nothing ⇒ counted as Onsite"，
+    # 数字和说明自相矛盾（work_mode 修复 af34eed 时漏改的模板字符串）。
+    # 只动了 internal/view/market.go 一行模板文案，行为中性；顺带带上
+    # ab87d4e（/simplify 行为中性重构，全量 go test 绿）。
+    # 2026-08-24/26 的历史重放与逐周重算（retech --apply + report --week +
+    # W31 补重算）已执行并记录在 docs/reference/jobs-sg.md —— 旧注释里
+    # fba4fcf 的「两步收尾」不再是待办。
+    #
+    # 其前身 fba4fcf (2026-08-24)：规则层技术栈假阳性收口（8b3040a + 73aa949 + fba4fcf
     # 一起上）。三个缺陷，两个会让「修好了」变成假的：
     #   ① 别名同时是普通英文词 → 大面积假阳性（`express` 精度 25% —— 命中的是
     #      Meta 简介 "express themselves" 和猎头签名档 "Recruit Express Pte Ltd"；
@@ -169,4 +178,4 @@ images:
     # store.addedColumns 在写者启动时 ALTER 补上。
     # ⚠️ 回滚到早于 4af8944 的镜像是安全的（多出来的列不碍旧代码），但审计列
     # 停更、/metrics 的 reconcile 偏差/覆盖率指标消失。
-    digest: sha256:17362634d69c1f509b3c9785e8ed1a4172ef4010e15b51493b986262cf68548f
+    digest: sha256:141203f141b5b91d19b65f3e4a66e157b4348c728e992fe284639a1467bd63c6
