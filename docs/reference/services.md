@@ -1,6 +1,6 @@
 # Services — 服务清单
 
-> Last updated: 2026-08-25
+> Last updated: 2026-08-27
 > Status: 生效事实
 >
 > **这张表是服务清单的唯一真相源** —— `docs/README.md`、`docs/ARCHITECTURE.md` 与各 runbook
@@ -24,7 +24,8 @@
 | Open Notebook (AI 研读) | homelab | `personal-services` | `notebook.meirong.dev`（模型走 DGX + Mac OMLX，见 [open-notebook.md](open-notebook.md)） |
 | Multica (AI 编码 agent 协作台) | homelab | `personal-services` | `multica.meirong.dev`（2026-08-18 上线；官方 OCI Helm chart，本仓库**唯一** OCI chart 源。☠️ `/` 由网关 302 到 `/homelab/issues` —— 上游在 `/` 服务的是 SaaS 营销页，chart/feature_flags/前端 middleware 三处都没有关掉它的开关，只能在 HTTPRoute 层截；该 302 由 Envoy 就地应答**不经过 pod**，故 Uptime Kuma 探的是 `/api/config`。☠️ **服务是两半的**：这里只有 service 端，执行任务的 daemon 跑在 **M2 MacBook** 上 —— daemon 离线时页面照常 200、Uptime Kuma 全绿、任务静默堆积。安装/重建见 [runbooks/multica-install.md](../runbooks/multica-install.md)） |
 | LiteLLM (LLM 网关) | homelab | `litellm` | `llm.meirong.dev`（inference API + 自带认证 admin UI `/ui`；DGX `deepseek-v4-flash` 主 + Mac `Ornith-1.5-35B` 兜底（别名 `mac/ornith`，无思维链变体 `mac/ornith-fast`）；运维事实与坑见 [litellm-gateway.md](litellm-gateway.md)，见 [decisions/litellm-llm-gateway.md](../decisions/litellm-llm-gateway.md)） |
-| Nakama (游戏后端) | homelab | `personal-services` | `nakama.meirong.dev`（客户端 API 7350，HTTP+WebSocket）+ `nakama-console.meirong.dev`（内嵌管理控制台 7351）。2026-08-25 上线；**无 PVC**，状态全在共享 Postgres `apps-pg` 的 `nakama` 租户。☠️ **控制台是公网可达的管理面且只有自带口令、没接 ZITADEL** —— 能删账号/改数据/跑任意 RPC，风险靠 32 字节随机口令压住，有意接受（要收紧就在那条 HTTPRoute 前加 oauth2-proxy）。⚠️ 7349 的 gRPC API 没暴露 |
+| Nakama (游戏后端) | homelab | `personal-services` | `nakama.meirong.dev`（客户端 API 7350，HTTP+WebSocket）+ `nakama-console.meirong.dev`（内嵌管理控制台 7351）。2026-08-25 上线；**无 PVC**，状态全在共享 Postgres `apps-pg` 的 `nakama` 租户。⚠️ `nakama.meirong.dev` 用浏览器打开是**空白页**（`GET /` 返回 200 + `content-length: 0`）—— 它是 API，不是网页；给人看的入口是下面那条「家庭游戏大厅」。☠️ **控制台是公网可达的管理面且只有自带口令、没接 ZITADEL** —— 能删账号/改数据/跑任意 RPC，风险靠 32 字节随机口令压住，有意接受（要收紧就在那条 HTTPRoute 前加 oauth2-proxy）。⚠️ 7349 的 gRPC API 没暴露。**游戏逻辑（服务端 Lua）来自另一个仓库** `meirongdev/godot-games`，由 initContainer 从 OCI 镜像拷进 `/nakama/data/modules`，发版=换 tag；`runtime.lua_{min,max}_count` 已按上游契约设成 1/4（两个必须成对，只调 max 会启动失败）|
+| 家庭游戏大厅 (Godot Web) | homelab | `personal-services` | `game.meirong.dev`（静态 Godot 4 Web 导出 + nginx-unprivileged:8080，`/healthz` 探活）。**无状态无 PVC**，游戏状态全在 Nakama。镜像与游戏源码在 `meirongdev/godot-games`（契约见 https://github.com/meirongdev/godot-games/blob/main/docs/deployment-contract.md ），本仓库只拥有域名/限额/落点。☠️ **这个域名下还挂着 Nakama 的 API**：Web 客户端从页面自身来源推导服务器地址（镜像里零环境事实），所以 `game.meirong.dev` 的 HTTPRoute 有三条规则 —— `/v2/*` 与 `/ws` 打到 `nakama:7350`，其余给静态站。**少了那两条游戏就是打不开**，而上游 e2e 工具直连 `nakama.meirong.dev:443`、结构上绕过它们，**e2e 全绿也证明不了网页能玩** —— 唯一判据是用浏览器真开一次（含"看得见中文"）。⚠️ server key 是**公开常量** `family-lobby-2026`（跟着 web 制品发布），刻意放在 git 里而不是 Vault：它必须与上游 `NakamaConfig.SERVER_KEY` 一致，放 Vault 会让这个一致性看不见 |
 | jobs-sg (SG 岗位周报) | homelab | `jobs-sg` | `jobs.meirong.dev`（2026-08-03 上线；独立 ns + 3 个 CronJob，见 [jobs-sg.md](jobs-sg.md)） |
 | Jellyfin (视频) | homelab | `media` | `media.meirong.dev`（2026-08-16；媒体读 106 只读 NFS，config 走 local-path，[OIDC SSO 接入中](identity.md#jellyfin)） |
 | Navidrome (音乐) | homelab | `media` | `music.meirong.dev`（2026-08-16；媒体读 106 只读 NFS，DB 走 local-path） |
