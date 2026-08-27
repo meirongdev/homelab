@@ -1,6 +1,6 @@
 # jobs-sg — 新加坡 SWE 岗位趋势周报（架构事实）
 
-> Last updated: 2026-08-24
+> Last updated: 2026-08-26
 > Status: 生效事实
 > Scope: jobs-sg 在 homelab 集群的部署形态、镜像固定方式、备份口径、首次上线依赖顺序
 > —— source of truth。应用代码在 [meirongdev/jobs-sg](https://github.com/meirongdev/jobs-sg)。
@@ -602,6 +602,10 @@ CI 当时是绿的：`testdata/fixture/jobs.jsonl` 由 `scripts/genfixture` 从*
 ingest 当时算好**存在行上**的。修了分类器，只有管线**再次看见**的岗位会被修正 ——
 **已经下架的岗位永远保留错误结论**，历史周报也就一直错着。
 
+✅ **已执行（2026-08-24）**：线上跑过 `reclassify --apply`，全表（含已下架/已关闭行）
+的派生分类已重写 —— 生产库 `work_mode` 0 条 `Onsite`，全部是 `Unknown` / `Remote`。
+同批的 `retech --apply` 与 `report --week` 逐周重算见下一节。
+
 归档存着每一条见过的岗位，而分类规则是该 JSON 的**纯函数**，所以整段历史可以离线重算：
 
 | | 强制 reconcile | `reclassify` |
@@ -679,6 +683,25 @@ kubectl --context k3s-homelab -n jobs-sg create job retech-dry --dry-run=client 
    涨了它一动不动。要自己查
    `NOT EXISTS job_tech(source='rule') AND NOT EXISTS enrich_done(source='rule')`。
 
+✅ **已执行（2026-08-24 + 08-26）**：`retech --apply` 已在线上跑过 —— 规则层假阳性
+收口（`expressjs` rule 71 / `go` 471，`ts`/`pg`/`tf` 清零）。同日 08-24 用**不带
+Telegram env 的 Job** 把 2026-W32/33/34 的 `report --week` 重算并重物化了
+`weekly_metric`（tech_freq 换成收口版，`go`/`expressjs` 出 top-30、`kafka` 顶上）。
+**2026-08-26 补重算了 W31（首周，唯一漏网的一周）** —— 它原本还挂着编造的
+`Onsite: 1301`、已退役的 avg_views/applications 指标和指向不存在周的 prev week。
+
+⚠️ **重算历史周的两个坑（实测）**：
+
+1. `report --week <周>` 会**无条件把 `latest.html` / `index.html` 覆写成那一周** ——
+   重算完旧周**必须**再把最新周的 HTML 复制回 `latest.html` / `index.html`，
+   否则「最新周报」会倒退。08-26 重算 W31 后就是这样恢复成 W34 的。
+2. **`active_jobs`（"On the board at publication"）重算出来的是「重算当日」快照**，
+   不是该周出版时点的真实在架数：SQL 是 `closed_at IS NULL AND expiry_date >= 周末`，
+   而 `closed_at` 只反映重算当天是否还在架。实测 W32/W33 重算后都显示 **4597**（撞车
+   不是巧合）、W31 从真实历史值 4902 变成 5266 —— 历史值被覆盖且无快照可复原。
+   重建真实历史在架数需要按 `first_seen_at` / `closed_at` / `expiry_date` 做 as-of
+   查询（尚未实现）。
+
 ## 别名表的三个坑（2026-08-24，上游 8b3040a + 73aa949 + fba4fcf）
 
 规则层是纯文本词边界匹配，**分不清词义**。三个缺陷叠在一起，其中两个会让「修好了」
@@ -752,5 +775,7 @@ MCF 的 `flexibleWorkArrangements` 回答的是**什么时候上班**，不是**
 
 1. **换镜像不会立刻改变页面**。`work_mode` 由 ingest 的 upsert 重写，web 只读 ——
    要等下一轮抓取；**周日那轮 reconcile 走全 board**，会把所有在架岗位一次性刷新。
-2. **历史不会追溯变对**。已关闭/归档的行保留旧的 `Onsite`，`weekly_metric` 里已物化的
-   历史周同理。跨越 2026-08-08 做同比时，两侧的 `work_mode` 口径是**不同**的。
+2. **历史已由 `reclassify --apply` 追溯修正（2026-08-24）**。已关闭/归档的行不再保留
+   旧 `Onsite`（生产库全表 0 条 `Onsite`），2026-W31~W34 的 `weekly_metric` 与周报
+   文件也已在 08-24 / 08-26 用新口径重算。⚠️ 若再发现旧周数据可疑，先查
+   `weekly_metric.week_start` 的 `computed_at` 是否晚于对应修复的部署时间。
