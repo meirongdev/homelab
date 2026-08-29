@@ -1,6 +1,6 @@
 # Observability — OTel 日志与追踪架构
 
-> Last updated: 2026-08-20
+> Last updated: 2026-08-29
 > Status: 生效事实
 >
 > 2026-07-31 homelab collector 首次真实落地 + 2026 OTel 对齐，见 [`decisions/otel-2026-alignment.md`](../decisions/otel-2026-alignment.md)。
@@ -22,7 +22,7 @@
                     │   ── traces: otlp/gRPC → oracle 31317        │
                     │              (via Tailscale)                 │
                     │                                              │
-                    │  应用 Pod（stdout/stderr 或 log-exporter sidecar）│
+                    │  应用 Pod（stdout/stderr —— 全部服务走此路）  │
                     │                                              │
                     │  Grafana 12.3.3（grafana.meirong.dev）       │
                     │   查询 Loki 31080 / Tempo 31320（跨集群）    │
@@ -68,7 +68,7 @@ Loki 3.x 原生支持 OTLP 协议（`/otlp/v1/logs`），自动将 OTel resource
 | `cluster` | resource processor（运营标签，与 Prometheus 侧一致） | `homelab` / `oracle-k3s` |
 | `k8s_namespace_name` | container operator + k8sattributes → Loki 默认索引标签 | `personal-services` |
 | `k8s_pod_name` | 同上 | `calibre-web-569cc4444d-rfw67` |
-| `k8s_container_name` | 同上 | `calibre-web` / `log-exporter` |
+| `k8s_container_name` | 同上 | `calibre-web` / `permission-fixer`（同 pod 多容器各成一路） |
 | `k8s_deployment_name` | k8sattributes processor | `calibre-web` |
 | `service_name` | OTel resource attr（SDK 上报的服务用） | `calibre-web` |
 
@@ -110,7 +110,16 @@ Dashboard ConfigMaps 通过 ArgoCD Application `monitoring-dashboards` 管理（
 
 ### 模式 B：文件日志 + log-exporter Sidecar
 
-**适用场景：** 将日志写入容器内部文件而非 stdout 的应用（linuxserver.io 镜像系列，如 Calibre-Web）
+> ⚠️ **本仓库当前没有在用的实例，且加之前必须先做下面的「验证」一步。**
+> 唯一那个实例（calibre-web）2026-08-29 已删除：它 tail 的
+> `/config/calibre-web.log` 在镜像里根本不存在，`tail -F` + `2>/dev/null`
+> 于是永久静默，Loki 近 7 天 **0 行**——而同 pod 主容器有 1898 行。
+> 即「加了个 sidecar」和「加了个什么都不干的 sidecar」现象完全一致，无告警、无报错。
+> 教训：**这个模式的失败是静默的，不验证等于没加。**
+
+**适用场景：** 只把日志写进容器内文件、不写 stdout 的应用。
+⚠️ **别按镜像血统预设**：linuxserver.io 系列（含 Calibre-Web）如今是输出 stdout 的，
+模式 A 就够了。先看 `kubectl logs` 有没有东西，有就别加 sidecar。
 
 **原理：** 在同一 Pod 中添加 `busybox` sidecar 容器，共享应用的 volume，通过 `tail -F` 将文件内容输出到 stdout，OTel Collector 再从该 sidecar 的 stdout 采集。
 
@@ -133,18 +142,24 @@ Dashboard ConfigMaps 通过 ArgoCD Application `monitoring-dashboards` 管理（
 
 **查找日志文件路径的方法：**
 ```bash
-# 先部署不带 sidecar，找到实际日志路径
+# 先部署不带 sidecar，确认主容器 stdout 确实是空的（不空则用模式 A，到此为止）
+kubectl logs -n <ns> <pod> -c <app-container> --tail=20
+# 再找实际日志路径（路径会随上游版本变，别照抄文档里的常量）
 kubectl exec -n <ns> <pod> -c <app-container> -- find / -name "*.log" 2>/dev/null | grep -v proc
 ```
 
-**LogQL 查询示例（Calibre-Web）：**
-```logql
-{k8s_namespace_name="personal-services", k8s_container_name="log-exporter"}
+**验证（加完 sidecar 必做，否则前功尽弃）：**
+```bash
+# 1) sidecar 自己有输出吗？空 = tail 的路径不对，不是"还没有日志"
+kubectl logs -n <ns> <pod> -c log-exporter --tail=5
+# 2) 真的进 Loki 了吗？（端口转发，见本文档「查询」一节）
+#    返回 0 或无数据 = 没接上
+{k8s_namespace_name="<ns>", k8s_container_name="log-exporter"}
 ```
 
-**已实施案例：**
-- `cloud/oracle/manifests/personal-services/calibre-web.yaml` — 日志文件：`/config/calibre-web.log`
-  （⚠️ calibre 全家 2026-08-03 迁 oracle-k3s，路径与集群都变了）
+**已实施案例：** 无。
+`cloud/oracle/manifests/personal-services/calibre-web.yaml` 曾是唯一实例，
+2026-08-29 删除（原因见本节顶部警告；该文件内留有删除注释）。
 
 ---
 
@@ -225,14 +240,14 @@ ENV JAVA_TOOL_OPTIONS="-javaagent:/otel/opentelemetry-javaagent.jar"
 kubectl get ds -n monitoring | grep otel
 kubectl logs -n monitoring -l app.kubernetes.io/name=opentelemetry-collector -f
 
-# 查看 Calibre-Web 日志实时输出（sidecar）
-kubectl logs -n personal-services -l app=calibre-web -c log-exporter -f
+# 查看 Calibre-Web 日志实时输出（主容器直接输出 stdout，无需 sidecar）
+kubectl logs -n personal-services -l app=calibre-web -c calibre-web -f
 
 # 在 Loki 查询某 namespace 所有日志
 {k8s_namespace_name="personal-services"}
 
-# 按容器名过滤（sidecar 日志）
-{k8s_namespace_name="personal-services", k8s_container_name="log-exporter"}
+# 按容器名过滤（同 pod 内的 sidecar 是独立一路日志流）
+{k8s_namespace_name="personal-services", k8s_container_name="permission-fixer"}
 
 # 错误日志聚合
 {k8s_namespace_name=~".+"} |~ "(?i)(error|exception|fatal|panic)"
@@ -250,7 +265,7 @@ kubectl logs -n personal-services -l app=calibre-web -c log-exporter -f
 | 采集层 | OTel Collector DaemonSet | 替换 Promtail；统一 OTel 语义，支持 logs/metrics/traces 三个信号 |
 | 传输协议 | OTLP HTTP → Loki `/otlp` | `loki` exporter 在 contrib v0.145.0 已移除；OTLP 是 Loki 3.x 原生协议 |
 | 追踪传输 | OTLP gRPC → Tempo :4317 | gRPC 双向流更适合 trace 数据；跨集群走 Tailscale NodePort :31317 |
-| 文件日志方案 | log-exporter sidecar (busybox) | linuxserver.io 镜像不输出 stdout；sidecar 比修改镜像更轻量 |
+| 文件日志方案 | log-exporter sidecar (busybox)，**当前无实例** | 当年判断「linuxserver.io 镜像不输出 stdout」；2026-08-29 复核该前提已不成立（CWA 输出 stdout），唯一实例删除，模式保留备用 |
 | Dashboard 管理 | ConfigMap + ArgoCD GitOps | 持久化，不依赖 Grafana DB，重建集群无损 |
 | label 设计 | 使用 OTel 语义标签 | 与 Grafana Labs 官方 Dashboard 兼容，无需自定义映射 |
 | 内存保护 | memory_limiter 200MiB/50MiB | 防止 OTel Collector OOM，背压式流控 |
@@ -268,7 +283,7 @@ kubectl logs -n personal-services -l app=calibre-web -c log-exporter -f
 | `cloud/oracle/manifests/monitoring/otel-collector.yaml` | Oracle-k3s OTel Collector（logs + metrics + traces） |
 | `k8s/helm/values/loki.yaml` | Loki config（promtail.enabled: false） |
 | `k8s/helm/manifests/monitoring/dashboards/grafana-dashboards.yaml` | 4 个 Loki Dashboard ConfigMap |
-| `cloud/oracle/manifests/personal-services/calibre-web.yaml` | log-exporter sidecar 示例（oracle-k3s） |
+| `cloud/oracle/manifests/personal-services/calibre-web.yaml` | 曾是 log-exporter sidecar 的唯一实例；2026-08-29 删除（文件内留有原因注释） |
 | `argocd/applications/monitoring-dashboards.yaml` | Dashboard GitOps Application |
 | `argocd/applications/otel-collector.yaml` | OTel Collector GitOps Application（chart + values） |
 | `docs/plans/archive/2026-02-21-otel-log-migration-design.md` | 迁移设计决策文档 |

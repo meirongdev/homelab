@@ -1,6 +1,6 @@
 # K8s 资源管理与 QoS 策略
 
-> Last updated: 2026-08-24
+> Last updated: 2026-08-29
 > Status: 生效事实（本文只定**原则**，不存具体数值）
 
 本文档记录 Homelab 中 CPU/Memory requests & limits 的设定**原则**。
@@ -172,7 +172,8 @@ oracle-k3s 在 2026-08-05 之前一条都没配（`capacity − allocatable` 的
 | 数据库 | `500m` | postgres |
 | 可观测性 | `300m–500m` | Loki, Tempo, Prometheus, Grafana |
 | 后台/轻量服务 | `100m–200m` | alertmanager, kube-state-metrics, oauth2-proxy |
-| 极轻量 sidecar | `10–100m` | log-exporter, permission-fixer |
+| 极轻量 sidecar（常驻低速）| `10–100m` | —（log-exporter 2026-08-29 已删，见 observability-otel-logging.md）|
+| 突发型单线程 sidecar | `1000m` | permission-fixer —— ⚠️ **不是给多了**：每 5 分钟扫一次库（约 0.2 CPU-秒）然后睡，limit <1 core 时配额小于单线程跑满一个 100ms 周期所需，结构上必被节流，占空比越低 `throttled/periods` 越难看（500m 实测仍 66.7%），CPUThrottlingHigh 反复复燃。requests 仍是 `1m`，不占调度额度 |
 | Batch/CronJob | `200m–300m` | restic-backup, kube-bench |
 | 元数据处理 | `1000m` | calibre-metadata（每日凌晨） |
 
