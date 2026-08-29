@@ -1,7 +1,7 @@
 # Runbooks
 
 > 可直接执行的运维操作手册（SOP）。**只收针对本 homelab 基础设施、可照抄执行的流程。**
-> Last updated: 2026-08-29
+> Last updated: 2026-08-30
 
 | Runbook | 什么时候用 |
 |---------|-----------|
@@ -14,6 +14,7 @@
 | [cilium-gateway-cutover.md](cilium-gateway-cutover.md) | 重新部署或整体验证入口链路（Tunnel → Gateway → Service） |
 | [homelab-rebuild-ubuntu-24-04.md](homelab-rebuild-ubuntu-24-04.md) | 节点重建；Cilium 数据面变更后节点不稳定 |
 | [proxmox-host-upgrade.md](proxmox-host-upgrade.md) | 升 `pve` / `storage-106` 宿主的内核与 PVE 本体；含「两台都没配 Proxmox 源」的根因、☠️ 顺序反了会装上 `zfs-dkms` 的陷阱、停机面与 GRUB 回滚 |
+| [k3s-cluster-upgrade.md](k3s-cluster-upgrade.md) | 升两个集群的 k3s/Kubernetes 版本；含不可跳 minor / 控制面先于 worker / 不可降级三条硬约束、升级前的兼容性闸门（☠️ Kyverno 是当前天花板）、SQLite 后端下的回滚点与三处 pin 的收尾 |
 | [oracle-k3s-rebuild.md](oracle-k3s-rebuild.md) | oracle-k3s 节点不可恢复时重建（OCI 终止/OS 损坏）；含数据盘点、ArgoCD 控制面重装、ClusterMesh 重连 |
 | [argocd-control-plane-on-oracle.md](argocd-control-plane-on-oracle.md) | 重装/升级 ArgoCD、集群凭据过期、回滚控制面、`argocd.meirong.dev` 跨集群搬家 |
 | [stateful-service-cross-cluster-migration.md](stateful-service-cross-cluster-migration.md) | 把带 PVC 的服务在 homelab ↔ oracle 之间搬家（两遍 rsync、域名两步切换、退役与残余清扫） |
