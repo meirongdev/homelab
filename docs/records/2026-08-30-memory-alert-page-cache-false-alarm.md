@@ -5,10 +5,15 @@
 >       将连报至 2026-09-05，约 40 条。无 OOM、无重启、无查询降级
 > 根因: 规则用 `container_memory_working_set_bytes`，该指标 = `memory.current − inactive_file`，
 >       **含页缓存**。容器重启后读 TSDB 文件把 2652Mi 页缓存计入分子 → 99.45%；
->       同一时刻 Go 堆（RSS）只有 408Mi，换算成 RSS 口径是 **26.4%**
+>       同一时刻 Go 堆（RSS）只有 408Mi（= limit 的 13.3%）。把规则分子换成
+>       `container_memory_rss`、其余不动，同一个 7d 窗口算出来是 **26.4%**
+>       （rss 的 7d 峰值 810Mi，出现在别的时刻 —— ⚠️ 这两个数 2026-08-30 一度被混为一个）
 > 结论: **告警在测一个不构成 OOM 风险的量**，且该读数主要由**节点页缓存冷热**决定 ——
 >       对照实验：同容器/同数据/同 limit 的三次重启，峰值 **3072Mi(99.45%) → 2153Mi(70.1%)
->       → 728Mi(23.7%)**，跨度 5 倍。本次未改规则（见文末「未做」），只归档分析与判据
+>       → 728Mi(23.7%)**，跨度 5 倍
+> 处置: 2026-08-30 已改：分子 `working_set` → `rss`、窗口 `7d` → `2d`、阈值 `85%` → `80%`
+>       （回放标定，见文末「处置」），并先给 oracle 的 keep 正则补 `container_memory_rss`、
+>       加 `ContainerMemoryRssAbsent` 守卫该依赖
 > 触发: 按 [runbooks/proxmox-host-upgrade.md](../runbooks/proxmox-host-upgrade.md)
 >       做宿主内核升级（`7.0.0-28` → `7.0.0-30`），k8s-node 于 15:08 / 15:35 两次重启
 
@@ -167,7 +172,7 @@ id…89eef1b8a4（新容器）           720 Mi   ← 与 cgroup 直读 cur=697/
 
 | # | 问题 | 说明 |
 |---|---|---|
-| ① | **指标含页缓存** | 对 mmap/文件重的负载不是 OOM 风险的代理量。改 RSS 口径同一容器是 **26.4%** |
+| ① | **指标含页缓存** | 对 mmap/文件重的负载不是 OOM 风险的代理量。分子换 `container_memory_rss` 后同一容器是 **26.4%**（7d 峰值 810Mi；峰值那一刻的 rss 408Mi 只占 13.3%） |
 | ② | **读数由页缓存冷热决定** | 见上节实验 A：三次重启 99.45% / 70.1% / 23.70%，**跨度 5 倍**，与容器内存需求无关。拿它做 85% 判断是在测节点缓存状态 |
 | ③ | **`for: 30m` 是装饰品** | 分子是 7d 的 max，顶上去就是平台期，`for` 起不到去抖作用，只把首次投递推迟 30min。实际持续时间由窗口长度决定 = 7 天 |
 | ④ | **窗口与 doc 不一致** | [k8s-qos-resource-management.md](../reference/k8s-qos-resource-management.md) 给的排查查询用 `[2d]`，线上规则是 `[7d]` |
@@ -277,17 +282,39 @@ Go 1.16+ 在 Linux 默认 `MADV_DONTNEED`，GC 释放的 span 当场还给内核
 | 抬 limit 是否有效 | **未知** | 仍需「改 limit 复测」对照实验；实验 A 只改变缓存冷热、未动 limit |
 | 第一次尖峰为何比第二次高 1Gi | **有解释未闭环** | 缓存冷热可解释（实验 A），但该容器日志已销毁，无法直接验证 |
 
-## 未做（留待后续）
+## 处置（2026-08-30）与仍未做的
 
-本次**只归档，不动配置**：
+改动**顺序是硬的**，反了会让 oracle 侧静默失效或让守卫先烧 30 分钟：
 
-- [ ] 未建 Alertmanager 静默。该告警按 4h 重投，7d 窗口滚过前（约 2026-09-05 15:10 UTC）
-      不会自灭。⚠️ 静默是运行时状态、不在 git 里
-- [ ] 未改告警规则（指标口径 / 窗口 `7d→2d` / annotation 补当前值）
-- [ ] 未给 oracle 的 otel-collector keep 正则加 `container_memory_rss`
-- [x] ~~对照实验 A（热缓存下重启）~~ —— 2026-08-30 22:31 已做，见上文
+1. `cloud/oracle/manifests/monitoring/otel-collector-config.yaml` 的 keep 正则加
+   `memory_rss`（+58 条 series），等 otel-collector 随 configMapGenerator 哈希滚过、
+   确认 `container_memory_rss{cluster="oracle-k3s"}` 到货；
+2. 再改 `manifests/monitoring/alerts/prometheus-rules.yaml`：
+   分子 `container_memory_working_set_bytes` → **`container_memory_rss`**、
+   窗口 `[7d]` → **`[2d]`**（与 reference 的排查查询统一）、阈值 `0.85` → **`0.80`**；
+   同批新增 **`ContainerMemoryRssAbsent`**（`absent()` 判别）守卫分子来源。
+
+阈值标定（回放实测，别凭直觉改）：
+
+| 用途 | 容器 | `rss` 峰值 / limit |
+|---|---|---|
+| **真阳性锚点** | `personal-services/frontend`（multica 08-25，`memory.events max=69`、`memory.peak == memory.max`） | 870Mi / 当时 1024Mi = **85.0%** |
+| 当前全舰队最高 | `litellm/litellm` | **71.1%** |
+| 次高 | `trivy-system/trivy-operator` | 62.3% |
+| 本次的假阳性 | `monitoring/prometheus` | **25.7%**（working_set 口径 99.4%） |
+
+上线前用线上 Prometheus 直接跑过两条新表达式：`ContainerMemoryNearLimit` **0 条命中**，
+`ContainerMemoryRssAbsent` 对 `cluster="oracle-k3s"` **命中 1 条**（当时 keep 正则还没上，
+守卫按预期报警）——这两条读数本身就是「顺序必须先改 oracle」的证据。
+
+仍未做：
+
+- [ ] 未建 Alertmanager 静默。⚠️ 换口径后**这条告警自己就不再命中**（prometheus 25.7%），
+      不需要静默；旧告警实例会在规则同步后随下一轮评估消失
 - [ ] 未做「改 limit 复测峰值」的对照实验 —— 「抬/降 limit 有没有用」因此**仍是未知**
-- [ ] 未做实验 B（`drop_caches` 后重启，预期复现 95%+）—— ⚠️ 它会把 7d 窗口从实验当天重新计时
+- [ ] 未做实验 B（`drop_caches` 后重启，预期复现 95%+）—— ⚠️ 它会把窗口从实验当天重新计时
+- [ ] `cache` / `usage` / `max_usage` 在 oracle **仍未采集**，那边做不了 rss/cache 拆解
+- [ ] oracle 的 rss 历史从 keep 正则上线当天起算，`max_over_time[2d]` 头两天**只会少报**
 - [ ] Prometheus 的 `resources` 未动 —— 结论是**不该动**
 
 ⚠️ 2026-08-18 曾为同一条告警建过 7 天静默（那次是砍 series 造成的窗口错位），

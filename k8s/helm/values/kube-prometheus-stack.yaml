@@ -417,6 +417,16 @@ prometheus:
     #      Telegram 重复投递，连报一周。
     #      ⚠️ 静默是 Alertmanager 运行时状态、**不在 git 里**，到期自动失效；
     #         若到期后仍然报，那就是真的逼近了，别再续一条 —— 去查为什么。
+    # ☠️ 2026-08-30 结账：它确实又报了（99.45%），但**不是真的逼近** —— 上面那句
+    #    「仍然报 = 真的逼近了」只在分子测的是不可回收内存时成立，而当时的分子
+    #    `container_memory_working_set_bytes` **含页缓存**：3055Mi 峰值里 2652Mi 是
+    #    重启后 WAL replay / mmap index 读进来的 file cache，容器顶死 3Gi 仍
+    #    `exitCode 0 / Completed`。同窗口 rss 峰值只有 810Mi。
+    #    处置是改规则而不是改这里的 resources：分子已换成 `container_memory_rss`、
+    #    窗口 7d→2d、阈值 85%→80%（manifests/monitoring/alerts/prometheus-rules.yaml）。
+    #    ✅ **本条 resources 刻意不动** —— 换口径后本容器是 25.7%，稳态 rss 504Mi 与
+    #    requests 512Mi 吻合，抬/降 limit 都没有依据。
+    #    → docs/records/2026-08-30-memory-alert-page-cache-false-alarm.md
     resources:
       requests:
         cpu: 200m

@@ -421,25 +421,86 @@ spec:
         #    ⚠️ 别改回按 pod join 来「修」漏报——那样 CronJob 假阳性立刻回来。
         #    验证过：改前命中 repo-server 93.29% + backup 90.03%（后者是假的）；
         #    改后只剩 repo-server 93.29%，356 条 series 无 many-to-many 报错。
+        # ☠️ 2026-08-30 换分子口径：`working_set` → **`rss`**，窗口 7d → 2d，阈值 85% → 80%。
+        #    起因：08-29 宿主内核升级重启后本条对 monitoring/prometheus 报 **99.45%**，
+        #    而那个容器的终止状态是 `exitCode 0 / Completed` —— 顶死 limit 也没被杀。
+        #    峰值 3055Mi 里 **2652Mi 是页缓存**，同窗口 rss 峰值只有 810Mi = 26.4%。
+        #    `working_set = memory.current − inactive_file`，**含 page cache**；干净的
+        #    file page 永远先于 OOM 被回收，所以它逼近 limit 并不蕴含 OOM 风险。
+        #    更糟的是这个读数由**节点页缓存冷热**决定：同容器 / 同数据 / 同 limit 重启三次，
+        #    峰值 3072Mi(99.45%) → 2153Mi(70.1%) → 728Mi(23.70%)，跨度 5 倍。
+        #    → records/2026-08-30-memory-alert-page-cache-false-alarm.md
+        # ✅ **80% 是回放标定出来的，不是拍的**（做法同下面 CPU 节流那条）：
+        #      唯一确证的真阳性 personal-services/frontend（multica，08-25，
+        #        `memory.events max=69` 且 `memory.peak == memory.max`）：
+        #        rss 峰值 **870Mi / 当时 limit 1024Mi = 85.0%**
+        #      当前全舰队 rss 口径最高：litellm **71.1%** · trivy-operator 62.3% · 其余 <40%
+        #    → 80% 正落在 71.1 与 85.0 中间，两侧各留 9 / 5 个点。
+        #    ⚠️ 别升回 85%：那条线正好压在 multica 那次的读数上，真阳性变掷硬币。
+        #    ⚠️ 别降到 75%：litellm 常态 71.1%，会变常亮黄灯。
+        #    顺带把阈值拉回 reference/k8s-qos-resource-management.md 写的「>80% 就该抬 limit
+        #    或查泄漏」——原先那 5 个点是给 working_set 的噪声留的余量，换 rss 后噪声源没了。
+        # ⚠️ **认下的取舍**：`rss` 只是 cgroup v2 的 `memory.stat.anon`，不含 kernel/tmpfs/
+        #    mlocked。本仓库没有 `medium: Memory` 的 emptyDir（jobs-sg/web 那处是特意用磁盘的），
+        #    所以 anon 是这里唯一有分量的不可回收项；真被杀了还有 ContainerOOMKilled 兜底。
+        #    ⚠️ 已知会漏的一类：`GOMEMLIMIT` 硬接 limit 的 Go 应用（08-24 grafana，
+        #    第三种形状）—— 它是 GC 加班而不是 OOM，rss 未必到 80%。那一类的判据是
+        #    `next_gc` / GC 频率，不归本条管。
+        # ⚠️ 窗口 7d→2d：与 reference 里的排查查询统一（原先两边不一致）。代价是回看更短，
+        #    收益是一次瞬态尖峰把告警钉住的时间从 7 天降到 2 天。
+        #    `for: 30m` 在这里**不是去抖**（分子已是 2d 的 max，顶上去就是平台期），
+        #    它只把首次投递推迟 30 分钟；要熄灭得等 2d 窗口滚过去。
         - alert: ContainerMemoryNearLimit
           expr: |
             max by (cluster, namespace, pod, container) (
-              max_over_time(container_memory_working_set_bytes{container!=""}[7d])
+              max_over_time(container_memory_rss{container!=""}[2d])
             )
             / on (cluster, namespace, container) group_left
             max by (cluster, namespace, container) (
               kube_pod_container_resource_limits{resource="memory"}
-            ) > 0.85
+            ) > 0.80
           for: 30m
           labels:
             severity: warning
             component: workload
           annotations:
-            summary: "{{ $labels.namespace }}/{{ $labels.container }} 的 7d 内存峰值已达 limit 的 {{ $value | humanizePercentage }}（{{ $labels.cluster }}）"
+            summary: "{{ $labels.namespace }}/{{ $labels.container }} 的 2d RSS 峰值已达 limit 的 {{ $value | humanizePercentage }}（{{ $labels.cluster }}）"
             description: |
-              一次尖峰就会 OOMKill，而 OOM 后干净重启、无人察觉。现在抬 limit 还来得及。
+              分子是 `container_memory_rss`（cgroup v2 的 anon），**不含页缓存**——响了通常
+              是真的在逼近 OOM，现在抬 limit 还来得及。
               ⚠️ 控制面组件（ArgoCD / Kyverno / trivy / opencost）的峰值随**被管对象规模**
               增长而非流量增长——每次新增大 CRD 的 App 或扩容之后要回头复查这条。
+              ⚠️ 排查时按 `id` 拆序列再看，别用聚合值：容器重启后 5 分钟内，旧容器的序列
+              仍在 staleness 回看窗内，`max by (...)` 读到的是上一个容器的值。
+
+        # ☠️ 2026-08-30 加：上一条的**分子来源守卫**。
+        # ContainerMemoryNearLimit 依赖 `container_memory_rss`，而这个指标在 oracle 侧要靠
+        # cloud/oracle/manifests/monitoring/otel-collector-config.yaml 的 keep 正则显式放行
+        # （homelab 走 ServiceMonitor 抓 kubelet，天然就有）。那条正则被改窄或回滚 =
+        # 分子无 series = 上一条在 oracle **恒不触发**，而「恒不触发」与「没有容器超阈值」
+        # 在任何面板上都一模一样，不会有人发现 —— 这正是 08-30 那次排查里记下的坑。
+        # ⚠️ 用 `absent()` 而不是 `count(...) == 0`：series 全没的时候 count 不产出任何样本，
+        #    比较式永远不评估（同 reference/observability-alerting-slo.md 记的那类陷阱）。
+        # ⚠️ 因此**改动顺序是硬的**：先上 oracle 的 keep 正则、确认 series 到货，再改规则。
+        #    顺序反了这条会先烧 30 分钟。
+        - alert: ContainerMemoryRssAbsent
+          expr: |
+            absent(container_memory_rss{cluster="homelab"}) == 1
+            or
+            absent(container_memory_rss{cluster="oracle-k3s"}) == 1
+          for: 30m
+          labels:
+            severity: warning
+            component: observability
+          annotations:
+            summary: "container_memory_rss 在 {{ $labels.cluster }} 已停止入库 —— ContainerMemoryNearLimit 正在该集群静默失效"
+            description: |
+              ContainerMemoryNearLimit 的分子没有 series，该集群的内存预警等于关闭，
+              且外观与「没有容器超阈值」完全一致。
+              oracle-k3s：查 cloud/oracle/manifests/monitoring/otel-collector-config.yaml
+              的 `prometheus/cadvisor` keep 正则是否还含 `memory_rss`，以及 otel-collector
+              DaemonSet 是否随 configMapGenerator 的哈希滚过。
+              homelab：查 kube-prometheus-stack 的 kubelet ServiceMonitor / cAdvisor 采集。
 
         # 2026-08-18 加：CPU 节流的**可投递**版本。
         # 动机：upstream 的 `CPUThrottlingHigh` severity 是 `info`，而 Alertmanager 路由
