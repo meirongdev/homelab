@@ -1,8 +1,10 @@
 # Calibre-Web-Automated Migration Implementation Plan
 
-> **状态: ✅ 已完成（2026-02-21）** —— CWA 生产运行于 homelab `personal-services`，`book.meirong.dev`。
-> ⚠️ 下文的 NFS 路径与 `manifests/calibre-web.yaml` 均已变更：书库 2026-07-11 迁 `local-path`，
-> manifest 现在是 `k8s/helm/manifests/personal-services/calibre-web.yaml`。
+> **状态: ✅ 已完成（2026-02-21）** —— CWA 仍在生产运行（`book.meirong.dev`）。
+> ⚠️ **落点与存储都已变更，下文路径全部过期**：书库 2026-07-11 从 NFS 迁 `local-path`；
+> 整套 calibre 2026-08-03 迁至 **oracle-k3s**，manifest 现在是
+> `cloud/oracle/manifests/personal-services/calibre-web.yaml`。
+> 当前事实见 [reference/services.md](../../reference/services.md)。
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 

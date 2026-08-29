@@ -1,6 +1,6 @@
 # 新机器开发环境 bootstrap（配到能改 homelab repo）
 
-> Last updated: 2026-08-20
+> Last updated: 2026-08-29
 > 面向「换了一台 Mac，要把本机环境配到能 clone、改、验证这个 repo」的流程。
 > 排障/恢复类走 [runbooks/](../runbooks/README.md)；AI 助手上下文见 [../AGENTS.md](../AGENTS.md)（唯一上下文文件，细节按域在 [reference/](../reference/README.md)）。
 
@@ -27,6 +27,14 @@ uv tool install ansible        # 提供 ansible-playbook（justfile 直接调它
   （⚠️ `2026-08-03-tf-state-r2.md` 的迁移表只列了其中 5 个 —— 它写在
   `proxmox/terraform-storage` 存在之前，也没覆盖 `zitadel/terraform`。）
 - `kubectl`：context 名固定为 `k3s-homelab` 与 `oracle-k3s`。
+
+☠️ **macOS 本地网络授权（TCC）会让 terraform/kubectl 连内网 100% `no route to host`**。
+未获授权的**非 Apple 签名**二进制（terraform / kubectl / Homebrew python）访问 LAN 一律
+`EHOSTUNREACH`，而 `ping`/`curl`/`ssh`/`nc` 是 Apple 自带故全通 —— 这个差异极具迷惑性，
+当年据此误判成「网络正常，是 provider 的锅」。Tailscale 与 loopback 不受限，所以平时无感。
+**根治**：系统设置 → 隐私与安全性 → 本地网络，给终端（及 IDE）授权。
+不依赖授权的绕法（SSH 隧道 / Tailscale 寻址）已固化进 `proxmox/terraform-storage`。
+→ [复盘](../records/2026-08-13-macos-local-network-tcc.md)
 
 ## 3. Clone 与接入 kubeconfig
 
