@@ -30,5 +30,22 @@ spec:
               #   allocatable 1800m，requests 一度到 83%。CPU limit 保持 "1" 不动
               #   （备份是夜间错峰的一次性任务，让它跑快点是对的），但别再据此
               #   给别的工作负载放宽 request。
+              #
+              # 2026-08-29: 1Gi→1.5Gi（7d 峰值 968.7Mi=94.6%，触发 08-24 定的抬升线）。
+              # ☠️ 再修正一次归因：也不是「当晚增量大小」——Added 每晚恒定 ~210MiB
+              #   （/work 里 sqlite/pg_dump 翻新），全量重读晚也只有 214MiB。决定峰值的是
+              #   **当晚被迫重切块的字节数**，而它是双峰的：
+              #   安静晚 ~26 文件 changed → 100–160Mi；重读晚 6563 文件（24.5G 书库全量,
+              #   跑 4:56 而非 0:29）→ 600–970Mi。
+              #   重读晚的成因：calibre-web 带 fsGroup:1000 且书库 PV 是 local 型 →
+              #   pod 每次重启 kubelet 都递归 chown/chmod 整库（fsGroupChangePolicy 默认
+              #   Always，无容器日志）→ ctime 全变 → restic 视为全 changed。节点重启
+              #   08-22(×2)/08-26/08-27 精确对应峰值晚 08-23/27/28（623/823/969Mi），
+              #   无重启晚全部安静。根治在 calibre-web 侧加 fsGroupChangePolicy:
+              #   OnRootMismatch（见 cloud/oracle/manifests/personal-services/calibre-web.yaml）。
+              #   1.5Gi ≈ 观测峰值的 1.55 倍；合法的整库改写（如 embed 元数据批处理）
+              #   也会造出同级峰值，所以即使根治了 fsGroup 扫盘这条 limit 也不白抬。
+              #   下次触发线：**重读晚**峰值 > 1.2Gi（=80%）→ 说明书库显著变大或机制
+              #   又变了，先查根因，别机械抬 2Gi。
               resources:
-                limits: { cpu: "1", memory: "1Gi" }
+                limits: { cpu: "1", memory: "1.5Gi" }
