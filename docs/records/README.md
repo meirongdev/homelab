@@ -4,6 +4,7 @@
 
 | 日期 | 记录 | 内容 |
 |------|------|------|
+| 2026-08-30 | [memory-alert-page-cache-false-alarm](2026-08-30-memory-alert-page-cache-false-alarm.md) | `ContainerMemoryNearLimit` 报 Prometheus 99.45%，峰值 87% 是页缓存（RSS 口径 26.4%）；容器 `usage` 顶死 3072Mi=limit 却**没有 OOM**。☠️ 对照实验：同容器同 limit 重启三次，峰值 **99.45%/70.1%/23.7%** —— 读数由**节点页缓存冷热**决定。另含：ws 回落≠内存被回收 · v2 上 failcnt 是废指标 · 重启后 5 分钟聚合读到旧容器 · 加 RSS 判据会静默关掉 oracle 那半 |
 | 2026-08-22 | [podcast-tts-unload-pending](2026-08-22-podcast-tts-unload-pending.md) | 播客整集败于 Mac 换模型时的 `is busy`：重试只等 15s；☠️ 并发被实测否掉（5 路比串行快一倍），病因是耐心不是并发 |
 | 2026-08-19 | [opencost-bingen-replay-crashloop](2026-08-19-opencost-bingen-replay-crashloop.md) | collector WAL 积 5.5GB，启动全量重放 3m43s > 探针预算 160s → 节点重启后永久崩循环烧 1.1/2 核 24h；retention 参数就是重放窗口 |
 | 2026-08-18 | [multica-frontend-idle-rightsizing-oom](2026-08-18-multica-frontend-idle-rightsizing-oom.md) | 按「空载实测」把 frontend 上限收到 512Mi → OOM 崩循环（`memory.peak` 顶死上限、`oom_kill` 6 次）；sharp 图片优化单任务 +68Mi 是空载采样看不见的；CPU 500m throttle 66% 让首页间歇 4.5s，**全程对外 200 故无告警** |
