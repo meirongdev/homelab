@@ -13,7 +13,7 @@
 # （如 wizardzines 的 `Networking ACK (Julia Evans)`）。
 # 但**书本身是完整的** —— 扉页有真实书名与作者，前言/封底可作简介，目录可提炼标签。
 #
-# ☠️☠️ **本作业当前是坏的（2026-08-20 复核）—— 别照现状 unsuspend，它连不上。**
+# ☠️☠️ **本作业当前是坏的 —— 别照现状 unsuspend，它连不上。**
 #
 # 下面所有 `LLM_URL` 默认值与 env 曾指向跨集群的 `dgx-proxy`（Cilium 全局服务），
 # 那个 Service **随旧 LLM 网关一起在 2026-08-08 退役了**，现在两集群的全局 Service
@@ -25,16 +25,44 @@
 # 实测过 /v1/models 200、真实推理 2.7s。完整原委见
 # docs/reference/tailscale-network.md 的「Tagged devices cannot reach shared nodes」一节。
 #
-# 要复活它，必须先决定走哪条路（**两条都不是改一行就完事**）：
-#   a) 指向 LiteLLM（2026-08-16 上线的接替网关，homelab `litellm` ns）——
-#      但 LiteLLM 的 Service 是 ClusterIP，oracle 要么重新做一个全局 Service
-#      （等于把 dgx-proxy 那套再搭一遍），要么走公网 `llm.meirong.dev`；
-#      且 LiteLLM **强制 key 鉴权**，需要新开一把 virtual key → Vault → ESO 到本 ns。
-#   b) 明确退役本作业（LLM 生成的那 234 本已在 2026-08-08 跑完，见
-#      docs/reference/calibre-metadata.md 的终态）。⚠️ 删文件前先 `grep '^kind:'`：
-#      本文件含 ConfigMap + CronJob 两个对象，ArgoCD 会一起 prune。
+# ── 2026-08-29 复核：结论从「待定去留」改为「值得修，别退役」 ───────────────
+# 上一版文件头把退役列为平权选项，依据是「那 234 本已跑完」。该依据不成立：
+#   · 候选池今天仍有 **33 本**（作业自带 SQL 现算），其中 **17 本是 08-08 之后新入库、
+#     从未跑过**（另 16 本是上轮啃不动的硬骨头）。三周新增 17 本 ≈ 每周 5–6 本，
+#     且都是自出版/AI 新书（`101 Claude Code Tips`、`Wispr Flow` 之类），
+#     正是外部书目库查不到、周跑的 backfill 反复扑空的那一类。**这是常设需求不是一次性积压。**
+#   · 上轮成效有据：库里 **202 本**带 `#meta_src = llm-from-content` 标记（234 候选里 86%）。
+#   · 后端活着：homelab pod 实测 DGX `/v1/models` 200，`deepseek-v4-flash` 在线
+#     （max_model_len 1000000）—— 正是 08-07 三轮 DRY-RUN 调校护栏时用的那个模型，
+#     换模型等于护栏全部要重验，别换。
+#   · 根因未变：oracle pod 直连 `100.97.87.120:8000` 仍然 **timeout**（同日实测）。
 #
-# 在做出选择之前，保持 suspend 不动就是正确状态。
+# 修复比上一版估的便宜，但**仍不是改一行**。三个卡点，按顺序解决：
+#   1) 网络。LiteLLM（homelab `litellm` ns，ClusterIP:4000）已有公网路由
+#      `llm.meirong.dev`，且 oracle pod 实测可达 —— ⚠️ 但裸 urllib 拿到的是
+#      **Cloudflare `error code: 1010`（403）**，按客户端签名拦截；换成浏览器 UA 立刻 200。
+#      靠伪装 UA 绕自家 WAF 能跑但脆（WAF 一收紧就再次静默失效，本作业最擅长静默）。
+#      更稳的是照 `cloud/oracle/manifests/monitoring/monitoring-external.yaml` 那套
+#      跨集群范式：homelab 侧给 litellm 开一个 Tailscale NodePort，oracle 直连
+#      `100.94.186.7:<port>`，不经 Cloudflare。**推荐走这条。**
+#   2) 鉴权。LiteLLM 强制 key，而**本脚本目前只发 `Content-Type`、根本没有
+#      Authorization 头**（见下方 `urllib.request.Request(...)`）—— 走网关必须改代码，
+#      不只是改 env。另需一把 virtual key → Vault `homelab/litellm` 同款 → ESO 到本 ns
+#      （本 ns 的 ESO 已有 4 个在跑，照抄 readlist-secrets 即可）。
+#      ☠️ virtual key 的**模型白名单在 Postgres 不在 git**，不放行 `deepseek-v4-flash`
+#      就会「清单正确 + Synced + 调用全挂」，见 reference/litellm-gateway.md。
+#   3) 模型名。网关同时提供 `deepseek-v4-flash` 与 `custom_dgx/deepseek-v4-flash`
+#      两个别名，本作业现有的 `LLM_MODEL=deepseek-v4-flash` 直接可用，不用改。
+#      ⚠️ `LLM_URL` 是**完整端点**（脚本直接 `Request(LLM_URL, data=...)`），
+#      要写到 `/v1/chat/completions`，不是 base URL。
+#
+# 对照：同集群的 `jobs-sg/cronjob-enrich.yaml` 是**直连 DGX、不经网关**（省掉 virtual key
+# 那条 Vault 依赖）。本作业学不了 —— 它在 oracle，而这正是 1) 存在的原因。
+# 反过来也别想着把本作业搬去 homelab：它挂 `calibre-books-local` PVC，PVC 不跨集群。
+#
+# 在完成 1)+2) 之前，保持 suspend 不动就是正确状态。
+# ⚠️ 若将来仍决定退役：删文件前先 `grep '^kind:'` —— 本文件含 ConfigMap + CronJob
+# 两个对象，ArgoCD 按目录同步会一起 prune。
 apiVersion: v1
 kind: ConfigMap
 metadata:
