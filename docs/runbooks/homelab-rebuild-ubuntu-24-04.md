@@ -8,7 +8,7 @@
 > ⚠️ **Phase 4 不要照抄**：其中的保守模式（`kubeProxyReplacement: false`、`gatewayAPI.enabled: false`）
 > 是当年为绕开那个 BPF bug 的临时手段。**标准配置是 `kubeProxyReplacement: true` + Cilium Gateway API**，
 > 见 `k8s/cilium/README.md` 与 `just deploy-cilium`。
-> Last updated: 2026-08-25
+> Last updated: 2026-08-29
 
 ## Goal
 
@@ -46,7 +46,7 @@ At the end of this runbook:
   （`media` ns 的 5 个只读 NFS PV 确实不受影响，它们的真身在 106 的 ZFS 上；
   worker 上那 2 个 local-path PVC 也不受影响。）
 - This does destroy the homelab cluster control plane and all in-cluster resources on the VM.
-- The repo's active Proxmox task runner is `proxmox/terraform/justfile`. The historical `Makefile` is currently empty.
+- The repo's active Proxmox task runner is `proxmox/terraform/justfile`.
 - Homelab no longer relies on `ufw`; Cilium owns the datapath and the node should keep host firewalling disabled to avoid reboot-time loss of SSH / kube-apiserver reachability.
 - `qemu-guest-agent` is part of the homelab baseline so Proxmox can inspect the guest even when SSH is unavailable.
 - The Cilium config source of truth is `k8s/cilium/values.yaml` (applied by `just deploy-cilium`; see `k8s/cilium/README.md`). If the node is on an unstable kernel, temporarily run Cilium in conservative mode by setting in that file:

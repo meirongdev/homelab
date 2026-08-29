@@ -12,8 +12,7 @@
 
 ## 目录
 
-- **`terraform/`** — pve 上的 k8s-node VM。`just init/plan/apply`
-  （⚠️ 这里的 `Makefile` 是 0 字节空文件，**别用 make**）。
+- **`terraform/`** — pve 上的 k8s-node VM。`just init/plan/apply`。
 - **`terraform-storage/`** — 106 上的 worker VM（2026-08-15 起）。同样用 `just`。
   详见该目录 README；内存分配链在 `variables.tf` 的注释里。
 - **`ansible/`** — 两台宿主的运维：cloud image 下载、省电/散热
