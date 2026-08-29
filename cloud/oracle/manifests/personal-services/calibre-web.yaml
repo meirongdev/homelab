@@ -9,8 +9,11 @@
 # （含 linux/arm64），不是 amd64 专属 digest，故 aarch64 的 oracle 可直接拉。
 # （对照旧网关 oauth2-proxy 那个坑：那次 pin 的是单架构 digest。）
 #
-# ⚠️ NETWORK_SHARE_MODE=true / CWA_WATCH_MODE=poll 保持不变。它们当年是为 NFS 加的，
-# 2026-07-11 全面迁 local-path 后其实已无必要，但迁移期刻意不改行为 —— 一次只动一件事。
+# ⚠️ NETWORK_SHARE_MODE=true / CWA_WATCH_MODE=poll 当年是为 NFS 加的。
+# 2026-08-29 更正旧注释「迁 local-path 后已无必要」：NSM=true 如今是主动选择——
+# 关掉它上游会每摄入一个文件就 chown -R 全库（no-op chown 也刷 ctime → restic
+# 全库重读），详见下方 permission-fixer 容器的注释。poll 才是真·可清理遗产
+# （local-path 上 inotify 可用），动不动均可。
 #
 # 迁移过程与取舍见 docs/plans/architecture/2026-08-02-homelab-to-oracle-workload-migration.md
 apiVersion: v1
@@ -220,6 +223,22 @@ spec:
               readOnly: true
         # Fixes permissions on files created by the cwa-ingest pipeline, which runs
         # as root and produces files that the web process (uid 1000) cannot edit.
+        # ⚠️ 2026-08-29 核查：这不是可顺手删掉的 NFS 遗产，前提今天仍成立——
+        #  ① ingest 仍以 root 跑（web 进程是 abc/1000），实测 umask 0022 → 无本容器时
+        #    新书落盘 root:1000 644（group 只读，web 改不了内容）、新目录 2755（写不进）。
+        #    08-24 摄入的书至今 uid 0，全靠本容器修成 666 才可编辑。
+        #  ② 上游其实自带修复（ingest_processor.py set_library_permissions：每处理一个
+        #    文件就在 finally 里 chown -R abc:abc 全库），但 NETWORK_SHARE_MODE=true
+        #    会跳过它且无 chmod 兜底 —— 本容器就是在替被关掉的它干活。
+        #  ③ 别用「关 NSM 换上游方案」退役本容器：那等于每摄入一本书 chown -R 一遍
+        #    ~24.5G 书库，且实测属主不变的 no-op chown 也刷 ctime → 每次摄入当晚
+        #    restic 全库重读（正是 fsGroupChangePolicy=OnRootMismatch 修掉的那类
+        #    内存峰值）。本容器只 chmod 漂移的新文件，restic 只多读本来就要读的新书。
+        #  ④ UMASK=000 让文件生来 666 也不通：本镜像没插桩 UMASK env
+        #    （/etc/s6-overlay 里 grep 不到），设了不生效。
+        #  退役条件 = 上游换机制（ingest 降权，或 NSM 模式补 chmod 兜底，盯 CWA
+        #  release note）；届时同步处理 fix-permissions-init、securityContext 的
+        #  fsGroup 注释、docs/reference/k8s-qos-resource-management.md 拿它举例那行。
         - name: permission-fixer
           image: busybox:1.36
           command:
