@@ -247,9 +247,12 @@ max by (cluster,namespace,pod,container) (kube_pod_container_resource_limits{res
 `max_over_time` 是关键——尖峰型负载看瞬时值会整个漏掉（`argocd-application-controller`
 被杀时的瞬时读数只有 0.67G，2d 窗口才照出 94%）。
 
-⚠️ **上面这条排查查询用 `[2d]`，线上 `ContainerMemoryNearLimit` 规则用的是 `[7d]`** ——
-两者口径不一致（2026-08-30 发现，尚未统一）。窗口越长，一次瞬态尖峰把告警钉住的时间越长：
-7d 窗口下一个 60 秒的重启尖峰会连报 7 天，且 `for` 完全起不到去抖作用。
+✅ **2026-08-30 已统一**：线上 `ContainerMemoryNearLimit` 原先用 `[7d]`，现已改成 `[2d]`，
+与上面这条排查查询一致。窗口越长，一次瞬态尖峰把告警钉住的时间越长：7d 窗口下一个 60 秒的
+重启尖峰会连报 7 天，且 `for` 完全起不到去抖作用（分子已是窗口 max，顶上去就是平台期）。
+⚠️ **同批把线上规则的分子从 `working_set` 换成了 `rss`、阈值 85%→80%**（理由见下面第四种形状）。
+上面这条排查查询仍用 `working_set`，是**故意的**：排查时要先看到含页缓存的那个数，
+才能与 rss 对照判断属不属于第四种形状。
 
 ⚠️ **`KubePodCrashLooping` 抓不到这类事件** —— 容器 OOM 后干净重启，从不进
 `CrashLoopBackOff`。
@@ -263,7 +266,8 @@ max by (cluster,namespace,pod,container) (kube_pod_container_resource_limits{res
 > |---|---|---|
 > | `ContainerOOMKilled` | 事后 | 双集群（kube-state-metrics） |
 > | `ContainerOOMKilledCadvisor` | 事后 | **仅 homelab**（kubelet 内嵌 cAdvisor 的 OOM 计数器；oracle 侧该指标未被采集），用来交叉验证上一条的标签值拼写 |
-> | `ContainerMemoryNearLimit` | **事前**（7d 峰值 >85% limit） | 双集群 |
+> | `ContainerMemoryNearLimit` | **事前**（**2d `rss` 峰值 >80% limit**，2026-08-30 改口径） | 双集群 |
+> | `ContainerMemoryRssAbsent` | **元**（守卫上一条的分子来源） | 双集群 |
 >
 > ⚠️ `ContainerOOMKilled` 的 `reason="OOMKilled"` **至今未经实测证实** —— 30d 窗口内
 > 两集群只出现过 `Unknown`/`Error`/`Completed`，没有任何 OOMKilled 样本。第一次真实
@@ -272,7 +276,8 @@ max by (cluster,namespace,pod,container) (kube_pod_container_resource_limits{res
 > ⚠️ **没有独立部署 cAdvisor**——`container_*` 指标全部来自 **kubelet 内嵌 cAdvisor**：
 > homelab 经 kube-prometheus-stack 全量入库；oracle 的 otel-collector
 > `prometheus/cadvisor` receiver 的 keep 正则只保留 `container_(cpu_usage_seconds_total|
-> memory_working_set_bytes)`（为 KRR）。所以 `container_oom_events_total`（homelab 116 条 /
+> memory_working_set_bytes|memory_rss)`（前两个为 KRR，`memory_rss` 是 2026-08-30 为
+> `ContainerMemoryNearLimit` 换口径补的）。所以 `container_oom_events_total`（homelab 116 条 /
 > oracle 0 条）与 `container_cpu_cfs_throttled_*`（homelab 41 条 / oracle 0 条）
 > 在 oracle 侧**不进入中枢 Prometheus**，查询返回**空结果**，与「值为 0」外观完全一致 ——
 > 2026-08-10 就据此误下过「oracle 无 CPU 节流」的结论。在 oracle 上判断 CPU 是否吃紧，
@@ -349,10 +354,13 @@ max by (cluster,namespace,pod,container) (kube_pod_container_resource_limits{res
 > | 时刻 | working_set | **rss** | **cache** | usage |
 > |---|---|---|---|---|
 > | 重启前稳态 | 990 Mi | 631 Mi | 1160 Mi | 1829 Mi |
-> | **峰值** | **3055 Mi (99.45%)** | **408 Mi (26.4%)** | **2652 Mi** | **3072 Mi (=limit)** |
+> | **峰值** | **3055 Mi (99.45%)** | **408 Mi (13.3%)** | **2652 Mi** | **3072 Mi (=limit)** |
 >
 > `usage` **精确等于 `memory.max`**（顶了两次），内核回收缓存了事，容器
-> `exitCode 0 / Completed` —— 顶死上限但没被杀。**同一容器换 RSS 口径是 26.4%，不是 99.45%。**
+> `exitCode 0 / Completed` —— 顶死上限但没被杀。
+> ⚠️ **别把这两个数混成一个**（2026-08-30 订正）：峰值那一刻的 rss 408Mi 只占 limit 的 **13.3%**；
+> 而把规则分子换成 `container_memory_rss`、其余不动，同一个 7d 窗口算出来是 **26.4%**
+> （rss 的 7d 峰值 810Mi，出现在别的时刻）。**同一容器换 RSS 口径是 26.4%，不是 99.45%。**
 >
 > ☠️ **「working_set 塌下去」≠「内存被回收」**。同日第二次重启是对照组，它没顶到 limit
 > 却同样断崖：
@@ -402,16 +410,38 @@ max by (cluster,namespace,pod,container) (kube_pod_container_resource_limits{res
 > v2 判据：容器活着时读 `memory.events` 的 `max`/`oom`/`oom_kill`，
 > 或用可回溯的 `container_memory_max_usage_bytes`（**仅 homelab 采集**）。
 >
-> ☠️ **想给规则加 RSS 判据滤掉这类假阳性，先看 oracle 有没有这个指标**：
-> `rss` / `cache` / `usage` / `max_usage` 在中枢 Prometheus 里全是 homelab 162 条 /
-> **oracle 0 条**（`cloud/oracle/manifests/monitoring/otel-collector-config.yaml` 的 keep
-> 正则只留 `container_(cpu_usage_seconds_total|memory_working_set_bytes)`）——
-> **oracle 唯一入库的容器内存指标，恰好就是有误导性的那一个**，那边做不了上述拆解
-> （只能 SSH 读 `memory.stat`）。直接 `and` 一条 RSS 判据会让 oracle 侧该告警**恒不触发**，
-> 外观与「没超阈值」完全一致。要么先扩 keep 正则，要么用 `cluster="homelab"` 限定
-> 并把不对称写进注释。
+> ☠️ **改这条规则前先看 oracle 有没有那个指标 —— 这是本次最容易踩的坑**。
+> 2026-08-30 处置前的实测：`rss` / `cache` / `usage` / `max_usage` 在中枢 Prometheus 里
+> 全是 homelab 162 条 / **oracle 0 条**，因为
+> `cloud/oracle/manifests/monitoring/otel-collector-config.yaml` 的 keep 正则只留了
+> `container_(cpu_usage_seconds_total|memory_working_set_bytes)` ——
+> **oracle 唯一入库的容器内存指标，恰好就是有误导性的那一个**。
+> 直接把 RSS 判据加进规则会让 oracle 侧该告警**恒不触发**，外观与「没超阈值」完全一致。
 >
-> 完整现场与判据 → [records/2026-08-30-memory-alert-page-cache-false-alarm.md](../records/2026-08-30-memory-alert-page-cache-false-alarm.md)
+> ✅ **处置（2026-08-30）**：keep 正则已加 `memory_rss`（+58 条 series），规则分子随后改成
+> `container_memory_rss`。**改动顺序是硬的**：先上 keep 正则、确认 series 到货，再改规则。
+> 另加 `ContainerMemoryRssAbsent`（`absent()` 判别）守卫这个依赖 —— keep 正则将来被改窄或
+> 回滚时，它会响，而不是让内存预警在那一侧静默关闭。
+> ⚠️ `cache` / `usage` / `max_usage` 在 oracle **仍然没有**：那边要做本节这套 rss/cache 拆解，
+> 只能 SSH 读 `memory.stat`。
+> ⚠️ oracle 的 rss 历史从 keep 正则上线那天起算，`max_over_time[2d]` 在头两天内**只会少报**。
+>
+> ✅ **换口径后的阈值是回放标定的，不是拍的**（2026-08-30）：
+>
+> | 用途 | 容器 | `rss` 峰值 / limit |
+> |---|---|---|
+> | **真阳性锚点** | `personal-services/frontend`（multica 08-25，`memory.events max=69` 且 `memory.peak == memory.max`） | 870Mi / 当时 1024Mi = **85.0%** |
+> | 当前全舰队最高 | `litellm/litellm` | **71.1%** |
+> | 次高 | `trivy-system/trivy-operator` | 62.3% |
+> | 换口径前的假阳性 | `monitoring/prometheus` | 25.7%（working_set 口径是 99.4%） |
+>
+> **80% 落在 71.1 与 85.0 中间**，两侧各留 9 / 5 个点。⚠️ 别升回 85%（正好压在 multica
+> 那次的读数上，真阳性变掷硬币），也别降到 75%（litellm 常态 71.1%，会变常亮）。
+> ⚠️ **认下的取舍**：`rss` 只是 `memory.stat.anon`，不含 kernel/tmpfs/mlocked，
+> 且**会漏掉第三种形状**（`GOMEMLIMIT` 硬接 limit 的 Go 应用是 GC 加班而不是 OOM，
+> rss 未必到 80%）—— 那一类的判据是 `next_gc` / GC 频率，不归这条告警管。
+>
+> > 完整现场与判据 → [records/2026-08-30-memory-alert-page-cache-false-alarm.md](../records/2026-08-30-memory-alert-page-cache-false-alarm.md)
 
 ---
 
