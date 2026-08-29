@@ -1,6 +1,6 @@
 # 清单安全规则 (Manifest Safety Checks)
 
-> Last updated: 2026-08-25
+> Last updated: 2026-08-30
 > Status: 生效事实
 > Scope: CI 强制的仓库规则 —— source of truth。三个检查器：
 > `scripts/check-manifests.py` 的 **H1-H5**（清单结构）、
@@ -303,8 +303,8 @@ uv run --with pyyaml python scripts/check-manifests.py             # H1-H5
 uv run --with pyyaml python scripts/check-manifests.py --list      # 只看规则与出处
 uv run --with pyyaml python scripts/check-version-pairs.py         # V1-V3
 uv run --with pyyaml python scripts/check-version-pairs.py --list
-python3 scripts/check-embedded-scripts.py                          # E1（无第三方依赖）
-python3 scripts/check-embedded-scripts.py --write                  # E1 修复 = just gen-embedded-scripts
+uv run --with pyyaml python scripts/check-embedded-scripts.py      # E1
+uv run --with pyyaml python scripts/check-embedded-scripts.py --write   # E1 修复 = just gen-embedded-scripts
 ```
 
 CI 里由 `.github/workflows/static-checks.yml` 在改动 `*.yaml` / `justfile` /
