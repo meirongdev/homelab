@@ -138,11 +138,13 @@ spec:
               fi
               echo "[init] no marker — applying baseline permissions once..."
               # -perm -664/-775 = "至少含这些位"：别剥 kubelet fsGroup 扫描给目录加的
-              # setgid（2777，含 -775），否则与 OnRootMismatch 打架（见 pod securityContext 注释）
-              # 664/775 = 属组写：全库 gid 恒为 abc(1000)、web 进程 gid 也是 1000，
-              # 属组写即可让 web 编辑书库，不必 world-writable（666/777 是旧目标）。
+              # setgid（2777，含 -775），否则与 OnRootMismatch 打架（见 pod securityContext 注释）。
+              # 664/2775 = 属组写：全库 gid 恒为 abc(1000)、web 进程 gid 也是 1000，
+              # 属组写即可让 web 编辑书库，不必 world-writable（666/2777 是旧目标）。
+              # ⚠️ dir 的 chmod 必须带 setgid 位（2775）：数字 chmod 会清掉特殊位，
+              # 写 775 会把 2777 剥成 0775（2026-08-29 存量收紧时实测踩过）。
               find /library -type f ! -perm -664 -exec chmod 664 {} + 2>/dev/null || true
-              find /library -type d ! -perm -775 -exec chmod 775 {} + 2>/dev/null || true
+              find /library -type d ! -perm -775 -exec chmod 2775 {} + 2>/dev/null || true
               touch "$MARKER"
               echo "[init] baseline applied + marker placed"
           volumeMounts:
@@ -247,13 +249,15 @@ spec:
               while true; do
                 # -perm -664/-775（至少含）而非精确匹配：别剥 kubelet fsGroup 扫描给目录
                 # 加的 setgid（2777，含 -775），否则与 OnRootMismatch 打架（见 securityContext 注释）。
-                # 664/775 = 属组写（web gid=1000=abc、全库 gid 恒为 abc）：让 web 可编辑即可，
-                # 不必 world-writable。⚠️ fixer 只补缺位不降权——存量 666/2777 保持原样，
-                # 只对后续新落盘/漂移文件按新目标修；要收紧存量需另跑一次性 chmod。
+                # 664/2775 = 属组写（web gid=1000=abc、全库 gid 恒为 abc）：让 web 可编辑即可，
+                # 不必 world-writable。
+                # ⚠️ dir 的 chmod 必须带 setgid 位（2775）：数字 chmod 会清特殊位，写 775
+                # 会把 2777 剥成 0775（2026-08-29 存量收紧实测踩过，kubelet 判定即失效）。
+                # 存量已于 2026-08-29 一次性收紧到 664/2775；fixer 只补缺位不降权。
                 # -print 让 wc -l 数真实修过的路径：原写法数的是 chmod 的 stdout，恒为 0，
                 # "fixed N files" 从没打印过，排障时会被误读成 "fixer 没干过活"。
                 files=$(find /library -type f ! -perm -664 -print -exec chmod 664 {} + 2>/dev/null | wc -l)
-                dirs=$(find /library -type d ! -perm -775 -print -exec chmod 775 {} + 2>/dev/null | wc -l)
+                dirs=$(find /library -type d ! -perm -775 -print -exec chmod 2775 {} + 2>/dev/null | wc -l)
                 if [ "$files" -gt 0 ] || [ "$dirs" -gt 0 ]; then
                   echo "[fix-perms] fixed $files files and $dirs directories"
                 fi
