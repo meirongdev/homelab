@@ -1,7 +1,7 @@
 # Proxmox 宿主升级（内核 + PVE 本体）
 
-> Last updated: 2026-08-29
-> Status: SOP —— `pve` 已于 2026-08-29 按本文执行完毕，`storage-106` 待做（见 §8）。
+> Last updated: 2026-08-30
+> Status: SOP —— 两台宿主均已按本文执行完毕（2026-08-29 / 08-30，见 §8）。
 > 触发条件：要升 `pve` / `storage-106` 的内核或 PVE 本体；或发现这两台**长期收不到任何
 > Proxmox 更新**（`apt list --upgradable` 里一条 `proxmox-*` 都没有）。
 > ⛔ **不适用于两台 k8s 节点** —— `k8s-node` / `k8s-worker-106` 是普通 Ubuntu，
@@ -229,6 +229,30 @@ kubectl --context k3s-homelab -n media exec deploy/jellyfin -- ls /media >/dev/n
 
 ## 5. `storage-106` 的额外注意
 
+### 重启前的顺序（比 `pve` 多三步）
+
+106 同时是 worker 宿主 + NFS 服务端 + 备份目标，**先把客户端摘干净再停机**，
+否则集群里挂着它 NFS 的 pod 会因服务端消失卡在 D 状态：
+
+```bash
+# 1) 腾空 worker 节点（在笔记本上）
+kubectl --context k3s-homelab cordon k8s-worker-106
+kubectl --context k3s-homelab drain k8s-worker-106 --ignore-daemonsets --delete-emptydir-data
+
+# 2) 关 worker VM（在 106 上，root）
+qm shutdown 200 --timeout 180
+
+# 3) 停 NFS，让残余客户端快速失败而不是挂死
+systemctl stop nfs-server        # is-active 返回 3 = inactive，是预期不是错误
+```
+
+重启后 `nfs-server` 是 `enabled`，会自己起来；`pve` 的 `backups` 存储（挂 106 的 NFS）
+也会自动恢复，`pvesm status` 复核即可，不用手工 remount。
+最后别忘了 `kubectl --context k3s-homelab uncordon k8s-worker-106`。
+
+### 其它
+
+
 - ☠️ **不要跑 `zpool upgrade`**。ZFS 2.3.3 → 2.4.x 只换用户态与模块，**池的 feature flags
   不会自动升**，旧内核照样能导入 —— 这正是 §6 回滚成立的前提。一旦 `zpool upgrade`，
   池就再也无法被旧版本导入，**回滚路径当场消失**，而本流程完全不需要它。
@@ -289,6 +313,6 @@ kubectl --context k3s-homelab uncordon k8s-worker-106
 | 日期 | 宿主 | 从 → 到 | 备注 |
 |------|------|---------|------|
 | 2026-08-29 | `pve` | 内核 6.14.8-2 → **7.0.14-14-pve** · PVE 9.0.3 → **9.2.11** · ZFS 2.3.3 → **2.4.4-pve1** | 顺利。120 升级 / 21 新装 / 1 移除。宿主重启 46s，homelab 总停机约 3 分钟（VM 先 `qm shutdown`，宿主起来后 `onboot:1` 自动拉起，集群 145s 内 69 pod 全绿）。踩到 `libzpool6linux` 孤儿（见 §4.3）与 oracle 侧瞬时 Degraded（见 §4.5），均已在文中固化 |
-| — | `storage-106` | — | 未执行 |
+| 2026-08-30 | `storage-106` | 内核 6.14.8-2 → **7.0.14-14-pve** · PVE 9.0.3 → **9.2.11** · ZFS 2.3.3 → **2.4.4-pve1** | 顺利。111 升级 / 23 新装 / 1 移除，与 `pve` 形态完全一致（含 `libzpool6linux`）。宿主重启 66s，集群 150s 内 70 pod 全绿。`mrstorage` 10.9T 池 ONLINE、三个数据集自动挂回、11 条 NFS 导出恢复、restic 仓库完好、`pve` 的 NFS 备份存储自动重连。升级后到重启前 userland 2.4.4 / kmod 2.3.3 短暂不一致，`zpool status` 期间仍正常，未影响 NFS 供数 |
 
 > 执行后回填本表；若过程中出了状况，复盘写进 [`records/`](../records/README.md) 并链回这里。
