@@ -91,7 +91,7 @@ spec:
         # 备份内存峰值 100–160Mi → 600–970Mi（节点重启 08-22×2/08-26/08-27 精确对应
         # 峰值晚 08-23/27/28）。OnRootMismatch = 卷根目录 gid/权限已符合预期就跳过。
         # ⚠️ kubelet 对"符合预期"的判断含目录 setgid 位（它扫完目录是 2777），所以
-        # 下面两处 fixer 的 find 谓词必须用 -perm -777（至少含）而非 -perm 777
+        # 下面两处 fixer 的 find 谓词必须用 -perm -775（至少含）而非 -perm 775
         # （精确等于），否则 fixer 把 2777 改回 0777 剥掉 setgid → 下次启动又判
         # "不匹配"再全量扫，两者打架。归因全文与备份侧数据见
         # backup/overlays/oracle/cronjob-patch.yaml 的 2026-08-29 注释。
@@ -137,10 +137,12 @@ spec:
                 exit 0
               fi
               echo "[init] no marker — applying baseline permissions once..."
-              # -perm -666/-777 = "至少含这些位"：别剥 kubelet fsGroup 扫描给目录加的
-              # setgid（2777），否则与 OnRootMismatch 打架（见 pod securityContext 注释）
-              find /library -type f ! -perm -666 -exec chmod 666 {} + 2>/dev/null || true
-              find /library -type d ! -perm -777 -exec chmod 777 {} + 2>/dev/null || true
+              # -perm -664/-775 = "至少含这些位"：别剥 kubelet fsGroup 扫描给目录加的
+              # setgid（2777，含 -775），否则与 OnRootMismatch 打架（见 pod securityContext 注释）
+              # 664/775 = 属组写：全库 gid 恒为 abc(1000)、web 进程 gid 也是 1000，
+              # 属组写即可让 web 编辑书库，不必 world-writable（666/777 是旧目标）。
+              find /library -type f ! -perm -664 -exec chmod 664 {} + 2>/dev/null || true
+              find /library -type d ! -perm -775 -exec chmod 775 {} + 2>/dev/null || true
               touch "$MARKER"
               echo "[init] baseline applied + marker placed"
           volumeMounts:
@@ -221,7 +223,7 @@ spec:
         # ⚠️ 2026-08-29 核查：这不是可顺手删掉的 NFS 遗产，前提今天仍成立——
         #  ① ingest 仍以 root 跑（web 进程是 abc/1000），实测 umask 0022 → 无本容器时
         #    新书落盘 root:1000 644（group 只读，web 改不了内容）、新目录 2755（写不进）。
-        #    08-24 摄入的书至今 uid 0，全靠本容器修成 666 才可编辑。
+        #    08-24 摄入的书至今 uid 0，全靠本容器修成 664 才可编辑（属组写，见下）。
         #  ② 上游其实自带修复（ingest_processor.py set_library_permissions：每处理一个
         #    文件就在 finally 里 chown -R abc:abc 全库），但 NETWORK_SHARE_MODE=true
         #    会跳过它且无 chmod 兜底 —— 本容器就是在替被关掉的它干活。
@@ -243,12 +245,15 @@ spec:
               set -u
               echo "[fix-perms] starting permission fixer loop"
               while true; do
-                # -perm -666/-777（至少含）而非精确匹配：别剥 kubelet fsGroup 扫描给目录
-                # 加的 setgid（2777），否则与 OnRootMismatch 打架（见 securityContext 注释）。
+                # -perm -664/-775（至少含）而非精确匹配：别剥 kubelet fsGroup 扫描给目录
+                # 加的 setgid（2777，含 -775），否则与 OnRootMismatch 打架（见 securityContext 注释）。
+                # 664/775 = 属组写（web gid=1000=abc、全库 gid 恒为 abc）：让 web 可编辑即可，
+                # 不必 world-writable。⚠️ fixer 只补缺位不降权——存量 666/2777 保持原样，
+                # 只对后续新落盘/漂移文件按新目标修；要收紧存量需另跑一次性 chmod。
                 # -print 让 wc -l 数真实修过的路径：原写法数的是 chmod 的 stdout，恒为 0，
                 # "fixed N files" 从没打印过，排障时会被误读成 "fixer 没干过活"。
-                files=$(find /library -type f ! -perm -666 -print -exec chmod 666 {} + 2>/dev/null | wc -l)
-                dirs=$(find /library -type d ! -perm -777 -print -exec chmod 777 {} + 2>/dev/null | wc -l)
+                files=$(find /library -type f ! -perm -664 -print -exec chmod 664 {} + 2>/dev/null | wc -l)
+                dirs=$(find /library -type d ! -perm -775 -print -exec chmod 775 {} + 2>/dev/null | wc -l)
                 if [ "$files" -gt 0 ] || [ "$dirs" -gt 0 ]; then
                   echo "[fix-perms] fixed $files files and $dirs directories"
                 fi
