@@ -183,3 +183,33 @@ spec:
     - port: 4000
       targetPort: 4000
       name: http
+---
+# 跨集群入口（2026-08-29）—— 供 **oracle-k3s** 的作业经 Tailscale 直连本网关。
+#
+# 为什么需要：oracle 是 tagged 设备，拿不到用户级共享的 DGX，必须经 homelab 上的代理；
+# 本网关就是那个代理（旧的 nginx `dgx-proxy` 已于 2026-08-08 退役）。
+# 首个消费者：cloud/oracle/manifests/calibre-metadata/metadata-llm.yaml
+#
+# 为什么不走公网 `llm.meirong.dev`：那条路实测可达，但 Cloudflare 会对非浏览器
+# 客户端返回 **`error code: 1010`（403）**，只有伪装浏览器 UA 才 200 —— 靠绕自家 WAF
+# 维生太脆，WAF 一收紧就再次静默失效。走 Tailscale 不经 Cloudflare，也省掉 UA 伪装。
+#
+# 范式与 cloud/oracle/manifests/monitoring/monitoring-external.yaml 一致（独立
+# `-external` Service，不动上面那个 ClusterIP，避免改动波及集群内既有消费者）。
+# ⚠️ NodePort 监听节点所有网卡，不只是 Tailscale —— 敢这么开的前提是
+# **LiteLLM 强制 virtual key 鉴权**（无 key 一律 401，实测越权模型 403）。
+# 端口 31400 取自服务端口 4000，便于对照；homelab 侧已占用 31090/31093/31505/31952/32379。
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm-external
+  namespace: litellm
+spec:
+  type: NodePort
+  selector:
+    app: litellm
+  ports:
+    - port: 4000
+      targetPort: 4000
+      nodePort: 31400
+      name: http
