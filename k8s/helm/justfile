@@ -315,7 +315,7 @@ prometheus:
 # 改完 cf-analytics-exporter/exporter.py **必须**跑这个，否则改的是源、跑的是旧副本
 # （且 ConfigMap 变更不会自己重启 pod）。CI 的 E1 会拦住漂移。
 gen-embedded-scripts:
-    python3 ../../scripts/check-embedded-scripts.py --write
+    uv run --with pyyaml python ../../scripts/check-embedded-scripts.py --write
 
 # 查看集群资源使用情况
 check-resources:

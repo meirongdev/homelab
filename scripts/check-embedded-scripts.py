@@ -14,8 +14,10 @@
 读进内存的旧脚本。git 干净、ArgoCD Synced、pod Running、行为是旧的——跟 (a) 同一种静默。
 把 hash 写进 pod 模板，脚本一变模板就变，ArgoCD 自然滚动重启。
 
-  检查:  python3 scripts/check-embedded-scripts.py
-  修复:  python3 scripts/check-embedded-scripts.py --write   （= just gen-embedded-scripts）
+  检查:  uv run --with pyyaml python scripts/check-embedded-scripts.py
+  修复:  uv run --with pyyaml python scripts/check-embedded-scripts.py --write
+         （= cd k8s/helm && just gen-embedded-scripts）
+  ⚠️ 本脚本 import yaml，**不能**用裸 python3 跑（除非系统装了 pyyaml）。
 
 加新目标：在 TARGETS 里加一项。要求 YAML 的 data 块只有这一个 key 且位于文件末尾
 （生成器按「`key: |` 之后到文件尾」整段替换，以保住文件头的注释）。
