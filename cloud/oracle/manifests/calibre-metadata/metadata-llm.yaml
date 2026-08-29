@@ -13,16 +13,17 @@
 # （如 wizardzines 的 `Networking ACK (Julia Evans)`）。
 # 但**书本身是完整的** —— 扉页有真实书名与作者，前言/封底可作简介，目录可提炼标签。
 #
-# ☠️☠️ **本作业当前是坏的 —— 别照现状 unsuspend，它连不上。**
+# ── 2026-08-08 ～ 08-29 曾停摆，现已接通 LiteLLM 网关 ─────────────────────
+# 停摆原因存档：`LLM_URL` 原指向跨集群的 `dgx-proxy`（Cilium 全局服务），该 Service
+# 随旧 LLM 网关于 2026-08-08 退役，两集群全局 Service 计数归零。作业是
+# suspend + `schedule: 0 5 31 2 *`（2 月 31 日 = 永不触发），所以它不失败也不告警
+# —— **坏得完全安静，21 天没人发现**。这类「永不触发的手动模板」出故障时没有任何
+# 信号，改动它的依赖后要主动回来验一次。
 #
-# 下面所有 `LLM_URL` 默认值与 env 曾指向跨集群的 `dgx-proxy`（Cilium 全局服务），
-# 那个 Service **随旧 LLM 网关一起在 2026-08-08 退役了**，现在两集群的全局 Service
-# 计数都是 0。作业本身是 suspend + `schedule: 0 5 31 2 *`（2 月 31 日 = 永不触发），
-# 所以它不会自己失败、也不会告警 —— 坏得完全安静。
-#
-# 背景（仍然成立的部分）：oracle **直连不到 DGX**（tagged 设备拿不到用户级节点共享），
-# 所以它必须经某种代理。原方案是 homelab 上的 nginx `dgx-proxy` + Cilium 全局服务，
-# 实测过 /v1/models 200、真实推理 2.7s。完整原委见
+# 根因（今天仍然成立，别以为绕过去了）：oracle **直连不到 DGX**（tagged 设备拿不到
+# 用户级节点共享）—— 2026-08-29 实测 oracle pod 连 `100.97.87.120:8000` 仍 timeout，
+# 而 homelab pod 同址 200。所以它必须经 homelab 上的代理；现在那个代理是 LiteLLM
+# （接替已退役的 nginx `dgx-proxy`）。完整原委见
 # docs/reference/tailscale-network.md 的「Tagged devices cannot reach shared nodes」一节。
 #
 # ── 2026-08-29 复核：结论从「待定去留」改为「值得修，别退役」 ───────────────
@@ -37,32 +38,26 @@
 #     换模型等于护栏全部要重验，别换。
 #   · 根因未变：oracle pod 直连 `100.97.87.120:8000` 仍然 **timeout**（同日实测）。
 #
-# 修复比上一版估的便宜，但**仍不是改一行**。三个卡点，按顺序解决：
-#   1) 网络。LiteLLM（homelab `litellm` ns，ClusterIP:4000）已有公网路由
-#      `llm.meirong.dev`，且 oracle pod 实测可达 —— ⚠️ 但裸 urllib 拿到的是
-#      **Cloudflare `error code: 1010`（403）**，按客户端签名拦截；换成浏览器 UA 立刻 200。
-#      靠伪装 UA 绕自家 WAF 能跑但脆（WAF 一收紧就再次静默失效，本作业最擅长静默）。
-#      更稳的是照 `cloud/oracle/manifests/monitoring/monitoring-external.yaml` 那套
-#      跨集群范式：homelab 侧给 litellm 开一个 Tailscale NodePort，oracle 直连
-#      `100.94.186.7:<port>`，不经 Cloudflare。**推荐走这条。**
-#   2) 鉴权。LiteLLM 强制 key，而**本脚本目前只发 `Content-Type`、根本没有
-#      Authorization 头**（见下方 `urllib.request.Request(...)`）—— 走网关必须改代码，
-#      不只是改 env。另需一把 virtual key → Vault `homelab/litellm` 同款 → ESO 到本 ns
-#      （本 ns 的 ESO 已有 4 个在跑，照抄 readlist-secrets 即可）。
-#      ☠️ virtual key 的**模型白名单在 Postgres 不在 git**，不放行 `deepseek-v4-flash`
-#      就会「清单正确 + Synced + 调用全挂」，见 reference/litellm-gateway.md。
-#   3) 模型名。网关同时提供 `deepseek-v4-flash` 与 `custom_dgx/deepseek-v4-flash`
-#      两个别名，本作业现有的 `LLM_MODEL=deepseek-v4-flash` 直接可用，不用改。
-#      ⚠️ `LLM_URL` 是**完整端点**（脚本直接 `Request(LLM_URL, data=...)`），
-#      要写到 `/v1/chat/completions`，不是 base URL。
+# 接通方式（三处改动，缺一不可）：
+#   1) 网络：homelab 侧新增 `litellm-external` NodePort 31400
+#      （k8s/helm/manifests/litellm/litellm.yaml），oracle 经 Tailscale 直连
+#      `100.94.186.7:31400`。**刻意不走公网 `llm.meirong.dev`**：那条路实测可达，
+#      但 Cloudflare 对非浏览器客户端返回 `error code: 1010`(403)，只有伪装浏览器 UA
+#      才 200 —— 靠绕自家 WAF 维生太脆。范式抄 monitoring-external.yaml。
+#   2) 鉴权：本脚本原先**只发 Content-Type、没有 Authorization 头**（旧 dgx-proxy 是
+#      裸 nginx 无鉴权），已补。key 走 Vault `oracle-k3s/calibre-metadata` → ESO
+#      → Secret `calibre-metadata-secrets`（本文件末尾）。
+#   3) 模型名不用改：网关提供的别名与裸 vLLM 同名。
 #
-# 对照：同集群的 `jobs-sg/cronjob-enrich.yaml` 是**直连 DGX、不经网关**（省掉 virtual key
-# 那条 Vault 依赖）。本作业学不了 —— 它在 oracle，而这正是 1) 存在的原因。
+# 对照：同集群的 `jobs-sg/cronjob-enrich.yaml` 是**直连 DGX、不经网关**（省掉 virtual
+# key 那条 Vault 依赖）。本作业学不了 —— 它在 oracle，这正是 1) 存在的原因。
 # 反过来也别想着把本作业搬去 homelab：它挂 `calibre-books-local` PVC，PVC 不跨集群。
 #
-# 在完成 1)+2) 之前，保持 suspend 不动就是正确状态。
-# ⚠️ 若将来仍决定退役：删文件前先 `grep '^kind:'` —— 本文件含 ConfigMap + CronJob
-# 两个对象，ArgoCD 按目录同步会一起 prune。
+# **仍然保持 suspend** —— 与本目录其它作业一致，是「手动触发模板」而非夜间管道
+# （它生成内容，每次跑都该有人看着）。派生方式见下方 CronJob 上的注释。
+# ⚠️ 若将来决定退役：删文件前先 `grep '^kind:'` —— 本文件含 ConfigMap +
+# ExternalSecret + CronJob 三个对象，ArgoCD 按目录同步会一起 prune；
+# 网关侧那把 alias 为 `calibre-metadata-llm` 的 virtual key 也要一并删。
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -92,8 +87,10 @@ data:
     PDFTOTEXT = "/app/calibre/bin/pdftotext"
     CALIBRE_ENV = dict(os.environ, LD_LIBRARY_PATH="/app/calibre/lib")
 
-    LLM_URL = os.environ.get(
-        "LLM_URL", "")   # 曾指向跨集群 dgx-proxy；2026-08-08 随网关退役，置空并 suspend
+    # 完整端点（不是 base URL）—— 下面直接 Request(LLM_URL, data=...)。
+    # 2026-08-29 起指向 LiteLLM 网关的跨集群 NodePort，见 CronJob 的 env 注释。
+    LLM_URL = os.environ.get("LLM_URL", "")
+    LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
     LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-v4-flash")
     LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "300"))
 
@@ -284,8 +281,13 @@ data:
             "max_tokens": 2000,
             "temperature": 0,
         }).encode()
-        req = urllib.request.Request(
-            LLM_URL, data=body, headers={"Content-Type": "application/json"})
+        headers = {"Content-Type": "application/json"}
+        # ⚠️ 2026-08-29 起走 LiteLLM 网关，**必须带 key**（旧的 dgx-proxy 是裸 nginx
+        # 无鉴权，所以本脚本原先只发 Content-Type）。无 key → 401，key 未放行本模型
+        # → 403；两者都会被下面的 except 吞成一行「LLM 调用失败」，看日志要认这两个码。
+        if LLM_API_KEY:
+            headers["Authorization"] = f"Bearer {LLM_API_KEY}"
+        req = urllib.request.Request(LLM_URL, data=body, headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=LLM_TIMEOUT) as r:
                 d = json.load(r)
@@ -494,6 +496,30 @@ data:
     if __name__ == "__main__":
         main()
 ---
+# LiteLLM virtual key（2026-08-29）。Vault 路径遵循本仓库约定 `oracle-k3s/<service>`，
+# 字段名大写，与同 ns 的 readlist-secrets 一致；ClusterSecretStore 的 provider.path
+# 已是 `secret`，所以 remoteRef.key 不带 `secret/` 前缀。
+# ⚠️ 这把 key 与 LiteLLM 里 alias 为 `calibre-metadata-llm` 的记录是一对：
+# 在网关侧重铸/删除 key 后必须回写本 Vault 路径，否则作业静默 401。
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: calibre-metadata-secrets
+  namespace: personal-services
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: calibre-metadata-secrets
+    creationPolicy: Owner
+  data:
+    - secretKey: llm-api-key
+      remoteRef:
+        key: oracle-k3s/calibre-metadata
+        property: LLM_API_KEY
+---
 # 挂起的 CronJob，同本目录其它作业。手动派生：
 #   kubectl --context oracle-k3s -n personal-services create job llm-1 \
 #     --from=cronjob/calibre-metadata-llm
@@ -542,10 +568,28 @@ spec:
                 # 候选池 234 本，实测约 10s/本 ≈ 40 分钟。
                 - name: LIMIT
                   value: "300"
-                # ⚠️ 曾必须走跨集群的 dgx-proxy（oracle 直连不到 DGX，见文件头）；
-                # 该路由已随 LLM 网关于 2026-08-08 退役，本作业 suspend，恢复前需重设。
+                # 2026-08-29 接通：LiteLLM 网关（homelab `litellm` ns）的跨集群
+                # NodePort，经 Tailscale 直连控制面节点 k8s-node —— oracle 直连不到
+                # DGX（tagged 设备拿不到用户级共享），网关替它转发。
+                # ⚠️ 是**完整端点**不是 base URL：脚本直接 Request(LLM_URL, ...)。
+                # ⚠️ 不要改成公网 llm.meirong.dev —— Cloudflare 对非浏览器 UA 返回
+                # `error code: 1010`(403)，只有伪装 UA 才通，见文件头。
+                # Service 定义：k8s/helm/manifests/litellm/litellm.yaml 的 litellm-external
                 - name: LLM_URL
-                  value: ""
+                  value: "http://100.94.186.7:31400/v1/chat/completions"
+                # LiteLLM 强制 key 鉴权。这把 virtual key 的**模型白名单只有
+                # deepseek-v4-flash**（实测：该模型 200、openrouter/* 403），
+                # 所以作业越权不了，也花不到 OpenRouter 的钱。
+                # ☠️ 白名单存在 LiteLLM 的 Postgres 里、**不在 git**：将来改网关
+                # 模型别名而不同步改这把 key，就会「清单正确 + Synced + 调用全 403」。
+                # key 由 alias `calibre-metadata-llm` 标识，重铸后需同步更新 Vault。
+                - name: LLM_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: calibre-metadata-secrets
+                      key: llm-api-key
+                # 网关与裸 vLLM 提供同名别名，沿用原值即可，别加 provider 前缀
+                # （`custom_dgx/...` 那个别名也在，但换模型等于护栏要全部重验）。
                 - name: LLM_MODEL
                   value: "deepseek-v4-flash"
                 # 与 jobs-sg 同口径；nginx 代理侧也是 300s，两边要一致，
