@@ -207,20 +207,15 @@ spec:
             - name: books
               mountPath: /cwa-book-ingest
               subPath: ingest
-        - name: log-exporter
-          image: busybox:1.36
-          command: ["sh", "-c", "tail -F /config/calibre-web.log 2>/dev/null"]
-          resources:
-            requests:
-              cpu: 1m
-              memory: 8Mi
-            limits:
-              cpu: 10m
-              memory: 16Mi
-          volumeMounts:
-            - name: config
-              mountPath: /config
-              readOnly: true
+        # 2026-08-29 删除 log-exporter sidecar（`tail -F /config/calibre-web.log`）。
+        # 它自始至终没产出过一行：该路径在本镜像里根本不存在（/config 下唯一的日志是
+        # epub-fixer.log），而 `tail -F` 对不存在的文件配上 `2>/dev/null` 就是永久静默。
+        # 实测 Loki 近 7 天：k8s_container_name="calibre-web" 1898 行、"log-exporter" 0 行。
+        # 且它的前提也早已不成立 —— 引入时的理由是「linuxserver.io 镜像不输出 stdout」，
+        # 但本镜像现在把应用日志（cps.py / cwa-* 服务）全打到 stdout，OTel 直接采得到。
+        # ⚠️ 想给别的服务照搬「文件日志 + sidecar」模式前，先按
+        # docs/reference/observability-otel-logging.md 模式 B 的「先验证再加」跑一遍：
+        # 这个 sidecar 的坑就是加了之后没人验证过它真的在产日志。
         # Fixes permissions on files created by the cwa-ingest pipeline, which runs
         # as root and produces files that the web process (uid 1000) cannot edit.
         # ⚠️ 2026-08-29 核查：这不是可顺手删掉的 NFS 遗产，前提今天仍成立——
