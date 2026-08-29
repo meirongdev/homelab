@@ -34,7 +34,6 @@ docs/                          # 见下方「Documentation Rules」
 | `just deploy-argocd` | ⚠️ 控制面在 **oracle-k3s**；本配方不含 Application 注册 |
 | `just deploy-gateway-api-crds` | ⚠️ 升 Cilium 必跑（见下 Ingress 条）|
 | `just connect-clustermesh <homelab-ts>:32379 <oracle-ts>:32379` | 需两个端点参数 |
-| `just init/plan/apply`（`proxmox/terraform/`）| **`just` 不是 `make`**，那里的 Makefile 是空文件 |
 | `make init/plan/apply`（`cloud/oracle/terraform/`）| **唯一**用 `make` 的 terraform root |
 
 - **GitOps**：`git push` → ArgoCD 3 分钟轮询自动同步，**不可手动 `kubectl apply` 覆盖**。

@@ -1,6 +1,6 @@
 # Homelab Docs Portal
 
-> Last updated: 2026-08-14
+> Last updated: 2026-08-29
 > 这是**入口索引**。运行态事实都在下面链接的文档里，本页不复制副本。
 > 写文档的强制规则（R1–R7）见 [RULES.md](RULES.md)，本页只做导航。
 
@@ -26,7 +26,6 @@
 | [guides/](guides/README.md) | 跨领域任务流程 |
 | [records/](records/README.md) | 故障复盘 |
 | [plans/](plans/README.md) | 带日期的方案档案（6 个类别） |
-| `assets/` | 图片/架构图（目前为空） |
 
 ## 推荐阅读顺序
 
