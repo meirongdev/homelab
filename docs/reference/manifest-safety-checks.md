@@ -187,12 +187,22 @@ targetRevision: "2.5.27"   # version-pair-ok: 灰度先行 oracle，2026-09 对�
 —— 而这处漏改只在**重建集群时**才爆，等于埋了一颗定时炸弹。
 
 配对组是**人工声明**的（`DECLARED_PAIRS`），不做"同名变量一律必须相等"的推断。加组前
-先问：改了一处不改另一处，会不会出事？会才加。当前两组：
+先问：改了一处不改另一处，会不会出事？会才加。当前三组：
 
 | 组 | 为什么必须相等 |
 |---|---|
 | `gateway_api_version`（3 处）| 两集群装同一版本 CRD；oracle 的 justfile 与剧本描述的更是同一批 CRD |
 | `cilium_version`（2 处）| ClusterMesh 要求两端版本一致；且各自的 Gateway API 版本由同一张兼容表推出 |
+| `k3s_version`（3 处，2026-08-30 加）| homelab 控制面与 worker 是**同一个集群**（agent 不保证能新于 server）；oracle 按舰队惯例同步升 |
+
+`k3s_version` 这组补的是同一类洞的**另一半**：2026-08-30 核查发现两个 **server** 剧本
+（`k8s/ansible/playbooks/setup-k3s.yaml`、`cloud/oracle/ansible/playbooks/setup-k3s.yaml`）
+压根没钉版本，是裸的 `curl -sfL https://get.k3s.io | sh -` —— 装的是 **stable 频道当天的值**。
+当时现网跑 v1.34.5、stable 已是 v1.36.4，而 worker 那份偏偏钉死在 v1.34.5。
+后果同 08-13 的 CRD：**只在重建那天才爆**，且爆出来的是「重建完的集群和原来不是一个 minor」。
+三处现已全部钉死并纳入本组。⚠️ 这些值描述的是**现网正在跑什么**，不是想升到什么——
+升级流程见 [runbooks/k3s-cluster-upgrade.md](../runbooks/k3s-cluster-upgrade.md)，
+升完节点**再**回来改 pin。分阶段升级（一侧先行）在先行那侧行尾写 `version-pair-ok: <理由>`。
 
 ⚠️ **刻意不收** `node_exporter_version`（三套 ansible 各一份，实测 1.11.1 / 1.10.0 /
 1.11.1）与 `eso_version`（两集群独立安装）：那是三个独立机队/两个独立安装，不一致是
@@ -313,3 +323,5 @@ CI 里由 `.github/workflows/static-checks.yml` 在改动 `*.yaml` / `justfile` 
 ⚠️ **改规则必须同步改这份文档**（两边不一致的话，要么规则是摆设，要么检查器在误伤）。
 V1-V3 的敏感度在上线当天逐条实测过：故意把 oracle 剧本改回 1.2.1、把两集群 cilium 版本
 拆开、把 Cilium 升到表外的 minor、把变量改名——六个场景全部按预期判红，行内豁免按预期转绿。
+`k3s_version` 组加入时同样实测过：把 oracle 那处改成 v1.35.8 判红、补上行内
+`version-pair-ok:` 转绿。

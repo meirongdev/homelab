@@ -299,15 +299,26 @@
 - name: Install K3s single node
   hosts: oracle_masters
   become: true
+  vars:
+    # ☠️ 必须钉版本，理由同 k8s/ansible/playbooks/setup-k3s.yaml：不钉 = 重建时
+    # 装上 stable 频道当天的值，和现网差着 minor。本文件是 oracle-k3s 的重建路径
+    # （docs/runbooks/oracle-k3s-rebuild.md），漏钉只在重建那天才爆。
+    # 三处取值一致，由 scripts/check-version-pairs.py 的 V2 组 `k3s_version` 强制。
+    # ⚠️ 描述现网、不是目标版本；升级流程见 docs/runbooks/k3s-cluster-upgrade.md。
+    # renovate: datasource=github-releases depName=k3s-io/k3s
+    k3s_version: v1.34.5+k3s1
   tasks:
     - name: Check if K3s is already installed
       ansible.builtin.stat:
         path: /usr/local/bin/k3s
       register: k3s_binary
 
+    # 首装专用。升级不走这里，见 docs/runbooks/k3s-cluster-upgrade.md。
     - name: Install K3s (reads flags from /etc/rancher/k3s/config.yaml)
       ansible.builtin.shell: |
-        curl -sfL https://get.k3s.io | sh -
+        curl -sfL https://get.k3s.io | \
+          INSTALL_K3S_VERSION={{ k3s_version }} \
+          sh -
       when: not k3s_binary.stat.exists
       changed_when: true
 

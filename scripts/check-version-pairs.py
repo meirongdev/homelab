@@ -69,6 +69,19 @@ DECLARED_PAIRS = {
             "cloud/oracle/justfile",
         ],
     },
+    "k3s_version": {
+        "why": "homelab 控制面与 worker 是**同一个集群**，k3s 不保证 agent 新于 server "
+               "可用；oracle 与它们按舰队惯例同步升（见 runbooks/k3s-cluster-upgrade.md）。"
+               "2026-08-30 加：此前两个 server 剧本根本没钉版本（`curl … | sh -` 裸装），"
+               "重建任何一台都会装上 stable 频道当天的值 —— 现网 v1.34.5、stable 已 "
+               "v1.36.4，中间还隔着一次不可跳的 minor，而 worker 那份偏偏是钉死的。"
+               "分阶段升级（一侧先行）在先行那侧的行尾写 `version-pair-ok: <理由>` 豁免。",
+        "files": [
+            "k8s/ansible/playbooks/setup-k3s.yaml",
+            "k8s/ansible/playbooks/setup-k3s-worker.yaml",
+            "cloud/oracle/ansible/playbooks/setup-k3s.yaml",
+        ],
+    },
 }
 
 # ── V3：Cilium ↔ Gateway API CRD 兼容表 ──────────────────────────────────────
@@ -82,8 +95,10 @@ CILIUM_GATEWAY_API = {
 VAR_RE = {
     # justfile: name := "1.2.3"
     "justfile": re.compile(r'^\s*([a-z0-9_]+)\s*:=\s*"([^"]+)"'),
-    # yaml vars: name: "1.2.3" / name: 1.2.3
-    "yaml": re.compile(r'^\s*([a-z0-9_]+):\s*"?([0-9][^"\s#]*)"?'),
+    # yaml vars: name: "1.2.3" / name: 1.2.3 / name: v1.34.5+k3s1
+    # 允许 v 前缀：k3s 的版本号自带它（`INSTALL_K3S_VERSION` 只认 `v…+k3sN`），
+    # 不允许的话 find_var 会返回 None，报成「配对声明与实际不符」的假违规。
+    "yaml": re.compile(r'^\s*([a-z0-9_]+):\s*"?(v?[0-9][^"\s#]*)"?'),
 }
 
 violations = defaultdict(list)
