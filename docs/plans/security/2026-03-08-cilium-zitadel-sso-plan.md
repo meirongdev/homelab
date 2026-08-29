@@ -1,9 +1,10 @@
 # 2026-03-08 Cilium + ZITADEL SSO Reintroduction Plan
 
-> **状态: ✅ 已落地** —— 最终形态是**各应用原生 ZITADEL OIDC**（Grafana / ArgoCD / Miniflux / KaraKeep /
-> Stirling-PDF），少数无法直连 OIDC 的应用（旧 LLM 网关管理面、Excalidraw）用 per-app oauth2-proxy。
-> 不再有共享入口层 SSO。当前身份模型见 [reference/identity.md](../../reference/identity.md)。
-> ⚠️ ZITADEL 本体已于 2026-07-06 迁至 oracle-k3s。
+> **状态: ✅ 已落地** —— 最终形态是**各应用原生 ZITADEL OIDC**，不再有共享入口层 SSO。
+> ⚠️ **本文列举的接入方已过期**：当年的 KaraKeep（2026-08-14 退役）、Stirling-PDF
+> （2026-08-11 由无认证的 BentoPDF 取代）、旧 LLM 网关管理面（2026-08-08 退役）都已不在；
+> per-app oauth2-proxy 当前**无实例**。现役名单与 ZITADEL 落点（2026-07-06 迁 oracle-k3s）
+> 一律以 [reference/identity.md](../../reference/identity.md) 为准。
 
 ## Goal
 
