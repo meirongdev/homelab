@@ -77,6 +77,16 @@
 - name: Install K3s single node
   hosts: k8s_masters
   become: true
+  vars:
+    # ☠️ 必须钉版本。不钉的话 get.k3s.io 装的是 **stable 频道当天的值**，
+    # 于是「重建一台节点」= 悄悄换一个 minor：写这段时现网跑 v1.34.5，
+    # 而 stable 已经是 v1.36.4，中间还隔着一次不可跳的 minor。
+    # 三处（本文件 / setup-k3s-worker.yaml / cloud/oracle/.../setup-k3s.yaml）
+    # 取值必须一致，由 scripts/check-version-pairs.py 的 V2 组 `k3s_version` 强制。
+    # ⚠️ 本值描述的是「现网正在跑什么」，不是「想升到什么」——
+    # 升级时先按 docs/runbooks/k3s-cluster-upgrade.md 把节点升完，**再**改这里。
+    # renovate: datasource=github-releases depName=k3s-io/k3s
+    k3s_version: v1.34.5+k3s1
   tasks:
     - name: Enable qemu-guest-agent for Proxmox diagnostics
       ansible.builtin.systemd:
@@ -165,9 +175,14 @@
         path: /usr/local/bin/k3s
       register: k3s_binary
 
+    # 首装专用（`when: not ...exists`）。**升级不走这里**，见
+    # docs/runbooks/k3s-cluster-upgrade.md —— 升级要停机、要按顺序、要验证，
+    # 不该混在一个「装机」剧本里被顺手跑掉。
     - name: Install K3s
       ansible.builtin.shell: |
-        curl -sfL https://get.k3s.io | sh -
+        curl -sfL https://get.k3s.io | \
+          INSTALL_K3S_VERSION={{ k3s_version }} \
+          sh -
       when: not k3s_binary.stat.exists
       changed_when: true
 
