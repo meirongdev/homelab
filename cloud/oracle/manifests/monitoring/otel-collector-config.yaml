@@ -276,8 +276,15 @@ receivers:
               labels:
                 cluster: oracle-k3s
           metric_relabel_configs:
+            # ☠️ 2026-08-30 加 memory_rss：`ContainerMemoryNearLimit` 改用 RSS 口径
+            #    （working_set 含页缓存，见 records/2026-08-30-memory-alert-page-cache-false-alarm.md）。
+            #    **这一条必须先于规则改动上线**——不加它，oracle 侧那半个规则会因为
+            #    分子无 series 而**恒不触发**，外观与「没超阈值」完全一致。
+            #    删它 = 静默废掉 oracle 侧的内存预警；改这里请同步看
+            #    manifests/monitoring/alerts/prometheus-rules.yaml 的 ContainerMemoryRssAbsent。
+            #    成本：+58 条 series（与 working_set 同基数）。
             - source_labels: [__name__]
-              regex: 'container_(cpu_usage_seconds_total|memory_working_set_bytes)'
+              regex: 'container_(cpu_usage_seconds_total|memory_working_set_bytes|memory_rss)'
               action: keep
             # cAdvisor 会为每个 Pod 额外吐一条 container="" 的汇总序列，KRR 用不到
             - source_labels: [container]
