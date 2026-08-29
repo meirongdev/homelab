@@ -1,6 +1,6 @@
 # K8s 资源管理与 QoS 策略
 
-> Last updated: 2026-08-29
+> Last updated: 2026-08-30
 > Status: 生效事实（本文只定**原则**，不存具体数值）
 
 本文档记录 Homelab 中 CPU/Memory requests & limits 的设定**原则**。
@@ -247,6 +247,10 @@ max by (cluster,namespace,pod,container) (kube_pod_container_resource_limits{res
 `max_over_time` 是关键——尖峰型负载看瞬时值会整个漏掉（`argocd-application-controller`
 被杀时的瞬时读数只有 0.67G，2d 窗口才照出 94%）。
 
+⚠️ **上面这条排查查询用 `[2d]`，线上 `ContainerMemoryNearLimit` 规则用的是 `[7d]`** ——
+两者口径不一致（2026-08-30 发现，尚未统一）。窗口越长，一次瞬态尖峰把告警钉住的时间越长：
+7d 窗口下一个 60 秒的重启尖峰会连报 7 天，且 `for` 完全起不到去抖作用。
+
 ⚠️ **`KubePodCrashLooping` 抓不到这类事件** —— 容器 OOM 后干净重启，从不进
 `CrashLoopBackOff`。
 
@@ -332,6 +336,82 @@ max by (cluster,namespace,pod,container) (kube_pod_container_resource_limits{res
 > ⚠️ 同样把 `GOMEMLIMIT` 接成 `limits.memory` 的还有两集群的 `cilium-agent`
 > （chart 默认）。它今天没报，但一旦报，别按「抬 limit」处理 —— 且改它要重跑
 > `just deploy-cilium` + `just connect-clustermesh`。
+
+> ☠️ **2026-08-30 补第四种形状：峰值由页缓存主导 —— 告警在测一个不构成 OOM 风险的量。**
+>
+> `container_memory_working_set_bytes = memory.current − inactive_file`，**它包含页缓存**。
+> 对 mmap/顺序读文件重的负载（TSDB、对象存储缓存、大 SQLite），working_set 里可能大半
+> 是 file cache，而**干净的 file page 永远先于 OOM 被回收**，所以「working_set 逼近 limit」
+> 对这类容器不蕴含 OOM 风险。
+>
+> 2026-08-29 Prometheus 重启后 WAL replay 的实测（limit 3Gi = 3072Mi）：
+>
+> | 时刻 | working_set | **rss** | **cache** | usage |
+> |---|---|---|---|---|
+> | 重启前稳态 | 990 Mi | 631 Mi | 1160 Mi | 1829 Mi |
+> | **峰值** | **3055 Mi (99.45%)** | **408 Mi (26.4%)** | **2652 Mi** | **3072 Mi (=limit)** |
+>
+> `usage` **精确等于 `memory.max`**（顶了两次），内核回收缓存了事，容器
+> `exitCode 0 / Completed` —— 顶死上限但没被杀。**同一容器换 RSS 口径是 26.4%，不是 99.45%。**
+>
+> ☠️ **「working_set 塌下去」≠「内存被回收」**。同日第二次重启是对照组，它没顶到 limit
+> 却同样断崖：
+>
+> | 时刻 | working_set | rss | cache | usage |
+> |---|---|---|---|---|
+> | 峰值 | **2054 Mi** | 651 Mi | 1425 Mi | 2084 Mi |
+> | +30s | **660 Mi** | 652 Mi | 1396 Mi | 2055 Mi |
+>
+> working_set 掉 1394Mi 而 `usage` 只掉 29Mi —— **什么都没被回收**，掉的是 `active_file`：
+> 刚读进来的文件页先挂 active LRU，约两分钟无人再引用就降级到 `inactive_file`，
+> 而 working_set 把 `inactive_file` 扣掉了。**别拿 working_set 回落推断压力解除。**
+>
+> **怎么分辨**：取 `container_memory_rss` 与 `container_memory_cache`。
+> rss 平稳而 cache 撑起峰值 → 属本形状。
+>
+> ☠️ **这个读数主要由节点页缓存冷热决定，不是由容器内存需求决定。**
+> 2026-08-30 对照实验：同容器、同数据、同 limit（3Gi）重启三次 ——
+>
+> | 重启时机 | 节点页缓存 | 峰值 `usage` | %limit | 该容器 `file` |
+> |---|---|---|---|---|
+> | 刚开机 | 全冷 | 3072 Mi | **99.45%** | 2652 Mi |
+> | +29 分钟 | 半热 | 2153 Mi | 70.1% | ~1425 Mi |
+> | +7 小时 | 全热 | 728 Mi | **23.70%** | 218 Mi |
+>
+> `anon` 三次都在 400–550Mi，**唯一变的是 `file`**。跨度 5 倍，85% 阈值被穿过两次方向。
+> 机制：cgroup v2 只对**自己从磁盘 fault 进来**的页计费；旧容器死后其页缓存不立刻消失，
+> 新容器读已常驻的页是搭便车、不重复计费 —— 越晚重启、缓存越热，账面越小。
+> **拿 `max_over_time` 抓这种读数，抓到的是节点缓存状态。**
+>
+> ⚠️ **别照搬第三种形状的处置。** 第三种（`GOMEMLIMIT` 硬接 limit）已确证「抬 limit 无效」；
+> 本形状**没有**那种绑定关系，「抬/降 limit 有没有用」**目前无定论** ——
+> 上面三次实验都没动过 limit。真想压只能降 limit，但**收益本就是假的**：
+> 页缓存本就计入节点 `MemAvailable`。
+>
+> ☠️ **容器重启后 5 分钟内，`max by (...)` 读到的是上一个容器的值。** 容器 ID 变了 =
+> 新序列，旧序列在 staleness 回看窗内仍被计入聚合（实测同时刻 2035Mi vs 720Mi）。
+> 规则把 `id` 聚合掉了，所以看不出来 —— 排查时务必按 `id` 拆开。
+>
+> ⚠️ **别把「机制普遍」当成「一堆容器在误报」**。当前 homelab 有 8 个容器的
+> `cache/working_set` > 130%（vault 258%、coredns 254%…），但 7d 峰值/limit 的排名里
+> **只有 prometheus 一个 >85%**（第二名 83.7%）。前者说明这类假阳性随时可能在别处复现，
+> 不等于现在有一堆误报。
+>
+> ⚠️ **cgroup v2 上别用 `container_memory_failcnt` 取证** —— 那是 v1 的
+> `memory.failcnt`，v2 无对应文件、cAdvisor 恒报 0，与「真的没触到上限」外观一致。
+> v2 判据：容器活着时读 `memory.events` 的 `max`/`oom`/`oom_kill`，
+> 或用可回溯的 `container_memory_max_usage_bytes`（**仅 homelab 采集**）。
+>
+> ☠️ **想给规则加 RSS 判据滤掉这类假阳性，先看 oracle 有没有这个指标**：
+> `rss` / `cache` / `usage` / `max_usage` 在中枢 Prometheus 里全是 homelab 162 条 /
+> **oracle 0 条**（`cloud/oracle/manifests/monitoring/otel-collector-config.yaml` 的 keep
+> 正则只留 `container_(cpu_usage_seconds_total|memory_working_set_bytes)`）——
+> **oracle 唯一入库的容器内存指标，恰好就是有误导性的那一个**，那边做不了上述拆解
+> （只能 SSH 读 `memory.stat`）。直接 `and` 一条 RSS 判据会让 oracle 侧该告警**恒不触发**，
+> 外观与「没超阈值」完全一致。要么先扩 keep 正则，要么用 `cluster="homelab"` 限定
+> 并把不对称写进注释。
+>
+> 完整现场与判据 → [records/2026-08-30-memory-alert-page-cache-false-alarm.md](../records/2026-08-30-memory-alert-page-cache-false-alarm.md)
 
 ---
 
