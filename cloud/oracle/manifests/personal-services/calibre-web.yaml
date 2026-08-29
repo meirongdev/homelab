@@ -82,6 +82,17 @@ spec:
       priorityClassName: bulk
       securityContext:
         fsGroup: 1000
+        # 2026-08-29: 书库 PV 是 local 型 → kubelet 会做 fsGroup 属主管理，默认策略
+        # Always = 每次 pod 重启都递归 chown/chmod 整个 ~24.5G 书库（kubelet 干的，
+        # 无容器日志）→ 全部文件 ctime 刷新 → 当晚 restic 视全库 changed 整库重读，
+        # 备份内存峰值 100–160Mi → 600–970Mi（节点重启 08-22×2/08-26/08-27 精确对应
+        # 峰值晚 08-23/27/28）。OnRootMismatch = 卷根目录 gid/权限已符合预期就跳过。
+        # ⚠️ kubelet 对"符合预期"的判断含目录 setgid 位（它扫完目录是 2777），所以
+        # 下面两处 fixer 的 find 谓词必须用 -perm -777（至少含）而非 -perm 777
+        # （精确等于），否则 fixer 把 2777 改回 0777 剥掉 setgid → 下次启动又判
+        # "不匹配"再全量扫，两者打架。归因全文与备份侧数据见
+        # backup/overlays/oracle/cronjob-patch.yaml 的 2026-08-29 注释。
+        fsGroupChangePolicy: "OnRootMismatch"
       initContainers:
         - name: disable-auto-convert
           image: python:3.11-slim
@@ -123,8 +134,10 @@ spec:
                 exit 0
               fi
               echo "[init] no marker — applying baseline permissions once..."
-              find /library -type f ! -perm 666 -exec chmod 666 {} + 2>/dev/null || true
-              find /library -type d ! -perm 777 -exec chmod 777 {} + 2>/dev/null || true
+              # -perm -666/-777 = "至少含这些位"：别剥 kubelet fsGroup 扫描给目录加的
+              # setgid（2777），否则与 OnRootMismatch 打架（见 pod securityContext 注释）
+              find /library -type f ! -perm -666 -exec chmod 666 {} + 2>/dev/null || true
+              find /library -type d ! -perm -777 -exec chmod 777 {} + 2>/dev/null || true
               touch "$MARKER"
               echo "[init] baseline applied + marker placed"
           volumeMounts:
@@ -216,10 +229,12 @@ spec:
               set -u
               echo "[fix-perms] starting permission fixer loop"
               while true; do
-                # Find and fix files not at 666
-                files=$(find /library -type f ! -perm 666 -exec chmod 666 {} + 2>/dev/null | wc -l)
-                # Find and fix directories not at 777
-                dirs=$(find /library -type d ! -perm 777 -exec chmod 777 {} + 2>/dev/null | wc -l)
+                # -perm -666/-777（至少含）而非精确匹配：别剥 kubelet fsGroup 扫描给目录
+                # 加的 setgid（2777），否则与 OnRootMismatch 打架（见 securityContext 注释）。
+                # -print 让 wc -l 数真实修过的路径：原写法数的是 chmod 的 stdout，恒为 0，
+                # "fixed N files" 从没打印过，排障时会被误读成 "fixer 没干过活"。
+                files=$(find /library -type f ! -perm -666 -print -exec chmod 666 {} + 2>/dev/null | wc -l)
+                dirs=$(find /library -type d ! -perm -777 -print -exec chmod 777 {} + 2>/dev/null | wc -l)
                 if [ "$files" -gt 0 ] || [ "$dirs" -gt 0 ]; then
                   echo "[fix-perms] fixed $files files and $dirs directories"
                 fi
