@@ -1,12 +1,13 @@
 # Proxmox 宿主升级（内核 + PVE 本体）
 
 > Last updated: 2026-08-29
-> Status: SOP —— 尚未执行。两台宿主的现状盘点见 §1，执行后请回填 §8。
+> Status: SOP —— `pve` 已于 2026-08-29 按本文执行完毕，`storage-106` 待做（见 §8）。
 > 触发条件：要升 `pve` / `storage-106` 的内核或 PVE 本体；或发现这两台**长期收不到任何
 > Proxmox 更新**（`apt list --upgradable` 里一条 `proxmox-*` 都没有）。
 > ⛔ **不适用于两台 k8s 节点** —— `k8s-node` / `k8s-worker-106` 是普通 Ubuntu，
 > unattended-upgrades 会自动装新内核，只差重启，流程完全不同（见 §7）。
-> 成功判定：`pveversion` 是新版本 · `uname -r` 是 `6.17.x-*-pve` ·
+> 成功判定：`pveversion` 是新版本 · `uname -r` 是 `proxmox-default-kernel` 当前指向的系列
+> （2026-08-29 实测为 `7.0.x-*-pve`）·
 > `zfs version` 的 userland 与 kmod **同版本** · `zpool status mrstorage` ONLINE（仅 106）·
 > `qm list` 里 VM 自己起来了 · 从 `k8s-node` 能挂上 106 的 NFS。
 > 回滚：见 §6（GRUB 一次性回旧内核 / 删仓库文件）。
@@ -28,7 +29,7 @@
 
 | | 现装 | `pve-no-subscription` 里有 |
 |---|------|--------------------------|
-| 内核 | `proxmox-kernel-6.14` 6.14.8-2 | `proxmox-kernel-6.17`（6.17.13-x）|
+| 内核 | `proxmox-kernel-6.14` 6.14.8-2 | `proxmox-kernel-7.0`（由 `proxmox-default-kernel` 定为默认）· 6.17 与 6.14 系列同时在架 |
 | PVE | `pve-manager` 9.0.3 | `pve-manager` 9.2.x |
 | ZFS | 2.3.3-pve1 | 2.4.x-pve1 |
 
@@ -152,8 +153,21 @@ apt-get -s full-upgrade | grep -E '^Inst (zfs|dkms|proxmox-kernel|pve-)|newly in
 
 **放行判据**（三条都要满足，否则停下来查）：
 
-- 出现 `Inst proxmox-kernel-6.17 ...`
-- ZFS 各包的来源是 **Proxmox**（版本号带 `-pve1`），**不是** `Debian-Security`
+- 出现 `Inst proxmox-kernel-<新系列> ...` 与 `Inst proxmox-default-kernel ...`
+  ☠️ **别把系列号写死在判据里** —— 2026-08-29 首次执行时就已经是 7.0 而非 6.17
+- ZFS 各包的来源是 **Proxmox**（版本号带 `-pve1`），**不是** `Debian-Security`。
+  ⚠️ 2.3.x → 2.4.x 会做 **soname 迁移**，正常形态长这样，不要误判为异常：
+  `Remv libzfs6linux` + `Inst libzfs7linux (2.4.4-pve1)`。
+  ☠️ 但 **`libzpool6linux` 是个例外**：它被标成 manual、且旧版 `zfsutils-linux` 对它有依赖记录，
+  apt 不会顺手删，反而会把它从 **Debian-Security 升到 2.3.9**。它在升级后没有任何消费者
+  （新 `zfsutils-linux 2.4.4-pve1` 只依赖 `libzpool7linux`），**升级后定点删掉**即可，
+  别用 `apt autoremove`（会连旧内核一起带走）：
+
+  ```bash
+  dpkg -s zfsutils-linux | grep ^Depends   # 确认只依赖 libzpool7linux
+  apt-get -s remove libzpool6linux         # 确认只删它一个、无级联
+  apt-get remove libzpool6linux
+  ```
 - **没有** `Inst zfs-dkms`
 
 ### 4.4 升级
@@ -171,7 +185,7 @@ apt-get full-upgrade
 而那正是 §6 回滚要引导的内核。等新内核**稳定跑过几天**再清理：
 
 ```bash
-dpkg -l | grep proxmox-kernel      # 确认 6.14 与 6.17 并存后再谈清理
+dpkg -l | grep proxmox-kernel      # 确认新旧系列并存后再谈清理
 ```
 
 ### 4.5 重启并验证
@@ -180,10 +194,10 @@ dpkg -l | grep proxmox-kernel      # 确认 6.14 与 6.17 并存后再谈清理
 reboot
 ```
 
-回来后（预期 6.17.x 内核）：
+回来后：
 
 ```bash
-uname -r                       # 6.17.x-*-pve
+uname -r                       # 7.0.x-*-pve（以 proxmox-default-kernel 为准）
 pveversion                     # 9.2.x
 systemctl --failed             # 应为空
 qm list                        # VM 自动起来了（onboot: 1）
@@ -191,6 +205,13 @@ zfs version                    # userland 与 kmod 必须同版本
 zpool status mrstorage         # 仅 106：ONLINE，无 DEGRADED/错误计数
 exportfs -s | head             # 仅 106：导出还在
 ```
+
+⚠️ **重启窗口内 oracle 侧会出现预期内的瞬时 Degraded**：Vault 跑在 homelab，
+`pve` 一停，oracle 那些跨集群读 Vault 的 ExternalSecret 就会失败，ArgoCD 把对应 App
+标成 `Degraded`。刷新间隔短的（如 `argocd-oidc`，1m）先中招，长的（1h）可能压根没赶上。
+**不要立刻去修** —— Vault 回来后它自己会好（2026-08-29 实测约 10s 内全部回 Healthy）。
+判据：`kubectl --context oracle-k3s get externalsecrets -A` 全部 `SecretSynced`，
+且 `kubectl --context k3s-homelab -n vault exec vault-0 -- vault status` 显示 `Sealed false`。
 
 集群侧（在**笔记本**上）：
 
@@ -267,7 +288,7 @@ kubectl --context k3s-homelab uncordon k8s-worker-106
 
 | 日期 | 宿主 | 从 → 到 | 备注 |
 |------|------|---------|------|
-| — | `pve` | — | 未执行 |
+| 2026-08-29 | `pve` | 内核 6.14.8-2 → **7.0.14-14-pve** · PVE 9.0.3 → **9.2.11** · ZFS 2.3.3 → **2.4.4-pve1** | 顺利。120 升级 / 21 新装 / 1 移除。宿主重启 46s，homelab 总停机约 3 分钟（VM 先 `qm shutdown`，宿主起来后 `onboot:1` 自动拉起，集群 145s 内 69 pod 全绿）。踩到 `libzpool6linux` 孤儿（见 §4.3）与 oracle 侧瞬时 Degraded（见 §4.5），均已在文中固化 |
 | — | `storage-106` | — | 未执行 |
 
 > 执行后回填本表；若过程中出了状况，复盘写进 [`records/`](../records/README.md) 并链回这里。
