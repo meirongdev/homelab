@@ -12,7 +12,7 @@ spec:
     # 确认该版本存在并按需调整（chart 3.x ↔ app v1.12+）。
     - repoURL: https://kyverno.github.io/kyverno
       chart: kyverno
-      targetRevision: "3.8.1"
+      targetRevision: "3.8.2"
       helm:
         valueFiles:
           - $values/k8s/helm/values/kyverno.yaml
