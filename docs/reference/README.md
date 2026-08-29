@@ -51,6 +51,7 @@
 ### 安全与身份
 
 - [security.md](security.md) — 纵深防御 11 层逐层状态 + 威胁覆盖矩阵。⚠️ 第 9 层网络**只到可见性**，无自建 CiliumNetworkPolicy
+- [trivy-cve-ops.md](trivy-cve-ops.md) — Trivy Operator 配置真相 + **四类静默失败**（TTL 卡吞吐 / ignoreFile 不触发重扫 / arm64-only 扫不了 / Docker Hub 限流不自愈）+ 覆盖率体检
 - [identity.md](identity.md) — ZITADEL 部署形态（HelmChart CR + CNPG）、各应用原生 OIDC 接入、per-app oauth2-proxy、GitHub 联邦 IdP
 
 ### 存储与备份

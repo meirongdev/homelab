@@ -1,6 +1,6 @@
 # ArgoCD Application Patterns
 
-> Last updated: 2026-08-20
+> Last updated: 2026-08-29
 > Status: 生效事实
 >
 > 当前 ArgoCD 管理模式分析、可选 pattern 对比与取舍建议。
@@ -112,7 +112,7 @@ homelab 负载必须显式写 `https://100.94.186.7:6443`，写错会把整套 h
 - **`monitoring-dashboards`** 的 App 名是历史名——**改 Application 名会触发 ArgoCD 删旧建新**，
   不值得。
 - **`trivy-operator-oracle`** 2026-08-03 补齐（控制面迁移后 oracle 镜像脱离 CVE 扫描的盲区，
-  见 [security.md §6](security.md)）。
+  见 [trivy-cve-ops.md](trivy-cve-ops.md)）。
 - **`backup`** = `backup/overlays/homelab`；oracle 侧不是独立 App，经 `oracle-k3s` App 引
   `backup/overlays/oracle`。
 - **`external-dns` ×2** 的配置事实（upsert-only、token、通配路由）在
