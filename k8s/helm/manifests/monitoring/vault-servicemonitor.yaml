@@ -1,0 +1,68 @@
+# 抓取 homelab Vault 的 telemetry —— 补上 2026-08-30 发现的采集盲区。
+#
+# ☠️ 发现经过：`VaultSealed`(vault_core_unsealed == 0) 与 `VaultUnreachable`
+# (up{job=~".*vault.*"} == 0) 两条 critical 自上线起**从没有可能响过** —— 中枢
+# Prometheus 里 `vault_*` 整个指标族不存在、`up{job=~".*vault.*"}` 是空集，因为
+# values/vault.yaml 从没开过 telemetry，也没有任何 ServiceMonitor 指向 Vault。
+# 而 `== 0` 在**序列不存在**时永远不评估（absent series 不参与比较），外观与
+# 「Vault 一切正常」完全一致。同月同形状的第三次（另两次见 records/2026-08-30-*）。
+#
+# ⚠️ 必须带 label release=kube-prometheus-stack，否则 Prometheus Operator 的
+#    serviceMonitorSelector 会**静默忽略**（同 cloudflared-servicemonitor.yaml）。
+# cluster=homelab 由默认 scrapeClass 的 relabeling 自动补上，无需手设。
+#
+# ☠️ **必须抓 Service `vault`，不能抓 `vault-active`** —— 这是本文件最容易改错的地方：
+#   两个 Service 都有 publishNotReadyAddresses=true，但 `vault-active` 的 selector 多一个
+#   `vault-active: "true"`，而 Vault 的 service_registration 在**封印/standby 时会摘掉
+#   这个标签** → 端点清空 → target 消失 → `up` 序列消失 →「Vault 封印了」这件事
+#   反而让告警**没有数据可判**。那正好是本文件要修的病。
+#   `vault` 的 selector 只有 component=server，封印时端点仍在（2026-08-30 实测三个
+#   Service 的 endpoints 均为 10.42.0.65:8200/8201）。
+#
+# ☠️ 第二个坑：ServiceMonitor 的 spec.selector 匹配的是 **Service 的标签**，而
+#   vault / vault-active / vault-standby / vault-internal **四个 Service 的标签几乎相同**
+#   （都带 app.kubernetes.io/name=vault；vault 与 vault-standby 的标签集完全一致，
+#   2026-08-30 实测）。只靠 matchLabels 会一次抓到 4 个 target、指向同一个 pod ——
+#   重复序列，且其中就有那个封印时会消失的 vault-active。
+#   故下面用 relabelings 按 __meta_kubernetes_service_name 精确 keep 到 `vault` 一个。
+#   （component=server 是 **Pod** 的标签，不是 Service 的，写进 selector 会一个都匹配不到。）
+#
+# 端点无需认证：values/vault.yaml 的 listener 里开了
+# telemetry{unauthenticated_metrics_access = true}，只放开 /v1/sys/metrics 一个路径
+# （抓取端不该持有 Vault token；8200 不出集群）。
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: vault
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app.kubernetes.io/part-of: vault
+spec:
+  namespaceSelector:
+    matchNames:
+      - vault
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vault
+  endpoints:
+    - port: http
+      interval: 30s
+      path: /v1/sys/metrics
+      params:
+        format:
+          - prometheus
+      relabelings:
+        # 见文件头「第二个坑」：四个 Service 标签近乎相同，必须按名字收到一个。
+        - sourceLabels: [__meta_kubernetes_service_name]
+          regex: 'vault'
+          action: keep
+      metricRelabelings:
+        # Vault 全量约 97–139 个指标族（数目随 telemetry 保留窗口浮动），绝大多数是
+        # Go runtime 与逐 API 路径的 summary。只留判活/封印/存储健康所需的少量。
+        # ⚠️ `vault_core_unsealed` 是 VaultSealed 的判据，删它 = 那条告警回到今天之前
+        #    的状态（恒不评估）。要改这条正则先看 alerts/prometheus-rules.yaml 的
+        #    vault 组与 VaultMetricsAbsent 守卫。
+        - sourceLabels: [__name__]
+          regex: 'vault_core_(unsealed|active|performance_standby|leadership_lost_count|handle_request_(count|sum))|vault_runtime_(alloc_bytes|num_goroutines)|vault_raft_storage_(entry_size|get|put|delete)_(count|sum)|vault_expire_num_leases|vault_barrier_(get|put)_(count|sum)|up'
+          action: keep
