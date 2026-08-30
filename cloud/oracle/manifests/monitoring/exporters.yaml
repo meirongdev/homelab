@@ -36,12 +36,24 @@ spec:
             - containerPort: 9100
               hostPort: 9100
               name: metrics
+          # ☠️ 2026-08-30 删掉 `limits.cpu: 100m`：实测 CFS 节流 **71.9%**（1h 窗口）。
+          # 这个数字在此之前**在 oracle 侧根本看不见** —— `container_cpu_cfs_*` 直到当天
+          # 才进 otel keep 正则，`ContainerCPUThrottlingSustained` 也才刚从 homelab-only
+          # 放开（见 otel-collector-config.yaml 的 prometheus/cadvisor）。
+          # 处置依据有两条，不是拍的：
+          #   1) homelab 的 node-exporter（kube-prometheus-stack 默认）**本来就没有 CPU
+          #      limit**，只有 memory limit —— 它从来不出现在节流榜上。本改动是与它对齐。
+          #   2) 告警自己的 annotation 写着：亚秒级突发的采集器/agent 抬 limit 治不好，
+          #      应考虑不设 CPU limit。node-exporter 正是这一类（15s 一轮、每轮很短的尖峰）。
+          # limits 不参与调度（只有 requests 参与），删掉不影响排布；QoS 仍是 Burstable。
+          # ⚠️ 预期副作用，**别误读**：没有 CPU quota 的容器 cAdvisor 就不吐
+          #    `container_cpu_cfs_*`，所以改完 node-exporter 会从节流面板/告警里**整个消失**，
+          #    那是「无数据」不是「节流降到 0」。
           resources:
             requests:
               cpu: 10m
               memory: 32Mi
             limits:
-              cpu: 100m
               memory: 64Mi
           volumeMounts:
             - name: proc
