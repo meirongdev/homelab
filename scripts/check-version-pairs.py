@@ -207,8 +207,9 @@ def check_v3():
         violations["V3"].append(
             f"cilium {cil[0]} 要求 Gateway API {want}，但 gateway_api_version={gw[0]}"
             f"（k8s/helm/justfile:{gw[1]}）。升 Cilium 后必须跑 "
-            f"`just deploy-gateway-api-crds`，验收看 cilium-operator 日志有无 "
-            f"'Required GatewayAPI resources'，别拿 curl 旧域名当证据。"
+            f"`just deploy-gateway-api-crds`。验收判据是**新建一条 HTTPRoute 能拿到 "
+            f".status**；operator 日志里 'Required GatewayAPI resources are not found' "
+            f"是故障信号（有输出=坏了），健康时不打日志，所以 grep 不到不等于健康。"
         )
 
 

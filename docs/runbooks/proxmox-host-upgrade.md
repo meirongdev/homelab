@@ -236,6 +236,12 @@ kubectl --context k3s-homelab -n media exec deploy/jellyfin -- ls /media >/dev/n
 
 ```bash
 # 1) 腾空 worker 节点（在笔记本上）
+# ☠️ drain **不是平滑迁移**：这台上的 jellyfin / navidrome / podcast / external-dns /
+#    sloth / opencost / cf-analytics-exporter 全部硬钉
+#    `nodeSelector: {kubernetes.io/hostname: k8s-worker-106}`，赶下来也**无处可去**，
+#    只会变 Pending（0/2 nodes … didn't match Pod's node affinity/selector）。
+#    所以这一步 = 这 7 个服务开始停机，时长 = 整个 106 停机窗口。按这个估维护窗口。
+#    （uncordon 后它们会自己回来，不需要 rollout restart。）
 kubectl --context k3s-homelab cordon k8s-worker-106
 kubectl --context k3s-homelab drain k8s-worker-106 --ignore-daemonsets --delete-emptydir-data
 
