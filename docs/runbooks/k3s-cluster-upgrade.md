@@ -1,8 +1,13 @@
 # k3s 集群版本升级（两集群）
 
 > Last updated: 2026-08-30
-> Status: SOP —— **尚未整体执行过**。本文的兼容性判据、停机面、回滚点均在 2026-08-30
-> 对着两个现网集群实测核对；升级动作本身待首次执行后回来补 §10 的实测记录。
+> Status: SOP —— **已整体执行过一次**：2026-08-30 三节点 v1.34.5+k3s1 → **v1.35.8+k3s1**
+> （oracle → homelab 控制面 → worker），验收 24/24 通过。
+> ☠️ 那次踩了三个坑，**全都是本文当时写错或漏写的**，现已改进正文：
+> G6「谁把 k8s 版本当输入」整节是事后补的（漏它 → ZITADEL SSO 中断约 7 分钟）·
+> §8 陷阱 ①（安装脚本清空 agent env → agent 拒启）· §8 陷阱 ②（drain 不迁移
+> 硬钉在 worker 上的 7 个服务，只会让它们 Pending）。复盘见
+> [records/2026-08-30-k3s-135-upgrade.md](../records/2026-08-30-k3s-135-upgrade.md)。
 > 触发条件：要把 `k3s-homelab`（`k8s-node` + `k8s-worker-106`）或 `oracle-k3s` 升到新的
 > k3s/Kubernetes 版本；或发现三处 `k3s_version` pin 与现网跑的版本对不上。
 > 成功判定：三个节点 `kubectl get nodes` 全 `Ready` 且 `VERSION` 是目标版本 ·
@@ -62,7 +67,8 @@ worker 剧本里 `k3s_version` 的注释写的就是这条。
 | G2 | **cgroup v2** | `stat -fc %T /sys/fs/cgroup/` → 必须 `cgroup2fs` | 三节点全通过 |
 | G3 | **被移除的 kubelet flag** | `grep -A20 kubelet-arg /etc/rancher/k3s/config.yaml` | 三处均无被移除项 |
 | G4 | **还在被请求的弃用 API** | 见下方 `apiserver_requested_deprecated_apis` | 仅 `endpoints v1`（`removed_release=""`，无移除计划），不阻塞 |
-| G5 | **组件支持矩阵** | 见 §3.2 | ⚠️ **Kyverno 是天花板** |
+| G5 | **组件支持矩阵**（谁**支持**新版本）| 见 §3.2 | ⚠️ **Kyverno 是天花板** |
+| G6 | **谁把 k8s 版本当\*\*输入\*\***（与 G5 是两回事）| 见 §3.3 | ☠️ ZITADEL chart 咬过一次 |
 
 ### 3.1 G1/G4 的命令
 
@@ -125,6 +131,43 @@ done
 
 **因此当前的结论是：可以升到 1.35，先别上 1.36。** 若确要上 1.36，得接受 Kyverno
 处于未测试状态，并在 §9 里把策略生效验证当作每次必查项。
+
+### 3.3 G6 —— 谁把 k8s 版本当**输入**
+
+☠️ **这一格是 2026-08-30 补的，因为漏了它当场吃了一次 SSO 中断。**
+
+G5 问的是「组件**支不支持**新版本」，G6 问的是完全不同的另一件事：
+**「有没有组件把集群的 k8s 版本读出来，拿去拼别的东西」**。后者不出现在任何
+支持矩阵里，升级前也不会有任何告警。
+
+实际咬到的形态：ZITADEL chart 的 `tools.kubectl.image.tag` 默认留空，语义是
+「自动取集群的 k8s 版本」，于是集群一到 v1.35.8，它就去拉
+`docker.io/alpine/k8s:1.35.8` —— 而这个镜像的 tag 是**人工发布**的，跟不上
+k8s 的补丁节奏（当天最新只有 1.35.6）。setup Job 拉不到镜像 → 它是
+**pre-upgrade hook** → helm 回滚整个 release → `zitadel` 与 `zitadel-login`
+两个 Deployment 被拆掉 → `auth.meirong.dev` 从 302 变 **500**。
+
+**怎么查**（没有一劳永逸的静态办法，三条一起用）：
+
+```bash
+# ① 哪些 chart 由 k3s helm-controller 管（k3s 重启就会重新 reconcile，风险最高）
+for c in k3s-homelab oracle-k3s; do echo "--- $c"; kubectl --context "$c" get helmchart -A; done
+
+# ② chart 模板里有没有读 KubeVersion（对每个 helm 型 App 渲一遍看可疑镜像 tag）
+helm template <release> <chart> --version <ver> --repo <repo> -f <values> \
+  | grep -E "image:" | sort -u
+# ③ 上游 values 里搜「默认跟随集群版本」的说明
+helm show values <chart> --version <ver> --repo <repo> | grep -iB3 "cluster version"
+```
+
+**发现了就显式钉死**，别留空。2026-08-30 的处置：
+`cloud/oracle/manifests/zitadel/zitadel.yaml` 里钉 `tools.kubectl.image.tag: "1.35.6"`
+（⚠️ oracle 是 arm64，钉之前确认该 tag 是多架构 manifest list）。
+
+> 2026-08-30 的普查结果：**homelab 一个 HelmChart CR 都没有**（`No resources found`），
+> 这条路径只在 oracle 上存在，且已只剩 zitadel 一个。⚠️ 但 ArgoCD 渲染 Helm chart
+> 时同样会把集群版本传给模板，所以不能只查 helm-controller —— §9 ② 那条
+> 「升完立刻查未就绪 pod」才是兜底。
 
 ## 4. 停机面
 
@@ -270,17 +313,70 @@ ssh -i ~/.ssh/vgio root@100.110.27.111 \
 
 # 在 worker 上
 ssh -i ~/.ssh/vgio ubuntu@192.168.50.107
-# K3S_URL / K3S_TOKEN 已持久化在 /etc/systemd/system/k3s-agent.service.env，无需重传
-curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=<目标版本> sh -s - agent
+# ☠️ **必须重传 K3S_URL / K3S_TOKEN**，见下方陷阱 ①
+curl -sfL https://get.k3s.io | \
+  INSTALL_K3S_VERSION=<目标版本> \
+  K3S_URL=https://10.10.10.10:6443 \
+  K3S_TOKEN="$(ssh -i ~/.ssh/vgio ubuntu@10.10.10.10 'sudo cat /var/lib/rancher/k3s/server/node-token')" \
+  sh -s - agent
 sudo systemctl status k3s-agent --no-pager
 
 # 回笔记本
 kubectl --context k3s-homelab uncordon k8s-worker-106
 ```
 
-⚠️ drain 会把 `media` ns 的三个服务（jellyfin/navidrome/podcast）赶到控制面上，
-它们挂着 106 的只读 NFS PV，控制面同样挂得上。`uncordon` 之后它们**不会自己回来**——
-无所谓，下次重建自然回去；要立刻回去就 `kubectl -n media rollout restart deploy/<name>`。
+### ☠️ 陷阱 ① —— 安装脚本会**清空** agent 的 env 文件
+
+**2026-08-30 实踩，agent 直接拒启。** 装完日志里那行
+
+```
+[INFO]  env: Creating environment file /etc/systemd/system/k3s-agent.service.env
+```
+
+不是"沿用"，是**重新生成** —— 用当前 shell 环境覆盖。升级时若没把 `K3S_URL` /
+`K3S_TOKEN` 重新传进去，这个文件会变成**空的**，然后：
+
+```
+level=fatal msg="Error: --server is required"
+Job for k3s-agent.service failed because the control process exited with error code.
+```
+
+☠️ **别想当然地以为"已经 join 过就不用再给 token"** —— server 端的
+`config.yaml` 会被保留，但 agent 的 join 参数只活在这个 env 文件里，装一次冲一次。
+
+**已经踩了怎么救**（不必回滚，token 直接管道过去、不落盘不进历史）：
+
+```bash
+ssh -i ~/.ssh/vgio ubuntu@10.10.10.10 'sudo cat /var/lib/rancher/k3s/server/node-token' \
+ | ssh -i ~/.ssh/vgio ubuntu@192.168.50.107 'read -r T
+     printf "K3S_TOKEN=%s\nK3S_URL='"'"'https://10.10.10.10:6443'"'"'\n" "$T" \
+       | sudo tee /etc/systemd/system/k3s-agent.service.env >/dev/null
+     sudo chmod 600 /etc/systemd/system/k3s-agent.service.env'
+ssh -i ~/.ssh/vgio ubuntu@192.168.50.107 'sudo systemctl daemon-reload && sudo systemctl start k3s-agent'
+```
+
+### ☠️ 陷阱 ② —— drain 不会把这些服务"迁到控制面"，只会让它们 Pending
+
+**2026-08-30 实踩。** worker 上这 6 个 Deployment 全部**硬钉**在本节点：
+
+```yaml
+nodeSelector: {kubernetes.io/hostname: k8s-worker-106}
+```
+
+`jellyfin` · `navidrome` · `podcast` · `external-dns` · `sloth` · `opencost`
+（外加 `cf-analytics-exporter`）。drain 把它们赶下来之后**无处可去**，症状是
+
+```
+0/2 nodes are available: 1 node(s) didn't match Pod's node affinity/selector,
+1 node(s) were unschedulable.
+```
+
+所以 **drain 不是"平滑迁移"，是"这些服务开始停机"** —— 停机时长 = 整个 worker
+升级窗口，直到 `uncordon`。计划维护窗口时按这个算，别按"迁走了就没事"算。
+（好消息是 `uncordon` 之后它们会自己回来，不需要 `rollout restart`。）
+
+> 为什么钉死：媒体三件套要就近读 106 的 ZFS（worker VM 就跑在 106 上），
+> 其余几个是刻意从热控制面挪开。→ [ADR](../decisions/storage106-as-homelab-worker.md)
 
 ## 9. 验收
 
