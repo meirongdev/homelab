@@ -206,6 +206,35 @@ trivy:
       #   2026-08-05 已在源仓库 meirongdev/it-tools 把 base 钉到 nginx:1.30-alpine
       #   并重建（sha-ffb28a7），实测 nginx-1.30.4-r1 → 真修掉了，故删除该豁免。）
 
+    # ---- 暴露密钥（exposed secrets）的既知假阳性（2026-08-30 新增）----
+    # 背景：`TrivyExposedSecretFound` 自上线起引用的指标名 `trivy_exposedsecrets_findings`
+    # **根本不存在**（真名 `trivy_image_exposedsecrets`），这条 critical 从没可能响过。
+    # 同批修了名字，修完立刻有 43 条 High 命中，逐条读过 report 后确认**全部是上游镜像
+    # 自带的测试/自签夹具，不是本仓库的凭据泄漏**。
+    # ☠️ **按 path 豁免，不按 rule id 豁免**：`private-key` 是这条告警存在的唯一理由，
+    #    整条 id 挡掉等于把告警删了还留个空壳（正是上面那个"名字写错"的翻版）。
+    # ⚠️ paths 同时写了带/不带前导斜杠与 `**/` 三种写法：trivy 的 ignore path 匹配语义
+    #    随版本变过，多写两行零成本，写少了则**豁免静默失效**（表现为告警继续 firing）。
+    #    验收：下一轮自然重扫后 `trivy_image_exposedsecrets{severity=~"High|Critical"}`
+    #    应归零；若仍非零，就是 path 没匹配上，别去手删报告（见 CVE 运维那套口径）。
+    secrets:
+      - id: private-key
+        paths:
+          - "**/ssl-cert-snakeoil.key"
+          - "etc/ssl/private/ssl-cert-snakeoil.key"
+          - "/etc/ssl/private/ssl-cert-snakeoil.key"
+        statement: "Debian 基底自带的 snakeoil 自签私钥(cnpg-postgresql 镜像, 命中 databases/ 与 zitadel/ 两个 pg); 非本仓库凭据, 2027-02 复审"
+      - id: private-key
+        paths:
+          - "**/slapdtest/certs/client.key"
+          - "**/slapdtest/certs/server.key"
+        statement: "python-ldap slapdtest 的测试夹具私钥(calibre-web-automated 镜像内, 命中 personal-services 的 18 个 workload); 上游公开测试数据, 2027-02 复审"
+      - id: private-key
+        paths:
+          - "**/dist/caixin-*.mjs"
+          - "app/dist/caixin-*.mjs"
+        statement: "RSSHub 公开镜像内置的 caixin 路由解密私钥, 属上游公开代码而非本仓库凭据; 文件名带内容哈希故用 glob; 上游移除该内置 key 后即可删本条, 2026-11 复审"
+
   # 扫描 Job（client）资源
   resources:
     requests:

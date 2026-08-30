@@ -39,8 +39,16 @@ spec:
             description: "运行中工作负载的镜像含可修复的 Critical CVE。查看：`kubectl get vulnerabilityreports -A -o wide`，按 Critical 计数排序后升级对应镜像。"
 
         # 镜像内硬编码密钥被扫出——最高信号，几乎总是配置事故。
+        # ☠️ 2026-08-30 修正指标名：原先写的 `trivy_exposedsecrets_findings` **在任何集群
+        #    都不存在**（真名 `trivy_image_exposedsecrets`），所以这条 critical 自上线起
+        #    **一次都没有可能响过** —— 表达式恒为空集，外观与「没有暴露密钥」完全一致。
+        #    本文件头 17 行的「首次部署后 curl :8080/metrics 核对指标名」那一步没做过。
+        #    同类陷阱：records/2026-08-30-memory-alert-page-cache-false-alarm.md。
+        # ⚠️ 改名后立刻有 43 条 High 命中（全在 oracle），逐条读过 report 确认都是上游镜像
+        #    自带的测试/自签夹具，已在 values/trivy-operator-oracle.yaml 的 ignoreFile
+        #    按 **path** 精确豁免（不按 rule id 全局豁免——那会连真的私钥泄漏一起挡掉）。
         - alert: TrivyExposedSecretFound
-          expr: sum by (cluster) (trivy_exposedsecrets_findings{severity=~"High|Critical"}) > 0
+          expr: sum by (cluster) (trivy_image_exposedsecrets{severity=~"High|Critical"}) > 0
           for: 15m
           labels:
             severity: critical
