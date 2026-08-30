@@ -4,7 +4,6 @@
 
 | 日期 | 记录 | 内容 |
 |------|------|------|
-| 2026-08-30 | [k3s-135-upgrade](2026-08-30-k3s-135-upgrade.md) | 三节点 1.34.5 → **1.35.8**（验收 24/24）。☠️ 三个坑**全是 SOP 自身的缺陷**：①漏查「谁把 k8s 版本当**输入**」—— ZITADEL chart 的 kubectl 镜像 tag 自动跟随集群版本，`alpine/k8s:1.35.8` 不存在 → pre-upgrade hook 失败 → helm 回滚 → **SSO 中断 ~7 分钟**，且发生在升级「成功」之后 3 分钟 ②安装脚本**清空** agent 的 env → `--server is required` 拒启 ③drain 不迁移硬钉 worker 的 7 个服务，只让它们 Pending。顺带 Kyverno 3.8.2→3.9.0（v1.18 已 EOL，越界失效**完全静默**）|
 | 2026-08-30 | [memory-alert-page-cache-false-alarm](2026-08-30-memory-alert-page-cache-false-alarm.md) | `ContainerMemoryNearLimit` 报 Prometheus 99.45%，峰值 87% 是页缓存（RSS 口径 26.4%）；容器 `usage` 顶死 3072Mi=limit 却**没有 OOM**。☠️ 对照实验：同容器同 limit 重启三次，峰值 **99.45%/70.1%/23.7%** —— 读数由**节点页缓存冷热**决定。另含：ws 回落≠内存被回收 · v2 上 failcnt 是废指标 · 重启后 5 分钟聚合读到旧容器 · 加 RSS 判据会静默关掉 oracle 那半 |
 | 2026-08-22 | [podcast-tts-unload-pending](2026-08-22-podcast-tts-unload-pending.md) | 播客整集败于 Mac 换模型时的 `is busy`：重试只等 15s；☠️ 并发被实测否掉（5 路比串行快一倍），病因是耐心不是并发 |
 | 2026-08-19 | [opencost-bingen-replay-crashloop](2026-08-19-opencost-bingen-replay-crashloop.md) | collector WAL 积 5.5GB，启动全量重放 3m43s > 探针预算 160s → 节点重启后永久崩循环烧 1.1/2 核 24h；retention 参数就是重放窗口 |

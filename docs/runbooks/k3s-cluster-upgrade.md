@@ -1,13 +1,8 @@
 # k3s 集群版本升级（两集群）
 
 > Last updated: 2026-08-30
-> Status: SOP —— **已整体执行过一次**：2026-08-30 三节点 v1.34.5+k3s1 → **v1.35.8+k3s1**
-> （oracle → homelab 控制面 → worker），验收 24/24 通过。
-> ☠️ 那次踩了三个坑，**全都是本文当时写错或漏写的**，现已改进正文：
-> G6「谁把 k8s 版本当输入」整节是事后补的（漏它 → ZITADEL SSO 中断约 7 分钟）·
-> §8 陷阱 ①（安装脚本清空 agent env → agent 拒启）· §8 陷阱 ②（drain 不迁移
-> 硬钉在 worker 上的 7 个服务，只会让它们 Pending）。复盘见
-> [records/2026-08-30-k3s-135-upgrade.md](../records/2026-08-30-k3s-135-upgrade.md)。
+> Status: SOP —— 已按本文完整执行过一次（三节点 v1.34.5+k3s1 → v1.35.8+k3s1，
+> 顺序 oracle → homelab 控制面 → worker，验收 24/24 通过）。本文的每条命令都是实跑验证过的。
 > 触发条件：要把 `k3s-homelab`（`k8s-node` + `k8s-worker-106`）或 `oracle-k3s` 升到新的
 > k3s/Kubernetes 版本；或发现三处 `k3s_version` pin 与现网跑的版本对不上。
 > 成功判定：三个节点 `kubectl get nodes` 全 `Ready` 且 `VERSION` 是目标版本 ·
@@ -37,7 +32,8 @@ curl -sS https://update.k3s.io/v1-release/channels \
 grep -rn "k3s_version:" k8s/ansible/playbooks/ cloud/oracle/ansible/playbooks/
 ```
 
-> 2026-08-30 的快照仅供理解形态：三节点全 `v1.34.5+k3s1`，stable 已 `v1.36.4+k3s1`。
+> ⚠️ 上面三条命令的输出才是判据。**别把版本号写进任何常青文档** —— 它每周都在动，
+> 唯一可信的现状是 `kubectl get nodes` 与 update.k3s.io。
 
 ## 2. 三条硬约束
 
@@ -68,7 +64,7 @@ worker 剧本里 `k3s_version` 的注释写的就是这条。
 | G3 | **被移除的 kubelet flag** | `grep -A20 kubelet-arg /etc/rancher/k3s/config.yaml` | 三处均无被移除项 |
 | G4 | **还在被请求的弃用 API** | 见下方 `apiserver_requested_deprecated_apis` | 仅 `endpoints v1`（`removed_release=""`，无移除计划），不阻塞 |
 | G5 | **组件支持矩阵**（谁**支持**新版本）| 见 §3.2 | ⚠️ **Kyverno 是天花板** |
-| G6 | **谁把 k8s 版本当\*\*输入\*\***（与 G5 是两回事）| 见 §3.3 | ☠️ ZITADEL chart 咬过一次 |
+| G6 | **谁把 k8s 版本当\*\*输入\*\***（与 G5 是两回事）| 见 §3.3 | ☠️ ZITADEL chart 命中，已钉死 |
 
 ### 3.1 G1/G4 的命令
 
@@ -103,7 +99,7 @@ grep -rn "gitRepo:\|externalIPs:" --include="*.yaml" k8s/ cloud/ argocd/ backup/
 | 组件 | 在哪 | 怎么查 | 2026-08-30 结论 |
 |---|---|---|---|
 | **Cilium** | 两集群 1.20.0 | `docs.cilium.io/en/v<ver>/network/kubernetes/requirements/` | e2e 覆盖 k8s **1.33–1.36**，到 1.36 不挡路 |
-| **Kyverno** | 仅 homelab 1.18.2 | `kyverno.io/docs/installation/releases/` | ⚠️ 唯一 supported release v1.19 只到 **k8s 1.35**；**1.36 无任何版本支持**（v1.20 预计 2026-11）|
+| **Kyverno** | 仅 homelab（现 v1.19.0）| `kyverno.io/docs/installation/releases/` | ⚠️ 唯一 supported release v1.19 只到 **k8s 1.35**；**1.36 无任何版本支持**（v1.20 预计 2026-11）|
 | **CNPG** | 仅 oracle 1.30.0 | 版本发布公告 | 1.30 已加 1.36 支持 |
 | ArgoCD / ESO / prometheus-operator / trivy-operator / tetragon / falco | 两集群 | 上游 release notes | 均无声明冲突 |
 
@@ -134,18 +130,25 @@ done
 
 ### 3.3 G6 —— 谁把 k8s 版本当**输入**
 
-☠️ **这一格是 2026-08-30 补的，因为漏了它当场吃了一次 SSO 中断。**
+☠️ **这一格最容易漏，且漏了会直接打掉线上服务。**
 
 G5 问的是「组件**支不支持**新版本」，G6 问的是完全不同的另一件事：
 **「有没有组件把集群的 k8s 版本读出来，拿去拼别的东西」**。后者不出现在任何
 支持矩阵里，升级前也不会有任何告警。
 
-实际咬到的形态：ZITADEL chart 的 `tools.kubectl.image.tag` 默认留空，语义是
-「自动取集群的 k8s 版本」，于是集群一到 v1.35.8，它就去拉
-`docker.io/alpine/k8s:1.35.8` —— 而这个镜像的 tag 是**人工发布**的，跟不上
-k8s 的补丁节奏（当天最新只有 1.35.6）。setup Job 拉不到镜像 → 它是
-**pre-upgrade hook** → helm 回滚整个 release → `zitadel` 与 `zitadel-login`
-两个 Deployment 被拆掉 → `auth.meirong.dev` 从 302 变 **500**。
+典型形态（ZITADEL chart，本仓库实际命中过）：`tools.kubectl.image.tag` 默认留空，
+语义是「自动取集群的 k8s 版本」，于是集群一升到 vX.Y.Z，它就去拉
+`docker.io/alpine/k8s:X.Y.Z` —— 而这个镜像的 tag 是**人工发布**的，**跟不上 k8s
+的补丁节奏**，集群的补丁版本往往还没有对应 tag。链条是：
+
+```
+拉不到镜像 → setup Job 失败 → 它是 pre-upgrade hook → helm 回滚整个 release
+           → zitadel / zitadel-login 两个 Deployment 被拆掉 → auth 域名 500
+```
+
+⚠️ **发作时机在升级"成功"之后几分钟**：节点 Ready、`k3s --version` 正确、pod 数
+也已复原，helm-controller 才慢一步重新 reconcile。**「升完看一眼节点就收工」会
+完美错过它** —— 必须跑完 §9 的 ② 才算验收。
 
 **怎么查**（没有一劳永逸的静态办法，三条一起用）：
 
@@ -160,12 +163,13 @@ helm template <release> <chart> --version <ver> --repo <repo> -f <values> \
 helm show values <chart> --version <ver> --repo <repo> | grep -iB3 "cluster version"
 ```
 
-**发现了就显式钉死**，别留空。2026-08-30 的处置：
-`cloud/oracle/manifests/zitadel/zitadel.yaml` 里钉 `tools.kubectl.image.tag: "1.35.6"`
-（⚠️ oracle 是 arm64，钉之前确认该 tag 是多架构 manifest list）。
+**发现了就显式钉死**，别留空。本仓库已钉的一处：
+`cloud/oracle/manifests/zitadel/zitadel.yaml` 的 `tools.kubectl.image.tag`
+（⚠️ oracle 是 arm64，换 tag 前确认该 tag 是多架构 manifest list；
+kubectl 与集群同 minor 即可，所以只有升 minor 时才需要动它）。
 
-> 2026-08-30 的普查结果：**homelab 一个 HelmChart CR 都没有**（`No resources found`），
-> 这条路径只在 oracle 上存在，且已只剩 zitadel 一个。⚠️ 但 ArgoCD 渲染 Helm chart
+> 普查现状：**homelab 一个 HelmChart CR 都没有**（`No resources found`），
+> 这条路径只在 oracle 上存在，且只剩 zitadel 一个。⚠️ 但 ArgoCD 渲染 Helm chart
 > 时同样会把集群版本传给模板，所以不能只查 helm-controller —— §9 ② 那条
 > 「升完立刻查未就绪 pod」才是兜底。
 
@@ -175,7 +179,7 @@ helm show values <chart> --version <ver> --repo <repo> | grep -iB3 "cluster vers
 |---|---|---|
 | 升 **oracle-k3s** | **ArgoCD 控制面**（GitOps 暂停）· ZITADEL（全站 SSO 登录）· Loki/Tempo（日志与追踪断档）· Calibre | 单节点，全集群短暂不可用 |
 | 升 **homelab 控制面** | Vault（→ oracle 侧 ExternalSecret 报错）· Prometheus/Grafana/Alertmanager · 该节点上的全部应用 | 同上 |
-| 升 **homelab worker** | jellyfin / navidrome / podcast（媒体）· external-dns · sloth · opencost | 可先 drain 迁走，控制面还在 |
+| 升 **homelab worker** | jellyfin / navidrome / podcast（媒体）· external-dns · sloth · opencost · cf-analytics-exporter | ☠️ 这些**硬钉在 worker 上、迁不走**，drain 只会让它们 Pending —— 停机时长 = 整个 worker 升级窗口，见 §8 陷阱 ② |
 
 三条已知的连带反应，**都是预期内、不要去修**：
 
@@ -327,7 +331,7 @@ kubectl --context k3s-homelab uncordon k8s-worker-106
 
 ### ☠️ 陷阱 ① —— 安装脚本会**清空** agent 的 env 文件
 
-**2026-08-30 实踩，agent 直接拒启。** 装完日志里那行
+**不重传就是 agent 拒启，没有中间状态。** 装完日志里那行
 
 ```
 [INFO]  env: Creating environment file /etc/systemd/system/k3s-agent.service.env
@@ -357,7 +361,7 @@ ssh -i ~/.ssh/vgio ubuntu@192.168.50.107 'sudo systemctl daemon-reload && sudo s
 
 ### ☠️ 陷阱 ② —— drain 不会把这些服务"迁到控制面"，只会让它们 Pending
 
-**2026-08-30 实踩。** worker 上这 6 个 Deployment 全部**硬钉**在本节点：
+worker 上这几个 Deployment 全部**硬钉**在本节点：
 
 ```yaml
 nodeSelector: {kubernetes.io/hostname: k8s-worker-106}

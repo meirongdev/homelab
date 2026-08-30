@@ -204,19 +204,17 @@ spec:
         enabled: false
       service:
         appProtocol: ""
-    # ☠️ 2026-08-30 —— 升 k3s 时被这个咬到，且**每次升 k3s 补丁都会复发**。
-    # chart 的 tools.kubectl.image.tag 默认留空，其语义是「自动取**集群的 k8s 版本**」
-    # （values 注释原话：It should be left empty to automatically default to the
-    # Kubernetes cluster version）。而 docker.io/alpine/k8s 的 tag 是人工发布的，
-    # **跟不上 k8s 的补丁节奏**：集群升到 v1.35.8 的当天，alpine/k8s 最新的 1.35.x
-    # 只到 1.35.6 → setup Job 的 3 个 machinekey/PAT 容器全部 ImagePullBackOff
-    # （"1.35.8: not found"）。
+    # ☠️ **这个 tag 必须显式钉住，不能留空。** chart 里留空的语义是
+    # 「自动取**集群的 k8s 版本**」（values 原话：It should be left empty to
+    # automatically default to the Kubernetes cluster version），而
+    # docker.io/alpine/k8s 的 tag 是人工发布的、**跟不上 k8s 的补丁节奏** ——
+    # 集群一升补丁，它就去拉一个还不存在的 tag，setup Job 的 3 个 machinekey/PAT
+    # 容器全部 ImagePullBackOff。**每次升 k3s 补丁都会复发**，所以别改回留空。
     #
-    # 失败形态值得记：ZITADEL **本体不受影响**（主 pod 没重启、auth.meirong.dev 照常
-    # 302），挂的只是 k3s 重启后 helm-controller 重新 reconcile 拉起的 setup Job ——
-    # 也就是说 SSO 看着好好的，一个 Job 在后台无限重试。不主动看 pod 就发现不了。
+    # ⚠️ 后果比看上去大：setup 是 **pre-upgrade hook**，它失败会让 helm 回滚整个
+    # release，把 zitadel / zitadel-login 两个 Deployment 一起拆掉 → auth 域名 500。
     #
-    # 因此**显式钉住**，不再跟随集群版本。升级规则：kubectl 与集群同 minor 即可
+    # 升级规则：kubectl 与集群同 minor 即可
     # （k8s 支持 ±1 minor 偏移），所以升 k8s minor 时才需要动这里，升补丁不用。
     # ⚠️ oracle 是 arm64：换 tag 前必须确认该 tag 是**多架构 manifest list**
     #    （1.35.6 已核：linux/amd64 + linux/arm64）。
