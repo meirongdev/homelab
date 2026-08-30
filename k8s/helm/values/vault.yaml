@@ -27,6 +27,38 @@ server:
           address = "[::]:8200"
           cluster_address = "[::]:8201"
           tls_disable = 1
+
+          # /v1/sys/metrics 默认要 token；Prometheus 抓取端没有也不该有 Vault token。
+          # 只放开 metrics 一个端点，且 8200 不出集群（入口是 vault-ui NodePort 31952，
+          # 仅经 Tailscale 暴露）。
+          telemetry {
+            unauthenticated_metrics_access = true
+          }
+        }
+
+        # ☠️ 2026-08-30 新增，**提交 ≠ 生效**（vault 是 manual-helm）。
+        # 背景：`VaultSealed`(vault_core_unsealed == 0) 与 `VaultUnreachable`
+        # (up{job=~".*vault.*"} == 0) 这两条 critical 自上线起**从没有可能响过** ——
+        # 实测中枢 Prometheus 里 `vault_*` 整个指标族不存在、`up{job=~".*vault.*"}` 为空集，
+        # 因为本 values 从来没开过 telemetry，也没有任何 ServiceMonitor 指向 Vault。
+        # 而 `up == 0` 在**序列不存在**时永远不评估（absent series 不参与比较）——
+        # 与「一切正常」外观完全一致。这是本仓库第三次栽在这个形状上。
+        # 兜底不是零：ESO 的 `ClusterSecretStoreNotReady`（活的，两集群各 2 条序列）
+        # 罩的正是「Vault sealed / token 过期」，见 alerts/eso-alerts.yaml 的注释。
+        # 但它要等 10 分钟且指向 ESO 而不是 Vault 本身。
+        #
+        # ⚠️ 生效需要两步，且必须同批做（顺序见 docs 与 justfile）：
+        #   1) cd k8s/helm && just deploy-vault      # helm upgrade，加载本段 config
+        #   2) kubectl -n vault delete pod vault-0   # STS 是 OnDelete，不删不生效
+        #      重启会 seal，由 postStart 的 auto-unseal 拉回（vault-auto-unseal secret）；
+        #      窗口内 ESO 同步会失败，属预期。
+        #   3) 确认 `up{job=~".*vault.*"}` 与 `vault_core_unsealed` 有序列后，
+        #      再补 ServiceMonitor 与 `VaultMetricsAbsent` 守卫 —— **顺序不能反**：
+        #      先上 ServiceMonitor 而 telemetry 还没生效 = 抓取 403 = up==0 =
+        #      `VaultUnreachable` 立刻烧，且烧的是我们自己制造的故障。
+        telemetry {
+          prometheus_retention_time = "30s"
+          disable_hostname          = true
         }
 
         service_registration "kubernetes" {}
