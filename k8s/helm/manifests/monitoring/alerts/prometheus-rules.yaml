@@ -533,14 +533,20 @@ spec:
         #    oracle 侧返回空结果，与"没有节流"外观完全一致 —— 2026-08-10 已据此误判过一次。
         # ⚠️ 分母用 periods_total 而非墙钟：节流率的判据是**周期比例**，不是 CPU 用量。
         #    `kubectl top` 在这里会给出个位数 m 的读数，看着像"完全没在用 CPU"。
+        # ✅ 2026-08-30 放开到两集群：oracle 的 keep 正则已补
+        #    `container_cpu_cfs_{,throttled_}periods_total`（各 42 条 series 实测到货），
+        #    此前硬写 cluster="homelab" 纯粹是因为那边没有分子。oracle 只有 2 OCPU 而设了
+        #    CPU limit 的容器比 homelab 还多（57 vs 53），比 homelab 更需要这条。
+        #    下面的 ContainerCPUThrottlingMetricsAbsent 守卫这个新依赖。
+        # ⚠️ oracle 侧的 1h 窗口从 keep 正则上线那刻起算，头一个小时内**只会少报**。
         - alert: ContainerCPUThrottlingSustained
           expr: |
             sum by (cluster, namespace, pod, container) (
-              increase(container_cpu_cfs_throttled_periods_total{container!="", cluster="homelab"}[1h])
+              increase(container_cpu_cfs_throttled_periods_total{container!=""}[1h])
             )
             /
             sum by (cluster, namespace, pod, container) (
-              increase(container_cpu_cfs_periods_total{container!="", cluster="homelab"}[1h])
+              increase(container_cpu_cfs_periods_total{container!=""}[1h])
             ) > 0.25
           for: 90m
           labels:
@@ -560,6 +566,34 @@ spec:
                 · 亚秒级突发的采集器/agent → 抬 limit 治不好，应考虑**不设 CPU limit**。
               ⚠️ 控制面是热笔记本（reference/homelab-host-power-thermal.md），抬 CPU 有热代价，
               别无脑往上加；优先抬到上游 chart 的默认值为止。
+
+        # ☠️ 2026-08-30 加：上一条的**分子来源守卫**，同 ContainerMemoryRssAbsent 的口径。
+        # oracle 的 cfs 指标靠 otel-collector-config.yaml 的 keep 正则显式放行；正则被改窄
+        # 或回滚 = 分子无 series = 上一条在该集群恒不触发，而这与「没有容器被节流」在任何
+        # 面板上都一模一样。
+        # ⚠️ 与内存那条的一个**实打实的区别**：cAdvisor 只为设了 CPU quota 的容器吐这一族，
+        #    所以「整个集群一个容器都没设 CPU limit」也会让本条烧起来。那种情况下它报的是
+        #    真事（节流告警确实失去了覆盖），不是误报 —— 别因此给它加 cluster 限定。
+        - alert: ContainerCPUThrottlingMetricsAbsent
+          expr: |
+            absent(container_cpu_cfs_periods_total{cluster="homelab"}) == 1
+            or
+            absent(container_cpu_cfs_periods_total{cluster="oracle-k3s"}) == 1
+          for: 30m
+          labels:
+            severity: warning
+            component: observability
+          annotations:
+            summary: "container_cpu_cfs_periods_total 在 {{ $labels.cluster }} 已停止入库 —— ContainerCPUThrottlingSustained 正在该集群静默失效"
+            description: |
+              CPU 节流告警的分子/分母没有 series，该集群的节流预警等于关闭，
+              且外观与「没有容器被节流」完全一致。
+              oracle-k3s：查 cloud/oracle/manifests/monitoring/otel-collector-config.yaml
+              的 `prometheus/cadvisor` keep 正则是否还含 `cpu_cfs`，以及 otel-collector
+              DaemonSet 是否随 configMapGenerator 的哈希滚过。
+              homelab：查 kube-prometheus-stack 的 kubelet ServiceMonitor / cAdvisor 采集。
+              也可能是**该集群所有容器都取消了 CPU limit** —— cAdvisor 只为有 quota 的容器
+              吐这一族，那种情况下本条报的是真事。
 
         # 慢频崩溃循环（每轮存活数分钟的那种）。mixin 的 KubePodCrashLooping 罩不住它：
         # 那条规则看 waiting_reason{CrashLoopBackOff}，容器每轮 Running 的几分钟里序列
