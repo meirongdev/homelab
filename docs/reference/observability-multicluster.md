@@ -294,6 +294,14 @@ All 4 Loki dashboards (`k8s/helm/manifests/monitoring/dashboards/grafana-dashboa
 Multi-cluster resource overview (`k8s/helm/manifests/monitoring/dashboards/multicluster-overview-dashboard.yaml`):
 
 - **Kubernetes / Multi-Cluster / Resource Overview** (`uid: k8s-multicluster-overview`) — node CPU/memory/disk/network, Pod status table, Deployment/StatefulSet health, container resource usage vs Limit; supports `cluster`, `namespace`, `phase` variables
+  - 「📦 容器资源使用」行 2026-08-30 从 2 个面板扩到 4 个，新增的两个按**容器**取 TOP10、
+    红色阈值线直接对齐告警：**CPU 节流率 TOP10**（红线 25% = `ContainerCPUThrottlingSustained`）
+    与 **内存 RSS / Limit TOP10**（红线 80% = `ContainerMemoryNearLimit`）。
+    ⚠️ RSS 面板与它左边的 working_set 面板**口径不同**，两张图并排就是为了看出差别：
+    working_set 含页缓存，对 mmap/文件重的负载会显著偏高
+    （[records/2026-08-30-…](../records/2026-08-30-memory-alert-page-cache-false-alarm.md)）。
+    ⚠️ 节流面板里**没设 CPU limit 的容器整个缺席**——cAdvisor 只为有 quota 的容器吐
+    `container_cpu_cfs_*`，那是无数据，不是「节流为 0」。
 
 **Dashboard variable configuration:**
 ```json
@@ -308,6 +316,34 @@ Multi-cluster resource overview (`k8s/helm/manifests/monitoring/dashboards/multi
 ```
 
 All LogQL queries use: `{cluster=~"${cluster}", k8s_namespace_name=~"..."}`
+
+### ☠️ chart 内置 mixin 看板选 `oracle-k3s` 恒为空（已知、刻意，不是故障）
+
+kube-prometheus-stack 自带的 **Compute Resources / Namespace(Pods) / Pod / Node** 那组看板
+（`defaultDashboardsEnabled` 未关，且开了 `sidecar.dashboards.multicluster.global.enabled`，
+所以有 `$cluster` 下拉）**选 oracle-k3s 只会得到空图**。原因不在看板，在录制规则：
+
+```
+面板查的是录制规则，不是原始指标：
+  node_namespace_pod_container:container_memory_working_set_bytes   homelab 111 · oracle 0
+规则的选择器（chart 内置，不可改）：
+  {image!="", job="kubelet", metrics_path="/metrics/cadvisor"}
+```
+
+oracle 的容器指标经 OTel `prometheusreceiver` remote-write 进来，标签是
+`job="kubelet-cadvisor"`，且**没有 `metrics_path` 标签**（那两个标签是 homelab 侧
+ServiceMonitor 加的，OTel 不加）—— 两个条件都不匹配，录制规则永远算不到 oracle。
+**给 cadvisor keep 正则加指标不会改变这一点**（2026-08-30 从 2 个加到 8 个，mixin 面板照旧空）。
+
+⚠️ **别试图靠改写 job 名去"修"它**：`job="kubelet-cadvisor"` 这个名字是
+`values/kube-prometheus-stack.yaml` 里 `KubeletDown` 被 disable、自建版本硬写
+`cluster="homelab"` 的**前提**（那里有完整设计说明）。而且 mixin 面板还依赖
+`container_network_*` / `container_fs_*` 等一大批没进 keep 正则的指标，改了 job 名
+也只有 CPU/内存两块有数——结果是"看起来支持了其实半残"，比现在明确的空更难排查。
+
+**oracle 的容器视图看这两处**：本仓库自建的 `multicluster-overview`（查**原始**
+`container_cpu_usage_seconds_total` / `container_memory_working_set_bytes` +
+`cluster=~"$cluster"`，两集群都有数），或 Grafana Explore 直接查原始指标。
 
 ## Service Health Checks
 

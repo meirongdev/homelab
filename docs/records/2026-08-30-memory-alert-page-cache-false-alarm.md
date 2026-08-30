@@ -240,7 +240,8 @@ oracle 维持现状并把这个不对称写进注释。
 - 恒 0 与「真的没触到」外观完全一致 —— 与 oracle「指标未采集 vs 值为 0」同类陷阱。
 
 v2 上的正确判据：容器活着时读 `memory.events` 的 `max`/`oom`/`oom_kill`，
-或可回溯的 `container_memory_max_usage_bytes`（**仅 homelab 采集**）。
+或可回溯的 `container_memory_max_usage_bytes`（当时**仅 homelab 采集**；
+oracle 已于同日补进 keep 正则，见文末「处置」）。
 当前容器（15:38 起）的读数：
 
 ```
@@ -313,7 +314,8 @@ Go 1.16+ 在 Linux 默认 `MADV_DONTNEED`，GC 释放的 span 当场还给内核
       不需要静默；旧告警实例会在规则同步后随下一轮评估消失
 - [ ] 未做「改 limit 复测峰值」的对照实验 —— 「抬/降 limit 有没有用」因此**仍是未知**
 - [ ] 未做实验 B（`drop_caches` 后重启，预期复现 95%+）—— ⚠️ 它会把窗口从实验当天重新计时
-- [ ] `cache` / `usage` / `max_usage` 在 oracle **仍未采集**，那边做不了 rss/cache 拆解
+- [x] ~~`cache` / `usage` / `max_usage` 在 oracle 未采集~~ —— 同日一并补进 keep 正则
+      （共 +174 条 series，三者均为纯取证、无规则消费），容器内存全族两集群已对齐
 - [ ] oracle 的 rss 历史从 keep 正则上线当天起算，`max_over_time[2d]` 头两天**只会少报**
 - [ ] Prometheus 的 `resources` 未动 —— 结论是**不该动**
 

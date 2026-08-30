@@ -249,9 +249,12 @@ receivers:
                 cluster: oracle-k3s
 
   # kubelet cAdvisor 容器用量 → homelab Prometheus (cluster=oracle-k3s)。
-  # 唯一消费者是 KRR（robusta-dev/krr），它只查这两个指标：
-  #   container_cpu_usage_seconds_total / container_memory_working_set_bytes
-  # 该端点共 ~9200 条 series，keep 正则只留 ~280 条（丢 97%），跨 Tailscale 增量可忽略
+  # 消费者与 keep 正则里的八个指标一一对应（正则旁的注释写了各自的理由）：
+  #   container_cpu_usage_seconds_total / container_memory_working_set_bytes  → KRR 右尺寸
+  #   container_memory_rss                                                    → ContainerMemoryNearLimit
+  #   container_cpu_cfs_{,throttled_}periods_total                            → ContainerCPUThrottlingSustained
+  #   container_memory_max_usage_bytes / _cache / _usage_bytes                → 取证（无规则消费）
+  # 该端点共 ~9200 条 series，keep 正则只留 ~430 条（丢 95%），跨 Tailscale 增量可忽略
   # ——做法同上面的 cilium-envoy job。
   # 不加这条时 oracle 侧 KRR 只能看当前运行的 Pod、没有历史，推荐值无意义。
   # 需 ClusterRole 含 nodes/metrics（见本文件顶部）。
@@ -283,8 +286,32 @@ receivers:
             #    删它 = 静默废掉 oracle 侧的内存预警；改这里请同步看
             #    manifests/monitoring/alerts/prometheus-rules.yaml 的 ContainerMemoryRssAbsent。
             #    成本：+58 条 series（与 working_set 同基数）。
+            # 2026-08-30 加 memory_max_usage_bytes：cgroup v2 上判断「容器到底有没有顶死
+            #    limit」的**唯一可回溯**证据 —— 节点侧的 memory.events(max/oom_kill) 随容器
+            #    销毁一并消失，事后 SSH 上去读不到（08-30 那次排查里 15:09 那个容器就已无从
+            #    回溯）；max_usage 是 cAdvisor 记的历史高水位，容器没了序列仍在 Prometheus。
+            #    没有告警规则消费它，纯取证用 —— 因此删它不会让任何告警静默失效，
+            #    只会在下次排内存问题时少一半证据。成本：+58 条 series。
+            # 2026-08-30 加 memory_cache + memory_usage_bytes：补齐容器内存全族，让
+            #    reference/k8s-qos-resource-management.md 那套「working_set 里有多少是页缓存」
+            #    的拆解在 oracle 也能直接查 —— 此前那边只能 SSH 上节点读 memory.stat，
+            #    而容器一销毁 cgroup 就没了，事后无从查起。三者的关系：
+            #      working_set ≈ usage − inactive_file · usage ≈ rss + cache + kernel
+            #    同为纯取证、无规则消费。成本：+116 条 series。
+            # 2026-08-30 加 cpu_cfs_periods_total + cpu_cfs_throttled_periods_total：
+            #    `ContainerCPUThrottlingSustained` 现在硬写着 cluster="homelab"，就是因为
+            #    这两个在 oracle 没有。它抓的是「服务没挂但很慢、对外一直 200、不触发任何
+            #    可用性告警」那类问题 —— oracle 只有 2 OCPU 而设了 CPU limit 的容器比
+            #    homelab 还多（57 vs 53，2026-08-30 实测），比 homelab 更该有这条。
+            #    ☠️ **同 rss：先上这两个、确认 series 到货，再去掉规则里的 cluster="homelab"**。
+            #    顺序反了 oracle 侧那半个规则会因分子无 series 而恒不触发，外观与「没节流」
+            #    完全一致。规则放开的同批要照 ContainerMemoryRssAbsent 的样子加 absent 守卫。
+            # ⚠️ 估成本的两个基数不一样（2026-08-30 实测 homelab 同口径）：
+            #    内存族与 cpu_usage 每个 ~58 条；**cfs 这一族只有 ~38 条** —— cAdvisor 只为
+            #    设了 CPU quota 的容器吐它，没设 limit 的容器整族缺席（这也意味着给容器
+            #    去掉 CPU limit，它就从节流告警的视野里消失，不是「节流为 0」）。
             - source_labels: [__name__]
-              regex: 'container_(cpu_usage_seconds_total|memory_working_set_bytes|memory_rss)'
+              regex: 'container_(cpu_usage_seconds_total|cpu_cfs_periods_total|cpu_cfs_throttled_periods_total|memory_working_set_bytes|memory_rss|memory_max_usage_bytes|memory_cache|memory_usage_bytes)'
               action: keep
             # cAdvisor 会为每个 Pod 额外吐一条 container="" 的汇总序列，KRR 用不到
             - source_labels: [container]
