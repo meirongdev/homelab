@@ -218,6 +218,20 @@ spec:
     # （k8s 支持 ±1 minor 偏移），所以升 k8s minor 时才需要动这里，升补丁不用。
     # ⚠️ oracle 是 arm64：换 tag 前必须确认该 tag 是**多架构 manifest list**
     #    （1.35.6 已核：linux/amd64 + linux/arm64）。
+    #
+    # ⚠️ 2026-08-30 补：这个 pin **确实覆盖 cleanup hook**（helm template 实测：设了
+    #    tools.kubectl.image.tag=1.35.6 后 job_cleanup.yaml 也渲染成 1.35.6），
+    #    但升级过程中仍会留下**一个失败的 zitadel-cleanup Job**：
+    #      · 它是 helm.sh/hook: post-delete，且 hook-delete-policy 只有 hook-succeeded
+    #        —— **失败的 hook Job 永远不会被自动清理**；
+    #      · k3s 1.35.8 升级期间它以未打 pin 的 alpine/k8s:1.35.8（上游不存在该 tag）
+    #        跑过一次 → ImagePullBackOff → DeadlineExceeded → Failed 滞留。
+    #    后果不是 zitadel 故障（init/setup 都 Complete、服务正常），而是
+    #    **KubeJobFailed 会一直烧**，直到有人手动删掉那个 Job：
+    #      kubectl --context oracle-k3s -n zitadel delete job zitadel-cleanup
+    #    2026-08-30 已按此清理过一次（留证：image=alpine/k8s:1.35.8,
+    #    start=2026-08-30T00:09:41Z, reason=DeadlineExceeded）。下次升 k3s 补丁后
+    #    如果 KubeJobFailed 又指向 zitadel/zitadel-cleanup，就是同一件事，照此处理。
     tools:
       kubectl:
         image:
