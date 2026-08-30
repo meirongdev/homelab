@@ -249,8 +249,13 @@ defaultRules:
   #     unless on (cluster) count by (cluster) (up{job="kubelet",metrics_path="/metrics"} == 1)
   # oracle-k3s 会上报 kube_node_info（其 kube-state-metrics 经 otel remote-write 进来），
   # 但**故意只抓 kubelet 的 cadvisor 端点**——job=kubelet-cadvisor、
-  # metrics_path=/metrics/cadvisor，且 keep 正则只留 KRR 用到的 2 个指标
-  # （见 cloud/oracle/manifests/monitoring/otel-collector.yaml 的设计说明）。
+  # metrics_path=/metrics/cadvisor，且 keep 正则只留必要的 8 个容器指标
+  # （2026-08-30 从 2 个扩到 8 个；正则与逐条理由见
+  #  cloud/oracle/manifests/monitoring/otel-collector-config.yaml 的 prometheus/cadvisor）。
+  # ⚠️ 那边的 job 名 **kubelet-cadvisor** 是本条推理的前提，别改成 kubelet —— 顺带一提，
+  #   chart 内置 mixin 看板的 node_namespace_pod_container:* 录制规则选的正是
+  #   {job="kubelet", metrics_path="/metrics/cadvisor"}，所以那些面板选 oracle-k3s 恒为空。
+  #   那是**已知且刻意**的（详见 reference/observability-multicluster.md），不是故障。
   # 即 oracle 侧永远不存在 job="kubelet" 的抓取 → unless 恒成立 → 永久 firing。
   # 处理方式与仓库既有约定一致（external-dns / external-secrets 的 absent 类告警
   # 都写死 cluster="homelab"）：关掉 chart 版本，改由

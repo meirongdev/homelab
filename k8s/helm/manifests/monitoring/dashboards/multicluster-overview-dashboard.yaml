@@ -20,6 +20,13 @@
 #    job=node-exporter-dgx-spark / -macbook，没有 job=node-exporter，
 #    因此在本 dashboard 的节点面板里是 No data。它们看 🌡️ DGX Spark /
 #    macbook-node 专属 dashboard，宕机由 prometheus-rules.yaml 的 up==0 规则覆盖。
+#
+# 「📦 容器资源使用」行的四个面板刻意查**原始** cAdvisor 指标 + cluster=~"$cluster"，
+# 不用 chart mixin 的 node_namespace_pod_container:* 录制规则 —— 那些规则选的是
+# {job="kubelet", metrics_path="/metrics/cadvisor"}，而 oracle 的容器指标经 OTel
+# remote-write 进来，job="kubelet-cadvisor" 且无 metrics_path 标签，两个条件都不匹配。
+# 即 chart 内置的 Compute Resources 系列面板**选 oracle-k3s 恒为空**，本面板是它在
+# oracle 侧的唯一替代。详见 reference/observability-multicluster.md。
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -973,6 +980,144 @@ data:
             }
           ],
           "title": "容器内存使用率（vs Limit）by Namespace",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "红线 25% = ContainerCPUThrottlingSustained 的阈值。⚠️ cAdvisor 只为设了 CPU limit 的容器吐 cfs 指标——没设 limit 的容器在此面板整个缺席，那不是「没节流」而是无数据。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "thresholdsStyle": {
+                  "mode": "dashed"
+                }
+              },
+              "unit": "percentunit",
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 0.25
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 36
+          },
+          "id": 52,
+          "options": {
+            "legend": {
+              "calcs": [
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "topk(10,\n  sum by (cluster, namespace, container) (increase(container_cpu_cfs_throttled_periods_total{cluster=~\"$cluster\", namespace=~\"$namespace\", container!=\"\"}[1h]))\n  /\n  sum by (cluster, namespace, container) (increase(container_cpu_cfs_periods_total{cluster=~\"$cluster\", namespace=~\"$namespace\", container!=\"\"}[1h]))\n)",
+              "legendFormat": "{{cluster}} / {{namespace}} / {{container}}",
+              "refId": "A"
+            }
+          ],
+          "title": "容器 CPU 节流率 TOP10（1h 窗口）",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "红线 80% = ContainerMemoryNearLimit 的阈值。分子是 rss（cgroup v2 anon，**不含页缓存**），与左侧「容器内存使用率」的 working_set 口径不同——后者对 mmap/文件重的负载会显著偏高，见 records/2026-08-30-memory-alert-page-cache-false-alarm.md。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "thresholdsStyle": {
+                  "mode": "dashed"
+                }
+              },
+              "unit": "percentunit",
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 0.8
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 36
+          },
+          "id": 53,
+          "options": {
+            "legend": {
+              "calcs": [
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "topk(10,\n  max by (cluster, namespace, container) (container_memory_rss{cluster=~\"$cluster\", namespace=~\"$namespace\", container!=\"\"})\n  /\n  max by (cluster, namespace, container) (kube_pod_container_resource_limits{cluster=~\"$cluster\", namespace=~\"$namespace\", resource=\"memory\", container!=\"\"})\n)",
+              "legendFormat": "{{cluster}} / {{namespace}} / {{container}}",
+              "refId": "A"
+            }
+          ],
+          "title": "容器内存 RSS / Limit TOP10",
           "type": "timeseries"
         }
       ],

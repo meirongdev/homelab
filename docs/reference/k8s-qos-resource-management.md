@@ -408,7 +408,7 @@ max by (cluster,namespace,pod,container) (kube_pod_container_resource_limits{res
 > ⚠️ **cgroup v2 上别用 `container_memory_failcnt` 取证** —— 那是 v1 的
 > `memory.failcnt`，v2 无对应文件、cAdvisor 恒报 0，与「真的没触到上限」外观一致。
 > v2 判据：容器活着时读 `memory.events` 的 `max`/`oom`/`oom_kill`，
-> 或用可回溯的 `container_memory_max_usage_bytes`（**仅 homelab 采集**）。
+> 或用可回溯的 `container_memory_max_usage_bytes`（2026-08-30 起**两集群都采集**）。
 >
 > ☠️ **改这条规则前先看 oracle 有没有那个指标 —— 这是本次最容易踩的坑**。
 > 2026-08-30 处置前的实测：`rss` / `cache` / `usage` / `max_usage` 在中枢 Prometheus 里
@@ -422,8 +422,22 @@ max by (cluster,namespace,pod,container) (kube_pod_container_resource_limits{res
 > `container_memory_rss`。**改动顺序是硬的**：先上 keep 正则、确认 series 到货，再改规则。
 > 另加 `ContainerMemoryRssAbsent`（`absent()` 判别）守卫这个依赖 —— keep 正则将来被改窄或
 > 回滚时，它会响，而不是让内存预警在那一侧静默关闭。
-> ⚠️ `cache` / `usage` / `max_usage` 在 oracle **仍然没有**：那边要做本节这套 rss/cache 拆解，
-> 只能 SSH 读 `memory.stat`。
+> ✅ **同日补齐容器内存全族**（`max_usage` + `cache` + `usage`，共 +174 条 series）：
+> 至此 oracle 与 homelab 在这一族上**完全对齐**，本节这套拆解两边都能直接查 ——
+> 此前 oracle 只能 SSH 上节点读 `memory.stat`，而容器一销毁 cgroup 就没了、事后无从查起。
+> `max_usage` 尤其关键：cgroup v2 的 `memory.events` 随容器一起消失，它是唯一能事后
+> 回看「有没有顶死 limit」的证据。
+> ⚠️ 这三个**都没有规则消费、纯取证**——删掉不会静默废掉任何告警（与 `rss` 不同）。
+> ⚠️ oracle 这三个的历史都从 2026-08-30 起算，此前的高水位/页缓存占比无法回溯。
+> ⚠️ **CPU 节流是两步走，当前停在第一步**（2026-08-30）：keep 正则已补
+> `container_cpu_cfs_{throttled_,}periods_total`，但 `ContainerCPUThrottlingSustained`
+> 的表达式**仍硬写着 `cluster="homelab"`** —— 指标到货前放开会让 oracle 侧因分子无
+> series 而恒不触发，外观与「没节流」完全一致（同 `rss` 那次立下的顺序）。
+> 第二步：确认 series 到货 → 去掉 `cluster="homelab"` → 照 `ContainerMemoryRssAbsent`
+> 加一条 absent 守卫。
+> ⚠️ 这一族的基数与内存族不同：cAdvisor **只为设了 CPU quota 的容器**吐它
+> （homelab 同口径 38 条 vs 内存族 58 条）。推论是**给容器去掉 CPU limit，它就从节流
+> 告警的视野里整个消失** —— 那不是「节流为 0」，是无数据。
 > ⚠️ oracle 的 rss 历史从 keep 正则上线那天起算，`max_over_time[2d]` 在头两天内**只会少报**。
 >
 > ✅ **换口径后的阈值是回放标定的，不是拍的**（2026-08-30）：
