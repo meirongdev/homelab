@@ -105,6 +105,8 @@ CRD 提供 v1。**H3 规则本身不变**（继续写 `v1beta1`，因为它仍 s
 
 - `oracle-gateway` 的 `Programmed=False (AddressNotAssigned)` 是**既有且无害**的：
   OCI 没有 LB provisioner，流量经 Cloudflare 隧道进来，路由实测正常。homelab 侧为 `True`。
-- 目前**没有任何告警**覆盖「Gateway API 控制器未初始化」。若要补，最直接的信号是对
-  `cilium-operator` 日志里那句 `Required GatewayAPI resources are not found` 做日志告警
-  （Loki 已收两集群日志），或对新建路由缺 `.status` 做巡检。尚未实施。
+- ~~目前**没有任何告警**覆盖「Gateway API 控制器未初始化」~~ —— **本条建议后来已实施**：
+  `cloud/oracle/manifests/monitoring/loki-rules.yaml` 的 `cilium-gateway-api` 组对
+  `cilium-operator` 日志里那句 `Required GatewayAPI resources are not found` 做了日志告警。
+  ⚠️ 它是**负向探测**（出现该串才报警）；健康时 operator 什么都不打，
+  所以「grep 不到」不能反过来当健康证据 —— 正向判据仍是新建路由能否拿到 `.status`。

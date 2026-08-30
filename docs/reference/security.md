@@ -1,6 +1,6 @@
 # K3s 集群安全架构 (Security Architecture)
 
-> Last updated: 2026-08-29
+> Last updated: 2026-08-30
 > Status: 生效事实
 > Scope: 双集群（homelab + oracle-k3s）的纵深防御模型 —— source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
@@ -30,7 +30,7 @@
 | 2 | 身份 | ZITADEL OIDC + GitHub 联邦 | ✅ 生产 | `zitadel/`, 各 app values | oracle-k3s(IdP，2026-07-06 迁自 homelab，见 [zitadel-to-oracle-k3s.md](../plans/apps/2026-07-04-zitadel-to-oracle-k3s.md)) |
 | 3 | 密钥 | Vault + ESO + 健康告警 | ✅ 生产 | `k8s/helm/values/vault-*`, `manifests/monitoring/alerts/eso-alerts.yaml` | 双 |
 | 4 | 准入：Pod 基线 | Pod Security Admission | ✅ 生产 | `just harden-psa` / oracle ns 清单 | 双 |
-| 5 | 准入：策略即代码 | Kyverno（Audit） | ✅ 生产 | `values/kyverno.yaml`, `manifests/kyverno-policies/` | homelab |
+| 5 | 准入：策略即代码 | Kyverno（3 条 Audit + `disallow-latest-tag` **Enforce**，见 §5.2）| ✅ 生产 | `values/kyverno.yaml`, `manifests/kyverno-policies/` | homelab |
 | 6 | 供应链/CVE | Trivy Operator（运行中镜像）+ Renovate（仓库声明的依赖，🚧 待装 App）| ✅ 生产 | `values/trivy-operator.yaml` · `values/trivy-operator-oracle.yaml` · `.github/renovate.json5` | **双集群**（oracle 2026-08-03 补齐）|
 | 7 | CIS 合规 | kube-bench（周巡检，钉 control-plane；worker 的 node 级检查未覆盖·有意接受） | ✅ 生产 | `manifests/kube-bench/kube-bench.yaml` | homelab |
 | 8 | 节点加固 | k3s `protect-kernel-defaults` + sysctl | ⏳ 待重启生效 | `k8s/ansible/playbooks/setup-k3s.yaml` | homelab |

@@ -53,8 +53,10 @@ docs/                          # 见下方「Documentation Rules」
 - **CNI**：双集群 Cilium eBPF + VXLAN。**Ingress**：Cilium Gateway API（唯一入口）。
   ☠️ **Gateway API CRD 版本与 Cilium 是一对**：缺 CRD 则 operator 的 Gateway API 控制器
   **整个不初始化**，而**旧路由照常 200、无任何告警**，只有新增路由静默 503。升 Cilium 必跑
-  `just deploy-gateway-api-crds`，验收看 operator 日志有无 `Required GatewayAPI resources`，
-  **别拿 curl 旧域名当证据**。→ [records/2026-08-11-gateway-api-crd-stall.md](records/2026-08-11-gateway-api-crd-stall.md)
+  `just deploy-gateway-api-crds`。☠️ **验收判据别搞反**：operator 日志里那句
+  `Required GatewayAPI resources are not found` 是**故障信号，有输出 = 坏了**；
+  健康集群**什么都不打**（实测两集群皆无），所以「grep 得到」不能当健康证据。
+  唯一的正向判据是**新建**一条 HTTPRoute 能拿到 `.status`（旧路由 curl 200 也不算）。→ [records/2026-08-11-gateway-api-crd-stall.md](records/2026-08-11-gateway-api-crd-stall.md)
 - **跨集群**：Tailscale 只做**节点级 underlay**（各节点自己的 /32 + NodePort），pod↔pod 走
   ClusterMesh VXLAN。⚠️ `AdvertiseRoutes` 只该有本节点 /32（Pod CIDR 子网路由 2026-07-07 已移除）。
   → [tailscale-network.md](reference/tailscale-network.md)
