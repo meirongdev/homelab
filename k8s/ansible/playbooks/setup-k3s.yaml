@@ -86,7 +86,7 @@
     # ⚠️ 本值描述的是「现网正在跑什么」，不是「想升到什么」——
     # 升级时先按 docs/runbooks/k3s-cluster-upgrade.md 把节点升完，**再**改这里。
     # renovate: datasource=github-releases depName=k3s-io/k3s
-    k3s_version: v1.34.5+k3s1
+    k3s_version: v1.35.8+k3s1
   tasks:
     - name: Enable qemu-guest-agent for Proxmox diagnostics
       ansible.builtin.systemd:
