@@ -10,6 +10,10 @@
     smartctl_exporter_version: "0.14.0"
     node_exporter_port: 9100
     smartctl_exporter_port: 9633
+    # 需要定期 scrub + 上报 scrub 时间戳的池。加池子时记得加进来
+    # （`zpool list -H -o name` 现取；2026-08-30 只有 mrstorage 一个）。
+    zfs_pools:
+      - mrstorage
 
   tasks:
     # ── node_exporter ──────────────────────────────────────────────────────────
@@ -68,7 +72,17 @@
         - udevadm trigger --subsystem-match=powercap --action=add --settle
       changed_when: rapl_udev_rule is changed
 
-    - name: Create node_exporter systemd service (with RAPL + ZFS)
+    # textfile 目录必须先于 node_exporter 存在，否则该 collector 启动即报错。
+    # root 写（zpool-scrub-textfile 以 root 跑）、node_exporter 组只读。
+    - name: Create node_exporter textfile collector directory
+      ansible.builtin.file:
+        path: /var/lib/node_exporter/textfile
+        state: directory
+        owner: root
+        group: node_exporter
+        mode: "0755"
+
+    - name: Create node_exporter systemd service (with RAPL + ZFS + textfile)
       ansible.builtin.copy:
         dest: /etc/systemd/system/node_exporter.service
         mode: "0644"
@@ -84,7 +98,9 @@
             --collector.zfs \
             --collector.rapl \
             --collector.systemd \
-            --collector.processes
+            --collector.processes \
+            --collector.textfile \
+            --collector.textfile.directory=/var/lib/node_exporter/textfile
           Restart=always
           RestartSec=5
 
@@ -98,6 +114,78 @@
         daemon_reload: true
         enabled: true
         state: started
+
+    # ── zpool scrub 时间戳采集器（2026-08-30 新增）─────────────────────────────
+    # ☠️ 为什么需要它：node_exporter 的 zfs collector **不导出 scrub 时间戳**
+    # （只有 node_zfs_zpool_state 与一堆 node_zfs_zpool_dataset_*，2026-08-30 实测）。
+    # 而 alerts/storage-alerts.yaml 的 ZpoolScrubOverdue 与记录规则 zpool_scrub_age_days
+    # 引用的是 node_zfs_zpool_scrub_last_scrub_timestamp_seconds —— **那个指标从来不
+    # 存在**，表达式恒为空集，与「scrub 很及时」外观完全一致，自上线起没有可能响过。
+    # ⚠️ 脚本刻意不用 node_zfs_ 前缀（那是 node_exporter 自己的命名空间），
+    #    产出 zpool_scrub_last_end_timestamp_seconds / _known / _collector_success。
+    - name: Install zpool scrub textfile collector
+      ansible.builtin.copy:
+        src: ../files/zpool-scrub-textfile
+        dest: /usr/local/sbin/zpool-scrub-textfile
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Create zpool-scrub-textfile service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/zpool-scrub-textfile.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Write zpool scrub timestamps as node_exporter textfile metrics
+          After=zfs.target
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/zpool-scrub-textfile
+
+    - name: Create zpool-scrub-textfile timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/zpool-scrub-textfile.timer
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Refresh zpool scrub textfile metrics hourly
+
+          [Timer]
+          # scrub 以「天」为尺度变化，每小时绰绰有余；OnBootSec 保证重启后很快有数
+          OnBootSec=2min
+          OnUnitActiveSec=1h
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+
+    - name: Enable and start zpool-scrub-textfile timer
+      ansible.builtin.systemd:
+        name: zpool-scrub-textfile.timer
+        daemon_reload: true
+        enabled: true
+        state: started
+
+    - name: Run the collector once now (so metrics exist without waiting for the timer)
+      ansible.builtin.command:
+        cmd: /usr/local/sbin/zpool-scrub-textfile
+      changed_when: false
+
+    # ⚠️ 2026-08-30 实测：本机**没有任何 ZFS scrub 排程** —— zfs-scrub-monthly@.timer
+    # 与 zfs-scrub-weekly@.timer 均为 disabled；`systemctl list-timers | grep scrub`
+    # 列出的 e2scrub_all / xfs_scrub_all 是 ext4/xfs 的，与 ZFS 无关，很容易看错。
+    # 上次 scrub 停在 2026-08-09（发现时 21 天前），显然是人工跑的。10.9T 的 mrstorage
+    # 同时承载媒体库与 restic 备份仓库，没有定期 scrub = 静默位腐风险。
+    # ZpoolScrubOverdue 的 35 天阈值正是按「每月一次」定的，这里把排程补上。
+    - name: Enable monthly ZFS scrub timer for each pool
+      ansible.builtin.systemd:
+        name: "zfs-scrub-monthly@{{ item }}.timer"
+        daemon_reload: true
+        enabled: true
+        state: started
+      loop: "{{ zfs_pools }}"
 
     # ── smartctl_exporter ──────────────────────────────────────────────────────
     # Remove Proxmox Enterprise repo files left from previous OS install
