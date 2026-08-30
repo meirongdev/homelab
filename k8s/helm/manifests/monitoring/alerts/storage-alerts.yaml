@@ -90,16 +90,70 @@ spec:
               如写入量持续，需计划换盘；NvmeWearHigh（静态 >90%）为最终确认。
 
     - name: zfs-scrub-overdue
+      # ☠️ 2026-08-30 修：本组的三条表达式此前全部引用
+      #    `node_zfs_zpool_scrub_last_scrub_timestamp_seconds` —— **这个指标从来不存在**。
+      #    node_exporter 的 zfs collector 只导出 node_zfs_zpool_state 与一堆
+      #    node_zfs_zpool_dataset_*（当天实测枚举过整族），没有任何 scrub 时间戳。
+      #    于是记录规则恒为空、告警恒不触发，外观与「scrub 很及时」完全一致，
+      #    自上线起没有可能响过。同月同形状的第四次（另三次：ContainerMemoryNearLimit
+      #    的分子、TrivyExposedSecretFound 的指标名、Vault 从未采集）。
+      #    现由 106 上的 textfile collector 提供，装置见
+      #    proxmox/ansible/playbooks/node-exporter-deploy.yaml 的「zpool scrub 时间戳采集器」。
+      # ⚠️ 指标名刻意不带 node_zfs_ 前缀：那是 node_exporter 自己的命名空间，
+      #    混进去会让下一个人以为是官方 collector 提供的（同 tailscale_iprule_* 的取向）。
       rules:
         # 记录距离上次 scrub 的天数，供看板和告警使用
         - record: zpool_scrub_age_days
-          expr: (time() - node_zfs_zpool_scrub_last_scrub_timestamp_seconds) / 86400
+          expr: (time() - zpool_scrub_last_end_timestamp_seconds) / 86400
         # zpool 超过 35 天未 scrub（正常每月一次，35 天阈值留了 3-5 天余量）
         - alert: ZpoolScrubOverdue
-          expr: (time() - node_zfs_zpool_scrub_last_scrub_timestamp_seconds) / 86400 > 35
+          expr: (time() - zpool_scrub_last_end_timestamp_seconds) / 86400 > 35
           for: 1h
           labels:
             severity: warning
           annotations:
             summary: "ZFS 池 {{ $labels.zpool }} 已 {{ $value | humanize }} 天未 scrub @ {{ $labels.instance }}"
-            description: "上次 scrub 距今 >35 天。zfsutils-linux timer 可能被禁用、卸载或重启后未恢复。运行 `systemctl status zfs-scrub.timer` 检查。"
+            description: |
+              上次 scrub 距今 >35 天。先查排程是否还在：
+                `systemctl list-timers 'zfs-scrub-*'`（⚠️ 别 grep scrub 就完事 ——
+                 e2scrub_all / xfs_scrub_all 是 ext4/xfs 的，**与 ZFS 无关**，
+                 2026-08-30 就差点因此误判成"排程还在"）。
+              没有就 `systemctl enable --now zfs-scrub-monthly@<pool>.timer`，
+              或重跑 proxmox/ansible/playbooks/node-exporter-deploy.yaml（已把它纳管）。
+
+        # ☠️ 上面两条的**来源守卫**，同 ContainerMemoryRssAbsent / VaultMetricsAbsent 的口径。
+        # 分成两条是因为两种坏法的处置完全不同：
+        #   NeverScrubbed  → 池在、采集器也在，但这个池**从来没 scrub 过**（或只跑过
+        #                    resilver）。此时上面两条因为分子无 series 而恒不触发 ——
+        #                    「从没 scrub 过」反而比「35 天没 scrub」更该报，却更安静。
+        #   CollectorFailed→ 采集器本身坏了/没在跑（脚本异常、timer 被停、node_exporter
+        #                    的 textfile collector 被摘掉、106 宕机）。
+        - alert: ZpoolNeverScrubbed
+          expr: zpool_scrub_known == 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "ZFS 池 {{ $labels.zpool }} 没有任何已完成的 scrub 记录 @ {{ $labels.instance }}"
+            description: |
+              采集器拿到了这个池，但读不到「上次 scrub 完成时间」——池从未 scrub 过，
+              或只跑过 resilver。ZpoolScrubOverdue 对这种情况**恒不触发**（分子无 series），
+              所以由本条覆盖。处置：`zpool scrub <pool>` 跑一次，并确认
+              `zfs-scrub-monthly@<pool>.timer` 已 enable。
+
+        - alert: ZpoolScrubCollectorFailed
+          expr: zpool_scrub_collector_success == 0 or absent(zpool_scrub_collector_success)
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "zpool scrub 采集器未产出数据 —— ZpoolScrubOverdue 正在静默失效"
+            description: |
+              zpool_scrub_collector_success 为 0 或整个消失，上面两条因此没有判据可用，
+              而这与「scrub 一切正常」外观完全一致（这正是本组 2026-08-30 之前的状态）。
+              在 106 上依次查：
+                `systemctl status zpool-scrub-textfile.timer`
+                `/usr/local/sbin/zpool-scrub-textfile; echo $?`（脚本会把失败写成 success 0）
+                `cat /var/lib/node_exporter/textfile/zpool_scrub.prom`
+                node_exporter 的 ExecStart 是否还带 --collector.textfile
+              整个 106 宕机时本条也会响（absent 分支），那种情况另有 BackupTargetNodeDown。

@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""把 zpool 的上次 scrub 完成时间写成 node_exporter textfile 指标。
+
+由 ansible 管理（proxmox/ansible/playbooks/node-exporter-deploy.yaml），别在节点上手改。
+zpool-scrub-textfile.timer 每小时执行一次。
+
+☠️ 存在的理由：node_exporter 的 zfs collector **不导出 scrub 时间戳**（只有
+   node_zfs_zpool_state 与一堆 node_zfs_zpool_dataset_*）。alerts/storage-alerts.yaml
+   的 ZpoolScrubOverdue 长期引用一个**根本不存在**的
+   node_zfs_zpool_scrub_last_scrub_timestamp_seconds —— 表达式恒为空集，
+   与「scrub 很及时」外观完全一致，自上线起没有可能响过（2026-08-30 修）。
+
+⚠️ 指标刻意**不用 node_zfs_ 前缀**：那是 node_exporter 自己的命名空间，混进去会让
+   下一个人以为是官方 collector 提供的。
+"""
+import datetime
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+TEXTFILE_DIR = "/var/lib/node_exporter/textfile"
+PROM_FILE = os.path.join(TEXTFILE_DIR, "zpool_scrub.prom")
+
+# ZFS 打的时间形如 "Sun Aug  9 01:19:57 AM +08 2026"。
+# ⚠️ `date -d` **解析不了**它（实测 invalid date），所以这里用 Python 而不是 shell。
+# ⚠️ %z 只认 +0800 / +08:00，不认 ZFS 输出的两位 "+08" —— 下面会补成四位。
+_FORMATS = (
+    "%a %b %d %I:%M:%S %p %z %Y",
+    "%a %b %d %H:%M:%S %z %Y",
+    "%a %b %d %I:%M:%S %p %Y",
+    "%a %b %d %H:%M:%S %Y",
+)
+
+
+def parse_zfs_time(raw):
+    s = re.sub(r"\s+", " ", raw or "").strip()
+    if not s:
+        return None
+    s = re.sub(r"([+-]\d{2})(?=\s)", r"\g<1>00", s)
+    for fmt in _FORMATS:
+        try:
+            return int(datetime.datetime.strptime(s, fmt).timestamp())
+        except ValueError:
+            continue
+    return None
+
+
+def main():
+    lines = [
+        "# HELP zpool_scrub_last_end_timestamp_seconds 上次 scrub 完成的 unix 时间",
+        "# TYPE zpool_scrub_last_end_timestamp_seconds gauge",
+    ]
+    known_lines = [
+        "# HELP zpool_scrub_known 是否拿到了该池的上次 scrub 完成时间（0 = 从未 scrub 过或解析失败）",
+        "# TYPE zpool_scrub_known gauge",
+    ]
+    ok = 1
+    try:
+        out = subprocess.run(
+            ["zpool", "status", "-j"], capture_output=True, text=True, timeout=30, check=True
+        ).stdout
+        pools = json.loads(out).get("pools", {})
+        if not pools:
+            ok = 0
+        for name, pool in pools.items():
+            ss = pool.get("scan_stats") or {}
+            ts = None
+            # 只认已完成的 SCRUB；resilver 或进行中的 scrub 不更新"上次完成时间"
+            if ss.get("function") == "SCRUB" and ss.get("state") == "FINISHED":
+                ts = parse_zfs_time(ss.get("end_time"))
+                if ts is None:
+                    # 拿到了字段却解析不出来 —— 这属于采集器坏了，必须可见
+                    ok = 0
+            if ts is not None:
+                lines.append(
+                    'zpool_scrub_last_end_timestamp_seconds{zpool="%s"} %d' % (name, ts)
+                )
+            known_lines.append(
+                'zpool_scrub_known{zpool="%s"} %d' % (name, 1 if ts is not None else 0)
+            )
+    except Exception as exc:  # noqa: BLE001 —— 任何失败都要落成 success=0 而不是空文件
+        ok = 0
+        print("zpool-scrub-textfile: %s" % exc, file=sys.stderr)
+
+    lines.extend(known_lines)
+    lines.extend(
+        [
+            "# HELP zpool_scrub_collector_success 本采集器上次是否完整跑通（0 = 解析/执行失败）",
+            "# TYPE zpool_scrub_collector_success gauge",
+            "zpool_scrub_collector_success %d" % ok,
+            "",
+        ]
+    )
+
+    os.makedirs(TEXTFILE_DIR, exist_ok=True)
+    # node_exporter 要求原子替换，否则会读到写了一半的文件
+    fd, tmp = tempfile.mkstemp(dir=TEXTFILE_DIR, prefix=".zpool_scrub.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write("\n".join(lines))
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, PROM_FILE)
+    except Exception:
+        os.path.exists(tmp) and os.unlink(tmp)
+        raise
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

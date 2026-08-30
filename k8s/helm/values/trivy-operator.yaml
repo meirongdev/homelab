@@ -88,6 +88,13 @@ trivy:
   #    而漏掉一条会立刻变成 firing 噪音。等 oracle 侧首轮扫描出结果、确认这些 CVE 确实
   #    只出现在那边之后，在下一次 CVE 复审（2026-09）时一并清理。
   #    oracle 侧的对应条目见 values/trivy-operator-oracle.yaml。
+  # ⚠️ 2026-08-30：oracle 那份多一个 `secrets:` 段（3 条 private-key 的 path 豁免，
+  #    全是上游镜像自带的测试/自签夹具）。**本集群刻意不加**：那三个镜像
+  #    （cnpg-postgresql / calibre-web-automated / rsshub）都只跑在 oracle，
+  #    本集群实测 trivy_image_exposedsecrets{severity=~"High|Critical"} = 0。
+  #    哪天把这类工作负载搬回 homelab，照抄那一段即可 —— 别提前加，
+  #    路径型豁免不像 CVE ID 那样"多余也无害"，它会静默扩大 private-key 的盲区，
+  #    而 TrivyExposedSecretFound 存在的唯一理由就是抓真的私钥泄漏。
   ignoreFileName: ".trivyignore.yaml"
   ignoreFile:
     vulnerabilities:
