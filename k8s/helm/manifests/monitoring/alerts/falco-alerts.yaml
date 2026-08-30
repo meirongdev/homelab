@@ -85,6 +85,13 @@ spec:
         # (3) 推送在失败。⚠️ status="error" 这个序列**只有第一次失败之后才存在**，所以
         # "查不到数据"= 正常，不是规则哑火（存活性由上面两条 up 规则兜底，不靠这个计数器）。
         # 最典型的成因是 Telegram token 过期/被撤、或 thread id 失效。
+        # ✅ 2026-08-30 实地核过一次，结论与上面一致，记下来免得下次重查：
+        #    falcosidekick 2.34.1 的 /metrics 上 `falcosecurity_falcosidekick_outputs_total`
+        #    **整族一个子序列都没有**（只有 falco_events_total / inputs_total）。这不是版本
+        #    不支持，而是 CounterVec 在首次 dispatch 前不产出任何行 —— 而 telegram 输出的
+        #    `minimumpriority: warning`（values/falco.yaml）比当前收到的事件（全是 notice）
+        #    高，所以一次都没派发过。要端到端验证只能造一条 warning 事件，
+        #    ⚠️ 那会真的往 Telegram 群里发一条消息。
         - alert: FalcoTelegramDeliveryFailing
           expr: increase(falcosecurity_falcosidekick_outputs_total{cluster="oracle-k3s", destination="telegram", status="error"}[15m]) > 0
           for: 5m
