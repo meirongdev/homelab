@@ -74,6 +74,42 @@ spec:
             summary: "Vault is unreachable from Prometheus"
             description: "Prometheus has been unable to scrape Vault for 5+ minutes."
 
+        # ☠️ 2026-08-30 加：上面两条的**数据来源守卫**。
+        # 在此之前，这两条 critical 自上线起从没有可能响过 —— `vault_*` 整个指标族不存在、
+        # `up{job=~".*vault.*"}` 是空集，因为 values/vault.yaml 从没开过 telemetry，
+        # 也没有 ServiceMonitor 指向 Vault。而 `== 0` 在**序列不存在**时永远不评估，
+        # 外观与「Vault 一切正常」完全一致。本月同形状的第三次
+        # （另两次：ContainerMemoryNearLimit 的分子、TrivyExposedSecretFound 的指标名）。
+        # 现已补齐：values 的 telemetry 段 + manifests/monitoring/vault-servicemonitor.yaml。
+        # 本条守的就是「那两样东西之一被回滚/改坏」这件事。
+        # ⚠️ 判据用 `vault_core_unsealed` 而不是 `up`：ServiceMonitor 的 keep 正则把
+        #    `vault_core_unsealed` 滤掉时 `up` 仍在，VaultSealed 照样静默失效。
+        # ⚠️ Vault 是 manual-helm：改了 values 不 `just deploy-vault` + 删 pod（STS 是
+        #    OnDelete）就不生效，本条会在 30 分钟后提醒你这件事。
+        - alert: VaultMetricsAbsent
+          expr: absent(vault_core_unsealed) == 1
+          for: 30m
+          labels:
+            severity: warning
+            component: observability
+          annotations:
+            summary: "vault_core_unsealed 已停止入库 —— VaultSealed 正在静默失效"
+            description: |
+              Vault 的 telemetry 没有进 Prometheus，`VaultSealed` 与 `VaultUnreachable`
+              两条 critical 因此不可能触发（序列不存在时比较式永不评估），
+              而这与「Vault 一切正常」外观完全一致。
+              依次查：
+                1. ServiceMonitor 还在吗 —— `kubectl -n monitoring get servicemonitor vault`
+                   （必须带 label release=kube-prometheus-stack，否则被 Operator 静默忽略）；
+                   它的 keep 正则是否还含 `vault_core_unsealed`。
+                2. Vault 的 telemetry 还开着吗 —— `kubectl -n vault get cm vault-config -o yaml`
+                   里应有 telemetry{prometheus_retention_time} 与 listener 内的
+                   telemetry{unauthenticated_metrics_access}。values 改了要
+                   `cd k8s/helm && just deploy-vault` + `kubectl -n vault delete pod vault-0`。
+                3. ServiceMonitor 是否指向了 Service `vault` —— **不能是 `vault-active`**，
+                   那个在封印时会被摘掉 vault-active 标签、端点清空（见该文件头注释）。
+              兜底：ESO 的 ClusterSecretStoreNotReady 仍能在 Vault 封印时报警（10 分钟）。
+
     - name: backups
       rules:
         - alert: BackupNotRunning
