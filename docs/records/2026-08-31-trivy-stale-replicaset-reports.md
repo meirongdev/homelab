@@ -74,26 +74,30 @@ python-ldap 的 `slapdtest` 模块自带的测试夹具证书，上游仓库里�
 
 活着的那个早就干净了。豁免从来没有问题。
 
-## 三、机制：僵尸报告是系统性的，不是 calibre 特有
+## 三、机制：僵尸报告是系统性的，不是 calibre 特有，也不止暴露密钥
 
 `OPERATOR_SCANNER_REPORT_TTL=24h` 只驱动**还有副本**的 workload 重扫。Deployment 的
 `revisionHistoryLimit` 默认 **10**，于是每滚动一次就多留一个 0 副本 ReplicaSet，
-它那份报告从此定格。清点两集群（已在本次清理之后）：
+它那份报告从此定格。清点两集群（calibre 那 10 个清掉之后、全量清理之前）：
 
-| 集群 | ReplicaSet 总数 | 其中 0 副本 | 挂在 0 副本上的 `ExposedSecretReport` | 挂在 0 副本上的 `VulnerabilityReport` |
-|------|----------------|------------|--------------------------------|--------------------------------|
-| homelab | 148 | **111** | **21** | 0 |
-| oracle-k3s | 144 | **105** | **20** | 0 |
+| 集群 | ReplicaSet | 其中 0 副本 | 僵尸 `ExposedSecretReport` | 僵尸 `ConfigAuditReport` | 僵尸 `VulnerabilityReport` |
+|------|-----------|------------|--------------------------|------------------------|--------------------------|
+| homelab | 148 | **111** | 21 | 17（**C+H 30**）| **0** |
+| oracle-k3s | 144 | **105** | 20 | 20（**C+H 33**）| **0** |
 
-两个值得记住的点：
+三个值得记住的点：
 
-1. **僵尸 `ExposedSecretReport` 遍布两集群**（41 份），只是它们碰巧 finding 为 0，
-   所以现在不点燃任何告警。**下一次给任何镜像加 secret 豁免，同样的哑火会重演。**
-2. **`VulnerabilityReport` 没有这个问题**：0 副本 rs 上一份都不挂，而活跃 rs 上的份数
+1. **僵尸报告遍布两集群**：41 个 0 副本 ReplicaSet 上挂着 78 份永不刷新的报告，
+   最旧一份的 `updateTimestamp` 是 **2026-07-19**（陈旧 43 天）。
+2. ☠️ **不止暴露密钥：`ConfigAuditReport` 同样定格，而且带真实 finding**。
+   那 63 条 C+H 一直计入 `trivy_resource_configaudits` —— 描述的是**没在运行的**
+   ReplicaSet。`TrivyConfigAuditCritical` 之所以没响，只是因为它们恰好全是
+   `High` 而该规则数的是 `severity="Critical"`（实测 Critical=0）。**这是运气，不是免疫。**
+3. **只有 `VulnerabilityReport` 免疫**：0 副本 rs 上一份都不挂，而活跃 rs 上的份数
    与 `ExposedSecretReport` **完全相等**（oracle 各 39 份）。也就是说 trivy-operator
-   会清掉缩容 ReplicaSet 的漏洞报告、**却把暴露密钥报告留下**。本次没有深挖这个不对称的
-   成因，只记录实测结论——它意味着 `TrivyImageCriticalVulnerabilities` 不受此坑影响，
-   而 `TrivyExposedSecretFound` 受。
+   会清掉缩容 ReplicaSet 的漏洞报告、**却把暴露密钥与配置审计报告留下**。本次没有深挖
+   这个不对称的成因，只记录实测结论 —— 它意味着 `TrivyImageCriticalVulnerabilities`
+   不受此坑影响，`TrivyExposedSecretFound` 与 `TrivyConfigAuditCritical` 受。
 
 ## 四、这次栽的到底是哪个坑
 
@@ -129,6 +133,28 @@ kubectl --context=oracle-k3s get exposedsecretreports -A -o json \
    的 Deployment。该 Deployment 是 `strategy: Recreate`（SQLite 写锁，见该文件注释），
    本来就回滚不了，留 10 份历史纯属给僵尸报告供料。
 
-未做、留作开放项：其余 200 多个 0 副本 ReplicaSet 没有统一收口
-（可以给各 Deployment 普遍加 `revisionHistoryLimit`，或加一条"僵尸报告数"的巡检）。
-当下它们不点燃告警，等下次真需要 secret 豁免时再处理也不迟。
+3. **全量清扫僵尸报告**（同日稍后）。216 个 0 副本 ReplicaSet 里**只有 41 个挂着报告**，
+   就删这 41 个（21 homelab + 20 oracle），级联带走 **78 份**永不刷新的报告。
+   刻意**没有**动其余 175 个 —— 它们不挂任何报告，删了只是丢 rollout 历史、换不到东西。
+   删前先确认两集群**没有任何刻意缩到 0 的 Deployment**，所以这些全是纯历史修订版本。
+
+   效果与副作用（实测）：
+
+   | 项 | 清理前 | 清理后 |
+   |----|-------|-------|
+   | `trivy_resource_configaudits{severity="High"}` homelab | 103 | **73**（−30）|
+   | 同上 oracle-k3s | 149 | **116**（−33）|
+   | 挂在僵尸 rs 上的报告（两集群） | 78 份 | **0** |
+   | **活跃** rs 上的报告 homelab / oracle | 38+30 / 39+31 | **38+30 / 39+31（未动）** |
+   | 非 Running/Completed 的 pod | — | **无** |
+
+   两个降幅与预测的僵尸贡献（30 / 33）**逐个吻合**，说明删掉的确实只是死数据。
+
+## 六、留作开放项
+
+- **其余 175 个 0 副本 ReplicaSet 没有统一收口**。它们当下不挂报告因而无害，
+  但每次滚动都会再生一个、并在滚动那一刻带上报告。根治是给 Deployment 普遍写
+  `revisionHistoryLimit`（本次只对 calibre-web 做了），或加一条"僵尸报告数"的巡检指标。
+- **`ConfigAuditReport` 的僵尸 finding 会重新长回来**（每次滚动 +1 份）。
+  `TrivyConfigAuditCritical` 数的是 `Critical` 而实测僵尸份全是 `High`，所以暂时不响 ——
+  但这是运气。若将来该告警响了，**先按 §四 的判据排除僵尸报告再去改配置**。
