@@ -74,6 +74,14 @@ spec:
     # Explicit null so server-side apply drops any prior rollingUpdate block
     # K8s rejects rollingUpdate when type=Recreate.
     rollingUpdate: null
+  # ☠️ 默认值 10 会让 10 个 replicas=0 的历史 ReplicaSet 长期滞留，而
+  #    trivy-operator 给每个 ReplicaSet 都建一份 exposedsecret/vulnerability 报告、
+  #    **只重扫还有副本的那个**。于是 2026-08-30 给 slapdtest 私钥加的 path 豁免
+  #    只让活着的 rs 归零，10 份旧报告永久停在豁免前的快照上 →
+  #    `trivy_image_exposedsecrets` 恒 >0 → TrivyExposedSecretFound 每 30 分钟
+  #    往 Telegram 推一条，永不自愈（records/2026-08-31-trivy-stale-replicaset-reports.md）。
+  #    Recreate 策略本来也回滚不了，留 10 份历史无意义。
+  revisionHistoryLimit: 2
   selector:
     matchLabels:
       app: calibre-web
