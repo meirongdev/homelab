@@ -4,6 +4,7 @@
 
 | 日期 | 记录 | 内容 |
 |------|------|------|
+| 2026-08-31 | [trivy-stale-replicaset-reports](2026-08-31-trivy-stale-replicaset-reports.md) | `TrivyExposedSecretFound` 烧 25h／Telegram 42 条，**没有任何真泄漏**：两条 finding 是上游镜像里 python-ldap `slapdtest` 的测试夹具私钥，且 08-30 的 path 豁免早已生效。☠️ 报告挂在 `replicas=0` 的 ReplicaSet 上，**24h TTL 只重扫有副本的**，指标衰减到 **20 就平台化**（10 僵尸 rs×2）永不自愈。另含：僵尸 `ExposedSecretReport` 两集群共 41 份而 `VulnerabilityReport` 一份没有 · 告警镜像来自 Docker Hub 不在 GHCR |
 | 2026-08-30 | [memory-alert-page-cache-false-alarm](2026-08-30-memory-alert-page-cache-false-alarm.md) | `ContainerMemoryNearLimit` 报 Prometheus 99.45%，峰值 87% 是页缓存（RSS 口径 26.4%）；容器 `usage` 顶死 3072Mi=limit 却**没有 OOM**。☠️ 对照实验：同容器同 limit 重启三次，峰值 **99.45%/70.1%/23.7%** —— 读数由**节点页缓存冷热**决定。另含：ws 回落≠内存被回收 · v2 上 failcnt 是废指标 · 重启后 5 分钟聚合读到旧容器 · 加 RSS 判据会静默关掉 oracle 那半 |
 | 2026-08-22 | [podcast-tts-unload-pending](2026-08-22-podcast-tts-unload-pending.md) | 播客整集败于 Mac 换模型时的 `is busy`：重试只等 15s；☠️ 并发被实测否掉（5 路比串行快一倍），病因是耐心不是并发 |
 | 2026-08-19 | [opencost-bingen-replay-crashloop](2026-08-19-opencost-bingen-replay-crashloop.md) | collector WAL 积 5.5GB，启动全量重放 3m43s > 探针预算 160s → 节点重启后永久崩循环烧 1.1/2 核 24h；retention 参数就是重放窗口 |
