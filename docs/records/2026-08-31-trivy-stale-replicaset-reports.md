@@ -150,11 +150,46 @@ kubectl --context=oracle-k3s get exposedsecretreports -A -o json \
 
    两个降幅与预测的僵尸贡献（30 / 33）**逐个吻合**，说明删掉的确实只是死数据。
 
-## 六、留作开放项
+## 六、同日追加：把剩下的 175 个僵尸 ReplicaSet 也清了
 
-- **其余 175 个 0 副本 ReplicaSet 没有统一收口**。它们当下不挂报告因而无害，
-  但每次滚动都会再生一个、并在滚动那一刻带上报告。根治是给 Deployment 普遍写
-  `revisionHistoryLimit`（本次只对 calibre-web 做了），或加一条"僵尸报告数"的巡检指标。
-- **`ConfigAuditReport` 的僵尸 finding 会重新长回来**（每次滚动 +1 份）。
-  `TrivyConfigAuditCritical` 数的是 `Critical` 而实测僵尸份全是 `High`，所以暂时不响 ——
-  但这是运气。若将来该告警响了，**先按 §四 的判据排除僵尸报告再去改配置**。
+上面第 3 步刻意只删了「挂着报告」的 41 个。随后按要求把**剩余 175 个**（homelab 90 +
+oracle 85）也一并清掉，两集群 `replicas=0` 的 ReplicaSet 归零。
+
+**删之前的安全筛选**（175 个全部通过，0 个被跳过）——这四条是判据，重做时照抄：
+
+| 排除条件 | 为什么 |
+|---------|--------|
+| `status.replicas != 0` | spec 已缩 0 但 pod 还在 Terminating，删它会杀掉正在退出的 pod |
+| 属主 `kind != Deployment` | 不是滚动历史，可能是别的控制器有意维持的 |
+| 属主 Deployment 已不存在 | 孤儿，要单独判断而不是混在批量里删 |
+| 属主 Deployment 自身 `replicas: 0` | 那是**现役** rs，不是历史 |
+
+结果：
+
+| 项 | 清理前 | 清理后 |
+|----|-------|-------|
+| ReplicaSet 总数 homelab / oracle | 127 / 124 | **37 / 39**（= 活跃数）|
+| `replicas=0` 的 ReplicaSet | 90 / 85 | **0 / 0** |
+| 三类报告数 homelab | esr 61 · car 100 · vr 59 | **完全不变** |
+| 三类报告数 oracle | esr 73 · car 109 · vr 73 | **完全不变** |
+| `trivy_resource_configaudits{severity="High"}` | 73 / 116 | **73 / 116（不变）** |
+| ArgoCD 应用 | 32 Synced/Healthy | **32 Synced/Healthy** |
+| 未就绪 Deployment / 异常 pod | — | **无** |
+
+**报告数与指标一个都没动**，正是预期 —— 这 175 个本来就不挂任何报告，所以清它们
+买不到可观测性上的任何改善，纯粹是把 rollout 历史清空。
+
+⚠️ **已知副作用**：`kubectl rollout undo` 对所有 Deployment 都退不回去了（`rollout history`
+只剩当前 revision，如 `uptime-kuma` 只剩 REVISION 11）。本仓库是 GitOps，回滚路径是
+`git revert` + ArgoCD 同步；manual-helm 的那几个走 `helm rollback`（由 chart 重建 rs），
+两条路都不依赖旧 ReplicaSet。抽查 `book` / `status` / `argocd` 三个域名均正常。
+
+## 七、留作开放项
+
+- **僵尸 ReplicaSet 会重新长回来**：本次只对 calibre-web 设了 `revisionHistoryLimit: 2`，
+  其余 Deployment 仍是默认 10，每滚动一次就再留一个、并在那一刻带上
+  `ExposedSecretReport` + `ConfigAuditReport`。根治是普遍写 `revisionHistoryLimit`，
+  或加一条"僵尸报告数"的巡检指标。
+- **`ConfigAuditReport` 的僵尸 finding 同样会重新长回来**。`TrivyConfigAuditCritical`
+  数的是 `Critical` 而实测僵尸份全是 `High`，所以暂时不响 —— 但这是运气。
+  若将来该告警响了，**先按 §四 的判据排除僵尸报告再去改配置**。
