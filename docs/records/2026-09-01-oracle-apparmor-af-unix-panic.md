@@ -9,8 +9,10 @@
 >       而 `kernel.panic_on_oops` 是 Ubuntu oracle 内核的**编译期默认 1**，
 >       oops 立刻升级成 panic → 10 秒后硬重启，journald 来不及落盘。
 >       **不是宿主层的问题**：OCI 侧查证该实例有史以来只有 2 条维护事件，最后一条在 3 月。
-> 结果: 设 `kernel.panic_on_oops=0` 止血（已入 ansible）；更正 2026-08-14 复盘与
->       `NodeRebootLoop` 告警描述里被证伪的排障指引。**根因未修，上游无补丁**。
+> 结果: 两步。①`kernel.panic_on_oops=0` 止血（已入 ansible）；②kprobe 定位到触发方是
+>       **uptime-kuma 容器内的 nscd**，关掉它后 libuv-worker 对该函数的调用归零。
+>       另更正 2026-08-14 复盘与 `NodeRebootLoop` 告警描述里被证伪的排障指引。
+>       **内核 bug 本身未修，上游无补丁**——我们只是让本集群不再走到那条路径。
 > 触发: 排查一条无关的 Telegram 告警时，顺手发现 oracle 刚重启过。
 
 ## 一句话根因
@@ -218,17 +220,70 @@ oops 照旧发生，但只杀掉肇事线程、机器不再重启——把「每
 ⚠️ 代价，别当成通用调优抄去别处：内核被标记污染、每次泄漏少量 AppArmor label
 引用计数（1–4 天一次，可忽略），且这是**刻意偏离发行版编译期默认**。
 
+**已做——根治触发方**（`cloud/oracle/manifests/uptime-kuma/provisioner.yaml`）：
+
+用 ftrace kprobe 挂 `unix_fs_perm` 定位到了触发方（方法见下节）。链条是：
+uptime-kuma **默认在容器内起 nscd** 做 DNS 缓存（`start()` 里
+`if (enable || enable === null)`，设置缺失即默认开），nscd 持有绑定到文件系统路径的
+AF_UNIX **服务端**套接字 `/var/run/nscd/socket`。libuv 的 DNS 线程每次 `getaddrinfo`
+都要连它，而 AppArmor **对每次操作检查两次**——自己的套接字（无路径，安全）
+和**对端的**（nscd 的，带路径）——所以 nscd 套接字拆除的竞态会在
+**libuv-worker 的上下文里**踩空。这解释了为何受害者恒为 libuv-worker 而非 nscd。
+
+修法是关掉 uptime-kuma 的 `nscd` 设置（它自带这个开关），**而不是给 pod 摘 AppArmor**：
+`status.meirong.dev` 公网可达，`Unconfined` 会实打实削弱约束；关 nscd 只是让容器内
+不再有带路径的 unix 套接字对端，代价仅是每次监控检查多一次 DNS 查询
+（21 个 monitor / 60s，对 CoreDNS 可忽略）。
+
+⚠️ `set_settings` 的坑：它把**全部**参数打包整体提交，没传的键会被库默认值覆盖。
+本仓库的 `keepDataPeriodDays` 已定制，直接调用会被冲掉，故实现为 get→merge→set。
+
+前后对比（kprobe 60 秒采样，同一函数的调用者分布）：
+
+| 调用者 | 修复前 | 修复后 |
+|---|---|---|
+| `nscd` | 69 | **0** |
+| `libuv-worker` | 69 | **0** |
+| `postgres` | 36 | 36 |
+| `pg_isready` | 12 | 12 |
+
+⚠️ 剩下的 postgres/pg_isready 仍在访问带路径的套接字（`dentry != 0`），
+**理论上仍暴露在同一个竞态下**。只是它们的套接字是长生命周期的（不像 nscd 的
+客户端连接那样每次查询建/拆），拆除竞态窗口小得多，且 10 次崩溃无一发生在它们身上。
+**这不是零风险，是把实际发生过的那条路径切断了。**
+
+### 定位方法：ftrace kprobe（不需要装任何东西）
+
+`unix_fs_perm` 没被内联，可以直接挂 kprobe。arm64 下第 5 个参数 `path` 在 `x4`，
+`struct path` 的 `mnt` 在偏移 0、`dentry` 在偏移 8：
+
+```bash
+# 在 oracle 节点上，全程只读，不改内核行为
+sudo bash -c '
+cd /sys/kernel/tracing
+echo "p:aa_unixfs unix_fs_perm mnt=+0(%x4):x64 dentry=+8(%x4):x64" > kprobe_events
+echo "mnt == 0 && dentry != 0" > events/kprobes/aa_unixfs/filter   # 危险组合
+echo 1 > events/kprobes/aa_unixfs/enable'
+sudo cat /sys/kernel/tracing/trace          # 看 comm-pid
+# 用完务必清理：
+sudo bash -c 'cd /sys/kernel/tracing; echo 0 > events/kprobes/aa_unixfs/enable; echo > kprobe_events'
+```
+
+拿到 PID 后映射到 pod：`sudo grep -oE "pod[0-9a-f_-]{36}" /proc/<pid>/cgroup`。
+
+☠️ **两个坑**：①别同时开着 `cat trace_pipe`——它是**破坏性读取**，会把事件从缓冲区
+取走，导致 `cat trace` 恒为空，看起来像"探针没工作"；②`pkill -f "cat .../trace_pipe"`
+会匹配到你自己这条命令的命令行而自杀（SSH 直接掉线，exit 255）。
+
 **已做——更正被证伪的文本**：本条 + 2026-08-14 复盘的根因行与「客场证据已用尽」段 +
 `prometheus-rules.yaml` 里 `NodeRebootLoop` 的排障指引（原文让人「查 OCI 维护事件」
 后就止步，且断言「宿主层硬重置，客场查不出」）。
 
 ## 遗留（刻意不做）
 
-- **根因没修，也修不了**。上游主线仍无 `path->mnt` 保护。真正的解要么等上游，
-  要么给触发方 pod 设 AppArmor `Unconfined`（`unix_fs_perm` 开头就是
-  `if (unconfined(label)) return 0`）——但**尚未定位到是哪个 pod**：
-  崩溃进程名 `libuv-worker` 是 libuv 线程池的通名，oracle 上的 Node.js 候选有
-  rsshub / rsshub-browserless / excalidraw-room / homepage / uptime-kuma / zitadel-login。
+- **内核 bug 本身没修，也修不了**。上游主线仍无 `path->mnt` 保护。我们只是让
+  本集群不再走到那条路径；postgres 那条路径理论上仍暴露（见上表的注）。
+  上游修掉之后，可以删掉 provisioner 里那段 nscd 豁免、并把 `panic_on_oops` 改回默认。
 - **没提上游**。手上有 10 次一致签名 + 精确的偏移分析，是一份质量不错的 bug 报告素材。
 - **止血后的实际效果待观察**。改完当天还没等到下一次 oops，
   判据是：`NodeRebooted` 不再响，但 `journalctl -k | grep -i oops` 会开始留下记录
