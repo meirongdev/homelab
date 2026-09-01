@@ -1,12 +1,22 @@
 # oracle 每天硬重启，而死人开关在重启窗口里静默失明——查 uptime-kuma 的 5xx 查出来的
 
+> ⚠️ **2026-09-01 更正：本文对「重启本身」的根因判断已被推翻。**
+> 不是宿主层硬重置，是**内核 AppArmor 的 AF_UNIX 中介空指针**
+> （`unix_fs_perm()` 不检查 `path->mnt` 就解引用）。本文那五条客场阴性结果
+> （无 shutdown / 无 panic / 无 OOM / 无 crash dump / EDK II 冷启动）之所以全阴，
+> 是因为 `panic_on_oops=1` 让机器在 journald 落盘前就重启了 —— 那恰恰是
+> **guest 内核 panic 的标准形态**，不是宿主层的证据。真凭据在 hypervisor 侧的
+> `oci compute console-history` 里（10 次 panic，签名 10/10 一致）。
+> **下面关于死人开关失明的部分依然成立**，只有「重启本身」那条根因作废。
+> → [2026-09-01 复盘](2026-09-01-oracle-apparmor-af-unix-panic.md)
+
 > 日期: 2026-08-14
 > 影响: oracle-k3s **6 天硬重启 6 次**（每次全集群 pod 中断 6~10 分钟）；
 >       每次重启期间 homelab 的 Watchdog 心跳推不进 oracle 的 Uptime Kuma，
 >       **死人开关在这段窗口内完全失明且不留痕迹**——实测 9分40秒缺口、
 >       `important` 翻转 **0** 条。若 homelab 在该窗口内挂掉，无人会知道。
-> 根因: 重启本身在 **OCI 宿主层**（无 shutdown 记录 / 无 panic / 无 OOM / 无 crash dump，
->       每次都从 EDK II 固件冷启动），客场证据已用尽。
+> 根因: ~~重启本身在 **OCI 宿主层**，客场证据已用尽。~~ **（已推翻，见文首横幅：
+>       真因是内核 AppArmor `unix_fs_perm()` 空指针，证据在 OCI console history）**
 >       失明则是设计前提没覆盖："死人开关是自检的"只在**接收侧活着**时成立——
 >       push monitor 的检查跑在 uptime-kuma 进程内，它自己下线就没人检查。
 > 结果: 新增 `NodeRebootLoop` + `DeadMansSwitchReceiverDown` 两条告警；
@@ -104,7 +114,10 @@ interval 是 60s，缺口 580s，**却没转 DOWN**。因为检查逻辑跑在 u
 `journalctl --list-boots` 能看到 6 个历史 boot，`-b -1` 读得到崩溃现场。
 过期的排障指引比没有更糟——它会让人以为证据不存在而放弃查。
 
-## 重启本身：客场证据已用尽
+## 重启本身：客场证据已用尽 ⚠️ 结论已作废（2026-09-01）
+
+> 下面五条实测都属实，但**推论错了**：它们是 guest panic 后 journald 来不及落盘的
+> 表现，不是宿主层重置的证据。正确根因见 [2026-09-01 复盘](2026-09-01-oracle-apparmor-af-unix-panic.md)。
 
 ```
 $ last -x reboot                       # 6 次，全部同一内核版本，全部无 shutdown 记录
@@ -162,7 +175,9 @@ increase(alertmanager_notifications_failed_total{integration="webhook"}[5m]) >= 
 
 ## 遗留（刻意不做）
 
-- **根因修不了**。宿主层重置只能从 OCI 侧查；客场已做到"可见 + 可归因"为止。
+- ~~**根因修不了**。宿主层重置只能从 OCI 侧查~~ —— **2026-09-01 更正**：方向是对的，
+  但只查了维护事件（阴性）就停了；真证据在同一个 API 的 console history 里。
+  根因已定位（内核 AppArmor bug，上游未修），已设 `panic_on_oops=0` 止血。
 - **失明窗口仍然存在**。两条新告警只让它**可见**，没有消除它：接收端仍是单点，
   oracle 一重启死人开关必然瞎几分钟。彻底解决要第二个独立接收端
   （如外部 healthchecks.io），那会引入新的外部依赖与密钥，**本次不做**——

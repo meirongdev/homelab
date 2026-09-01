@@ -4,6 +4,7 @@
 
 | 日期 | 记录 | 内容 |
 |------|------|------|
+| 2026-09-01 | [oracle-apparmor-af-unix-panic](2026-09-01-oracle-apparmor-af-unix-panic.md) | oracle 三个月的「宿主层硬重置」实为**内核 AppArmor 空指针**：`unix_fs_perm()` 不检查 `path->mnt` 就 `mnt_idmap()`（vfsmount 偏移 0x18，与故障地址/指令逐位吻合）。☠️ 客场永远查不到是因为 `panic_on_oops=1` 编译期默认，journald 来不及落盘 —— 「日志戛然而止无 panic」恰是 guest panic 的标准形态，不是宿主层证据。证据在 `oci compute console-history`：10 次 panic 签名 10/10 一致，肇事者全是 `libuv-worker`。另含：OCI 维护事件最后一条在 3 月洗清宿主层 · **换内核逃不掉**（6.8/6.14/6.17/7.0 全带该代码，上游主线亦未修）· soft lockup 的 cilium-agent 是后果不是原因 |
 | 2026-08-31 | [trivy-stale-replicaset-reports](2026-08-31-trivy-stale-replicaset-reports.md) | `TrivyExposedSecretFound` 烧 25h／Telegram 42 条，**没有任何真泄漏**：两条 finding 是上游镜像里 python-ldap `slapdtest` 的测试夹具私钥，且 08-30 的 path 豁免早已生效。☠️ 报告挂在 `replicas=0` 的 ReplicaSet 上，**24h TTL 只重扫有副本的**，指标衰减到 **20 就平台化**（10 僵尸 rs×2）永不自愈。另含：僵尸 `ExposedSecretReport` 两集群共 41 份而 `VulnerabilityReport` 一份没有 · 告警镜像来自 Docker Hub 不在 GHCR |
 | 2026-08-30 | [memory-alert-page-cache-false-alarm](2026-08-30-memory-alert-page-cache-false-alarm.md) | `ContainerMemoryNearLimit` 报 Prometheus 99.45%，峰值 87% 是页缓存（RSS 口径 26.4%）；容器 `usage` 顶死 3072Mi=limit 却**没有 OOM**。☠️ 对照实验：同容器同 limit 重启三次，峰值 **99.45%/70.1%/23.7%** —— 读数由**节点页缓存冷热**决定。另含：ws 回落≠内存被回收 · v2 上 failcnt 是废指标 · 重启后 5 分钟聚合读到旧容器 · 加 RSS 判据会静默关掉 oracle 那半 |
 | 2026-08-22 | [podcast-tts-unload-pending](2026-08-22-podcast-tts-unload-pending.md) | 播客整集败于 Mac 换模型时的 `is busy`：重试只等 15s；☠️ 并发被实测否掉（5 路比串行快一倍），病因是耐心不是并发 |
