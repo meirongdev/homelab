@@ -124,6 +124,28 @@ trivy:
       # 实际风险低:该 tar 只在镜像构建期解包受信任的 npm 包,运行时不处理用户上传的归档。
       - id: CVE-2026-59873
         statement: "open_notebook 内置 npm tar 7.5.x(修复 7.5.19), 1.14.0 已是最新 stable 无已修镜像, 运行时不解包不可信归档, 2026-10 复审"
+      # --- x/crypto/ssh 源地址限制未强制（2026-09-01 新增，两集群同批）---
+      # 2026-09-01 两集群的 TrivyImageCriticalVulnerabilities 同时烧起来，各 11 条
+      # Critical —— 逐条核过，**11 条全是这一个 CVE**，横跨 17 个镜像
+      # （homelab: kyverno 全家 6 个 / prometheus / node-exporter / config-reloader；
+      #   oracle: argocd(3 份副本) / falcoctl / loki / tempo / otel-collector /
+      #   node-exporter / wait4x / zitadel）。凡是 Go 二进制 vendor 了 x/crypto 就中。
+      # ☠️ **没有任何可升的镜像**（2026-09-01 查 GitHub releases 实测）：CVE 发布于
+      #   2026-08-28，而各上游最新版全部早于该日 —— kyverno v1.19.0(08-20，且是 k8s
+      #   1.35 唯一 supported release)、prometheus v3.14.0(08-18)、node_exporter
+      #   v1.12.1(07-14)、prometheus-operator v0.93.1(08-10)。升版本不会让它消失。
+      # **不可达**：GO-2026-6303 原文——source-address critical option 只在
+      #   PublicKeyCallback/VerifiedPublicKeyCallback 路径被强制，由 PasswordCallback /
+      #   KeyboardInteractiveCallback / NoClientAuthCallback / GSSAPIWithMICConfig.AllowLogin
+      #   返回的 Permissions 未被校验。触发前提是**本进程扮演 SSH 服务端**，且在上述
+      #   非公钥回调里设 source-address 限制。这 17 个镜像没有一个跑 SSH 服务端；
+      #   ArgoCD 用到 x/crypto/ssh 的地方是**克隆 git 的客户端**，不经过服务端认证回调。
+      # ⚠️ 覆盖范围：按 ID 全集群生效。当下这 17 个镜像里没有一个是 SSH 服务端，故不掩盖
+      #   任何真问题；**若将来集群里新增了真的 Go SSH 服务端（如 gitea/soft-serve 一类），
+      #   这条豁免必须立刻删掉**，别当成它的正常覆盖范围。
+      # 复审触发条件比日期更有用：上游镜像 bump 到 x/crypto ≥0.55.0 就删本条。
+      - id: CVE-2026-56854
+        statement: "x/crypto/ssh 源地址限制未强制(GO-2026-6303); 触发需本进程作 SSH 服务端且在非公钥认证回调里设 source-address, 17 个受影响镜像无一跑 SSH 服务端(argocd 只作 git 客户端); CVE 2026-08-28 发布, 各上游最新版均早于该日无已修镜像, 2026-10 复审"
   # 扫描 Job（client）资源
   resources:
     requests:
