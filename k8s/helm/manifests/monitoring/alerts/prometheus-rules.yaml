@@ -892,6 +892,42 @@ spec:
               `panic_on_oops=1` 会让 guest 内核 panic 后在落盘前就重启，长得一模一样。
               客场全阴时去 hypervisor 侧取证：`oci compute console-history`（方法见
               records/2026-09-01-oracle-apparmor-af-unix-panic.md）。
+
+        # ☠️ 存在理由 = 补一个我们自己弄哑的信号（2026-09-01）。
+        # 给 oracle 设 `kernel.panic_on_oops=0` 之后，oops 不再重启机器 ——
+        # 好处是不再全集群断 6~10 分钟，代价是**那次 oops 不会触发任何告警**，
+        # 只在 dmesg 里留一行。已知残留暴露面：postgres/pg_isready 仍在访问带路径的
+        # unix 套接字，理论上能踩到同一个空指针。本条把信号补回来。
+        # 完整背景 → records/2026-09-01-oracle-apparmor-af-unix-panic.md
+        #
+        # 判据用内核 taint 位而不是数 dmesg：taint 是内核自己置的、零成本、绝不漏。
+        # ⚠️ **本条会一直烧到你处理并重启** —— taint 位置位后保持到下次启动。这是刻意的：
+        #    内核死过一次的机器不该让告警自己悄悄消失。处理 = 取证后重启。
+        # ⚠️ **不能写 absent() 类判据**：`kernel_taint_die` 只有 oracle 有
+        #    （由 kernel-health-metrics.timer 经 node-exporter textfile 导出，
+        #    装在 cloud/oracle/ansible/playbooks/setup-k3s.yaml）。homelab 两个节点
+        #    仍是发行版默认的 panic_on_oops=1，oops 会照旧重启并触发 NodeRebooted，
+        #    信号没丢、不需要这套；对它们写 absent 只会永久误报。
+        #    ⚠️ 但 k8s-node 的 7.0.0-30-generic 实测同样带 unix_fs_perm 符号 ——
+        #    哪天也给它关了 panic_on_oops，必须同时把导出器搬过去。
+        - alert: KernelOopsOccurred
+          expr: kernel_taint_die == 1
+          for: 5m
+          labels:
+            severity: warning
+            component: infrastructure
+          annotations:
+            summary: "{{ $labels.cluster }} / {{ $labels.instance }} 内核发生过 oops（taint D 位已置）"
+            description: |
+              内核在本次启动期间死过至少一次（oops/BUG）。机器还活着是因为
+              `panic_on_oops=0`，**不是因为没事**。
+              先看是不是已知的那个：`journalctl -k | grep -A30 "Internal error: Oops"`，
+              栈里出现 `unix_fs_perm` / `aa_unix_file_perm` 就是 AppArmor af_unix 那个
+              上游未修的空指针（records/2026-09-01-oracle-apparmor-af-unix-panic.md
+              有完整签名、kprobe 定位法和上游报告草稿）。
+              若是**新的**栈，按同一套路取证：`kernel_oops_recent` 看新鲜度，
+              必要时 `oci compute console-history` 抓串口。
+              本条要重启才会消（taint 位保持到下次启动），取证完再重启。
               重启后按 runbook 核不变量：`cd cloud/oracle && just verify-node`（只读）。
 
         # ☠️ 频次盲区（2026-08-14 补）：上面那条**每次重启都正常响过**，oracle 在

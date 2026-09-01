@@ -243,6 +243,103 @@
         state: present
         reload: true
 
+    # ☠️ 上面那条 panic_on_oops=0 有个必须补上的代价：**它把响亮的故障变哑了**。
+    # 改之前 oops → panic → 重启 → `NodeRebooted`/`NodeRebootLoop` 必然告警；
+    # 改之后机器活下来了，但那次 oops **不会触发任何告警**，只在 dmesg 里留一行。
+    # 已知残留暴露面：postgres/pg_isready 仍在访问带路径的 unix 套接字
+    # （kprobe 实测 60s 内 36+12 次），理论上同样能踩到 `unix_fs_perm` 那个空指针。
+    # 所以必须补一个「内核死过」的信号，否则等于把问题藏起来。
+    #
+    # 判据选内核 taint 位而不是数 dmesg：taint 是**内核自己置的、零成本、绝不漏**，
+    # 且置位后一直保持到重启 —— 正好符合「这台机器出过事，处理前别让它消失」的语义。
+    #   bit 7  (128)   D  = kernel died recently（oops/BUG）← 主判据
+    #   bit 14 (16384) L  = soft lockup 发生过
+    # 另附一个 10 分钟窗口的 oops 计数，只为让告警里能看出"刚刚发生"还是"早先发生"。
+    # ⚠️ homelab 侧**刻意不加**：那两个节点仍是 panic_on_oops=1（发行版默认），
+    #    oops 会照旧重启并触发 NodeRebooted，信号没丢，不需要这套。
+    #    但 k8s-node 的 7.0.0-30-generic 实测**同样带 unix_fs_perm 符号**，
+    #    哪天给它也关了 panic_on_oops，就得把这段一并搬过去。
+    - name: Install kernel health metrics exporter (oops must not be silent after panic_on_oops=0)
+      ansible.builtin.copy:
+        dest: /usr/local/sbin/export-kernel-health-metrics
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          # 内核健康指标 —— kernel-health-metrics.timer 每 5 分钟执行。
+          # ansible 管理（cloud/oracle/ansible/playbooks/setup-k3s.yaml），别在节点上手改。
+          # 存在理由见该文件内注释：panic_on_oops=0 之后 oops 不再重启，需要另一个信号。
+          set -u
+
+          TEXTFILE_DIR=/var/lib/node_exporter/textfile
+          PROM_FILE=$TEXTFILE_DIR/kernel_health.prom
+          mkdir -p "$TEXTFILE_DIR"
+
+          bits=$(cat /proc/sys/kernel/tainted 2>/dev/null || echo 0)
+          case "$bits" in *[!0-9]*|"") bits=0 ;; esac
+
+          # bit 7 = D（kernel died: oops/BUG）; bit 14 = L（soft lockup）
+          die=$(( (bits / 128) % 2 ))
+          lockup=$(( (bits / 16384) % 2 ))
+
+          # 窗口取 10min 而 timer 是 5min：刻意重叠，避免边界上漏掉一次。
+          # 只为给告警提供"新鲜度"上下文，漏了也不影响主判据（taint 位不会漏）。
+          recent=$(journalctl -k -q --no-pager --since "-10min" 2>/dev/null \
+                     | grep -c "Internal error: Oops" || true)
+          case "$recent" in *[!0-9]*|"") recent=0 ;; esac
+
+          TMP="$PROM_FILE.tmp.$$"
+          {
+            printf '# HELP kernel_taint_bits /proc/sys/kernel/tainted 原始位图\n'
+            printf '# TYPE kernel_taint_bits gauge\n'
+            printf 'kernel_taint_bits %s\n' "$bits"
+            printf '# HELP kernel_taint_die 内核自上次启动以来发生过 oops/BUG（taint bit 7 D）\n'
+            printf '# TYPE kernel_taint_die gauge\n'
+            printf 'kernel_taint_die %s\n' "$die"
+            printf '# HELP kernel_taint_soft_lockup 发生过 soft lockup（taint bit 14 L）\n'
+            printf '# TYPE kernel_taint_soft_lockup gauge\n'
+            printf 'kernel_taint_soft_lockup %s\n' "$lockup"
+            printf '# HELP kernel_oops_recent 近 10 分钟内核日志里的 oops 条数（新鲜度参考，非主判据）\n'
+            printf '# TYPE kernel_oops_recent gauge\n'
+            printf 'kernel_oops_recent %s\n' "$recent"
+          } > "$TMP" && mv "$TMP" "$PROM_FILE"
+          exit 0
+
+    - name: Install kernel-health-metrics service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/kernel-health-metrics.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Export kernel taint/oops metrics for node-exporter textfile collector
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/export-kernel-health-metrics
+
+    - name: Install kernel-health-metrics timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/kernel-health-metrics.timer
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Refresh kernel health metrics every 5 minutes
+
+          [Timer]
+          # OnBootSec 取 60：比 node-exporter 起得晚没关系（textfile 是拉取时才读），
+          # 但要保证重启后尽快出现一次样本，否则 absent() 类判据会误报。
+          OnBootSec=60
+          OnUnitActiveSec=5min
+
+          [Install]
+          WantedBy=timers.target
+
+    - name: Enable kernel-health-metrics timer
+      ansible.builtin.systemd:
+        name: kernel-health-metrics.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+
   # firewalld reload 是**动作**不是状态：写成普通任务的话每次 `--check` 都报 changed，
   # 两条就足以把 `just check-node-drift` 的信号淹掉。改 handler 后只在真有规则变更时触发。
   handlers:
