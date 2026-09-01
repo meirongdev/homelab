@@ -1,16 +1,16 @@
 # Oracle-k3s 节点重建（OCI Free Tier）
 
-> **触发条件**：oracle-k3s 节点（OCI Always Free A1）不可恢复——VM 被终止/重建、
+> **触发条件**：oracle-k3s 节点（OCI Always Free A1）不可恢复：VM 被终止/重建、
 > OS 损坏、boot volume 丢失，或需要从零重做集群。
 > **成功判定**：`just argocd-status`（`cd k8s/helm`）**全部** App Synced/Healthy
 > （条数对 `ls argocd/applications/*.yaml | wc -l`，**别写死**）；
 > `argocd.meirong.dev` 可登录；`just clustermesh-status`（`cd cloud/oracle`）双集群
 > connected；夜备恢复后跑一次 `just backup-run` 通过。
-> **回滚**：恢复类 runbook 本身即回滚——重建中途失败就回到本流程第 1 步重跑，
+> **回滚**：恢复类 runbook 本身即回滚：重建中途失败就回到本流程第 1 步重跑，
 > 数据一律从 restic 恢复（见 [backup-recovery.md](backup-recovery.md)），
 > 无更早状态可退。注豁免。
 >
-> Last updated: 2026-08-20
+> Last updated: 2026-09-01
 > Status: 生效 SOP
 
 ## 现状（一句话）
@@ -29,7 +29,7 @@ oracle-k3s 的 local-path PVC（**11 个**，2026-08-20 对着 live 集群重新
 `trends-data` · `uptime-kuma-data-v2` ·
 `readlist-data` · `data-trivy-server-0` · `apps-pg-1` · `zitadel-pg-1`
 
-> `opencost-pvc` 已于 2026-08-19 删除（挂的是 CSV 导出目录，不是 WAL，从来是空的）——
+> `opencost-pvc` 已于 2026-08-19 删除（挂的是 CSV 导出目录，不是 WAL，从来是空的）：
 > 见 [records/2026-08-19-opencost-bingen-replay-crashloop.md](../records/2026-08-19-opencost-bingen-replay-crashloop.md)。
 > 权威清单是 [reference/storage.md](../reference/storage.md)，核对用
 > `kubectl --context oracle-k3s get pvc -A`。
@@ -54,7 +54,7 @@ make plan    # 核对实例形状/是否保留 boot volume
 make apply
 ```
 
-- ⚠️ terraform state 在本地（ROADMAP 开放项 #2，未离站）——这台 Mac 丢了 state 就得
+- ⚠️ terraform state 在本地（ROADMAP 开放项 #2，未离站）：这台 Mac 丢了 state 就得
   按 `cloud/oracle/terraform/IMPORT.md` 重新 import。
 - 若 VM 还在、只是 OS 层损坏：跳过本步，`cd cloud/oracle/ansible && just cleanup-k3s`
   后直接进第 2 步。
@@ -70,7 +70,7 @@ kubectl --context oracle-k3s get nodes    # 应 Ready
 
 `setup-k3s.yaml` 会一并装好：firewalld 放行（K3s/Cilium 端口 + 10.52/10.53 CIDR 信任）、
 Gateway API CRD v1.2.1（standard channel）、falco 依赖的 `fs.inotify.max_user_instances=8192`。
-⚠️ 不要改 playbook 里 `disable: traefik` 那段——Gateway API CRD 由 playbook 独立安装，
+⚠️ 不要改 playbook 里 `disable: traefik` 那段：Gateway API CRD 由 playbook 独立安装，
 让 traefik 托管会在 k3s 重启时级联删 CRD、路由全断（2026-06-04 踩过）。
 
 ## 3. Tailscale
@@ -103,9 +103,9 @@ just deploy-manifests    # kubectl apply -k manifests/
 全部应用 + `argocd/` 的 ns 与 homelab-cluster ESO 凭据）。
 
 - ⚠️ **bootstrap 依赖不入 git**：
-  - `vault-token` Secret（`rss-system`）——从 homelab Vault 手工取（Vault 在 homelab，
+  - `vault-token` Secret（`rss-system`）：从 homelab Vault 手工取（Vault 在 homelab，
     不受这次重建影响）。
-  - ZITADEL `login-client` Secret（`zitadel` ns，Login V2 PAT）——从 homelab 备份拷入，
+  - ZITADEL `login-client` Secret（`zitadel` ns，Login V2 PAT）：从 homelab 备份拷入，
     否则已恢复的 DB 上 setup job 不会重建它。见 `cloud/oracle/manifests/kustomization.yaml`
     头注。
 

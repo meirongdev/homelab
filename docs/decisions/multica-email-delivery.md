@@ -11,7 +11,7 @@ Multica 的登录靠邮箱验证码（它不支持通用 OIDC，接不进 ZITADE
 
 **真正的驱动力不是「能发邮件」，而是「停止把验证码写进日志」。** 后端的投递优先级是
 **SMTP → Resend → stdout**：两者都没配时，它把 6 位验证码 `fmt.Printf` 到 stdout。而本集群
-所有 pod 日志都进 Loki —— 等于把登录凭据索引进了日志库，任何能查 Loki 的人都能拿到。
+所有 pod 日志都进 Loki：等于把登录凭据索引进了日志库，任何能查 Loki 的人都能拿到。
 这是唯一还敞着的口子，其余（注册白名单、workspace 创建收口）都已关闭。
 
 约束：单用户实例，收件人只有账号持有者本人一个地址。
@@ -20,13 +20,13 @@ Multica 的登录靠邮箱验证码（它不支持通用 OIDC，接不进 ZITADE
 
 **Gmail SMTP**（`smtp.gmail.com:465`，implicit TLS，应用专用密码），凭据经 Vault → ESO →
 `envFrom: secretRef` 注入 backend。chart 没有 `SMTP_*` 字段，但因为 backend 用 `envFrom`
-整个注入 Secret，往 Secret 加 key 就是加环境变量 —— **不用改 chart，也不用 fork**。
+整个注入 Secret，往 Secret 加 key 就是加环境变量：不用改 chart，也不用 fork。
 
 ### 否决 Cloudflare Email Sending
 
 首选本来是它：DNS 就在 Cloudflare 手里，记录能自动建，且文档有一条
 *"Sending to verified destination addresses in your account is free on all plans, even when
-only Email Routing is configured."* —— 收件人只有自己，看着正好落在免费口子里。
+only Email Routing is configured."*：收件人只有自己，看着正好落在免费口子里。
 
 实测否决，两点：
 
@@ -34,11 +34,11 @@ only Email Routing is configured."* —— 收件人只有自己，看着正好�
    那条免费例外只出现在 **REST API / Workers binding** 的上下文，**SMTP relay 是否同样适用
    没有确证**（Cloudflare 自己的文档也没说）。
 2. 实测被挡在域名 onboard 这一关：`550 5.7.1 Email sending is not enabled for domain
-   meirong.dev`。⚠️ 注意 **SMTP AUTH 本身是通过的** —— token 权限没问题，缺的是把域名
+   meirong.dev`。⚠️ 注意 **SMTP AUTH 本身是通过的**：token 权限没问题，缺的是把域名
    onboard 到 Email Sending，而这个**没有公开 API**（探过 `accounts/<id>/email_sending*`
    全是 `No route for that URI`），只能在面板点，且大概率会要求升 Workers Paid。
 
-Email Routing（收件）不受影响，仍是免费无限 —— 但它是**纯入站转发，发不了信**。
+Email Routing（收件）不受影响，仍是免费无限：但它是**纯入站转发，发不了信**。
 
 ### 否决 Resend
 
@@ -46,7 +46,7 @@ Email Routing（收件）不受影响，仍是免费无限 —— 但它是**纯
 但要新注册第三方账号 + 往 zone 加 SPF/DKIM/DMARC 记录并写进 terraform。
 为「一个单用户实例每月几封验证码」付这份接线成本，收益不成比例。
 
-⚠️ 若将来要**邀请他人加入 workspace**，邀请邮件要发给未验证地址 ——
+⚠️ 若将来要**邀请他人加入 workspace**，邀请邮件要发给未验证地址：
 Gmail 能发（约 500 封/天），Cloudflare 免费档不能。那时优先考虑 Resend。
 
 ### 未选 Google OAuth 的原因

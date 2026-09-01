@@ -9,18 +9,18 @@ oracle-k3s 上有两个 postgres，形态完全不同：
 
 | | 形态 | 版本 | 消费者 | 实测内存 |
 |---|---|---|---|---|
-| `rss-postgres`（rss-system） | 手搓 Deployment，`Recreate` 策略防双写，外挂 postgres-exporter sidecar + NodePort 31087 | **15** | miniflux | 108Mi |
+| `rss-postgres`（rss-system） | 手搓 Deployment，`Recreate` 策略防双写，外挂 postgres-exporter sidecar + NodePort 31087 | 15 | miniflux | 108Mi |
 | `zitadel-pg`（zitadel） | CNPG `Cluster` | 17 | ZITADEL | 90Mi |
 
 homelab 集群**一个 postgres 都没有**（jobs-sg 是 sqlite，open-notebook 是 SurrealDB，
-Vault 是 raft）。所以"合并两个集群的数据库"这个动作从一开始就不存在——两个库本来就同集群、
+Vault 是 raft）。所以"合并两个集群的数据库"这个动作从一开始就不存在。两个库本来就同集群、
 同节点。真正的问题是**两套并存的模式**：新服务要库时没有可复用的东西，只能再抄一遍
 Deployment + PVC + Service + exporter。
 
 > ⚠️ **上面这句"homelab 一个 postgres 都没有"只在 2026-08-06 成立，别再引用。**
 > 之后 homelab 进了两个：`litellm-pg`（2026-08-16，手搓 Deployment）与
 > `multica-postgres`（2026-08-18，上游 chart 自带 pgvector）。两者都**没走**本 ADR 定的
-> CNPG 租户流程 —— 也就是说"一套模式"在 2026-08-25 之前只在 oracle 生效。
+> CNPG 租户流程：也就是说"一套模式"在 2026-08-25 之前只在 oracle 生效。
 > 收敛过程与为什么 homelab 不用 CNPG 见下面的**决策四**。
 
 顺带查清的两件事实：
@@ -55,7 +55,7 @@ Deployment + PVC + Service + exporter。
 
 两者的 `spec.cluster` 是 **LocalObjectReference（只有 `name`，没有 `namespace` 字段）**。
 所以租户的库声明放在 `databases` ns，**不能**放进应用自己的 ns。这是这套平台形态的硬约束，
-也是选 `databases` 这个中立 ns（而非把 Cluster 留在 `rss-system`）的原因——否则
+也是选 `databases` 这个中立 ns（而非把 Cluster 留在 `rss-system`）的原因：否则
 `personal-services` 的应用要用库，CR 却得写在 `rss-system` 里。
 
 ## 决策二：**不**把 `zitadel-pg` 并进来
@@ -66,7 +66,7 @@ Deployment + PVC + Service + exporter。
 
 但**内存上限恰好是这个节点最现实的那个**：
 
-- 实测节点内存 **87%**（7730Mi / 8867Mi allocatable），limits 已超卖 **224%**
+- 实测节点内存 87%（7730Mi / 8867Mi allocatable），limits 已超卖 224%
 - `zitadel-pg` 带 `priorityClassName: critical`，清单原注释：
   "SSO 的库被驱逐 = 全站登录挂，值得最高一档"
 
@@ -79,7 +79,7 @@ bulk 应用之上、控制面之下。
 
 ## 决策三：不开超级用户口令，备份改逐库 `pg_dump`
 
-`apps-pg` 设 `enableSuperuserAccess: false`——运维要 psql 就
+`apps-pg` 设 `enableSuperuserAccess: false`：运维要 psql 就
 `kubectl exec -it apps-pg-1 -- psql`（容器内本地 socket，peer auth 直接是 postgres），
 不必再往 Vault 塞一份超管口令。
 
@@ -87,14 +87,14 @@ bulk 应用之上、控制面之下。
 是超级用户，`pg_dumpall` 才跑得通；CNPG 下应用用户只能 dump 自己的库。角色/权限现在由 git
 里的 CR 声明，不再需要 globals。
 
-> ⚠️ **这让备份脚本的 PG 段变成了显式清单**——性质等同于它下面那份 sqlite 白名单。
+> ⚠️ **这让备份脚本的 PG 段变成了显式清单**。性质等同于它下面那份 sqlite 白名单。
 > apps-pg 上每加一个租户，就必须在 `backup/overlays/oracle/backup-script.yaml` 里加一行
 > `pg_dump`，否则该库静默不备份。`trends-data` 曾因同类失误静默漏备 2 个月。
 > CI 的 H4 规则**查不到这个**：它只扫清单里声明的 PVC，而 CNPG 的 PVC 由 operator 动态创建。
 
 ## 决策四（2026-08-25）：homelab 也收敛成一个实例，但**不装 CNPG**
 
-到 2026-08-25，homelab 上长出了两个各自独立的 postgres —— 都没走上面那套流程：
+到 2026-08-25，homelab 上长出了两个各自独立的 postgres。都没走上面那套流程：
 
 | | 形态 | 镜像 | 实测内存 | 消费者 |
 |---|---|---|---|---|
@@ -124,16 +124,16 @@ pod 前缀是 `apps-pg-`、服务就叫 `apps-pg`、加租户 = 改 initdb 脚�
 
 multica 的上游镜像就是 `pgvector/pgvector:pg17`。它现在**没有**建 vector 扩展（实测库里
 只有 `pg_trgm`/`pgcrypto`/`plpgsql`），但上游哪天加一条 `CREATE EXTENSION vector` 的迁移，
-alpine 上就会启动即炸，而症状是 backend 的 `./migrate up` 卡死在 startupProbe ——
+alpine 上就会启动即炸，而症状是 backend 的 `./migrate up` 卡死在 startupProbe：
 一点不像"缺扩展"。pgvector 镜像是官方 `postgres:17`(bookworm) 的超集，换过去零损失。
 
 ### 隔离：一处变严，一处变松
 
 - **变严**：租户不再是 superuser（旧实例的 `POSTGRES_USER` 是），且 initdb 里
-  `REVOKE CONNECT ON DATABASE <t> FROM PUBLIC` —— 实测跨租户连库被拒
+  `REVOKE CONNECT ON DATABASE <t> FROM PUBLIC`：实测跨租户连库被拒
   （`permission denied for database "multica"`）。
 - **变松**：两个库共享一个 memory limit、一次重启、一个 postmaster 故障域。
-  ⚠️ 具体后果是 **multica 的库故障能把 LLM 网关一起拖下去** —— LiteLLM 设了
+  ⚠️ 具体后果是 **multica 的库故障能把 LLM 网关一起拖下去**：LiteLLM 设了
   `DATABASE_URL` 就硬依赖库（虚拟 key 校验走库）。两者都不在关键路径上，且本来就同节点
   同盘，所以接受；但这是这次合并唯一真实的可用性代价，别忘了它存在。
 
@@ -160,7 +160,7 @@ bookworm(glibc)，跨 libc 搬 PGDATA 的排序规则不安全。逻辑恢复顺
 
 ### 决策二在这次一并复核了：**仍然不并 `zitadel-pg`**
 
-2026-08-25 复测 oracle 节点：requests **75%**、limits 超卖 **226%**（当初是 87%/224%），
+2026-08-25 复测 oracle 节点：requests 75%、limits 超卖 226%（当初是 87%/224%），
 `zitadel-pg` 仍带 `critical`、`apps-pg` 仍是默认档。前提没变，所以决策二不变。
 真正的代价也说清楚：合并后一个实例只能有一个 priorityClass，等于**失去单独给 SSO 的库
 设 limit 和优先级的能力**，收益仍只是一个 postmaster（zitadel-pg 实测 rss 47.7Mi）。
@@ -169,10 +169,10 @@ bookworm(glibc)，跨 libc 搬 PGDATA 的排序规则不安全。逻辑恢复顺
 
 1. ☠️ **删 chart values 里的 `postgres:` 块会带走 YAML 锚点。** `&pin-control-plane` 原先
    定义在 `postgres.affinity` 上，frontend 还在 `*pin-control-plane` 引用它。锚点丢了
-   **不报错**，是整份 values 解析失败 → `helm template` 渲染出**空文件**。
+   不报错，而是整份 values 解析失败 → `helm template` 渲染出**空文件**。
    删块前先 grep `&`。
 2. chart 的 `postgres.external.enabled=true` 不只是"不建 postgres"：它同时让 backend
-   不再注入 `env: DATABASE_URL`、ConfigMap 不再有 `POSTGRES_*` —— 连接串**只**能从
+   不再注入 `env: DATABASE_URL`、ConfigMap 不再有 `POSTGRES_*`：连接串**只**能从
    `existingSecret` 经 envFrom 进来。好处是不会和 chart 的 env 撞成 SSA 重复键硬失败。
 3. Kyverno 的 `restrict-image-registries` 是**字面前缀匹配**，镜像必须显式写
    `docker.io/`。省略前缀虽然能拉到镜像，策略却判违规（`failureAction: Audit` 所以
@@ -180,7 +180,7 @@ bookworm(glibc)，跨 libc 搬 PGDATA 的排序规则不安全。逻辑恢复顺
    **都在违规**，实测确认。
 4. ⚠️ **旧 PVC 不会被 prune**（都带 `Prune=false`，multica 那个是集群侧注解），
    所以旧数据还在盘上，而 multica 那个 App 会**一直 OutOfSync**（`requiresPruning=True`
-   但被拦住）。手工删掉旧 PVC 才收口 —— 挂着 OutOfSync 的 App 会掩盖将来真实的漂移。
+   但被拦住）。手工删掉旧 PVC 才收口：挂着 OutOfSync 的 App 会掩盖将来真实的漂移。
 
 ## 后果
 
@@ -190,7 +190,7 @@ bookworm(glibc)，跨 libc 搬 PGDATA 的排序规则不安全。逻辑恢复顺
   （省内存的真正大头是应用侧，例如 stirling-pdf 实测 633Mi）。
 
   > ⚠️ **读 `kubectl top pod` 会被误导。** 迁移刚完成时 apps-pg 显示 209Mi，是旧库
-  > (101Mi) 的两倍——但那是 working set，其中绝大部分是 `shared_buffers`（128MB，
+  > (101Mi) 的两倍。但那是 working set，其中绝大部分是 `shared_buffers`（128MB，
   > 与 postgres:15-alpine 默认值相同）被完整触达后计入的**共享内存/页缓存，可回收**。
   > 看 kubelet summary 的分项：apps-pg `rssBytes` 只有 **25Mi**，比跑了 18 天的
   > zitadel-pg（`rss` 41Mi / `workingSet` 117Mi）还低。当时的虚高是验证工作本身造成的
@@ -198,7 +198,7 @@ bookworm(glibc)，跨 libc 搬 PGDATA 的排序规则不安全。逻辑恢复顺
   > 判断 postgres 容器的真实占用要看 `rssBytes`，别只看 `top`。
 - `apps-pg` 的 `externalClusters`/`import` 段在旧库销毁后就指向不存在的 Service 了，
   是**刻意保留的死引用**：`bootstrap` 只在建库时读一次，集群 initialized 之后 CNPG 不再看它。
-  ⚠️ 不要为了"清理干净"去删它——那是在动一个有数据的库的 bootstrap 配置，收益纯属美观，
+  ⚠️ 不要为了"清理干净"去删它。那是在动一个有数据的库的 bootstrap 配置，收益纯属美观，
   而 CNPG 对 bootstrap 变更的处理**没在本环境验证过**。真要动，先拿一次性测试 Cluster 验。
 - CNPG 的 Barman 备份**没启用**（本环境没有对象存储，备份走 restic → 106 sftp），
   与 `zitadel-pg` 同口径。

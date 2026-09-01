@@ -6,7 +6,7 @@
 ## 上下文
 
 已有的例行体检覆盖了两类问题：trivy-operator 查**镜像/配置有漏洞**，OpenCost + KRR 查
-**资源给多了**。缺的是第三类：**配置漂移** —— 集群里存在、但 Git 里没有的对象。
+**资源给多了**。缺的是第三类：**配置漂移**：集群里存在、但 Git 里没有的对象。
 
 这类东西的具体危害在本仓库有先例：手动 `kubectl apply` 过、之后没补进 kustomization 的
 ConfigMap，平时一切正常，只在**从 Git 重建集群**时暴露成缺依赖的启动失败。
@@ -39,13 +39,13 @@ ConfigMap，平时一切正常，只在**从 Git 重建集群**时暴露成缺�
 - `argocd/argocd-secret`（server signature key）、`argocd/oracle-k3s-cluster`（oracle 外部集群凭据）
 - `external-secrets/vault-token`（删了全部 ESO 停摆）
 - `monitoring/alertmanager-kube-prometheus-stack-alertmanager`（Alertmanager 配置源）
-- `monitoring/alertmanager-telegram` —— 它正被 `k8s/helm/manifests/monitoring/krr.yaml` 的 CronJob 以
+- `monitoring/alertmanager-telegram`：它正被 `k8s/helm/manifests/monitoring/krr.yaml` 的 CronJob 以
   `secretKeyRef` 引用；kor 不遍历 CronJob 的 podTemplate
-- `opencost/custom-pricing-model` —— deploy 里有 `PRICING_CONFIGMAP_NAME` 环境变量指名读取；
+- `opencost/custom-pricing-model`：deploy 里有 `PRICING_CONFIGMAP_NAME` 环境变量指名读取；
   kor 只认 volume 挂载和 `envFrom`/`valueFrom`
 
 共同根因：**kor 只做静态引用分析**，看不见控制器经 K8s API 按名字/按 label 读取的配置。而在
-GitOps 集群里 `--delete` 本身就是反模式 —— selfHeal 会把删掉的弹回来，只留一次无意义抖动。
+GitOps 集群里 `--delete` 本身就是反模式：selfHeal 会把删掉的弹回来，只留一次无意义抖动。
 
 ArgoCD 的判定则天然跳过带 `ownerReferences` 的对象，ReplicaSet/Job/Pod 那一整类噪音根本不产生。
 
@@ -58,7 +58,7 @@ ArgoCD 的判定则天然跳过带 `ownerReferences` 的对象，ReplicaSet/Job/
 `orphanedResources.ignore` 的 schema 只有 `group`/`kind`/`name`，**没有 namespace 字段**
 （已核 CRD）。而 `kube-system` / `monitoring` / `argocd` / `external-secrets` 四个 namespace 里的
 组件（cilium+k3s / kube-prometheus-stack / ArgoCD 自身 / ESO operator）全是 manual-helm 装的，
-按定义永远"无人认领"——实测贡献 **255 条不可屏蔽的结构性噪音**。
+按定义永远"无人认领"。实测贡献 255 条不可屏蔽的结构性噪音。
 
 `warn: true` 会给 `loki`/`tempo`/`gateway`/`vault-eso` 等 App 常挂黄色告警条，复刻 trivy 那种
 告警疲劳。`warn: false` 下孤儿仍在各 App 的资源树里可见，只是不产生 warning condition。
@@ -75,7 +75,7 @@ ArgoCD 的判定则天然跳过带 `ownerReferences` 的对象，ReplicaSet/Job/
 | `Secret/kyverno-*.kyverno.svc.kyverno-tls-*` | 4 | cleanup-controller 运行时生成并轮转的自签 TLS |
 | `PersistentVolumeClaim/data-trivy-server-0` | 1 | trivy-server StatefulSet 的 volumeClaimTemplate 产物 |
 
-PVC **只豁免这一个具名对象、不豁免整类** —— 意外多出来的 PVC 正是最该被看见的孤儿
+PVC **只豁免这一个具名对象、不豁免整类**：意外多出来的 PVC 正是最该被看见的孤儿
 （参见 calibre PVC 的 `Prune=false` 保护）。
 
 ## 效果
@@ -97,11 +97,11 @@ manual-helm，设计如此，见 [`external-dns-adoption.md`](external-dns-adopt
 
 ### 首批捞到的真问题
 
-`k8s/helm/manifests/calibre-metadata/kustomization.yaml`（**当时**的路径 —— calibre 全家
+`k8s/helm/manifests/calibre-metadata/kustomization.yaml`（**当时**的路径：calibre 全家
 2026-08-03 迁 oracle，现在这棵树在 `cloud/oracle/manifests/calibre-metadata/`）的 `resources:` 漏列了
 `metadata-enrich.yaml`，而 `enrich-job.yaml` 要挂载它定义的 ConfigMap `metadata-enrich-script`。
 线上那份是当年手动 `kubectl apply` 的残留（同 App 的 `ebook-metadata-script` 有 tracking-id
-注解，它没有）—— 从 Git 重建集群时 `calibre-metadata-enrich` Job 会因缺 ConfigMap 起不来，
+注解，它没有）：从 Git 重建集群时 `calibre-metadata-enrich` Job 会因缺 ConfigMap 起不来，
 正落在 `runbooks/homelab-rebuild-ubuntu-24-04.md` 那条路径上。已在同批提交修复。
 
 ## 2026-08-06 复跑
@@ -109,7 +109,7 @@ manual-helm，设计如此，见 [`external-dns-adoption.md`](external-dns-adopt
 控制面已于 2026-08-02 迁 oracle，两集群各跑一遍同一判定逻辑。信号面**各 6 条**：
 
 **捞到并清除的真孤儿：0 条。**（同批另行清掉的 `argocd-image-updater` 两个 ExternalSecret
-不是靠本机制发现的——它们**在 Git 里**，属于「组件退役了但清单没删」，是 kor 那一侧的问题。
+不是靠本机制发现的。它们**在 Git 里**，属于「组件退役了但清单没删」，是 kor 那一侧的问题。
 这正好印证决策一的取舍：两个工具找的是相反的东西，本机制天然看不见这类。）
 
 12 条信号全部是**应该存在**的，分三类：
@@ -122,7 +122,7 @@ manual-helm，设计如此，见 [`external-dns-adoption.md`](external-dns-adopt
 
 ### 永久孤儿：不入 Git 的 bootstrap 依赖（**不要清理**）
 
-剩下 4 条是**刻意不进 Git** 的手工前置。它们会永远显示为孤儿，而这恰恰有用——
+剩下 4 条是**刻意不进 Git** 的手工前置。它们会永远显示为孤儿，而这恰恰有用：
 **这份清单就是「从 Git 重建集群时会缺什么」**。此前它散落在 8 个文件的注释里，汇总于此：
 
 | 对象 | 作用 | 删掉的后果 |

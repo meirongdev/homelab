@@ -3,7 +3,7 @@
 > **触发条件**：想把书库里某一批书灌进某个 notebook 做研读/问答。
 > **成功判定**：job 日志每本 `ok (200)`；`/api/sources` 里 `embedded: True` 且 chunk 数 >0；
 > UI 里该 notebook 能对书内容问答/语义搜索。
-> **回滚**：摄取只"新增 source"——删错灌的书在 UI 里删 source 即可，不动书库（只读挂载）。
+> **回滚**：摄取只"新增 source"：删错灌的书在 UI 里删 source 即可，不动书库（只读挂载）。
 > 执行目录：仓库根。首跑验证：2026-08-01（SRE 书，111 chunks，见文末数据点）。
 >
 > ☠️ **2026-08-02 起这条链路横跨两个集群，命令必须带 `--context`**：
@@ -14,7 +14,7 @@
 
 ## 设计要点（为什么不是"全量同步"）
 
-书库 23G/2040 本，大多数书永远不会被问到——所以**没有自动同步**。摄取是一个
+书库 23G/2040 本，大多数书永远不会被问到：所以**没有自动同步**。摄取是一个
 默认挂起的 CronJob 模板（schedule 写成 2 月 31 日 + `suspend: true`），三道闸：
 `NOTEBOOK_ID`/`BOOK_PATTERN` 为空直接失败退出、`MAX_BOOKS` 单次上限。
 参数进 git，"什么时候灌过什么"可追溯。
@@ -30,7 +30,7 @@ kubectl --context oracle-k3s -n personal-services exec deploy/calibre-web -c cal
   'find /calibre-library -type f -size -95000000c \( -name "*.epub" -o -name "*.pdf" \) | grep -i "<pattern>"'
 ```
 
-⚠️ 短 pattern 会误捞：裸 `sre` 同时命中作者 `Sreeram`/`Sreejith` 的无关书——首跑最终用的是
+⚠️ 短 pattern 会误捞：裸 `sre` 同时命中作者 `Sreeram`/`Sreejith` 的无关书：首跑最终用的是
 作者名 `betsy beyer`（唯一命中）。
 
 ### 2. 改参数并 push
@@ -77,14 +77,14 @@ kubectl --context k3s-homelab -n personal-services exec deploy/open-notebook -- 
 
 | 症状 | 原因 | 处理 |
 |---|---|---|
-| `matched 0 file(s)` 但预览有 | find 报错被吞过一次（BusyBox 不认 `-size -95M`，已改 `-95000000c` 且不再静音 stderr）——若复发，看 job 日志里 find 的 stderr | 脚本已修；pattern 打偏则回第 1 步 |
+| `matched 0 file(s)` 但预览有 | find 报错被吞过一次（BusyBox 不认 `-size -95M`，已改 `-95000000c` 且不再静音 stderr）：若复发，看 job 日志里 find 的 stderr | 脚本已修；pattern 打偏则回第 1 步 |
 | `curl: (26) Failed to open/read local data` | calibre 路径里的**逗号**被 curl `-F` 当多文件分隔符 | 已修（`@` 路径套双引号）；路径带 `"` 的文件仍会失败（calibre 会把 `"` 转 `_`，实际不出现） |
 | 每本 `FAILED (401)` | Bearer 口令不对：secret 卷权限（曾因 0400 + uid 100 读不到，已改 0444）或 Vault 里换了口令没 rollout restart | `kubectl --context oracle-k3s -n personal-services get secret open-notebook-ingest-secret`；对照 [reference/open-notebook.md 运维备忘](../reference/open-notebook.md) |
 | 每本 `FAILED (404)` | API 路径没带 `/api` 前缀（router 全挂在 `/api` 下，只有 `/health` 在根） | 脚本已修，别改回去 |
 | `FAILED (413)` | 单文件超上游 100MB 上限 | find 的 95MB 过滤本应挡住；确认没人改小 `OPEN_NOTEBOOK_MAX_UPLOAD_SIZE_MB` |
-| 上传 200 但 `embedded` 一直 False | Mac OMLX 不可达/在忙（embedding 全走它） | `curl http://100.89.15.120:8000/v1/models`；曾有旧进程假死先例——重启 omlx 服务（`macbook/ansible/`，Homebrew 服务 `homebrew.mxcl.omlx`） |
+| 上传 200 但 `embedded` 一直 False | Mac OMLX 不可达/在忙（embedding 全走它） | `curl http://100.89.15.120:8000/v1/models`；曾有旧进程假死先例：重启 omlx 服务（`macbook/ansible/`，Homebrew 服务 `homebrew.mxcl.omlx`） |
 
-已知行为（非 bug）：**不去重**——同一 pattern 跑两次会重复建 source，靠 `MAX_BOOKS` 和人工触发兜底。
+已知行为（非 bug）：**不去重**：同一 pattern 跑两次会重复建 source，靠 `MAX_BOOKS` 和人工触发兜底。
 
 ## 单本捷径
 
@@ -95,4 +95,4 @@ kubectl --context k3s-homelab -n personal-services exec deploy/open-notebook -- 
 
 Google《Site Reliability Engineering》epub：提取秒级；111 chunks（avg 1401 字符）；
 embedding 146.5s ≈ **1.3s/chunk**（走 Mac，含模型换入）。据此 20 本一批 ≈ 50 分钟，
-全在 Mac 串行——别与播客渲染/35B 对话撞车。
+全在 Mac 串行：别与播客渲染/35B 对话撞车。

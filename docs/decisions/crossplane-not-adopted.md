@@ -1,7 +1,7 @@
 # Crossplane 不引入：单人静态云面用不上控制面，且最大那块云面没有活的 provider
 
 > 日期: 2026-07-07（2026-08-13 从[技术债盘点与演进路线 §三](../plans/architecture/2026-07-07-tech-debt-and-evolution.md)拆出为独立 ADR，结论未变）
-> 状态: ❌ 否决（**结论仍然有效**）—— 重评条件见文末，满足其一再议
+> 状态: ❌ 否决（**结论仍然有效**）：重评条件见文末，满足其一再议
 > 关联：[external-dns-adoption](external-dns-adoption.md)（子域名 toil 的实际解法）·
 > [演进路线](../plans/architecture/2026-07-07-tech-debt-and-evolution.md)（2026-07-07 原始评估与当时的市场快照）
 
@@ -12,16 +12,16 @@
 且"加一个子域名要改 terraform + 改 gateway"是固定两步手工流程。
 
 Crossplane v2（2025-08 GA，评估时 v2.3：MR/XR 全面 namespaced、composition functions、去 claim）
-是当时最常被提名的答案——把云资源也变成 K8s 对象，由控制器持续 reconcile，
+是当时最常被提名的答案。把云资源也变成 K8s 对象，由控制器持续 reconcile，
 顺带让 IaC 获得 GitOps 语义。问题是：**它解决的是不是我们的问题**。
 
 ## Options
 
 | 方案 | 结论 |
 |---|---|
-| **Crossplane 统管云面** | ❌ 否决 —— provider 现实 + 三条结构性理由，见下 |
+| **Crossplane 统管云面** | ❌ 否决：provider 现实 + 三条结构性理由，见下 |
 | 只用 Crossplane 管 Cloudflare（最大云面） | ❌ 不可能：该 provider 已死（见下表） |
-| 维持 Terraform + 逐个补短板 | ✅ 采纳 —— external-dns 消掉子域名 toil、R2 backend 消掉 state 单点 |
+| 维持 Terraform + 逐个补短板 | ✅ 采纳：external-dns 消掉子域名 toil、R2 backend 消掉 state 单点 |
 
 ### Provider 现实（2026-07 逐一核查）
 
@@ -43,7 +43,7 @@ Crossplane v2（2025-08 GA，评估时 v2.3：MR/XR 全面 namespaced、composit
    云资源少而静态（1 台 OCI 实例、1 份 CF zone 配置、几台 PVE VM、1 份 Tailscale ACL），
    控制器 7×24 reconcile 的收益趋近零。
 2. **鸡生蛋**。Crossplane 跑在集群里，却要管"集群赖以存在"的资源（OCI 实例、PVE VM）。
-   集群挂 → 修复工具跟着挂，**DR 路径反而变复杂**——与"故障域集中"那条诊断直接冲突。
+   集群挂 → 修复工具跟着挂，**DR 路径反而变复杂**。与"故障域集中"那条诊断直接冲突。
 3. **资源开销**。upjet 系 provider 每 family 常驻数百 MB 内存，吃的正是 homelab
    单节点最紧张的资源（宿主余量见 [homelab-host-power-thermal.md](../reference/homelab-host-power-thermal.md)）。
 
@@ -58,7 +58,7 @@ Crossplane v2（2025-08 GA，评估时 v2.3：MR/XR 全面 namespaced、composit
 ## Consequences
 
 - 云面继续由 Terraform 管，**接受**"state 在本地、无锁"这个已知缺口，直到 R2 backend 落地（ROADMAP #2）。
-- 子域名 toil 已被 external-dns 单独消除，**不需要**为它引入控制面——这是本决策成立的关键前提之一：
+- 子域名 toil 已被 external-dns 单独消除，**不需要**为它引入控制面：这是本决策成立的关键前提之一：
   痛点被逐个拆掉后，"统管"的剩余收益不足以支付上面三条成本。
 - 不获得跨云统一 API / 自助式资源申请能力。单人场景下这不是损失。
 

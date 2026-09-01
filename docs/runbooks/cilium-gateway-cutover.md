@@ -7,10 +7,10 @@
 > **范围**：homelab + oracle-k3s。
 >
 > ⚠️ **历史背景**：本文最初写于 2026-03-07 的首次 cutover，那次已完成。
-> **§ Preconditions 里检查 Traefik 与 Kopia 的步骤已作废**——两者均已退役，跳过即可。
+> **§ Preconditions 里检查 Traefik 与 Kopia 的步骤已作废**：两者均已退役，跳过即可。
 > ClusterMesh 自 2026-03-08 起已连接（§ Phase 6 因此通常不需要执行）。
 > 日常健康观测另见 [reference/cloudflare-tunnel-observability.md](../reference/cloudflare-tunnel-observability.md)。
-> Last updated: 2026-08-01
+> Last updated: 2026-09-01
 
 ## Goal
 

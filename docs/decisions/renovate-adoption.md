@@ -8,14 +8,14 @@
 
 ## Context
 
-版本钉扎全靠人肉记账，而**漂移是静默的**——三次实例，一次比一次说明问题：
+版本钉扎全靠人肉记账，而**漂移是静默的**。三次实例，一次比一次说明问题：
 
 1. **2026-08-11**：Cilium 1.20 升级漏配 Gateway API CRD（现网 v1.2.1 vs 要求 v1.6.1），
    operator 的 Gateway API 控制器整个不初始化 **30 小时**。旧路由照常 200、无任何告警，
    只有新增路由静默 503。
 2. **2026-08-13**：复查发现 `cloud/oracle/ansible/playbooks/setup-k3s.yaml` **仍钉着
    v1.2.1**，而注释写着"与 homelab 一致"。同一事实散在三处（两个 justfile + 一个剧本），
-   两处已改、一处漏改，且漏的那处**只在重建集群时才爆**——最坏的一类缺陷。
+   两处已改、一处漏改，且漏的那处**只在重建集群时才爆**。最坏的一类缺陷。
 3. **同日扫全仓**又发现 `node_exporter` 在三套 ansible 里是 1.11.1 / 1.10.0 / 1.11.1。
 
 规模已经过了人肉能管住的线：28 个 ArgoCD App、两套 ansible、四个 justfile。
@@ -36,17 +36,17 @@
 
 **配置**：`.github/renovate.json5`（JSON5 是为了能写理由注释，与本仓库其它配置同风格）。
 内置 manager 管 ArgoCD chart 版本与清单镜像；自定义 regex manager 管 justfile / ansible
-里的版本变量，约定是**版本行上面一行**写 `# renovate: datasource=… depName=…`——
+里的版本变量，约定是**版本行上面一行**写 `# renovate: datasource=… depName=…`：
 把来源写在版本旁边，改版本的人当场就能看到它从哪来。实测识别 16 条自定义依赖 +
 内置 manager 覆盖的 chart/镜像。
 
 ### 三条刻意的自我约束
 
 1. **永不 automerge**。仓库有一批 manual-helm 组件（Cilium / Vault / ESO / ArgoCD 本体），
-   合并只改 git、现网不动。自动合并会制造"git 说新版、现网是旧版"的假象——
+   合并只改 git、现网不动。自动合并会制造"git 说新版、现网是旧版"的假象。
    那种挂着"✅ 生产运行"的死文档误导过 5 天，同一类伤害。
    这批的 PR 打 `manual-helm` label + PR 正文写明"合并 ≠ 部署"。
-2. **不开 `pinDigests`**。仓库要求 arm64 关键镜像钉**多架构 index digest**，
+2. **不开 `pinDigests`**。仓库要求 arm64 关键镜像钉多架构 index digest，
    让 Renovate 给所有镜像铺 digest 会淹掉 PR 队列；已有 digest 的它会自动跟着升。
 3. **不管 `docs/`**。`plans/` 是写完即冻结的快照，改它们是错的（R1）。
 
@@ -63,7 +63,7 @@
 
 - CI 里 `just` 与 `shellcheck` 的版本**刻意不标**：它们的版本在同一行出现两次
   （release tag + 解出的目录名 / 镜像 tag），regex manager 只替第一处，PR 会带一条拼不出来
-  的下载 URL——那种 PR 比不开 PR 更浪费时间。要管得先把版本抽成 env 变量，属独立改动。
+  的下载 URL。那种 PR 比不开 PR 更浪费时间。要管得先把版本抽成 env 变量，属独立改动。
 - `eso_version` / `node_exporter_version` **不进检查器的配对组**（但归 Renovate 管）：
   两集群的 ESO、三套机队的 exporter 各自独立，不一致是"该升级了"而非"配置错了"。
   把它算违规就会制造一条谁都不看的红灯。
@@ -81,7 +81,7 @@
 ## Consequences
 
 - ✅ 上游发版不再靠人想起来；"等上游修 CVE"的 trivyignore 豁免会在上游真重建镜像时
-  **自动变成一个 digest 更新 PR**——复审从日历纪律变成事件驱动。
+  **自动变成一个 digest 更新 PR**：复审从日历纪律变成事件驱动。
 - ✅ 三处 `gateway_api_version` 现在会在**同一个 PR** 里一起改，且 CI 会拦漏改。
 - ⚠️ 每周多出 PR 队列要处理（`prConcurrentLimit: 3` + 分组压噪音）。**PR 绿 ≠ 可以合**：
   manual-helm 那批合完必须手动部署。

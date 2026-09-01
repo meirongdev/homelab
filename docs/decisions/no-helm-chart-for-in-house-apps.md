@@ -8,7 +8,7 @@
 评估自研服务 [jobs-sg](https://github.com/meirongdev/jobs-sg) 落地时提出的问题：
 「做成 Helm chart 是不是更容易部署？」
 
-这条界线此前只是**既成事实、从未成文**——[argocd-app-patterns.md](../reference/argocd-app-patterns.md)
+这条界线此前只是既成事实、从未成文：[argocd-app-patterns.md](../reference/argocd-app-patterns.md)
 的「3 种子模式」表只描述了哪个 App 用哪种源，没写选择规则，更没写理由。
 于是每来一个自研应用就要重新讨论一次，且新人（含 AI 助手）看不出这是有意为之
 还是历史偶然。
@@ -32,7 +32,7 @@
 
 1. **`AppProject.sourceRepos` 是白名单，而 `AppProject` 不受 GitOps 管理。**
    chart 若放在应用自己的仓库，必须往 `argocd/projects/homelab.yaml` 的 `sourceRepos`
-   加一条——而 root App 的 `path` 是 `argocd/applications`，**`argocd/projects/` 不在
+   加一条：而 root App 的 `path` 是 `argocd/applications`，**`argocd/projects/` 不在
    任何 Application 的托管路径下**（已核 `argocd/applications/root.yaml:19`）。
    也就是说 `git push` 对它不生效，得手工
    `kubectl --context oracle-k3s apply -f argocd/projects/homelab.yaml`（或 `just deploy-argocd`）。
@@ -67,9 +67,9 @@
 
 ### 什么时候该推翻这条
 
-不写死，给触发条件——满足任一条就重新评估：
+不写死，给触发条件：满足任一条就重新评估：
 
-- 自研应用要被**外部**安装（公开发布给他人部署）——那时 chart 的价值是**分发格式**，
+- 自研应用要被外部安装（公开发布给他人部署）：那时 chart 的价值是**分发格式**，
   不是本仓库的部署方式；两者可以并存。
 - 同一自研应用要在 **3 个以上环境/集群**跑且 values 差异显著，kustomize overlay
   开始出现大段重复。
@@ -81,7 +81,7 @@
   `cloud/oracle/manifests/<app>/`（oracle），加 `argocd/applications/<app>.yaml`。
   `.claude/skills/add-service/SKILL.md` 已是这个流程，无需改动。
 - 应用自己的仓库里**可以**放 `deploy/` 参照清单，但**真相源是 homelab 仓库**，
-  ArgoCD 不指向应用仓库——否则就撞回第 1 条的 `sourceRepos` 陷阱。
+  ArgoCD 不指向应用仓库：否则就撞回第 1 条的 `sourceRepos` 陷阱。
 - ⚠️ `k8s/helm/` 这个目录名是历史命名：它下面的 `manifests/` 与 Helm 无关。
   别因为路径里有 `helm` 就以为自研应用也该走 chart。
 - 本决策**不影响**上游 chart 的用法：新增第三方组件照常

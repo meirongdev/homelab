@@ -1,6 +1,6 @@
 # KRR 报告分诊与采纳
 
-> Last updated: 2026-08-24
+> Last updated: 2026-09-01
 > Status: 生效 SOP
 > 触发条件：周一收到 KRR 推送到 Telegram 的两份报告（homelab 09:00 / oracle-k3s 09:15）；
 > 或改 shape、加服务、扩容之后主动跑一次核对。
@@ -20,7 +20,7 @@ KRR 部署拓扑、依赖指标、命令行参数见
 报告末尾那个 `NN points - D` 是 KRR 按「你的配置离我的推荐有多远」算的分，
 **不等于"浪费严重"**。2026-08-10 那轮两份报告都是 D，但实测：
 
-- homelab 节点 CPU requests 只占 20%、内存 39% —— 没有任何可省的必要
+- homelab 节点 CPU requests 只占 20%、内存 39%：没有任何可省的必要
 - 真正值钱的信息藏在最不起眼的 `unset -> 10m` 行里（那是 BestEffort，见 §2 分类 B）
 
 **分数低不代表要减配，分数高也不代表安全。** 报告的价值在分类，不在总分。
@@ -36,7 +36,7 @@ KRR 部署拓扑、依赖指标、命令行参数见
 |---|---|---|
 | CPU 推荐 = **p95** | — | 对批处理 CronJob 无意义（见分类 E） |
 | 内存推荐 = 窗口内 **max + 15%** | — | 可反推峰值：`峰值 ≈ 推荐值 ÷ 1.15` |
-| **内存有 100Mi 地板、CPU 有 10m 地板** | 100Mi / 10m | 任何恰好等于地板的推荐**都不是测量结果** |
+| **内存有 100Mi 地板、CPU 有 10m 地板** | 100Mi / 10m | 任何恰好等于地板的推荐都不是测量结果 |
 
 地板值这条最容易骗人。2026-08-10 实测对照：
 
@@ -73,14 +73,14 @@ curl -s --data-urlencode 'query=max by (namespace,container) (max_over_time(cont
 
 为什么最要紧：kubelet 驱逐先按「用量是否超 request」分桶、再按 Pod Priority 排序。
 BestEffort 的 request 恒为 0，**永远落在"超"那一桶**，于是排在守规矩的 `bulk`(-10)
-应用**前面**被驱逐 —— 与 [k8s-qos-resource-management.md](../reference/k8s-qos-resource-management.md)
+应用**前面**被驱逐：与 [k8s-qos-resource-management.md](../reference/k8s-qos-resource-management.md)
 的分档意图正好相反。2026-08-10 最刺眼的例子：external-dns 的 values 里写着
 `priorityClassName: high`(900)，却是 BestEffort，那行 priority 根本轮不到生效。
 
 处置：按 §1 查实测值 → 补 `resources` → 按 §4 下发 → 按 §5 验证。
 
 ⚠️ **一个重要例外：先看 Pod Priority，再决定值不值得补。**
-「BestEffort 排第一档」说的是**同一驱逐桶内**的事——kubelet 先按「用量是否超 request」
+「BestEffort 排第一档」说的是**同一驱逐桶内**的事：kubelet 先按「用量是否超 request」
 分桶，桶内**下一个排序键就是 Pod Priority**。所以带 `system-node-critical`(2000001000)
 或 `system-cluster-critical`(2000000000) 的 Pod 无论 QoS 如何都排在**最后**，
 它们的 BestEffort 基本无害。
@@ -94,25 +94,25 @@ kubectl --context <ctx> -n <ns> get pod <pod> \
 system-*-critical）：补 requests 会把 oracle 内存 requests 从 85% 推到 **95%**
 （+896Mi / 9080Mi allocatable），把新服务的调度空间吃光，换来的驱逐收益却接近零。
 同一集群里真正裸奔的是 `hubble-relay` / `hubble-ui`（priority **0**、无 class），
-但那是纯观测组件，掉了不影响服务——于是也一并搁置。
+但那是纯观测组件，掉了不影响服务。于是也一并搁置。
 
 **判据一句话**：BestEffort + priority 0 + 掉了会出事 = 必补；
 BestEffort + system-critical = 可以不补；BestEffort + priority 0 + 纯观测 = 看余量再说。
 
 ☠️ **报告里永远不会出现 `kube-system` 的任何一行**（2026-08-24 核实：连续三周两集群
-全部 0 行）。已排除两个常见原因——KRR 的 SA 对 kube-system 的 `list deployments/daemonsets`
+全部 0 行）。已排除两个常见原因：KRR 的 SA 对 kube-system 的 `list deployments/daemonsets`
 是 `yes`，KSM 里两集群的 kube-system 工作负载系列也都在中枢 Prometheus 里，
 所以是 KRR 自己的过滤。**后果**：cilium 全家 / coredns / hubble / local-path-provisioner
 这些恰恰是裸奔重灾区的组件，靠周报永远发现不了，只能靠 §5 的容器级扫描兜底。
 
-⚠️⚠️ **补 resources 时给不给 CPU limit，要单独判断——给错会引入原本不存在的问题。**
+⚠️⚠️ **补 resources 时给不给 CPU limit，要单独判断：给错会引入原本不存在的问题。**
 BestEffort 容器此前**没有任何 CPU limit，不可能被节流**；补上就可能被节流。
 2026-08-10 实测：给 node-exporter 配 `limits.cpu: 200m` 后节流率 **31%**，
-`CPUThrottlingHigh` 当场告警——而它 1m 粒度的峰值只有 **3m**。
+`CPUThrottlingHigh` 当场告警，而它 1m 粒度的峰值只有 3m。
 
 原因是**采集/抓取型组件的负载是亚秒级突发**：CFS 按 100ms 周期发配额，
 瞬时需求远超均值，1m 粒度的 rate 完全看不见这件事。同批加了同样 200m limit 的
-kube-state-metrics 实测节流 **0%**（它维护状态、不突发）——所以这不是普遍规律，
+kube-state-metrics 实测节流 0%（它维护状态、不突发）。所以这不是普遍规律，
 **必须逐个实测**，不能按组件类别想当然。
 
 - **抓取/导出型**（node-exporter 一类）：只给 memory limit，**CPU limit 留空**。
@@ -126,7 +126,7 @@ curl -s --data-urlencode 'query=sum by (namespace,container) (rate(container_cpu
   | jq -r '.data.result[] | select((.value[1]|tonumber)>0.02) | "\((.value[1]|tonumber*100)|floor)% \(.metric.namespace)/\(.metric.container)"' | sort -rn
 ```
 
-> ⚠️ 同 §2-F：**这条查询在 oracle 上返回空结果**——oracle 的 otel-collector 只 keep
+> ⚠️ 同 §2-F：**这条查询在 oracle 上返回空结果**：oracle 的 otel-collector 只 keep
 > `container_(cpu_usage_seconds_total|memory_working_set_bytes)` 两个 kubelet cAdvisor 指标，
 > 节流计数器不进中枢 Prometheus（见
 > [k8s-qos-resource-management.md](../reference/k8s-qos-resource-management.md)），
@@ -153,13 +153,13 @@ curl -s --data-urlencode 'query=max by (cluster,namespace,container) (max_over_t
 > 分组键必须带 `cluster`，否则两集群同名 ns 会串味。
 
 处置：**抬 limit**（limit 不占调度预算，抬高是免费的）。
-只在「稳态用量明显高于 request」时才一起抬 request —— 那会吃掉调度余量。
+只在「稳态用量明显高于 request」时才一起抬 request：那会吃掉调度余量。
 
 这类问题不会自己暴露：容器撞 limit 被 OOMKill 后**干净重启、不进 CrashLoopBackOff**，
 `KubePodCrashLooping` 结构上抓不到。集群已有三条规则兜底（`ContainerOOMKilled` /
 `ContainerOOMKilledCadvisor` / `ContainerMemoryNearLimit`），说明见
 [k8s-qos-resource-management.md § 检测 OOMKill](../reference/k8s-qos-resource-management.md)。
-**但告警是兜底，不是替代**——周报分诊要在告警响之前发现它。
+**但告警是兜底，不是替代**：周报分诊要在告警响之前发现它。
 
 ### D. `CPU DIFF` 为负 — 只在 oracle 上值得做
 
@@ -177,7 +177,7 @@ requests 是那里真正稀缺的东西。逐容器按实测 p95 下调，能一
 
 ⚠️ **k3s 内置组件（coredns / metrics-server / local-path-provisioner）不在本仓库**，
 `grep` 不到。要改得在节点上覆盖 `/var/lib/rancher/k3s/server/manifests/`，
-且会被 k3s 重启覆写 —— 收益通常不值这个复杂度，报告里看到它们直接跳过。
+且会被 k3s 重启覆写：收益通常不值这个复杂度，报告里看到它们直接跳过。
 
 ### E. 批处理 CronJob 的 CPU 建议 — 忽略
 
@@ -211,21 +211,21 @@ curl -s --data-urlencode 'query=sum by (namespace,container) (rate(container_cpu
 ## 3. 报告看不见的东西
 
 KRR 只报「当前 spec 的数值」与「实测用量」的差。有三类问题它**结构上照不出来**，
-但恰恰会被它的输出**间接暴露**——看到下面这些信号时要往深查一层。
+但恰恰会被它的输出**间接暴露**：看到下面这些信号时要往深查一层。
 
 | 报告里的信号 | 可能的真问题 | 怎么确认 |
 |---|---|---|
 | values 里明明写了 resources，报告却显示 `unset` | **配置写错层级被 chart 静默忽略** | `helm template <chart> --version <ver> -f <values>` 看渲染出的容器 spec 是不是 `resources: {}` |
 | git 里有 resources，集群里没有 | **改了但从没部署**（manual-helm 组件） | `helm get values <release> -n <ns> --kube-context <ctx>` 与 git 对比；再比 commit 时间和 `helm list` 的 UPDATED |
 | ns 有 LimitRange，个别 Pod 仍 BestEffort | **Pod 早于 LimitRange**（只在准入时注入，不追溯） | 比 Pod 的 `creationTimestamp` 与 LimitRange 的；修法是 `rollout restart` |
-| 某行的 CPU 建议高得离谱（如 `10m -> 1.168`） | **读到了已死副本的历史用量**——窗口内换过 pod，旧 pod 的尖峰仍在 7d 里 | 按 **pod** 分组复查，别只看聚合值：<br>`max_over_time(rate(container_cpu_usage_seconds_total{...}[2m])[7d:1m])` 然后 `jq` 按 `.metric.pod` 分组。⚠️ 写 jq 时别只取 `result[0]`——多 pod 时会**静默只显示一个系列**，看起来完全正常 |
+| 某行的 CPU 建议高得离谱（如 `10m -> 1.168`） | **读到了已死副本的历史用量**：窗口内换过 pod，旧 pod 的尖峰仍在 7d 里 | 按 **pod** 分组复查，别只看聚合值：<br>`max_over_time(rate(container_cpu_usage_seconds_total{...}[2m])[7d:1m])` 然后 `jq` 按 `.metric.pod` 分组。⚠️ 写 jq 时别只取 `result[0]`：多 pod 时会**静默只显示一个系列**，看起来完全正常 |
 | 某容器 7 天里换过十几个 pod，p95 被启动尖峰抬高 | **不是稳态需求**，是每次重建时的冷启动（扫库/建索引/加载规则） | 数窗口内的 pod 数（上式的分组数）；pod 多且大部分只有 1–2 个样本 = 冷启动占了分位数。按稳态定 request，不按 p95 |
 
 三种都在 2026-08-10 实际命中过。第一种最隐蔽：
 `kubeStateMetrics.resources` 写在了父 chart 的开关键下（正确位置是子 chart 别名
 `kube-state-metrics.resources`），chart 静默忽略、不报错，配置在 git 里躺了几个月。
 
-**这就是 KRR 真正的作用**——它不只是省钱工具，是**唯一会持续复读「集群里实际是什么」
+**这就是 KRR 真正的作用**：它不只是省钱工具，是**唯一会持续复读「集群里实际是什么」
 的东西**，所以它能照出「文档/配置说了什么」和「集群实际怎样」之间的漂移。
 
 ---
@@ -308,8 +308,8 @@ kubectl --context <ctx> -n kube-system exec ds/cilium -c cilium-agent -- sh -c "
 | 类 | 结果 |
 |---|---|
 | A 忽略 | 29 行（homelab 8 + oracle 21），无动作 |
-| B BestEffort | Pod 数 oracle **15→5**、homelab **9→3**；剩下的是 cilium 全家与 k3s 内置组件 |
-| C 逼近 limit | 抬了 11 个（grafana 98% / kyverno ×2 / prometheus 93% / redpanda 94% / karakeep / opencost / argocd ×2 / trivy / uptime-kuma / restic / otel-homelab）；**剩 4 个刻意留到下一轮**——cilium-operator 与 cilium-agent（改它们要再跑一轮 `deploy-cilium` + `connect-clustermesh`）、oracle 的 otel-collector、restic（CronJob，limit 已改但要等下次运行才反映到指标）。同批补上**事前**告警 `ContainerMemoryNearLimit` |
+| B BestEffort | Pod 数 oracle 15→5、homelab 9→3；剩下的是 cilium 全家与 k3s 内置组件 |
+| C 逼近 limit | 抬了 11 个（grafana 98% / kyverno ×2 / prometheus 93% / redpanda 94% / karakeep / opencost / argocd ×2 / trivy / uptime-kuma / restic / otel-homelab）；**剩 4 个刻意留到下一轮**，cilium-operator 与 cilium-agent（改它们要再跑一轮 `deploy-cilium` + `connect-clustermesh`）、oracle 的 otel-collector、restic（CronJob，limit 已改但要等下次运行才反映到指标）。同批补上**事前**告警 `ContainerMemoryNearLimit` |
 | D CPU 回收 | 只做 oracle：requests **83%→71%**（补完 B 之后的 83% 起算） |
 | E/F 不采纳 | 记录理由，不改 |
 

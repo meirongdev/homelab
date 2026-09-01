@@ -31,13 +31,13 @@ IaC 落点：
 
 | | 前一份决策的估算（2G VM） | 本次实测（3G VM） |
 |---|---|---|
-| allocatable 内存 | — | **2311Mi** |
+| allocatable 内存 | — | 2311Mi |
 | 已 requests | 1.1–1.5G | **928Mi（40%）** |
 | 已 requests CPU | — | 270m / 1800m（15%） |
-| `free -m` available | 0.5–0.9G 可用 | **2130 MB** |
+| `free -m` available | 0.5–0.9G 可用 | 2130 MB |
 
 实际排上来的只有 4 个 DaemonSet pod：`cilium`、`cilium-envoy`、`node-exporter`、
-`otel-collector-agent`（tetragon 也在）。**估算偏保守**——3G 的 VM 留给负载的
+`otel-collector-agent`（tetragon 也在）。估算偏保守：3G 的 VM 留给负载的
 远不止 0.5–0.9G。这是本决策成立的主要数据支撑。
 
 ## ⚠️ 三条与控制面不同、错了会静默失效的约束
@@ -49,7 +49,7 @@ IaC 落点：
 2. **ip rule**：worker 带 `--accept-routes` 会从 pve 学到 `10.10.10.0/24` 进 table 52，
    优先级高于 main → 控制面流量被劫进隧道。收敛器多一条
    `5240 to 10.10.10.0/24 lookup main`。☠️ **不能用 5250**，那被 tailscaled 自己占着。
-3. **必须装 Tailscale**，但**不是为了连通**（LAN 路由已够）。两个真实理由：
+3. **必须装 Tailscale**，但不是为了连通（LAN 路由已够）。两个真实理由：
    - `otel-collector-agent` 是 DaemonSet，exporter 写死 oracle 的 tailnet NodePort
      （`100.107.166.37:31080/31317`）。节点不在 tailnet 上 = 日志/追踪**静默断流**。
    - MTU：Cilium 按**每节点各自**的最低设备定 MTU。实测控制面的
@@ -60,7 +60,7 @@ IaC 落点：
 
 - `kubectl get nodes` → `k8s-worker-106 Ready`，v1.34.5+k3s1，InternalIP 192.168.50.107
 - worker 的 `cilium_vxlan` / `lxc_health` MTU = **1280**，与控制面一致
-- `pgrep -x kube-proxy` 空、无 `KUBE-SERVICES` 链 —— agent 正确继承了 server 的
+- `pgrep -x kube-proxy` 空、无 `KUBE-SERVICES` 链：agent 正确继承了 server 的
   `disable-kube-proxy`（⚠️ 该 flag 是 **server-only**，写进 agent config 会 fatal 拒启）
 - 跨节点 Service：worker 上的 pod → 控制面上的 grafana / prometheus 均 **HTTP 200**
 - 跨集群：Loki（oracle）近 15 分钟收到 **317 条** 来自 `k8s-worker-106` 的日志
@@ -74,7 +74,7 @@ IaC 落点：
   **2026-08-16 已解决**：worker 有了自己的夜备 Job
   （`backup/overlays/homelab/worker-cronjob.yaml`，02:00，`--host homelab-worker`，
   整目录扫不筛 PVC 名）+ 106 上的整机周备 vzdump（`just vzdump-worker`）。
-  当时查清的实况：worker 的 PVC 曾是**三重裸奔** —— restic 不覆盖、VM 盘在 `local-lvm`
+  当时查清的实况：worker 的 PVC 曾是**三重裸奔**：restic 不覆盖、VM 盘在 `local-lvm`
   不在 `mrstorage` 故 sanoid 拍不到、106 的 `jobs.cfg` 一条 vzdump 都没有。
   ⚠️ CI 的 H4 仍只解析控制面那份白名单，新 PVC 照样要写进去才过 CI。
   细节见 [reference/storage.md](../reference/storage.md)。
@@ -92,5 +92,5 @@ Tailscale 取好再传进剧本」绕开。取证见
 
 ## 推翻条件
 
-- 若要恢复实验田，别在这台 VM 上做——先决定 106 是否还要承担 prod 角色。
+- 若要恢复实验田，别在这台 VM 上做：先决定 106 是否还要承担 prod 角色。
 - 若 106 需要重新与 prod 解耦（例如它要做长时间维护），worker 必须先 drain + 退出集群。

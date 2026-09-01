@@ -15,19 +15,19 @@
 
 写入者盘点（4 个，前 3 个是既有的）：
 
-1. homelab `cloudflare/terraform` —— 隧道配置、zone 设置、WAF/限流、集群外源记录
+1. homelab `cloudflare/terraform`：隧道配置、zone 设置、WAF/限流、集群外源记录
 2. homelab 集群的 `homelab-externaldns`（txt owner，`upsert-only`）
 3. oracle 集群的 `oracle-externaldns`（txt owner，`upsert-only`）
-4. **home-stack 的 terraform —— 只有 `stack.meirong.dev` 这一条**（Workers 自定义域名）
+4. **home-stack 的 terraform：只有 `stack.meirong.dev` 这一条**（Workers 自定义域名）
 
 不把边界切清楚，有三种**具体**的坏结局，都不是假想：
 
-- **双主**：两边都声明同一条记录。Workers 自定义域名**不能**建在已存在 CNAME 的主机名上，
+- **双主**：两边都声明同一条记录。Workers 自定义域名不能建在已存在 CNAME 的主机名上，
   于是谁先 apply 谁赢，另一边永久报错。
 - **清理型误删**：那条记录既不在 homelab 的 state，也没有 external-dns 的 ownership TXT，
   看着就像一条游离记录。删掉 = 站点域名解析消失，而 homelab 仓库里没有任何线索指向原因。
   自动化不会误删它（两个 external-dns 都 `upsert-only`，terraform 不 prune 不在自己
-  state 里的记录）—— **风险只有人**，所以这条只能靠文档拦。
+  state 里的记录）。**风险只有人**，所以这条只能靠文档拦。
 - **凭据越界**：首次部署图省事用了 homelab 那枚宽 token（能改全部 DNS/隧道/WAF/R2）。
   它若进了 home-stack（**公开仓库**）的 Actions secret，爆炸半径远超「部署一个站点」。
 
@@ -35,9 +35,9 @@
 
 | | 方案 | 为什么不选 |
 |---|------|-----------|
-| A | **homelab 全管**：homelab 的 terraform 消费 home-stack 的 `modules/worker` 子模块 | 那个模块**按设计不构建产物**，消费方必须自己 checkout home-stack 并具备 Rust + wasm32 + `worker-build` + Pagefind 工具链 —— 等于把一条 Rust 构建链拖进 homelab 的部署路径；且 home-stack 目前 0 个 tag，只能钉 `main`（内容与代码一起变，部署内容会在没人改动时变化）|
-| B | **home-stack 全管**：连隧道、WAF、zone 设置一起接走 | 那些是**全 zone 共享**的：27 个主机名依赖同一份隧道与同一套 WAF。一个站点的仓库不该有权改它们 |
-| **C ✅** | **按资源类型切**，一张归属表，两边都留注释 | 代价见「后果」 |
+| A | **homelab 全管**：homelab 的 terraform 消费 home-stack 的 `modules/worker` 子模块 | 那个模块按设计不构建产物，消费方必须自己 checkout home-stack 并具备 Rust + wasm32 + `worker-build` + Pagefind 工具链：等于把一条 Rust 构建链拖进 homelab 的部署路径；且 home-stack 目前 0 个 tag，只能钉 `main`（内容与代码一起变，部署内容会在没人改动时变化）|
+| B | **home-stack 全管**：连隧道、WAF、zone 设置一起接走 | 那些是全 zone 共享的：27 个主机名依赖同一份隧道与同一套 WAF。一个站点的仓库不该有权改它们 |
+| **C ✅** | 按资源类型切，一张归属表，两边都留注释 | 代价见「后果」 |
 
 ## 决策
 
@@ -53,7 +53,7 @@
 | R2 桶 `terraform-backend` 本体与生命周期 | **homelab** | home-stack 只拥有 `home-stack/` 这个 key 前缀 |
 | 部署凭据 | **各自一枚最小权限 token** | ☠️ 不把 homelab 的宽 token 放进 home-stack 的 CI secret |
 | 可用性监控（Uptime Kuma、Homepage 磁贴） | **homelab** | home-stack 只管应用层正确性（内容校验、渲染一致性）|
-| 文档 | zone/入口的**事实**在 homelab `reference/`；部署 **SOP** 在 home-stack 的 runbook | 互链不复制。⚠️ homelab 是私有仓库 → home-stack 的文档必须自成一体，不能依赖读者点进 homelab |
+| 文档 | zone/入口的事实在 homelab `reference/`；部署 SOP 在 home-stack 的 runbook | 互链不复制。⚠️ homelab 是私有仓库 → home-stack 的文档必须自成一体，不能依赖读者点进 homelab |
 
 ## 后果
 
@@ -62,21 +62,21 @@
 
 **代价，逐条**：
 
-- **zone 的 DNS 不再只有一个真相源** —— 两份 state 各持一部分。缓解是把不对称压到最小：
+- **zone 的 DNS 不再只有一个真相源**：两份 state 各持一部分。缓解是把不对称压到最小：
   home-stack 只拥有**一条**记录，且这条记录的存在在 homelab 侧留了三处痕
   （`cloudflare/terraform/main.tf` 的 `external_origins` 上方、`networking-ingress.md`
   的记录归属表、`services.md` 的集群外托管清单）。
 - **改名要动两个仓库**：换主机名 = home-stack 改 `custom_domain` + homelab 改那三处注释。
 - ⚠️ **WAF 例外要跨仓库提**：`stack.meirong.dev` 走橙云，于是吃 zone 级 WAF 与限流。
   站点若被 zone 级规则误伤，改动落在 homelab。
-  **2026-08-26 更正**：原文担心的是 `cf.threat_score gt 14` 那条 managed challenge 误伤爬虫 ——
+  **2026-08-26 更正**：原文担心的是 `cf.threat_score gt 14` 那条 managed challenge 误伤爬虫：
   **那条规则从来就没生效过**（`cf.threat_score` 恒为 0），已删除。所以现在：
-  自定义规则 **4/5、剩 1 个槽位**（给它开例外不必再砍现有规则），限流仍是 **1/1 用满**。
-  另外公开文档站不会被"信誉挑战"误伤了 —— Free 档已无任何信誉类防护。
+  自定义规则 4/5、剩 1 个槽位（给它开例外不必再砍现有规则），限流仍是 1/1 用满。
+  另外公开文档站不会被"信誉挑战"误伤了。Free 档已无任何信誉类防护。
 - ✅ **监控缺口当天就补了**（2026-08-23）：uptime-kuma 的 `MONITORS` 里加了
   `Home Stack`，顺带把同样一个监控都没有的 `Playgrounds` 与 apex `Blog` 一起加上，
   Homepage 也补了 Home Stack 磁贴。⚠️ 但**这三条不是集群存活信号**（不经集群、
   不经隧道），dead-man's switch 仍只认 Grafana/Vault/Open Notebook 那组。
-  GitOps 意味着 push 后才生效 —— 状态见 [ROADMAP #13](../ROADMAP.md)。
+  GitOps 意味着 push 后才生效：状态见 [ROADMAP #13](../ROADMAP.md)。
 - **home-stack 侧的对称文档**在它自己的 `docs/reference/cross-repo-boundary.md`，
   内容是本表的消费方视角。两份都改才叫改完。

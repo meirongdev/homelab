@@ -1,6 +1,6 @@
 # Observability — OTel 日志与追踪架构
 
-> Last updated: 2026-08-29
+> Last updated: 2026-09-01
 > Status: 生效事实
 >
 > 2026-07-31 homelab collector 首次真实落地 + 2026 OTel 对齐，见 [`decisions/otel-2026-alignment.md`](../decisions/otel-2026-alignment.md)。
@@ -43,7 +43,7 @@
 ```
 
 > ⚠️ **Loki/Tempo 2026-08-02 才迁到 oracle**。更早的文档/记忆里 homelab collector
-> 指向集群内 `loki-gateway:80` / `tempo:4317` —— 那个拓扑已不存在，别照着排障。
+> 指向集群内 `loki-gateway:80` / `tempo:4317`，那个拓扑已不存在，别照着排障。
 
 ---
 
@@ -51,7 +51,7 @@
 
 ### OTel Collector (DaemonSet)
 
-- **Helm chart**: `open-telemetry/opentelemetry-collector` 0.165.0（镜像 `otel/opentelemetry-collector-k8s`——k8s 官方裁剪发行版）
+- **Helm chart**: `open-telemetry/opentelemetry-collector` 0.165.0（镜像 `otel/opentelemetry-collector-k8s`，k8s 官方裁剪发行版）
 - **Values**: `k8s/helm/values/opentelemetry-collector.yaml`
 - **Deploy**: ArgoCD `otel-collector` App（改 `values/opentelemetry-collector.yaml` → push → 自动同步）
 - **Preset `logsCollection`**: 自动挂载 `/var/log/pods` hostPath，注入 `filelog` receiver
@@ -73,11 +73,11 @@ Loki 3.x 原生支持 OTLP 协议（`/otlp/v1/logs`），自动将 OTel resource
 | `service_name` | OTel resource attr（SDK 上报的服务用） | `calibre-web` |
 
 （以上 6 个是 2026-07-31 对 Loki `/loki/api/v1/labels` 的实测全集。`k8s.node.name`、
-`log.iostream` 等其余属性在 **structured metadata** 里，不是索引标签——查询时用管道过滤：
+`log.iostream` 等其余属性在 structured metadata 里，不是索引标签，查询时用管道过滤：
 `{k8s_namespace_name="x"} | log_iostream="stderr"`。）
 
-> **注意**：filelog 断点（`file_storage` checkpoint，2026-07-31 起）— Collector 重启后从
-> 断点续读，不重复不漏采；仅**首次**部署时 `start_at: end` 只采新增行。
+> **注意**：filelog 断点（`file_storage` checkpoint，2026-07-31 起）：Collector 重启后从
+> 断点续读，不重复不漏采；仅首次部署时 `start_at: end` 只采新增行。
 
 ### Grafana Sidecar Dashboard 机制
 
@@ -113,7 +113,7 @@ Dashboard ConfigMaps 通过 ArgoCD Application `monitoring-dashboards` 管理（
 > ⚠️ **本仓库当前没有在用的实例，且加之前必须先做下面的「验证」一步。**
 > 唯一那个实例（calibre-web）2026-08-29 已删除：它 tail 的
 > `/config/calibre-web.log` 在镜像里根本不存在，`tail -F` + `2>/dev/null`
-> 于是永久静默，Loki 近 7 天 **0 行**——而同 pod 主容器有 1898 行。
+> 于是永久静默，Loki 近 7 天 0 行，而同 pod 主容器有 1898 行。
 > 即「加了个 sidecar」和「加了个什么都不干的 sidecar」现象完全一致，无告警、无报错。
 > 教训：**这个模式的失败是静默的，不验证等于没加。**
 
@@ -216,7 +216,7 @@ ENV JAVA_TOOL_OPTIONS="-javaagent:/otel/opentelemetry-javaagent.jar"
 
 > **追踪架构**：
 > - homelab: App → OTel Collector (`otel-collector.monitoring.svc:4317`) → **oracle Tempo** `100.107.166.37:31317` (via Tailscale；2026-08-02 起 Tempo 在 oracle，写 NodePort 31317)
->   ⚠️ 历史更正：**2026-07-31 才首次真正部署**——2026-03 声称的"上线"从未发生
+>   ⚠️ 历史更正：**2026-07-31 才首次真正部署**，2026-03 声称的"上线"从未发生
 >   （实测无 release、无 pod），homelab 容器日志同日首次进 Loki。
 >   现由 ArgoCD `otel-collector` App 管理，取舍见 `docs/decisions/otel-2026-alignment.md`。
 > - oracle-k3s: App → OTel Collector (ClusterIP :4317) → **Tempo 集群内直达** `tempo.monitoring.svc:4317`（2026-08-02 起 Tempo 就在本集群）
@@ -265,7 +265,7 @@ kubectl logs -n personal-services -l app=calibre-web -c calibre-web -f
 | 采集层 | OTel Collector DaemonSet | 替换 Promtail；统一 OTel 语义，支持 logs/metrics/traces 三个信号 |
 | 传输协议 | OTLP HTTP → Loki `/otlp` | `loki` exporter 在 contrib v0.145.0 已移除；OTLP 是 Loki 3.x 原生协议 |
 | 追踪传输 | OTLP gRPC → Tempo :4317 | gRPC 双向流更适合 trace 数据；跨集群走 Tailscale NodePort :31317 |
-| 文件日志方案 | log-exporter sidecar (busybox)，**当前无实例** | 当年判断「linuxserver.io 镜像不输出 stdout」；2026-08-29 复核该前提已不成立（CWA 输出 stdout），唯一实例删除，模式保留备用 |
+| 文件日志方案 | log-exporter sidecar (busybox)，当前无实例 | 当年判断「linuxserver.io 镜像不输出 stdout」；2026-08-29 复核该前提已不成立（CWA 输出 stdout），唯一实例删除，模式保留备用 |
 | Dashboard 管理 | ConfigMap + ArgoCD GitOps | 持久化，不依赖 Grafana DB，重建集群无损 |
 | label 设计 | 使用 OTel 语义标签 | 与 Grafana Labs 官方 Dashboard 兼容，无需自定义映射 |
 | 内存保护 | memory_limiter 200MiB/50MiB | 防止 OTel Collector OOM，背压式流控 |
