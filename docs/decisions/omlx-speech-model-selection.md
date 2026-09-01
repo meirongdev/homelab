@@ -1,7 +1,7 @@
 # Mac OMLX 新增的四个语音模型全部不采纳：现役 Qwen3-ASR / Qwen3-TTS 留任
 
 > 日期: 2026-08-22
-> 状态: ❌ 否决四个新增模型 —— Open Notebook 的 STT/TTS 接线一字不改（重评条件见文末）
+> 状态: ❌ 否决四个新增模型：Open Notebook 的 STT/TTS 接线一字不改（重评条件见文末）
 > 关联：[reference/open-notebook.md](../reference/open-notebook.md)（模型接线的**唯一真相源**）·
 > 真相源清单在 `k8s/helm/manifests/personal-services/open-notebook-provision.yaml`
 > 复现脚本与音频样本是一次性的，未入仓；复现方法见文末（十几行，重跑即得）。
@@ -23,12 +23,12 @@ Mac（`mbp-m2-pro`，OMLX `100.89.15.120:8000`）上语音相关模型从 2 个�
 （`/v1/models/status` 里 Qwen3-ASR 的 `actual_size` 只有 0.27G，那是"当前实际驻留"的
 惰性加载读数，不是模型体积，别拿它当"更省内存"的证据。）
 
-**判据不能看模型卡，只能对着两条真实调用口径测** —— 这两条口径决定了大半个结论：
+**判据不能看模型卡，只能对着两条真实调用口径测**：这两条口径决定了大半个结论：
 
 | | 谁在调 | 实际发出去的是什么 |
 |---|---|---|
-| **TTS** | `podcast_creator/nodes.py:273` → esperanto `agenerate_speech()` | **只有 `text` / `voice` / `output_file` 三个参数**。没有任何途径传"音色描述"或"参考音频" |
-| **STT** | `content_core/processors/media/audio.py:146` → `atranscribe()` | 音频按 **10 分钟**切段、重编码成 **mp3**、**不带 language 提示**、多段并发。**单次请求最长 10 分钟音频** |
+| **TTS** | `podcast_creator/nodes.py:273` → esperanto `agenerate_speech()` | 只有 `text` / `voice` / `output_file` 三个参数。没有任何途径传"音色描述"或"参考音频" |
+| **STT** | `content_core/processors/media/audio.py:146` → `atranscribe()` | 音频按 10 分钟切段、重编码成 mp3、不带 language 提示、多段并发。**单次请求最长 10 分钟音频** |
 
 STT 那条尤其反直觉：短句准确率几乎不影响结果，**能不能扛住 10 分钟**才是。
 
@@ -40,7 +40,7 @@ STT 那条尤其反直觉：短句准确率几乎不影响结果，**能不能�
 | 模型 | 结果 |
 |---|---|
 | **CustomVoice（现役）** | ✅ `voice=eric` → 6.3s 出 307KB 真 WAV |
-| VoiceDesign | ❌ HTTP 500 `VoiceDesign model requires 'instruct' to describe the voice`。`voice` 字段填音色名、填描述、留空**都是同一个 500**；只有 OpenAI 的 `instructions` 字段能满足它（实测 200/265KB），而 `podcast_creator` 从不发这个字段。**即便**经 speaker profile 的 `tts_config` 注入，那也是 per-profile 不是 per-speaker —— 一档播客里所有人同一个声音，比现状更差 |
+| VoiceDesign | ❌ HTTP 500 `VoiceDesign model requires 'instruct' to describe the voice`。`voice` 字段填音色名、填描述、留空都是同一个 500；只有 OpenAI 的 `instructions` 字段能满足它（实测 200/265KB），而 `podcast_creator` 从不发这个字段。**即便**经 speaker profile 的 `tts_config` 注入，那也是 per-profile 不是 per-speaker：一档播客里所有人同一个声音，比现状更差 |
 | chatterbox-multilingual-v3 | ❌ HTTP 500 `No conditionals available. Either provide audio_prompt/audio_prompt_sr for voice cloning, or ensure conds.safetensors is in the model directory.` 它是零样本音色克隆，要参考音频；**没有"按音色名选人"的入口** |
 
 ☠️ 这两个不是"效果差一点"，是**结构上不可能被 Open Notebook 驱动**。它们看起来都像升级
@@ -56,23 +56,23 @@ STT 那条尤其反直觉：短句准确率几乎不影响结果，**能不能�
 |---|---|---|---|
 | 13s 英文单句 | 0.0% | 0.0% | 0.0% |
 | 103s 英文对话 | 2.1% | 2.1% | 57.2% |
-| ↑ 叠白噪 | 2.5% | **1.7%** | 57.2% |
-| ↑ 32kbps mp3 伪影 | 3.0% | **2.1%** | 57.2% |
-| ↑ 1.2× 语速 | 3.0% | **1.3%** | 57.2% |
+| ↑ 叠白噪 | 2.5% | 1.7% | 57.2% |
+| ↑ 32kbps mp3 伪影 | 3.0% | 2.1% | 57.2% |
+| ↑ 1.2× 语速 | 3.0% | 1.3% | 57.2% |
 | 16s 中文 / 14s 中英混排 | **2.5% / 3.3%** | 5.0% / 10.0% | 2.5% / 3.3% |
-| 85s 中文（夹英文术语） | **2.5%** | 3.2% | 40.5% |
-| **571s mp3（生产口径）** | **4.2%，覆盖 99%，42–45s** | ❌ **470.6%**，7475/1448 token，172.8s | ❌ **92.3%**，覆盖 **8%** |
+| 85s 中文（夹英文术语） | 2.5% | 3.2% | 40.5% |
+| **571s mp3（生产口径）** | 4.2%，覆盖 99%，42–45s | ❌ 470.6%，7475/1448 token，172.8s | ❌ 92.3%，覆盖 8% |
 
 现役模型那一格跑了三次，`4.2% / 99% / 41.9–45.0s` 三次完全一致，不是抽中的好签。
 
 **两个新 ASR 各有一种静默失败**，都返回 HTTP 200：
 
-- **GLM-ASR-Nano：硬截断在约 45 秒。** 103s 样本吐 102 个 token，571s 样本吐 112 个——
+- **GLM-ASR-Nano：硬截断在约 45 秒。** 103s 样本吐 102 个 token，571s 样本吐 112 个。
   **输出量与输入时长无关**。10 分钟的讲座进去，出来一段听起来完整通顺的开头，丢掉 92%。
   长中文样本还会把已转录的段落**重复**一遍再停。
-- **Mega-ASR：长音频重复崩塌。** ≤300s 正常（625 token / 21.9s），**420s 起崩**
+- **Mega-ASR：长音频重复崩塌。** ≤300s 正常（625 token / 21.9s），420s 起崩
   （6450 token / 160.6s），571s 时 7475 token / 172.8s，尾部是同一句话无限重复。
-  内容重复的音频触发得更早（163s 就崩）。它在退化英文上确实比现役准 0.8–1.7 个点 ——
+  内容重复的音频触发得更早（163s 就崩）。它在退化英文上确实比现役准 0.8–1.7 个点。
   代价是在生产实际使用的长度上不可用。
 
 顺带记一笔：`Mega-ASR` 的 `config_model_type` 就是 `qwen3_asr`，同架构不同 checkpoint；
@@ -82,14 +82,14 @@ STT 那条尤其反直觉：短句准确率几乎不影响结果，**能不能�
 
 **四个新增模型全部不采纳，`DEFAULTS` 与 `PODCAST_TTS` 一字不改。**
 
-- STT 保持 `mlx-community__Qwen3-ASR-1.7B-8bit` —— 唯一能扛住 10 分钟切段的。
-- TTS 保持 `mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit` —— 唯一能按音色名选人的。
+- STT 保持 `mlx-community__Qwen3-ASR-1.7B-8bit`：唯一能扛住 10 分钟切段的。
+- TTS 保持 `mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit`：唯一能按音色名选人的。
 - 也**不注册成非默认的备选项**：Open Notebook 的音频摄取只读
   `default_speech_to_text_model` 一处，注册进去只是又一个假接线（与 Qwen3-Reranker 同理）。
 
 ## Consequences
 
-- 播客/摄取链路零改动、零风险 —— 本次产出全是文档。
+- 播客/摄取链路零改动、零风险：本次产出全是文档。
 - 长音频转写的上限由现役模型的 10 分钟表现决定；`content_core` 的 `10 * 60` 是库里
   写死的，不是我们能调的配置项，所以**没有"把段切小一点就能用 Mega"这条路**。
 - 顺带验证掉一个此前没确认过的隐患：esperanto 的 TTS 默认 `response_format=mp3`，
@@ -100,10 +100,10 @@ STT 那条尤其反直觉：短句准确率几乎不影响结果，**能不能�
 
 任一条成立就把上面的表重跑一遍（生产口径那一行是唯一必测项）：
 
-1. OMLX 又装了新的 `audio_stt` / `audio_tts` 模型 —— 尤其任何 **Qwen3-ASR 的更大/更新 checkpoint**。
+1. OMLX 又装了新的 `audio_stt` / `audio_tts` 模型：尤其任何 **Qwen3-ASR 的更大/更新 checkpoint**。
 2. `content_core` 升级后 `audio.py` 的分段长度或 mp3 重编码口径变了。
-3. `podcast_creator` 开始往 `agenerate_speech()` 传 `instructions` 或 `ref_audio`
-   —— 那一刻 VoiceDesign / chatterbox 才第一次具备可比性。
+3. `podcast_creator` 开始往 `agenerate_speech()` 传 `instructions` 或 `ref_audio`：
+那一刻 VoiceDesign / chatterbox 才第一次具备可比性。
 4. Mega-ASR 换 checkpoint 或 OMLX 侧加了重复惩罚/长音频分块。
 
 ## 复现

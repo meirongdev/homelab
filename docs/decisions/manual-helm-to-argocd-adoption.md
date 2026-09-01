@@ -2,12 +2,12 @@
 
 > 日期: 2026-07-31
 > 状态: ✅ 已实施（kube-prometheus-stack / external-dns ×2）；otel-collector 已于同日落地
-> （全新 ArgoCD App 部署，非采纳——见 `otel-2026-alignment.md`）
+> （全新 ArgoCD App 部署，非采纳：见 `otel-2026-alignment.md`）
 
 ## 上下文
 
 `docs/CONVENTIONS.md` 的「NOT managed by ArgoCD」曾列 6 项手动 Helm release。其中三项
-（kube-prometheus-stack、external-dns、otel-collector）没有任何非 GitOps 的技术理由——
+（kube-prometheus-stack、external-dns、otel-collector）没有任何非 GitOps 的技术理由：
 不像 Vault（需人工 init/unseal）、ESO（依赖 Vault）、Cilium（CNI，装它的时候还没有集群）。
 把它们留在 manual-helm 的代价是：改 values 要人肉记得跑 `just deploy-*`，
 而且集群与 Git 的偏离没人对账。
@@ -49,11 +49,11 @@ ArgoCD 的 diff 不把「live 有、desired 无」的字段算作变更。
 CRD 就一直没动过，落后运行中的 operator 三个 minor 版本。
 
 如果让 ArgoCD 接管 CRD，首次同步会**顺带**把 10 个 CRD 升到 v0.92.1。那是一次
-独立变更（单个 CRD 近 1MB、可能影响既有 CR 的校验），不该被"迁 GitOps"夹带执行——
+独立变更（单个 CRD 近 1MB、可能影响既有 CR 的校验），不该被"迁 GitOps"夹带执行：
 一次变更只解决一件事，出问题时才分得清是谁的错。故 Application 里显式
 `skipCrds: true`，把采纳保持为纯 no-op。
 
-**⏳ 待决（本次刻意不做）**：CRD v0.89.0 → v0.92.1。两条路——
+**⏳ 待决（本次刻意不做）**：CRD v0.89.0 → v0.92.1。两条路：
 把 `skipCrds` 去掉让 ArgoCD 接管（之后 CRD 随 chart 版本自动跟进，一劳永逸），
 或 `kubectl apply --server-side` 手工升一次。建议前者，但要单独开窗口、单独验证。
 
@@ -67,19 +67,19 @@ CRD 就一直没动过，落后运行中的 operator 三个 minor 版本。
 
 | 配置 | 结果 |
 |---|---|
-| 什么都不加 | **5 删 5 建** —— 全部资源改名重建 |
+| 什么都不加 | 5 删 5 建：全部资源改名重建 |
 | 只加 `fullnameOverride: external-dns` | 对象名对上了，但 5 个对象内容仍不符 |
 | `helm.releaseName: external-dns` | ✅ 与 live 逐字节一致 |
 
 原因：release 名不只影响对象名，还会渲染进 `app.kubernetes.io/instance` 标签，
-而该标签在 Deployment 的 **`spec.selector.matchLabels`** 里——**不可变字段**。
+而该标签在 Deployment 的 `spec.selector.matchLabels` 里，那是**不可变字段**。
 `fullnameOverride` 只改对象名，管不到标签，于是采纳时必然撞上 selector 不匹配。
 
 正解是 ArgoCD 的 `spec.sources[].helm.releaseName`，直接把 release 名与 Application 名解耦。
 
 > 为什么 `opencost-oracle` 用 `fullnameOverride` 没出事？因为它是 **ArgoCD 全新部署**
 > （资源由 ArgoCD 亲手创建），不存在"既有 selector"可撞。这个坑只在**采纳现存 release**
-> 时才咬人——两种场景要分清。
+> 时才咬人：两种场景要分清。
 
 ## 决策四：otel-collector 不采纳（因为它根本不存在）
 
@@ -92,7 +92,7 @@ manual-helm 组件，实测 homelab **既无 release 也无 pod**。连带发现
 
 即 **homelab 自己的容器日志完全没进 Loki**，包括 kube-bench CIS 结果、backup CronJob
 输出这些"打 stdout 就以为能在 Loki 查"的东西（文档里 `{namespace="kube-bench"}`
-这类查询也查不到——顺带一提 label 名也变了，现在是 `k8s_namespace_name`，见
+这类查询也查不到：顺带一提 label 名也变了，现在是 `k8s_namespace_name`，见
 `docs/reference/security.md` §7）。
 
 所以这一项不是"迁 GitOps"，而是"要不要新增一个日志采集 DaemonSet"：在 5600H 单节点
@@ -107,7 +107,7 @@ manual-helm 组件，实测 homelab **既无 release 也无 pod**。连带发现
   留着的实际效果是给"日常不要跑"的东西留了个能一键跑的入口，而真正需要它的场景
   （ArgoCD 自身挂了）本来就得手敲 helm。现改为 `k8s/helm/justfile` 头部的两行注释模板
   （`helm rollback` / `helm upgrade --install ... --version <targetRevision> -f values/<app>.yaml`），
-  chart 版本唯一真源随之收敛到 `argocd/applications/*.yaml`——此前双 pin 已漂移过（loki 7.0.0 vs 7.1.0）。
+  chart 版本唯一真源随之收敛到 `argocd/applications/*.yaml`：此前双 pin 已漂移过（loki 7.0.0 vs 7.1.0）。
   release 历史仍在，采纳不销毁它，`helm rollback` 路径照旧可用。
 - `AppProject.sourceRepos` 加了两个 chart repo。⚠️ AppProject **不在 root App 托管路径下**，
   必须手工 `kubectl apply -f argocd/projects/homelab.yaml`，否则新 App 报

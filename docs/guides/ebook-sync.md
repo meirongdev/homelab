@@ -20,7 +20,7 @@
 
 ## K8s CronJob
 
-⚠️ **calibre 全家 2026-08-03 迁到 oracle-k3s**，这个 CronJob 跟着走了 —— 清单与集群都变了。
+⚠️ **calibre 全家 2026-08-03 迁到 oracle-k3s**，这个 CronJob 跟着走了：清单与集群都变了。
 
 `cloud/oracle/manifests/personal-services/calibre-ebook-sync.yaml`（CronJob 名
 `ebook-sync-monitor`，`personal-services` ns，**oracle-k3s**）— 每 6h 在 pod 内运行健康检查：
@@ -41,7 +41,7 @@ git push   # ArgoCD 3 分钟内自动同步
 kubectl --context oracle-k3s -n personal-services get cronjob ebook-sync-monitor
 ```
 
-⚠️ **不要手动 `kubectl apply`**——该树归 `oracle-k3s` App（prune+selfHeal+SSA），手动应用会被 ArgoCD 改回去。
+⚠️ **不要手动 `kubectl apply`**：该树归 `oracle-k3s` App（prune+selfHeal+SSA），手动应用会被 ArgoCD 改回去。
 
 ## 传输流程
 
@@ -70,7 +70,7 @@ just cleanup-logs                 # 历史清理记录
 ## 元数据补全
 
 导进来的书元数据往往不全（书名是文件名、无简介无标签、作者 Unknown）。
-补全走 **[calibre-metadata-enrichment.md](calibre-metadata-enrichment.md)** ——
+补全走 [calibre-metadata-enrichment.md](calibre-metadata-enrichment.md)：
 四层手段、各自实测产出率、以及什么时候该停。
 
 > ⚠️ 此前这里指向 `plans/archive/2026-07-05-calibre-metadata-enrichment.md`（2026-08-13 归档前在 `plans/apps/`）。

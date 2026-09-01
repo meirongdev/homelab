@@ -1,10 +1,10 @@
 # DNS & Network Failure Recovery
 
-> **触发条件**：断网/路由器重启/ISP 中断之后服务不自愈——症状清单见 § Symptom
+> **触发条件**：断网/路由器重启/ISP 中断之后服务不自愈：症状清单见 § Symptom
 > （隧道 530、pod ImagePullBackOff、`kubectl` i/o timeout、DNS NXDOMAIN）。
 > **成功判定**：§ Step 5 — Verify recovery 全部通过。
-> **回滚**：不适用——本文本身就是恢复流程（R3 对恢复类 runbook 豁免回滚段）。
-> Last updated: 2026-08-13
+> **回滚**：不适用：本文本身就是恢复流程（R3 对恢复类 runbook 豁免回滚段）。
+> Last updated: 2026-09-01
 
 ## Symptom
 
@@ -12,7 +12,7 @@ After a network interruption (router reboot, ISP outage, etc.), homelab services
 recover automatically:
 
 - Cloudflare Tunnel returns **HTTP 530** (tunnel can't connect)
-- All pods stuck in **ImagePullBackOff** / **ErrImagePull**
+- All pods stuck in `ImagePullBackOff` / `ErrImagePull`
 - `kubectl get nodes` → `dial tcp 10.10.10.10:6443: i/o timeout`
 - Local DNS returns **NXDOMAIN** for recently-created records
 

@@ -1,14 +1,14 @@
 # ArgoCD Image Updater
 
 > 日期: 2026-02-19（2026-07-31 复核；2026-08-03 退役）
-> 状态: ❌ **已退役（2026-08-03）** —— 空转数月（0 个 `ImageUpdater` CR，从不更新任何镜像）
+> 状态: ❌ **已退役（2026-08-03）**：空转数月（0 个 `ImageUpdater` CR，从不更新任何镜像）
 > 后被卸载：删 `argocd/applications/argocd-image-updater.yaml` App + `k8s/helm/values/argocd-image-updater.yaml`，
 > `oracle-k3s` App 上的旧式注解一并移除。**本页保留作为机制说明/日后重新接入的参考**
 > （或改走 Renovate，见 [ROADMAP](../ROADMAP.md) 开放项 #12）。
 > 退役前的运行态：chart 1.2.4 / image v1.2.2，日志常驻 `No ImageUpdater CRs to process`。
 >
 > ⚠️ **下面「工作原理 / 关键配置文件 / 验证 / 问题排查」几节写的是 it-tools 那套 homelab 配置，
-> 已经不存在了**——it-tools 于 2026-07 迁往 oracle-k3s（`cloud/oracle/manifests/personal-services/it-tools.yaml`），
+> 已经不存在了**：it-tools 于 2026-07 迁往 oracle-k3s（`cloud/oracle/manifests/personal-services/it-tools.yaml`），
 > `argocd/applications/it-tools.yaml` 与 `k8s/helm/manifests/it-tools/` 整个目录都已删除。
 > 保留这几节是因为**机制说明和排查思路仍然适用**（将来给某个 App 配 `ImageUpdater` CR 时可直接套用），
 > 但**里面的文件路径、`it-tools` Application、示例命令都不要照抄执行**。
@@ -135,7 +135,7 @@ kubectl get secret git-creds -n argocd \
 ### 症状：修改了 Application 注解后未生效
 
 > ⚠️ **本节原有的说法已作废**：原文称"ArgoCD 不管理 Application 对象本身，改注解后需手动 `kubectl apply`"。
-> 这在引入 App-of-Apps 之前成立，**现在不成立**——`root` App watch `argocd/applications/`
+> 这在引入 App-of-Apps 之前成立，**现在不成立**：`root` App watch `argocd/applications/`
 > （非递归，`recurse: false`）并开了 automated+selfHeal，所以改 `argocd/applications/*.yaml`
 > **`git push` 就够了**，3 分钟内 reconcile。手动 `kubectl apply` 只在 bootstrap `root.yaml`
 > 或 `root` 本身丢失时才需要。
@@ -150,7 +150,7 @@ kubectl get application <app> -n argocd \
 
 ### 症状：Pod 重启后日志 level 变回 info（v1.1.0 已知问题，chart ≥1.2 已修复）
 
-v1.1.0 从 ConfigMap 中的 `log.level` 字段读取日志级别，但 Helm values 的顶层 `logLevel` 键**未能正确映射**到该字段（已知问题）。**chart ≥1.2 把该键移到 `config.log.level`，正确渲染进 ConfigMap，此工作区已不再需要下面的 patch workaround**（2026-07-18 升级到 chart 1.2.4 后验证）。以下步骤仅供仍在 v1.1.x 的环境参考：临时调试方式：
+v1.1.0 从 ConfigMap 中的 `log.level` 字段读取日志级别，但 Helm values 的顶层 `logLevel` 键未能正确映射到该字段（已知问题）。**chart ≥1.2 把该键移到 `config.log.level`，正确渲染进 ConfigMap，此工作区已不再需要下面的 patch workaround**（2026-07-18 升级到 chart 1.2.4 后验证）。以下步骤仅供仍在 v1.1.x 的环境参考：临时调试方式：
 
 ```bash
 kubectl patch configmap argocd-image-updater-config -n argocd \
@@ -175,8 +175,8 @@ kubectl rollout restart deployment/argocd-image-updater-controller -n argocd
 
 ## 2026-07-18 更新：升级到 chart 1.2.4（image v1.2.2）
 
-原因：CVE 修复——v1.1.0 镜像的 alpine 基础包（openssl/gnutls/py3-cryptography）+ argo-cd Go 模块共 7 个可修复 Critical CVE；升级前用集群内 trivy-server 实扫候选镜像 v1.2.2，确认 0 Critical 才升级。
+原因：CVE 修复：v1.1.0 镜像的 alpine 基础包（openssl/gnutls/py3-cryptography）+ argo-cd Go 模块共 7 个可修复 Critical CVE；升级前用集群内 trivy-server 实扫候选镜像 v1.2.2，确认 0 Critical 才升级。
 
 - **CRD group 不变**，无既有 `ImageUpdater` CR 会被破坏，升级零功能风险。
 - **日志级别 Helm 键变更**：chart ≥1.2 把 `logLevel`（顶层，v1.1.0 时映射就有 bug）移到 `config.log.level`，渲染正确。当前值设为稳态 `info`。
-- **⚠️ 运行状态：当前空闲**。`kubectl get imageupdater -A` 返回 0 个 CR，日志常驻 `No ImageUpdater CRs to process`——`oracle-k3s` App 上仍带着旧式 annotation（见文件头「工作原理」一节），但没有对应的 `ImageUpdater` CR 去读取它，因此**实际没有在更新任何镜像**。这套组件目前只是部署着、不做事；如果需要它真正工作，需要补一个 `ImageUpdater` CR（`useAnnotations: true`）。
+- **⚠️ 运行状态：当前空闲**。`kubectl get imageupdater -A` 返回 0 个 CR，日志常驻 `No ImageUpdater CRs to process`：`oracle-k3s` App 上仍带着旧式 annotation（见文件头「工作原理」一节），但没有对应的 `ImageUpdater` CR 去读取它，因此**实际没有在更新任何镜像**。这套组件目前只是部署着、不做事；如果需要它真正工作，需要补一个 `ImageUpdater` CR（`useAnnotations: true`）。

@@ -8,7 +8,7 @@
 `k8s/helm/manifests/` 曾是 ~40 个文件的平铺目录，11 个 ArgoCD Application 各自用
 `directory.include` glob 从中"认领"文件（`monitoring-dashboards` 的 glob 膨胀到 23 个文件名）。
 2026-07-30 OpenCost/KRR 落地时连踩三坑（记录在 `docs/reference/argocd-app-patterns.md`），
-其中第 3 坑——**新文件不加进 glob 就静默不生效**——纯属这个布局自找的：
+其中第 3 坑：**新文件不加进 glob 就静默不生效**：纯属这个布局自找的：
 文件归属只存在于 glob 字符串里，目录树上看不出来，每次扩展都要动两处、漏一处就白部署。
 
 评估过的替代方案：
@@ -25,7 +25,7 @@
 1. `k8s/helm/manifests/` 重组为**一个子目录 ↔ 一个 ArgoCD Application**（11 个目录，根下不留散文件），
    App 的 source 从 `path: k8s/helm/manifests` + `directory.include` 改为直接指向子目录。
    `monitoring-dashboards` 因有 `dashboards/`、`alerts/` 子目录带 `directory.recurse: true`；
-   其余 App 用平目录默认行为——**不要显式写 `recurse: false`**（默认值会被 live 对象规范化删除，
+   其余 App 用平目录默认行为：**不要显式写 `recurse: false`**（默认值会被 live 对象规范化删除，
    导致 root App 对该 Application 永久 OutOfSync，同 kyverno-policies 的既有注释）。
 2. `values/` 命名统一为 `<app>.yaml`（oracle 变体 `<app>-oracle.yaml`），终结一半文件带
    `-values` 后缀一半不带的状态；空孤儿 `calibre-values.yaml`（0 字节、零引用）删除。
@@ -37,7 +37,7 @@
 
 ## 迁移安全性（为什么敢一个 commit 完成）
 
-- 每个 App 的文件**整组**搬进自己的目录，同一 commit 改该 App 的 `path`——任一 revision 上，
+- 每个 App 的文件**整组**搬进自己的目录，同一 commit 改该 App 的 `path`：任一 revision 上，
   生效的那份 spec 渲染出的对象集合与迁移前完全一致；tracking 注解不变，同步 diff 为零。
 - 竞态窗口（子 App 先于 root 拿到新 revision 刷新，旧 glob 匹配为空）被 ArgoCD 默认
   `automated.allowEmpty=false` 挡住：自动同步拒绝"渲染为空 → 全量裁剪"。

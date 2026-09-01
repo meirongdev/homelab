@@ -1,6 +1,6 @@
 # Storage & Backup — 存储与备份
 
-> Last updated: 2026-08-25
+> Last updated: 2026-09-01
 > Status: 生效事实
 >
 > 双集群存储布局（可写卷全 `local-path` + 媒体只读 NFS）、NFS 退役的确切范围、
@@ -13,46 +13,46 @@
 - `192.168.50.106` / Tailscale `100.110.27.111`（hostname `storage`，`tag:homelab`，2026-07-06 入网）。
   PVE 节点，`proxmox/ansible/inventory.yaml` 的 `storage` 组。
 - 数据在 **ZFS pool `mrstorage`，挂载 `/storage`**（与 OS 盘分离），由
-  `proxmox/ansible/storage-playbook.yaml` 预配。**ARC 读缓存上限 2GiB** + **sanoid** hourly/daily 快照
+  `proxmox/ansible/storage-playbook.yaml` 预配。**ARC 读缓存上限 2GiB** + sanoid hourly/daily 快照
   （见 [../plans/storage/2026-07-04-storage-106-utilization-and-backup-simplification.md](../plans/storage/2026-07-04-storage-106-utilization-and-backup-simplification.md)）。
-  ⚠️ ARC 于 **2026-08-13 由 4G 降到 2G**、**2026-08-16 再降到 1G**，给同机那台 VM 腾内存
-  （106 只有 8G，现在的三方分配 = ARC 1G / 宿主 ~2.6G / VM **4G**）—— 106 是备份**目标**，
+  ⚠️ ARC 于 2026-08-13 由 4G 降到 2G、2026-08-16 再降到 1G，给同机那台 VM 腾内存
+  （106 只有 8G，现在的三方分配 = ARC 1G / 宿主 ~2.6G / VM 4G）。106 是备份目标，
   写入是顺序 pack 文件，ARC 主要服务夜间 restic prune/check 的元数据；媒体只读 NFS 是大文件
   顺序流，ARC 命中率接近零，这部分几乎无损。代价是备份窗口变长。
   ☠️ **这台机器的内存到此为止**：`StorageNodeMemoryLow`（已把可回收 ARC 算回去）的实测值
-  已从 2026-08-02 的 66% 掉到 **16%**，阈值是 10%。再要内存只能加物理条。
+  已从 2026-08-02 的 66% 掉到 16%，阈值是 10%。再要内存只能加物理条。
   判据见 [decisions/cluster-placement-for-new-services.md](../decisions/cluster-placement-for-new-services.md)。
 - **重建 106 对数据是安全的**（OS 在 boot 盘、数据全在 `mrstorage`；重装后重跑
   `storage-playbook.yaml` 即 `zpool import -f mrstorage` + 重建 `/etc/exports`），
   ☠️ **但它已经不再"不影响集群"**。2026-07-11–08-12 那段"零 pod 挂载 106、宕机只暂停
-  备份窗口"的结论**已失效**，现在 106 宕机会同时拿走三样东西：
+  备份窗口"的结论已失效，现在 106 宕机会同时拿走三样东西：
 
   | 角色 | 起始 | 106 宕机的后果 |
   |---|---|---|
   | restic 备份目标 + PVE vzdump 目标 | 2026-07-06 | 备份窗口暂停（可等） |
-  | **worker `k8s-worker-106` 的宿主**（VM 200） | 2026-08-13 | homelab 少一个节点；该节点上的 local-path PVC（navidrome/jellyfin 配置）一并不可达 |
-  | **媒体只读 NFS 源**（`/storage/{movie,tv,anime,music,podcast}`） | 2026-08-16 | Jellyfin/Navidrome/podcast 三个服务有进程无数据 |
+  | worker `k8s-worker-106` 的宿主（VM 200） | 2026-08-13 | homelab 少一个节点；该节点上的 local-path PVC（navidrome/jellyfin 配置）一并不可达 |
+  | 媒体只读 NFS 源（`/storage/{movie,tv,anime,music,podcast}`） | 2026-08-16 | Jellyfin/Navidrome/podcast 三个服务有进程无数据 |
 
   重建前先 `kubectl drain k8s-worker-106`，并预期 `media` ns 全程不可用。
 
 ## NFS 退役的确切范围（2026-07-11 起：读写型 PVC 不用 NFS）
 
 - 起因：106 宕机 3 天（07-08→07-11：calibre-web/trivy/nfs-provisioner 全 Error、pvestatd D-state
-  堆积、零告警送达），**全部** PVC 迁到 `local-path`，`nfs-client` provisioner 卸载、
+  堆积、零告警送达），全部 PVC 迁到 `local-path`，`nfs-client` provisioner 卸载、
   `values/nfs-values.yaml` 删除。之后约一个月（07-11→08-13）106 确实只是冷备份目标。
 - ☠️ **2026-08-16 起 NFS 以"只读媒体"的形式回来了**，别再照抄"运行时零依赖"那句话：
-  `media` ns 的 5 个**静态 NFS PV**（`media-{movie,tv,anime,music,podcast}`，手写 PV/PVC，
-  **不经 provisioner、无 StorageClass**）挂 106 的 ZFS。**退役结论仍然成立的部分**：
-  没有任何应用把**可写**数据放 NFS，provisioner 也没有回来。
-  **这个例外为什么成立、边界在哪、否决了什么** → [decisions/multimedia-repository-nfs-readonly.md](../decisions/multimedia-repository-nfs-readonly.md)（唯一解释处）；
+  `media` ns 的 5 个静态 NFS PV（`media-{movie,tv,anime,music,podcast}`，手写 PV/PVC，
+  **不经 provisioner、无 StorageClass**）挂 106 的 ZFS。退役结论仍然成立的部分：
+  没有任何应用把可写数据放 NFS，provisioner 也没有回来。
+  这个例外为什么成立、边界在哪、否决了什么 → [decisions/multimedia-repository-nfs-readonly.md](../decisions/multimedia-repository-nfs-readonly.md)（唯一解释处）；
   执行过程见 [../plans/apps/2026-08-16-multimedia-repository.md](../plans/apps/2026-08-16-multimedia-repository.md)（冻结快照）。
-- NFS export 现有 **7 个**（全由 `proxmox/ansible/storage-playbook.yaml` 的 `nfs_exports` 管）：
+- NFS export 现有 7 个（全由 `proxmox/ansible/storage-playbook.yaml` 的 `nfs_exports` 管）：
   `/storage`、`/storage/calibre` 两个是迁移前的遗留、运行时无人挂载；
-  `/storage/{movie,tv,anime,music,podcast}` 五个是媒体的**只读**（`ro` + `all_squash`）export，
+  `/storage/{movie,tv,anime,music,podcast}` 五个是媒体的只读（`ro` + `all_squash`）export，
   由上面那 5 个 PV 挂着。106 上的旧数据（`/storage/calibre`、`/storage/nfs/k8s/`）原地保留作迁移前快照。
   ⚠️ **只读是靠服务端 export 的 `ro` 保证的**，PV 上的 `readOnly: true` 只是给 kubelet 的提示。
 - **未来任何 NFS 重新引入的故障签名**（2026-06-13 重装时实测验证）：NFS 服务端挂起时
-  节点 load 飙到数千、containerd 报 `failed to reserve container name` —— 修 NFS，不是修 containerd。
+  节点 load 飙到数千、containerd 报 `failed to reserve container name`，修 NFS，不是修 containerd。
 
 ## sqlite 应用必须用 `local-path`，绝不能回 NFS
 
@@ -67,14 +67,14 @@ sqlite 依赖 POSIX 字节区间锁（`fcntl`）+ 同步小写入；NFS 的 NLM 
   （P2 可弃）。operator 管的 StatefulSet 改 SC = `volumeClaimTemplate` 不可变，流程：
   Prometheus CR `spec.paused: true` → 强删卡住的 pod → 删 STS + 旧 PVC → unpause →
   operator 用新 SC 重建。`maximumStartupDurationSeconds: 1800` 留作无害兜底。
-- 大顺序写（Loki chunk 类）对 NFS 耐受度高得多——死的是 lock+fsync 模式。
+- 大顺序写（Loki chunk 类）对 NFS 耐受度高得多：死的是 lock+fsync 模式。
 
 ## 当前 PVC 清单（全部 `local-path`）
 
-⚠️ **2026-08-13 起 homelab 是双节点**，`local-path` 因此有了**两个物理落点**：
+⚠️ **2026-08-13 起 homelab 是双节点**，`local-path` 因此有了两个物理落点：
 `k8s-node`（绝大多数 PVC）和 worker `k8s-worker-106`（106 上那台 VM 的本地盘）。
 **worker 上现有 2 个 PVC**（2026-08-16 迁入）：`navidrome-data-local`、`jellyfin-config-local`
-（媒体服务跟着数据走 —— 视频/音乐本体就在 106 的 ZFS 上）。
+（媒体服务跟着数据走，视频/音乐本体就在 106 的 ZFS 上）。
 > 曾经的第三个 `opencost-pvc` **已于 2026-08-19 删除**（两集群都删）：chart 的 `persistence`
 > 挂的是 CSV 导出目录 `/mnt/export`，而 opencost 的 WAL 在 `configPath` 的 emptyDir 下，
 > 那个 PVC 自始至终是空的、什么也没保住。→ [records/2026-08-19-opencost-bingen-replay-crashloop.md](../records/2026-08-19-opencost-bingen-replay-crashloop.md)
@@ -87,32 +87,32 @@ sqlite 依赖 POSIX 字节区间锁（`fcntl`）+ 同步小写入；NFS 的 NLM 
 备份边界原本 = control-plane 节点，**2026-08-16 起 worker 也被覆盖**：
 
 1. backup CronJob 钉 `nodeSelector: node-role.kubernetes.io/control-plane`
-   （`backup/base/cronjob.yaml`）。不钉的话它可能被排到 worker——那里的 hostPath
+   （`backup/base/cronjob.yaml`）。不钉的话它可能被排到 worker，那里的 hostPath
    几乎为空，白名单循环对空目录静默 `continue`，产出**「近空快照 + rc=0」的假阴性
    备份**，比"漏备一个 PVC"更糟。
-2. worker 侧有**自己的**夜备 Job（`backup/overlays/homelab/worker-{cronjob,backup-script}.yaml`，
-   02:00 CST，`--host homelab-worker`）——同一个 106 仓库、独立保留策略、只 `forget`
+2. worker 侧有自己的夜备 Job（`backup/overlays/homelab/worker-{cronjob,backup-script}.yaml`，
+   02:00 CST，`--host homelab-worker`）：同一个 106 仓库、独立保留策略、只 `forget`
    不 `prune`（prune 交给 03:00 控制面那次，两个 prune 抢独占锁只会互相失败）。
    它**不筛 PVC 名**，整个 `/localpath` 目录扫：worker 就是用来接住漂过来的负载的，
-   谁落上来都该被备到。⚠️ 但 CI 的 H4 仍只解析控制面那份的 `for pat in …`——
+   谁落上来都该被备到。⚠️ 但 CI 的 H4 仍只解析控制面那份的 `for pat in …`，
    新 PVC 照样要写进那份白名单才过 CI（在控制面上匹配不到目录、是无害 no-op）。
 3. 告警 `PVCOnUnbackedNode`（`k8s/helm/manifests/monitoring/alerts/prometheus-rules.yaml`
    backups 组）：homelab 任何**既非 control-plane、又不在排除名单**的节点上出现被
-   kubelet 统计的 PVC 即 warning——H4 只保证"进白名单"，这条保证"落对节点"。
-   `k8s-worker-106` 已按节点名从中排除（它有了自己的备份路径）；**再加节点仍会被抓到**。
+   kubelet 统计的 PVC 即 warning，H4 只保证"进白名单"，这条保证"落对节点"。
+   `k8s-worker-106` 已按节点名从中排除（它有了自己的备份路径）；再加节点仍会被抓到。
    已知局限：负载缩到 0 后 kubelet_volume_stats 消失、告警自行恢复，但数据还躺在
    节点盘上，处置别只看告警消没消。
 
 ☠️ **worker 上的 PVC 只有 restic 这一层保护，且比控制面少一层**：VM 200 的盘在 106 的
-`local-lvm`（LVM-thin，与 PVE 的 `local` 同在一块 238G 启动盘 sdd），**不在 `mrstorage`
-池里** —— sanoid 的 `[mrstorage] recursive=yes` 快照对它完全无效。2026-08-16 补了
+`local-lvm`（LVM-thin，与 PVE 的 `local` 同在一块 238G 启动盘 sdd），不在 `mrstorage`
+池里，sanoid 的 `[mrstorage] recursive=yes` 快照对它完全无效。2026-08-16 补了
 整机周备兜底：`just vzdump-worker`（`proxmox/ansible/playbooks/vzdump-worker-vm.yaml`）
 建的 `vzdump-worker106` 作业，周日 05:00 → ZFS 上的 `vmbackup` 存储（`mrstorage/vzdump`），
 keep-last=2。**dump 必须落 ZFS，不能用默认的 `local`**：那和 VM 盘同一块物理盘，等于没备。
 → [decisions/storage106-as-homelab-worker.md](../decisions/storage106-as-homelab-worker.md)
 
 
-**集群里没有 `nfs-client` StorageClass** —— 引用它的 PVC 会永久 Pending。
+**集群里没有 `nfs-client` StorageClass**，引用它的 PVC 会永久 Pending。
 
 - **homelab（18 个在用 + 2 个待删的孤儿，其中 5 个是只读 NFS）**:
   - 落 `k8s-node`（11 个）: `data-vault-0`、`audit-vault-0`、`data-trivy-server-0`、
@@ -120,17 +120,17 @@ keep-last=2。**dump 必须落 ZFS，不能用默认的 `local`**：那和 VM �
     `open-notebook-data-local`、`open-notebook-surreal-local`、`jobs-sg-data`（2026-08-03 新增）、
     `apps-pg-data-local`（2026-08-25 新增，共享 Postgres）、
     `multica-backend-uploads`（2026-08-18 新增，见下方 ⚠️）
-  - ⚠️ **两个孤儿卷（2026-08-25 起）**：`litellm-pg-data-local` 与 `multica-postgres-data`
-    —— 两个旧 postgres 实例的数据目录，库已并入 `apps-pg`，卷因带 `Prune=false`
-    **没有被 ArgoCD 回收**，仍占着盘。副作用不只是占盘：`multica` 那个 App 会
+  - ⚠️ **两个孤儿卷（2026-08-25 起）**：`litellm-pg-data-local` 与 `multica-postgres-data`，
+    两个旧 postgres 实例的数据目录，库已并入 `apps-pg`，卷因带 `Prune=false`
+    没有被 ArgoCD 回收，仍占着盘。副作用不只是占盘：`multica` 那个 App 会
     **一直 OutOfSync**（`requiresPruning=True` 但被注解拦住），从而掩盖将来真实的漂移。
     确认新库无恙后手工删掉才算收口：
     `kubectl --context k3s-homelab -n litellm delete pvc litellm-pg-data-local` 与
     `kubectl --context k3s-homelab -n personal-services delete pvc multica-postgres-data`。
-  - 落 `k8s-worker-106`（2 个，2026-08-16 迁入）: `navidrome-data-local`、`jellyfin-config-local`
-    —— 由 worker 侧夜备覆盖，见上文第 2 条
+  - 落 `k8s-worker-106`（2 个，2026-08-16 迁入）: `navidrome-data-local`、`jellyfin-config-local`，
+    由 worker 侧夜备覆盖，见上文第 2 条
   - `media` ns 的 **5 个只读 NFS PV**（`media-movie/tv/anime/music/podcast`，2026-08-16 新增）
-    **不是 local-path**：真身在 106 的 ZFS（raidz1+sanoid），刻意不进 restic
+    不是 local-path：真身在 106 的 ZFS（raidz1+sanoid），刻意不进 restic
     （H4 的 `BACKUP_EXEMPT` 里逐条写了理由）
 - **oracle-k3s（11 个）**: `storage-loki-0`、`storage-tempo-0`、`calibre-books-local`、
   `calibre-web-automated-config-local`、`timeslot-pvc`、`trends-data`、
@@ -149,21 +149,21 @@ keep-last=2。**dump 必须落 ZFS，不能用默认的 `local`**：那和 VM �
 |---|---|---|
 | `apps-pg-1` · `zitadel-pg-1` | CNPG operator 按 `Cluster` CR | `backup/overlays/oracle/backup-script.yaml` 的逐库 `pg_dump` 行，**加租户必须手工加一行** |
 | `multica-backend-uploads` | 上游 OCI chart `multica`（2026-08-18） | `backup/overlays/homelab/backup-script.yaml` 里 `multica-backend-uploads` 目录整体纳入（失败时**只 warn 不中断夜备**，所以要定期核 `restic ls` 里真有它） |
-| （homelab `apps-pg` 的 `litellm`/`multica`/`nakama` 三个库） | 清单里的 `apps-pg-data-local`，H4 **看得见**、走 `BACKUP_EXEMPT` | `backup/overlays/homelab/backup-script.yaml` 的 2c)/2d)/2e) 三段逐库 `pg_dump`（都打同一个实例）。⚠️ **实例里加一个库，H4 一样看不见** —— 必须手工加一行 `pg_dump`，同 oracle 的 CNPG。`nakama` 尤其要紧：那个服务**没有 PVC**，2e) 那一行是它唯一的备份 |
+| （homelab `apps-pg` 的 `litellm`/`multica`/`nakama` 三个库） | 清单里的 `apps-pg-data-local`，H4 看得见、走 `BACKUP_EXEMPT` | `backup/overlays/homelab/backup-script.yaml` 的 2c)/2d)/2e) 三段逐库 `pg_dump`（都打同一个实例）。⚠️ **实例里加一个库，H4 一样看不见**，必须手工加一行 `pg_dump`，同 oracle 的 CNPG。`nakama` 尤其要紧：那个服务没有 PVC，2e) 那一行是它唯一的备份 |
 
-没有任何检查会提醒你——**加这类应用时必须手工确认备份归属**。
+没有任何检查会提醒你，**加这类应用时必须手工确认备份归属**。
 
-⚠️ 这份清单**天然会漂移**（docs-check 只查结构，查不出内容与集群不符——2026-07-31 那次 NFS
+⚠️ 这份清单天然会漂移（docs-check 只查结构，查不出内容与集群不符：2026-07-31 那次 NFS
 描述就是格式完美而内容全错）。改集群存储后重新生成：`kubectl --context <ctx> get pvc -A`。
 
-- 「新增 PVC 却忘了纳入备份」**已由 CI 拦截**（`scripts/check-manifests.py` 的 H4，见
-  [manifest-safety-checks.md](manifest-safety-checks.md)）——它上线即抓到 `trends-data`
+- 「新增 PVC 却忘了纳入备份」已由 CI 拦截（`scripts/check-manifests.py` 的 H4，见
+  [manifest-safety-checks.md](manifest-safety-checks.md)），它上线即抓到 `trends-data`
   静默未备份约两个月。
   ⚠️ H4 只查「PVC 有没有备份归属」，**查不出「归属了但文件名模式对不上」**：
   `jobs-sg-data` 的 `raw/<date>/NNN.jsonl.gz` 归档匹配不上白名单那组 `*.db` / `*.json`
   模式，得靠第 3 步 `JOBS_ARCHIVE_DIR` 整目录纳入才保得住（见
   [jobs-sg.md](jobs-sg.md)）。这类只能实测（`restic ls` 确认文件真在快照里）。
-- ⚠️ **`local-path` 无冗余、无 ZFS 快照** —— restic 备份是上面每一个卷的**唯一安全网**。
+- ⚠️ **`local-path` 无冗余、无 ZFS 快照**：restic 备份是上面每一个卷的唯一安全网。
 - 有状态服务的 PVC 带 `argocd.argoproj.io/sync-options: Prune=false` 防误删。
 
 **2026-08-20 对两个 live 集群重新生成**（上一版 08-17 之后有三处变动：multica 的 2 个卷
@@ -181,42 +181,42 @@ keep-last=2。**dump 必须落 ZFS，不能用默认的 `local`**：那和 VM �
 现有 `restic-restore-drill` CronJob（每月 1 日 04:00 CST，`backup/overlays/homelab/`）
 真恢复一遍并跑 **8 条判据**：仓库结构（`restic check`）· 两集群快照新鲜度 ·
 Vault raft 快照 · jobs.db integrity · 两个 pg dump 的收尾标记 · raw 归档实解压。
-只恢复 `/work`（两集群各几百 MB）——oracle 快照里挂着 23.5G 书库，全量恢复毫无必要。
+只恢复 `/work`（两集群各几百 MB），oracle 快照里挂着 23.5G 书库，全量恢复毫无必要。
 告警三条一套：`RestoreDrillFailed` / `RestoreDrillStale` / `RestoreDrillNeverRan`。
 
-☠️ **判据要能真的判失败**，否则演练只是每月一次的自我安慰。上线当天用**损坏数据**逐条
+☠️ **判据要能真的判失败**，否则演练只是每月一次的自我安慰。上线当天用损坏数据逐条
 验过敏感度（7 种坏法全部判出、零漏报），其中两条最说明问题：
 
 - **截断的 `vault.snap` 依然非空** → 只验 `-s` 会放过；判据必须是 `tar tzf` 里有 `state.bin`。
 - **合法空库的 `PRAGMA integrity_check` 返回 `ok`** → 只验它会放过；靠"表数 > 0"才抓住。
-- 半截的 `pg_dump` 大小看着完全正常 → 判据是**收尾标记** `PostgreSQL database dump complete`。
+- **半截的 `pg_dump` 大小看着完全正常** → 判据是收尾标记 `PostgreSQL database dump complete`。
 
 ⚠️ **只验"latest 能恢复"是假信心**：夜备三个月前停了，`latest` 照样能恢复、判据照样全绿。
-故演练第 0 步先卡快照新鲜度（>3 天即失败）。这也是 `BackupNotRunning` 覆盖不到的
-——它只看 CronJob 有没有被调度，看不出"调度了但仓库里没有新快照"。
+故演练第 0 步先卡快照新鲜度（>3 天即失败）。这也是 `BackupNotRunning` 覆盖不到的：
+它只看 CronJob 有没有被调度，看不出"调度了但仓库里没有新快照"。
 
 ### ☠️ restic 在 K8s 下的锁陷阱（会咬夜备，不只咬演练）
 
-restic 判定"锁已陈旧"靠 **hostname + PID**。而每个 Job 的 Pod hostname 都不同，
+restic 判定"锁已陈旧"靠 hostname + PID。而每个 Job 的 Pod hostname 都不同，
 所以**跨 Pod 泄漏的锁在 30 分钟内一律不被认为陈旧**，`restic unlock`（只删陈旧锁）
-对它无效——夜备脚本里那句 `restic unlock` 也一样清不掉。
+对它无效，夜备脚本里那句 `restic unlock` 也一样清不掉。
 
-泄漏是怎么产生的：任何被 `activeDeadlineSeconds` 杀掉的运行，或**管道被提前关闭**的
+泄漏是怎么产生的：任何被 `activeDeadlineSeconds` 杀掉的运行，或管道被提前关闭的
 restic（`restic ls … | head` 会 SIGPIPE 杀掉 restic，2026-08-13 实测踩到两次）。
 
 - 演练脚本靠 `--retry-lock 10m` 等（也顺带覆盖与夜备 `forget --prune` 的短暂重叠）。
 - 真卡住时手工处置：`restic unlock --remove-all`
-  ☠️ **只在确认没有任何备份/prune 在跑时**才能用——它会连活锁一起删。
+  ☠️ **只在确认没有任何备份/prune 在跑时**才能用，它会连活锁一起删。
 - 写脚本时别用 `restic … | head`：整份落盘再挑。
 ## PVC 迁移程序（改 claim 指向）
 
-历史背景：2026-07-06 的分层设计（sqlite/PG 迁 local-path、追加日志型留 NFS）已不存在——
+历史背景：2026-07-06 的分层设计（sqlite/PG 迁 local-path、追加日志型留 NFS）已不存在，
 07-08 宕机后全量迁移（[当时的计划](../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md)里的分层理由当历史读）。
 
 要再迁一个 claim（StatefulSet 模板与 Deployment claim 都适用）：
 
 1. 停应用 → 数据拷进新 `-local` PVC
-2. `kubectl patch … volumes/<idx>/persistentVolumeClaim/claimName`（**json-patch 按下标**——
+2. `kubectl patch … volumes/<idx>/persistentVolumeClaim/claimName`（**json-patch 按下标**，
    strategic-merge 不动 volumes 列表）
 3. 验证 → ArgoCD 管的应用 **push git + `refresh=hard` 之后再开回 auto-sync**
    （否则它同步旧 revision 把 claim 改回去）
@@ -240,12 +240,12 @@ restic（`restic ls … | head` 会 SIGPIPE 杀掉 restic，2026-08-13 实测踩
   凭据 Vault `secret/homelab/restic`（含 base64 SSH key + 周期 Vault token）→ ESO。
 - **容量**: dataset 配额 **100G**（2026-08-16 由 50G 抬起，当时已用 26.2G；抬后 26%）。
   由 `proxmox/ansible/storage-playbook.yaml --tags quota` 收敛（此前只存在于 07-06 那份 plan 的
-  命令里，重建 106 会静默丢失）。⚠️ 配额是 `MetalNodeFilesystemLow/Critical` 对这个仓库的**分母** ——
+  命令里，重建 106 会静默丢失）。⚠️ 配额是 `MetalNodeFilesystemLow/Critical` 对这个仓库的分母：
   去掉配额那两条告警就永远不会响；而它报警时池子通常还很空，处置是抬配额不是删备份。
 - **部署**: 双集群共用 kustomize base+overlay（`backup/`，2026-07-07 合并）；homelab 走 ArgoCD
   `backup` App（`backup/overlays/homelab`），oracle 随 `oracle-k3s` App（`backup/overlays/oracle`）。
   手动触发 `just backup-run`（`k8s/helm/`）。
-  ⚠️ 两个 overlay 的备份脚本都是**显式白名单**（`for pat in …`）——新增有状态应用必须往里加，
+  ⚠️ 两个 overlay 的备份脚本都是**显式白名单**（`for pat in …`），新增有状态应用必须往里加，
   否则静默不备份（CI H4 兜底）。
 - **夜备有三个 Job，不是两个**（2026-08-16 起）：homelab 控制面 03:00（`--host homelab`）、
   homelab worker 02:00（`--host homelab-worker`，见上「当前 PVC 清单」第 2 条）、
@@ -262,6 +262,6 @@ restic（`restic ls … | head` 会 SIGPIPE 杀掉 restic，2026-08-13 实测踩
   PVE 每周 vzdump：pve-1 的 VM 100 → 106（keep-last=3）不变；**106 自己的 VM 200
   （worker）2026-08-16 新增** → `mrstorage/vzdump`（keep-last=2）。
   ⚠️ worker VM 的盘不在 `mrstorage` 里，sanoid 那层对它是**缺的**，只有 restic + vzdump 两层。
-- **告警**: `BackupTargetNodeDown`（106 失联 >15m，severity=**warning**）——2026-07-12 由
+- **告警**: `BackupTargetNodeDown`（106 失联 >15m，severity=warning）。2026-07-12 由
   `NFSStorageNodeDown`(critical/2m) 改名降级：106 已无运行时依赖，宕机只影响备份窗口。
   规则在 `manifests/monitoring/alerts/prometheus-rules.yaml`。

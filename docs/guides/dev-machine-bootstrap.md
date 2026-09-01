@@ -1,6 +1,6 @@
 # 新机器开发环境 bootstrap（配到能改 homelab repo）
 
-> Last updated: 2026-08-29
+> Last updated: 2026-09-01
 > 面向「换了一台 Mac，要把本机环境配到能 clone、改、验证这个 repo」的流程。
 > 排障/恢复类走 [runbooks/](../runbooks/README.md)；AI 助手上下文见 [../AGENTS.md](../AGENTS.md)（唯一上下文文件，细节按域在 [reference/](../reference/README.md)）。
 
@@ -21,16 +21,16 @@ uv tool install ansible        # 提供 ansible-playbook（justfile 直接调它
 
 - `just`：repo 的主任务运行器（**不是 make**；只有 `cloud/oracle/terraform/` 用 make）。
 - `uv`：`check-manifests.py` 用 `uv run --with pyyaml`；ansible 建议 `uv tool install` 隔离。
-- `terraform`：**7 个 root** 都用它 —— `proxmox/terraform`、**`proxmox/terraform-storage`**
+- `terraform`：7 个 root 都用它：`proxmox/terraform`、`proxmox/terraform-storage`
   （106 上的 worker VM，2026-08-15 新增）、`cloudflare/terraform`、`tailscale/terraform`、
   `zitadel/terraform`、`cloud/oracle/terraform`、`cloud/oracle/cloudflare`。
-  （⚠️ `2026-08-03-tf-state-r2.md` 的迁移表只列了其中 5 个 —— 它写在
+  （⚠️ `2026-08-03-tf-state-r2.md` 的迁移表只列了其中 5 个：它写在
   `proxmox/terraform-storage` 存在之前，也没覆盖 `zitadel/terraform`。）
 - `kubectl`：context 名固定为 `k3s-homelab` 与 `oracle-k3s`。
 
 ☠️ **macOS 本地网络授权（TCC）会让 terraform/kubectl 连内网 100% `no route to host`**。
 未获授权的**非 Apple 签名**二进制（terraform / kubectl / Homebrew python）访问 LAN 一律
-`EHOSTUNREACH`，而 `ping`/`curl`/`ssh`/`nc` 是 Apple 自带故全通 —— 这个差异极具迷惑性，
+`EHOSTUNREACH`，而 `ping`/`curl`/`ssh`/`nc` 是 Apple 自带故全通：这个差异极具迷惑性，
 当年据此误判成「网络正常，是 provider 的锅」。Tailscale 与 loopback 不受限，所以平时无感。
 **根治**：系统设置 → 隐私与安全性 → 本地网络，给终端（及 IDE）授权。
 不依赖授权的绕法（SSH 隧道 / Tailscale 寻址）已固化进 `proxmox/terraform-storage`。
@@ -71,7 +71,7 @@ uv run --with pyyaml python scripts/check-manifests.py   # 清单安全 H1-H5
   `terraform plan` 会读到 tfvars 里的失效值而报错）。
 - **有本地 state 的 5 个 root 的 `terraform.tfstate*`**：`proxmox/terraform`、
   `cloudflare/terraform`、`tailscale/terraform`、`cloud/oracle/terraform`、
-  `cloud/oracle/cloudflare`。**state 只在本地**（ROADMAP 开放项 #2，未离站）——漏拷哪个，
+  `cloud/oracle/cloudflare`。**state 只在本地**（ROADMAP 开放项 #2，未离站）：漏拷哪个，
   那个 root 就只能 `terraform import` 重建（见 `cloud/oracle/terraform/IMPORT.md`）。
   另两个 root（`zitadel/terraform`、`proxmox/terraform-storage`）**当前没有 state 文件**，
   拷不到不是漏了；判据是 `find . -name terraform.tfstate -not -path '*/.terraform/*'`。

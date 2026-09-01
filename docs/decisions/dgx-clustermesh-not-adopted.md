@@ -1,7 +1,7 @@
 # DGX Spark 不接 ClusterMesh：节点 IP 平面跨不过 Tailscale 节点共享，改用 Endpoints 直连
 
 > 日期: 2026-08-13
-> 状态: ❌ 否决 ClusterMesh 对接 —— 改用 Service + Endpoints 直连（重评条件见文末）
+> 状态: ❌ 否决 ClusterMesh 对接：改用 Service + Endpoints 直连（重评条件见文末）
 > 关联：[reference/tailscale-network.md](../reference/tailscale-network.md)（共享节点 / MTU / 跨集群 underlay 的**唯一真相源**）·
 > [ROADMAP #5 DGX Spark 入编](../ROADMAP.md) · [cluster-placement-for-new-services](cluster-placement-for-new-services.md)
 > 对端仓库：`~/projects/meirongdev/nv-dgx-spark`，其 `docs/k3s-migration-design-cn.md` §6 是本决策的提问方；
@@ -21,10 +21,10 @@
 
 | | homelab | oracle-k3s | dgx-spark |
 |---|---|---|---|
-| `cluster.id` | **1** | **2** | **1** ⚠️ 与 homelab 撞 |
+| `cluster.id` | 1 | 2 | 1 ⚠️ 与 homelab 撞 |
 | Pod CIDR | 10.42.0.0/16 | 10.52.0.0/16 | 10.44.0.0/16 ✅ 三方不重叠 |
 | Service CIDR | 10.43.0.0/16 | — | 10.45.0.0/16 ✅ |
-| **节点 IP（= VXLAN 隧道端点）** | 10.10.10.10 | 10.0.0.26 | **192.168.200.101/102** ⚠️ |
+| **节点 IP（= VXLAN 隧道端点）** | 10.10.10.10 | 10.0.0.26 | 192.168.200.101/102 ⚠️ |
 | Cilium（实测镜像 digest） | v1.20.0 | v1.20.0 | **v1.19.6** ⚠️ 差一个 minor |
 | tailnet | `meirongdev@`（`taild162e5`） | 同左 | **`kaixinhuang3307@`（`tailf63175`）** ⚠️ 外部 |
 
@@ -32,19 +32,19 @@
 
 | §6.1 假设 | 实际 |
 |---|---|
-| homelab 是 `cluster.id=2` | 是 **1**；`2` 早被 oracle-k3s 占用 |
-| 两侧同一 minor 为佳 | homelab/oracle 已是 **1.20.0**，DGX 1.19.6 |
-| 两侧节点 IP 经 Tailscale subnet route 互通 | **做不到** —— 见阻塞项 1 |
+| homelab 是 `cluster.id=2` | 是 1；`2` 早被 oracle-k3s 占用 |
+| 两侧同一 minor 为佳 | homelab/oracle 已是 1.20.0，DGX 1.19.6 |
+| 两侧节点 IP 经 Tailscale subnet route 互通 | 做不到，见阻塞项 1 |
 | Pod/Service CIDR 不重叠 | ✅ 成立（当初刻意避开 k3s 默认值这步做对了） |
 
 ## Options
 
 | 方案 | 结论 |
 |---|---|
-| **ClusterMesh 对接（设计文档 §6 原方案）** | ❌ 否决 —— 阻塞项 1 不在我们控制范围内，见下 |
-| DGX 重装 k3s，`--node-ip` 改到 Tailscale IP | ❌ 否决 —— 主动推翻 DGX §4.1「控制面不依赖 Tailscale」的决定；在全程 DERP、74ms 的链路上 NotReady 抖动几乎必然 |
-| 把两台 DGX 迁进本 tailnet，再两侧加 subnet router | ❌ 不由我们决定 —— 需要 `kaixinhuang3307@` 账号配合；且收益仍不足（见 Consequences） |
-| **homelab 侧建 Service + 手写 Endpoints 指向 DGX Tailscale IP** | ✅ 采纳 —— 零 CNI 改动、零 `cluster.id` 迁移、零跨集群 CA 维护，DGX 侧一行不改 |
+| **ClusterMesh 对接（设计文档 §6 原方案）** | ❌ 否决：阻塞项 1 不在我们控制范围内，见下 |
+| DGX 重装 k3s，`--node-ip` 改到 Tailscale IP | ❌ 否决：主动推翻 DGX §4.1「控制面不依赖 Tailscale」的决定；在全程 DERP、74ms 的链路上 NotReady 抖动几乎必然 |
+| 把两台 DGX 迁进本 tailnet，再两侧加 subnet router | ❌ 不由我们决定：需要 `kaixinhuang3307@` 账号配合；且收益仍不足（见 Consequences） |
+| **homelab 侧建 Service + 手写 Endpoints 指向 DGX Tailscale IP** | ✅ 采纳：零 CNI 改动、零 `cluster.id` 迁移、零跨集群 CA 维护，DGX 侧一行不改 |
 
 ## Decision
 
@@ -67,10 +67,10 @@ homelab → ping 192.168.200.101  2 packets transmitted, 0 received, 100% loss
 ```
 
 设计文档 §6.2 的补救办法是两侧 Tailscale subnet router 互相通告。**这条路在这里是封死的**：
-那两台机器属于 **`kaixinhuang3307@gmail.com` 的 tailnet**，经**节点共享**进入我们的 netmap
+那两台机器属于 `kaixinhuang3307@gmail.com` 的 tailnet，经节点共享进入我们的 netmap
 （机制与既有约束见 [tailscale-network.md](../reference/tailscale-network.md) 的
 "Tagged devices cannot reach *shared* nodes" 一节）。
-**节点共享只共享设备本身，不携带 subnet route 与 exit node** —— 所以 `pve` 的
+**节点共享只共享设备本身，不携带 subnet route 与 exit node**，所以 `pve` 的
 `10.10.10.0/24` 到不了 DGX，DGX 通告 `192.168.200.0/24` 我们也收不到。
 
 配套证据（都在 DGX 侧实测）：
@@ -110,7 +110,7 @@ DGX → homelab   via DERP(sin)  64ms      direct connection not established
 比 `nv-dgx-spark/docs/china-network-mirrors-cn.md` 记的 0.15 MB/s 好不少，但仍是
 **第三方中继在中间的 WAN 级链路**，且两个方向走不同 DERP 节点（hkg / sin），路径非对称。
 5 次 ping 后仍未打洞成功。ClusterMesh 会把 clustermesh-apiserver 的 etcd watch
-**常驻**在这条链路上 —— 那才是真正的风险，而不是数据面慢。
+**常驻**在这条链路上：那才是真正的风险，而不是数据面慢。
 
 ### 采纳的替代方案
 
@@ -135,7 +135,7 @@ subsets:
     ports: [{ port: 8000 }]
 ```
 
-⚠️ **只有 homelab 能这么做，oracle 不能** —— oracle 的 `node0` 是 `tagged-devices`
+⚠️ **只有 homelab 能这么做，oracle 不能**：oracle 的 `node0` 是 `tagged-devices`
 （tailnet 所有，非用户所有），共享节点根本不在它的 netmap 里。
 oracle 侧若要消费 DGX，仍需 homelab 上的代理（历史方案 `dgx-proxy` 已随旧 LLM 网关于
 2026-08-08 退役），细节见 [tailscale-network.md](../reference/tailscale-network.md)。
@@ -158,9 +158,9 @@ oracle 侧若要消费 DGX，仍需 homelab 上的代理（历史方案 `dgx-pro
 描述一致（可用内层上限 1230，1231–1280 窗口 ICMP/UDP 静默丢弃、TCP 实践中无影响）。
 那一节是**准确的**；但另外两处不是：
 
-1. **DGX 的 `mtu: 1200` 是个拼错的键名，从未生效。** Cilium chart 的键是 **`MTU`（全大写）**，
+1. **DGX 的 `mtu: 1200` 是个拼错的键名，从未生效。** Cilium chart 的键是 `MTU`（全大写），
    `helm show values cilium/cilium --version 1.19.6 | grep '^MTU'` → `MTU: 0`。
-   Helm 对未知键不报错，静默忽略 —— 所以 DGX 设备停在自动探测的 1280。
+   Helm 对未知键不报错，静默忽略：所以 DGX 设备停在自动探测的 1280。
    **这是运气**：真生效了就会复刻 2026-07-07 那次黑洞（显式 MTU 时 Cilium 不减隧道开销）。
 2. **`k8s/cilium/values.yaml` 的注释说 "automatically gives pods 1280-50=1230"，与实测不符**
    （pod veth 实为 1280）。结论"不要显式设 MTU"没错，错的是对结果状态的描述。
@@ -169,7 +169,7 @@ oracle 侧若要消费 DGX，仍需 homelab 上的代理（历史方案 `dgx-pro
 ## 重新评估条件（满足其一再议）
 
 - 两台 DGX **迁入本 tailnet**（不再是共享节点），且两侧各有 subnet router 通告节点网段；
-- `tailscale ping` 显示 **direct**（非 DERP）且吞吐进入可用区间 —— 当前 2.28 MB/s 不够；
+- `tailscale ping` 显示 **direct**（非 DERP）且吞吐进入可用区间：当前 2.28 MB/s 不够；
 - 出现真实的 **pod↔pod** 跨集群需求（不只是调一个 HTTP 端点），
   例如把 DGX 纳入统一的服务网格或需要 Cilium NetworkPolicy 跨集群生效。
 

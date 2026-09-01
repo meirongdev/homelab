@@ -1,6 +1,6 @@
 # Tailscale Cross-Cluster Networking
 
-> Last updated: 2026-08-21
+> Last updated: 2026-09-01
 > Status: 生效事实
 >
 > Rewritten 2026-07-07 after the topology review. The original design (each K3s node
@@ -64,7 +64,7 @@ responsible for delivering to you.**
 from the 2026-07-12 double-advertiser fix — it is structural and stays.
 （维护机制 2026-08-12 起变更：`k8s-node` 上由收敛器 `tailscale-ip-rules.timer`
 每 5 分钟断言，历史单元 `nfs-lan-route.service` 已退役，见下方「守护自身失守」；
-`pve` 上仍是同名手工单元——它不跑 systemd-networkd，无清扫问题。）
+`pve` 上仍是同名手工单元，它不跑 systemd-networkd，无清扫问题。）
 
 Because `pve` legitimately advertises `192.168.50.0/24` (it is 24/7, unlike a
 laptop, so it is the right subnet router) and `k8s-node` needs `--accept-routes`
@@ -74,11 +74,11 @@ route → restore immediately): without the rule, traffic to 192.168.50.x
 immediately switches to `dev tailscale0` — an extra hop through the tunnel to
 reach a host that is one LAN hop away. Keep the rule on **both** nodes.
 
-### 5240 control-plane-direct ip-rule —— 只有 `k8s-worker-106` 需要
+### 5240 control-plane-direct ip-rule：只有 `k8s-worker-106` 需要
 
 2026-08-13 入编的 worker 在 `192.168.50.0/24`，而控制面在 `10.10.10.0/24`
 （pve `vmbr0` 的第二地址段）。pve 合法通告 **两个** 段，worker 带 `--accept-routes`
-于是 table 52 里两段都有。5260 只覆盖前者，控制面那段会被劫进隧道 —— k3s agent 与
+于是 table 52 里两段都有。5260 只覆盖前者，控制面那段会被劫进隧道，k3s agent 与
 cilium-agent（`k8sServiceHost: 10.10.10.10`）的存活就挂在了 tailnet 上，还绕开了
 实测 0.8ms 的 LAN 直连。故需要 **5240** `to 10.10.10.0/24 lookup main`。
 
@@ -91,16 +91,16 @@ cilium-agent（`k8sServiceHost: 10.10.10.10`）的存活就挂在了 tailnet 上
 经过：[records/2026-08-13-k3s-worker-join-106.md](../records/2026-08-13-k3s-worker-join-106.md) §4 +
 [records/2026-08-13-iprule-guard-render-bug.md](../records/2026-08-13-iprule-guard-render-bug.md)。
 
-☠️ **优先级不能取 5250**：tailscaled 自己占着 **5210 / 5230 / 5250 / 5270**，
+☠️ **优先级不能取 5250**：tailscaled 自己占着 5210 / 5230 / 5250 / 5270，
 留给我们的空位只有 **5200 / 5220 / 5240 / 5260**，且必须 < 5270 才抢得到
 `from all lookup 52`。2026-08-13 首版写成 5250 直接与它的
 `fwmark 0x80000/0xff0000 unreachable` 冲突。
 
 ☠️ **给新节点跑 `setup-tailscale` 有个致命窗口**：`tailscale up` 一成功、收敛器还没装上
-的那几秒里，节点自己的 LAN 流量已被卷进隧道 —— SSH 会当场断，且断的是你正在用的那条。
+的那几秒里，节点自己的 LAN 流量已被卷进隧道，SSH 会当场断，且断的是你正在用的那条。
 别在窗口内中断剧本；已经断了就从 tailnet 地址进去补规则。
 
-### `tailscale-cgnat-route` ip-rule —— Cilium 身份标记撞上 Tailscale 的 fwmark
+### `tailscale-cgnat-route` ip-rule：Cilium 身份标记撞上 Tailscale 的 fwmark
 
 全部三台 k3s 节点（homelab 控制面/worker + oracle）在优先级 **5200** 各有一条
 `to 100.64.0.0/10 lookup 52`。它挡的是一个
@@ -123,14 +123,14 @@ Cilium 与 Tailscale 之间的位段冲突，2026-08-09 定位并修复。
 - **Tailscale** 用 `0x80000` 标记"这个包我已经处理过，别再送回 tailscale0"，并为此装了
   三条 ip rule（5210/5230/5250）。
 
-那三条规则写的是 `fwmark 0x80000/0xff0000` —— 掩码只看 mark 的 **bit16-23**。而这一段
+那三条规则写的是 `fwmark 0x80000/0xff0000`，掩码只看 mark 的 bit16-23。而这一段
 正好压在 Cilium 写身份的位置上，于是判据退化成一句话：
 
 ```
 identity & 0xFF == 0x08   →   命中 Tailscale 的规则
 ```
 
-命中之后包被送去 `lookup main`，绕过了排在后面的 `5270: from all lookup 52` ——
+命中之后包被送去 `lookup main`，绕过了排在后面的 `5270: from all lookup 52`，
 **table 52 才是 tailscale0 的路由表**。main 表里没有 `100.64/10`，包就落到默认路由，
 于是一个 CGNAT 地址被从 `eth0` 扔给了 LAN 网关，出了网关就没了。没有人回 RST，
 所以任何端口都表现为超时。
@@ -172,7 +172,7 @@ NetworkPolicy/CNP/CCNP（两个集群都是空的）、ipcache 缺条目、Clust
 
 **尤其别去 grep Tailscale 的 netfilter 规则找"谁打的 mark"。** 本舰队两台节点都用
 `--netfilter-mode=off`（见两个 `setup-tailscale.yaml` 的 `tailscale_up_extra_args`），
-它**一条 netfilter 规则都不装**，但**照样装 ip rule** —— 这是最容易走岔的一步。
+它**一条 netfilter 规则都不装**，但照样装 ip rule，这是最容易走岔的一步。
 实测 nft、iptables-nft、iptables-legacy 三处含 `0x80000` 的规则均为 **0 条**。
 答案不在 netfilter 里，在 Cilium。
 
@@ -192,23 +192,23 @@ NetworkPolicy/CNP/CCNP（两个集群都是空的）、ipcache 缺条目、Clust
 设置 `0x80000`**（就是上面那 0 条）。5210-5250 在这里不承担真实的防环职责，只会因位段
 碰撞误伤。换句话说，这条规则挡掉的全是误判。
 
-⚠️ **别改用"给中签的 pod 换个标签"** —— 那只躲开这一次抽签，下一个中签的 pod 照样断。
+⚠️ **别改用"给中签的 pod 换个标签"**，那只躲开这一次抽签，下一个中签的 pod 照样断。
 
 ⚠️ **oracle 是预防性加的。** 定位当天扫它 52 个 endpoint，低字节 `0x08` 的只有保留身份 8，
 没有真实负载中签，但它的规则集与 homelab 一模一样（同样 `netfilter-mode=off`、同样缺这条
 保护规则），即同样暴露，只是运气好。中签的代价不小：oracle 的 otel remote-write 与 krr
 都靠 `100.94.186.7` 打回 homelab。
 
-#### 2026-08-12：守护自身失守 —— 现在由两道防线 + 指标看护
+#### 2026-08-12：守护自身失守，现在由两道防线 + 指标看护
 
 上面两条规则（5200/5260）曾以"开机 oneshot"systemd 单元维护，**2026-08-12 review
 发现两台 k8s 节点上全部静默失守**：单元 `active (exited)`"看起来修过"，`ip rule`
 里规则却没了；oracle 的 homepage 恰好中签（identity 138760，低字节 0x08），到
-100.64/10 全超时。凶手是 **systemd-networkd**——`ManageForeignRoutingPolicyRules`
+100.64/10 全超时。凶手是 systemd-networkd 的 `ManageForeignRoutingPolicyRules`
 默认 `yes`，networkd (重)启动/重配时清扫一切非它管理的 ip rule；8-11 清晨
 unattended-upgrades 重启两台节点的 networkd，规则同批被清。tailscaled 的四条
 （5210-5270）有 netlink 监听自愈，自定义规则没有守护者。`pve` 用 ifupdown2 不跑
-networkd，其手工 5260 幸存——这条差异是破案线索。A/B 实测（oracle）：默认配置重启
+networkd，其手工 5260 幸存，这条差异是破案线索。A/B 实测（oracle）：默认配置重启
 networkd → 5200 三秒内被清；装 drop-in 后重启 → 幸存。
 完整取证链 → [records/2026-08-12-tailscale-iprule-guard-drift.md](../records/2026-08-12-tailscale-iprule-guard-drift.md)
 
@@ -221,7 +221,7 @@ networkd → 5200 三秒内被清；装 drop-in 后重启 → 幸存。
 | 可见性 | 脚本写 node-exporter textfile：`tailscale_iprule_present` / `tailscale_iprule_reasserts_total` | 5 条告警（缺失/拉锯/指标停更/逐集群 absent），见 `alerts/tailscale-iprule-alerts.yaml` |
 
 ⚠️ 实测两个反直觉结论，改这套机制前先读：**tailscaled 重启并不清这些规则**（清的是
-networkd）；**`PartOf=tailscaled` 对已死的 oneshot 不触发**（restart 传播是空操作）——
+networkd）；**`PartOf=tailscaled` 对已死的 oneshot 不触发**（restart 传播是空操作），
 所以单元里刻意没有 PartOf，timer 是唯一的重申机制。
 
 ## How It Works
@@ -473,15 +473,15 @@ KVStoreMesh 下 remote endpoint **不在** `cilium-clustermesh` 里。两者分�
 
 | secret | 谁读 | 内容 | 正常值 |
 |---|---|---|---|
-| `cilium-clustermesh` | **cilium-agent** | 连**本集群自己**的缓存 | `https://clustermesh-apiserver.kube-system.svc:2379` |
-| `cilium-kvstoremesh` | **kvstoremesh 容器** | 连**对端** | `https://<peer>.mesh.cilium.io:32379` |
+| `cilium-clustermesh` | cilium-agent | 连本集群自己的缓存 | `https://clustermesh-apiserver.kube-system.svc:2379` |
+| `cilium-kvstoremesh` | kvstoremesh 容器 | 连对端 | `https://<peer>.mesh.cilium.io:32379` |
 
-⚠️ `cilium-clustermesh` 里那个 `...kube-system.svc:2379` 是**设计如此，不是配错**——
+⚠️ `cilium-clustermesh` 里那个 `...kube-system.svc:2379` 是**设计如此，不是配错**：
 agent 只读本地缓存，跨集群那一跳由 kvstoremesh 负责。2026-08-05 排障时我按"endpoint
 写成了集群内 DNS 名"去下结论，是错的，白绕一圈。
 
 `<peer>.mesh.cilium.io` 靠 **`clustermesh-apiserver` Deployment 的 `hostAliases`** 解析
-（**不是** cilium DaemonSet 的 —— 查错对象也会得出错误结论）：
+（不是 cilium DaemonSet 的，查错对象也会得出错误结论）：
 
 ```bash
 kubectl --context k3s-homelab -n kube-system get deploy clustermesh-apiserver \
@@ -523,7 +523,7 @@ kubectl --context k3s-homelab -n kube-system get pods -l k8s-app=cilium -o \
 | homelab | [`k8s/cilium/values.yaml`](../../k8s/cilium/values.yaml) | `cd k8s/helm && just deploy-cilium`（`ctx := "k3s-homelab"`） |
 | oracle | [`cloud/oracle/values/cilium-values.yaml`](../../cloud/oracle/values/cilium-values.yaml) | `cd cloud/oracle && just deploy-cilium` |
 
-`clustermesh.config.clusters[].ips` 是真源——它同时生成 `cilium-kvstoremesh` secret 的
+`clustermesh.config.clusters[].ips` 是真源，它同时生成 `cilium-kvstoremesh` secret 的
 endpoint 与 clustermesh-apiserver 的 `hostAliases`。**两个 `deploy-cilium` 都带
 `--reset-values`**，所以缺了这段就等于跑一次删一次。
 oracle 那段**直到 2026-08-05 才补上**（此前只存在于 live helm release 的 stored values）。
@@ -534,7 +534,7 @@ Cilium CA，两侧要重新交换证书（`--allow-mismatching-ca`）。上面�
 
 ### 真实故障模式：up-but-stuck，且不自愈
 
-2026-08-05 那次断开**与配置无关**——helm release 历史证明 peer 条目自 oracle `cilium.v11`
+2026-08-05 那次断开与配置无关：helm release 历史证明 peer 条目自 oracle `cilium.v11`
 （2026-03-15）/ homelab `cilium.v10`（2026-04-27）起一直正确。真正的故障是
 **clustermesh-apiserver 活着但卡住**，Cilium 不会自己恢复。修它的其实是
 `cilium clustermesh connect` 顺带触发的 helm upgrade **重建了 pod**（新 pod
@@ -695,7 +695,7 @@ ip rule list
    ```
 
    tailnet 整个不可用时才需要 Oracle 的**公网** IP。它不在本仓库里
-   （CI: `scripts/check-public-ips.py`），现取不落盘 —— `terraform output` 读本地
+   （CI: `scripts/check-public-ips.py`），现取不落盘，`terraform output` 读本地
    state，离线可用；新克隆没有 state 时去 OCI 控制台看实例的 Public IP：
    ```bash
    ORACLE_PUB=$(cd cloud/oracle/terraform && terraform output -raw instance_public_ip)

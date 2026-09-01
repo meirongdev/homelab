@@ -1,8 +1,8 @@
 # K3s 集群安全架构 (Security Architecture)
 
-> Last updated: 2026-08-30
+> Last updated: 2026-09-01
 > Status: 生效事实
-> Scope: 双集群（homelab + oracle-k3s）的纵深防御模型 —— source of truth。
+> Scope: 双集群（homelab + oracle-k3s）的纵深防御模型，本文是 source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
 > 实施决策与权衡见 [../plans/security/2026-06-16-k3s-security-hardening.md](../plans/security/2026-06-16-k3s-security-hardening.md)。
 
@@ -12,13 +12,13 @@
   节点加固 → 网络 → 运行时 → restic。
 - **第 9 层（网络）只到"可见性"**：无自建 CiliumNetworkPolicy，集群级默认拒绝刻意延后。
 - **硬约束**：热笔记本 fail-open + 控 CPU；GitOps 优先（PSA 标签 / Vault / ESO / argocd 例外）。
-- **威胁覆盖矩阵**见 § 10；**已知缺口与路线图**见 § 11。
+- 威胁覆盖矩阵见 § 10，已知缺口与路线图见 § 11。
 
 ## 0. 设计原则（硬约束驱动）
 
 - **热笔记本约束**：homelab 的控制面 `k8s-node` 是 Ryzen 5600H 笔记本（2026-08-13 起另有一个 worker `k8s-worker-106`，但安全组件仍以控制面为准）（空闲 ~60–62°C、内存紧、重启需 `just homelab-recover`；功耗/散热细节见 [homelab-host-power-thermal.md](homelab-host-power-thermal.md)）。所有安全组件 **fail-open + 控 CPU**：不引入会在故障时阻断调度的 fail-closed 准入，周期/串行扫描优先于常驻高负载。
 - **GitOps 优先**：除两类例外（PSA 标签用 `just`、Vault/ESO/argocd 用 Helm），安全策略均经 ArgoCD `git push` 声明式下发。
-- **单用户威胁模型**：一个可信运维者、无敌对多租户。据此**有意延后**集群级网络默认拒绝（横向移动收益边际低、debug 成本高）。
+- **单用户威胁模型**：一个可信运维者、无敌对多租户。据此有意延后集群级网络默认拒绝（横向移动收益边际低、debug 成本高）。
 
 ## 1. 纵深防御总览
 
@@ -30,8 +30,8 @@
 | 2 | 身份 | ZITADEL OIDC + GitHub 联邦 | ✅ 生产 | `zitadel/`, 各 app values | oracle-k3s(IdP，2026-07-06 迁自 homelab，见 [zitadel-to-oracle-k3s.md](../plans/apps/2026-07-04-zitadel-to-oracle-k3s.md)) |
 | 3 | 密钥 | Vault + ESO + 健康告警 | ✅ 生产 | `k8s/helm/values/vault-*`, `manifests/monitoring/alerts/eso-alerts.yaml` | 双 |
 | 4 | 准入：Pod 基线 | Pod Security Admission | ✅ 生产 | `just harden-psa` / oracle ns 清单 | 双 |
-| 5 | 准入：策略即代码 | Kyverno（3 条 Audit + `disallow-latest-tag` **Enforce**，见 §5.2）| ✅ 生产 | `values/kyverno.yaml`, `manifests/kyverno-policies/` | homelab |
-| 6 | 供应链/CVE | Trivy Operator（运行中镜像）+ Renovate（仓库声明的依赖，🚧 待装 App）| ✅ 生产 | `values/trivy-operator.yaml` · `values/trivy-operator-oracle.yaml` · `.github/renovate.json5` | **双集群**（oracle 2026-08-03 补齐）|
+| 5 | 准入：策略即代码 | Kyverno（3 条 Audit + `disallow-latest-tag` Enforce，见 §5.2）| ✅ 生产 | `values/kyverno.yaml`, `manifests/kyverno-policies/` | homelab |
+| 6 | 供应链/CVE | Trivy Operator（运行中镜像）+ Renovate（仓库声明的依赖，🚧 待装 App）| ✅ 生产 | `values/trivy-operator.yaml` · `values/trivy-operator-oracle.yaml` · `.github/renovate.json5` | 双集群（oracle 2026-08-03 补齐）|
 | 7 | CIS 合规 | kube-bench（周巡检，钉 control-plane；worker 的 node 级检查未覆盖·有意接受） | ✅ 生产 | `manifests/kube-bench/kube-bench.yaml` | homelab |
 | 8 | 节点加固 | k3s `protect-kernel-defaults` + sysctl | ⏳ 待重启生效 | `k8s/ansible/playbooks/setup-k3s.yaml` | homelab |
 | 9 | 网络 | Cilium NetworkPolicy + Hubble 可见性 | 🟡 仅可见性 | Cilium（默认拒绝刻意延后） | 双 |
@@ -43,44 +43,44 @@
 
 ## 2. 边缘安全 (Edge) — Cloudflare
 
-- **应用流量零暴露**：所有外部流量 `Internet → Cloudflare DNS → Tunnel(cloudflared) → Cilium Gateway → Service`。cloudflared 是**出站**连 CF 边缘，DNS 全是 `CNAME → <tunnel_id>.cfargotunnel.com` 且 proxied，**没有任何 A 记录指向节点公网 IP**。入口链路细节见 [networking-ingress.md](networking-ingress.md)。
-- ⚠️ **但「零暴露端口」不等于节点没有公网入站规则**——这条描述此前写成了「集群无公网入站端口」，
-  与事实不符（2026-08-10 更正）。homelab 在家宽 NAT 后面、本来就没有公网 IP；**oracle-k3s 有**，
-  它的 OCI Security List 曾把 **22 / 80 / 443 / 6443 全开给 `0.0.0.0/0`**，其中 6443 是 k8s API 直挂公网。
+- **应用流量零暴露**：所有外部流量 `Internet → Cloudflare DNS → Tunnel(cloudflared) → Cilium Gateway → Service`。cloudflared 是出站连 CF 边缘，DNS 全是 `CNAME → <tunnel_id>.cfargotunnel.com` 且 proxied，**没有任何 A 记录指向节点公网 IP**。入口链路细节见 [networking-ingress.md](networking-ingress.md)。
+- ⚠️ **但「零暴露端口」不等于节点没有公网入站规则**。这条描述此前写成了「集群无公网入站端口」，
+  与事实不符（2026-08-10 更正）。homelab 在家宽 NAT 后面、本来就没有公网 IP；oracle-k3s 有，
+  它的 OCI Security List 曾把 22 / 80 / 443 / 6443 全开给 `0.0.0.0/0`，其中 6443 是 k8s API 直挂公网。
   2026-08-10 实测后删掉 80/443/6443（80/443 无进程监听，纯死规则；6443 无公网客户端，
   且 `tailscale0` 属 firewalld `trusted` zone，删了不影响经 tailnet 的 API 访问）。
   **现存公网入站仅 3 条**：`22/tcp`（tailnet 全挂时的唯一进入手段，密钥认证）、
   `41641/udp`（Tailscale NAT 穿透，缺了会全程走 DERP 中继）、`ICMP 3/4`（PMTU）。
   规则与逐条实测依据写在 `cloud/oracle/terraform/main.tf` 的注释里。
-- **WAF**（zone 级，覆盖两条 Tunnel 所有子域；`cloudflare/terraform/waf.tf`，`just apply` 部署）：**4 条**自定义规则（拦 WordPress/PHP 扫描、敏感文件、漏扫 UA、非标 HTTP 方法），免费额度 5 条、**还剩 1 个槽位**。敏感路径**默认仍并进「敏感文件」那条**（同类判据放一处便于验收），但这是风格选择、不再是配额所迫（`.env/.git/.htaccess` 之外，2026-08-15 起还含 `.tfstate`/`.aws/credentials`/`serviceaccount.json`/`id_rsa`/`.pem`/`web.config`/`/etc/passwd` 等，新 term 一律套 `lower()`，因为 `contains` 区分大小写；哪些路径**刻意不拦**见 `waf.tf` 行内注释）+ **1 条**限流规则（免费额度就 1 条，共用一个计数器）：认证端点（`/login`,`/oauth2`,`/api/login`,`/signin`,`/v1/auth`）**外加** `draw.meirong.dev` 的 `/socket.io/`（Excalidraw 2026-08-04 去掉 SSO 后，那是个公开的协作中继），30 req/10s/IP+colo → 封 10s。Pro 计划才有 Managed Ruleset (SQLi/XSS/RCE)/OWASP CRS/泄漏凭据检测（见 `waf.tf` 注释段）。
+- **WAF**（zone 级，覆盖两条 Tunnel 所有子域；`cloudflare/terraform/waf.tf`，`just apply` 部署）：4 条自定义规则（拦 WordPress/PHP 扫描、敏感文件、漏扫 UA、非标 HTTP 方法），免费额度 5 条、**还剩 1 个槽位**。敏感路径默认仍并进「敏感文件」那条（同类判据放一处便于验收），但这是风格选择、不再是配额所迫（`.env/.git/.htaccess` 之外，2026-08-15 起还含 `.tfstate`/`.aws/credentials`/`serviceaccount.json`/`id_rsa`/`.pem`/`web.config`/`/etc/passwd` 等，新 term 一律套 `lower()`，因为 `contains` 区分大小写；哪些路径刻意不拦见 `waf.tf` 行内注释）+ 1 条限流规则（免费额度就 1 条，共用一个计数器）：认证端点（`/login`,`/oauth2`,`/api/login`,`/signin`,`/v1/auth`）外加 `draw.meirong.dev` 的 `/socket.io/`（Excalidraw 2026-08-04 去掉 SSO 后，那是个公开的协作中继），30 req/10s/IP+colo → 封 10s。Pro 计划才有 Managed Ruleset (SQLi/XSS/RCE)/OWASP CRS/泄漏凭据检测（见 `waf.tf` 注释段）。
 - ☠️ **信誉/评分类防护在 Free 档已经彻底没有了（2026-08-26 查明）**。原第 4 条规则
-  `cf.threat_score gt 14 → managed_challenge` 是**死规则**：Cloudflare 已停止填充
+  `cf.threat_score gt 14 → managed_challenge` 是死规则：Cloudflare 已停止填充
   `cf.threat_score`，该字段[恒为 0](https://developers.cloudflare.com/ruleset-engine/rules-language/fields/reference/cf.threat_score/)，
-  表达式永远 false，**它从未拦下过任何一次请求**，却占着 5 个槽位之一 —— 已删除并回收槽位。
-  替代品 `cf.waf.score` 是 **Enterprise 独有**（Business 也只有分类字段 `cf.waf.score.class`），
-  故 Free 档**无可替代，槽位就空着**，别为填满硬塞规则。
+  表达式永远 false，**它从未拦下过任何一次请求**，却占着 5 个槽位之一，已删除并回收槽位。
+  替代品 `cf.waf.score` 是 Enterprise 独有（Business 也只有分类字段 `cf.waf.score.class`），
+  故 Free 档无可替代，槽位就空着，别为填满硬塞规则。
   ⚠️ 同一个信号也让 zone 设置 **Security Level 失去原义**：它如今只是 Under Attack 模式的开关，
   `medium` 与 `low/high` 之间没有可观测差别（留 `medium` = 没开 Under Attack，正是想要的常态）。
-  **结论**：现存边缘防护全部是**确定性规则**（路径 / UA / 方法 / 限流）+ Browser Integrity Check，
-  一条基于 IP 信誉的自适应防线都没有 —— 评估「WAF 挡住了什么」时不要把信誉类算进去。**怎么判断一次可疑访问要不要加规则**（下钻查询 + 判读 + 改完怎么验收）见 [../runbooks/suspicious-traffic-investigation.md](../runbooks/suspicious-traffic-investigation.md)。
+  结论：现存边缘防护全部是确定性规则（路径 / UA / 方法 / 限流）+ Browser Integrity Check，
+  一条基于 IP 信誉的自适应防线都没有，评估「WAF 挡住了什么」时不要把信誉类算进去。怎么判断一次可疑访问要不要加规则（下钻查询 + 判读 + 改完怎么验收）见 [../runbooks/suspicious-traffic-investigation.md](../runbooks/suspicious-traffic-investigation.md)。
 - **Zone settings**：SSL Full、TLS 1.2+、Always HTTPS、Security Level Medium、Browser Integrity Check、Email Obfuscation、Hotlink Protection、Opportunistic Encryption。
 - **API Token 权限**：Zone DNS Edit + Zone WAF Edit + Zone Settings Edit + Cloudflare Tunnel Edit。
 
 ## 3. 身份与访问 (Identity) — ZITADEL OIDC
 
-- **单一 IdP**：`auth.meirong.dev`。无共享 ingress 层 SSO；每个服务**要么公开、要么原生 ZITADEL OIDC、要么自带认证**。
+- **单一 IdP**：`auth.meirong.dev`。无共享 ingress 层 SSO；每个服务要么公开、要么原生 ZITADEL OIDC、要么自带认证。
 - **原生 OIDC apps**：Grafana / Miniflux / ArgoCD。各自机密 client 由 `zitadel/scripts/*.sh`(REST) 幂等下发，creds 经 Vault→ESO。**本地账号保留为后备**（无锁死风险）。
 - **刻意公开无认证**：`pdf.meirong.dev`(BentoPDF，2026-08-11 取代 Stirling-PDF)、`draw.meirong.dev`(Excalidraw)。BentoPDF 是纯客户端 WASM，文件不出浏览器、服务端零状态，公开面只是一个 nginx 静态站。
-- **GitHub 联邦锁定**：instance 级外部 IdP，`isCreationAllowed/isAutoCreation=false` + `autoLinking=EMAIL` —— 陌生人无法自助注册，GitHub 身份仅能按已验证邮箱链接到既有 ZITADEL 用户。
+- **GitHub 联邦锁定**：instance 级外部 IdP，`isCreationAllowed/isAutoCreation=false` + `autoLinking=EMAIL`：陌生人无法自助注册，GitHub 身份仅能按已验证邮箱链接到既有 ZITADEL 用户。
 - 部署形态与各 app 接入细节见 [identity.md](identity.md)。
 
 ## 4. 密钥管理 (Secrets) — Vault + ESO
 
 - **Vault = 所有 app 密钥的唯一真相源**；ESO 自动同步 Vault → K8s Secret。
 - **路径约定**：homelab 用 `secret/homelab/<svc>`，oracle 用 `secret/oracle-k3s/<svc>`。
-- **静默陈旧防护**：ESO 健康告警（`externalsecret`/`(cluster)secretstore` `Ready=False`）经 Telegram 报警——堵住"Vault 封印/token 过期 → Secret 不再刷新但 app 仍用旧值"的盲区。规则 `manifests/monitoring/alerts/eso-alerts.yaml`。
+- **静默陈旧防护**：ESO 健康告警（`externalsecret`/`(cluster)secretstore` `Ready=False`）经 Telegram 报警，堵住"Vault 封印/token 过期 → Secret 不再刷新但 app 仍用旧值"的盲区。规则 `manifests/monitoring/alerts/eso-alerts.yaml`。
 - 本地 `.env` 仅用于 bootstrap token（gitignore）。
-- **不留常驻明文 Vault 清单**：旧的 `k8s/helm/values/vault_values.md` dump 已删（2026-07-31），不得重建为常驻文件——按需生成、用完即删；`.gitignore` 的 `**/vault_values.md` 规则保留作护栏。Vault 本身就是真相源（有夜备）；陈旧 dump 比没有更糟——最后那份有 10 条死路径、漏 12 条活路径。
+- **不留常驻明文 Vault 清单**：旧的 `k8s/helm/values/vault_values.md` dump 已删（2026-07-31），不得重建为常驻文件：按需生成、用完即删；`.gitignore` 的 `**/vault_values.md` 规则保留作护栏。Vault 本身就是真相源（有夜备）；陈旧 dump 比没有更糟：最后那份有 10 条死路径、漏 12 条活路径。
 
 ## 5. 准入管控 (Admission)
 
@@ -90,18 +90,18 @@
 
   | ns 由谁创建 | 谁打标签 | 兜底 |
   |---|---|---|
-  | 仓库清单（`*/namespace.yaml`） | ArgoCD 同步该文件 | **CI 的 H5**：清单里的 Namespace 漏写等级直接失败 |
-  | Helm chart / k3s 自建（`kube-system`、`external-secrets`、`cnpg-system`、`trivy-system`、`default`…） | `just harden-psa`（两集群各一份列表：`k8s/helm/justfile` 与 `cloud/oracle/justfile`） | **`just psa-check`**：跑着 Pod 却没标签的 ns → 非零退出 |
+  | 仓库清单（`*/namespace.yaml`） | ArgoCD 同步该文件 | CI 的 H5：清单里的 Namespace 漏写等级直接失败 |
+  | Helm chart / k3s 自建（`kube-system`、`external-secrets`、`cnpg-system`、`trivy-system`、`default`…） | `just harden-psa`（两集群各一份列表：`k8s/helm/justfile` 与 `cloud/oracle/justfile`） | `just psa-check`：跑着 Pod 却没标签的 ns → 非零退出 |
 
   **刻意不给第二类补 Namespace 清单**：那等于把 ns 交给 ArgoCD prune，正是 2026-08-03
   级联删除事故的成因（渲染 Namespace 的 App 配 prune+selfHeal → 误同步删 ns → 连带删光 PVC）。
-  代价是命令式标签**不跟着 ns 重建复活**——`personal-services` 就是这么丢的（08-03 被级联删掉后
+  代价是命令式标签不跟着 ns 重建复活，`personal-services` 就是这么丢的（08-03 被级联删掉后
   重建，列表里明明有它，live 却空了近一周），`psa-check` 就是为这个失效模式加的哨兵。
   ⚠️ 一个 ns 只能有一个写者：`kube-bench` 的标签归清单管，故已从 `psa_privileged_ns` 移除。
 
 **kube-bench 钉在 control-plane 审计**（缺口当日发现当日修，2026-08-13：CronJob 加
 `nodeSelector: node-role.kubernetes.io/control-plane`）。此前双节点下它审计的是
-「碰巧落到的那个节点」——排到 `k8s-worker-106`（agent）时，控制面那批 CIS 检查项根本
+「碰巧落到的那个节点」：排到 `k8s-worker-106`（agent）时，控制面那批 CIS 检查项根本
 不适用，报告"看起来通过"而实际没审计控制面。
 ⚠️ 残余缺口（有意接受）：worker 的 node 级检查项（kubelet 文件权限等）无覆盖；
 要补的话改 DaemonSet 式逐节点审计，或为 worker 加一个 `--targets node` 的第二 CronJob。
@@ -110,20 +110,20 @@
 
   | enforce | namespace |
   |---------|-----------|
-  | `baseline` | default, vault, personal-services, cloudflare, external-secrets, kyverno, external-dns, opencost, media, litellm, **databases**（homelab，2026-08-25；共享 Postgres 用官方镜像，entrypoint 先 root 建/chown 数据目录再 gosu 降权，restricted 的 runAsNonRoot 会直接挡住它）；argocd, cloudflare, external-dns, homepage, personal-services, rss-system, opencost, default, external-secrets, cnpg-system（oracle） |
-  | `restricted` | jobs-sg（homelab）；databases（oracle，CNPG **apps-pg** 所在地）· **zitadel**（oracle，2026-08-10 起，SSO + 身份库 zitadel-pg） |
+  | `baseline` | default, vault, personal-services, cloudflare, external-secrets, kyverno, external-dns, opencost, media, litellm, databases（homelab，2026-08-25；共享 Postgres 用官方镜像，entrypoint 先 root 建/chown 数据目录再 gosu 降权，restricted 的 runAsNonRoot 会直接挡住它）；argocd, cloudflare, external-dns, homepage, personal-services, rss-system, opencost, default, external-secrets, cnpg-system（oracle） |
+  | `restricted` | jobs-sg（homelab）；databases（oracle，CNPG `apps-pg` 所在地）· zitadel（oracle，2026-08-10 起，SSO + 身份库 zitadel-pg） |
   | `privileged`（显式豁免, warn/audit 仍记 baseline） | kube-system, monitoring, trivy-system, tetragon, kube-bench, backup（homelab）；kube-system, monitoring, trivy-system, falco, backup（oracle） |
 
-  只剩 `cilium-secrets` / `kube-node-lease` / `kube-public` 三个无标签——它们**天生不跑 Pod**，
+  只剩 `cilium-secrets` / `kube-node-lease` / `kube-public` 三个无标签，它们天生不跑 Pod，
   `psa-check` 据此放行（判据用「有没有 Pod」而不是维护系统 ns 白名单，白名单会漂）。
 
   ⚠️ `trivy-system` 两集群都是 `privileged`，**别照 dry-run 的干净结果降成 baseline**：
   operator 的 `nodeCollector.volumes` 挂 `/var/lib/etcd` 等 hostPath，而 node-collector 是
-  周期 Job，dry-run 那一刻不在场；降档的症状是基础设施合规扫描**静默停更**。
+  周期 Job，dry-run 那一刻不在场；降档的症状是基础设施合规扫描静默停更。
 
   ⚠️ **`zitadel-pg` 不在 `databases` ns**，它在 `zitadel` ns（`cloud/oracle/manifests/zitadel/zitadel-pg-cluster.yaml`）。
   `databases` 是 2026-08-06 新建的共享库平台，只承载 `apps-pg`；zitadel 的库刻意没并进去。
-  也就是说**身份库吃的是 `zitadel` ns 的档，不是 `databases` 的 restricted**。
+  也就是说身份库吃的是 `zitadel` ns 的档，不是 `databases` 的 restricted。
 
 - **`zitadel` ns：2026-08-10 一天内走完 无标签 → baseline → restricted**。起点是清单里
   一个标签都没有 → 吃 PSA 内置默认 `privileged` 且 warn/audit 全空（实测 server dry-run 一个
@@ -132,8 +132,8 @@
   [`zitadel.yaml`](../../cloud/oracle/manifests/zitadel/zitadel.yaml) 的 `valuesContent` 补
   `securityContext`/`podSecurityContext`（chart 默认缺 `allowPrivilegeEscalation:false` /
   `capabilities.drop[ALL]` / `seccompProfile`；CNPG 渲的 zitadel-pg 本就达标），
-  helm upgrade 后 10 个容器逐个复核通过、`auth.meirong.dev` 仍 200，**才**翻 enforce。
-  ☠️ 由此产生一条**承重关系**：ns 是 restricted 之后那段 chart values 不能删——删了之后
+  helm upgrade 后 10 个容器逐个复核通过、`auth.meirong.dev` 仍 200，才翻 enforce。
+  ☠️ 由此产生一条承重关系：ns 是 restricted 之后那段 chart values 不能删。删了之后
   运行中的 Pod 毫无异样（PSA 只在创建/更新时评估），症状要等下一次 helm upgrade 才现形，
   且现形方式是 `zitadel-init`/`zitadel-setup` Job 被拒 → 升级卡在 DB 迁移中途。
 
@@ -145,16 +145,16 @@
   # 没 warning = 现存 Pod 全过；有则逐条列出 Pod 名与缺的字段
   ```
 
-  ⚠️ 它只评估**当下存在的** Pod。周期性 Job（如 trivy 的 node-collector 要 hostPath）
-  当时不在，dry-run 干净不等于收紧安全 —— 这也是 `trivy-system` 在 homelab 定 privileged 的原因。
+  ⚠️ 它只评估当下存在的 Pod。周期性 Job（如 trivy 的 node-collector 要 hostPath）
+  当时不在，dry-run 干净不等于收紧安全，这也是 `trivy-system` 在 homelab 定 privileged 的原因。
 
-- 不做**全局** `restricted`（monitoring 的 grafana 跑 root）；按 ns 逐个上（已上：jobs-sg、databases）。
-  PSA 仅在 Pod 创建/更新时评估，**不杀已运行 Pod** —— 所以翻标签当下总是"看着没事"，
+- 不做全局 `restricted`（monitoring 的 grafana 跑 root）；按 ns 逐个上（已上：jobs-sg、databases）。
+  PSA 仅在 Pod 创建/更新时评估，**不杀已运行 Pod**，所以翻标签当下总是"看着没事"，
   代价要到下一次 Pod 重建（升级/驱逐/重启）才兑现。
 
 ### 5.2 Kyverno（策略即代码，homelab）
-- 拆分 controller 各 `replicas:1`、`backgroundScanInterval:24h`、**所有策略 `failurePolicy:Ignore`（fail-open）** —— 单节点上 fail-closed = Kyverno 没起来时全集群无法调度，与恢复路径冲突。
-- **4 条 ClusterPolicy**（per-rule `failureAction`），**2026-06-18 audit 后的状态**：
+- 拆分 controller 各 `replicas:1`、`backgroundScanInterval:24h`、**所有策略 `failurePolicy:Ignore`（fail-open）**：单节点上 fail-closed = Kyverno 没起来时全集群无法调度，与恢复路径冲突。
+- **4 条 ClusterPolicy**（per-rule `failureAction`），2026-06-18 audit 后的状态：
 
   | 策略 | Action | 说明 |
   |------|--------|------|
@@ -172,7 +172,7 @@
 
 ## 6. 供应链与漏洞扫描 (Supply chain / CVE) — Trivy Operator
 
-- **扫描面**：镜像 CVE + 配置审计 + RBAC 评估 + **镜像内暴露密钥**（最高信号）。
+- **扫描面**：镜像 CVE + 配置审计 + RBAC 评估 + 镜像内暴露密钥（最高信号）。
   结果以 CR 落地（`vulnerabilityreports` / `configauditreports` / `exposedsecretreports` /
   `rbacassessmentreports`）。
 - **热节点调优**：homelab `scanJobsConcurrentLimit:1`（串行，杜绝扫描器风暴；oracle 用 2）
@@ -181,29 +181,29 @@
 - **接入可观测**：ServiceMonitor（仅 homelab；oracle 由 otel-collector 直抓再 remote-write）
   → 告警 `manifests/monitoring/alerts/trivy-alerts.yaml` 经 Telegram，看板在 Grafana
   `Security` 文件夹。
-- ☠️ **这一层的失败几乎全是静默的**：告警只数**现存报告**，缺报告按 0 计入，
+- ☠️ **这一层的失败几乎全是静默的**：告警只数现存报告，缺报告按 0 计入，
   于是「漏扫」与「已清零」外观一致。已知四类：`scanJobTTL` 卡住扫描吞吐 ·
-  改 `ignoreFile` 不触发重扫 · arm64-only 镜像扫不了 · Docker Hub 匿名限流**且不会自愈**。
+  改 `ignoreFile` 不触发重扫 · arm64-only 镜像扫不了 · Docker Hub 匿名限流且不会自愈。
   **判据永远是报告数 vs 工作负载数**，不是告警绿不绿。
 
 → 配置真相、四类静默失败的完整机制、强制重扫与覆盖率体检命令全部在
-**[trivy-cve-ops.md](trivy-cve-ops.md)**。
+[trivy-cve-ops.md](trivy-cve-ops.md)。
 
 ## 7. CIS 合规与节点加固
 
-- **kube-bench**：每周日 05:00 UTC CronJob，**k3s 基准**（`k3s-cis-*`，否则通用基准满屏假 FAIL），结果 stdout→Loki（按 `{namespace="kube-bench"}` 查）。专用 `kube-bench` ns 标 privileged（需 hostPID + host 挂载）。
-- **节点加固**（`setup-k3s.yaml`）：`/etc/sysctl.d/31-k8s-protect-kernel.conf`（protect-kernel-defaults 所需 sysctl，先落盘持久化）+ config.yaml `protect-kernel-defaults:true`。**现网需维护窗口 `systemctl restart k3s` 才生效**。API 审计日志**刻意延后**（磁盘紧）。
+- **kube-bench**：每周日 05:00 UTC CronJob，k3s 基准（`k3s-cis-*`，否则通用基准满屏假 FAIL），结果 stdout→Loki（按 `{namespace="kube-bench"}` 查）。专用 `kube-bench` ns 标 privileged（需 hostPID + host 挂载）。
+- **节点加固**（`setup-k3s.yaml`）：`/etc/sysctl.d/31-k8s-protect-kernel.conf`（protect-kernel-defaults 所需 sysctl，先落盘持久化）+ config.yaml `protect-kernel-defaults:true`。**现网需维护窗口 `systemctl restart k3s` 才生效**。API 审计日志刻意延后（磁盘紧）。
 
 ## 8. 网络安全 (Network) — Cilium + Hubble
 
 - **数据面**：双集群 Cilium（eBPF + VXLAN），具备 `CiliumNetworkPolicy` L3/L4/L7 能力；ClusterMesh 经 Tailscale 互联。
-- **当前态：默认放行 + Hubble 可见性**。Hubble 已启用（relay 开），可 `hubble observe` 回答"谁在跟谁通信"——这是日后做默认拒绝的安全前置。
+- **当前态：默认放行 + Hubble 可见性**。Hubble 已启用（relay 开），可 `hubble observe` 回答"谁在跟谁通信"，这是日后做默认拒绝的安全前置。
 - **默认拒绝刻意延后**：见 §11。已有的 argocd chart 自带 NetworkPolicy（4 条）提供部分隔离。
 - **唯一自建的网络管控**（2026-08-05，oracle）：`readlist-snapshot-no-egress` /
-  `readlist-score-no-egress` —— 标准 `networking.k8s.io/v1` NetworkPolicy（Cilium 照常执行，
-  不需要 CNP），`egress: []` 即**全部拒绝含 DNS**。目的不是横向移动，而是把
+  `readlist-score-no-egress`，标准 `networking.k8s.io/v1` NetworkPolicy（Cilium 照常执行，
+  不需要 CNP），`egress: []` 即全部拒绝含 DNS。目的不是横向移动，而是把
   「能读 calibre 书库与 `app.db`（含密码 hash/OIDC 凭据）的容器」和「能出网的容器」
-  **在同一个应用内切开**：snapshot/score 零出口，只有 ingest 能出网且挂不到 calibre 卷。
+  在同一个应用内切开：snapshot/score 零出口，只有 ingest 能出网且挂不到 calibre 卷。
   这是「按数据敏感度切分工作负载」的样板，可复用到其它碰敏感卷的 Job；但注意它
   **只覆盖两个短命 Job**，不代表 ns 级或集群级有默认拒绝。
 
@@ -211,28 +211,28 @@
 
 eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异常外联）。**按集群硬件选型**：
 
-- **homelab → Tetragon**（`values/tetragon.yaml`，ns `tetragon`，Helm App）。Cilium 原生、**内核态过滤**只上报命中事件 → 省 CPU，适配热笔记本。v1：默认进程 exec/exit 可见性 → `export-stdout` → 现有 OTel→Loki（按 pod=tetragon 查，可见容器内 shell/kubectl exec/异常进程）+ Prometheus 指标(ServiceMonitor 带 release 标签)。自定义 TracingPolicy（敏感文件/提权检测）+ 基于其指标的告警为后续调优。
-- **oracle → Falco + Falcosidekick → Telegram**（`values/falco.yaml`，ns `falco`，Helm App 部署到 oracle 集群）。规则库开箱即用；oracle VM CPU 余量大。`driver: modern_ebpf`(CO-RE 无需内核模块)。**双出口**：① Falco JSON→stdout→OTel→Loki（always-on，零依赖）；② Falcosidekick→Telegram（原生 output，warning+，併入群 MatthewDaily「🚨 Homelab 告警」话题——2026-07 前曾经 Gotify 转发，已随其下线迁移，见 `decisions/alerting-telegram-migration.md`）。
+- **homelab → Tetragon**（`values/tetragon.yaml`，ns `tetragon`，Helm App）。Cilium 原生、内核态过滤只上报命中事件 → 省 CPU，适配热笔记本。v1：默认进程 exec/exit 可见性 → `export-stdout` → 现有 OTel→Loki（按 pod=tetragon 查，可见容器内 shell/kubectl exec/异常进程）+ Prometheus 指标(ServiceMonitor 带 release 标签)。自定义 TracingPolicy（敏感文件/提权检测）+ 基于其指标的告警为后续调优。
+- **oracle → Falco + Falcosidekick → Telegram**（`values/falco.yaml`，ns `falco`，Helm App 部署到 oracle 集群）。规则库开箱即用；oracle VM CPU 余量大。`driver: modern_ebpf`(CO-RE 无需内核模块)。**双出口**：① Falco JSON→stdout→OTel→Loki（always-on，零依赖）；② Falcosidekick→Telegram（原生 output，warning+，併入群 MatthewDaily「🚨 Homelab 告警」话题；2026-07 前曾经 Gotify 转发，已随其下线迁移，见 `decisions/alerting-telegram-migration.md`）。
   - **Telegram 推送前置（一次性）**：token 走 Vault `secret/homelab/telegram`（与 homelab Alertmanager 共用同一个 bot，跨集群读取）→ ESO(`cloud/oracle/manifests/falco/falcosidekick-secret.yaml`)生成 `falcosidekick-telegram` secret(key `TELEGRAM_TOKEN`)；chatid/messagethreadid 明文配在 `values/falco.yaml`。token 未配好不影响 Falco→Loki 检测，只是 falcosidekick 推送失败。
   - falco ns（含 PSA privileged 标签 + ESO secret）由 oracle-k3s kustomize App 拥有；Falco 工作负载由独立 `falco` Helm App 部署（`CreateNamespace=false`）。
-  - **⚠️ 规则误报会吃掉整条通道**：2026-08-10 复核发现，近 25 小时 Falco 的**全部 135 条告警
-    都是同一条误报**（`Read sensitive file untrusted`，宿主 systemd 拉起带 `User=` 的单元时
+  - **⚠️ 规则误报会吃掉整条通道**：2026-08-10 复核发现，近 25 小时 Falco 的全部 135 条告警
+    都是同一条误报（`Read sensitive file untrusted`，宿主 systemd 拉起带 `User=` 的单元时
     查 NSS/PAM 读 `/etc/shadow` + `/etc/pam.d/*`），约 500 条/天全部推进 Telegram。
     上游那串 `proc.name` 白名单接不住它，因为 `systemd-executor` 的 comm 是**一个纯数字**
-    （实测 `proc.name="9"`）—— 只能按 `proc.exepath` 排除，见 `values/falco.yaml` 的 override。
+    （实测 `proc.name="9"`），只能按 `proc.exepath` 排除，见 `values/falco.yaml` 的 override。
   - **自身健康告警（2026-08-10 补齐，5 条）**：在此之前 Falco **没有任何指标被抓、没有任何规则**，
-    死了也没人知道；而上面那条误报恰好在**冒充心跳**（「今天有 Falco 消息」）。修误报等于拆心跳，
+    死了也没人知道；而上面那条误报恰好在冒充心跳（「今天有 Falco 消息」）。修掉误报的同时也拆掉了这个心跳，
     所以同批接入了 `falco`(falco-metrics:8765) 与 `falcosidekick`(:2801) 两个 otel 抓取 job
     → homelab Prometheus，规则见 [observability-alerting-slo.md](observability-alerting-slo.md)
     与 `manifests/monitoring/alerts/falco-alerts.yaml`。
-  - **⚠️ falco 依赖 inotify**：oracle 节点必须 `fs.inotify.max_user_instances=8192`（Ubuntu 默认 128 会被占满，falco 启动即 `could not initialize inotify handler` CrashLoop——2026-07-12 发现时已崩 23 天/2000+ 次重启；sysctl 已固化于 `cloud/oracle/ansible/playbooks/setup-k3s.yaml`）。教训：期间 `KubePodCrashLooping`(warning) 一直在触发但淹没在噪音里——**长期 Progressing/慢性 warning 需要人定期扫一眼兜底**。
+  - **⚠️ falco 依赖 inotify**：oracle 节点必须 `fs.inotify.max_user_instances=8192`（Ubuntu 默认 128 会被占满，falco 启动即 `could not initialize inotify handler` CrashLoop；2026-07-12 发现时已崩 23 天/2000+ 次重启；sysctl 已固化于 `cloud/oracle/ansible/playbooks/setup-k3s.yaml`）。教训：期间 `KubePodCrashLooping`(warning) 一直在触发但淹没在噪音里，**长期 Progressing/慢性 warning 需要人定期扫一眼兜底**。
 
 ## 9. 安全可观测与告警
 
-- **统一管道**（2026-07 起）：homelab 侧 Prometheus(metrics)/Loki(logs) → Alertmanager → 原生 `telegramConfigs`(无 bridge) → Telegram 群 MatthewDaily 的「🚨 Homelab 告警」话题。`severity:warning|critical` 路由，`info` 丢弃；**`Watchdog` 不丢弃**——由 `watchdog` AlertmanagerConfig 抢先路由到 oracle Uptime Kuma push monitor 作 dead-man's switch（目的、链路与**覆盖边界**见 [dead-mans-switch.md](dead-mans-switch.md)，此处不留副本；⚠️ 它有已证实的失明盲区，别当成无条件兜底）。旧 `alertmanager-gotify-bridge` 因 `concurrent map writes` 崩溃 bug + 上游无维护已下线。oracle 侧 Falco 走独立的 Falcosidekick 原生 Telegram output(§8.5)——两条链路各自直连 Telegram Bot API，同一个 bot/话题，但代码路径不同，互不依赖。Gotify 本体已随本次迁移彻底下线（Deployment/PVC/网关路由/DNS 全部移除），详见 `decisions/alerting-telegram-migration.md`。
+- **统一管道**（2026-07 起）：homelab 侧 Prometheus(metrics)/Loki(logs) → Alertmanager → 原生 `telegramConfigs`(无 bridge) → Telegram 群 MatthewDaily 的「🚨 Homelab 告警」话题。`severity:warning|critical` 路由，`info` 丢弃；**`Watchdog` 不丢弃**：由 `watchdog` AlertmanagerConfig 抢先路由到 oracle Uptime Kuma push monitor 作 dead-man's switch（目的、链路与覆盖边界见 [dead-mans-switch.md](dead-mans-switch.md)，此处不留副本；⚠️ 它有已证实的失明盲区，别当成无条件兜底）。旧 `alertmanager-gotify-bridge` 因 `concurrent map writes` 崩溃 bug + 上游无维护已下线。oracle 侧 Falco 走独立的 Falcosidekick 原生 Telegram output(§8.5)，两条链路各自直连 Telegram Bot API，同一个 bot/话题，但代码路径不同，互不依赖。Gotify 本体已随本次迁移彻底下线（Deployment/PVC/网关路由/DNS 全部移除），详见 `decisions/alerting-telegram-migration.md`。
 - **新增 `PrometheusRule`/`ServiceMonitor` 必须带 `release:kube-prometheus-stack`** 否则 operator selector 忽略。
 - **安全相关规则**：ESO 健康（`eso-alerts.yaml`）、Trivy 发现（`trivy-alerts.yaml`）。多集群靠 `cluster` 标签区分。
-- **看板**：Grafana `Security` 文件夹 3 张——**Trivy 漏洞概览**（CVE/暴露密钥/配置审计，Prometheus）、**Kyverno 准入策略**（评估结果/Enforce 拦截/各策略 fail/webhook 延迟，Prometheus，Kyverno 各 controller ServiceMonitor）、**运行时与审计事件**（Falco 告警 + Tetragon 进程事件 + kube-bench CIS，Loki）。Hubble CLI 看网络流。
+- **看板**：Grafana `Security` 文件夹 3 张：Trivy 漏洞概览（CVE/暴露密钥/配置审计，Prometheus）、Kyverno 准入策略（评估结果/Enforce 拦截/各策略 fail/webhook 延迟，Prometheus，Kyverno 各 controller ServiceMonitor）、运行时与审计事件（Falco 告警 + Tetragon 进程事件 + kube-bench CIS，Loki）。Hubble CLI 看网络流。
 - **散在别处的可见性**：Kyverno 当前存量违规 `kubectl get polr -A`（counter 指标只适合看趋势/速率）；PSA violation 在 `kubectl get events`；所有 warning|critical 告警(homelab) → Telegram。
 
 ## 10. 威胁模型与覆盖矩阵
@@ -261,19 +261,19 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 5. **离站备份**：restic 仓库（Vault raft / pg_dump / sqlite，含恢复演练通过）目前仅 106 本地 ZFS 单副本，尚未同步到云端（OCI always-free / B2）。详见 docs/runbooks/backup-recovery.md 与 ROADMAP.md。
 6. **oracle 节点 OS 层防火墙口子过多**（2026-08-10 发现，未处理）：firewalld `public` zone 开着
    `10250 / 2380 / 4240 / 4244 / 32379 / 16443 / 25000 / 19001 / 12379 / 10248-10259 / 7800 / 1338 / …`
-   ——多数是早期 CNI（`cali+`、`flannel.1`、`cni0` 仍挂在 `trusted` zone）和 microk8s 试验的残留。
-   它们**目前只靠 OCI Security List 这一层挡在云边界**，纵深只有一层厚。
+   多数是早期 CNI（`cali+`、`flannel.1`、`cni0` 仍挂在 `trusted` zone）和 microk8s 试验的残留。
+   它们目前只靠 OCI Security List 这一层挡在云边界，纵深只有一层厚。
    收口有真实风险（`enp0s3` 也在 `public` zone，误删可能切断节点自身到 API 的路径），
    需要先逐端口确认归属再动；在那之前**不要往 Security List 里新增任何 `0.0.0.0/0` 规则**。
-7. **Nakama 管理控制台裸挂公网**（2026-08-25，**有意接受**，非疏忽）：
+7. **Nakama 管理控制台裸挂公网**（2026-08-25，有意接受，非疏忽）：
    `nakama-console.meirong.dev` → Nakama 内嵌 console(7351)，它能看/删账号、改任意存储数据、
-   调用任意 RPC，而前面**只有 Nakama 自带的用户名+口令** —— 没有 ZITADEL OIDC、没有
-   oauth2-proxy、没有 Cloudflare Access。这是本仓库当前**唯一**一个公网可达却不过第 2 层
+   调用任意 RPC，而前面只有 Nakama 自带的用户名+口令，没有 ZITADEL OIDC、没有
+   oauth2-proxy、没有 Cloudflare Access。这是本仓库当前唯一一个公网可达却不过第 2 层
    身份的管理面（Grafana/ArgoCD/Vault 都在 OIDC 后面）。
    现有缓解只有两条：口令是 32 字节随机值（Vault `secret/homelab/nakama` → `console_password`）、
    Nakama 那 6 个带不安全默认值的 key 全部换掉了。
    ⚠️ **收紧的正确方向是在那条 HTTPRoute 前面加 oauth2-proxy 或 Cloudflare Access**，
-   不是改口令 —— 改口令不减少暴露面。清单：`k8s/helm/manifests/gateway/route-nakama-console.yaml`。
+   不是改口令，改口令不减少暴露面。清单：`k8s/helm/manifests/gateway/route-nakama-console.yaml`。
 8. **git 历史里的旧对象**（2026-08-10）：公网 IP 与两个已失效的 ZITADEL 凭据已从全历史抹除并
    force-push，但 GitHub 上重写前的悬空对象**仍可按 commit SHA 访问**，直到向 GitHub Support
    申请 GC。彻底了结的替代手段是轮换 OCI 公网 IP，让旧对象里的值失去意义。

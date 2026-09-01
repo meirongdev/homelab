@@ -1,11 +1,11 @@
 # ArgoCD 控制面运行在 oracle-k3s
 
-> Last updated: 2026-08-20
+> Last updated: 2026-09-01
 > Status: 生效事实 + 迁移 SOP
 > 触发条件：重装/升级 ArgoCD、集群凭据过期、需要回滚到 homelab 控制面、
 > 或要完成 2026-08-02 迁移的收尾步骤。
 > 成功判定：`just argocd-status`（在 `k8s/helm/`）列出的 App **全部** Synced/Healthy，
-> 且数量与 `ls argocd/applications/*.yaml | wc -l` 一致（**别写死条数**——App 是持续增减的，
+> 且数量与 `ls argocd/applications/*.yaml | wc -l` 一致（**别写死条数**：App 是持续增减的，
 > 2026-08-02 迁移当时 28 个、2026-08-20 已是 31 个），`argocd.meirong.dev` 可登录。
 
 ## 现状（一句话）
@@ -14,7 +14,7 @@
 
 | 项 | 值 |
 |---|---|
-| 控制面所在 | `oracle-k3s` / ns `argocd`，chart `argo/argo-cd` **10.1.4**（manual-helm，不自管） |
+| 控制面所在 | `oracle-k3s` / ns `argocd`，chart `argo/argo-cd` 10.1.4（manual-helm，不自管） |
 | 部署命令 | `cd k8s/helm && just deploy-argocd`（`argocd_ctx := "oracle-k3s"`） |
 | values | `values/argocd.yaml` + `values/argocd-oracle.yaml`（后者只覆盖 `crds.install=true`） |
 | 被纳管的外部集群 | homelab `https://100.94.186.7:6443`（Tailscale） |
@@ -29,7 +29,7 @@
 - homelab 的负载**必须**写 `https://100.94.186.7:6443`（19 个）
 - oracle 自己的负载写 `https://kubernetes.default.svc`（7 个）
 - `root` 跟着控制面走，保持 in-cluster
-  （2026-08-02 迁移当时这里是 2 个——另一个是 `argocd-image-updater`，已于
+  （2026-08-02 迁移当时这里是 2 个：另一个是 `argocd-image-updater`，已于
   2026-08-03 退役，其残留的两个 ExternalSecret 也在 2026-08-06 一并清除）
 
 在 destination 尚未重写时对新控制面 `kubectl apply -f argocd/applications/`，
@@ -54,7 +54,7 @@ just deploy-argocd        # 重装/升级 chart（幂等）
 ### bootstrap 依赖（不在 Git，重建时要手工做）
 
 homelab 侧的 `kube-system/argocd-manager` SA + ClusterRoleBinding(cluster-admin) +
-`argocd-manager-token` Secret。刻意不进 GitOps —— 否则 ArgoCD 要靠自己创建
+`argocd-manager-token` Secret。刻意不进 GitOps：否则 ArgoCD 要靠自己创建
 自己纳管 homelab 所需的凭据，成环。重建：
 
 ```bash

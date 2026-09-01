@@ -4,9 +4,9 @@
 > 且需要保住数据、尽量短的切换窗口。无状态服务不需要本文，改 destination 推送即可。
 > 目标：给出一条已经跑通过的执行序列，以及每一步「不做就会静默出问题」的配套。
 > **成功判定**：§ 5 校验全绿 + § 6 域名切换后业务可用。
-> **回滚**：源端保留到 § 7 之前——§ 6 域名切换未完成前可整体回切；§ 7 后源端已退役，需走
+> **回滚**：源端保留到 § 7 之前：§ 6 域名切换未完成前可整体回切；§ 7 后源端已退役，需走
 > [backup-recovery.md](backup-recovery.md) 的 restic 恢复。
-> Last updated: 2026-08-21
+> Last updated: 2026-09-01
 >
 > 本文由 2026-08-03 的 calibre 迁移（书库 23G / 2061 本 / 3 个 sqlite）反推而成，
 > 那次的实测数字与事故见
@@ -17,13 +17,13 @@
 
 | 核实项 | 怎么查 | 踩过的坑 |
 |---|---|---|
-| **镜像支持目标架构** | `docker manifest inspect <image>@<digest>` 看有没有 `linux/arm64` | oracle 是 aarch64。calibre 那次 digest 原样复用**是安全的**（核实过是多架构 manifest list）；但此前的 oauth2-proxy 样例就栽过——那次 pin 的是**单架构 digest**，搬过去直接起不来 |
+| **镜像支持目标架构** | `docker manifest inspect <image>@<digest>` 看有没有 `linux/arm64` | oracle 是 aarch64。calibre 那次 digest 原样复用**是安全的**（核实过是多架构 manifest list）；但此前的 oauth2-proxy 样例就栽过：那次 pin 的是**单架构 digest**，搬过去直接起不来 |
 | **目标集群容量** | `kubectl --context <target> get node -o wide`；`df -h` | 别只看 `kubectl top` 的百分比，页缓存会骗人（见迁移文档 §5） |
 | **是否真的能搬** | 依赖是否跨 tailnet / 是否必须贴着抓取目标 | open-notebook 搬不了：模型后端 DGX/Mac 是**按人共享**的节点，oracle 的 tagged-device 在 netmap 里看不到它们 |
 
 ## 1. 建空壳，让 PVC 落地
 
-⚠️ **`local-path` 是 `WaitForFirstConsumer`** —— `replicas: 0` 时 PVC 根本不绑定，
+⚠️ **`local-path` 是 `WaitForFirstConsumer`**：`replicas: 0` 时 PVC 根本不绑定，
 节点上不会有目录，**就无处 rsync**。所以必须先真起一次 Pod。
 
 ```bash
@@ -51,9 +51,9 @@ kubectl --context oracle-k3s -n <ns> get pod          # 确认已无 Pod
 
 | 配套 | 不改的后果 | 现在有没有网兜住 |
 |---|---|---|
-| **备份白名单** | 备份脚本是**显式白名单**，搬过去不加 = 数据直接掉出 restic，且**不会有任何报错** | ✅ CI 的 H4 会拦（[manifest-safety-checks.md](../reference/manifest-safety-checks.md)） |
-| **SLO / 告警** | oracle 侧指标名不同：`envoy_cluster_upstream_rq_xx_total`（带 `_total`，otel remote-write 的命名差异）+ 需要 `cluster="oracle-k3s"` 过滤。照抄 homelab 写法得到**空集**，SLO 恒绿 | ❌ 只能人工核对，查询要实跑一次 |
-| **配额护栏** | LimitRange/ResourceQuota 常常留在原地 —— **风险搬走了，防护留下**。calibre 那组护栏当初就是为 ebook-sync 泄漏 92 个 Job pod 加的 | ❌ 人工 |
+| **备份白名单** | 备份脚本是显式白名单，搬过去不加 = 数据直接掉出 restic，且**不会有任何报错** | ✅ CI 的 H4 会拦（[manifest-safety-checks.md](../reference/manifest-safety-checks.md)） |
+| **SLO / 告警** | oracle 侧指标名不同：`envoy_cluster_upstream_rq_xx_total`（带 `_total`，otel remote-write 的命名差异）+ 需要 `cluster="oracle-k3s"` 过滤。照抄 homelab 写法得到空集，SLO 恒绿 | ❌ 只能人工核对，查询要实跑一次 |
+| **配额护栏** | LimitRange/ResourceQuota 常常留在原地：风险搬走了，防护留下。calibre 那组护栏当初就是为 ebook-sync 泄漏 92 个 Job pod 加的 | ❌ 人工 |
 | **工具链默认 context** | 脚本 / skill / justfile 里的 `kubectl` 打到旧集群 | ❌ 人工；跨集群后所有命令都得带 `--context` |
 | **隐藏耦合** | 见下 | ❌ 人工 |
 
@@ -78,7 +78,7 @@ ssh <dst-node>  "sudo ls -d /var/lib/rancher/k3s/storage/*_<ns>_<pvc>"
 rsync -aHAX --info=progress2 <src>/ <dst>/
 ```
 
-**第 1 遍拿到的 DB 是不可用的** —— sqlite 处于 WAL 模式、库是活的
+**第 1 遍拿到的 DB 是不可用的**：sqlite 处于 WAL 模式、库是活的
 （calibre 那次 `metadata.db` 带 152KB 未 checkpoint 的 `-wal`）。所以：
 
 ```bash
@@ -87,7 +87,7 @@ rsync -aHAX --info=progress2 <src>/ <dst>/
 rsync -aHAX --info=progress2 <src>/ <dst>/
 ```
 
-第 2 遍按 `size+mtime` 跳过已传文件 —— calibre 那次 2000+ 书籍文件全部跳过，
+第 2 遍按 `size+mtime` 跳过已传文件。calibre 那次 2000+ 书籍文件全部跳过，
 **实际只传了 811KB（speedup 29772）**。停机窗口因此是秒级而非小时级。
 
 ## 5. 校验（进域名切换前必须全绿）
@@ -106,7 +106,7 @@ calibre 那次的验收线：`metadata.db` 2043 本 / 2578 作者、`app.db` 2 �
 
 ## 6. 域名两步切换
 
-必须**分两个提交**，不能一步到位 —— external-dns 的 owner TXT 机制决定了
+必须**分两个提交**，不能一步到位：external-dns 的 owner TXT 机制决定了
 同一记录不能被两个集群同时持有。
 
 ```
@@ -121,7 +121,7 @@ calibre 那次的验收线：`metadata.db` 2043 本 / 2578 作者、`app.db` 2 �
 
 ## 7. 退役源端
 
-☠️ **删任何清单文件前先 `grep '^kind:' <file>`** —— 看有没有作用域大于该文件的资源。
+☠️ **删任何清单文件前先 `grep '^kind:' <file>`**：看有没有作用域大于该文件的资源。
 2026-08-03 就是 `Namespace` 内嵌在 `calibre-web.yaml` 顶部，`git rm` 掉它 →
 ArgoCD prune 掉整个 ns → **级联删光同 ns 的 open-notebook 数据**
 （[复盘](../records/2026-08-03-namespace-prune-cascade.md)）。
@@ -137,8 +137,8 @@ grep '^kind:' <要删的每个文件>
 - **源端备份脚本移除对应逻辑**，否则每晚打 `[warn] ... NOT in this backup`
 - Application 的 `path` 与 `destination` 一起改（destination 写错会把负载装错集群，
   由 H2 拦截）
-- ⚠️ **带 `Prune=false` 的 PVC 删清单不会删数据**，需在确认目标端服务正常后**手工删除**
-  —— 这是刻意的护栏，别在切换当天就删
+- ⚠️ **带 `Prune=false` 的 PVC 删清单不会删数据**，需在确认目标端服务正常后**手工删除**：
+这是刻意的护栏，别在切换当天就删
 
 ## 8. 残余清扫（迁移完成后单独跑一轮）
 
@@ -146,10 +146,10 @@ grep '^kind:' <要删的每个文件>
 
 | 残余 | 为什么留下 | 怎么清 |
 |---|---|---|
-| 集群级 RBAC（ClusterRole/Binding） | 不属于任何 ns | 逐个点名删。☠️ 别按前缀批量删——`argocd-manager` 是 oracle 纳管 homelab 的**活凭据** |
+| 集群级 RBAC（ClusterRole/Binding） | 不属于任何 ns | 逐个点名删。☠️ 别按前缀批量删：`argocd-manager` 是 oracle 纳管 homelab 的**活凭据** |
 | 无 `ownerReferences` 的 trivy 报告 | trivy 的 GC 靠 ownerRef 级联 | `kubectl delete configauditreport <name> -n <ns>` |
 | Vault path | 消费它的 ExternalSecret 删了，path 还在 | 两集群 ExternalSecret 交叉核对确认零消费者后 `vault kv metadata delete` |
-| containerd 镜像 | k3s 镜像 GC 阈值是磁盘 **85%**，低于此永不触发 | `k3s crictl rmi --prune` |
+| containerd 镜像 | k3s 镜像 GC 阈值是磁盘 85%，低于此永不触发 | `k3s crictl rmi --prune` |
 
 ⚠️ `crictl rmi --prune` 会刷一屏 `DeadlineExceeded`（默认 RPC 超时 2s，控制面那台笔记本
 的 containerd 跟不上），**但删除其实在后台完成了**。别看见报错就重跑，先 `df -h` 复核。

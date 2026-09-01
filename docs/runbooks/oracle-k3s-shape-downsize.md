@@ -1,6 +1,6 @@
 # oracle-k3s 缩容到 2 OCPU / 12GB
 
-> Last updated: 2026-08-14
+> Last updated: 2026-09-01
 > Status: 生效事实 + 切换 SOP
 > 触发条件：需要改 `VM.Standard.A1.Flex` 的 shape（vendor 回收额度、腾额度开第二台、
 > 或事后要涨回去）。任何改 `ocpus` / `memory_gb` 的动作都走本文。
@@ -34,7 +34,7 @@
 | capacity | 2000m / ~11985Mi |
 | system-reserved | 200m / 2560Mi |
 | eviction-hard | memory.available<500Mi |
-| **allocatable** | **1800m / ~8925Mi** |
+| **allocatable** | 1800m / ~8925Mi |
 | CPU requests 合计 | **1372m（76%）**，CronJob 峰值另计 ~200m ← 缩容当时的快照，会随新负载上涨（2026-08-06 已 1477m/82%） |
 | 内存 requests 合计 | ~5800Mi（65%） |
 | 内存实际峰值（pod 部分） | ~6.0GiB |
@@ -43,7 +43,7 @@
 
 | # | 改什么 | 在哪 | 怎么生效 |
 |---|--------|------|---------|
-| 1 | CPU requests 2712m → **1372m**（43 处） | `cloud/oracle/manifests/**`、`k8s/helm/values/{loki,tempo,falco,cnpg-operator,opencost-oracle,trivy-operator-oracle}.yaml` | `git push` → ArgoCD |
+| 1 | CPU requests 2712m → 1372m（43 处） | `cloud/oracle/manifests/**`、`k8s/helm/values/{loki,tempo,falco,cnpg-operator,opencost-oracle,trivy-operator-oracle}.yaml` | `git push` → ArgoCD |
 | 2 | argocd-server 50→25m、argocd-redis 25→15m | `k8s/helm/values/argocd.yaml` | **`cd k8s/helm && just deploy-argocd`**（manual-helm，push 不生效） |
 | 3 | `bulk`(-10) PriorityClass + 9 个可牺牲应用挂上 | `cloud/oracle/manifests/base/priorityclasses.yaml` 等 | `git push` → ArgoCD |
 | 4 | LimitRange `defaultRequest.cpu` 50m→15m | `cloud/oracle/manifests/personal-services/personal-services-limits.yaml` | `git push`（**要重建 timeslot pod 才吃到新默认值**） |
@@ -57,7 +57,7 @@
 squoosh / it-tools / excalidraw×2 / trends / rsshub-browserless。
 
 ⚠️ **ZITADEL 应用设不了 priorityClassName**：chart 9.34.1 没有这个 values 键（逐键
-确认过），写进 `valuesContent` 会被静默忽略——比不配更糟，因为看起来像配了。
+确认过），写进 `valuesContent` 会被静默忽略：比不配更糟，因为看起来像配了。
 它留在 0，靠 `bulk` 把可牺牲的应用压到它下面来保证相对次序。
 它的库（CNPG Cluster）能设，已设成 `critical`。
 
@@ -78,7 +78,7 @@ kubectl --context oracle-k3s describe node oracle-k3s | sed -n '/Allocated resou
 # 期望：cpu requests ≈ 1372m。此时仍是 4 OCPU，所以显示的百分比是 /4000m（34%）。
 ```
 
-**这一步不过就不要往下走**——shape 改完再发现 requests 没降，节点已经在 Pending 了。
+**这一步不过就不要往下走**：shape 改完再发现 requests 没降，节点已经在 Pending 了。
 
 ⚠️ 这一步本身会滚一批 pod（改了 pod template 就会重建）。两个有用户可见影响的：
 
@@ -90,7 +90,7 @@ kubectl --context oracle-k3s describe node oracle-k3s | sed -n '/Allocated resou
 已核对**不会**踩的坑（2026-08-05 用 `kubectl diff -k` 服务端 dry-run 实测，无
 `field is immutable`）：`calibre-metadata-updater` 是 CronJob，`jobTemplate` 可变；
 `loki-0`/`tempo-0`/`trivy-server-0` 是 StatefulSet，`spec.template` 可变。
-唯一不可改的是裸 `kind: Job` 的 `calibre-metadata-enrich`——**它的 200m 是刻意留的**，
+唯一不可改的是裸 `kind: Job` 的 `calibre-metadata-enrich`：**它的 200m 是刻意留的**，
 原因写在 `cloud/oracle/manifests/calibre-metadata/enrich-job.yaml` 里。
 
 ### 2. 上节点改 kubelet 参数并清 hugepages
@@ -128,7 +128,7 @@ ssh -i ~/.ssh/vgio ubuntu@100.107.166.37 'sudo systemctl restart k3s'
 
 ⚠️ 这会重建全集群 pod（~2-3 分钟），**SSO 会再断一次**。在此之前的中间状态是
 **安全但不理想**的：allocatable 偏保守（白扣 2GiB），而 `eviction-hard` 还是默认
-100Mi —— 12GB 机器上这个阈值太晚，内核 OOM killer 往往先于 kubelet 的有序驱逐动手。
+100Mi：12GB 机器上这个阈值太晚，内核 OOM killer 往往先于 kubelet 的有序驱逐动手。
 
 ### 3. 静音告警 + 通告停机面
 
@@ -136,7 +136,7 @@ oracle 挂掉会连带的（Prometheus/Grafana/Alertmanager 在 homelab，告警
 
 | 服务 | 停机影响 |
 |---|---|
-| ZITADEL | **SSO 全挂**——homelab 侧 Grafana / ArgoCD UI 也登不进 |
+| ZITADEL | **SSO 全挂**，homelab 侧 Grafana / ArgoCD UI 也登不进 |
 | ArgoCD | GitOps 停摆（控制面在 oracle） |
 | cloudflared ×2 | oracle 侧所有子域 502 |
 | Loki / Tempo | 日志、追踪断档；homelab otel-collector 先排队后丢 |
@@ -187,7 +187,7 @@ make apply    # 0 added, 0 changed, 0 destroyed —— 只把 refresh 结果和 
 state 的东西会给出错误数字；而 `apply -refresh=false` 会拿 state 里的旧值去和 config
 比，可能对一台已经是目标形状的实例再发一次 shape 变更（=白重启一次）。
 
-另外手工改 shape 时**别忘了步骤 2**（hugepages + kubelet-arg）—— 它不在 OCI Console
+另外手工改 shape 时**别忘了步骤 2**（hugepages + kubelet-arg）：它不在 OCI Console
 的流程里，最容易漏。漏了的症状：节点 `hugepages-2Mi` 仍是 `2Gi`，且
 `capacity − allocatable` 的差额恰好等于 2048Mi（说明 system-reserved 一条没生效）。
 
@@ -201,7 +201,7 @@ cd /Users/matthew/projects/homelab/cloud/oracle && just verify-node
 
 24 项：主机层（hugepages / kubelet-arg / UDP GRO 持久化 / firewalld 递归防护 /
 FORWARD policy / DNS fallback / Tailscale 只广播本节点 /32）· 节点账目（capacity、
-**预留差额** —— 差额恰好 2048Mi 会被专门指出来，那正是「sysctl 清了但 kubelet 没重启」
+**预留差额**：差额恰好 2048Mi 会被专门指出来，那正是「sysctl 清了但 kubelet 没重启」
 的典型症状）· pod/App · ClusterMesh 双向 `retrieved=true` · 数据面 HTTP 码。
 任一条不成立即非零退出。
 
@@ -212,7 +212,7 @@ cd /Users/matthew/projects/homelab/cloud/oracle && just check-node-drift
 ```
 
 它是 `ansible-playbook --check --diff`，只读，**`changed=0` 即无漂移**。这个信号是
-2026-08-05 才变可信的——之前有 4 条结构性假阳性（2 条 firewalld reload 是「动作」不是
+2026-08-05 才变可信的：之前有 4 条结构性假阳性（2 条 firewalld reload 是「动作」不是
 「状态」，已改成 handler；2 条 FORWARD ACCEPT 规则永远无法收敛，已删除，理由见
 `setup-k3s.yaml` 里的注释）。留着假阳性的漂移检测等于没有。
 
@@ -259,7 +259,7 @@ max_over_time((node_memory_MemTotal_bytes{cluster="oracle-k3s"}
 **如果 `make plan` 想重建实例**：立刻停。2026-08-05 实测正确的输出是
 `0 to add, 1 to change, 0 to destroy` + `~ shape_config` 就地更新。出现
 `must be replaced` 一定是别的字段漂移了（镜像 OCID、`create_vnic_details`），
-先查漂移，**绝不要**带着 replace 跑 apply —— `preserve_boot_volume = true` 保得住盘，
+先查漂移，**绝不要**带着 replace 跑 apply：`preserve_boot_volume = true` 保得住盘，
 但保不住 ap-osaka-1 的容量。
 
 **涨回 4/24 不保证做得到**：ap-osaka-1 的 A1 Free Tier 长期没容量，回滚可能连续数天
@@ -294,7 +294,7 @@ reconcile，撞上只剩 2 核。表现是 app 短暂 `Unknown`/`Progressing`、
    > 这类 nested map 覆盖推之前先本地核对：
    > `helm template loki grafana/loki --version <v> -f k8s/helm/values/loki.yaml`
 
-3. **改掉 affinity 是必要不充分——pod anti-affinity 是对称的。** 新 pod 自己没规则了，
+3. **改掉 affinity 是必要不充分的，pod anti-affinity 是对称的。** 新 pod 自己没规则了，
    但**还在跑的旧 pod 带着规则**，禁止同节点再来一个 gateway。报错措辞会从
    `didn't match pod anti-affinity rules` 变成 `didn't satisfy **existing pods**
    anti-affinity rules`（这个词的变化就是判据）。而 Deployment 控制器又不肯把旧 RS

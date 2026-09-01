@@ -1,11 +1,11 @@
 # Mac OMLX 推理指标（采集口径与陷阱）
 
-> Last updated: 2026-08-23
+> Last updated: 2026-09-01
 > Status: 生效事实
 
 ## 速览
 
-- **OMLX 自己没有 `/metrics`**（0.6.3rc2 实测）。指标靠**两条互补链路**拼出来，
+- **OMLX 自己没有 `/metrics`**（0.6.3rc2 实测）。指标靠两条互补链路拼出来，
   都不需要鉴权、都不改 OMLX 本身：
 
 | | 链路 A：json-exporter（拉） | 链路 B：textfile（推） |
@@ -14,7 +14,7 @@
 | 谁在跑 | 集群内 `json-exporter.monitoring` Deployment | Mac 上的 LaunchAgent，每 60s 渲染一次 `.prom` |
 | 怎么进 Prometheus | job `omlx-status` / `omlx-models` 抓 `/probe` | node_exporter textfile collector，随 job `node-exporter-macbook` |
 | 新鲜度 | 30s | 源文件 300s 才落盘（且只在有请求时落）|
-| 独有内容 | **驻留/内存/队列/能力位**（实时状态） | **累计 prefill/generate 秒数**、**per-model token 账本**、跨重启持久化 |
+| 独有内容 | 驻留/内存/队列/能力位（实时状态） | 累计 prefill/generate 秒数、per-model token 账本、跨重启持久化 |
 | 指标前缀 | `omlx_*` | `omlx_alltime_*`（☠️ 抓取时改名，见陷阱 8）|
 
 - 链路 B 是 2026-08-23 加的，补的是链路 A 结构性拿不到的**分母**：
@@ -33,7 +33,7 @@
 | **A** 模块配置（JSON→指标的映射） | `k8s/helm/manifests/monitoring/json-exporter/json-exporter-cm.yaml` |
 | **B** 生产端（Mac LaunchAgent，写 `.prom`） | `macbook/ansible/playbooks/omlx-metrics.yaml` + `templates/com.meirongdev.omlx-textfile-collector.plist.j2` |
 | **B** 读取端（给 node_exporter 加 textfile flag） | `macbook/ansible/playbooks/node-exporter.yaml` + `templates/com.prometheus.node_exporter.plist.j2` |
-| **B** 渲染器（☠️ **不在本仓**） | `mlx-learning` 仓的 `src/mlx_learning/omlx_textfile_collector.py`，装在 Mac 的 `~/projects/meirongdev/mlx-learning/.venv/` 里 |
+| B 渲染器（☠️ **不在本仓**） | `mlx-learning` 仓的 `src/mlx_learning/omlx_textfile_collector.py`，装在 Mac 的 `~/projects/meirongdev/mlx-learning/.venv/` 里 |
 | 抓取配置（A 两个 job + B 的改名规则） | `k8s/helm/values/kube-prometheus-stack.yaml` 的 `additionalScrapeConfigs` |
 | 面板 | `k8s/helm/manifests/monitoring/dashboards/omlx-dashboard.yaml` |
 | Mac 侧主机指标（同一个 node_exporter） | 见 [observability-multicluster.md](observability-multicluster.md) |
@@ -43,7 +43,7 @@
 - 集群侧（A 的 exporter、两侧的抓取配置、面板）：`git push` → ArgoCD `monitoring-dashboards`
   （管 `manifests/monitoring/` 整个目录）与 `kube-prometheus-stack`（多源 values）各自同步，
   **无需手动 helm/kubectl**。
-- Mac 侧（B 的两个 LaunchAgent）：**Ansible，可重复执行**——
+- Mac 侧（B 的两个 LaunchAgent）：Ansible，可重复执行。
   ```bash
   cd macbook/ansible
   just node-exporter   # 读取端：--collector.textfile.directory（改了 plist 必须重启进程，handler 会做）
@@ -62,12 +62,12 @@ netmap 里没有 Mac 这个源（与 litellm 同一约束）。调度到 worker 
 |---|---|---|---|
 | `GET /api/status` | 无 | 全局累计：请求数/token 数/累计平均 TPS/缓存命中/uptime/自定义内核可用性 | 链路 A |
 | `GET /v1/models/status` | 无 | per-model：是否驻留/装载中/体积（估算+实际）/`last_access`/context 长度 + pool 天花板 | 链路 A |
-| **文件 `~/.omlx/stats.json`** | 无 | 原始累计和：token / 请求 / **prefill 与 generate 秒数**，全局 + **per-model** | 链路 B |
+| 文件 `~/.omlx/stats.json` | 无 | 原始累计和：token / 请求 / prefill 与 generate 秒数，全局 + per-model | 链路 B |
 | `GET /admin/api/stats` | ❌ **admin 会话 cookie** | 更细：内存压力档位、队列深度 | 未采集 |
 
 **`stats.json` 是怎么回事**：`server_metrics.save_alltime()` 每 300s（`_SAVE_INTERVAL`）
 把 `alltime` 计数器**原子重写**进这个文件，进程退出时再写一次。这就是 admin API 那套
-`alltime` 口径的落盘副本 —— 免鉴权、跨进程重启累加，且**带着 `/api/status` 没有的秒数分母**。
+`alltime` 口径的落盘副本：免鉴权、跨进程重启累加，且**带着 `/api/status` 没有的秒数分母**。
 
 **`/admin/api/*` 拿不到**：`omlx/admin/auth.py::require_admin` 只认 cookie，**没有 Bearer 通路**。
 ☠️ **不要为此去开 `skip_api_key_verification`**：`server.host` 是 `0.0.0.0` 且
@@ -121,7 +121,7 @@ admin 面板开放给 LAN 和整个 tailnet。原本唯一卡在 admin API 后�
 | `omlx_alltime_stats_file_mtime_seconds` | 源文件 `stats.json` 的 mtime（**源数据**新鲜度）|
 | `omlx_alltime_stats_collected_timestamp_seconds` | 快照渲染时刻（**采集器**新鲜度，两者含义不同，见陷阱 9）|
 
-这才是「最近半小时到底多快」的正确算法 —— 分母是**纯推理秒数**，不含空闲：
+这才是「最近半小时到底多快」的正确算法，分母是纯推理秒数，不含空闲：
 
 ```promql
 # prefill tok/s：分子必须扣掉缓存命中，否则被缓存命中率放大
@@ -150,11 +150,11 @@ rate(omlx_alltime_cached_prompt_tokens_total[30m])
      墙上吞吐（「这台机器这半小时产出了多少 token」）；
    - `rate(omlx_alltime_model_completion_tokens_total[30m]) / rate(omlx_alltime_model_generation_seconds_total[30m])`
      = **纯推理速度**（「它干活的时候有多快」）。机器闲着时前者掉到 0，后者不动。
-   ⚠️ 2026-08-23 之前这里写的是「OMLX 不暴露分窗口的纯推理速度」—— 那是只看 HTTP 端点
+   ⚠️ 2026-08-23 之前这里写的是「OMLX 不暴露分窗口的纯推理速度」，那是只看 HTTP 端点
    得出的结论，秒数分母在 `stats.json` 里一直有，链路 B 把它取出来了。
 2. **天花板核算 ≠ 实际内存**。pool 用 `estimated_size` 记账，实测 reranker 估算 0.35G /
    实际 `actual_size` 0.50G（**+41%**）；但它与 4B 嵌入模型同驻时，两个口径合计只差 4%
-   —— **偏差因模型而异，别当固定系数用**。「核算没到 30G」不等于机器还有那么多余量 ——
+   **偏差因模型而异，别当固定系数用**。「核算没到 30G」不等于机器还有那么多余量，
    余量看 `free -m` 的 available（见 [k8s-qos-resource-management.md](k8s-qos-resource-management.md)）。
 3. **未驻留的模型没有 `actual_size` / `last_access` 指标**（源端是 `null`）。
    json_exporter 遇到 `null` 会**丢弃该指标并每次抓取刷一条 ERROR 日志**，
@@ -171,11 +171,11 @@ rate(omlx_alltime_cached_prompt_tokens_total[30m])
    （抓取间隔刻意不是 15s：OMLX 是单进程 Python，大 prefill 期间事件循环卡住，
    抓超时恰好发生在最该看数据的时候。）
 7. **`custom_kernels` 是字典不是数组**，jsonpath 带不出 key 名，4 个内核只能在配置里逐条写死。
-   OMLX 升级新增内核时这里不会自动出现 —— 面板少一格，不报错。
+   OMLX 升级新增内核时这里不会自动出现，面板少一格，不报错。
 8. **链路 B 的指标在抓取时被改了名**（`omlx_` → `omlx_alltime_`，规则写在
    `node-exporter-macbook` job 的 `metric_relabel_configs`）。两个后果：
    - Mac 上 `omlx.prom` 里、以及 **mlx-learning 仓 `docs/serving.md` 的 PromQL 示例**
-     用的都是**没有前缀**的原名，照抄进 Grafana 一定查不到东西 —— 自己补 `alltime`。
+     用的都是没有前缀的原名，照抄进 Grafana 一定查不到东西，自己补 `alltime`。
    - 改名的理由不是洁癖：不改的话 `omlx_prompt_tokens_total` 会同时存在两份
      **同名不同义**的序列（自启动 vs 跨重启），只差 `job` 标签。它们会互相跟随，
      于是漏写 `job=` 的 `sum()` 得到的是一条**看起来完全合理的双倍曲线**，不报错、
@@ -186,17 +186,17 @@ rate(omlx_alltime_cached_prompt_tokens_total[30m])
      才落一次盘，且只在这期间有过请求才落）。这是**正常状态**，不是故障。
    - `node_textfile_mtime_seconds{file="omlx.prom"}` /
      `omlx_alltime_stats_collected_timestamp_seconds` 老了 = **采集器死了**。
-   ☠️ 渲染器读文件失败时**故意保留旧 `.prom` 而不是写一份归零的** —— 归零会被
+   ☠️ 渲染器读文件失败时**故意保留旧 `.prom` 而不是写一份归零的**，归零会被
    Prometheus 读成计数器重置，把跨越这段空档的每一条 `rate()` 都打出一个洞。
    代价就是「采集器死了」只能靠上面那两个 mtime 看出来，数值本身看不出来。
-10. **退役模型永远不消失**：`stats.json` 保留**每一个曾经服务过的模型**且从不清理
+10. **退役模型永远不消失**：`stats.json` 保留每一个曾经服务过的模型且从不清理
    （今天 27 个），所以早就删掉的模型仍然以平坦的计数器一直上报。序列数
    = 7 字段 × 模型数 × 2（全局/per-model 那份）+ 元数据 = 当前 198 条，
    **只增不减**。按 `model=` 过滤面板，别默认 `All`。
 11. **渲染器在另一个仓**（`mlx-learning` 的 venv）。本仓的 Ansible 只负责调度它，
    **不负责创建那个 venv**：缺了 `just omlx-metrics` 会明确失败并给出 `uv sync` 的修法，
    而不是装一个每 60s 空转的 LaunchAgent。反过来，升级 mlx-learning 之后
-   **不需要**重跑 playbook —— plist 指的就是 venv 里的脚本本身。
+   不需要重跑 playbook，plist 指的就是 venv 里的脚本本身。
 
 ## 这台机器的物理约束（读面板要知道的）
 
@@ -206,21 +206,21 @@ rate(omlx_alltime_cached_prompt_tokens_total[30m])
 |---|---|---|
 | `memory.memory_guard_custom_ceiling_gb` | 30.0 | `omlx_pool_ceiling_bytes` = 32212254720 |
 | `memory.soft_threshold` / `hard_threshold` | 0.85 / 0.95 | 内存占用 stat 的两档阈值就是它们 |
-| `scheduler.max_concurrent_requests` | **2** | 在飞到 2 就满，其余进 `waiting`；5 路齐发必然排队 |
+| `scheduler.max_concurrent_requests` | 2 | 在飞到 2 就满，其余进 `waiting`；5 路齐发必然排队 |
 | per-model `ttl_seconds`（语音/嵌入/重排）| 900 | 空闲 15 分钟即卸载；面板的 900s 阈值线 |
 | 全局 `idle_timeout_seconds` | `None` | 两个 21G/16G 的 VLM **没有 TTL**，只受内存压力驱逐 |
 
-两个大 VLM 各 16–21G，**同时驻留就顶穿 30G** —— 这是换入换出的物理原因，不是配置失误。
+两个大 VLM 各 16–21G，**同时驻留就顶穿 30G**，这是换入换出的物理原因，不是配置失误。
 
 ## 为什么链路 B 走 textfile 而不是再加一个 exporter
 
-`stats.json` 是 Mac 本地的**文件**，不是 HTTP 端点 —— 集群里的 json-exporter 只会
+`stats.json` 是 Mac 本地的文件，不是 HTTP 端点，集群里的 json-exporter 只会
 `GET` 一个 URL，够不着它。要让它够着就得在 Mac 上再起一个 HTTP 监听，
 那是给一台已经暴露在 tailnet 上的笔记本**新开一个端口**，只为搬运一个本地文件。
 
 node_exporter 已经在那台机器上跑着，它的 **textfile collector 正是为这件事设计的**：
 落一个 `.prom` 文件，零新端口、零新进程常驻（渲染器跑 0.03s 就退）、
-零额外抓取目标 —— 指标跟着已有的 `node-exporter-macbook` job 一起进来。
+零额外抓取目标，指标跟着已有的 `node-exporter-macbook` job 一起进来。
 渲染器本身也不是新写的，是 `mlx-learning` 仓已有的 `omlx-textfile-collector`
 （那边带单元测试），本仓只负责用 Ansible 把它调度起来。
 
@@ -250,7 +250,7 @@ docker rm -f jx
 
 ## 验收（链路 B）
 
-平时不用手动查 —— `cd macbook/ansible && just omlx-metrics` 自己会跑完下面这套并打印结论
+平时不用手动查：`cd macbook/ansible && just omlx-metrics` 自己会跑完下面这套并打印结论
 （渲染器 → 源数据 → node_exporter 三段各有各的判据和修法）。要单独看某一段：
 
 ```bash

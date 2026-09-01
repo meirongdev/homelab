@@ -1,7 +1,7 @@
 # Homelab Architecture
 
 > 单页架构总览，双集群 homelab（homelab + oracle-k3s）。
-> Last updated: 2026-08-25
+> Last updated: 2026-09-01
 
 ## Network Topology
 
@@ -30,15 +30,15 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
   └───────────────────────────────────────────┘
 ```
 
-⚠️ **106 不再是"纯冷备份目标"**：自 2026-08-13/16 起它同时是 worker 的宿主和媒体数据源，
-宕机会拿走一个节点 + 三个媒体服务，不再只是暂停备份窗口。→ [reference/storage.md](reference/storage.md)
+⚠️ **106 已经不是"纯冷备份目标"**。自 2026-08-13/16 起它同时是 worker 的宿主和媒体数据源，
+宕机会拿走一个节点和三个媒体服务，不再只是暂停备份窗口。→ [reference/storage.md](reference/storage.md)
 
 ## Cluster Comparison
 
 | 维度 | homelab | oracle-k3s |
 |------|---------|------------|
-| 节点数 | **2**（control-plane `k8s-node` + worker `k8s-worker-106`，2026-08-13 起） | 1（单节点） |
-| 硬件 | 控制面：Ryzen 5600H 笔记本，16GB 物理 / OS 可见 15.0GB / k8s VM 13312MB（分配链与判据见 [homelab-host-power-thermal.md](reference/homelab-host-power-thermal.md)，**唯一真相源**）；worker：106 上的 2c/4G VM | Oracle Cloud Free Tier (ARM, **2 OCPU / 12GB**；2026-08-05 由 4/24 缩容，见 [runbook](runbooks/oracle-k3s-shape-downsize.md)) |
+| 节点数 | 2（control-plane `k8s-node` + worker `k8s-worker-106`，2026-08-13 起） | 1（单节点） |
+| 硬件 | 控制面：Ryzen 5600H 笔记本，16GB 物理 / OS 可见 15.0GB / k8s VM 13312MB（分配链与判据见 [homelab-host-power-thermal.md](reference/homelab-host-power-thermal.md)，那里是**唯一真相源**）；worker：106 上的 2c/4G VM | Oracle Cloud Free Tier (ARM, **2 OCPU / 12GB**；2026-08-05 由 4/24 缩容，见 [runbook](runbooks/oracle-k3s-shape-downsize.md)) |
 | 角色 | 指标中枢 + Vault + 本地模型接入 (Prometheus/Grafana/Vault/Open Notebook) | 公网服务 + GitOps 控制面 + 日志/追踪 + 身份面 (ArgoCD/Loki/Tempo/ZITADEL/Calibre/…) |
 | 存储 | 可写卷全 local-path（NFS 于 2026-07-11 退出读写路径）+ `media` ns 的 **5 个只读 NFS PV**（106 ZFS，2026-08-16） | local-path only |
 | 备份 | restic CronJob ×2 → 106 sftp（控制面 03:00 / worker 02:00） | restic CronJob → 106 sftp (via TS) |
@@ -56,21 +56,21 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 | 子域名 DNS | external-dns (HTTPRoute 声明式，取代 Terraform 手管) | [`decisions/external-dns-adoption.md`](decisions/external-dns-adoption.md) |
 | 成本/右尺寸 | OpenCost 走 collector 旁路 + KRR 窄口径采集 | [`decisions/opencost-krr-data-sources.md`](decisions/opencost-krr-data-sources.md) |
 | 配置漂移体检 | ArgoCD 原生 `orphanedResources` (否决 kor) | [`decisions/orphaned-resources.md`](decisions/orphaned-resources.md) |
-| 关系型数据库 | **每个集群一个共享实例**。oracle：CNPG 两个 Cluster —— `apps-pg`(共享应用库) + `zitadel-pg`(身份面独立)，加租户 = 加 `Database`/`DatabaseRole` CR。homelab：同名 `databases/apps-pg` 但是**裸 Deployment**（租户 litellm/multica，2026-08-25 合并而来）—— 刻意不装 CNPG，operator 自己比省下的 postmaster 还贵 | [`decisions/shared-postgres-platform.md`](decisions/shared-postgres-platform.md) |
+| 关系型数据库 | 每个集群一个共享实例。oracle 用 CNPG 起两个 Cluster：`apps-pg`(共享应用库) 和 `zitadel-pg`(身份面独立)，加租户就是加 `Database`/`DatabaseRole` CR。homelab 有同名的 `databases/apps-pg`，但那是裸 Deployment（租户 litellm/multica，2026-08-25 合并而来），刻意不装 CNPG，operator 自己比省下的 postmaster 还贵 | [`decisions/shared-postgres-platform.md`](decisions/shared-postgres-platform.md) |
 | 备份工具 | restic (非 Kopia)，无 server 直推 106 | [`plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md`](plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md) |
 | SSO | 应用原生 OIDC, 非共享入口层 SSO | [`plans/security/2026-03-08-cilium-zitadel-sso-plan.md`](plans/security/2026-03-08-cilium-zitadel-sso-plan.md) |
 | 跨集群网络 | Tailscale 节点级 underlay（各节点 /32 + NodePort）+ Cilium ClusterMesh VXLAN | [`reference/tailscale-network.md`](reference/tailscale-network.md) |
 
 ## Service Inventory
 
-完整清单（含集群/namespace、域名、运维备忘）见 [reference/services.md](reference/services.md) —
-**唯一真相源，此处不复制**。
+完整清单（含集群/namespace、域名、运维备忘）见 [reference/services.md](reference/services.md)。
+那里是唯一真相源，此处不复制。
 
 ## Security (Defense in Depth)
 
 11 层纵深防御: 边缘(WAF) → 身份(OIDC) → 密钥(Vault+ESO) → 准入(PSA) → 策略(Kyverno) → 供应链(Trivy) → CIS → 节点加固 → 网络(**仅 Hubble 可见性**) → 运行时(Tetragon/Falco) → 备份(restic)。
 
-⚠️ 第 9 层是 11 层里唯一没落到"管控"的：集群内无自建 `CiliumNetworkPolicy`，**网络默认拒绝刻意延后**。
+⚠️ 第 9 层是 11 层里唯一没落到"管控"的一层：集群内没有自建 `CiliumNetworkPolicy`，**网络默认拒绝是刻意延后的**。
 
 详见: [`reference/security.md`](reference/security.md)（逐层状态表 + 威胁覆盖矩阵）
 

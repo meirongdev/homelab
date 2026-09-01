@@ -1,6 +1,6 @@
 # Security Hardening Runbook — 集群内部安全（Phase 0 + 1）
 
-> Last updated: 2026-08-18
+> Last updated: 2026-09-01
 >
 > **触发条件**：部署/验证/回滚集群内部安全组件（PSA / kube-bench / Trivy / Kyverno / 节点加固 / Hubble）。
 > **成功判定**：各层验证步骤通过（每 Phase 内嵌验证命令与冒烟/巡检判据）。
@@ -20,7 +20,7 @@
 | 网络可见性 | Hubble（已启用） | — | 双 | 已有 |
 
 **硬约束**：homelab 控制面 = 5600H 笔记本，idle ~74°C，重启需 `just homelab-recover`。故全部选型 fail-open、控 CPU。
-（2026-08-13 起集群另有 worker `k8s-worker-106`，但它只有 2c/4G —— 热预算与安全组件的判断仍以控制面为准。）
+（2026-08-13 起集群另有 worker `k8s-worker-106`，但它只有 2c/4G：热预算与安全组件的判断仍以控制面为准。）
 
 **刻意延后**：Cilium 网络默认拒绝（单命名空间灰度，独立门控变更，见末节）；API 审计日志（磁盘紧）。
 
@@ -36,7 +36,7 @@ helm search repo aqua/trivy-operator --versions | head    # → argocd/applicati
 helm search repo kyverno/kyverno     --versions | head    # → argocd/applications/kyverno.yaml
 ```
 
-kube-bench 镜像 tag（`k8s/helm/manifests/kube-bench/kube-bench.yaml`）与 k3s 基准名同理——见该层下方说明。
+kube-bench 镜像 tag（`k8s/helm/manifests/kube-bench/kube-bench.yaml`）与 k3s 基准名同理：见该层下方说明。
 
 ---
 
@@ -122,7 +122,7 @@ kubectl --context k3s-homelab get polr -A              # Audit 模式下的违�
 2. 修违规的工作负载 manifest（git）；
 3. 确认该策略零违规后，把对应 `manifests/kyverno-policies/<策略>.yaml` 里每条 rule 的 `validate.failureAction: Audit` 改为 `Enforce`，`git push`。（Kyverno v1.11+ 用 per-rule `failureAction`，非旧的 spec 级 `validationFailureAction`。）
 - `restrict-image-registries` 噪声最大（裸镜像名会被标记），长期建议保持 Audit，提 Enforce 前先把镜像写全限定名。
-- 所有策略 `failurePolicy: Ignore`（fail-open）——Kyverno 宕机不阻断调度（保护单节点恢复路径）。
+- 所有策略 `failurePolicy: Ignore`（fail-open）：Kyverno 宕机不阻断调度（保护单节点恢复路径）。
 
 ### 5. 节点 CIS 内核加固（需重启，放最后）
 
@@ -131,13 +131,13 @@ kubectl --context k3s-homelab get polr -A              # Audit 模式下的违�
 ```bash
 cd k8s/ansible && just setup-k8s     # 幂等：写 sysctl drop-in（立即生效+持久化）+ 写 config.yaml
 ```
-**现有节点不会自动生效**——`protect-kernel-defaults` 仅在 k3s 重启时校验。安排维护窗口：
+**现有节点不会自动生效**：`protect-kernel-defaults` 仅在 k3s 重启时校验。安排维护窗口：
 ```bash
 ssh ubuntu@100.94.186.7 'sudo sysctl --system && sudo systemctl restart k3s'   # 或整机重启
 kubectl --context k3s-homelab get nodes                                        # 确认 Ready
 just homelab-recover                                                           # 重启后常规恢复
 ```
-> 顺序保障：sysctl drop-in 先落盘且持久化（systemd-sysctl 每次启动应用），故 k3s 重启时 `protect-kernel-defaults` 检查必过。若误删 drop-in 则 k3s 拒启——重写该文件即可。
+> 顺序保障：sysctl drop-in 先落盘且持久化（systemd-sysctl 每次启动应用），故 k3s 重启时 `protect-kernel-defaults` 检查必过。若误删 drop-in 则 k3s 拒启：重写该文件即可。
 
 ### 6. Hubble 流量可见性（网络默认拒绝的前置）
 
@@ -158,7 +158,7 @@ kubectl --context k3s-homelab -n kube-system exec ds/cilium -- hubble observe --
 3. 先开 Cilium 每端点 **policy audit mode**（`cilium endpoint config <id> PolicyAuditMode=Enabled`）只记不拦；
 4. 写命名空间级 `CiliumNetworkPolicy`：默认拒绝 + 显式放行（DNS egress→kube-system CoreDNS、入站放行 gateway/Envoy 身份、必要 `toFQDNs`/`toCIDR` egress、如涉跨集群再放 ClusterMesh）；
 5. soak 看 Hubble `DROPPED`，迭代后再翻成强制；
-6. 逐 ns 评估——建议**只对对外暴露的 ns** 做默认拒绝，纯内部的不做。
+6. 逐 ns 评估：建议**只对对外暴露的 ns** 做默认拒绝，纯内部的不做。
 
 ## 回滚
 

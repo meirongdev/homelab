@@ -1,18 +1,18 @@
 # Backup & Recovery Runbook
 
-> Last updated: 2026-08-25
+> Last updated: 2026-09-01
 > 设计与执行: [../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md](../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md)
 >
 > **触发条件**：备份/恢复运维（含月度恢复演练）、或数据丢失/损坏后需要从 restic 恢复。
 > **成功判定**：恢复后数据可用（按 § 恢复逐类验证）；演练则 8 条判据全过（见「演练失败怎么办」）。
-> **回滚**：豁免——本文本身就是恢复类操作，恢复到哪个快照由你选的快照决定，无额外回滚路径。
+> **回滚**：豁免：本文本身就是恢复类操作，恢复到哪个快照由你选的快照决定，无额外回滚路径。
 
 ## Status
 
 **🟢 restic 备份已上线并验证（2026-07-06，Phase 1）。** 双集群每夜逻辑 dump → 106 ZFS 加密仓库 `881fb124bf`。恢复演练通过（Vault snapshot + 两 PG dump + sqlite integrity_check 全 OK）。
 **月度恢复演练已自动化（2026-08-13）**：`restic-restore-drill` CronJob 每月 1 日 04:00 CST 真恢复 + 跑 8 条判据，
 见下方「演练失败怎么办」与 [reference/storage.md](../reference/storage.md#月度恢复演练2026-08-13-上线)。
-**离站（Phase 5）仍待做** —— 当前仅本地仓库（raidz1 + sanoid 保护），无异地副本；屋内灾难仍是敞口，属计划 Phase 5。
+**离站（Phase 5）仍待做**：当前仅本地仓库（raidz1 + sanoid 保护），无异地副本；屋内灾难仍是敞口，属计划 Phase 5。
 
 - 清单：kustomize base+overlay `backup/`（2026-07-07 双集群合并；共用骨架在 `backup/base`）。
 - ☠️ **是三个 CronJob、三个 restic `--host`，不是两个**（漏掉第二个 = 恢复 worker 上的数据时
@@ -38,10 +38,10 @@
 
 **为什么换掉 Kopia**：Kopia 复杂度几乎全来自 server 模式（TLS/gRPC/NodePort/524），而它存在只为让无 NFS 的 oracle-k3s 经 gRPC 推备份。restic 无 server：每集群 CronJob 直接 `restic backup` 到同一加密仓库。
 
-**仓库**: 单一 restic 仓库落在 **storage-106 ZFS 专用 dataset** `mrstorage/restic`（`/storage/restic`，raidz1 + sanoid 快照保护、**100G 配额**）。AES 加密，明文不出域。
+**仓库**: 单一 restic 仓库落在 storage-106 的 ZFS 专用 dataset `mrstorage/restic`（`/storage/restic`，raidz1 + sanoid 快照保护、100G 配额）。AES 加密，明文不出域。
 
 > 配额 2026-08-16 由 50G 抬到 100G（当时已用 26.2G = 52%，拆开看 `usedbydataset` 25.7G、
-> 快照仅 496M —— 是仓库本体在长，不是 sanoid 拖累）。池子本身还有 6.29T，抬配额是一条命令：
+> 快照仅 496M：是仓库本体在长，不是 sanoid 拖累）。池子本身还有 6.29T，抬配额是一条命令：
 > `zfs set quota=100G mrstorage/restic`，且已收进 `proxmox/ansible/storage-playbook.yaml`
 > （`--tags quota`，读到实际值不符才 set）。
 > ⚠️ 配额不是为了省空间，是**给"仓库无限膨胀"划一条会响的线**：dataset 以 `node_filesystem_*`
@@ -59,11 +59,11 @@
 | ZITADEL PG | oracle（迁移后）| `pg_dump`（network）|
 | Miniflux PG | oracle | `pg_dump`（network）|
 | sqlite: open-notebook checkpoints / jobs-sg | homelab 控制面 | 特权 CronJob hostPath 读 local-path + `sqlite3 ".backup"`（在线 API）|
-| **multica**（workspace/task/agent 记录 + 上传件） | homelab 控制面 | `pg_dump -Fc` → `multica.dump`（凭据 Vault `secret/homelab/multica` → ESO）+ `multica-backend-uploads` 目录纳入。⚠️ **两者失败都只 warn 不中断夜备**——绿灯不等于 multica 备到了，靠 `restic ls` 里有没有 `multica.dump` 判 |
-| **jellyfin / navidrome 的配置与库**（媒体本体不备） | homelab **worker** | worker 那个 Job 整目录扫 `/localpath`，快照在 `--host homelab-worker` 下 |
+| **multica**（workspace/task/agent 记录 + 上传件） | homelab 控制面 | `pg_dump -Fc` → `multica.dump`（凭据 Vault `secret/homelab/multica` → ESO）+ `multica-backend-uploads` 目录纳入。⚠️ **两者失败都只 warn 不中断夜备**：绿灯不等于 multica 备到了，靠 `restic ls` 里有没有 `multica.dump` 判 |
+| **jellyfin / navidrome 的配置与库**（媒体本体不备） | homelab worker | worker 那个 Job 整目录扫 `/localpath`，快照在 `--host homelab-worker` 下 |
 | sqlite: uptime-kuma / timeslot / calibre-web-config / readlist | oracle | 同上（白名单见 `backup/overlays/oracle/backup-script.yaml`）。2026-08-11 移除 stirling-pdf（退役，接替者 BentoPDF 服务端零状态）；2026-08-14 移除 karakeep-data/meilisearch-data（karakeep 退役，PVC 已删除）|
 | SurrealDB: open-notebook | homelab | HTTP `GET /export` 逻辑导出 → `open-notebook.surql`（rocksdb 是活进程持有的 `.sst/MANIFEST`，热拷不一致）。口令走 optional 卷，缺失时只 warn 不中断夜备 |
-| **Calibre 书库** | oracle（2026-08-03 迁入）| **已进 restic**：`calibre-books-local`（~23G）目录整体纳入，增量去重。⚠️ 本行原写"不进 restic，留 NFS/ZFS"，NFS 退役后已不成立 |
+| **Calibre 书库** | oracle（2026-08-03 迁入）| 已进 restic：`calibre-books-local`（~23G）目录整体纳入，增量去重。⚠️ 本行原写"不进 restic，留 NFS/ZFS"，NFS 退役后已不成立 |
 
 **为什么 sqlite 走 hostPath**：local-path 卷是 RWO、被 app 占用，旁路 Pod 无法挂载。单节点场景用特权 CronJob 直接读节点 `/var/lib/rancher/k3s/storage/`，对 sqlite 用在线 `.backup` API（读活库安全），无需改任何 app。
 
@@ -96,7 +96,7 @@ Vault unseal keys: `vault-keys.json` / K8s secret `vault-backup-keys`（见记�
 
 ## 演练失败怎么办（RestoreDrillFailed）
 
-告警说的是「备份跑了，但恢复出来的数据过不了检查」——夜备的绿灯对此完全无感。
+告警说的是「备份跑了，但恢复出来的数据过不了检查」：夜备的绿灯对此完全无感。
 
 ```bash
 # 1) 先看是哪条判据（每条都对应一种具体坏法）
@@ -111,16 +111,16 @@ kubectl --context k3s-homelab -n backup create job \
 
 | 判据报错 | 说明 | 下一步 |
 |---|---|---|
-| `快照 … 早于 …（夜备已停？）` | 仓库里没有新快照——**夜备其实已经坏了**，与能否恢复无关 | 查 `BackupNotRunning` / 夜备 Job 日志 |
+| `快照 … 早于 …（夜备已停？）` | 仓库里没有新快照：**夜备其实已经坏了**，与能否恢复无关 | 查 `BackupNotRunning` / 夜备 Job 日志 |
 | `vault.snap 里没有 state.bin` | raft 快照截断/损坏（文件非空也不算数） | 查夜备当晚是否撞 `activeDeadlineSeconds`、Vault token 是否失效 |
 | `jobs.db integrity_check = …` / `没有任何表` | sqlite 热拷贝撞上写事务，或恢复出空库 | 用更早的快照恢复；查 jobs-sg 是否在 03:00 窗口有写者 |
 | `<db>.sql 没有 pg_dump 收尾标记` | dump 是半截的（**大小看着完全正常**） | 查 oracle 侧夜备是否超时/连接中断 |
 | `raw 归档 gzip 校验失败` | **不可再生数据**损坏（MCF 下架职位拿不回来） | 立刻用更早快照核对，别覆盖现有归档 |
-| `restic ls 执行失败` | 演练**自身**受阻（多半仓库锁），**不等于数据坏了** | 见下方锁处置，别照着删数据 |
+| `restic ls 执行失败` | 演练自身受阻（多半仓库锁），**不等于数据坏了** | 见下方锁处置，别照着删数据 |
 
 ### 仓库锁卡住（restic：repository is already locked）
 
-☠️ restic 的陈旧锁判定靠 **hostname + PID**，而 K8s 里每个 Job 的 Pod hostname 都不同——
+☠️ restic 的陈旧锁判定靠 **hostname + PID**，而 K8s 里每个 Job 的 Pod hostname 都不同：
 **跨 Pod 泄漏的锁在 30 分钟内清不掉**，`restic unlock`（只删陈旧锁）无效。
 泄漏来自被 `activeDeadlineSeconds` 杀掉的运行，或管道被提前关闭的 restic（`… | head`）。
 

@@ -1,6 +1,6 @@
 # 成本归因与资源右尺寸
 
-> Last updated: 2026-08-20
+> Last updated: 2026-09-01
 > Status: 生效事实
 
 两套互补的工具：**OpenCost** 回答「钱花在哪」（常驻，出指标 → Grafana），
@@ -9,7 +9,7 @@
 | | OpenCost | KRR |
 |---|---|---|
 | 形态 | 常驻 Deployment（每集群一份） | CronJob（每集群一份，周一 09:00 / 09:15） |
-| 数据源 | **自带 collector**，直读 kubelet stats/summary，不查 Prometheus | 查中枢 Prometheus（cAdvisor 指标） |
+| 数据源 | 自带 collector，直读 kubelet stats/summary，不查 Prometheus | 查中枢 Prometheus（cAdvisor 指标） |
 | 产物 | Prometheus 指标 → Grafana 面板 `opencost-multicluster-overview` | 文本表格 → Telegram 附件 |
 | 版本 | chart `opencost-2.5.28` | `robustadev/krr:v1.29.0` |
 | 是否改集群 | 否 | 否（ClusterRole 全 get/list/watch） |
@@ -36,7 +36,7 @@ oracle OpenCost ──(otel prometheus/opencost)─────┘        按 cl
 
 **collector 数据源**（`collectorDataSource.enabled: true`）经 apiserver proxy 读
 `/api/v1/nodes/<node>/proxy/stats/summary`，chart 的 ClusterRole 已含 `nodes/proxy`。
-自带 10m/1h/1d 三级 rollup（保留 6h / 2d / **15d**），状态落在 2Gi PVC 上跨重启保留。
+自带 10m/1h/1d 三级 rollup（保留 6h / 2d / 15d），状态落在 2Gi PVC 上跨重启保留。
 
 ### 定价模型（`provider: custom`）
 
@@ -45,25 +45,25 @@ oracle OpenCost ──(otel prometheus/opencost)─────┘        按 cl
 
 | | homelab | oracle-k3s |
 |---|---|---|
-| 依据 | 实测功耗 + 硬件摊销 | OCI Ampere A1 牌价**影子定价** |
+| 依据 | 实测功耗 + 硬件摊销 | OCI Ampere A1 牌价的影子定价 |
 | CPU | `0.0018` /vCPU-hr | `0.01` /vCPU-hr |
 | RAM | `0.00024` /GiB-hr | `0.0015` /GiB-hr |
-| 月度合计 | **~$18.7**（两个节点：`k8s-node` ~$15.4 + worker `k8s-worker-106` ~$3.3） | **~$27.4**（实付 $0） |
+| 月度合计 | ~$18.7（两个节点：`k8s-node` ~$15.4 + worker `k8s-worker-106` ~$3.3） | ~$27.4（实付 $0） |
 
 oracle 用牌价而非 0：看板的价值是「工作负载该放哪个集群」的比较决策，填 0 会让 oracle 永远赢。
 
 > **homelab 合计随节点数变**：2026-08-13 加入 worker 后从 ~$12.7 涨到 ~$18.7（单价没变，
-> 多了一台机器）。**别把这里的合计当常量**——现取：
+> 多了一台机器）。**别把这里的合计当常量**，现取：
 > `sum by (cluster)(node_total_hourly_cost) * 730`。
 
 > **单价不随 shape 变，月度合计变**：2026-08-05 缩容 4 OCPU/24GB → 2/12 后，
 > oracle 影子成本从 ~$54.8 腰斩到 ~$27.4（`2×0.01×730 + 11.7×0.0015×730`）。
-> 看板上 oracle 的「工作负载该放哪」优势因此缩水一半——这是**有意的**，那台机器
+> 看板上 oracle 的「工作负载该放哪」优势因此缩水一半，这是有意的：那台机器
 > 的余量确实少了一半。缩容始末见
 > [runbooks/oracle-k3s-shape-downsize.md](../runbooks/oracle-k3s-shape-downsize.md)。
 
-> ⚠️ 当前 homelab 单价是**占位推导值**（按整机 45W 估算，偏保守）。2026-08-09 已实测空闲功耗：
-> CPU RAPL ~5W + iGPU ~4W + 外设/风扇 ~15–20W ≈ **整机空闲 ~25W**（满载会更高）。
+> ⚠️ 当前 homelab 单价是占位推导值（按整机 45W 估算，偏保守）。2026-08-09 已实测空闲功耗：
+> CPU RAPL ~5W + iGPU ~4W + 外设/风扇 ~15–20W ≈ 整机空闲 ~25W（满载会更高）。
 > 功耗/散热细节见 [homelab-host-power-thermal.md](homelab-host-power-thermal.md)。
 > 校准步骤见下方「运维操作」。
 
@@ -75,9 +75,9 @@ oracle 用牌价而非 0：看板的价值是「工作负载该放哪个集群�
 totalCost := cpu*cpuCost + ramCost*(ram/1024/1024/1024) + gpu*gpuCost
 ```
 
-- `node_cpu_hourly_cost` / `node_ram_hourly_cost` 是**单价**（$/vCPU-hr、$/**GiB**-hr），不是节点总额
+- `node_cpu_hourly_cost` / `node_ram_hourly_cost` 是**单价**（$/vCPU-hr、$/GiB-hr），不是节点总额
 - `node_total_hourly_cost` 才是节点总额
-- 换算内存用 **1073741824**（GiB），不是 1e9
+- 换算内存用 1073741824（GiB），不是 1e9
 - `container_cpu_allocation` / `container_memory_allocation_bytes` 是 max(request, usage)
 
 **导出的成本指标自身不带 `cluster` 标签**（label 集只有
@@ -89,7 +89,7 @@ homelab 靠 `scrapeClasses` 默认类，oracle 靠 otel target label + remote-wr
 `k8s/helm/manifests/monitoring/dashboards/opencost-dashboard.yaml` → Grafana `Platform` 文件夹，
 uid `opencost-multicluster-overview`。
 
-**刻意只用 OpenCost 自身的指标，不掺 kube-state-metrics** —— 闲置率不走
+**刻意只用 OpenCost 自身的指标，不掺 kube-state-metrics**：闲置率不走
 `kube_node_status_capacity`，而是：
 
 ```
@@ -101,7 +101,7 @@ uid `opencost-multicluster-overview`。
 `$cluster` 变量取自 `label_values(node_total_hourly_cost, cluster)`，天然只返回跑了
 OpenCost 的两个集群，不会混入 `dgx-spark` / `macbook` 这类外部 node-exporter 目标。
 
-> 小集群闲置率天然偏高（实测两边都约 **63–64%**；该次实测时两边**都还是单节点**，homelab 于 2026-08-13 加了 worker，数字待重测）—— 闲置容量确实在烧电/占额度，
+> 小集群闲置率天然偏高（实测两边都约 63–64%；该次实测时两边都还是单节点，homelab 于 2026-08-13 加了 worker，数字待重测）。闲置容量确实在烧电/占额度，
 > 属真实情况而非归因失败。
 
 ## KRR
@@ -115,7 +115,7 @@ OpenCost 的两个集群，不会混入 `dgx-spark` / `macbook` 这类外部 nod
 | Prometheus | 集群内 `kube-prometheus-stack-prometheus:9090` | 中枢，经 Tailscale `100.94.186.7:31090` |
 | bot token | 复用 `monitoring/alertmanager-telegram` | 自建 ExternalSecret `krr-telegram` |
 
-每集群各跑一个，因为 KRR 需要同时访问 Prometheus（历史用量）**和** K8s API
+每集群各跑一个，因为 KRR 需要同时访问 Prometheus（历史用量）和 K8s API
 （枚举工作负载与当前 requests），而 K8s API 只能看本集群。
 
 Pod 结构 `initContainers: [krr]` → `containers: [notify]`：同 Pod 的多个 container
@@ -130,7 +130,7 @@ max(rate(container_cpu_usage_seconds_total{namespace=…,pod=~…,container=…}
 max(container_memory_working_set_bytes{namespace=…,pod=~…,container=…})            by (container, pod, job)
 ```
 
-始终按**真实 container 名**过滤，所以 cAdvisor 的 `container=""` Pod 级汇总序列用不到。
+始终按真实 container 名过滤，所以 cAdvisor 的 `container=""` Pod 级汇总序列用不到。
 
 oracle 的这两个指标由 otel `prometheus/cadvisor` receiver 提供（见
 [observability-multicluster.md](observability-multicluster.md#metrics-pipeline)）。
@@ -139,8 +139,8 @@ oracle 的这两个指标由 otel `prometheus/cadvisor` receiver 提供（见
 
 | 参数 | 含义 | 易错点 |
 |---|---|---|
-| `--prometheus-label` | 标签**键**（`cluster`） | 与下一行容易搞反 |
-| `-l` / `--prometheus-cluster-label` | 标签**值**（`homelab`） | **短选项不支持 `-l=value`**，会被当成值 `"=homelab"`，必须拆成两个 argv 项 |
+| `--prometheus-label` | 标签键（`cluster`） | 与下一行容易搞反 |
+| `-l` / `--prometheus-cluster-label` | 标签值（`homelab`） | **短选项不支持 `-l=value`**，会被当成值 `"=homelab"`，必须拆成两个 argv 项 |
 | `--cluster` / `-c` | kubeconfig context | 集群内跑时用不上 |
 | `--history-duration` | 小时数 | 默认 336(14d) > Prometheus retention 7d，**不传不会报错、只会静默用不足的数据**，故显式传 `168` |
 | `--width` | 输出宽度 | 180 会把 namespace 截断成 `personal…`；附件不是终端，用 300 |
@@ -177,13 +177,13 @@ RAM 单价 = 节点小时成本 × 0.175 / 12.66
 
 ### 采纳 KRR 推荐
 
-KRR **只读不改**，采纳需手工改 git（`krr-enforcer` 刻意未部署，原因见 decisions）。
+KRR 只读不改，采纳需手工改 git（`krr-enforcer` 刻意未部署，原因见 decisions）。
 
 推荐值的两条口径（影响怎么读，故留在本文）：
 
-- CPU 取 **p95**；内存取窗口内 **max + 15%**，可反推峰值 `峰值 ≈ 推荐 ÷ 1.15`
-- 内存有 **100Mi** 地板、CPU 有 **10m** 地板 —— 恰好等于地板的推荐**不是测量结果**
-- 内存窗口 7d（对齐 Prometheus retention），**跨周尖峰会落在窗外**（如每周备份 CronJob），
+- CPU 取 p95；内存取窗口内 max + 15%，可反推峰值 `峰值 ≈ 推荐 ÷ 1.15`
+- 内存有 100Mi 地板、CPU 有 10m 地板，**恰好等于地板的推荐不是测量结果**
+- 内存窗口 7d（对齐 Prometheus retention），跨周尖峰会落在窗外（如每周备份 CronJob），
   这类工作负载要自行留余量
 
 **拿到报告之后怎么处理 → [runbooks/krr-report-triage.md](../runbooks/krr-report-triage.md)**
@@ -205,7 +205,7 @@ oracle 检查 otel `prometheus/opencost` receiver 的 `static_configs[].labels`�
 
 ### oracle 的成本/用量指标消失
 
-八成是 otel-collector 跑着旧配置 —— 改 ConfigMap **不会**触发 DaemonSet 重启，
+八成是 otel-collector 跑着旧配置：改 ConfigMap **不会**触发 DaemonSet 重启，
 且 ArgoCD 全程显示 Synced/Healthy。见
 [observability-multicluster.md](observability-multicluster.md#otel-collector-配置改了不生效)。
 
@@ -216,7 +216,7 @@ oracle 检查 otel `prometheus/opencost` receiver 的 `static_configs[].labels`�
 ### KRR 大量 `(Not enough data)`
 
 窗口内没有足够历史。oracle 侧的 cAdvisor 采集自 2026-07-30 才启用，
-**上线后约 7 天推荐值才有意义**。
+上线后约 7 天推荐值才有意义。
 
 ## 相关文档
 

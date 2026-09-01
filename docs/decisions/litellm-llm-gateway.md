@@ -5,7 +5,7 @@
 > 关联: `docs/plans/apps/2026-08-01-litellm-gateway-migration.md`
 > 生效事实与运维坑（虚拟 key 白名单 / 配置生效路径 / 上游可用性）:
 >   [reference/litellm-gateway.md](../reference/litellm-gateway.md)
-> 修订: 2026-08-25 —— Mac 兜底模型由 `Qwen3.6-35B` 换为 `Ornith-1.5-35B-A3B`，
+> 修订: 2026-08-25：Mac 兜底模型由 `Qwen3.6-35B` 换为 `Ornith-1.5-35B-A3B`，
 >   网关别名 `mac/qwen3.6-35b` → `mac/ornith`（下方 Decision 记录的是 2026-08-01 的原始决策，
 >   不改写；换型理由与实测见本文件末尾「2026-08-25 修订」）。
 
@@ -19,8 +19,8 @@ homelab LLM 网关（llm.meirong.dev）原为一个自托管的 LLM 网关。其
 生产 proxy 仍是 Python。
 
 本仓库有两个**自托管推理源**，都可从 homelab 控制面直连（Open Notebook 已生产验证接线）：
-- **DGX Spark vLLM**（`100.97.87.120:8000`，`deepseek-v4-flash`，1M ctx）——跨境共享节点（SG↔CN，DERP hkg，RTT 66–83ms），常驻但他人机器、无告警、不可控。
-- **MacPro M2 OMLX**（`100.89.15.120:8000`，`Qwen3.6-35B`，262k ctx）——境内低延迟但**笔记本无 SLA**（电池/合盖/负载可能掉）。
+- **DGX Spark vLLM**（`100.97.87.120:8000`，`deepseek-v4-flash`，1M ctx）：跨境共享节点（SG↔CN，DERP hkg，RTT 66–83ms），常驻但他人机器、无告警、不可控。
+- **MacPro M2 OMLX**（`100.89.15.120:8000`，`Qwen3.6-35B`，262k ctx）：境内低延迟但**笔记本无 SLA**（电池/合盖/负载可能掉）。
 
 两者互不能全信，需要一个网关统一入口 + 自动 failover。
 
@@ -61,7 +61,7 @@ homelab LLM 网关（llm.meirong.dev）原为一个自托管的 LLM 网关。其
 **换型理由不是「Qwen3.6 有 bug」**，而是它思考得太多，在小 `max_tokens` 下必然被截断：
 
 思维链模型的 `reasoning_content` 切分依赖 `</think>` 闭合标签。token 用完时标签不会出现，
-OMLX 的 parser 就失去切分依据，**把整段思维链原样放进 `content`** —— 不报错、不告警，
+OMLX 的 parser 就失去切分依据，**把整段思维链原样放进 `content`**：不报错、不告警，
 只是答案变成一坨思考过程。实测（同一提示词，`max_tokens=4096`）：
 
 | 模型 | finish_reason | completion | content | reasoning_content |
@@ -74,7 +74,7 @@ OMLX 的 parser 就失去切分依据，**把整段思维链原样放进 `conten
 （多集群 Postgres 故障转移），同样 `max_tokens=4096` 下它一样 `finish_reason=length`、
 一样把 16362 字符思维链漏进 `content`。**结构性的解只有两条**：把 `max_tokens` 给够，
 或者走 OMLX 的 `fast` profile（`enable_thinking: false`，两个模型都已建好，
-暴露为 `<model>:fast`，与基础模型共用同一份驻留权重、不触发换入换出）——
+暴露为 `<model>:fast`，与基础模型共用同一份驻留权重、不触发换入换出）：
 网关已把它接成别名 **`mac/ornith-fast`**，k8sgpt 用的就是这条。
 
 ☠️ **只暴露一个 Mac 35B**：OMLX 池天花板 30GB 装不下两个（Qwen3.6 19.95GB + Ornith 19.08GB

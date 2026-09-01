@@ -43,7 +43,7 @@ provisioner 卸载。那次退役的结论被反复引用成一句话：**「NFS
 三条边界，缺一条这个决策就不成立：
 
 1. **只读，且只读是服务端保证的。** PV 上的 `readOnly: true` 只是给 kubelet 的提示，
-   真正拦写的是 export 的 `ro`。**k8s 负载永远没有 106 的写权** —— 所有写路径
+   真正拦写的是 export 的 `ro`。**k8s 负载永远没有 106 的写权**：所有写路径
    （上传 / 下载 / 整理）走非 k8s 侧（直接写 106 的 SMB/ssh）。
 2. **只有顺序读的大文件。** 当初退役 NFS 的根因是 sqlite 的 `fcntl` 锁 + 小写入 fsync
    在 NLM 上能阻塞分钟级（[storage.md](../reference/storage.md) 有 Grafana CrashLoop 8 天
@@ -54,14 +54,14 @@ provisioner 卸载。那次退役的结论被反复引用成一句话：**「NFS
 
 配套取舍（同批定的，一并记在这里免得散落）：
 
-- **媒体不进 restic**，吃 106 的 raidz1 + sanoid。理由不是"不重要"，是**做不到**：
+- **媒体不进 restic**，吃 106 的 raidz1 + sanoid。理由不是"不重要"，是做不到：
   restic 的目标仓库也在 106，把 106 的数据备份到 106 不产生任何跨机冗余，只是把 500GB
   抄一遍。用户已确认接受「视频仅本地 ZFS 保护、无离站副本」。
   H4 的 `BACKUP_EXEMPT` 里逐条写了这个理由。
 - **Jellyfin / Navidrome 两个组件都留**，不用 Jellyfin 单扛音乐（Navidrome 的元数据/刮削 +
   多端 Subsonic 客户端体验明显更好，两者都近零成本）。否决 Funkwhale（联邦是它的重价值，
   私藏库用不上）。
-- **podcast 用静态 RSS**（nginx 伺服 mp3 + `rss.xml`），否决 Castopod —— PHP 全家桶 + 数据库，
+- **podcast 用静态 RSS**（nginx 伺服 mp3 + `rss.xml`），否决 Castopod：PHP 全家桶 + 数据库，
   为几十人的订阅量引入一个大后端不划算。
 
 ## 被否决的替代方案
@@ -88,16 +88,16 @@ provisioner 卸载。那次退役的结论被反复引用成一句话：**「NFS
   106 宕机 = homelab 少一个节点 + 三个媒体服务有进程无数据。
   「106 宕机只暂停备份窗口」这句话**在 2026-08-13 之后就是错的**。
 - 媒体没有离站副本，也不会有（进 restic 无意义，见上）。106 整机损毁 = 媒体全损。
-  这是**已知且被接受**的敞口，与 ROADMAP 开放项 #1（离站备份）不是同一件事——
+  这是已知且被接受的敞口，与 ROADMAP 开放项 #1（离站备份）不是同一件事。
   那条覆盖的是 restic 仓库，不覆盖媒体。
 - NFS 服务端挂起的故障签名要记住：**节点 load 飙到数千、containerd 报
-  `failed to reserve container name`** —— 修 NFS，不是修 containerd。
+  `failed to reserve container name`**：修 NFS，不是修 containerd。
 - worker 节点需要 `nfs-common`，缺了表现为 `FailedMount`（落地时实际踩到并修了）。
 
 ## 与原计划的差异（as-built）
 
 计划写的是「重开 106 **一个**只读 export，暴露新建的 `media/` 树」。实际落地改成
-**复用 106 已有的 `movie/tv/anime/music` 目录 + 新建 `podcast`，5 个 export**——
+**复用 106 已有的 `movie/tv/anime/music` 目录 + 新建 `podcast`，5 个 export**：
 不迁移、不动原数据，省掉一次 500GB 的搬运和随之而来的路径重写。
 代价是 export 数从 1 变 5，`nfs_exports` 列表长一些，语义完全相同。
 
@@ -106,6 +106,6 @@ provisioner 卸载。那次退役的结论被反复引用成一句话：**「NFS
 本文是 2026-08-16 计划 §Task 10 明确要求的产物，**当时没写**。后果在四天里可验证地发生了：
 `AGENTS.md`、`ARCHITECTURE.md`、`storage.md`、`terminology.md` 四处继续声称
 "NFS 已退役 / 106 非运行时依赖 / 全部 PVC 用 local-path"，与已经上线的只读 NFS 直接矛盾，
-而 `check-docs.py` 全绿——**结构检查看不出内容与集群不符**。
+而 `check-docs.py` 全绿。**结构检查看不出内容与集群不符**。
 2026-08-20 的文档复核一次性修掉那四处，并补上本文作为这个例外的**唯一解释处**：
 以后再有人问"不是说 NFS 退役了吗"，答案在这里，不必每篇文档各写一遍。

@@ -26,9 +26,9 @@
 | [cf-analytics-custom-exporter](cf-analytics-custom-exporter.md) | 按域名访问 IP 数自写 exporter：官方/lablabs 实测在 Free zone 全废（`httpRequests1mGroups` 403），且**都只有 zone 级 uniques** |
 | [cronjob-and-job-hygiene](cronjob-and-job-hygiene.md) | CronJob 只强制两个 deadline（`activeDeadlineSeconds` 断卡死 + `startingDeadlineSeconds` 防 100-missed 永久停摆）；配额改用 `pods` 而非 `count/pods`；**否决**强制 TTL（与 history limit 重复）与 Kyverno `require-job-ttl`（Enforce 会炸 5 个 Helm hook、Audit 无告警消费） |
 | [litellm-llm-gateway](litellm-llm-gateway.md) | 旧 LLM 网关 → **LiteLLM**：配置进 git + 自带认证 + Postgres；双自托管来源 DGX 主 + Mac 兜底 fallback |
-| [multimedia-repository-nfs-readonly](multimedia-repository-nfs-readonly.md) | 媒体 serving 重新引入 NFS，但**只读 + 只媒体 + 不装 provisioner** —— 2026-07-11 退役后的唯一例外；☠️ 副作用是 106 从此不再是"非运行时依赖" |
+| [multimedia-repository-nfs-readonly](multimedia-repository-nfs-readonly.md) | 媒体 serving 重新引入 NFS，但**只读 + 只媒体 + 不装 provisioner**：2026-07-11 退役后的唯一例外；☠️ 副作用是 106 从此不再是"非运行时依赖" |
 | [prometheus-series-reduction](prometheus-series-reduction.md) | 砍 series 而非继续抬 limit：k3s 单进程让 kubelet 重复暴露 apiserver/etcd（占该 job 80%）→ 按 job 分别 drop，234k→110k（−53%）；三层证据（规则/看板/抓取层）+ chart 默认值必须原样保留再追加 |
-| [omlx-speech-model-selection](omlx-speech-model-selection.md) | ❌ Mac 新增的 4 个语音模型全部不采纳，STT/TTS 接线不动：两个新 TTS **结构上**驱动不了（只能传 `voice`，它们要 `instruct`/参考音频），两个新 ASR 在生产口径（10 分钟 mp3 切段）各有一种 HTTP 200 的静默失败 —— 截断在 45s / 长音频重复崩塌 |
+| [omlx-speech-model-selection](omlx-speech-model-selection.md) | ❌ Mac 新增的 4 个语音模型全部不采纳，STT/TTS 接线不动：两个新 TTS **结构上**驱动不了（只能传 `voice`，它们要 `instruct`/参考音频），两个新 ASR 在生产口径（10 分钟 mp3 切段）各有一种 HTTP 200 的静默失败：截断在 45s / 长音频重复崩塌 |
 | [home-stack-repo-boundary](home-stack-repo-boundary.md) | `stack.meirong.dev` 上线后两个仓库同写一个 zone：**按资源类型切**（否决「homelab 全管」与「home-stack 全管」）；home-stack 只拥有 Worker + 那一条 DNS 记录，homelab 独占隧道/WAF/zone 设置；☠️ 那条记录别声明第二份、别当游离记录清理 |
 
 ## 写新 ADR

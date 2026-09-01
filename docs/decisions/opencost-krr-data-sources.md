@@ -10,8 +10,8 @@
 
 | 指标 | homelab | oracle-k3s |
 |---|---|---|
-| `container_cpu_usage_seconds_total` | 144 | **0** |
-| `container_memory_working_set_bytes` | 144 | **0** |
+| `container_cpu_usage_seconds_total` | 144 | 0 |
+| `container_memory_working_set_bytes` | 144 | 0 |
 
 原因：oracle 的 otel-collector 只抓 node-exporter / KSM / cloudflared / cilium-envoy /
 external-secrets / external-dns，**没有 kubelet cAdvisor**。
@@ -35,8 +35,8 @@ external-secrets / external-dns，**没有 kubelet cAdvisor**。
 
 ### 理由
 
-1. **oracle 侧 Prometheus 数据源直接不成立** —— 没有 cAdvisor 就没有输入。
-2. **自带更长的历史**：collector 有 10m/1h/1d 三级 rollup，日粒度保留 **15d**；
+1. **oracle 侧 Prometheus 数据源直接不成立**：没有 cAdvisor 就没有输入。
+2. **自带更长的历史**：collector 有 10m/1h/1d 三级 rollup，日粒度保留 15d；
    中枢 Prometheus 只有 7d。
 3. **故障域自治**：oracle 不必依赖 Tailscale 通、也不必依赖 homelab 存活。
 4. 代价小：每集群约 200–300Mi 内存 + 2Gi PVC。
@@ -78,13 +78,13 @@ KRR 只认 Prometheus，没有 collector 那种旁路，所以决策一的办法
 选中：给 oracle otel 加 `prometheus/cadvisor` receiver，但 **keep 正则只留 KRR 需要的
 2 个指标**。
 
-实测：该端点共 **9223** 条 series，KRR 只需 **280** 条 —— 丢弃 97%，
+实测：该端点共 9223 条 series，KRR 只需 280 条，丢弃 97%，
 跨 Tailscale 增量可忽略。做法与既有的 `prometheus/cilium-envoy` job 一致
 （那个 job 也是 keep 正则丢掉 ~5000 条 Envoy 内部指标）。
 
 额外 drop `container=""` 的 Pod 级汇总：KRR 的查询永远带真实 container 名。
 
-> 这批指标**不足以**支撑 OpenCost 的 Prometheus 数据源 —— 后者还需要
+> 这批指标**不足以**支撑 OpenCost 的 Prometheus 数据源：后者还需要
 > `container_fs_*` / `container_network_*`。所以决策一不因此翻案。
 
 ### RBAC：必须显式给 `nodes/metrics`
@@ -93,7 +93,7 @@ kubelet 自己做 SubjectAccessReview，走 `metrics` 子资源，只给 `nodes`
 
 > ⚠️ **`kubectl auth can-i get nodes/metrics --as=<sa>` 在这里会误报 `yes`。**
 > 用该 SA 起 Pod 直连 kubelet 实测返回 **HTTP 403**。
-> can-i 判断的是 API server 的视角，kubelet 走的是另一条授权路径 —— 以实际请求为准。
+> can-i 判断的是 API server 的视角，kubelet 走的是另一条授权路径：以实际请求为准。
 
 ## 决策三：不部署 krr-enforcer
 

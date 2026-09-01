@@ -1,7 +1,7 @@
 # k3s 集群版本升级（两集群）
 
-> Last updated: 2026-08-30
-> Status: SOP —— 已按本文完整执行过一次（三节点 v1.34.5+k3s1 → v1.35.8+k3s1，
+> Last updated: 2026-09-01
+> Status: SOP：已按本文完整执行过一次（三节点 v1.34.5+k3s1 → v1.35.8+k3s1，
 > 顺序 oracle → homelab 控制面 → worker，验收 24/24 通过）。本文的每条命令都是实跑验证过的。
 > 触发条件：要把 `k3s-homelab`（`k8s-node` + `k8s-worker-106`）或 `oracle-k3s` 升到新的
 > k3s/Kubernetes 版本；或发现三处 `k3s_version` pin 与现网跑的版本对不上。
@@ -13,7 +13,7 @@
 > 新建一条 HTTPRoute 能拿到 `.status`（见 §9，Gateway API 是本仓库的头号静默失效点）。
 > 回滚：见 §10。两台 homelab VM 走 `qm rollback`（lvm-thin 快照，已核实支持）；
 > oracle 无 VM 快照层，走「重装旧版本二进制 + 还原 `state.db`」。
-> ☠️ **k3s 不支持"降级"**——回滚永远是回到快照/DB 副本，不是装个旧版本了事。
+> ☠️ **k3s 不支持"降级"**。回滚永远是回到快照/DB 副本，不是装个旧版本了事。
 
 ## 1. 别抄结论：现状与目标都要现取
 
@@ -32,7 +32,7 @@ curl -sS https://update.k3s.io/v1-release/channels \
 grep -rn "k3s_version:" k8s/ansible/playbooks/ cloud/oracle/ansible/playbooks/
 ```
 
-> ⚠️ 上面三条命令的输出才是判据。**别把版本号写进任何常青文档** —— 它每周都在动，
+> ⚠️ 上面三条命令的输出才是判据。**别把版本号写进任何常青文档**。它每周都在动，
 > 唯一可信的现状是 `kubectl get nodes` 与 update.k3s.io。
 
 ## 2. 三条硬约束
@@ -40,30 +40,30 @@ grep -rn "k3s_version:" k8s/ansible/playbooks/ cloud/oracle/ansible/playbooks/
 **① ☠️ 不能跳 minor。** k3s 官方原话："Ensure that your plan does not skip intermediate
 minor versions when upgrading"。1.34 → 1.36 是**两次**升级，中间必须在 1.35 上落地并验证。
 
-**② 控制面必须先于 worker。** kubelet 不允许**新于** apiserver。homelab 是
+**② 控制面必须先于 worker。** kubelet 不允许新于 apiserver。homelab 是
 `k8s-node`（server）+ `k8s-worker-106`（agent）：顺序永远是 server → agent。
 worker 剧本里 `k3s_version` 的注释写的就是这条。
 
-**③ ☠️ 不能降级。** 两集群的数据库都是 **SQLite/kine**（`/var/lib/rancher/k3s/server/db/state.db`，
+**③ ☠️ 不能降级。** 两集群的数据库都是 SQLite/kine（`/var/lib/rancher/k3s/server/db/state.db`，
 2026-08-30 实测 homelab 142MB / oracle 179MB，同目录的 `etcd/` 里只有一个空的 `name` 文件）。
 两个后果：
 
-- **`k3s etcd-snapshot` 系列命令在这里全部不可用** —— 那是 etcd 后端专属的。
+- **`k3s etcd-snapshot` 系列命令在这里全部不可用**。那是 etcd 后端专属的。
   别照抄网上以 etcd 为前提的 k3s 升级教程。
 - 回滚只能靠**文件级/VM 级**的时间点副本（§5）。
 
 ## 3. 升级前的兼容性闸门
 
-☠️ **这一节是流程，不是结论**。下表最右列是 2026-08-30 的核查结果，**每次升级前重跑一遍**——
+☠️ **这一节是流程，不是结论**。下表最右列是 2026-08-30 的核查结果，**每次升级前重跑一遍**：
 组件在动，上游支持矩阵也在动。
 
 | # | 查什么 | 怎么查 | 2026-08-30 |
 |---|--------|--------|-----------|
-| G1 | 目标版本的 **Urgent Upgrade Notes** | 读 `CHANGELOG-<minor>.md` 的该节（见下方命令）| 1.35 起 cgroup v1 由 warning 变**硬错**；1.35 移除 kubelet `--pod-infra-container-image` |
+| G1 | 目标版本的 **Urgent Upgrade Notes** | 读 `CHANGELOG-<minor>.md` 的该节（见下方命令）| 1.35 起 cgroup v1 由 warning 变硬错；1.35 移除 kubelet `--pod-infra-container-image` |
 | G2 | **cgroup v2** | `stat -fc %T /sys/fs/cgroup/` → 必须 `cgroup2fs` | 三节点全通过 |
 | G3 | **被移除的 kubelet flag** | `grep -A20 kubelet-arg /etc/rancher/k3s/config.yaml` | 三处均无被移除项 |
 | G4 | **还在被请求的弃用 API** | 见下方 `apiserver_requested_deprecated_apis` | 仅 `endpoints v1`（`removed_release=""`，无移除计划），不阻塞 |
-| G5 | **组件支持矩阵**（谁**支持**新版本）| 见 §3.2 | ⚠️ **Kyverno 是天花板** |
+| G5 | 组件支持矩阵（谁支持新版本）| 见 §3.2 | ⚠️ **Kyverno 是天花板** |
 | G6 | **谁把 k8s 版本当\*\*输入\*\***（与 G5 是两回事）| 见 §3.3 | ☠️ ZITADEL chart 命中，已钉死 |
 
 ### 3.1 G1/G4 的命令
@@ -84,7 +84,7 @@ for c in k3s-homelab oracle-k3s; do
 done
 ```
 
-⚠️ **G4 是抽样不是普查**：该指标只反映 apiserver **最近观测到的**请求。一个季度才跑一次的
+⚠️ **G4 是抽样不是普查**：该指标只反映 apiserver 最近观测到的请求。一个季度才跑一次的
 CronJob 用了将被删的 API，扫的时候它不在场，指标就是干净的。清单侧再扫一遍别的形态：
 
 ```bash
@@ -92,14 +92,14 @@ CronJob 用了将被删的 API，扫的时候它不在场，指标就是干净�
 grep -rn "gitRepo:\|externalIPs:" --include="*.yaml" k8s/ cloud/ argocd/ backup/ zitadel/
 ```
 
-### 3.2 G5 —— 组件支持矩阵（唯一真正会挡路的一格）
+### 3.2 G5：组件支持矩阵（唯一真正会挡路的一格）
 
 只列**会因 k8s 版本而拒绝工作或失去支持**的组件。查的是各上游自己的兼容表，不是猜的。
 
 | 组件 | 在哪 | 怎么查 | 2026-08-30 结论 |
 |---|---|---|---|
-| **Cilium** | 两集群 1.20.0 | `docs.cilium.io/en/v<ver>/network/kubernetes/requirements/` | e2e 覆盖 k8s **1.33–1.36**，到 1.36 不挡路 |
-| **Kyverno** | 仅 homelab（现 v1.19.0）| `kyverno.io/docs/installation/releases/` | ⚠️ 唯一 supported release v1.19 只到 **k8s 1.35**；**1.36 无任何版本支持**（v1.20 预计 2026-11）|
+| Cilium | 两集群 1.20.0 | `docs.cilium.io/en/v<ver>/network/kubernetes/requirements/` | e2e 覆盖 k8s 1.33–1.36，到 1.36 不挡路 |
+| Kyverno | 仅 homelab（现 v1.19.0）| `kyverno.io/docs/installation/releases/` | ⚠️ 唯一 supported release v1.19 只到 k8s 1.35；**1.36 无任何版本支持**（v1.20 预计 2026-11）|
 | **CNPG** | 仅 oracle 1.30.0 | 版本发布公告 | 1.30 已加 1.36 支持 |
 | ArgoCD / ESO / prometheus-operator / trivy-operator / tetragon / falco | 两集群 | 上游 release notes | 均无声明冲突 |
 
@@ -118,7 +118,7 @@ done
 
 `kyverno-resource-validating-webhook-cfg` 的 `failurePolicy` 是 **`Ignore`**（2026-08-30 实测），
 符合 [security.md](../reference/security.md) 的 fail-open 设计。所以 Kyverno 与 apiserver
-版本不兼容时，**不会有任何东西报错或告警** —— 4 条 ClusterPolicy
+版本不兼容时，**不会有任何东西报错或告警**。4 条 ClusterPolicy
 （`disallow-latest-tag` / `require-probes` / `require-requests-limits` /
 `restrict-image-registries`）只是悄悄不再生效。
 
@@ -128,7 +128,7 @@ done
 **因此当前的结论是：可以升到 1.35，先别上 1.36。** 若确要上 1.36，得接受 Kyverno
 处于未测试状态，并在 §9 里把策略生效验证当作每次必查项。
 
-### 3.3 G6 —— 谁把 k8s 版本当**输入**
+### 3.3 G6：谁把 k8s 版本当**输入**
 
 ☠️ **这一格最容易漏，且漏了会直接打掉线上服务。**
 
@@ -138,7 +138,7 @@ G5 问的是「组件**支不支持**新版本」，G6 问的是完全不同的�
 
 典型形态（ZITADEL chart，本仓库实际命中过）：`tools.kubectl.image.tag` 默认留空，
 语义是「自动取集群的 k8s 版本」，于是集群一升到 vX.Y.Z，它就去拉
-`docker.io/alpine/k8s:X.Y.Z` —— 而这个镜像的 tag 是**人工发布**的，**跟不上 k8s
+`docker.io/alpine/k8s:X.Y.Z`，而这个镜像的 tag 是人工发布的，**跟不上 k8s
 的补丁节奏**，集群的补丁版本往往还没有对应 tag。链条是：
 
 ```
@@ -148,7 +148,7 @@ G5 问的是「组件**支不支持**新版本」，G6 问的是完全不同的�
 
 ⚠️ **发作时机在升级"成功"之后几分钟**：节点 Ready、`k3s --version` 正确、pod 数
 也已复原，helm-controller 才慢一步重新 reconcile。**「升完看一眼节点就收工」会
-完美错过它** —— 必须跑完 §9 的 ② 才算验收。
+完美错过它**：必须跑完 §9 的 ② 才算验收。
 
 **怎么查**（没有一劳永逸的静态办法，三条一起用）：
 
@@ -170,16 +170,16 @@ kubectl 与集群同 minor 即可，所以只有升 minor 时才需要动它）�
 
 > 普查现状：**homelab 一个 HelmChart CR 都没有**（`No resources found`），
 > 这条路径只在 oracle 上存在，且只剩 zitadel 一个。⚠️ 但 ArgoCD 渲染 Helm chart
-> 时同样会把集群版本传给模板，所以不能只查 helm-controller —— §9 ② 那条
+> 时同样会把集群版本传给模板，所以不能只查 helm-controller：§9 ② 那条
 > 「升完立刻查未就绪 pod」才是兜底。
 
 ## 4. 停机面
 
 | 动作 | 谁受影响 | 实测/预期 |
 |---|---|---|
-| 升 **oracle-k3s** | **ArgoCD 控制面**（GitOps 暂停）· ZITADEL（全站 SSO 登录）· Loki/Tempo（日志与追踪断档）· Calibre | 单节点，全集群短暂不可用 |
+| 升 **oracle-k3s** | ArgoCD 控制面（GitOps 暂停）· ZITADEL（全站 SSO 登录）· Loki/Tempo（日志与追踪断档）· Calibre | 单节点，全集群短暂不可用 |
 | 升 **homelab 控制面** | Vault（→ oracle 侧 ExternalSecret 报错）· Prometheus/Grafana/Alertmanager · 该节点上的全部应用 | 同上 |
-| 升 **homelab worker** | jellyfin / navidrome / podcast（媒体）· external-dns · sloth · opencost · cf-analytics-exporter | ☠️ 这些**硬钉在 worker 上、迁不走**，drain 只会让它们 Pending —— 停机时长 = 整个 worker 升级窗口，见 §8 陷阱 ② |
+| 升 **homelab worker** | jellyfin / navidrome / podcast（媒体）· external-dns · sloth · opencost · cf-analytics-exporter | ☠️ 这些**硬钉在 worker 上、迁不走**，drain 只会让它们 Pending，停机时长 = 整个 worker 升级窗口，见 §8 陷阱 ② |
 
 三条已知的连带反应，**都是预期内、不要去修**：
 
@@ -194,10 +194,10 @@ kubectl 与集群同 minor 即可，所以只有升 minor 时才需要动它）�
 
 ☠️ **不要在这里把三台的回滚点一次做完**。每台的回滚点都要求先 `stop k3s`，一次做完
 = homelab 从这一刻起一直停到 oracle 升完并验收完（§6 要求在那里停下来跑全套验收，
-可能是几十分钟）。**正确姿势是「谁要升，才停谁、才给谁做回滚点」** —— §6/§7/§8
+可能是几十分钟）。**正确姿势是「谁要升，才停谁、才给谁做回滚点」**：§6/§7/§8
 每一节的开头都已经就地写好了。
 
-### 5.1 两台 homelab VM —— `qm snapshot`
+### 5.1 两台 homelab VM：`qm snapshot`
 
 两台的磁盘都在 **lvm-thin**（`local-lvm`），支持快照，2026-08-30 核实容量充足
 （pve 剩 242G / 106 剩 129G，thin 快照只占增量）。
@@ -221,7 +221,7 @@ ssh -i ~/.ssh/vgio root@100.110.27.111 \
 > `qm delsnapshot <vmid> pre-k3s-upgrade` 删掉。
 > 兜底还有周备：pve VM100 周日 03:30 / 106 VM200 周日 05:00（`keep-last=3`）。
 
-### 5.2 oracle-k3s —— 没有 VM 快照层，拷 DB
+### 5.2 oracle-k3s：没有 VM 快照层，拷 DB
 
 OCI 侧没有做 boot volume 备份策略，所以 oracle 的回滚点只能自己造：
 
@@ -241,7 +241,7 @@ ssh -i ~/.ssh/vgio ubuntu@100.107.166.37 '
 > 真出不来的话还有第二层：oracle 全部 PVC 由 restic 夜备（03:30），重建路径见
 > [oracle-k3s-rebuild.md](oracle-k3s-rebuild.md)。那是**重建**不是回滚，代价大得多。
 
-## 6. 执行 A —— oracle-k3s（先升，当金丝雀）
+## 6. 执行 A：oracle-k3s（先升，当金丝雀）
 
 先升 oracle 的理由：单节点、爆炸半径自包含、没有 Kyverno（少一个变量）、且有成型的重建 runbook。
 
@@ -274,7 +274,7 @@ kubectl --context oracle-k3s get pods -A --no-headers \
 
 ⚠️ **在这里停下来，跑完 §9 的全套验收再动 homelab。** 金丝雀的意义就是让问题只发生在一侧。
 
-## 7. 执行 B —— homelab 控制面 `k8s-node`
+## 7. 执行 B：homelab 控制面 `k8s-node`
 
 ```bash
 # 先把 worker 上的负载保住：控制面重启期间 worker 会 NotReady，但 pod 不会被驱逐
@@ -301,7 +301,7 @@ sudo systemctl status k3s --no-pager
   万一有别的原因必须 drain，用 `kubectl drain … --disable-eviction`（走 delete 而非
   eviction，绕开 PDB）。
 
-## 8. 执行 C —— homelab worker `k8s-worker-106`
+## 8. 执行 C：homelab worker `k8s-worker-106`
 
 **必须在 §7 通过之后**（约束 ②）。这台可以正经 drain，因为有控制面接着。
 
@@ -329,7 +329,7 @@ sudo systemctl status k3s-agent --no-pager
 kubectl --context k3s-homelab uncordon k8s-worker-106
 ```
 
-### ☠️ 陷阱 ① —— 安装脚本会**清空** agent 的 env 文件
+### ☠️ 陷阱 ①：安装脚本会**清空** agent 的 env 文件
 
 **不重传就是 agent 拒启，没有中间状态。** 装完日志里那行
 
@@ -337,7 +337,7 @@ kubectl --context k3s-homelab uncordon k8s-worker-106
 [INFO]  env: Creating environment file /etc/systemd/system/k3s-agent.service.env
 ```
 
-不是"沿用"，是**重新生成** —— 用当前 shell 环境覆盖。升级时若没把 `K3S_URL` /
+不是"沿用"，是重新生成：用当前 shell 环境覆盖。升级时若没把 `K3S_URL` /
 `K3S_TOKEN` 重新传进去，这个文件会变成**空的**，然后：
 
 ```
@@ -345,7 +345,7 @@ level=fatal msg="Error: --server is required"
 Job for k3s-agent.service failed because the control process exited with error code.
 ```
 
-☠️ **别想当然地以为"已经 join 过就不用再给 token"** —— server 端的
+☠️ **别想当然地以为"已经 join 过就不用再给 token"**：server 端的
 `config.yaml` 会被保留，但 agent 的 join 参数只活在这个 env 文件里，装一次冲一次。
 
 **已经踩了怎么救**（不必回滚，token 直接管道过去、不落盘不进历史）：
@@ -359,7 +359,7 @@ ssh -i ~/.ssh/vgio ubuntu@10.10.10.10 'sudo cat /var/lib/rancher/k3s/server/node
 ssh -i ~/.ssh/vgio ubuntu@192.168.50.107 'sudo systemctl daemon-reload && sudo systemctl start k3s-agent'
 ```
 
-### ☠️ 陷阱 ② —— drain 不会把这些服务"迁到控制面"，只会让它们 Pending
+### ☠️ 陷阱 ②：drain 不会把这些服务"迁到控制面"，只会让它们 Pending
 
 worker 上这几个 Deployment 全部**硬钉**在本节点：
 
@@ -375,7 +375,7 @@ nodeSelector: {kubernetes.io/hostname: k8s-worker-106}
 1 node(s) were unschedulable.
 ```
 
-所以 **drain 不是"平滑迁移"，是"这些服务开始停机"** —— 停机时长 = 整个 worker
+所以 **drain 不是"平滑迁移"，是"这些服务开始停机"**，停机时长 = 整个 worker
 升级窗口，直到 `uncordon`。计划维护窗口时按这个算，别按"迁走了就没事"算。
 （好消息是 `uncordon` 之后它们会自己回来，不需要 `rollout restart`。）
 
@@ -409,7 +409,7 @@ kubectl --context k3s-homelab -n vault exec vault-0 -- vault status | grep Seale
 for c in k3s-homelab oracle-k3s; do kubectl --context "$c" get externalsecrets -A | grep -v SecretSynced; done
 ```
 
-**⑤ Gateway API 控制器真的初始化了** —— 判据只有一个：**新建**一条 HTTPRoute 能不能拿到
+**⑤ Gateway API 控制器真的初始化了**，判据只有一个：新建一条 HTTPRoute 能不能拿到
 `.status`。旧路由 curl 200 **不是证据**（08-11 瘫了 30 小时期间旧路由一直是 200），
 `kubectl get gateway` 也**不是**（Gateway 对象的 status 是上次写的，会一直挂着）。
 
@@ -447,7 +447,7 @@ io.cilium/gateway-controller  Accepted=True ResolvedRefs=True
 
 > ⚠️ **两条会被误判成"升坏了"的既有基线，先记下来**（都在 2026-08-30、升级前就是这样）：
 > - `oracle-gateway` 的 `PROGRAMMED` 一直是 **False**（`reason=AddressNotAssigned`,
->   "Gateway waiting for address"）—— oracle 禁了 servicelb、没有 LoadBalancer 给它派地址，
+>   "Gateway waiting for address"）。oracle 禁了 servicelb、没有 LoadBalancer 给它派地址，
 >   而入口流量走 Cloudflare Tunnel 直接进 Service，不依赖这个地址。**86 天来一直如此，
 >   不是升级造成的。** homelab 侧是 `True`（地址 `10.10.10.10`）。
 > - `cilium-operator` 日志里**没有** `Required GatewayAPI resources` 这句
@@ -472,7 +472,7 @@ disallow-latest-tag:
 ```
 
 ☠️ **"建得成"就是失效了**。webhook 是 `failurePolicy: Ignore`（fail-open），
-Kyverno 与 apiserver 不兼容时**不报错、不告警、pod 全 Running**，只是不再拦 ——
+Kyverno 与 apiserver 不兼容时**不报错、不告警、pod 全 Running**，只是不再拦：
 这条命令是唯一能看见它的地方。
 
 ## 10. 回滚
@@ -500,7 +500,7 @@ ssh -i ~/.ssh/vgio ubuntu@100.107.166.37 '
 旧版本读它属于未定义行为。二进制与 DB 必须**成对**回到升级前。
 
 回滚后**先把两集群 Cilium 的连通性看一遍**再宣布恢复：ClusterMesh 要求两端 Cilium 同版本，
-而回滚不改 Cilium（它是 manual-helm，不随 k3s 走），所以这里通常没问题——
+而回滚不改 Cilium（它是 manual-helm，不随 k3s 走），所以这里通常没问题：
 但要用 `just clustermesh-status` 确认，不要假设。
 
 ## 11. 收尾（做完才算完）

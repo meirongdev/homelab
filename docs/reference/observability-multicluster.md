@@ -1,6 +1,6 @@
 # Multi-Cluster Observability Architecture
 
-> Last updated: 2026-08-30
+> Last updated: 2026-09-01
 > Status: 生效事实
 
 ## 速览
@@ -12,16 +12,16 @@
 
 ## Overview
 
-⚠️ **2026-08-02 起遥测不再是单向的。** Loki(日志) 与 Tempo(追踪) 已迁到 **oracle-k3s**，
-Prometheus/Grafana/Alertmanager 仍在 **homelab**。排查时别默认「所有遥测都往同一个方向走」。
+⚠️ **2026-08-02 起遥测不再是单向的。** Loki(日志) 与 Tempo(追踪) 已迁到 oracle-k3s，
+Prometheus/Grafana/Alertmanager 仍在 homelab。排查时别默认「所有遥测都往同一个方向走」。
 
 - **日志 / 追踪** → 汇聚在 oracle：homelab 跨 Tailscale 写出，oracle 集群内直达
 - **指标** → 仍汇聚在 homelab：oracle 跨 Tailscale `prometheusremotewrite` 写入（方向未变）
-- **Grafana** 留在 homelab（贴着 Prometheus），经 NodePort 跨 Tailscale 查询 oracle 的 Loki/Tempo
+- Grafana 留在 homelab（贴着 Prometheus），经 NodePort 跨 Tailscale 查询 oracle 的 Loki/Tempo
 
-搬 Loki/Tempo 的理由：homelab 是 12GB 笔记本 VM，**迁移当时（2026-08-02）**内存实测 76%、
-磁盘 66%（⚠️ 那两个数字是**当时的迁移动机**，不是现状——搬走后已回落到内存 46% / 磁盘 23%），
-而 Loki/Tempo 是纯「写入-存储」组件，不像 Prometheus 需要贴着抓取目标 —— 是 LGTM 里
+搬 Loki/Tempo 的理由：homelab 是 12GB 笔记本 VM，迁移当时（2026-08-02）内存实测 76%、
+磁盘 66%（⚠️ 那两个数字是当时的迁移动机，不是现状：搬走后已回落到内存 46% / 磁盘 23%），
+而 Loki/Tempo 是纯「写入-存储」组件，不像 Prometheus 需要贴着抓取目标，是 LGTM 里
 唯一可安全切分出去的子集。附带收益：homelab 整机故障时**故障前的日志与追踪还在**，
 此前它们和被观测对象同归于尽（PVC 在同一块盘上）。
 取舍全集见 [../plans/architecture/2026-08-02-homelab-to-oracle-workload-migration.md](../plans/architecture/2026-08-02-homelab-to-oracle-workload-migration.md)。
@@ -63,7 +63,7 @@ All metrics carry a `cluster` label for multi-cluster dashboard queries:
 ### Oracle k3s → Loki（集群内直达）
 
 **Component:** `cloud/oracle/manifests/monitoring/otel-collector-config.yaml`（receivers/pipelines
-全在这里；同目录的 `otel-collector.yaml` 只有 RBAC/Service/DaemonSet，**没有**管道配置）
+全在这里；同目录的 `otel-collector.yaml` 只有 RBAC/Service/DaemonSet，没有管道配置）
 
 **Pipeline:** `filelog → k8sattributes → resource → batch → otlphttp`
 
@@ -78,7 +78,7 @@ All metrics carry a `cluster` label for multi-cluster dashboard queries:
    - `attributes.container_name` → `resource["k8s.container.name"]`
 4. **k8sattributes processor** uses `k8s.pod.uid` (resource attribute) to look up the pod in the K8s API and enrich with `k8s.deployment.name`, `k8s.node.name`, etc.
 5. **resource processor** adds `cluster: oracle-k3s` label
-6. **otlphttp exporter** ships to `http://loki-gateway.monitoring.svc.cluster.local/otlp` —— 2026-08-02 起 Loki 就在本集群，集群内直达（此前是跨 Tailscale 的 `100.94.186.7:31080`）
+6. **otlphttp exporter** ships to `http://loki-gateway.monitoring.svc.cluster.local/otlp`。2026-08-02 起 Loki 就在本集群，集群内直达（此前是跨 Tailscale 的 `100.94.186.7:31080`）
 
 > **Bug fixed 2026-02-22:** The original config did not promote filepath-extracted attributes to resource attributes, so `k8sattributes` could never find the pod (all identifier values were empty strings). Logs arrived in Loki as `unknown_service` with no namespace/pod labels.
 
@@ -91,14 +91,14 @@ Uses the `container` operator type which automatically handles filepath parsing 
 ### Loki Label Mapping
 
 OTel resource attributes 转 Loki stream labels（点转下划线）的映射与实测 label 全集见
-[observability-otel-logging.md](observability-otel-logging.md#loki-3x-otlp-支持)——唯一真相源，此处不复制。
+[observability-otel-logging.md](observability-otel-logging.md#loki-3x-otlp-支持)，唯一真相源，此处不复制。
 
 ## Metrics Pipeline
 
 ### Oracle k3s → Homelab Prometheus (push via OTel)
 
 **Component:** `cloud/oracle/manifests/monitoring/otel-collector-config.yaml`（receivers/pipelines
-全在这里；同目录的 `otel-collector.yaml` 只有 RBAC/Service/DaemonSet，**没有**管道配置）
+全在这里；同目录的 `otel-collector.yaml` 只有 RBAC/Service/DaemonSet，没有管道配置）
 
 **Mechanism:** OTel Collector scrapes local exporters and pushes via `prometheusremotewrite` to homelab Prometheus over Tailscale. No prometheus-agent needed.
 
@@ -117,13 +117,13 @@ All metrics pass through `resource` processor (adds `cluster: oracle-k3s`) → `
 
 **`prometheus/cadvisor` 的特殊之处**（2026-07-30 为 KRR 新增）：
 
-- 直连 kubelet，ClusterRole 必须含 **`nodes/metrics`** —— 只给 `nodes` 会 403
+- 直连 kubelet，ClusterRole 必须含 `nodes/metrics`，只给 `nodes` 会 403
   （kubelet 走自己的 SubjectAccessReview，`kubectl auth can-i` 在此会误报 yes）
-- `tls_config.insecure_skip_verify: true` —— k3s kubelet 服务证书自签且 SAN 不含节点 IP
+- `tls_config.insecure_skip_verify: true`：k3s kubelet 服务证书自签且 SAN 不含节点 IP
 - `metric_relabel_configs` 只 keep
   `container_(cpu_usage_seconds_total|memory_working_set_bytes)`，
-  并 drop `container=""` 的 Pod 级汇总。端点原有 **9223** 条 series，落库仅 ~51 条/指标
-- 唯一消费者是 KRR，**不足以**支撑 OpenCost 的 Prometheus 数据源
+  并 drop `container=""` 的 Pod 级汇总。端点原有 9223 条 series，落库仅 ~51 条/指标
+- 唯一消费者是 KRR，不足以支撑 OpenCost 的 Prometheus 数据源
   （后者还需 `container_fs_*` / `container_network_*`），
   详见 [cost-and-rightsizing.md](cost-and-rightsizing.md)
 
@@ -133,7 +133,7 @@ All metrics pass through `resource` processor (adds `cluster: oracle-k3s`) → `
 
 ### Architecture
 
-Both clusters have OTLP receivers (gRPC :4317, HTTP :4318) on their local OTel Collectors. Applications send traces to the cluster-local Collector via ClusterIP Service. The Collector enriches spans with `cluster` label and forwards to Tempo —— 2026-08-02 起 Tempo 在 **oracle-k3s**（homelab 跨 Tailscale 写出，oracle 集群内直达）。
+Both clusters have OTLP receivers (gRPC :4317, HTTP :4318) on their local OTel Collectors. Applications send traces to the cluster-local Collector via ClusterIP Service. The Collector enriches spans with `cluster` label and forwards to Tempo。2026-08-02 起 Tempo 在 oracle-k3s（homelab 跨 Tailscale 写出，oracle 集群内直达）。
 
 ```
 Application Pod                      OTel Collector              Tempo (oracle-k3s)
@@ -146,7 +146,7 @@ Application Pod                      OTel Collector              Tempo (oracle-k
 
 **Pipeline:** `otlp → memory_limiter → resource(cluster=homelab) → batch → otlp/tempo`
 
-- ⚠️ 2026-08-02 起 **不再是集群内直达**：Tempo 已迁 oracle，homelab collector 跨 Tailscale
+- ⚠️ 2026-08-02 起**不再是集群内直达**：Tempo 已迁 oracle，homelab collector 跨 Tailscale
   发到 `100.107.166.37:31317`，并带持久化发送队列（file_storage，链路中断不丢缓冲）
 - ClusterIP Service: `opentelemetry-collector.monitoring.svc:4317/4318`
 
@@ -154,7 +154,7 @@ Application Pod                      OTel Collector              Tempo (oracle-k
 
 **Pipeline:** `otlp → memory_limiter → resource(cluster=oracle-k3s) → batch → otlp/tempo`
 
-- Collector forwards traces to `tempo.monitoring.svc.cluster.local:4317` —— 同上，2026-08-02 起集群内直达
+- Collector forwards traces to `tempo.monitoring.svc.cluster.local:4317`，同上，2026-08-02 起集群内直达
 - ClusterIP Service: `otel-collector.monitoring.svc:4317/4318`
 
 ### Sampling Strategy
@@ -197,22 +197,22 @@ Standard kube-prometheus-stack in-cluster scraping with `scrapeClasses` default 
 `kubelet` / `kubeApiServer` `serviceMonitor.metricRelabelings`）：
 
 - ☠️ **k3s 把 apiserver 与 kubelet 跑在同一个进程里**，kubelet 的 `/metrics` 会把整个
-  进程的 registry 全吐出来，于是全套 `apiserver_*` / `etcd_*` 被**抓进来两遍**。
-  实测这批重复副本占 `job="kubelet"` 全部 93,056 条 series 的 **80%**。
+  进程的 registry 全吐出来，于是全套 `apiserver_*` / `etcd_*` 被抓进来两遍。
+  实测这批重复副本占 `job="kubelet"` 全部 93,056 条 series 的 80%。
 - 现状：kubelet 侧整族 drop `(apiserver|etcd)_.*`；apiserver 侧另 drop 7 族无 rule/无
   panel 引用的 histogram。**保留** `apiserver_request_sli_duration_seconds_bucket`
-  的 apiserver 副本——`kube-apiserver-histogram.rules` 两条 recording rule 在用它。
-- 效果：active series **234,532 → 109,566（−53%）**、摄入 7,562 → 2,879 samples/s，
-  Prometheus limit 随之从 4Gi 收回 **3Gi**（cgroup peak 758Mi = 24%）。
-- ⚠️ 两个 key 的 chart 默认 `metricRelabelings` **不是空的**，list 是整体覆盖 ——
-  默认值原样抄进来再追加（当前抄自 chart **87.6.0**），升 chart 时要重新比对。
+  的 apiserver 副本：`kube-apiserver-histogram.rules` 两条 recording rule 在用它。
+- 效果：active series 234,532 → 109,566（−53%）、摄入 7,562 → 2,879 samples/s，
+  Prometheus limit 随之从 4Gi 收回 3Gi（cgroup peak 758Mi = 24%）。
+- ⚠️ 两个 key 的 chart 默认 `metricRelabelings` **不是空的**，list 是整体覆盖，
+  默认值原样抄进来再追加（当前抄自 chart 87.6.0），升 chart 时要重新比对。
 - ⚠️ 面板查的是 recording rule 输出（`cluster_quantile:...`）而非原始 bucket，
-  所以看板不受影响；但**原始 bucket 已无法 ad-hoc 查询**。
+  所以看板不受影响；但原始 bucket 已无法 ad-hoc 查询。
 
 判据、被否决的选项与三层验证方法见
 [decisions/prometheus-series-reduction.md](../decisions/prometheus-series-reduction.md)。
 
-**Additional scrape targets** (`additionalScrapeConfigs`；⚠️ 这些配置**逐字注入**，
+**Additional scrape targets** (`additionalScrapeConfigs`；⚠️ 这些配置逐字注入，
 scrapeClasses 不会给它们 relabel，`cluster`/`nodename` 必须逐 target 写)：
 
 | Job | Target | Labels |
@@ -225,12 +225,12 @@ scrapeClasses 不会给它们 relabel，`cluster`/`nodename` 必须逐 target �
 
 ### 外部主机（非 K8s，metrics-only）
 
-- **dgx-spark**（2× GB10）: node_exporter 从 **`nv-dgx-spark` repo** 部署
+- **dgx-spark**（2× GB10）: node_exporter 从 `nv-dgx-spark` repo 部署
   （`make node-exporter-deploy`，docker `--net=host --pid=host`）。看板 Grafana
   「DGX Spark / Node Exporter」（`dashboards/dgx-spark-node-dashboard.yaml`）。
   Tailnet ACL 已放行 `tag:homelab → *:*`。
-- **macbook**（Apple Silicon 笔记本）: node_exporter 是预编译 **`darwin-arm64` 二进制**
-  （`~/.local/bin/node_exporter`，非 Homebrew——那台 Mac 出不了 GitHub，tarball 是 `scp` 进去的），
+- **macbook**（Apple Silicon 笔记本）: node_exporter 是预编译的 `darwin-arm64` 二进制
+  （`~/.local/bin/node_exporter`，不是 Homebrew：那台 Mac 出不了 GitHub，tarball 是 `scp` 进去的），
   由 LaunchAgent 拉起（`com.prometheus.node_exporter.plist`，`:9100`，无 sudo）。
   SSH: `ssh -i ~/.ssh/vgio matthew@100.89.15.120`。主机配置已固化为 Ansible
   （`macbook/ansible/`，`just node-exporter` / `just power`）；GUI-only 步骤在其 README。
@@ -245,15 +245,15 @@ scrapeClasses 不会给它们 relabel，`cluster`/`nodename` 必须逐 target �
 - **SMART 磁盘健康**（2026-06-27）: Linux 裸机跑 `smartctl_exporter`（:9633）。
   部署：storage-106 + pve（amd64）走 `cd proxmox/ansible && just node-exporter`（一个 playbook
   同装 node_exporter + smartctl_exporter）；DGX ×2（arm64）走 `nv-dgx-spark` repo
-  `make smartctl-exporter-deploy`——**不是容器**（`quay.io/...` 的镜像 amd64-only，GB10 是
+  `make smartctl-exporter-deploy`，**不是容器**（`quay.io/...` 的镜像 amd64-only，GB10 是
   aarch64，GitHub `linux-arm64` 二进制在控制机下载后 SSH 分发）。macbook 无 SMART
   （Apple Silicon 内置 NVMe 不暴露标准 SMART 属性，只有文件系统/IO）。
-  看板：Grafana **Hardware** 文件夹（health / 温度 / SSD 磨损 / 通电时长）。
+  看板：Grafana `Hardware` 文件夹（health / 温度 / SSD 磨损 / 通电时长）。
   - **⚠️ 指标名坑**: 磁盘温度是 `smartctl_device_temperature{temperature_type="current"}`
     （NVMe+SATA 统一），**不是** `smartctl_device_temperature_celsius`（v0.14.0 无此指标，
     用了面板静默空白）。SSD 磨损：NVMe `100 - smartctl_device_percentage_used`，SATA
     `smartctl_device_attribute{attribute_value_type="value", attribute_name=~"Media_Wearout_Indicator|Wear_Leveling_Count|SSD_Life_Left|Percent_Lifetime_Remain"}`
-    （磨损 bargauge 两个 target 都带，覆盖两种盘型）。**不是** `smartctl_attr_normalized_value`——
+    （磨损 bargauge 两个 target 都带，覆盖两种盘型）。**不是** `smartctl_attr_normalized_value`：
     v0.14.0 已把该指标改名 `smartctl_device_attribute` 并加 `attribute_value_type` 标签
     （`"value"`=归一化 100=new），旧名直接查不到、面板静默空白（2026-08-17 三个 dashboard 同修）。
 
@@ -265,7 +265,7 @@ scrapeClasses 不会给它们 relabel，`cluster`/`nodename` 必须逐 target �
 |---------|----------|---------|
 | ~~`loki-gateway-external`~~ | ~~31080~~ | 已随 Loki 迁往 oracle，homelab 侧 Service 已从 Git 移除 |
 | ~~`tempo-otlp-external`~~ | ~~31317~~ | 已随 Tempo 迁往 oracle，homelab 侧 Service 已从 Git 移除 |
-| `prometheus-otlp-external` | 31090 | Receives Prometheus remote_write from oracle OTel（**方向未变**，Prometheus 仍在 homelab）|
+| `prometheus-otlp-external` | 31090 | Receives Prometheus remote_write from oracle OTel（方向未变，Prometheus 仍在 homelab）|
 
 oracle-k3s 侧新增（`cloud/oracle/manifests/monitoring/monitoring-external.yaml`）：
 
@@ -273,7 +273,7 @@ oracle-k3s 侧新增（`cloud/oracle/manifests/monitoring/monitoring-external.ya
 |---------|----------|---------|
 | `loki-gateway-external` | 31080 | 收 homelab OTel 的日志；同时是 Grafana 的日志查询口 |
 | `tempo-otlp-external` | 31317 | 收 homelab OTel 的追踪（OTLP gRPC 写入口）|
-| `tempo-query-external` | 31320 | Grafana 的追踪**查询**口（3200/HTTP，与写入口不同）|
+| `tempo-query-external` | 31320 | Grafana 的追踪查询口（3200/HTTP，与写入口不同）|
 > **Note:** kube-state-metrics NodePort (31082) on oracle-k3s is no longer used for cross-cluster scrape. OTel Collector scrapes it locally via ClusterIP and pushes via remote_write.
 
 ## Grafana Dashboards
@@ -295,12 +295,12 @@ Multi-cluster resource overview (`k8s/helm/manifests/monitoring/dashboards/multi
 
 - **Kubernetes / Multi-Cluster / Resource Overview** (`uid: k8s-multicluster-overview`) — node CPU/memory/disk/network, Pod status table, Deployment/StatefulSet health, container resource usage vs Limit; supports `cluster`, `namespace`, `phase` variables
   - 「📦 容器资源使用」行 2026-08-30 从 2 个面板扩到 4 个，新增的两个按**容器**取 TOP10、
-    红色阈值线直接对齐告警：**CPU 节流率 TOP10**（红线 25% = `ContainerCPUThrottlingSustained`）
-    与 **内存 RSS / Limit TOP10**（红线 80% = `ContainerMemoryNearLimit`）。
-    ⚠️ RSS 面板与它左边的 working_set 面板**口径不同**，两张图并排就是为了看出差别：
+    红色阈值线直接对齐告警：CPU 节流率 TOP10（红线 25% = `ContainerCPUThrottlingSustained`）
+    与内存 RSS / Limit TOP10（红线 80% = `ContainerMemoryNearLimit`）。
+    ⚠️ RSS 面板与它左边的 working_set 面板口径不同，两张图并排就是为了看出差别：
     working_set 含页缓存，对 mmap/文件重的负载会显著偏高
     （[records/2026-08-30-…](../records/2026-08-30-memory-alert-page-cache-false-alarm.md)）。
-    ⚠️ 节流面板里**没设 CPU limit 的容器整个缺席**——cAdvisor 只为有 quota 的容器吐
+    ⚠️ 节流面板里**没设 CPU limit 的容器整个缺席**：cAdvisor 只为有 quota 的容器吐
     `container_cpu_cfs_*`，那是无数据，不是「节流为 0」。
 
 **Dashboard variable configuration:**
@@ -331,17 +331,17 @@ kube-prometheus-stack 自带的 **Compute Resources / Namespace(Pods) / Pod / No
 ```
 
 oracle 的容器指标经 OTel `prometheusreceiver` remote-write 进来，标签是
-`job="kubelet-cadvisor"`，且**没有 `metrics_path` 标签**（那两个标签是 homelab 侧
-ServiceMonitor 加的，OTel 不加）—— 两个条件都不匹配，录制规则永远算不到 oracle。
+`job="kubelet-cadvisor"`，且没有 `metrics_path` 标签（那两个标签是 homelab 侧
+ServiceMonitor 加的，OTel 不加），两个条件都不匹配，录制规则永远算不到 oracle。
 **给 cadvisor keep 正则加指标不会改变这一点**（2026-08-30 从 2 个加到 8 个，mixin 面板照旧空）。
 
 ⚠️ **别试图靠改写 job 名去"修"它**：`job="kubelet-cadvisor"` 这个名字是
 `values/kube-prometheus-stack.yaml` 里 `KubeletDown` 被 disable、自建版本硬写
-`cluster="homelab"` 的**前提**（那里有完整设计说明）。而且 mixin 面板还依赖
+`cluster="homelab"` 的前提（那里有完整设计说明）。而且 mixin 面板还依赖
 `container_network_*` / `container_fs_*` 等一大批没进 keep 正则的指标，改了 job 名
-也只有 CPU/内存两块有数——结果是"看起来支持了其实半残"，比现在明确的空更难排查。
+也只有 CPU/内存两块有数，结果是"看起来支持了其实半残"，比现在明确的空更难排查。
 
-**oracle 的容器视图看这两处**：本仓库自建的 `multicluster-overview`（查**原始**
+**oracle 的容器视图看这两处**：本仓库自建的 `multicluster-overview`（查原始的
 `container_cpu_usage_seconds_total` / `container_memory_working_set_bytes` +
 `cluster=~"$cluster"`，两集群都有数），或 Grafana Explore 直接查原始指标。
 
@@ -411,20 +411,20 @@ Oracle-k3s metrics are pushed (not scraped). Check the OTel Collector:
 ### otel-collector 配置改了不生效 —— ✅ 已根治（2026-08-02），别再手动重启
 
 **曾经的症状：** 改了 oracle 的 otel ConfigMap 并推送，ArgoCD 显示 **Synced / Healthy**，
-但新的 receiver / pipeline 一条数据都没有。**原因**是 DaemonSet 的 pod template 没有 config
-checksum 注解，ConfigMap 内容变了**不会**触发滚动，Pod 继续挂着旧配置跑；ArgoCD 只比对对象
-本身，看不出这层。2026-07 引入 OpenCost 和 KRR 时各踩了一次（homelab 侧没这问题——Helm chart
+但新的 receiver / pipeline 一条数据都没有。原因是 DaemonSet 的 pod template 没有 config
+checksum 注解，ConfigMap 内容变了不会触发滚动，Pod 继续挂着旧配置跑；ArgoCD 只比对对象
+本身，看不出这层。2026-07 引入 OpenCost 和 KRR 时各踩了一次（homelab 侧没这问题，Helm chart
 会自动打 checksum 注解）。
 
 **根治做法（已生效）：** 配置改由根 `cloud/oracle/manifests/kustomization.yaml` 的
-**`configMapGenerator`** 生成 —— 生成的 ConfigMap 名字带内容哈希后缀，并自动重写 DaemonSet 的
-volume 引用，所以**内容一变名字就变，DaemonSet 随之滚动**。改配置只需编辑
+`configMapGenerator` 生成：生成的 ConfigMap 名字带内容哈希后缀，并自动重写 DaemonSet 的
+volume 引用，所以内容一变名字就变，DaemonSet 随之滚动。改配置只需编辑
 `cloud/oracle/manifests/monitoring/otel-collector-config.yaml` 后 push，**不需要任何手动重启**。
 
 2026-08-06 实测复核：新增 `prometheus/readlist` receiver 后，ConfigMap 名变成
 `otel-collector-config-2g4gm5979k`，DaemonSet 自动滚动、Pod age 归零、新指标立即上来。
 
-**要守住的不变量：** 那份配置**必须**留在 `configMapGenerator` 里。谁要是把它改回普通
+**要守住的不变量：** 那份配置必须留在 `configMapGenerator` 里。谁要是把它改回普通
 ConfigMap 资源（比如为了"看起来整齐"），上面那个静默失败立刻回来，而且照样是 Synced/Healthy。
 
 ```bash

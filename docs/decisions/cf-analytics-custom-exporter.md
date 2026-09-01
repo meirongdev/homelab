@@ -23,7 +23,7 @@
 
 ## 评估过的选项
 
-### 选项 A —— `cloudflare/cloudflare-prometheus-exporter`（官方，90+ 指标）
+### 选项 A：`cloudflare/cloudflare-prometheus-exporter`（官方，90+ 指标）
 
 ❌ **否决,两个独立原因**：
 
@@ -36,7 +36,7 @@
 另外形态也不合：它是 **Cloudflare Worker + Durable Objects**，不是集群内组件
 （虽然提供了 docker-compose 备选）。
 
-### 选项 B —— `lablabs/cloudflare-exporter`（426★，社区最流行；及其一众 fork）
+### 选项 B：`lablabs/cloudflare-exporter`（426★，社区最流行；及其一众 fork）
 
 ❌ **否决**。它比官方的更接近：有 `cloudflare_zone_requests_status_country_host`，
 **按域名的请求数是有的**。但
@@ -60,13 +60,13 @@ level=info msg="Filtering zone: <zone> meirong.dev"
 `Authorization: Bearer <token>` **完整打进日志**。在本仓库的集群里跑它 = token 进 Loki。
 （这条是评估当天踩出来的，代价是那把 token 当场作废重滚。）
 
-### 选项 C —— Grafana Infinity datasource 直接查 GraphQL，完全不写代码
+### 选项 C：Grafana Infinity datasource 直接查 GraphQL，完全不写代码
 
 未采纳，也**未验证**。代价明确：没有 Prometheus 历史留存（每次开面板重新查）、
-token 落进 Grafana datasource、且无法对「数据变旧」告警 —— 而这个数据源的失效
+token 落进 Grafana datasource、且无法对「数据变旧」告警。而这个数据源的失效
 恰恰全是静默的。留作备选。
 
-### 选项 D —— 升级到 Pro（$20/月）
+### 选项 D：升级到 Pro（$20/月）
 
 解决不了问题：选项 A 在 Pro 上能跑，但**它依然没有按域名的独立访客/IP 数**。花钱买不到这个指标。
 
@@ -74,17 +74,17 @@ token 落进 Grafana datasource、且无法对「数据变旧」告警 —— �
 
 **自写 exporter**（`k8s/helm/manifests/monitoring/cf-analytics-exporter/`）。
 
-根因是一条，值得单独记住 —— 它同时解释了「为什么现成的都不行」和「为什么必须自己数」：
+根因是一条，值得单独记住：它同时解释了「为什么现成的都不行」和「为什么必须自己数」：
 
 | GraphQL 数据集 | 本 zone（Free） | 谁依赖它 |
 |---|---|---|
 | `httpRequests1mGroups` | ❌ `does not have access to the path` | lablabs 及全部 fork 的 zone analytics |
 | `httpRequests1hGroups` | ✅ | — |
-| `httpRequestsAdaptiveGroups` | ✅ 但**单次跨度 ≤ 1 天**、**保留期仅 1w1d** | 官方 exporter 的 hostname 指标 |
+| `httpRequestsAdaptiveGroups` | ✅ 但单次跨度 ≤ 1 天、保留期仅 1w1d | 官方 exporter 的 hostname 指标 |
 
 免费版唯一能按域名拆的数据集是 `httpRequestsAdaptiveGroups`，而它**没有 `uniq` 字段**
 （实测报 `unknown field "uniq"`）。所以「每个域名多少个独立 IP」只能靠
-**拉 `clientIP` 维度回来在本地去重** —— 没有任何现成 exporter 这么做，因为这在付费版上
+**拉 `clientIP` 维度回来在本地去重**：没有任何现成 exporter 这么做，因为这在付费版上
 本来就有更省事的算法。
 
 自写的代价被刻意压到最低：**~200 行纯标准库 Python，零第三方依赖，不建镜像**
@@ -93,11 +93,11 @@ token 落进 Grafana datasource、且无法对「数据变旧」告警 —— �
 ## 后果
 
 - ✅ 拿到了买不到也装不来的指标：按域名的独立访问 IP 数，以及**按来源的分类**
-  （真人 / 已验证爬虫 / 自建监控 / CF 边缘预取）—— 后者 2026-08-15 补齐，用的是同一条
+  （真人 / 已验证爬虫 / 自建监控 / CF 边缘预取）：后者 2026-08-15 补齐，用的是同一条
   查询多加两个维度，**零额外 API 调用**。口径见
   [reference/public-traffic-analysis.md](../reference/public-traffic-analysis.md)。
-- ☠️ **它立刻揭穿了一件事**：原始访问量约 **45% 是自建监控**（Uptime Kuma / Alertmanager
-  绕公网回来），`argocd`/`vault`/`auth` 三个域名 100% 是它、真人 IP 为 0 —— 与
+- ☠️ **它立刻揭穿了一件事**：原始访问量约 45% 是自建监控（Uptime Kuma / Alertmanager
+  绕公网回来），`argocd`/`vault`/`auth` 三个域名 100% 是它、真人 IP 为 0，与
   [slo-availability-targets.md](slo-availability-targets.md) 从 Envoy 侧得出的结论互相印证。
 - ⚠️ **多了一份要自己跟的代码**。缓解措施都已落地，别拆：
   - `check-embedded-scripts.py` 的 **E1** 盯住「`.py` 源 ↔ ConfigMap 内嵌副本」漂移，
