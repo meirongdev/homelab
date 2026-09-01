@@ -160,6 +160,37 @@ data:
     api.login(username=USERNAME, password=PASSWORD)
     print("Logged in.")
 
+    # --- 关掉 nscd（2026-09-01）——— 这是一条**内核崩溃缓解**，不是性能调优 ---
+    # uptime-kuma 默认在容器内起 nscd 做 DNS 缓存（server 的 start() 里
+    # `if (enable || enable === null)`，即设置缺失时默认开）。而 nscd 持有一个
+    # **绑定到文件系统路径**的 AF_UNIX 服务端套接字 /var/run/nscd/socket。
+    # 内核 6.17 新上游化的 AppArmor AF_UNIX 中介有个空指针 bug：`unix_fs_perm()`
+    # 不检查 `path->mnt` 为空就 `mnt_idmap(path->mnt)`（vfsmount 偏移 0x18）。
+    # libuv 的 DNS 线程每次 getaddrinfo 都要连它，而 AppArmor 对每次操作检查两次
+    # ——自己的套接字（无路径，安全）**和对端的**（nscd 的，带路径）——
+    # 所以 nscd 套接字拆除的竞态窗口会在 **libuv-worker 的上下文里**踩空。
+    # ☠️ 这正是 oracle 从 2026-06-22 起每 1–4 天硬重启一次的根因：
+    #    10 次 panic 签名 10/10 一致，肇事进程全是 libuv-worker。
+    #    kprobe 实测 nscd 与 libuv-worker 的调用严格 1:1（60 秒各 69 次）。
+    # 关掉 nscd = 容器内不再有带路径的 unix 套接字对端 = 该代码路径走不到，
+    # 且**不需要**给这个公网可达的 pod 摘掉 AppArmor 约束。
+    # 代价：每次监控检查多一次 DNS 查询（21 个 monitor/60s，对 CoreDNS 可忽略）。
+    # ⚠️ 上游修了这个 bug（`path->mnt` 加保护）之后可以删掉本段。
+    #    完整取证 → docs/records/2026-09-01-oracle-apparmor-af-unix-panic.md
+    #
+    # ⚠️ **必须先 get 再 merge**：set_settings 把全部参数打包整体提交，
+    #    没传的键会被库的默认值覆盖 —— 直接调用会把 keepDataPeriodDays 等
+    #    已定制的设置冲掉。
+    import inspect as _inspect
+    _allowed = set(_inspect.signature(api.set_settings).parameters) - {"self", "password"}
+    _cur = {k: v for k, v in api.get_settings().items() if k in _allowed}
+    if _cur.get("nscd") is False:
+        print("nscd already disabled.")
+    else:
+        _cur["nscd"] = False
+        api.set_settings(password=PASSWORD, **_cur)
+        print("nscd disabled (kernel AppArmor af_unix panic mitigation).")
+
     STATUS_PAGE_SLUG   = "homelab"
     STATUS_PAGE_TITLE  = "Homelab Status"
     STATUS_PAGE_DOMAIN = "status.meirong.dev"
