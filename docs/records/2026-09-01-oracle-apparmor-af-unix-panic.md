@@ -279,15 +279,166 @@ sudo bash -c 'cd /sys/kernel/tracing; echo 0 > events/kprobes/aa_unixfs/enable; 
 `prometheus-rules.yaml` 里 `NodeRebootLoop` 的排障指引（原文让人「查 OCI 维护事件」
 后就止步，且断言「宿主层硬重置，客场查不出」）。
 
+**已做——把自己弄哑的信号补回来**（`cloud/oracle/ansible/playbooks/setup-k3s.yaml`
+\+ `k8s/helm/manifests/monitoring/alerts/prometheus-rules.yaml`）：
+
+☠️ `panic_on_oops=0` 有个必须正视的副作用：**它把响亮的故障变哑了**。改之前
+oops → panic → 重启 → `NodeRebooted`/`NodeRebootLoop` 必然告警；改之后机器活下来，
+但那次 oops 不触发任何告警，只在 dmesg 里留一行。而残留暴露面是真实存在的
+（postgres/pg_isready 仍在访问带路径的 unix 套接字，kprobe 实测 60s 内 36+12 次）。
+只止血不补检测，等于把问题藏起来。
+
+补法：`kernel-health-metrics.timer` 每 5 分钟经 node-exporter 的 textfile collector
+（两集群早就开着，路径 `/var/lib/node_exporter/textfile`）导出四个指标，
+配 `KernelOopsOccurred` 告警。
+
+| 指标 | 含义 |
+|---|---|
+| `kernel_taint_die` | taint bit 7（D）= 内核自上次启动以来 oops/BUG 过 —— **主判据** |
+| `kernel_taint_soft_lockup` | taint bit 14（L） |
+| `kernel_taint_bits` | 原始位图 |
+| `kernel_oops_recent` | 近 10 分钟 dmesg 里的 oops 条数，只作新鲜度参考 |
+
+判据选 taint 位而不是数 dmesg：**taint 是内核自己置的、零成本、绝不漏**，且置位后
+保持到重启——正好符合「这台机器死过一次，处理前别让告警自己消失」的语义。
+告警按仓库规矩做了**两向实测**：`kernel_taint_die == 1` 现返回 0 条（无 oops，符合预期），
+`== 0` 返回 1 条（证明指标在、比较运算能命中）——不是只验了一半就当它会响。
+
+⚠️ **homelab 侧刻意不装**：那两个节点仍是发行版默认的 `panic_on_oops=1`，
+oops 会照旧重启并触发 `NodeRebooted`，信号没丢。所以告警里**不能写 `absent()` 类判据**，
+那会对 homelab 永久误报。
+
 ## 遗留（刻意不做）
 
 - **内核 bug 本身没修，也修不了**。上游主线仍无 `path->mnt` 保护。我们只是让
-  本集群不再走到那条路径；postgres 那条路径理论上仍暴露（见上表的注）。
-  上游修掉之后，可以删掉 provisioner 里那段 nscd 豁免、并把 `panic_on_oops` 改回默认。
-- **没提上游**。手上有 10 次一致签名 + 精确的偏移分析，是一份质量不错的 bug 报告素材。
+  本集群不再走到那条路径；postgres 那条路径理论上仍暴露，现在至少**出事能被看见**
+  （`KernelOopsOccurred`）。上游修掉之后，可以删掉 provisioner 里那段 nscd 豁免、
+  把 `panic_on_oops` 改回默认、并撤掉这套导出器。
+- ☠️ **homelab 的 `k8s-node` 同样暴露，未处理**。实测它跑 `7.0.0-30-generic`，
+  `sudo grep -w unix_fs_perm /boot/System.map-$(uname -r)` **有命中**，
+  且 24 个 AppArmor profile 在 enforce、`panic_on_oops=1`。
+  只是它上面没有 nscd 那种「libuv 反复连带路径 unix 套接字」的负载，从没被踩到。
+  **刻意维持现状**：它从没触发过，为一个未发生的风险偏离发行版默认不划算；
+  而且 `panic_on_oops=1` 意味着真出事会重启 → `NodeRebooted` 必响，信号是有的
+  （代价是控制面重启 = 全集群中断）。哪天要改，导出器和告警得一并搬过去。
+- **上游报告已写好但未提交**（见上一节，正文可直接粘贴）。提交需要用你自己的
+  Launchpad / 邮件列表账号，不是我能代劳的一步。
 - **止血后的实际效果待观察**。改完当天还没等到下一次 oops，
   判据是：`NodeRebooted` 不再响，但 `journalctl -k | grep -i oops` 会开始留下记录
   ——**这次 oops 终于能落盘了**，因为机器不再立刻重启。
+
+## 上游报告（待提交，正文可直接粘贴）
+
+☠️ **本仓库只能治标**：关掉 nscd 是让本集群绕开，`path->mnt` 那个空指针在上游仍在。
+提上游是唯一能让它真正消失的路径。两个去处二选一或都发：
+
+- Ubuntu：`ubuntu-bug linux-oracle`（或 Launchpad 对 `linux-oracle` 开 bug），
+  它会自动附上内核版本、`dmesg`、AppArmor 状态
+- AppArmor 上游：`apparmor@lists.ubuntu.com`（`af_unix.c` 的一串同类修复都在这条邮件列表上讨论）
+
+⚠️ 提交前把下面的 `<...>` 占位符补上；**别贴节点 IP / OCID / tailnet 地址**。
+
+---
+
+**Title**: apparmor: NULL pointer dereference in `unix_fs_perm()` — `path->mnt` not checked before `mnt_idmap()`
+
+**Environment**
+- Ubuntu 24.04.4 LTS (noble), arm64, QEMU/KVM guest
+- Kernel: `6.17.0-1020-oracle` (also reproduced on `6.17.0-1019-oracle`)
+- AppArmor: 127 profiles loaded, 29 in enforce mode
+- Containers confined by the default `cri-containerd.apparmor.d` profile (k3s + containerd)
+
+**Symptom**
+
+Kernel panics every 1–4 days since ~2026-06-22. Ten captured occurrences have an
+identical signature; the faulting instruction and address are the same every time.
+The crash is invisible from inside the guest: `CONFIG_PANIC_ON_OOPS` is enabled, so
+the box reboots ~10s later and journald never flushes the oops. All ten traces were
+recovered from the hypervisor-side serial console buffer.
+
+**Analysis**
+
+The faulting address is `0x18` and the faulting instruction is
+`f9400c00` = `ldr x0, [x0, #24]` with `x0 == 0`. In `struct vfsmount`,
+offset 24 is `mnt_idmap` (`mnt_root`@0, `mnt_sb`@8, `mnt_flags`@16, `mnt_idmap`@24).
+
+In `security/apparmor/af_unix.c`, `unix_fs_perm()` guards `path->dentry` but not
+`path->mnt`, then dereferences the latter:
+
+```c
+if (path->dentry) {
+        struct inode *inode = path->dentry->d_inode;
+        vfsuid_t vfsuid = i_uid_into_vfsuid(mnt_idmap(path->mnt), inode);
+```
+
+So a `struct path` with `dentry != NULL` and `mnt == NULL` faults. The same code is
+present unchanged in v6.17 and in current mainline.
+
+**Trigger**
+
+A confined Node.js process whose libuv threadpool calls `getaddrinfo()` against
+nscd's filesystem-bound `AF_UNIX` socket (`/var/run/nscd/socket`). Both peers are
+confined by the same profile. AppArmor mediates each operation twice — once for the
+socket itself and once for its peer — so the peer check runs in the *client's*
+context, which is why the victim task is always the libuv worker and never nscd.
+
+A kprobe on `unix_fs_perm` confirmed the pairing: over a 60s window, `nscd` and
+`libuv-worker` each hit the function exactly 69 times, and each libuv-worker
+operation produced two consecutive events in the same microsecond. Disabling nscd
+in that container dropped both to zero and the crashes stopped.
+
+Reproducer sketch: a confined process repeatedly connecting to and reading from a
+path-bound AF_UNIX socket owned by another confined process, while that socket is
+torn down concurrently.
+
+**Oops**
+
+```
+Unable to handle kernel NULL pointer dereference at virtual address 0000000000000018
+Mem abort info:
+  ESR = 0x0000000096000006
+  EC = 0x25: DABT (current EL), IL = 32 bits
+  FSC = 0x06: level 2 translation fault
+[0000000000000018] pgd=080000023a625403, p4d=080000023a625403, pud=080000023a626403, pmd=0000000000000000
+Internal error: Oops: 0000000096000006 [#1]  SMP
+CPU: 0 UID: 0 PID: 13352 Comm: libuv-worker Not tainted 6.17.0-1020-oracle #20-Ubuntu
+Hardware name: QEMU KVM Virtual Machine, BIOS 1.6.6 08/22/2023
+pc : unix_fs_perm+0xd0/0x130
+lr : aa_unix_file_perm+0x510/0x690
+x0 : 0000000000000000
+Call trace:
+ unix_fs_perm+0xd0/0x130 (P)
+ aa_unix_file_perm+0x510/0x690
+ aa_sock_file_perm+0xb4/0x150
+ aa_file_perm+0x420/0x460
+ common_file_perm+0x6c/0x1c8
+ apparmor_file_permission+0x30/0x60
+ security_file_permission+0x50/0xb0
+ rw_verify_area+0x64/0x1e8
+ vfs_read+0x9c/0x358
+ ksys_read+0x114/0x138
+ __arm64_sys_read+0x28/0x50
+ invoke_syscall+0x74/0x128
+ el0_svc_common.constprop.0+0x114/0x140
+ do_el0_svc+0x28/0x58
+ el0_svc+0x40/0x160
+ el0t_64_sync_handler+0xc0/0x108
+ el0t_64_sync+0x1b8/0x1c0
+Code: aa0203f7 f9401838 f9400080 f9401701 (f9400c00)
+---[ end trace 0000000000000000 ]---
+```
+
+A `watchdog: BUG: soft lockup - CPU#1 stuck for 23s! [cilium-agent]` follows in every
+trace; it is a consequence (the kernel is already `Tainted: G D`, CPU0 is gone and
+CPU1 waits on an IPI that never arrives), not a second bug.
+
+**Note**
+
+This looks like the same family as the recent `af_unix.c` fixes on the AppArmor list
+(`ctx->peer` NULL derefs, premature refcount put), but a distinct site: those crash in
+`aa_label_is_subset` / refcount paths, this one in `unix_fs_perm` on `path->mnt`.
+
+---
 
 ## 教训
 
