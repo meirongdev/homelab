@@ -212,6 +212,37 @@
           SystemMaxUse=200M
       notify: Restart journald
 
+    # ☠️ 2026-09-01：上面那段持久 journal 建成后**仍然**查不出重启原因 —— 因为证据
+    # 根本到不了磁盘。真凶是内核 AppArmor 的 AF_UNIX 中介 bug：`unix_fs_perm()` 在
+    # `mnt_idmap(path->mnt)` 处不检查 path->mnt 是否为空就解引用（vfsmount 偏移
+    # 0x18 = mnt_idmap，与实测故障地址 0x18、故障指令 `ldr x0,[x0,#24]`、x0=0 逐位吻合）。
+    # 而 `kernel.panic_on_oops` 在 Ubuntu oracle 内核里是**编译期默认 1**
+    # （grep 遍 /etc/sysctl.d 与 /usr/lib/sysctl.d 都没有设它的文件），于是 oops 立刻
+    # 升级成 panic → `kernel.panic=10` 十秒后硬重启，journald 来不及落盘 ——
+    # 客场永远只看到"日志戛然而止"，这正是 2026-08-14 复盘误判成"宿主层硬重置"的原因。
+    # 证据只存在于 hypervisor 侧：`oci compute console-history` 抓下来 1MB，
+    # 内含 10 次 panic，签名 10/10 完全一致，崩溃进程全是 Node.js 的 libuv-worker。
+    #
+    # ⚠️ 这是**止血不是根治**：改 0 之后 oops 照旧发生，但只杀掉肇事线程、机器不再
+    # 重启，把"每 1–4 天全集群断 6–10 分钟"降成"死一个 Node 线程"。
+    # 代价：内核被标记污染（Tainted: G D）、每次泄漏少量 AppArmor label 引用计数
+    # （1–4 天一次，可忽略），且这是**刻意偏离发行版默认**，别当成通用调优抄去别处。
+    # ⚠️ 换内核逃不掉，别把工夫花在那上面：6.8 / 6.14 / 6.17 / 7.0 四条 oracle 轨道
+    # **全都带**这段代码（实测比对 6.8.0-1060 与 6.17.0-1020 的 kallsyms，
+    # unix_fs_perm / aa_unix_file_perm / aa_sock_file_perm 两边都在），
+    # 且 v6.17 与上游 master 分支的那一行**完全相同** —— 补丁至今未进上游。
+    # (terminology-ok: master 此处指 torvalds/linux 的 git 分支名，非控制面节点)
+    # 根治只有两条：等上游修，或给触发方 pod 设 AppArmor Unconfined
+    # （`unix_fs_perm` 开头就是 `if (unconfined(label)) return 0`，不受约束即不走该路径）。
+    # 完整取证方法与推理链 → docs/records/2026-09-01-oracle-apparmor-af-unix-panic.md
+    - name: Survive the AppArmor af_unix oops instead of hard-rebooting
+      ansible.posix.sysctl:
+        name: kernel.panic_on_oops
+        value: '0'
+        sysctl_file: /etc/sysctl.d/99-panic-on-oops.conf
+        state: present
+        reload: true
+
   # firewalld reload 是**动作**不是状态：写成普通任务的话每次 `--check` 都报 changed，
   # 两条就足以把 `just check-node-drift` 的信号淹掉。改 handler 后只在真有规则变更时触发。
   handlers:

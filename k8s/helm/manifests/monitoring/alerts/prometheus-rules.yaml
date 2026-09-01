@@ -887,8 +887,11 @@ spec:
               节点重启了。若非你主动操作，就是**非正常关机**，需要查原因。
               oracle 的 journald 持久化**已启用**（`/var/log/journal` 存在，`Storage=auto`
               据此落盘；2026-08-14 实测 `journalctl --list-boots` 能看到 6 个历史 boot）。
-              查崩溃现场：`journalctl -b -1 -n 25` —— 若最后几行是正常业务日志、
-              **没有任何 shutdown 序列**，那就是宿主层硬重置，客场查不出更多。
+              查崩溃现场：`journalctl -b -1 -n 25`。⚠️ 若最后几行是正常业务日志、
+              **没有任何 shutdown 序列**，那**不是**宿主层重置的证据（2026-08-14 曾这样误判）——
+              `panic_on_oops=1` 会让 guest 内核 panic 后在落盘前就重启，长得一模一样。
+              客场全阴时去 hypervisor 侧取证：`oci compute console-history`（方法见
+              records/2026-09-01-oracle-apparmor-af-unix-panic.md）。
               重启后按 runbook 核不变量：`cd cloud/oracle && just verify-node`（只读）。
 
         # ☠️ 频次盲区（2026-08-14 补）：上面那条**每次重启都正常响过**，oracle 在
@@ -910,9 +913,13 @@ spec:
             description: |
               这台机在反复重启，按单次 NodeRebooted 看不出来。先分清是哪一类：
               `journalctl -b -1 -n 25` 有干净 shutdown 序列 → 客场原因（内核升级/主动重启）；
-              日志戛然而止且无 panic/OOM → **宿主层硬重置，客场查不出**。
-              oracle 属后者：查 OCI 控制台该实例的 Work Requests / 维护事件，
-              客场只能做韧性（重启期间 dead-man's switch 会失明，见 DeadMansSwitchReceiverDown）。
+              日志戛然而止且无 panic/OOM → **别停在这里**：这既可能是宿主层重置，
+              也可能是 guest 内核 panic（`panic_on_oops=1` 时来不及落盘），两者客场同形。
+              ☠️ 2026-08-14 就在这一步误判成宿主层、白白多崩了 2.5 个月。
+              判据只能去 hypervisor 侧拿：`oci compute console-history` 抓串口缓冲区，
+              有 panic 栈就是 guest 内核问题。oracle 已确诊为 AppArmor af_unix 空指针，
+              并已设 `panic_on_oops=0` 止血（故此后 oracle 再反复重启 = 新问题，别套旧结论）。
+              取证脚本与完整推理 → records/2026-09-01-oracle-apparmor-af-unix-panic.md
 
     # ☠️ 覆盖盲区（2026-08-13 补）：**V4-Flash 推理服务死了 3h10m，告警"响过"却没人动。**
     # 事故实录（全部可在本 Prometheus 复查，均在 7d 保留期内）：
