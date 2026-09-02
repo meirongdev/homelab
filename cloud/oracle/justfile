@@ -148,70 +148,14 @@ create-vault-token:
         --from-literal=token={{vault_token}} \
         --dry-run=client -o yaml | kubectl --context {{ctx}} apply -f -
 
-# ─── Application Deployment ────────────────────────────────────
+# ─── Bootstrap-only apply ──────────────────────────────────────
+# 日常部署不在这里：manifests/ 由 ArgoCD `oracle-k3s` App 同步，改文件 → git push 即生效，
+# 手动 apply 会被 selfHeal 在 3 分钟内拉回（AGENTS.md 明令禁止）。2026-09-02 删掉了 7 条
+# 绕过 GitOps 的 per-app apply / teardown 配方，只留下面这条给全新重建（ArgoCD 尚不存在时）用。
 
-# Deploy all K8s manifests (base infra + all apps)
+# 整树 apply 一次，把入口链路拉起来（bootstrap / ArgoCD 不可用时的应急）。见 runbooks/oracle-k3s-rebuild.md §5
 deploy-manifests:
     kubectl --context {{ctx}} apply -k manifests/
-
-# Deploy only rss-system app manifests
-deploy-rss:
-    kubectl --context {{ctx}} apply -f manifests/rss-system/
-
-# Deploy only homepage manifests
-deploy-homepage:
-    kubectl --context {{ctx}} apply -f manifests/homepage/
-
-# Deploy personal services (IT-Tools, Stirling-PDF, Squoosh)
-deploy-personal-services:
-    kubectl --context {{ctx}} apply -f manifests/personal-services/
-
-# Deploy Timeslot via Helm chart (sparse-clones upstream chart, injects secret from Vault)
-# Requires VAULT_TOKEN env var. Run after storing secret:
-#   kubectl --context k3s-homelab exec -n vault vault-0 -- \
-#     sh -c "VAULT_TOKEN=$VAULT_TOKEN vault kv put secret/oracle-k3s/timeslot admin_password=<pw>"
-deploy-timeslot:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "📦 Fetching admin_password from Vault (secret/oracle-k3s/timeslot)..."
-    ADMIN_PASSWORD=$(kubectl --context k3s-homelab exec -n vault vault-0 -- \
-      sh -c "VAULT_TOKEN=${VAULT_TOKEN} vault kv get -field=admin_password secret/oracle-k3s/timeslot")
-    echo "🔀 Sparse-cloning timeslot Helm chart from GitHub..."
-    TMPDIR=$(mktemp -d)
-    trap "rm -rf $TMPDIR" EXIT
-    git clone --depth 1 --filter=blob:none --sparse \
-      https://github.com/meirongdev/timeslot.git "$TMPDIR"
-    git -C "$TMPDIR" sparse-checkout set deploy/helm
-    echo "🚀 Installing/upgrading timeslot Helm release..."
-    # Note: --wait omitted intentionally; chart bugs are patched below before waiting
-    # image 用 digest 固定（原 :latest，供应链卫生/可复现）。部署新构建时：在 timeslot 仓库打
-    # 版本 tag 后用该 tag，或把下面 digest 换成新构建的 digest。
-    helm upgrade --install timeslot "$TMPDIR/deploy/helm" \
-      --kube-context {{ctx}} \
-      --namespace personal-services \
-      --create-namespace \
-      --set image=ghcr.io/meirongdev/timeslot/timeslot@sha256:27c17dace6f713015f2f9df451a647e9c971daee7a22a444db6e0512e57f5230 \
-      --set persistence.size=100Mi \
-      --set persistence.storageClass=local-path \
-      --set config.adminPassword="$ADMIN_PASSWORD"
-    # Workaround upstream chart bugs (pending fix in meirongdev/timeslot):
-    # Bug 1: liveness probe path /admin/ requires auth → 401 → CrashLoopBackOff
-    # Bug 2: init container sed uses $(ADMIN_PASSWORD) as shell command substitution (expands
-    #        to empty), so the placeholder is never replaced. Fixed with awk which treats the
-    #        literal $(...) as a regex pattern rather than a shell expression.
-    echo "🔧 Patching chart bugs (liveness probe + init container)..."
-    printf '[{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/httpGet/path","value":"/api/slots"},{"op":"replace","path":"/spec/template/spec/initContainers/0/command","value":["sh","-c","awk -v pw=\\"$ADMIN_PASSWORD\\" '"'"'{gsub(/\\$\\(ADMIN_PASSWORD\\)/, pw)}1'"'"' /config-template/config.json > /config/config.json"]}]' > /tmp/timeslot-chart-fix.json
-    kubectl --context {{ctx}} patch deployment timeslot -n personal-services \
-      --type=json --patch-file=/tmp/timeslot-chart-fix.json
-    kubectl --context {{ctx}} rollout status deployment timeslot \
-      -n personal-services --timeout=3m
-    echo "✅ Timeslot deployed. Apply HTTPRoute with: just deploy-personal-services"
-
-# Deploy only uptime-kuma manifests (without provisioner job)
-deploy-uptime-kuma:
-    kubectl --context {{ctx}} apply -f manifests/uptime-kuma/namespace.yaml
-    kubectl --context {{ctx}} apply -f manifests/uptime-kuma/uptime-kuma.yaml
-    kubectl --context {{ctx}} apply -f manifests/uptime-kuma/secrets.yaml
 
 # Run uptime-kuma provisioner job (creates admin + monitors)
 provision-uptime-kuma:
@@ -220,10 +164,6 @@ provision-uptime-kuma:
     @echo "⏳ Waiting for provisioner job to complete..."
     kubectl --context {{ctx}} wait --for=condition=complete job/uptime-kuma-provisioner -n personal-services --timeout=120s
     kubectl --context {{ctx}} logs job/uptime-kuma-provisioner -n personal-services
-
-# Deploy only observability manifests (OTel collector + exporters)
-deploy-monitoring:
-    kubectl --context {{ctx}} apply -f manifests/monitoring/
 
 # Restart rss-system deployments
 restart-rss:
@@ -376,15 +316,10 @@ logs app ns="rss-system":
     kubectl --context {{ctx}} logs -n {{ns}} deployment/{{app}} --tail=50
 
 # ─── Teardown ──────────────────────────────────────────────────
-
-# Delete all kustomize-managed resources
-teardown-apps:
-    kubectl --context {{ctx}} delete -k manifests/ --ignore-not-found
+# 2026-09-02 删掉了 `teardown-apps`（kubectl delete -k 整树：selfHeal 会立刻重建，且一条命令无确认）
+# 与把它和 DNS 销毁串在一起的 `teardown`。退役单个服务照 docs/runbooks/stateful-service-cross-cluster-migration.md
+# 的「退役与残余清扫」走；整集群销毁走 terraform（cloud/oracle/terraform，`make destroy`）。
 
 # Destroy Cloudflare tunnel DNS records
 teardown-cloudflare-dns:
     cd cloudflare && just destroy
-
-# Full teardown
-teardown: teardown-apps teardown-cloudflare-dns
-    @echo "✅ All oracle-k3s resources removed"
