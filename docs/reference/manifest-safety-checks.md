@@ -2,10 +2,11 @@
 
 > Last updated: 2026-09-02
 > Status: 生效事实
-> Scope: CI 强制的仓库规则，本文是 source of truth。三个检查器：
+> Scope: CI 强制的仓库规则，本文是 source of truth。四个检查器：
 > `scripts/check-manifests.py` 的 **H1-H5**（清单结构）、
-> `scripts/check-version-pairs.py` 的 **V1-V3**（版本配对，2026-08-13 加）与
-> `scripts/check-embedded-scripts.py` 的 **E1**（内嵌脚本一致性，2026-08-15 加）。
+> `scripts/check-version-pairs.py` 的 **V1-V3**（版本配对，2026-08-13 加）、
+> `scripts/check-embedded-scripts.py` 的 **E1**（内嵌脚本一致性，2026-08-15 加）与
+> `scripts/render-manifests.py` 的**渲染检查**（2026-09-02 加，见下方专节）。
 > 每条规则都对应一次**真实发生过的事故或静默失效**，不是风格偏好。
 > 三者都由 [static-checks.yml](../../.github/workflows/static-checks.yml) 在 PR 与 main 上运行。
 
@@ -305,6 +306,44 @@ kubectl --context oracle-k3s -n homepage get cm homepage-config -o json \
 `k8s/helm/manifests/media/podcast.yaml`（nginx `default.conf`）。
 改它会静默不生效，加进 `STAMP_ONLY` 只需一条目 + 一个注解。
 
+## 渲染检查（`scripts/render-manifests.py`，2026-09-02 加）
+
+H1-H5 / V1-V3 / E1 查的都是**文件与归属**：谁独占文件、版本副本一不一致、内嵌脚本有没有漂。
+它们全都读不到「ArgoCD 最终会 apply 出什么对象」。而本仓库有三类静默失效恰好只活在渲染层：
+
+| 失效 | 表现 | 本仓库实例 |
+|---|---|---|
+| values 写错嵌套层级 | chart 静默忽略多余的键，ArgoCD 照样 Synced | Tempo 的 `persistence` 写在 `tempo.` 之下 → 一直跑在 emptyDir；2026-08-10 KRR 分诊一次照出 3 处同类 |
+| 多源 `$values` 渲染成空操作 | map 键保留 chart 默认（`{}` 不覆盖）、list 整体替换 | 见 `argocd-app-patterns.md`「Synced 也可能是空操作」 |
+| kustomize 漏登记 / 目录源混进非清单 | 对象静默缺席，或整个 App 同步失败 | 2026-07 calibre-metadata 漏登记 `metadata-enrich.yaml` |
+
+**做法**：以 `argocd/applications/*.yaml` 为唯一输入（那就是现网会部署的清单，不另列一份），
+按 source 类型分别渲染 —— 目录源照 ArgoCD 的 recurse/exclude 规则拼接、kustomize 源走
+`kubectl kustomize`、chart 源走 `helm template` 并带上 `--version` pin 与 `$values` 文件，
+然后 `kubeconform -strict` 逐对象校验。
+
+两个容易判错的点：
+
+- ☠️ **必须传 `--kube-version` 与 `--api-versions`**。ArgoCD 渲染时会把目标集群的 API 组喂给
+  helm；不传则 `.Capabilities.APIVersions.Has` 全为 false，ServiceMonitor / PrometheusRule /
+  HTTPRoute 一类模板**直接不渲染**——校验通过的是一份与现网不同的清单，比不校验更危险。
+  脚本里的 `API_VERSIONS` 是两集群 `kubectl api-versions` 的并集，装了新 operator 要补它的 group。
+- **「跳过」不是「通过」**。没有 schema 的类型（CRD 本体、`CiliumGatewayClassConfig` 等）
+  由 `-ignore-missing-schemas` 放行，脚本按 kind 打印出来，让覆盖缺口可见。
+  当前跳过的只有 `CustomResourceDefinition` 与 `CiliumGatewayClassConfig`。
+
+⚠️ **它证明的是「渲染得出来 + 每个对象结构合法」，证明不了值是对的**：resources 填 1Mi
+一样合法。与下一节的「查不出来的那些」并不重叠——那些是连渲染都看不出的。
+
+```bash
+uv run --with pyyaml python scripts/render-manifests.py                  # 全部（约 2 分钟，要联网拉 chart）
+uv run --with pyyaml python scripts/render-manifests.py --app loki       # 只跑一个
+uv run --with pyyaml python scripts/render-manifests.py --out /tmp/r     # 渲染结果落盘，人工 diff
+```
+
+`KUBE_VERSION` 跟着现网走（当前 `1.35.8`，两集群同版本）；升 k3s 时同步改，它同时喂给
+`helm --kube-version` 与 `kubeconform -kubernetes-version`。
+
 ## 查不出来的那些（仍需人判断）
 
 写下来是为了不让「CI 绿了」被误当成「安全了」。
@@ -328,6 +367,7 @@ kubectl --context oracle-k3s -n homepage get cm homepage-config -o json \
 # 仓库根目录
 uv run --with pyyaml python scripts/check-manifests.py             # H1-H5
 uv run --with pyyaml python scripts/check-manifests.py --list      # 只看规则与出处
+uv run --with pyyaml python scripts/render-manifests.py            # 渲染检查（需 kubectl/helm/kubeconform + 联网）
 uv run --with pyyaml python scripts/check-version-pairs.py         # V1-V3
 uv run --with pyyaml python scripts/check-version-pairs.py --list
 uv run --with pyyaml python scripts/check-embedded-scripts.py      # E1

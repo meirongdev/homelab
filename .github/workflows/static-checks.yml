@@ -1,5 +1,6 @@
 # 静态检查：YAML 语法（含重复键）/ 清单安全规则 H1-H5 / 内嵌脚本一致性 E1 /
-# justfile 可解析 / terraform fmt / shellcheck（全等级，含引号类 SC2086）。
+# justfile 可解析 / terraform fmt + validate / shellcheck（全等级，含引号类 SC2086）。
+# 另有独立 job `render`：把 ArgoCD 真正会 apply 的对象渲染出来过 schema（scripts/render-manifests.py）。
 # 目的：把踩过的坑（死配方、YAML typo、tf 格式、脚本引号、内嵌 Namespace 被 prune、
 # Application 装错集群、PVC 静默不备份、ns 漏 PSA 标签静默吃 privileged、
 # ConfigMap 内嵌脚本与源文件漂移）变成 CI 能拦的——
@@ -18,6 +19,7 @@ on:
       - 'scripts/check-manifests.py'
       - 'scripts/check-version-pairs.py'
       - 'scripts/check-embedded-scripts.py'
+      - 'scripts/render-manifests.py'
       # 内嵌脚本的源文件：改了 .py 但忘了重新生成 ConfigMap，正是 E1 要拦的情况
       - 'k8s/helm/manifests/**/*.py'
       - '.github/workflows/static-checks.yml'
@@ -32,6 +34,7 @@ on:
       - 'scripts/check-manifests.py'
       - 'scripts/check-version-pairs.py'
       - 'scripts/check-embedded-scripts.py'
+      - 'scripts/render-manifests.py'
       # 内嵌脚本的源文件：改了 .py 但忘了重新生成 ConfigMap，正是 E1 要拦的情况
       - 'k8s/helm/manifests/**/*.py'
       - '.github/workflows/static-checks.yml'
@@ -127,6 +130,19 @@ jobs:
         # -recursive . 自动覆盖新增模块；CI 干净 checkout 里 tfvars 全被 gitignore，等价于只查已跟踪 .tf。
         run: terraform fmt -check -recursive .
 
+      - name: terraform validate（每个 root）
+        # fmt 只管缩进；validate 才查引用了不存在的变量 / 属性名写错 / provider 参数不合法。
+        # -backend=false：不碰 state（7 个 root 全是本地 state，CI 里根本没有），只装 provider。
+        # 版本按各 root 的 .terraform.lock.hcl 钉死，所以这里下载的就是现网用的那一版。
+        # 2026-09-02 加；此前 7 个 root 都没有任何语义校验，写错只在 plan 时才炸。
+        run: |
+          set -euo pipefail
+          for d in $(find . -name '*.tf' -not -path '*/.terraform/*' -not -path './.git/*' -exec dirname {} \; | sort -u); do
+            echo "== $d =="
+            terraform -chdir="$d" init -backend=false -input=false -no-color >/dev/null
+            terraform -chdir="$d" validate -no-color
+          done
+
       - name: shellcheck
         # 镜像 pin 0.11.0，不用 runner 自带的那个——理由同上面的 uv/just/terraform：
         # 不赌 runner 镜像内容。自带版本随镜像升级漂移，新等级的检查会突然在 main 上炸，
@@ -142,3 +158,30 @@ jobs:
           find . -name '*.sh' -not -path './.git/*' -print0 | sort -z \
             | xargs -0 -r docker run --rm -v "$PWD:/repo" -w /repo \
                 koalaman/shellcheck-alpine:v0.11.0 shellcheck
+
+  # 渲染检查：与上面 static 并行。static 查的是文件与归属（结构），这里查的是 ArgoCD 真正会
+  # apply 的对象（渲染结果）。三类已发生的静默失效只有它能拦：values 写错层级被 chart 静默忽略、
+  # 多源 $values 渲染成空操作、kustomize 树漏登记。规则背景见 docs/reference/manifest-safety-checks.md。
+  # 需要联网拉 chart（16 个 chart 源），约 2 分钟；helm / kubectl 用 runner 自带，kubeconform 钉版本。
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: 安装 kubeconform
+        # 钉版本，理由同 just / shellcheck：不赌 runner 镜像。升级时改这里的 tag 并本地复跑一遍。
+        run: |
+          # renovate: datasource=github-releases depName=yannh/kubeconform
+          KUBECONFORM_VERSION=v0.8.0
+          curl -sSfL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" -o /tmp/kubeconform.tar.gz
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
+          sudo mv /tmp/kubeconform /usr/local/bin/kubeconform
+          kubeconform -v
+          helm version --short
+          kubectl version --client
+
+      - name: 渲染全部 ArgoCD App 并过 schema
+        run: uv run --with pyyaml python scripts/render-manifests.py
