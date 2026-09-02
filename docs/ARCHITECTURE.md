@@ -49,7 +49,7 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 
 | 决策 | 结论 | 文档 |
 |------|------|------|
-| CNI | Cilium (eBPF + VXLAN)，双集群统一；从 Flannel 迁入 | [`plans/networking/2026-03-06-cilium-mesh-installation.md`](plans/networking/2026-03-06-cilium-mesh-installation.md)（无独立 ADR） |
+| CNI | Cilium (eBPF + VXLAN)，双集群统一；从 Flannel 迁入 | [`decisions/cilium-as-cni.md`](decisions/cilium-as-cni.md) |
 | Ingress | Cilium Gateway API (非 Traefik) | [`decisions/gateway-controller-evaluation.md`](decisions/gateway-controller-evaluation.md) |
 | 镜像更新 | 无自动升级（ArgoCD Image Updater 已于 2026-08-03 退役；可选 Renovate） | [`decisions/argocd-image-updater.md`](decisions/argocd-image-updater.md) |
 | 告警投递 | Alertmanager 原生 telegramConfigs (Gotify 已退役) | [`decisions/alerting-telegram-migration.md`](decisions/alerting-telegram-migration.md) |
@@ -58,8 +58,8 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 | 配置漂移体检 | ArgoCD 原生 `orphanedResources` (否决 kor) | [`decisions/orphaned-resources.md`](decisions/orphaned-resources.md) |
 | GitOps 权限边界 | 每集群一个 AppProject（`homelab` / `oracle-k3s`），元 App 挂 `default`；写错 destination 由服务端拒绝 | [`decisions/argocd-project-per-cluster.md`](decisions/argocd-project-per-cluster.md) |
 | 关系型数据库 | 每个集群一个共享实例。oracle 用 CNPG 起两个 Cluster：`apps-pg`(共享应用库) 和 `zitadel-pg`(身份面独立)，加租户就是加 `Database`/`DatabaseRole` CR。homelab 有同名的 `databases/apps-pg`，但那是裸 Deployment（租户 litellm/multica，2026-08-25 合并而来），刻意不装 CNPG，operator 自己比省下的 postmaster 还贵 | [`decisions/shared-postgres-platform.md`](decisions/shared-postgres-platform.md) |
-| 备份工具 | restic (非 Kopia)，无 server 直推 106 | [`plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md`](plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md) |
-| SSO | 应用原生 OIDC, 非共享入口层 SSO | [`plans/security/2026-03-08-cilium-zitadel-sso-plan.md`](plans/security/2026-03-08-cilium-zitadel-sso-plan.md) |
+| 备份工具 | restic (非 Kopia)，无 server 直推 106 | [`decisions/restic-serverless-backup.md`](decisions/restic-serverless-backup.md) |
+| SSO | 应用原生 OIDC, 非共享入口层 SSO | [`decisions/app-native-oidc-sso.md`](decisions/app-native-oidc-sso.md) |
 | 跨集群网络 | Tailscale 节点级 underlay（各节点 /32 + NodePort）+ Cilium ClusterMesh VXLAN | [`reference/tailscale-network.md`](reference/tailscale-network.md) |
 
 ## Service Inventory

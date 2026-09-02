@@ -4,7 +4,10 @@
 
 | 决策 | 结论 |
 |------|------|
+| [cilium-as-cni](cilium-as-cni.md) | CNI 选 Cilium（eBPF + VXLAN），从 Flannel 迁入；当时四条保守选择后来推翻了三条 |
 | [gateway-controller-evaluation](gateway-controller-evaluation.md) | Traefik vs Cilium Gateway → 选 Cilium Gateway API 作唯一入口 |
+| [app-native-oidc-sso](app-native-oidc-sso.md) | SSO 走应用原生 OIDC，否决共享入口层认证（per-app oauth2-proxy 兜底但当前零实例）|
+| [restic-serverless-backup](restic-serverless-backup.md) | 备份选 restic 无 server 直推 106，取代 Kopia（其复杂度全来自 server 模式）|
 | [external-dns-adoption](external-dns-adoption.md) | 子域名 DNS 从 Terraform 手管 → HTTPRoute 声明式（`upsert-only` 共存安全） |
 | [crossplane-not-adopted](crossplane-not-adopted.md) | ❌ 不引入 Crossplane：最大云面 provider 已死 2 年、控制面管"集群赖以存在"会把 DR 搞复杂 |
 | [manual-helm-to-argocd-adoption](manual-helm-to-argocd-adoption.md) | 采纳渲染等价性验证法 + `skipCrds` 解耦 CRD；跨集群同 chart 用 `helm.releaseName` 而非 `fullnameOverride` |
