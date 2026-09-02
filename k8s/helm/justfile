@@ -134,20 +134,17 @@ cleanup-logs:
     @tail -30 $(ls -t ~/.local/share/calibre-cleanup/*.log 2>/dev/null | head -1) 2>/dev/null || echo "暂无清理日志"
 
 # IT-Tools / Stirling-PDF 的配方已删除（2026-07-31）——两个服务已迁往 oracle-k3s，
-# manifests/{it-tools,stirling-pdf}.yaml 随迁移删除，配方只会报 "no such file"。
-# 现由 ArgoCD `oracle-k3s` App 从 cloud/oracle/manifests/personal-services/ 同步；
-# 需要手动部署时用 `cd cloud/oracle && just deploy-personal-services`。
+# 现由 ArgoCD `oracle-k3s` App 从 cloud/oracle/manifests/personal-services/ 同步：改清单 → git push。
+# （oracle 侧的 per-app 手动 apply 配方 2026-09-02 一并删除，日常没有「手动部署」这条路。）
 
 # 查看个人服务状态
 status-personal:
     kubectl --context {{ctx}} get all,pvc -n {{personal_ns}}
 
 # ⬇️ Homepage 仪表盘 ⬇️
-# 配方已删除（2026-07-31）——Homepage 已迁 oracle-k3s，homelab 上连 `homepage` namespace 都没有，
-# manifests/homepage.yaml 也已随迁移删除。现由 ArgoCD `oracle-k3s` App 从
-# cloud/oracle/manifests/homepage/ 同步。
-#   手动部署:   cd cloud/oracle && just deploy-homepage
-#   改配置生效: kubectl --context oracle-k3s rollout restart deployment/homepage -n homepage
+# 配方已删除（2026-07-31）——Homepage 已迁 oracle-k3s，homelab 上连 `homepage` namespace 都没有。
+# 现由 ArgoCD `oracle-k3s` App 从 cloud/oracle/manifests/homepage/ 同步：改清单 → git push。
+#   改配置生效: cd cloud/oracle && just restart-homepage
 #              （ConfigMap 是 subPath 挂载，ArgoCD 同步后不会热加载）
 
 # ⬇️ Cilium CNI ⬇️

@@ -1,6 +1,6 @@
 # Services — 服务清单
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-02
 > Status: 生效事实
 >
 > **这张表是服务清单的唯一真相源**：`docs/README.md`、`docs/ARCHITECTURE.md` 与各 runbook
@@ -19,7 +19,7 @@
 | Excalidraw | oracle-k3s | `personal-services` | `draw.meirong.dev` | 无认证（2026-08-04 去掉 oauth2-proxy） |
 | Trends | oracle-k3s | `personal-services` | `trends.meirong.dev` | |
 | readlist (技术书评分/书单) | oracle-k3s | `personal-services` | `readlist.meirong.dev` | 2026-08-05 上线；3 个夜间 CronJob，snapshot 读 calibre 两库（[bootstrap](../runbooks/readlist-bootstrap.md)） |
-| Timeslot | oracle-k3s | `personal-services` | `slot.meirong.dev` | |
+| Timeslot | oracle-k3s | `personal-services` | `slot.meirong.dev` | 2026-09-02 起整组资源进 kustomize 树由 ArgoCD 接管（此前只有 HTTPRoute 在 git，Deployment 是清单外 manual-helm）。☠️ 管理口令仍是 helm 遗留 Secret 里的 **chart 默认值**，Vault 无 `oracle-k3s/timeslot`；轮换步骤见 `timeslot.yaml` 文件头 |
 | Uptime Kuma | oracle-k3s | `personal-services` | `status.meirong.dev` | ⚠️ monitor 声明式管理，见备忘 |
 | Miniflux | oracle-k3s | `rss-system` | `rss.meirong.dev` | |
 | RSSHub (+browserless/redis) | oracle-k3s | `rss-system` | Internal only | |

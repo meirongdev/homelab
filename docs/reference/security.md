@@ -283,6 +283,12 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
    （[决策](../decisions/argocd-project-per-cluster.md)），但那只收窄「误投」，不收窄凭据权限；
    真收窄要给 homelab 侧 SA 降权到 ArgoCD 实际需要的资源类型，成本与收益另评。
    现有缓解：ArgoCD 在 ZITADEL OIDC 之后、`argocd-manager` token 在 Vault、oracle 节点 OS 层有 firewalld。
+10. **Timeslot 管理口令是公开 chart 的默认值**（2026-09-02 发现，待处理）：`slot.meirong.dev/admin/` 只有
+    Basic Auth，而口令来自当年 helm 装出来的 Secret `timeslot-secrets`，值等于上游 chart（公开仓库）的默认值。
+    `deploy-timeslot` 配方声称从 Vault `secret/oracle-k3s/timeslot` 取值，但 Vault 里没有这个路径
+    （ESO 实测 SecretSyncedError），所以 `--set` 从未生效。**修法**：往 Vault 写一把随机口令，
+    再把 `cloud/oracle/manifests/personal-services/timeslot.yaml` 的 secretKeyRef 切到 ESO 目标
+    （步骤写在该文件头）。暴露面：管理页只能改预约时段配置，无用户数据；API `/api/slots` 本就是公开的。
 
 ## 12. 运维入口
 
