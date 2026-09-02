@@ -7,7 +7,7 @@
 #   - admin UI (/ui): LiteLLM 自带登录 (UI_USERNAME/UI_PASSWORD, Vault→ESO)
 # Config: config.yaml in git (model_list); keys/spend live in Postgres —— 2026-08-25 起
 #   是共享实例 `databases/apps-pg` 的 litellm 租户，不再是本 ns 自带的 litellm-pg。
-# 双自托管上游: DGX (deepseek-v4-flash, 主) + MacPro M2 OMLX (Ornith-1.5-35B, 兜底),
+# 双自托管上游: DGX (qwen38-flash-next, 主) + MacPro M2 OMLX (Ornith-1.5-35B, 兜底),
 #   fallbacks 键 = 严格的"主→兜底"链（见 docs/plans/apps/2026-08-01-litellm-gateway-migration.md §3 决策 6）。
 # 升版：改 image digest + 注释 tag → git push。不要追 main-stable。
 apiVersion: v1
@@ -21,16 +21,23 @@ data:
   # 强制 key 鉴权由 env LITELLM_MASTER_KEY 实现（general_settings.master_key 语义=require a key for all calls）。
   config.yaml: |
     model_list:
-      # ── DGX（主，向后兼容：custom_dgx/ 前缀原名不变）──
-      - model_name: custom_dgx/deepseek-v4-flash
+      # ── DGX（主；custom_dgx/ 前缀是历史约定，保留）──
+      # 2026-09-02 DGX 换栈：DeepSeek-V4-Flash → Qwen3.8-Flash-Next NVFP4（RadixArk 权重、
+      # 双节点 TP=2、官方 vllm/vllm-openai 镜像，不再吊在个人 fork 上）。api_base 不变，
+      # 只有 served name 变，而旧名已从 /v1/models 消失 —— 旧别名一律 404，那不是"配置没生效"。
+      # ☠️ max_model_len 从 1M 掉到 262144：按 1M 做过长上下文规划的下游要重算
+      #    （已知受影响：open-notebook 的 large_context_model，见 docs/reference/open-notebook.md）。
+      - model_name: custom_dgx/qwen38-flash-next
         litellm_params:
-          model: openai/deepseek-v4-flash
+          model: openai/qwen38-flash-next
           api_base: http://100.97.87.120:8000/v1
           api_key: dummy
-      # ── 无前缀别名 deepseek-v4-flash：DGX 主 + Mac 兜底（fallbacks 键 = 严格的"主→兜底"，非轮询）──
-      - model_name: deepseek-v4-flash
+      # ── 无前缀别名 qwen38-flash-next：DGX 主 + Mac 兜底（fallbacks 键 = 严格的"主→兜底"，非轮询）──
+      # 与裸 vLLM 同名是刻意的（下游改 base_url 即可绕过网关），代价是换模型时两边都得动。
+      # ☠️ 改别名必须同步改 Postgres 里各虚拟 key 的 models 白名单，否则「清单正确 + Synced + 调用全 403」。
+      - model_name: qwen38-flash-next
         litellm_params:
-          model: openai/deepseek-v4-flash
+          model: openai/qwen38-flash-next
           api_base: http://100.97.87.120:8000/v1
           api_key: dummy
           fallbacks: ["mac/ornith"]
@@ -101,7 +108,7 @@ spec:
         #    ⇒ ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按**旧路由表**继续跑。
         #    2026-08-25 实际踩过一次（改了 mac/ornith 后必须手动 rollout restart 才生效）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py 的 STAMP_ONLY），别手改。
-        checksum/config: "dbb9b94c20a96368"
+        checksum/config: "235883358d522dc8"
       labels:
         app: litellm
     spec:

@@ -8,6 +8,12 @@
 > 修订: 2026-08-25：Mac 兜底模型由 `Qwen3.6-35B` 换为 `Ornith-1.5-35B-A3B`，
 >   网关别名 `mac/qwen3.6-35b` → `mac/ornith`（下方 Decision 记录的是 2026-08-01 的原始决策，
 >   不改写；换型理由与实测见本文件末尾「2026-08-25 修订」）。
+> 修订: 2026-09-02：DGX 主力模型由 `DeepSeek-V4-Flash` 换为 `Qwen3.8-Flash-Next`（NVFP4），
+>   别名 `custom_dgx/deepseek-v4-flash` / `deepseek-v4-flash` →
+>   `custom_dgx/qwen38-flash-next` / `qwen38-flash-next`。换栈由上游 nv-dgx-spark 单方面做出，
+>   本仓库只是跟着改引用；生效事实见
+>   [reference/litellm-gateway.md](../reference/litellm-gateway.md) 的「DGX 主力模型」，
+>   换栈理由与压测在 nv-dgx-spark 仓库。本文件的 Decision 仍不改写，见末尾「2026-09-03 修订」。
 
 ## Context
 
@@ -85,3 +91,23 @@ Qwen3.6 仍在盘上、仍可直连 OMLX 指名调用，只是不再从网关暴
 
 Mac 侧的 `is_default` 已于 2026-08-25 指向 Ornith，因此**不带模型名**的 OMLX 调用
 （如 `codex --profile m2`）也随之切换。
+
+
+---
+
+## 2026-09-03 修订：DGX 主力换成 Qwen3.8-Flash-Next
+
+决策**不变**（双自托管来源 + 严格的"主→兜底"单向 fallback + 别名与裸 vLLM 同名），
+换栈本身也不是本仓库的判断 —— 上游 nv-dgx-spark 把 :8000 换了模型，旧名直接从
+`/v1/models` 消失，跟着改引用是唯一选项。这里只记两件对以后决策有影响的事：
+
+1. **本文件 Context 里「DGX = 1M ctx」这条依据失效了**（新栈 `max_model_len=262144`）。
+   按它做过长上下文规划的下游要重算，已知受影响的是 Open Notebook 的长上下文角色。
+   同理 NVIDIA 侧曾按"与 DGX 主力同款"选兜底候选的思路也失效了。
+2. **"别名与裸 vLLM 同名"这个选择的代价被量化了一次**：一次改名要动 5 处配置
+   （网关清单 / jobs-sg 直连 / Open Notebook 接线 / oracle calibre 作业 / 告警与面板注释），
+   外加 **8 把虚拟 key 的白名单**（16 把里有 8 把引用了 DGX 别名，见
+   [reference/litellm-gateway.md](../reference/litellm-gateway.md) 坑 A）。
+   当初图的是"下游换 base_url 就能绕过网关"，代价就是上游动一次模型，本仓库要跟着扫一遍。
+   **下次再改名仍然按真实模型名命名**（不要为了少改一处就把别名做成与模型无关的稳定名 ——
+   那会让"清单说 deepseek、实际给 Qwen"这种谎话进网关）。

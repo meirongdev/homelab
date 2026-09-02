@@ -33,9 +33,13 @@
 #     且都是自出版/AI 新书（`101 Claude Code Tips`、`Wispr Flow` 之类），
 #     正是外部书目库查不到、周跑的 backfill 反复扑空的那一类。**这是常设需求不是一次性积压。**
 #   · 上轮成效有据：库里 **202 本**带 `#meta_src = llm-from-content` 标记（234 候选里 86%）。
-#   · 后端活着：homelab pod 实测 DGX `/v1/models` 200，`deepseek-v4-flash` 在线
-#     （max_model_len 1000000）—— 正是 08-07 三轮 DRY-RUN 调校护栏时用的那个模型，
-#     换模型等于护栏全部要重验，别换。
+#   · 后端活着：homelab pod 实测 DGX `/v1/models` 200，彼时在线的是 `deepseek-v4-flash`
+#     （max_model_len 1000000）—— 正是 08-07 三轮 DRY-RUN 调校护栏时用的那个模型。
+#   · ☠️ **2026-09-02 DGX 换了主力模型**（`deepseek-v4-flash` → `qwen38-flash-next`，
+#     max_model_len 1M → 262144，旧名已从 `/v1/models` 消失）。上面「别换模型」的前提
+#     由上游单方面消失了，不是本仓库的选择。护栏（`max_tokens 2000` 等）是按旧模型
+#     调的：**换模型后先 `DRY_RUN=1` 重跑一轮**再置 0，判据看 `finish_reason` 与
+#     `content` 是否为 null（旧模型就是在这条上崩过的）。
 #   · 根因未变：oracle pod 直连 `100.97.87.120:8000` 仍然 **timeout**（同日实测）。
 #
 # 接通方式（三处改动，缺一不可）：
@@ -47,7 +51,8 @@
 #   2) 鉴权：本脚本原先**只发 Content-Type、没有 Authorization 头**（旧 dgx-proxy 是
 #      裸 nginx 无鉴权），已补。key 走 Vault `oracle-k3s/calibre-metadata` → ESO
 #      → Secret `calibre-metadata-secrets`（本文件末尾）。
-#   3) 模型名不用改：网关提供的别名与裸 vLLM 同名。
+#   3) 模型名：网关别名与裸 vLLM 刻意同名（下游换 base_url 就能绕过网关），代价是
+#      **DGX 换模型时这里要跟着改**（2026-09-02 已跟着改成 `qwen38-flash-next`）。
 #
 # 对照：同集群的 `jobs-sg/cronjob-enrich.yaml` 是**直连 DGX、不经网关**（省掉 virtual
 # key 那条 Vault 依赖）。本作业学不了 —— 它在 oracle，这正是 1) 存在的原因。
@@ -91,7 +96,7 @@ data:
     # 2026-08-29 起指向 LiteLLM 网关的跨集群 NodePort，见 CronJob 的 env 注释。
     LLM_URL = os.environ.get("LLM_URL", "")
     LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
-    LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-v4-flash")
+    LLM_MODEL = os.environ.get("LLM_MODEL", "qwen38-flash-next")
     LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "300"))
 
     DRY_RUN = os.environ.get("DRY_RUN", "1") != "0"
@@ -274,7 +279,8 @@ data:
         body = json.dumps({
             "model": LLM_MODEL,
             "messages": [{"role": "user", "content": PROMPT + text}],
-            # ⚠️ deepseek-v4-flash 是**推理模型**：它先产出 reasoning_content，
+            # ⚠️ qwen38-flash-next（与之前的 deepseek-v4-flash 一样）是**推理模型**：
+            # 它先产出 reasoning_content，
             # 再产出 content。800 在 6000 字摘录下会被推理阶段吃光，
             # 结果是 finish_reason=length 且 **content 为 null**（不是报错、不是空串）。
             # 2026-08-07 首次 DRY-RUN 就是这样崩的。2000 给推理留够余量。
@@ -577,9 +583,12 @@ spec:
                 # Service 定义：k8s/helm/manifests/litellm/litellm.yaml 的 litellm-external
                 - name: LLM_URL
                   value: "http://100.94.186.7:31400/v1/chat/completions"
-                # LiteLLM 强制 key 鉴权。这把 virtual key 的**模型白名单只有
-                # deepseek-v4-flash**（实测：该模型 200、openrouter/* 403），
+                # LiteLLM 强制 key 鉴权。这把 virtual key 的**模型白名单只有网关的
+                # DGX 别名一个**（实测：白名单内的模型 200、openrouter/* 403），
                 # 所以作业越权不了，也花不到 OpenRouter 的钱。
+                # ⚠️ 2026-09-02 DGX 换模型后，白名单里的名字必须是
+                # `qwen38-flash-next`（原来是 `deepseek-v4-flash`）—— 改法见
+                # docs/reference/litellm-gateway.md 坑 A。
                 # ☠️ 白名单存在 LiteLLM 的 Postgres 里、**不在 git**：将来改网关
                 # 模型别名而不同步改这把 key，就会「清单正确 + Synced + 调用全 403」。
                 # key 由 alias `calibre-metadata-llm` 标识，重铸后需同步更新 Vault。
@@ -588,10 +597,11 @@ spec:
                     secretKeyRef:
                       name: calibre-metadata-secrets
                       key: llm-api-key
-                # 网关与裸 vLLM 提供同名别名，沿用原值即可，别加 provider 前缀
-                # （`custom_dgx/...` 那个别名也在，但换模型等于护栏要全部重验）。
+                # 网关与裸 vLLM 提供同名别名，所以这一个值同时满足两条路径；
+                # 别加 provider 前缀（`custom_dgx/...` 那个别名也在，指同一个上游）。
+                # 换模型 = 护栏全部重验（DRY_RUN=1 先跑一轮），见文件头 2026-09-02 那条。
                 - name: LLM_MODEL
-                  value: "deepseek-v4-flash"
+                  value: "qwen38-flash-next"
                 # 与 jobs-sg 同口径；nginx 代理侧也是 300s，两边要一致，
                 # 否则代理先断会让客户端看到不完整响应而非超时。
                 - name: LLM_TIMEOUT

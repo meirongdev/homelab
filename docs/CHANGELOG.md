@@ -1,6 +1,6 @@
 # Homelab Changelog
 
-> Last updated: 2026-09-02
+> Last updated: 2026-09-03
 > 已经做完的事，一条一行，按阶段/时间倒着找。**这里只回答「做过什么」**——
 > 还剩什么没做看 [ROADMAP.md](ROADMAP.md)，现在是什么样看 [reference/](reference/README.md)。
 > 2026-09-02 从 ROADMAP 拆出：那份文件长到 23.8KB，9 条开放项被 65 条历史淹没，
@@ -87,6 +87,7 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-08-25 | **homelab 两个 Postgres 收敛成一个**：`litellm-pg` + `multica-postgres` → `databases/apps-pg`，逐表对账。**刻意不装 CNPG**（operator 自身开销比省下的 postmaster 还贵），所以两集群的 `apps-pg` 同名同角色但形态不同 ([决策四](decisions/shared-postgres-platform.md)) |
 | 2026-08-26 | **接上 godot-games**：Nakama 挂服务端 Lua 模块（initContainer 从 OCI 镜像拷入，换 tag 即发版）+ 按契约设 `runtime.lua_{min,max}_count`（**必须成对**，只调 max 直接启动失败）+ 新服务 `game.meirong.dev` ([services.md](reference/services.md)) |
 | 2026-08-27 | **游戏大厅打通**：`game.meirong.dev` 的 HTTPRoute 变三条规则（`/v2/*` + `/ws` → nakama，其余静态站）。☠️ **上游 e2e 直连 nakama 域名、结构上绕过这两条**，路由漏写 e2e 照样全绿，唯一判据是用浏览器真开一次 ([services.md](reference/services.md)) |
+| 2026-09-03 | **DGX 主力模型全线换引用**：上游 nv-dgx-spark 2026-09-02 把 :8000 从 `deepseek-v4-flash` 换成 `qwen38-flash-next`（NVFP4，ctx 1M→262k，冷启动 8–11min），旧名已从 `/v1/models` 消失。跟着改的是网关别名 + jobs-sg 直连 + Open Notebook 接线 + oracle calibre 作业，另把 `DgxSparkVllmDown` 的 `for` 10m→15m（新栈加载 8–11min，10m 会被正常重启烧掉）。☠️ 爆炸半径实测：**8 把虚拟 key 的白名单**要同步改 ([网关事实](reference/litellm-gateway.md) · [决策修订](decisions/litellm-llm-gateway.md)) |
 
 ### 审计与清理（历史）
 
