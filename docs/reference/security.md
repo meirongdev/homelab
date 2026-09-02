@@ -1,6 +1,6 @@
 # K3s 集群安全架构 (Security Architecture)
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-02
 > Status: 生效事实
 > Scope: 双集群（homelab + oracle-k3s）的纵深防御模型，本文是 source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
@@ -277,6 +277,12 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 8. **git 历史里的旧对象**（2026-08-10）：公网 IP 与两个已失效的 ZITADEL 凭据已从全历史抹除并
    force-push，但 GitHub 上重写前的悬空对象**仍可按 commit SHA 访问**，直到向 GitHub Support
    申请 GC。彻底了结的替代手段是轮换 OCI 公网 IP，让旧对象里的值失去意义。
+9. **公网集群上的 ArgoCD 持有 homelab 的 cluster-admin**（2026-09-02 记录，有意接受）：控制面在
+   oracle-k3s（对外暴露面最大的集群），它经 ESO 从 Vault 拿到 homelab 的 `argocd-manager` 凭据，
+   而 homelab 是 Vault 所在。ArgoCD 被攻破 = 两个集群一起丢。2026-09-02 起 AppProject 按集群拆分
+   （[决策](../decisions/argocd-project-per-cluster.md)），但那只收窄「误投」，不收窄凭据权限；
+   真收窄要给 homelab 侧 SA 降权到 ArgoCD 实际需要的资源类型，成本与收益另评。
+   现有缓解：ArgoCD 在 ZITADEL OIDC 之后、`argocd-manager` token 在 Vault、oracle 节点 OS 层有 firewalld。
 
 ## 12. 运维入口
 

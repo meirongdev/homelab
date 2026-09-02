@@ -109,9 +109,9 @@ manual-helm 组件，实测 homelab **既无 release 也无 pod**。连带发现
   （`helm rollback` / `helm upgrade --install ... --version <targetRevision> -f values/<app>.yaml`），
   chart 版本唯一真源随之收敛到 `argocd/applications/*.yaml`：此前双 pin 已漂移过（loki 7.0.0 vs 7.1.0）。
   release 历史仍在，采纳不销毁它，`helm rollback` 路径照旧可用。
-- `AppProject.sourceRepos` 加了两个 chart repo。⚠️ AppProject **不在 root App 托管路径下**，
-  必须手工 `kubectl apply -f argocd/projects/homelab.yaml`，否则新 App 报
-  `repo ... is not permitted in project`。
+- `AppProject.sourceRepos` 加了两个 chart repo，否则新 App 报 `repo ... is not permitted in project`。
+  （当时 AppProject 不在 root App 托管路径下，得手工 apply；2026-09-02 起由 `projects` App 托管，
+  见 [argocd-project-per-cluster](argocd-project-per-cluster.md)。）
 - 遗留的 `sh.helm.release.v1.*` Secret 不动：它是 `helm rollback` 的依据，
   且 AppProject 的 `orphanedResources.ignore` 已豁免这类 Secret。
 

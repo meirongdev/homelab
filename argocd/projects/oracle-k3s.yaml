@@ -1,0 +1,62 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: oracle-k3s
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: oracle-k3s 集群的工作负载（ArgoCD 控制面所在集群，in-cluster）
+
+  # ☠️ 一个 AppProject 只允许一个 destination（CI 规则 H2 强制）。
+  # 2026-08-02 控制面迁到本集群后，`kubernetes.default.svc` 指的就是 oracle-k3s 自己。
+  # homelab 的负载不可能出现在这个 project 里：destination 写成 Tailscale 端点会被
+  # ArgoCD 服务端直接拒绝，不再只靠 CI 的 H2。
+  # 背景与迁移顺序见 docs/decisions/argocd-project-per-cluster.md。
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "*"
+
+  # 只列 oracle 侧 Application 实际用到的 chart 源；新加 chart 得先加进这里。
+  # 本文件由 `projects` App 托管：改完 git push 即生效。
+  sourceRepos:
+    - https://github.com/meirongdev/homelab
+    - https://aquasecurity.github.io/helm-charts            # trivy-operator-oracle
+    - https://falcosecurity.github.io/charts                # falco
+    - https://grafana.github.io/helm-charts                 # loki / tempo
+    - https://cloudnative-pg.github.io/charts               # cnpg-operator
+    - https://opencost.github.io/opencost-helm-chart        # opencost-oracle
+    - https://kubernetes-sigs.github.io/external-dns/       # external-dns-oracle
+
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"
+
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+
+  # 孤儿资源监控，判定条件与 warn: false 的理由见 homelab.yaml 同名段落（两边一致）。
+  # oracle 上的 manual-helm ns：kube-system(cilium) / external-secrets(ESO) / argocd(ArgoCD 本体)。
+  # 只列本集群真实存在的那几类。
+  orphanedResources:
+    warn: false
+    ignore:
+      # Endpoints 由 endpoints controller 为每个 Service 自动创建,无 ownerRef、永远不会进 Git。
+      - group: ""
+        kind: Endpoints
+        name: "*"
+      # Helm 自己的 release 状态存档（cilium / ESO / ArgoCD / zitadel HelmChart CR）,不是工作负载。
+      - group: ""
+        kind: Secret
+        name: "sh.helm.release.v1.*"
+      # trivy-server StatefulSet 的 volumeClaimTemplate 产物（具名豁免，PVC 整类不能豁免）。
+      - group: ""
+        kind: PersistentVolumeClaim
+        name: "data-trivy-server-0"
+      # CNPG operator 在每个含 Cluster 的 ns 里自动创建的默认监控查询 ConfigMap
+      # (标签 app.kubernetes.io/managed-by=cloudnative-pg)。删了会被立即重建。
+      # apps-pg 与 zitadel-pg 两个 ns 都有；ignore 没有 namespace 字段,按名字豁免正好覆盖全部。
+      - group: ""
+        kind: ConfigMap
+        name: "cnpg-default-monitoring"

@@ -29,6 +29,7 @@
 | [multimedia-repository-nfs-readonly](multimedia-repository-nfs-readonly.md) | 媒体 serving 重新引入 NFS，但**只读 + 只媒体 + 不装 provisioner**：2026-07-11 退役后的唯一例外；☠️ 副作用是 106 从此不再是"非运行时依赖" |
 | [prometheus-series-reduction](prometheus-series-reduction.md) | 砍 series 而非继续抬 limit：k3s 单进程让 kubelet 重复暴露 apiserver/etcd（占该 job 80%）→ 按 job 分别 drop，234k→110k（−53%）；三层证据（规则/看板/抓取层）+ chart 默认值必须原样保留再追加 |
 | [omlx-speech-model-selection](omlx-speech-model-selection.md) | ❌ Mac 新增的 4 个语音模型全部不采纳，STT/TTS 接线不动：两个新 TTS **结构上**驱动不了（只能传 `voice`，它们要 `instruct`/参考音频），两个新 ASR 在生产口径（10 分钟 mp3 切段）各有一种 HTTP 200 的静默失败：截断在 45s / 长音频重复崩塌 |
+| [argocd-project-per-cluster](argocd-project-per-cluster.md) | 每集群一个 AppProject（homelab / oracle-k3s，各只一条 destination），root / projects 元 App 挂 `default`；写错 destination 改由 ArgoCD 服务端拒绝，H2 加查 project ↔ destination；AppProject 从此由 `projects` App 托管 |
 | [home-stack-repo-boundary](home-stack-repo-boundary.md) | `stack.meirong.dev` 上线后两个仓库同写一个 zone：**按资源类型切**（否决「homelab 全管」与「home-stack 全管」）；home-stack 只拥有 Worker + 那一条 DNS 记录，homelab 独占隧道/WAF/zone 设置；☠️ 那条记录别声明第二份、别当游离记录清理 |
 
 ## 写新 ADR

@@ -2,7 +2,8 @@
 """清单结构安全检查 —— 把**已经发生过的事故**变成 CI 能拦的规则。
 
     H1  Namespace / CRD 必须独占文件      ← 2026-08-03 级联删除事故
-    H2  Application 的 path 与 destination 必须同集群  ← AGENTS.md 的 ☠️ 警告
+    H2  Application 的 path / project 与 destination 同集群，AppProject 只许一个 destination
+        ← AGENTS.md 的 ☠️ 警告；2026-09-02 起 project 那半由 ArgoCD 服务端兜底，本规则保证两边不脱节
     H3  ReferenceGrant 必须声明 v1beta1   ← 声明集群未提供的版本会炸掉整个 App
     H4  清单里的 PVC 必须有备份归属        ← 备份脚本是显式白名单，漏了静默无声
     H5  Namespace 必须显式声明 PSA 等级    ← 漏写 = 静默吃内置默认 privileged，且无 warn/audit
@@ -59,8 +60,17 @@ PATH_CLUSTER = [
     ("backup/overlays/homelab", HOMELAB_SERVER),
     ("cloud/oracle/manifests", ORACLE_SERVER),
     ("backup/overlays/oracle", ORACLE_SERVER),
-    ("argocd/applications", ORACLE_SERVER),
+    ("argocd", ORACLE_SERVER),  # root / projects 两个元 App（in-cluster，只写 argocd ns）
 ]
+
+# 2026-09-02 起每个集群一个 AppProject（docs/decisions/argocd-project-per-cluster.md）：
+# destination 由 ArgoCD 服务端拒绝跨集群误投，本脚本负责「project 与 destination 不脱节」。
+# chart 型 source 没有 path，此前 H2 对它们完全没网可兜，project 这一半正好补上。
+# root / projects 两个元 App（source 在 argocd/ 下）挂内置的 `default` project：
+# 挂 homelab / oracle-k3s 任一都会出现「App 管理自己所属 project」的自引用。
+PROJECT_FOR_SERVER = {HOMELAB_SERVER: "homelab", ORACLE_SERVER: "oracle-k3s"}
+META_PROJECT = "default"
+META_PATH_PREFIX = "argocd"
 
 # ── H3 ────────────────────────────────────────────────────────────────────
 # 声明集群里**没有提供**的版本 → 整个 App ComparisonError
@@ -161,19 +171,29 @@ def check_h1(p, docs):
 
 
 def check_h2(p, docs):
-    """H2 —— Application 的 source.path 与 destination 必须同集群。"""
+    """H2 —— Application 的 path / project 与 destination 必须同集群；AppProject 只许一个 destination。"""
     for d in docs:
-        if d.get("kind") != "Application":
-            continue
+        kind = d.get("kind")
         spec = d.get("spec") or {}
         name = (d.get("metadata") or {}).get("name", "?")
+        if kind == "AppProject":
+            servers = sorted({(x or {}).get("server", "") for x in (spec.get("destinations") or [])})
+            expect = next((srv for srv, prj in PROJECT_FOR_SERVER.items() if prj == name), None)
+            if expect is None:
+                fail("H2", p, f"AppProject `{name}` 不在已知集群表里（homelab / oracle-k3s）；"
+                              "新集群要先登记进 check-manifests.py 的 PROJECT_FOR_SERVER")
+            elif servers != [expect]:
+                fail("H2", p, f"AppProject `{name}` 的 destinations 必须且只能是 `{expect}`，现为 {servers}。"
+                              "一个 project 一个集群，多列或通配会让服务端那半兜底失守")
+            continue
+        if kind != "Application":
+            continue
         server = ((spec.get("destination") or {}).get("server") or "").strip()
+        project = spec.get("project") or ""
         sources = spec.get("sources") or ([spec["source"]] if spec.get("source") else [])
-        for s in sources:
-            path = (s or {}).get("path")
-            if not path:
-                continue  # chart 型 source 没有 path，静态上无从判断集群，跳过
-            path = path.rstrip("/")
+        paths = [((x or {}).get("path") or "").rstrip("/") for x in sources if (x or {}).get("path")]
+        # ① path ↔ destination（chart 型 source 没有 path，这一条对它们无从判断，跳过）
+        for path in paths:
             for prefix, expect in PATH_CLUSTER:
                 if path == prefix or path.startswith(prefix + "/"):
                     if server != expect:
@@ -186,6 +206,18 @@ def check_h2(p, docs):
                             f"⚠️ `kubernetes.default.svc` 指的是 oracle（2026-08-02 起控制面在那）。",
                         )
                     break
+        # ② project ↔ destination（对 chart 型 source 是唯一的静态兜底）
+        is_meta = any(path == META_PATH_PREFIX or path.startswith(META_PATH_PREFIX + "/") for path in paths)
+        if is_meta:
+            if project != META_PROJECT:
+                fail("H2", p, f"元 App `{name}`（source 在 argocd/ 下）必须挂 `{META_PROJECT}` project，现为 `{project}`")
+        else:
+            expect = PROJECT_FOR_SERVER.get(server)
+            if expect is None:
+                fail("H2", p, f"App `{name}` 的 destination.server `{server or '<空>'}` 不在已知集群表里")
+            elif project != expect:
+                fail("H2", p, f"App `{name}` 的 destination 是 {expect} 集群，但 project 是 `{project}`，应为 `{expect}`；"
+                              "project 与 destination 脱节时 ArgoCD 会拒绝同步（响亮），但别等到那时")
 
 
 def check_h3(p, docs):
@@ -279,7 +311,7 @@ def check_h4():
 
 RULES = [
     ("H1", "Namespace/CRD 必须独占文件", "2026-08-03 级联删除：删 calibre 清单 → prune 掉整个 ns → 删光同 ns 的 open-notebook 数据"),
-    ("H2", "Application path ↔ destination 同集群", "控制面 2026-08-02 迁 oracle 后，kubernetes.default.svc 改指 oracle；写错会把 homelab 全套装到 oracle"),
+    ("H2", "Application path/project ↔ destination 同集群；AppProject 单 destination", "控制面 2026-08-02 迁 oracle 后，kubernetes.default.svc 改指 oracle；写错会把 homelab 全套装到 oracle。2026-09-02 起每集群一个 AppProject，服务端也兜底"),
     ("H3", "ReferenceGrant 必须 v1beta1", "v1beta1 仍是 CRD 的 storage 版本；声明集群未提供的版本会让整个 App ComparisonError 不可用"),
     ("H4", "PVC 必须有备份归属", "备份脚本是显式白名单；trends-data 曾因此静默未备份 2 个月（45MB）"),
     ("H5", "Namespace 必须显式声明 PSA 等级", "漏写不是没定级，是静默吃内置默认 privileged；zitadel ns 就这样敞了一个多月（2026-07-06→08-10）"),

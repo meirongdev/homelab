@@ -136,9 +136,10 @@ manual-helm，设计如此，见 [`external-dns-adoption.md`](external-dns-adopt
 
 ## 后果
 
-- ⚠️ **AppProject 不归 `root` App 同步**（root 只 watch `argocd/applications/`），改完
-  `argocd/projects/homelab.yaml` 必须手动 `kubectl apply -f`，同
-  `k8s/helm/justfile` 的 `deploy-argocd` 配方
+- ~~⚠️ AppProject 不归 `root` App 同步，改完必须手动 `kubectl apply -f`~~ ——
+  2026-09-02 起由 `projects` App 托管，`git push` 即生效；且 `orphanedResources` 配置现在分在
+  `homelab.yaml` / `oracle-k3s.yaml` 两处、各列自己集群真实存在的 ignore
+  （[argocd-project-per-cluster](argocd-project-per-cluster.md)）
 - 纯只读特性，不影响任何 App 的 sync 行为；回滚 = 删掉 `spec.orphanedResources` 块再 apply
 - 新增 manual-helm 组件时，其 namespace 会带来一批新孤儿。若该 ns 的 App 在
   `homelab` project 内，属预期，无需处理

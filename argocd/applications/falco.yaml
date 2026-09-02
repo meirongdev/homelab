@@ -6,7 +6,7 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: homelab
+  project: oracle-k3s
   sources:
     # Falco chart 版本 —— 部署前 `helm search repo falcosecurity/falco --versions` 核对。
     - repoURL: https://falcosecurity.github.io/charts

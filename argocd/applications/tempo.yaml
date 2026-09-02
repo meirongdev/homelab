@@ -12,7 +12,7 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: homelab
+  project: oracle-k3s
 
   sources:
     - repoURL: https://grafana.github.io/helm-charts

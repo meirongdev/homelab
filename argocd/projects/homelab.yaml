@@ -6,56 +6,38 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  description: Homelab GitOps project
+  description: homelab 集群的工作负载（控制面在 oracle-k3s，经 Tailscale 纳管）
 
-  sourceRepos:
-    - https://github.com/meirongdev/homelab
-    - https://argoproj.github.io/argo-helm
-    # 安全加固组件的 Helm chart 仓库（Kyverno 准入策略 / Trivy Operator 漏洞扫描）
-    - https://kyverno.github.io/kyverno
-    - https://aquasecurity.github.io/helm-charts
-    # Phase 2 运行时检测：Tetragon(homelab) / Falco(oracle)
-    - https://helm.cilium.io/
-    - https://falcosecurity.github.io/charts
-    # 可观测性: Loki(日志) / Tempo(追踪)
-    - https://grafana.github.io/helm-charts
-    # SLO 生成器
-    - https://slok.github.io/sloth
-    # CloudNativePG operator（ZITADEL DB 从冻结 bitnami 迁 CNPG，evolution-roadmap Phase C）
-    - https://cloudnative-pg.github.io/charts
-    # OpenCost 双集群成本归因（homelab + oracle-k3s 各一份）
-    - https://opencost.github.io/opencost-helm-chart
-    # Prometheus/Grafana/Alertmanager 全栈（2026-07-31 从 manual-helm 采纳进 ArgoCD）
-    - https://prometheus-community.github.io/helm-charts
-    # external-dns 双集群（同上，两实例 values 不同、txtOwnerId 必须不同）
-    - https://kubernetes-sigs.github.io/external-dns/
-    # OTel Collector（homelab 节点代理：日志→Loki、OTLP 追踪→Tempo；2026-07-31）
-    - https://open-telemetry.github.io/opentelemetry-helm-charts
-    # Multica（AI 编码 agent 协作平台，2026-08-18）。本条是全仓库**第一个 OCI**
-    # chart 源，写法与上面的 HTTP repo 不同：ArgoCD 要求 repoURL **不带 `oci://` 前缀**
-    # （官方文档原话 "note: the oci:// syntax is not included."）。公开 registry
-    # 无需注册 repository Secret —— 私有的才需要 enableOCI。
-    - ghcr.io/multica-ai/charts
-
-  # ⚠️ 2026-08-02 ArgoCD 控制面迁到 oracle-k3s 后，`kubernetes.default.svc` 的所指
-  # **变了**：它现在是 oracle 自己，不再是 homelab。homelab 变成需要显式列出的外部集群。
-  # 三条都保留：切换期间新旧控制面并存，两种写法都要能通过 project 校验。
+  # ☠️ 一个 AppProject 只允许一个 destination（CI 规则 H2 强制）。
+  # 2026-09-02 之前这里三条 destination 通配、namespace 全是 "*"，两个集群的 App 共用一个
+  # project，于是「Application 写错 destination 把 homelab 全套装到 oracle」只有 CI 的 H2
+  # 能拦；现在 ArgoCD 服务端自己会拒绝：`application destination server ... is not permitted`。
+  # 背景与迁移顺序见 docs/decisions/argocd-project-per-cluster.md。
   destinations:
-    # in-cluster —— 控制面所在集群。迁移前=homelab，迁移后=oracle-k3s。
-    - server: https://kubernetes.default.svc
-      namespace: "*"
-    # homelab Tailscale 端点(canonical;cluster Secret + Application 均用此)
+    # homelab 控制面 API，走 Tailscale（cluster Secret `homelab-cluster` 与 Application 均用此）
     - server: https://100.94.186.7:6443
       namespace: "*"
-    # 2026-08-10 删掉了 oracle-k3s 的**公网** fallback 端点：没有任何 Application
-    # 引用过它（全部走 100.94.186.7 或 kubernetes.default.svc），而本仓库不提交公网
-    # 地址（CI: scripts/check-public-ips.py）。API 的 tls-san 也已不含公网 IP。
-    # oracle-k3s Tailscale 端点(迁移前 canonical;迁移后 oracle 自己走 in-cluster,
-    # 这条留着兼容尚未重写完的 Application 与紧急回滚)
-    - server: https://100.107.166.37:6443
-      namespace: "*"
 
-  # 允许管理集群级资源（Namespace、ClusterRole 等）
+  # 只列 homelab 侧 Application 实际用到的 chart 源；新加 chart 得先加进这里，
+  # 否则 Application 报 `repo ... is not permitted in project 'homelab'`（响亮，不是静默）。
+  # 本文件由 `projects` App 托管（argocd/applications/projects.yaml）：改完 git push 即生效，
+  # 不再需要手工 kubectl apply（首次装 ArgoCD 时 `just deploy-argocd` 仍会 apply 一次做 bootstrap）。
+  sourceRepos:
+    - https://github.com/meirongdev/homelab
+    - https://kyverno.github.io/kyverno                      # kyverno
+    - https://aquasecurity.github.io/helm-charts            # trivy-operator
+    - https://helm.cilium.io/                               # tetragon
+    - https://prometheus-community.github.io/helm-charts    # kube-prometheus-stack
+    - https://kubernetes-sigs.github.io/external-dns/       # external-dns
+    - https://open-telemetry.github.io/opentelemetry-helm-charts  # otel-collector
+    - https://opencost.github.io/opencost-helm-chart        # opencost
+    - https://slok.github.io/sloth                          # sloth
+    # multica：全仓库第一个 OCI chart 源。ArgoCD 要求 repoURL **不带 `oci://` 前缀**
+    # （官方文档原话 "note: the oci:// syntax is not included."）。公开 registry 无需
+    # repository Secret —— 私有的才需要 enableOCI。
+    - ghcr.io/multica-ai/charts
+
+  # 允许管理集群级资源（Namespace、ClusterRole、Kyverno ClusterPolicy 等）
   clusterResourceWhitelist:
     - group: "*"
       kind: "*"
@@ -75,23 +57,22 @@ spec:
   # 另有 3 条内置豁免:default SA、kube-root-ca.crt、default ns 的 kubernetes Service。
   #
   # ⚠️ warn: false 是刻意的。ignore 列表只支持 group/kind/name,**没有 namespace 字段**,
-  # 而 kube-system / monitoring / argocd / external-secrets 四个 ns 里的组件
-  # (cilium+k3s / kube-prometheus-stack / ArgoCD 自身 / ESO operator)都是手动 helm 装的,
-  # 天然全部「无人认领」—— 实测这四个 ns 贡献 255 条,且无法用 ignore 屏蔽。
-  # 开 warn: true 会给 loki/tempo/gateway/vault-eso 等 App 常挂黄色告警条,
-  # 直接复刻 trivy 那种告警疲劳。warn: false 下孤儿仍在各 App 的资源树里可见,
-  # 只是不产生 warning condition —— 看 personal-services/trivy-operator 这类
-  # 「GitOps 自有」ns 时列表是干净的(实测全集群仅剩 7 条,条条有意义)。
-  # 若日后想要真告警,正确做法是把上述四个 ns 的 App 拆到独立 project,而不是加 ignore。
+  # 而 kube-system / monitoring / external-secrets 三个 ns 里的组件
+  # (cilium+k3s / kube-prometheus-stack 采纳前的残留 / ESO operator)都是手动 helm 装的,
+  # 天然全部「无人认领」,且无法用 ignore 屏蔽。开 warn: true 会给 gateway/vault-eso 等
+  # App 常挂黄色告警条,复刻 trivy 那种告警疲劳。warn: false 下孤儿仍在各 App 的资源树里
+  # 可见,只是不产生 warning condition。
+  # 若日后想要真告警,正确做法是把上述 ns 的 App 再拆到一个 platform project,而不是加 ignore。
+  # 只列 homelab 集群上真实存在的那几类；oracle 的在 oracle-k3s.yaml 里单独列。
   orphanedResources:
     warn: false
     ignore:
       # Endpoints 由 endpoints controller 为每个 Service 自动创建,无 ownerRef、
-      # 永远不会进 Git(EndpointSlice 有 ownerRef,已被条件 3 自动排除)。实测 50 条。
+      # 永远不会进 Git(EndpointSlice 有 ownerRef,已被条件 3 自动排除)。
       - group: ""
         kind: Endpoints
         name: "*"
-      # Helm 自己的 release 状态存档,不是工作负载。实测 34 条。
+      # Helm 自己的 release 状态存档,不是工作负载。
       - group: ""
         kind: Secret
         name: "sh.helm.release.v1.*"
@@ -106,7 +87,6 @@ spec:
         kind: PersistentVolumeClaim
         name: "data-trivy-server-0"
       # 同上,Vault StatefulSet 的两个 volumeClaimTemplate(data / audit)产物。
-      # 2026-08-06 复跑孤儿分析时补 —— 它们与 data-trivy-server-0 同类,此前漏了。
       # 依旧是**具名**豁免,不豁免 PVC 整类。
       - group: ""
         kind: PersistentVolumeClaim
@@ -114,10 +94,3 @@ spec:
       - group: ""
         kind: PersistentVolumeClaim
         name: "audit-vault-0"
-      # CNPG operator 在每个含 Cluster 的 ns 里自动创建的默认监控查询 ConfigMap
-      # (标签 app.kubernetes.io/managed-by=cloudnative-pg)。删了会被立即重建。
-      # 2026-08-06 补:apps-pg 上线后它出现在 databases 与 zitadel 两个 ns。
-      # ignore 的 schema 没有 namespace 字段,按名字豁免正好覆盖全部 ns。
-      - group: ""
-        kind: ConfigMap
-        name: "cnpg-default-monitoring"

@@ -1,6 +1,6 @@
 # ArgoCD Application Patterns
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-02
 > Status: 生效事实
 >
 > 当前 ArgoCD 管理模式分析、可选 pattern 对比与取舍建议。
@@ -42,10 +42,11 @@ root (Application)
 
 ### 跨集群
 
-**2026-08-02 起控制面在 oracle-k3s**，一个 ArgoCD 实例管两个集群：
-`AppProject.destinations` 声明 `homelab`（`https://100.94.186.7:6443`，经 Tailscale）和
-`oracle-k3s`（`https://kubernetes.default.svc` = 控制面自己所在集群），
-`Application.spec.destination.server` 选目标。
+**2026-08-02 起控制面在 oracle-k3s**，一个 ArgoCD 实例管两个集群。
+**2026-09-02 起每集群一个 AppProject**（[决策](../decisions/argocd-project-per-cluster.md)）：
+`homelab` project 只允许 `https://100.94.186.7:6443`（经 Tailscale），`oracle-k3s` project 只允许
+`https://kubernetes.default.svc`（控制面自己所在集群）；root / projects 两个元 App 挂内置 `default`。
+`Application.spec.project` 与 `destination.server` 必须配对，写错时服务端拒绝同步，CI 的 H2 也拦。
 ⚠️ 控制面搬家后 `kubernetes.default.svc` 的所指从 homelab 变成了 oracle，
 homelab 负载必须显式写 `https://100.94.186.7:6443`，写错会把整套 homelab 负载
 部署到 oracle 上。见 [runbook](../runbooks/argocd-control-plane-on-oracle.md)。
@@ -67,30 +68,32 @@ homelab 负载必须显式写 `https://100.94.186.7:6443`，写错会把整套 h
 - **资源追踪**: ArgoCD v3.x 默认用 annotation 方式，被管对象带 `argocd.argoproj.io/tracking-id`，
   **不是** v2 时代的 `app.kubernetes.io/instance` label。区分 GitOps 资源与 manual-helm 资源：
   `kubectl -n <ns> get secret -l owner=helm`（有 Helm release 归档 = manual-helm）。
-- **孤儿资源监控**（2026-07-31）: `homelab` AppProject 声明 `orphanedResources`（`warn: false` +
-  4 条 ignore）：在 App 资源树里标出「集群里有、Git 里没有」的对象但不产生 warning。
+- **孤儿资源监控**（2026-07-31）: 两个 AppProject 各自声明 `orphanedResources`（`warn: false` +
+  各自集群真实存在的那几条 ignore）：在 App 资源树里标出「集群里有、Git 里没有」的对象但不产生 warning。
   `warn` 刻意关掉：`ignore` 没有 namespace 字段，4 个 manual-helm ns 贡献 ~255 个永久无主对象。
   依据/测量/被否的 `kor` 见 [../decisions/orphaned-resources.md](../decisions/orphaned-resources.md)。
 - **homelab 外部集群凭据**: Vault `secret/homelab/argocd-homelab-cluster` → ESO
   `cloud/oracle/manifests/argocd/homelab-cluster-external-secret.yaml`。
   （2026-08-02 之前方向相反，oracle 作外部集群的 `argocd-oracle-cluster` 凭据已退役。）
 
-## Application 清单（31 个，全部在 `homelab` project）
+## Application 清单（按 project 分组）
 
-核对: `kubectl --context oracle-k3s -n argocd get app`。源→目录映射见上方树；这里只记
-destination 与踩过坑的备注。
+核对: `kubectl --context oracle-k3s -n argocd get app -o custom-columns=NAME:.metadata.name,PROJECT:.spec.project`。
+源→目录映射见上方树；这里只记归属与踩过坑的备注。总数别写死，以命令为准。
 
-**目标 homelab（显式 `https://100.94.186.7:6443`，21 个）**:
-`backup` · `cloudflare` · `external-dns` · `gateway` · `kube-bench` ·
+**project `homelab`（destination 显式 `https://100.94.186.7:6443`）**:
+`backup` · `cloudflare` · `databases` · `external-dns` · `gateway` · `kube-bench` ·
 `kube-prometheus-stack` · `kyverno` · `kyverno-policies` · `monitoring-dashboards` ·
 `namespace-guardrails` · `opencost` · `otel-collector` · `personal-services` · `sloth` ·
 `tetragon` · `trivy-operator` · `vault-eso` · `jobs-sg`（2026-08-03 上线，kustomize 目录）·
 `media`（2026-08-16 上线，plain manifest 目录）· `litellm`（2026-08-16 上线，plain manifest 目录）·
 `multica`（2026-08-18 上线，本仓库唯一的 OCI chart 源，见下）
 
-**目标 oracle-k3s（in-cluster `kubernetes.default.svc`，10 个）**:
-`root` · `oracle-k3s` · `calibre-metadata` · `cnpg-operator` · `external-dns-oracle` ·
+**project `oracle-k3s`（destination in-cluster `kubernetes.default.svc`）**:
+`oracle-k3s` · `calibre-metadata` · `cnpg-operator` · `external-dns-oracle` ·
 `falco` · `loki` · `tempo` · `trivy-operator-oracle` · `opencost-oracle`
+
+**project `default`（元 App，只写 argocd ns）**: `root`（App-of-Apps）· `projects`（托管 `argocd/projects/`）
 
 值得记住的备注：
 
@@ -162,24 +165,20 @@ justfile 里的手动部署配方已移除，**chart 版本唯一真源是 `argo
 
 2026-07 引入 OpenCost / KRR 时逐一踩到，都会导致「push 了但不生效」。
 
-### 1. `AppProject.sourceRepos` 是白名单，且不由 GitOps 托管
+### 1. `AppProject.sourceRepos` 是白名单，而且分集群
 
-新 chart 仓库不加进 `argocd/projects/homelab.yaml` 的 `sourceRepos`，Application 会拒绝同步：
+新 chart 仓库不加进**目标集群对应的** project 文件（`argocd/projects/homelab.yaml` 或
+`oracle-k3s.yaml`）的 `sourceRepos`，Application 会拒绝同步：
 
 ```
 application repo https://xxx.github.io/chart is not permitted in project 'homelab'
 ```
 
-更麻烦的是 **AppProject 不在 root App 的托管路径下**（root App 的 path 是
-`argocd/applications/`，AppProject 由 `just deploy-argocd` 第 3 步注册），
-**`git push` 不会让它生效**，必须手工 apply：
-
-```bash
-kubectl --context oracle-k3s apply -f argocd/projects/homelab.yaml
-```
-
-（`just deploy-argocd` 也行，但会连带 `helm upgrade` 整个 ArgoCD，通常没必要。
-⚠️ AppProject 随控制面走，apply 目标是 oracle-k3s，不是 homelab。）
+2026-09-02 起 `argocd/projects/` 由 `projects` App 托管，改完 `git push` 即生效
+（此前不在任何 App 的托管路径下、必须手工 apply，四篇 runbook 各提醒一遍还是漏过）。
+只有全新装的 ArgoCD 才靠 `just deploy-argocd` 第 2 步先 bootstrap 一次。
+同样分集群的还有 `project` 字段本身：homelab 的 App 挂 `homelab`，oracle 的挂 `oracle-k3s`，
+写反了服务端拒绝、CI 的 H2 也拦（[决策](../decisions/argocd-project-per-cluster.md)）。
 
 **OCI registry 的写法与 HTTP repo 不同**（2026-08-18 加 multica 时确立，本仓库首个 OCI chart）：
 `repoURL` 与 `sourceRepos` 都写不带 `oci://` 前缀的裸地址（`ghcr.io/multica-ai/charts`），

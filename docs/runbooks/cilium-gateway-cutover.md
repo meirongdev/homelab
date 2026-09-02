@@ -10,7 +10,7 @@
 > **§ Preconditions 里检查 Traefik 与 Kopia 的步骤已作废**：两者均已退役，跳过即可。
 > ClusterMesh 自 2026-03-08 起已连接（§ Phase 6 因此通常不需要执行）。
 > 日常健康观测另见 [reference/cloudflare-tunnel-observability.md](../reference/cloudflare-tunnel-observability.md)。
-> Last updated: 2026-09-01
+> Last updated: 2026-09-02
 
 ## Goal
 
@@ -111,10 +111,10 @@ kubectl --context oracle-k3s exec -n kube-system ds/cilium -c cilium-agent -- ci
 This ensures ArgoCD is tracking the updated source layout.
 
 ```bash
-kubectl --context k3s-homelab apply -f argocd/projects/homelab.yaml
-kubectl --context k3s-homelab apply -f argocd/applications/gateway.yaml
-kubectl --context k3s-homelab apply -f argocd/applications/cloudflare.yaml
-kubectl --context k3s-homelab apply -f argocd/applications/monitoring-dashboards.yaml
+# AppProject 自 2026-09-02 起由 projects App 托管，无需手工 apply；控制面在 oracle-k3s
+kubectl --context oracle-k3s apply -f argocd/applications/gateway.yaml
+kubectl --context oracle-k3s apply -f argocd/applications/cloudflare.yaml
+kubectl --context oracle-k3s apply -f argocd/applications/monitoring-dashboards.yaml
 ```
 
 Then trigger sync:
