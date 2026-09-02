@@ -1,7 +1,7 @@
 # Runbooks
 
 > 可直接执行的运维操作手册（SOP）。**只收针对本 homelab 基础设施、可照抄执行的流程。**
-> Last updated: 2026-08-30
+> Last updated: 2026-09-03
 
 | Runbook | 什么时候用 |
 |---------|-----------|
@@ -17,6 +17,7 @@
 | [k3s-cluster-upgrade.md](k3s-cluster-upgrade.md) | 升两个集群的 k3s/Kubernetes 版本；含不可跳 minor / 控制面先于 worker / 不可降级三条硬约束、升级前的兼容性闸门（☠️ Kyverno 是当前天花板）、SQLite 后端下的回滚点与三处 pin 的收尾 |
 | [oracle-k3s-rebuild.md](oracle-k3s-rebuild.md) | oracle-k3s 节点不可恢复时重建（OCI 终止/OS 损坏）；含数据盘点、ArgoCD 控制面重装、ClusterMesh 重连 |
 | [argocd-control-plane-on-oracle.md](argocd-control-plane-on-oracle.md) | 重装/升级 ArgoCD、集群凭据过期、回滚控制面、`argocd.meirong.dev` 跨集群搬家 |
+| [oracle-manifests-split-to-apps.md](oracle-manifests-split-to-apps.md) | 把 oracle 的单体 kustomize 树拆成一目录一个 App（需维护窗口）：☠️ `namespace.yaml` 一律不动，否则重放 2026-08-03 的级联删除；按「先建新 App → 让它抢到 tracking → 才从旧树摘」的顺序，一次一组 |
 | [stateful-service-cross-cluster-migration.md](stateful-service-cross-cluster-migration.md) | 把带 PVC 的服务在 homelab ↔ oracle 之间搬家（两遍 rsync、域名两步切换、退役与残余清扫） |
 | [oracle-k3s-shape-downsize.md](oracle-k3s-shape-downsize.md) | 改 A1 shape（`ocpus`/`memory_gb`）；含 requests 右尺寸前置、hugepages 回收、system-reserved、停机面与验证 |
 | [krr-report-triage.md](krr-report-triage.md) | 周一收到 KRR 报告后怎么读怎么处理：五类分诊、地板值与空结果两类误读、改哪里怎么下发、改完怎么验证生效 |

@@ -1,6 +1,6 @@
 # Homelab Roadmap
 
-> Last updated: 2026-09-02
+> Last updated: 2026-09-03
 > 本文只回答两件事：**还剩什么没做**，和**为什么不做**。做过什么在
 > [CHANGELOG.md](CHANGELOG.md)（2026-09-02 拆出，原因见那里）。
 > **实施细节不写在这里**：每条压到一句话，展开看链接指向的 `reference/`（事实）、
@@ -31,6 +31,7 @@
 | 9 | **jobs-sg 收尾** | 均不阻塞服务：① 周报 Telegram 已接好，只差端到端实测一次推送；② Grafana 面板未做（`jobs_sg_*` 已在采，可用 Explore）；③ `closed` 寿命口径 A/B 待观察 2–3 周再定。（[jobs-sg.md](reference/jobs-sg.md)） |
 | 10 | **readlist 公开面缺准入过滤** | 公开面已多轮收窄（v0.3.0 catalog 收敛、v0.4.0 公开榜三份、v0.5.0 修两个「静默为 0」缺陷）。**仍未做修法①**：`internal/calibre` 读 tags 但不据此筛选，非书文档照样参与打分，碰巧上榜则 title+author 上公网，判据只有人眼。⚠️ 做 catalog SSR/sitemap 前应先补①，否则偶发泄漏会被搜索引擎收录固化。 |
 | 11 | **readlist 边缘限流（Cloudflare Free 限制）** | Free 只允许 1 条 rate limiting 规则，已被 auth 端点 + Excalidraw collab relay 占用且共享计数器（见 [`waf.tf`](../cloudflare/terraform/waf.tf) 注释），"分档"做不到。**当前选择：先不做**，v0.2.0 已在应用侧堵掉自伤路径（published_run 缓存、ETag/304、不碰库的 `/livez`、读写超时），站点只读且单副本 500m 上限，剩余风险可接受。 |
+| 13 | **oracle 清单树拆 App** | `cloud/oracle/manifests/` 仍是 140 个对象的单体 kustomize 树、一个 App 同步：任一文件坏掉整个集群停同步，且新文件漏登记 `kustomization.yaml` 就静默不生效（homelab 侧 2026-07-31 已改掉，oracle 侧没跟）。**不阻塞任何东西**，纯布局债。步骤已备好，需一个维护窗口 + 有人盯：[runbook](runbooks/oracle-manifests-split-to-apps.md)。☠️ `namespace.yaml` 一律不动，否则重放 2026-08-03 的级联删除 |
 | 12 | **低优先 / 可选** | **Renovate 只做完一半**：配置与 CI 已合入，但 GitHub App 仍未安装，至今一个 PR 都没开过（判据：`git ls-remote --heads origin` 无 `renovate/*`）。装 App 是纯人工一步（[决策](decisions/renovate-adoption.md)，状态 🚧）· MacBook `TargetDown` 静默规则 · Vault Dynamic Secrets（规模不需要）· Cloudflare Pro WAF。（母文档 P2） |
 
 ### 已知问题（不阻塞，无人认领）
