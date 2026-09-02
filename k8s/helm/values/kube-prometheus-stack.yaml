@@ -489,12 +489,12 @@ prometheus:
         scrape_interval: 15s
         static_configs:
           - targets:
-              - 100.97.87.120:9100   # dgx-spark-1 (V4-Flash head)
+              - 100.97.87.120:9100   # dgx-spark-1 (inference head)
             labels:
               cluster: dgx-spark
               nodename: dgx-spark-1
           - targets:
-              - 100.67.164.92:9100   # dgx-spark-2 (V4-Flash TP worker)
+              - 100.67.164.92:9100   # dgx-spark-2 (inference TP worker)
             labels:
               cluster: dgx-spark
               nodename: dgx-spark-2
@@ -521,13 +521,16 @@ prometheus:
       # DGX Spark vLLM inference — vLLM server metrics (:8000/metrics, the vLLM default,
       # NOT the VLLM_PROMETHEUS_PORT=8001 in nv-dgx-spark/config/vllm.env), scraped over
       # Tailscale. Exposes vllm:* run-state, KV-cache occupancy, TTFT + e2e latency buckets.
-      # Only dgx-spark-1 (V4-Flash head) has the engine up; dgx-spark-2 vllm_node is idle
-      # (no listening port, 2026-08-03 probe) — add its :8000 target if/when it serves.
+      # Only dgx-spark-1 (the head) has the engine listening; dgx-spark-2's vllm_node is
+      # idle (no listening port, 2026-08-03 probe; still true after the 2026-09-02 stack
+      # swap to qwen38-flash-next — TP=2 ranks, but only the head exposes :8000).
+      # Served model name is a vLLM label (model_name), not part of the target — the 2026-09-02
+      # swap deepseek-v4-flash → qwen38-flash-next needed no change here.
       - job_name: 'vllm-dgx-spark'
         scrape_interval: 15s
         static_configs:
           - targets:
-              - 100.97.87.120:8000   # dgx-spark-1 vLLM (deepseek-v4-flash head)
+              - 100.97.87.120:8000   # dgx-spark-1 vLLM (qwen38-flash-next head since 2026-09-02)
             labels:
               cluster: dgx-spark
               nodename: dgx-spark-1

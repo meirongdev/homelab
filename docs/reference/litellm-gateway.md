@@ -1,6 +1,6 @@
 # LiteLLM 网关（运维事实与坑）
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-03
 > Status: 生效事实
 > Scope: `llm.meirong.dev` 这个 LLM 网关的配置生效路径、鉴权分层、上游可用性边界，
 > 本文是 source of truth。为什么选 LiteLLM、上游怎么选、Mac 兜底为何换 Ornith，见
@@ -24,6 +24,26 @@
 | 模型列表 / `api_base` / `fallbacks` | git 的 ConfigMap | 改清单 → push → ArgoCD |
 | **虚拟 key 能访问哪些模型** | Postgres | 只能调 API（坑 A）|
 | 花费账本 / key 有效期 | Postgres | `/ui` 或 API |
+
+## DGX 主力模型：2026-09-02 换成 Qwen3.8-Flash-Next
+
+上游（`~/projects/meirongdev/nv-dgx-spark`）单方面换栈，本仓库只是跟着改引用。**这一节是本
+仓库关于该上游的唯一真相源**；换栈的技术理由与压测数据在 nv-dgx-spark 仓库，不在这里复制。
+
+| | |
+|---|---|
+| served name | `qwen38-flash-next`（root `Qwen3.8-Flash-Next-NVFP4`，NVFP4 权重 126 GiB）|
+| 端点 | **不变**：`100.97.87.120:8000/v1`。旧名 `deepseek-v4-flash` 已从 `/v1/models` 消失，所以旧引用是 **404**（不是 401，也不是"配置没生效"）|
+| `max_model_len` | **262144**（旧栈 1000000）。按 1M 做过长上下文规划的下游全要重算 —— 已知受害者 [open-notebook.md](open-notebook.md) 的 `large_context_model` 与播客 profiles |
+| 拓扑 / 冷启动 | 双节点 TP=2，两台都必须在；加载 **8–11 分钟**（旧栈 5m29s）。`DgxSparkVllmDown` 的 `for` 因此从 10m 抬到 15m，否则一次正常重启就烧 critical |
+| 并发 | `--max-num-seqs 8`，但线上 `cache_config` 实测 `kv_cache_max_concurrency=5.34`（gmu 0.75）—— 真瓶颈是 KV 池，不是条数，所以排队告警阈值**没有**按 8 等比抬 |
+| 工具调用 | ✅ 实测 `finish_reason=tool_calls`、arguments 是合法 JSON（calibre/jobs-sg 那批 JSON 消费方的前提）|
+| 回滚 | `make qwen38fn-rollback` → `make v4flash-run`（旧权重/镜像保留）。☠️ 回滚要把网关别名 + jobs-sg + open-notebook + oracle calibre 四处一起回退，**外加坑 A 的 key 白名单** |
+
+⚠️ **质量闸门还没跑**（nv-dgx-spark 侧的 aider-polyglot）：RadixArk 的 NVFP4 是无校准 RTN
+量化，公开分数由量化方自报。速度闸门已过（decode 均值 58.6 tok/s，比旧栈 −12.8%，但并发
+c4/c6 +25%/+29%、prefill +82%/+100%，真实代码任务 62.1 vs 63.8 基本打平）。也就是说
+**「换模型」目前只有速度与工具调用被验证过，输出质量没有**。
 
 ## ☠️ 坑 A：虚拟 key 的模型白名单在 Postgres 里，git 完全管不到
 
@@ -54,15 +74,35 @@ curl -s -H "Authorization: Bearer $MK" "https://llm.meirong.dev/key/info?key=$VK
 
 # 覆盖白名单（整个列表替换，不是增量）
 curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
-  -d '{"key":"'"$VK"'","models":["custom_dgx/deepseek-v4-flash","deepseek-v4-flash",
+  -d '{"key":"'"$VK"'","models":["custom_dgx/qwen38-flash-next","qwen38-flash-next",
        "mac/ornith","mac/ornith-fast","openrouter/*","nvidia/*"]}' \
   https://llm.meirong.dev/key/update
 ```
 
+### 改名时先找出**全部**受影响的 key
+
+白名单散在 Postgres 里，只改"自己那把"必然漏。列全量的口径有两个坑：`POST /key/list`
+是 **405**（要 GET + 分页），且返回的 `keys` 是 token 的 **sha256**、不是 key 原文，
+所以要逐把 `key/info` 才看得到白名单：
+
+```bash
+# ⚠️ 走 homelab 的 Tailscale NodePort：经 Cloudflare 的 llm.meirong.dev 查管理接口会被
+#    WAF 以 `error code: 1010`(403) 挡（非浏览器 UA）。机制见 tailscale-network.md。
+GW=http://100.94.186.7:31400
+curl -s -H "Authorization: Bearer $MK" "$GW/key/list?page_size=50&page=1"   # 还有 page=2
+curl -s -H "Authorization: Bearer $MK" "$GW/key/info?key=<那个 sha256>"      # 逐把看 models
+```
+
+想知道哪把是本机的 `LITELLM_VK`：`printf %s "$LITELLM_VK" | sha256sum` 去匹配列表即可。
+
+⚠️ **爆炸半径实测（2026-09-03）**：16 把 key 里 **8 把**的白名单写着 DGX 别名，另有 4 把
+还挂着早已不存在的 `mac/qwen3.6-35b`。一次改名的正确预期是"改 8 把"，不是"改 1 把"。
+`/key/update` 是**整表替换**，所以脚本要先把原列表读出来、只映射要改的那两项、其余原样带回。
+
 ⚠️ **未验证但要当真的推论**：`fallbacks` 的目标也是别名。如果兜底别名不在 key 的白名单里，
 DGX 不可达时该 key 大概率拿不到兜底（拿到的是 `key_model_access_denied` 而不是 Mac 的回答）。
 本仓库当前两个别名都已在白名单里，所以没有实测过。真要确认：临时建一个只含
-`deepseek-v4-flash` 的 key，制造 DGX 不可达再调它。**在验证之前，别把「有 fallbacks 就有兜底」
+`qwen38-flash-next` 的 key，制造 DGX 不可达再调它。**在验证之前，别把「有 fallbacks 就有兜底」
 当成结论**：兜底链是否真的通，取决于 key 而不只是 config。
 
 ## ☠️ 坑 B：`/v1/models` 返回的是「这个 key 能访问什么」，不是 live config
@@ -231,7 +271,8 @@ shell 里会 SyntaxError，第一版就这么写错过。）
 能用的那些输出全部正确、`content` 全部干净（NVIDIA 托管端的 parser 是对的）。
 
 ⚠️ **修正一条先前的推荐**：本文档曾把 `deepseek-v4-flash-0731` 标为「与 DGX 主力同款，
-适合做同模型兜底」。**推理成立但实测否掉了它**：221.5s 才吐 33 个 token，比本地 DGX（~4s）
+适合做同模型兜底」。**推理成立但实测否掉了它**（而且 2026-09-02 起 DGX 主力是
+Qwen3.8-Flash-Next，连"同款"这个前提本身也不成立了）：221.5s 才吐 33 个 token，比本地 DGX（~4s）
 慢两个数量级，当兜底只会让请求挂死。按数据要在 NVIDIA 里选一个，是
 `poolside/laguna-xs-2.1`（0.7s、零思维链、专做 agentic coding，比本地 DGX 还快），
 `nemotron-3.5-lightning-30b-a3b` 作为要多模态/更强推理时的第二选择。
@@ -255,7 +296,7 @@ shell 里会 SyntaxError，第一版就这么写错过。）
 |---|---|---|
 | `nvidia/nemotron-3.5-lightning-30b-a3b` | 2026-08-11 | 30B MoE / 3B 激活，为 agent 执行做的「快」档，单 H100 可跑 |
 | `meta/muse-glimmer-30b` | 2026-08-10 | Meta 自 Llama 4 后首个开放权重模型；30B dense 多模态、agent 调优、Apache 2.0 |
-| `deepseek-ai/deepseek-v4-flash-0731` | 2026-07-31 | 与 DGX 主力同款，但免费档实测 221.5s / 超时，不可用（见上方实测表）|
+| `deepseek-ai/deepseek-v4-flash-0731` | 2026-07-31 | 曾是 DGX 主力同款（2026-09-02 起不再是），且免费档实测 221.5s / 超时，不可用（见上方实测表）|
 | `moonshotai/kimi-k3` | 2026-07-16（权重 07-27）| 2.8T MoE、1M ctx、原生视觉；agentic coding 强 |
 | `poolside/laguna-xs-2.1` | 2026-07-02 | 33B MoE / 3B 激活，专做 agentic coding |
 | `minimaxai/minimax-m3` | 2026-05-31 | 1M ctx + 原生多模态 + 前沿编码，开放权重 |
@@ -302,8 +343,13 @@ reranker / nemoguard / 视觉 / riva-translate / palmyra 垂类）全部早于�
 `reasoning_content` 的切分依赖 `</think>` 闭合标签；token 用完标签不出现，parser 就失去切分
 依据、把整段思考原样放进 `content`（不报错、不告警，只是答案变成一坨思考过程）。
 
-- 受影响的是所有自托管上游（DGX 的 deepseek、Mac 的 Ornith 都是思维链模型），
+- 受影响的是所有自托管上游（DGX 的 `qwen38-flash-next`、Mac 的 Ornith 都是思维链模型），
   不是某个模型的缺陷；
+- DGX 侧的开关与 Mac 不同：`--reasoning-parser qwen3` 已开，单请求可发
+  `chat_template_kwargs: {"enable_thinking": false}` **真关掉思考**（实测 2026-09-03：
+  `reasoning_tokens=0`、`content` 干净）。`reasoning_effort` 只接受
+  `none`/`low`/`medium`/`xhigh`，**`high` 会被 400 拒**（报错文本还漏了 `none`，别照抄）。
+  ⚠️ 这套枚举与旧栈 V4-Flash 完全不同（那边只有 `max` 真生效），**别跨栈照抄档位**；
 - 逃生口是别名 `mac/ornith-fast`，走 OMLX 的 `fast` profile（`enable_thinking: false`），
   与 `mac/ornith` 共用同一份驻留权重、不触发换入换出；
 - 实测数据、为什么换 Ornith、以及「换模型不能消除该失效模式」的反例，见
@@ -316,10 +362,11 @@ reranker / nemoguard / 视觉 / riva-translate / palmyra 垂类）全部早于�
 
 | 消费方 | 用哪个别名 | 配置在哪 |
 |---|---|---|
-| `codex --profile litellm` | `custom_dgx/deepseek-v4-flash` | `~/.codex/litellm.config.toml`（本机）|
+| `codex --profile litellm` | `custom_dgx/qwen38-flash-next` | `~/.codex/litellm.config.toml`（本机）|
 | `codex --profile mac` | `mac/ornith` | `~/.codex/mac.config.toml`（本机）|
-| k8sgpt（`--backend openai`）| `deepseek-v4-flash` | `~/Library/Application Support/k8sgpt/k8sgpt.yaml`（本机）|
+| k8sgpt（`--backend openai`）| `qwen38-flash-next` | `~/Library/Application Support/k8sgpt/k8sgpt.yaml`（本机）|
 | k8sgpt（`--backend localai`）| `mac/ornith-fast` | 同上 |
+| oracle 上的 calibre 元数据作业 | `qwen38-flash-next`（经 `litellm-external` NodePort）| [清单内嵌脚本](../../cloud/oracle/manifests/calibre-metadata/metadata-llm.yaml) |
 | Open Notebook | **不走网关**，直连 DGX 与 OMLX | [open-notebook.md](open-notebook.md) |
 
 ⚠️ 本机消费方全部读同一个 `LITELLM_VK`（`~/.zshrc`），所以坑 A 一旦发生是全体受影响。

@@ -1,13 +1,15 @@
 ---
 # Grafana Dashboard: DGX Spark / vLLM Inference
 # vLLM server metrics for the 2× NVIDIA DGX Spark (GB10) inference service
-# (model deepseek-v4-flash), scraped over Tailscale by homelab Prometheus
+# (served model qwen38-flash-next since 2026-09-02, was deepseek-v4-flash), scraped over
+# Tailscale by homelab Prometheus
 # (job vllm-dgx-spark, target dgx-spark-1 :8000/metrics).
 # Follows the dgx-spark-node-dashboard pattern: sidecar auto-load via
 # grafana_dashboard:"1" + grafana_folder annotation, synced by ArgoCD
 # monitoring-dashboards App. Metrics carry engine/model_name labels from vLLM;
 # cluster/nodename are added by the scrape config, so panels filter on
-# job + nodename + model_name template vars.
+# job + nodename + model_name template vars. model_name is a template var resolved by
+# label_values() at render time — a model swap on the engine needs no dashboard edit.
 apiVersion: v1
 kind: ConfigMap
 metadata:

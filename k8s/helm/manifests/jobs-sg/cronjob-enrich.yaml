@@ -5,8 +5,10 @@
 #
 # ⚠️ **直连 DGX vLLM，不经 LLM 网关**：省掉 virtual key 这条 Vault 依赖。
 # 模型 id 是后端相关的 —— 网关路由用带 provider 前缀的名字
-# （`custom_dgx/deepseek-v4-flash`），裸 vLLM 提供的是 `deepseek-v4-flash`，
+# （`custom_dgx/qwen38-flash-next`），裸 vLLM 提供的是 `qwen38-flash-next`，
 # 写前缀名会 404。上游 2026-08-03 (d833623) 把模型链改成读 LLM_MODELS 后才可配。
+# ⚠️ 2026-09-02 DGX 换过主力模型（DeepSeek-V4-Flash → Qwen3.8-Flash-Next，ctx 1M→262k）。
+#    本作业**直连** DGX，模型名不在 git 的网关清单里，只能靠改这里跟着换。
 # 实测（2026-08-03，jobs-sg ns 内的 pod）：DGX 可达、无需认证、`x-bf-vk` 头被忽略。
 #
 # 代价：没有网关的 custom_m2 回退，也没有用量计量；DGX 是跨 tailnet 共享的
@@ -26,7 +28,7 @@
 # 75 条/14 分钟 → **4837 条/30 秒**，容器 CPU 降到 ~0%。
 #
 # 现在真正的瓶颈是 DGX 推理时间（实测真实岗位描述约 70s/条 —— 短 prompt 只要 15s，
-# 真实描述长、deepseek 的 reasoning 输出也长）。并发 8 → 约 6.5 条/分钟，
+# 真实描述长、reasoning 输出也长）。并发 8 → 约 6.5 条/分钟，
 # baseline 后约 4900 条积压要跑 ~4 个晚上收敛（每晚 3h 窗口约 1100 条，进度落库不丢）。
 # 稳态每日新增几百条，约半小时跑完。
 #
@@ -69,8 +71,12 @@ spec:
                 - name: LLM_BASE_URL
                   value: http://100.97.87.120:8000
                 # 裸 vLLM 的模型 id，不带网关的 provider 前缀。
+                # ⚠️ 必须与 DGX 当前 serve 的模型同名，写错回 404（不是 401）。
+                # 2026-09-02 由 deepseek-v4-flash 换为 qwen38-flash-next。本文件里 66.5s/条、
+                # 排空速率、937 completion tokens 等数字全是旧模型实测的，
+                # 换栈后第一轮跑完要按新模型回校（新栈 prefill 快得多、decode 略慢）。
                 - name: LLM_MODELS
-                  value: deepseek-v4-flash
+                  value: qwen38-flash-next
                 - name: LLM_CONCURRENCY
                   value: "8"
                 # ⚠️ 单次调用超时。上游原本硬编码 60s，而实测真实岗位描述一次要 **66.5s**

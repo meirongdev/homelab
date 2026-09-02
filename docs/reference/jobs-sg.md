@@ -1,6 +1,6 @@
 # jobs-sg — 新加坡 SWE 岗位趋势周报（架构事实）
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-03
 > Status: 生效事实
 > Scope: jobs-sg 在 homelab 集群的部署形态、镜像固定方式、备份口径、首次上线依赖顺序
 > 本文是 source of truth。应用代码在 [meirongdev/jobs-sg](https://github.com/meirongdev/jobs-sg)。
@@ -78,12 +78,19 @@ ingest 约 02:20 SGT 落地，数字必须当场就是最新的。周报仍是�
 LLM 网关的 virtual key**，也就少了一条 Vault 依赖。
 
 ⚠️ **模型 id 是后端相关的**：LLM 网关路由用带 provider 前缀的名字
-（`custom_dgx/deepseek-v4-flash`），裸 vLLM 提供的是 `deepseek-v4-flash`，写前缀名
+（`custom_dgx/qwen38-flash-next`），裸 vLLM 提供的是 `qwen38-flash-next`，写前缀名
 会 404。上游原先把模型链**硬编码**成网关形式，2026-08-03（`d833623`）才改成读
 `LLM_MODELS` / `LLM_CONCURRENCY` 环境变量（默认仍是网关链，不破兼容）。
 
 实测（2026-08-03，`jobs-sg` ns 内的 pod）：DGX 可达、**无需认证**、`x-bf-vk` 头被
-vLLM 忽略；`deepseek-v4-flash`（1M ctx）返回的正是 enrich 要的严格 JSON。
+vLLM 忽略；当时的模型 `deepseek-v4-flash`（1M ctx）返回的正是 enrich 要的严格 JSON。
+
+☠️ **2026-09-02 DGX 换了主力模型**（`deepseek-v4-flash` → `qwen38-flash-next`，
+ctx 1M → 262144，旧名已从 `/v1/models` 消失 → 旧配置是 404）。因为本作业**直连** DGX，
+git 里那份网关清单帮不上忙，只有 `LLM_MODELS` 跟着改才有效。模型事实见
+[litellm-gateway.md](litellm-gateway.md) 的「DGX 主力模型」。
+⚠️ 新模型**尚未按 enrich 的提示词复测严格 JSON**（只验过 tool call 与补全可用），
+换栈后第一轮跑完要看有多少条目 fail-open 退回规则结果。
 
 **取舍**：省掉 VK 与 Vault 依赖，但没有 LLM 网关的 `custom_m2` 回退，也没有用量计量；
 DGX 是跨 tailnet 共享的境内机器（RTT 66–83ms），不可用时 enrich fail-open 退回纯规则。
@@ -92,6 +99,8 @@ DGX 是跨 tailnet 共享的境内机器（RTT 66–83ms），不可用时 enric
 
 **单次调用实测 66.5s**（2,326 字描述 / 497 prompt tokens / 937 completion tokens，
 reasoning 占大头）。短 prompt 只要 15s，别拿短 prompt 的数字做容量规划。
+⚠️ 这组数字（含 300s 超时、6.5 条/分钟、每晚排空 ~1100 条）是**旧模型**测的：新栈
+prefill 快约一倍、decode 略慢、并发上限更高，2026-09-02 换栈后第一轮要重测再回校。
 
 ⚠️ **超时值曾经卡在真实耗时下面（2026-08-03）**：上游硬编码 60s，而真实调用要 66.5s，
 于是几乎每次都差几秒超时 → 每条白烧 2×60s → fail-open 留在积压里，实测排空只有

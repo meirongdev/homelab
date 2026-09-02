@@ -1,6 +1,6 @@
 # Tailscale Cross-Cluster Networking
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-03
 > Status: 生效事实
 >
 > Rewritten 2026-07-07 after the topology review. The original design (each K3s node
@@ -291,7 +291,7 @@ destination (`*:*`).
 
 ### ☠️ Tagged devices cannot reach *shared* nodes — this is not an ACL problem
 
-The two **DGX Spark** boxes (`100.97.87.120` = V4-Flash head, `100.67.164.92` = TP
+The two **DGX Spark** boxes (`100.97.87.120` = inference head, `100.67.164.92` = TP
 worker) live in **someone else's tailnet** (`*.tailf63175.ts.net`, owner
 `kaixinhuang3307@`) and enter ours via **Tailscale node sharing**.
 

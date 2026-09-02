@@ -988,30 +988,37 @@ spec:
           # 2026-08-13 拿事故当时的数据实证过：11:00 该表达式返回 dgx-spark-1（会触发），
           # 健康态返回空（不会触发）。
           expr: up{job="vllm-dgx-spark"} == 0 and on(nodename) up{job="node-exporter-dgx-spark"} == 1
-          # for 10m：正常重启（含整机重启恢复）实测 5m29s 就能真实推理，10m 留 ~2 倍余量,
-          # 故 `make v4flash-restart` 不会烧告警；而本次中断会在 10:17 触发。
-          for: 10m
+          # for 原本的 10m 是按旧栈（V4-Flash）实测 5m29s 恢复定的，留 ~2 倍余量。
+          # ☠️ 2026-09-02 DGX 换主力栈 qwen38-flash-next：权重 126 GiB，冷启动实测 8–11 分钟，
+          # 10m 会被一次**正常**的 `make qwen38fn-restart` 烧成 critical。抬到 15m。
+          # 刻意不取 2 倍余量（那要 22m）：critical 多盲 7 分钟比误报一次更贵，而且重启成功
+          # 那一半自有 DgxSparkVllmRestarted 兜住。08-13 那种真中断照旧抓得到
+          # （10:07 起算 → 15m 后约 10:22，只比原阈值晚 5 分钟，故障是 3h10m 量级）。
+          for: 15m
           labels:
             severity: critical
             component: inference
           annotations:
-            summary: "dgx-spark V4-Flash 推理服务不可用（宿主在线，:8000 无响应）"
+            summary: "dgx-spark vLLM 推理服务不可用（宿主在线，:8000 无响应）"
             description: |
-              deepseek-v4-flash 唯一的 API 端点 100.97.87.120:8000 没了，而宿主机还活着。
+              DGX 主力模型（2026-09-02 起 `qwen38-flash-next`）唯一的 API 端点
+              100.97.87.120:8000 没了，而宿主机还活着。
               最常见成因（08-13 实录）：**对端节点 dgx-spark-2 死了**，leader 组不成
               TP=2 → 崩溃循环，日志为 `Engine core initialization failed`。
               先查对端在不在：`ssh -i ~/.ssh/vgio admin@100.67.164.92 uptime`
                 （不通 = 整机硬挂，只能硬断电重启；journal 会在某一秒直接断掉，
                  事后**找不到** panic/OOM 记录，别在日志里挖根因）
-              再看两个 rank：`cd ~/projects/meirongdev/nv-dgx-spark && make v4flash-status`
-              日志：`make v4flash-logs`（rank0）/ `make v4flash-logs-worker`（rank1）
-              ⚠️ 恢复必须整组重启 `make v4flash-restart`，**绝不能只重启一个 rank**
-              （会造出僵尸 TP 组，见 DgxSparkVllmStuck）。加载约 5 分钟。
+              再看两个 rank：`cd ~/projects/meirongdev/nv-dgx-spark && make qwen38fn-status`
+              日志：`make qwen38fn-logs`（rank0）/ `make qwen38fn-logs-worker`（rank1）
+              ⚠️ 恢复必须整组重启 `make qwen38fn-restart`，**绝不能只重启一个 rank**
+              （会造出僵尸 TP 组，见 DgxSparkVllmStuck）。加载 8–11 分钟（126 GiB 权重）。
+              回滚到旧栈（V4-Flash，权重/镜像仍保留）：`make qwen38fn-rollback` 后
+              `make v4flash-run` —— 但网关/作业/Open Notebook 的模型名要一起回退。
         - alert: DgxSparkVllmStuck
           # 僵尸 TP 组：**up==1 而引擎不干活**。这是多节点 TP serving 的签名故障 ——
           # /health 与 /v1/models 照常 200、指标照常被抓，但每个真实生成都超时。
           # 任何基于"抓得到就算活着"的告警（含 TargetDown）**原理上看不见这一段**。
-          # 判据照抄 k8s liveness 探针（nv-dgx-spark/k8s/v4flash/configmap-launch.yaml
+          # 判据照抄 k8s liveness 探针（nv-dgx-spark/k8s/qwen38fn/configmap-launch.yaml
           # 里的 liveness.py）：有需求 + 进度不前进。08-13 的真实样本（本 Prometheus
           # 可复查 09:58:30–10:02:30）：running=2 恒定，iteration_tokens_total_count
           # 冻在 6075 整 4 分钟。
@@ -1034,10 +1041,10 @@ spec:
             description: |
               引擎**看着是活的**（up==1、/health 200、/v1/models 200）但一步都没往前走。
               别拿 `/health` 或 `/v1/models` 判断，它们在这个故障里照样返回 200 ——
-              发一个真实生成才能确认：`make v4flash-test`。
+              发一个真实生成才能确认：`make qwen38fn-test`。
               成因几乎总是只重启了一个 rank（或一侧节点/进程单独死掉），
               存活那侧永久卡在集合通信里且**不退出**。
-              恢复：`make v4flash-restart`（整组，约 10 分钟）。
+              恢复：`make qwen38fn-restart`（整组，加载 8–11 分钟）。
               现场取证：`curl -s http://100.97.87.120:8000/metrics | grep -E 'num_requests|iteration_tokens_total_count'`
         - alert: DgxSparkVllmRestarted
           # liveness 探针是**静默恢复**的 —— 这正是 08-13 没人察觉的另一半：探针
@@ -1048,9 +1055,10 @@ spec:
           # process_start_time_seconds 2026-08-13 核对过：报 13:11:07，与容器
           # Started 13:11:08 一致，可信（它由 vLLM 的 prometheus_client 直接导出）。
           expr: (time() - process_start_time_seconds{job="vllm-dgx-spark"}) < 1800
-          # for 5m：引擎加载约 5 分钟，等它真起来再报，免得和 DgxSparkVllmDown 抢话。
+          # for 5m：等引擎真起来再报，免得和 DgxSparkVllmDown 抢话。换栈后加载 8–11 分钟，
+          # 指标出现得更晚，这条只会更靠后，不抢话；30m 窗口仍完整覆盖一次冷启动。
           # warning 而非 critical：重启**已经成功**了，属于事后知情，不是正在烧的火。
-          # 会在每次主动 `make v4flash-restart` 时也响一声 —— 与 NodeRebooted 一样刻意接受。
+          # 会在每次主动 `make qwen38fn-restart` 时也响一声 —— 与 NodeRebooted 一样刻意接受。
           for: 5m
           labels:
             severity: warning
@@ -1058,11 +1066,11 @@ spec:
           annotations:
             summary: "dgx-spark vLLM 引擎刚重启（进程启动不足 30 分钟）"
             description: |
-              引擎进程重启了。若非你主动 `make v4flash-restart`，那它是**被杀的** ——
+              引擎进程重启了。若非你主动 `make qwen38fn-restart`，那它是**被杀的** ——
               可能是 liveness 探针判定僵尸 TP 组（正确行为），也可能是 OOM 或 CUDA 错误。
-              Check: `make v4flash-status`（RESTARTS 列即累计次数，08-13 那次崩溃循环烧到 40）。
+              Check: `make qwen38fn-status`（RESTARTS 列即累计次数，08-13 那次崩溃循环烧到 40）。
               上一个容器为什么死（deploy/ 选择器，不用先查 pod 名；2026-08-13 实测可用）：
-                `kubectl --kubeconfig ~/.kube/dgx-spark.yaml -n v4flash logs deploy/v4flash-leader --previous | tail -50`
+                `kubectl --kubeconfig ~/.kube/dgx-spark.yaml -n qwen38fn logs deploy/qwen38fn-leader --previous | tail -50`
               ⚠️ 刚重启后别做性能基准（冷启动 ~30% 慢，且首个请求含 Triton JIT 尖峰）。
 
         # ⚠️ 防过载/前兆规则（2026-08-15 落地，规格见 nv-dgx-spark/docs/auto-mitigation-cn.md §3）。
@@ -1092,22 +1100,27 @@ spec:
         # 要么伴随排队（A4 接住）要么零进度（DgxSparkVllmStuck 接住），单独成条不增加信息量。
         # KV 占用仍在 dgx-vllm dashboard 上，排查时去看图，不需要为它挨报。
         - alert: DgxSparkRequestsQueued
-          # 排队饱和前兆：max_num_seqs=6，waiting>4 意味着基本打满、有人在挨饿
+          # 排队饱和前兆：waiting>4 意味着并发上限被打满、有人在挨饿
           # （2026-08-02 事故类型——饱和时交互请求会被长批处理拖死）。
+          # ⚠️ 2026-09-02 换主力栈后 `--max-num-seqs` 从 6 抬到 8，但阈值**刻意不动**：真正的
+          #    并发上限已从"条数"换成"KV 池"——线上 cache_config 实测
+          #    kv_cache_max_concurrency=5.34（gmu 0.75），它比 8 更早卡住，也和旧的 6 同量级。
+          #    按 8 等比抬到 6 反而会把"有人在挨饿"那一段推迟。首月按实测回校。
           # ⚠️ 与 DgxSparkVllmStuck 语义**不同**：那条是"有需求但零进度"（僵尸 TP 组），
           # 这条是"引擎健康但队列挤爆"。heavy 批处理时 waiting 可瞬间上百，阈值按本集群
-          # 实际（max_num_seqs=6）取 4，首月按实测回校。
+          # 实际（见上方 KV 上限）取 4，首月按实测回校。
           expr: vllm:num_requests_waiting{job="vllm-dgx-spark"} > 4
           for: 2m
           labels:
             severity: warning
             component: inference
           annotations:
-            summary: "dgx-spark vLLM 排队请求 > 4（max_num_seqs=6 饱和）"
+            summary: "dgx-spark vLLM 排队请求 > 4（并发上限饱和）"
             description: |
-              有 {{ $value }} 个请求在排队，引擎接近/达到饱和（max_num_seqs=6）。
+              有 {{ $value }} 个请求在排队，引擎接近/达到并发上限（max_num_seqs=8，
+              KV 池实测有效并发 5.34 —— 后者才是真瓶颈）。
               长批处理会把交互请求饿死。查当前占用：
-              `cd ~/projects/meirongdev/nv-dgx-spark && make v4flash-load`
+              `cd ~/projects/meirongdev/nv-dgx-spark && make qwen38fn-load`
               长期高频触发 = 并发客户太多，考虑限流/减并发；偶发自愈则忽略。
         - alert: DgxSparkNodeDown
           # 覆盖盲区（2026-08-15 补）：S2 断电级死亡时，内置 TargetDown（severity=warning、
@@ -1135,7 +1148,7 @@ spec:
               判断对端：`ssh -i ~/.ssh/vgio admin@100.67.164.92 uptime`
               （登录方式与 tailnet 归属见本文件 NodeRebooted 的长注释）。
               ⚠️ 无 BMC/IPMI + WoL 无效时，真断电只能物理到场硬重启，重启后
-              `cd ~/projects/meirongdev/nv-dgx-spark && make v4flash-status && make v4flash-test`。
+              `cd ~/projects/meirongdev/nv-dgx-spark && make qwen38fn-status && make qwen38fn-test`。
 
     - name: multicluster-telemetry
       rules:

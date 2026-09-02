@@ -52,7 +52,14 @@ data:
          "api_key": "dummy", "base_url": "http://100.89.15.120:8000/v1"},
     ]
     MODELS = [
-        {"name": "deepseek-v4-flash", "type": "language", "credential": "dgx-vllm"},
+        # 2026-09-02 DGX 换主力模型：deepseek-v4-flash → qwen38-flash-next（NVFP4，
+        # 双节点 TP=2）。端点不变，只有 served name 变；旧名已从 /v1/models 消失。
+        # ☠️ 名字必须与裸 vLLM 的 served name 逐字相同 —— 这里**不走 LLM 网关**，
+        #    填网关别名（custom_dgx/…）会 404。
+        # ⚠️ 本 provisioner 只增不删（unmanaged models 只打 note），所以改名后**旧条目
+        #    deepseek-v4-flash 会留在 UI 里**当死模型（选中即报错）。清理要在 UI 手删，
+        #    别指望 git push 把它带走。
+        {"name": "qwen38-flash-next", "type": "language", "credential": "dgx-vllm"},
         # 备用对话模型（非默认）：DGX 是跨境共享机器且暂无告警（ROADMAP #4），
         # 它不可达时在 UI 里一键切到这个本地 35B（262k ctx）兜底。
         # ⚠️ 这里走 mac-omlx 凭据直连 OMLX，所以填的是 OMLX 的模型 ID，
@@ -80,10 +87,12 @@ data:
         #     112 token，输出量与输入时长无关。10 分钟音频只转出 8%，且 HTTP 200。
     ]
     DEFAULTS = {  # 值是上面 MODELS 里的 name
-        "default_chat_model": "deepseek-v4-flash",
-        "default_transformation_model": "deepseek-v4-flash",
-        "large_context_model": "deepseek-v4-flash",   # max_model_len=1M，正适合整本书
-        "default_tools_model": "deepseek-v4-flash",
+        "default_chat_model": "qwen38-flash-next",
+        "default_transformation_model": "qwen38-flash-next",
+        # ⚠️ 2026-09-02 起 max_model_len 是 262144（旧栈 1M）：长上下文角色从此有真实上限，
+        #    整本书一次性塞进去会超窗。兜底的 Mac Ornith 也是 262k，换过去拿不到更多窗口。
+        "large_context_model": "qwen38-flash-next",
+        "default_tools_model": "qwen38-flash-next",
         "default_embedding_model": "mlx-community__Qwen3-Embedding-4B-4bit-DWQ",
         "default_text_to_speech_model": "mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
         "default_speech_to_text_model": "mlx-community__Qwen3-ASR-1.7B-8bit",
@@ -93,9 +102,11 @@ data:
     # voice_model（frontend/src/lib/types/podcasts.ts::needsModelSetup），defaults 配得
     # 再全也不影响它。上游首启 seed 出来的三个 episode + 三个 speaker 这三个字段全是 null。
     EPISODE_PROFILE_LLMS = {   # profile 名 -> 出大纲/台本的 language 模型
-        "tech_discussion": "deepseek-v4-flash",     # 1M ctx，整本书塞得进去
-        "business_analysis": "deepseek-v4-flash",
-        "solo_expert": "deepseek-v4-flash",
+        # ⚠️ 同样受 262k 限制（这里曾按旧栈 1M 写「整本书塞得进去」）。长书出大纲
+        #    若开始截断/报错，先看是不是超窗，别先怀疑上游挂了。
+        "tech_discussion": "qwen38-flash-next",
+        "business_analysis": "qwen38-flash-next",
+        "solo_expert": "qwen38-flash-next",
     }
     PODCAST_TTS = "mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit"
     PODCAST_LANGUAGE = None    # None = 沿用上游默认（英文）；要中文播客填 "zh"
