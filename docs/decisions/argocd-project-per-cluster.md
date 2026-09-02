@@ -45,6 +45,12 @@
 - 写错 destination 现在是两道网：服务端 `destination server ... is not permitted in project`
   （响亮，sync 直接失败）+ CI 的 H2。chart 型 App 首次有了静态兜底（project ↔ destination）。
 - 新加 chart 源：改对应集群的 project 文件并 `git push`，不再手工 apply。相关 runbook 已改。
+  ⚠️ **但同一个 commit 里同时改 Application 的 `repoURL` 与 project 的 `sourceRepos` 时，
+  中间有个窗口**：`projects` App 与消费方 App 是两个独立的同步单元，消费方可能先刷新，
+  于是报 `application repo … is not permitted in project`（App 变 `Unknown`，不 prune、不动
+  工作负载）。2026-09-03 换 cnpg chart 源时实测到。**处置**：手工推一次 `projects` 先行 ——
+  `kubectl --context oracle-k3s -n argocd annotate app projects argocd.argoproj.io/refresh=hard --overwrite`，
+  然后再刷消费方；或者干脆等下一轮 3 分钟轮询，它会自愈。
 - 新集群 = 新 project 文件 + 登记进 `scripts/check-manifests.py` 的 `PROJECT_FOR_SERVER`，
   否则 H2 报「不在已知集群表里」。这是刻意的：集群表只该有一份。
 - `default` project 全放行，只给 root / projects 用；其它 App 用它会被 H2 拦。
