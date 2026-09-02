@@ -1,163 +1,59 @@
-# Homelab Setup
+# k8s/helm/ — homelab 应用部署
 
-## Techstack
+> 本目录管 **homelab 集群**的应用层：Helm values、原生清单、以及部署配方。
+> 集群装机在 [`../ansible/`](../ansible/README.md)，CNI values 在 [`../cilium/`](../cilium/)，
+> oracle-k3s 的对应物在 [`cloud/oracle/`](../../cloud/oracle/README.md)。
+>
+> 架构事实不在这里：服务清单看 [reference/services.md](../../docs/reference/services.md)，
+> GitOps 形态看 [reference/argocd-app-patterns.md](../../docs/reference/argocd-app-patterns.md)，
+> 存储与备份看 [reference/storage.md](../../docs/reference/storage.md)。
 
-- **Terraform** for infrastructure (Proxmox VMs) and external access (Cloudflare)
-- **Ansible** for configuration management and K3s cluster setup
-- **Helm** for managing Kubernetes applications
-- **HashiCorp Vault** for centralized secret management
-- **External Secrets Operator (ESO)** for syncing secrets to Kubernetes
-- **Prometheus, Loki, Tempo, Grafana** (LGTM Stack) for observability
-- **Cloudflare Tunnel** for secure, outbound-only external access
-- **K8s Gateway API (Cilium)** for unified ingress routing
-
-## Project Structure
+## 目录
 
 ```
-homelab/
-├── proxmox/          # Infrastructure provisioning on Proxmox
-│   ├── terraform/
-│   └── ansible/
-├── k8s/
-│   ├── ansible/      # K3s cluster setup and node config
-│   └── helm/         # Application deployment
-│       ├── values/       # Helm values, one per app: <app>.yaml (+ <app>-oracle.yaml variants)
-│       ├── manifests/    # Raw manifests, one directory per ArgoCD Application (see manifests/README.md)
-│       └── justfile
-├── cloudflare/       # External access management
-│   └── terraform/
-└── README.md
+k8s/helm/
+├── values/     # Helm values，一个应用一份 <app>.yaml（oracle 变体 <app>-oracle.yaml）
+├── manifests/  # 原生清单，**一个子目录 ↔ 一个 ArgoCD Application**（所有权地图见 manifests/README.md）
+└── justfile    # 部署配方；共享版本变量从仓库根的 versions.just import
 ```
 
-## Quick Start
+## 部署方式
 
-### 1. Provision VMs with Terraform
+**日常一律 GitOps**：改 `values/` 或 `manifests/` → `git push` → ArgoCD 3 分钟内同步。
+已纳管资源**不要** `kubectl apply` 覆盖，selfHeal 会拉回。
 
-```bash
-cd proxmox/terraform
-just plan
-just apply
-```
+⚠️ **manual-helm 的例外**（改 values 必须手动 `helm upgrade`，**提交 ≠ 部署**）：
+Cilium（`just deploy-cilium`）· Vault（`just deploy-vault`）· ESO（`just deploy-eso`）·
+ArgoCD 本体（`just deploy-argocd`，装到 oracle-k3s）。
+判断某个东西归谁管：`kubectl -n <ns> get secret -l owner=helm`，有 Helm release 存档的就是 manual-helm。
 
-### 2. Setup Kubernetes Cluster with Ansible
+## 常用命令
 
-```bash
-cd k8s/ansible
-just setup-k8s
-just fetch-kubeconfig
-```
+完整清单 `just --list`（或在仓库根 `just helm --list`）。带坑的那几条：
 
-### 3. Observability Stack (GitOps)
+| 命令 | 坑 |
+|------|-----|
+| `just deploy-argocd-apps` | ☠️ destination 未重写时会把 homelab 全套装到 oracle（2026-09-02 起 AppProject 也会拦，见 [ADR](../../docs/decisions/argocd-project-per-cluster.md)）|
+| `just deploy-gateway-api-crds` | ⚠️ 升 Cilium 必跑；验收判据是**新建路由能拿到 `.status`**，不是 curl 旧域名 |
+| `just deploy-cilium` | ⚠️ `--reset-values` 会冲掉 ClusterMesh 的跨集群 CA 信任，跑完要重连 |
+| `just vault-unseal` | Vault pod 重启后必跑，否则 ESO 全线停摆 |
+| `just homelab-recover` | 节点重建后的恢复编排 |
 
-LGTM 栈（Loki/Grafana/Tempo/Sloth/otel-collector）已全部由 ArgoCD 管理（`argocd/applications/`）。
-装好 ArgoCD 后（`just deploy-argocd`），改 `k8s/helm/values/*.yaml` 或 `argocd/applications/*.yaml` → `git push` → 3 分钟内自动同步。
+## Vault / ESO
 
-## Security Best Practices
+Vault（KV v2）存凭据，ESO 同步成 K8s Secret。给应用加密钥 = 在应用自己的 manifest 目录
+（或共享的 `manifests/vault-eso/`）写一个 `ExternalSecret`，`secretStoreRef` 指
+`vault-backend` ClusterSecretStore。写法照抄目录里现有的任意一份。
 
-### Current Implementation (Phase 2)
-- ✅ **HashiCorp Vault** for centralized, encrypted secret management.
-- ✅ **External Secrets Operator (ESO)** to sync secrets from Vault to Kubernetes.
-- ✅ **Raft Integrated Storage** for persistent, single-node high availability.
-- ✅ Secrets are injected via standard Kubernetes Secrets, requiring no app code changes.
-- ⚠️ Vault must be **unsealed** manually after pod restarts (via `just vault-unseal`).
+- 根 token 与 unseal key 在 `k8s/helm/vault-keys.json`（**gitignored，绝不提交**）。
+- Vault pod 重启后是 **sealed** 状态，ESO 会同步失败 → `just vault-unseal`。
+- 备份与恢复见 [runbooks/backup-recovery.md](../../docs/runbooks/backup-recovery.md)。
+- 密钥路径约定与现役清单见 [reference/security.md](../../docs/reference/security.md)。
 
-## Vault & Secrets Management
+## 存储
 
-We use HashiCorp Vault (KV v2) to manage credentials. Secrets are synced to Kubernetes using the External Secrets Operator.
-
-### Initial Access & Authentication
-Vault credentials and unseal keys are saved locally in `k8s/helm/vault-keys.json`.
-**⚠️ Never commit `vault-keys.json` to Git.**
-
-```bash
-# Display UI access info and Root Token
-just vault-ui
-```
-
-### Vault CLI Usage (Inside Pod)
-
-To manage secrets via the command line, you can exec into the Vault pod:
-
-```bash
-# 1. Enter the pod
-kubectl exec -ti vault-0 -n vault -- sh
-
-# 2. Login with Root Token (from vault-keys.json)
-export VAULT_TOKEN="hvs.xxxxxx"
-
-# 3. List secrets
-vault kv list secret/homelab
-
-# 4. View a secret
-vault kv get secret/homelab/cloudflare
-
-# 5. Add/Update a secret
-vault kv put secret/homelab/grafana admin-password="your-new-password"
-```
-
-### Unsealing Vault
-If the Vault pod restarts, it enters a "Sealed" state and ESO will fail to sync secrets.
-```bash
-# Unseal Vault using the keys in vault-keys.json
-just vault-unseal
-```
-
-## Accessing Services
-
-```bash
-# Grafana
-cd k8s/helm
-just grafana
-# Open: http://localhost:3000
-# Username: admin
-# Password: (run 'just get-grafana-password' to retrieve)
-
-# Prometheus
-just prometheus
-# Open: http://localhost:9090
-```
-
-## Secrets Management
-
-### Current Approach
-Secrets live in **HashiCorp Vault**，由 **External Secrets Operator (ESO)** 同步到 K8s——Helm 配方不再有 `.env`（旧 `k8s/helm/.env(.example)` 已于 2026-08-01 退役：其两个消费者 `create-grafana-secret`/`create-cloudflare-secret` 随 ArgoCD 迁移被删，且无任何配方读它）。
-
-> ⚠️ 其它 terraform root（cloudflare/tailscale/zitadel/…）仍用各自的 `.env`，别误删；`.gitignore` 里的 `.env` 规则照旧生效。
-
-### ⚠️ Important Security Notes
-- **Never commit `.env` files to Git**（其余 root 的 `.env` 同理）
-- Vault secret 的备份见 `docs/runbooks/backup-recovery.md`
-
-### Syncing to Kubernetes (ESO)
-To make a Vault secret available to an application, create an `ExternalSecret` manifest in `k8s/helm/manifests/vault-eso/` (shared secrets, synced by the `vault-eso` App) or in the owning app's own manifest directory.
-
-Example `ExternalSecret` (`v1`):
-```yaml
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  name: my-app-secret
-  namespace: my-namespace
-spec:
-  secretStoreRef:
-    name: vault-backend
-    kind: ClusterSecretStore
-  target:
-    name: k8s-secret-target-name
-  data:
-  - secretKey: my-key-name
-    remoteRef:
-      key: secret/homelab/my-secret-path
-      property: password
-```
-
-## Persistent Storage
-
-All services use the node-local `local-path` StorageClass (k3s built-in). NFS (`nfs-client`)
-was fully retired on 2026-07-11 after the 106 storage-host outage — the NFS server is now
-only a **cold backup target** (restic nightly via sftp + vzdump weekly), never a runtime
-dependency.
-
-- StorageClass used: `local-path`
-- Data lives on the k8s node's local disk; off-host copies are produced by the backup
-  CronJob (`backup/overlays/homelab`) and the PVE-level weekly vzdump job.
+可写 PVC 一律 `local-path`（k3s 内置，节点本地盘）。NFS 于 2026-07-11 退出读写路径；
+唯一的例外是 `media` ns 的 5 个**只读** NFS PV（106 的 ZFS，2026-08-16 起）。
+⚠️ 新增 PVC 必须进备份白名单，CI 的 H4 查这个。详见
+[reference/storage.md](../../docs/reference/storage.md) 与
+[decisions/multimedia-repository-nfs-readonly.md](../../docs/decisions/multimedia-repository-nfs-readonly.md)。
