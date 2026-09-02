@@ -1,6 +1,6 @@
 # 清单安全规则 (Manifest Safety Checks)
 
-> Last updated: 2026-09-02
+> Last updated: 2026-09-03
 > Status: 生效事实
 > Scope: CI 强制的仓库规则，本文是 source of truth。四个检查器：
 > `scripts/check-manifests.py` 的 **H1-H5**（清单结构）、
@@ -353,6 +353,10 @@ H1-H5 / V1-V3 / E1 查的都是**文件与归属**：谁独占文件、版本副
 - **「跳过」不是「通过」**。没有 schema 的类型（CRD 本体、`CiliumGatewayClassConfig` 等）
   由 `-ignore-missing-schemas` 放行，脚本按 kind 打印出来，让覆盖缺口可见。
   当前跳过的只有 `CustomResourceDefinition` 与 `CiliumGatewayClassConfig`。
+- ⚠️ **它要出网**（16 个 chart 仓库），所以会遇到网络抖动。2026-09-02 首次在 CI 上跑就有一个
+  仓库 DNS 超时，整个检查因此变红 —— 而「偶尔红」的检查很快会被无视，比没有检查更糟。
+  脚本现在只对**网络形状**的错误重试 3 次（5s/10s 退避）并把每次重试打印出来：
+  仓库真坏掉仍然响亮失败，版本不存在这类真错误**不重试、立即失败**（两种都实测过）。
 
 ⚠️ **它证明的是「渲染得出来 + 每个对象结构合法」，证明不了值是对的**：resources 填 1Mi
 一样合法。与下一节的「查不出来的那些」并不重叠——那些是连渲染都看不出的。
@@ -365,6 +369,22 @@ uv run --with pyyaml python scripts/render-manifests.py --out /tmp/r     # 渲�
 
 `KUBE_VERSION` 跟着现网走（当前 `1.35.8`，两集群同版本）；升 k3s 时同步改，它同时喂给
 `helm --kube-version` 与 `kubeconform -kubernetes-version`。
+
+### 同批加的 `terraform validate`
+
+7 个 terraform root 此前只有 `fmt`（缩进），没有任何语义校验，引用了不存在的变量要到
+`plan` 时才炸。CI 现在逐 root 跑 `init -backend=false` + `validate`（不碰 state）。
+
+☠️ **lock 文件必须覆盖 CI 的平台**：`.terraform.lock.hcl` 里的 `h1:` 只是**本机那个平台**的
+哈希，跨平台校验靠 registry 签名的 `zh:` 一组。`proxmox/terraform-storage` 的 lock 当初只
+记了 `h1:`（其余 6 个 root 都有 `zh:`），于是 CI 在 linux/amd64 上报
+`doesn't match any of the checksums previously recorded`。补齐办法：
+
+```bash
+terraform -chdir=<root> providers lock -platform=linux_amd64 -platform=darwin_arm64
+```
+
+新增 root 或升 provider 后都要这么补一次，否则 CI 会在一台你本地复现不出来的机器上红。
 
 ## 查不出来的那些（仍需人判断）
 

@@ -29,12 +29,12 @@
 import argparse
 import fnmatch
 import json
-import os
 import pathlib
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 try:
     import yaml
@@ -79,11 +79,36 @@ CRD_CATALOG = ("https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/"
 MANIFEST_EXTS = (".yaml", ".yml", ".json")
 
 
-def sh(cmd, **kw):
-    r = subprocess.run(cmd, capture_output=True, text=True, **kw)
-    if r.returncode != 0:
-        raise RuntimeError(f"$ {' '.join(cmd)}\n{r.stderr.strip()[-2000:]}")
-    return r.stdout
+# 拉 chart 要出网，而网络会抖。2026-09-02 首次在 CI 上跑就有一个 chart 仓库
+# DNS 超时（`lookup cloudnative-pg.io … i/o timeout`）——一次抖动就让整个检查红，
+# 而「偶尔红」的检查很快就会被无视，那比没有检查更糟。
+# 所以只对**网络形状**的错误重试，且每次重试都打印出来：真正坏掉的仓库仍然会响亮地失败，
+# 抖动则留下痕迹而不是被悄悄吞掉。
+NETWORK_ERRORS = (
+    "dial tcp", "i/o timeout", "connection refused", "connection reset",
+    "no such host", "TLS handshake timeout", "temporary failure",
+    "EOF", "timeout awaiting response", "502 Bad Gateway", "503 Service Unavailable",
+)
+RETRIES = 3
+BACKOFF = 5  # 秒，线性递增
+
+
+def sh(cmd, retry_on_network=False, what="", **kw):
+    last = ""
+    for attempt in range(1, RETRIES + 1 if retry_on_network else 2):
+        r = subprocess.run(cmd, capture_output=True, text=True, **kw)
+        if r.returncode == 0:
+            return r.stdout
+        last = r.stderr.strip()
+        if not retry_on_network or attempt == RETRIES:
+            break
+        if not any(e.lower() in last.lower() for e in NETWORK_ERRORS):
+            break
+        wait = BACKOFF * attempt
+        print(f"    ⚠️ {what or cmd[0]} 第 {attempt} 次失败（网络类），{wait}s 后重试："
+              f"{last.splitlines()[-1][:120] if last else ''}", flush=True)
+        time.sleep(wait)
+    raise RuntimeError(f"$ {' '.join(cmd)}\n{last[-2000:]}")
 
 
 def load_apps():
@@ -144,7 +169,8 @@ def render_chart(app_name, src, namespace, tmpdir):
         cmd += ["-f", str(f)]
     for prm in h.get("parameters") or []:
         cmd += ["--set-string" if prm.get("forceString") else "--set", f"{prm['name']}={prm['value']}"]
-    out = sh(cmd)
+    # 唯一出网的一步 —— 只有它需要重试
+    out = sh(cmd, retry_on_network=True, what=f"helm template {app_name}")
     # OCI 拉取时 helm 会把 "Pulled: …" / "Digest: …" 两行写到 stdout（不是 stderr），
     # 混进清单会让 kubeconform 报 "missing 'kind' key"。只剥掉开头这两行。
     lines = out.split("\n")
