@@ -4,7 +4,7 @@
 > Status: 生效事实
 > Scope: CI 强制的仓库规则，本文是 source of truth。四个检查器：
 > `scripts/check-manifests.py` 的 **H1-H5**（清单结构）、
-> `scripts/check-version-pairs.py` 的 **V1-V3**（版本配对，2026-08-13 加）、
+> `scripts/check-version-pairs.py` 的 **V1-V4**（版本配对，2026-08-13 加，V4 于 2026-09-02 加）、
 > `scripts/check-embedded-scripts.py` 的 **E1**（内嵌脚本一致性，2026-08-15 加）与
 > `scripts/render-manifests.py` 的**渲染检查**（2026-09-02 加，见下方专节）。
 > 每条规则都对应一次**真实发生过的事故或静默失效**，不是风格偏好。
@@ -236,6 +236,28 @@ targetRevision: "2.5.27"   # version-pair-ok: 灰度先行 oracle，2026-09 对�
 检查器里有一张 `CILIUM_GATEWAY_API` 表（当前只有 `1.20 → 1.6.1`）。
 ☠️ **升 Cilium 时表里查不到对应 minor 会直接报错，这是特意的**：它强迫升级者去读一遍
 上游的 Gateway API 前置条件，而不是假设旧 CRD 还能用，后者正是 08-11 的死法。
+
+### V4：`versions.just` 的共享变量不得被 import 方重新定义
+
+2026-09-02 起 `cilium_version` 与 `gateway_api_version` 收敛到仓库根的
+[`versions.just`](../../versions.just)，`k8s/helm/justfile` 与 `cloud/oracle/justfile` 各
+`import` 一份 —— 这两个值是**同一个事实**（ClusterMesh 要求两端 Cilium 同版本；
+Gateway API CRD 两集群装同一批），此前各写一份，靠注释说「必须一致」，实测漂过两次。
+
+☠️ **`just import` 允许 import 方重新定义同名变量并静默胜出**。那正好复刻了这次收敛要
+消灭的漂移，而且更隐蔽：文件里明明写着 `import`，读的人会以为值来自共享文件。
+所以 V4 查两件事：
+
+1. 两个 justfile 都必须真的 `import versions.just`（删掉 import 就退回各写一份的老路）
+2. 它们里面不得再出现 `versions.just` 已定义的变量名
+
+分阶段升级（一侧先行）在那行行尾写 `version-pair-ok: <理由>` 豁免，同 V2 的约定。
+
+**不进 `versions.just` 的**：`eso_version`（两集群各自独立装 ESO，无耦合，同步是假约束）、
+`vault_version` / `argocd_chart_version`（只有 homelab 一处）、各 chart 的 `targetRevision`
+（唯一真相源是 `argocd/applications/<app>.yaml`）。V2 仍然管着 justfile 之外的副本 ——
+`gateway_api_version` 在 oracle 的 ansible 剧本里还有第三份（YAML 变量，`import` 不进来），
+而它正是 2026-08-13 被抓到钉着旧值、注释却写「与 homelab 一致」的那份。
 
 ### E1：ConfigMap 内嵌的脚本必须与同目录的源文件一致，且 pod 模板带它的 checksum
 

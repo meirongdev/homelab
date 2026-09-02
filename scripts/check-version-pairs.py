@@ -4,6 +4,7 @@
     V1  同一 chart 出现在多个 Application 里 → targetRevision 必须一致
     V2  声明为「同一事实」的版本变量组 → 取值必须一致
     V3  cilium_version 与 gateway_api_version 必须符合兼容表
+    V4  versions.just 里的共享变量不得被 import 方重新定义（会静默覆盖）
 
 每条都对应真实故障：
 
@@ -52,23 +53,17 @@ EXEMPT = "version-pair-ok:"
 # 同理不收 `eso_version`：两集群各自独立安装 ESO，版本可以不同步，没有耦合。
 DECLARED_PAIRS = {
     "gateway_api_version": {
-        "why": "两集群装同一版本的 Gateway API CRD；oracle 侧 justfile 与 ansible 剧本"
-               "描述的更是同一个集群的同一批 CRD。漏改一处 = 重建集群时重放"
-               "2026-08-11 的 30h 控制器 stall。",
+        "why": "两集群装同一版本的 Gateway API CRD。两个 justfile 已于 2026-09-02 改为 import "
+               "versions.just（单一真相源），但 ansible 剧本里那份是 YAML 变量、import 不进来，"
+               "只能靠断言 —— 而它正是 2026-08-13 被抓到的那份：剧本钉着旧值，注释却写"
+               "「与 homelab 一致」。漏改一处 = 重建集群时重放 2026-08-11 的 30h 控制器 stall。",
         "files": [
-            "k8s/helm/justfile",
-            "cloud/oracle/justfile",
+            "versions.just",
             "cloud/oracle/ansible/playbooks/setup-k3s.yaml",
         ],
     },
-    "cilium_version": {
-        "why": "ClusterMesh 要求两端 Cilium 版本一致（不同 minor 的控制面/数据面互通"
-               "不受支持）；且各自的 gateway_api_version 由同一张兼容表推出。",
-        "files": [
-            "k8s/helm/justfile",
-            "cloud/oracle/justfile",
-        ],
-    },
+    # cilium_version 于 2026-09-02 收敛到 versions.just（两个 justfile import 它），
+    # 单一真相源就不需要"多处一致"的断言了 —— 改由 V4 守住"不许被重新定义"。
     "k3s_version": {
         "why": "homelab 控制面与 worker 是**同一个集群**，k3s 不保证 agent 新于 server "
                "可用；oracle 与它们按舰队惯例同步升（见 runbooks/k3s-cluster-upgrade.md）。"
@@ -92,6 +87,12 @@ CILIUM_GATEWAY_API = {
     "1.20": "1.6.1",
 }
 
+# ── V4：共享版本变量的遮蔽守卫 ──────────────────────────────────────────────
+# `just import` 允许 import 方重新定义同名变量并**静默胜出**。那正好复刻了本次收敛要
+# 消灭的漂移，且比原来更隐蔽：文件里明明写着 import，读的人会以为值来自共享文件。
+SHARED_VERSIONS = "versions.just"
+IMPORTERS = ["k8s/helm/justfile", "cloud/oracle/justfile"]
+
 VAR_RE = {
     # justfile: name := "1.2.3"
     "justfile": re.compile(r'^\s*([a-z0-9_]+)\s*:=\s*"([^"]+)"'),
@@ -114,7 +115,10 @@ def read_lines(rel):
 
 def find_var(rel, name):
     """在文件里找 name 的取值，返回 (value, lineno, exempt) 或 None。"""
-    kind = "justfile" if pathlib.Path(rel).name == "justfile" else "yaml"
+    # `.just` 后缀的共享文件（versions.just）与 justfile 同语法；按后缀也认，
+    # 否则会掉进 yaml 分支、把 `name := "1.2.3"` 解析不出来，报成"变量被删/改名"的假违规。
+    fname = pathlib.Path(rel).name   # 不叫 name —— 那是本函数要找的变量名参数
+    kind = "justfile" if fname == "justfile" or fname.endswith(".just") else "yaml"
     for i, line in enumerate(read_lines(rel), 1):
         m = VAR_RE[kind].match(line)
         if m and m.group(1) == name:
@@ -188,10 +192,38 @@ def check_v2():
             violations["V2"].append(f"{name} 各处取值不一致：{where}\n    理由：{group['why']}")
 
 
+def check_v4():
+    """versions.just 的共享变量不得被 import 方重新定义（会静默覆盖）。"""
+    shared = {}
+    for line in read_lines(SHARED_VERSIONS):
+        m = VAR_RE["justfile"].match(line)
+        if m:
+            shared[m.group(1)] = m.group(2)
+    if not shared:
+        violations["V4"].append(f"{SHARED_VERSIONS}: 一个变量都没解析到（文件被清空/改格式？）")
+        return
+    for rel in IMPORTERS:
+        lines = read_lines(rel)
+        if not any(line.strip().startswith("import ") and SHARED_VERSIONS in line for line in lines):
+            violations["V4"].append(
+                f"{rel}: 没有 import {SHARED_VERSIONS} —— 共享版本会退回各写一份的老路"
+            )
+            continue
+        for i, line in enumerate(lines, 1):
+            m = VAR_RE["justfile"].match(line)
+            if m and m.group(1) in shared and EXEMPT not in line:
+                violations["V4"].append(
+                    f"{rel}:{i}: 重新定义了共享变量 {m.group(1)}={m.group(2)}"
+                    f"（{SHARED_VERSIONS} 里是 {shared[m.group(1)]}）——"
+                    "import 方的定义会静默胜出，等于绕开单一真相源。"
+                    "确实要分阶段升级时在行尾写 `version-pair-ok: <理由>` 豁免"
+                )
+
+
 def check_v3():
     """cilium_version 与 gateway_api_version 必须符合兼容表。"""
-    cil = find_var("k8s/helm/justfile", "cilium_version")
-    gw = find_var("k8s/helm/justfile", "gateway_api_version")
+    cil = find_var(SHARED_VERSIONS, "cilium_version")
+    gw = find_var(SHARED_VERSIONS, "gateway_api_version")
     if not cil or not gw:
         return
     minor = ".".join(cil[0].split(".")[:2])
@@ -206,7 +238,7 @@ def check_v3():
     elif gw[0] != want:
         violations["V3"].append(
             f"cilium {cil[0]} 要求 Gateway API {want}，但 gateway_api_version={gw[0]}"
-            f"（k8s/helm/justfile:{gw[1]}）。升 Cilium 后必须跑 "
+            f"（{SHARED_VERSIONS}:{gw[1]}）。升 Cilium 后必须跑 "
             f"`just deploy-gateway-api-crds`。验收判据是**新建一条 HTTPRoute 能拿到 "
             f".status**；operator 日志里 'Required GatewayAPI resources are not found' "
             f"是故障信号（有输出=坏了），健康时不打日志，所以 grep 不到不等于健康。"
@@ -217,6 +249,7 @@ RULES = {
     "V1": "同一 chart 在多个 Application 里必须同版本",
     "V2": "声明为同一事实的版本变量组必须取值一致",
     "V3": "cilium_version 与 gateway_api_version 必须符合兼容表",
+    "V4": "versions.just 的共享变量不得被 import 方重新定义",
 }
 
 
@@ -230,10 +263,11 @@ def main():
     check_v1()
     check_v2()
     check_v3()
+    check_v4()
 
     total = sum(len(v) for v in violations.values())
     if not total:
-        print("✅ 版本配对检查通过（V1-V3）")
+        print("✅ 版本配对检查通过（V1-V4）")
         print("   注意：本检查只保证「多处副本互相一致」与「配对符合表」，")
         print("   保证不了这些值与**现网实际跑的版本**一致 —— 那只能实测。")
         return 0

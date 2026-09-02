@@ -111,6 +111,9 @@ jobs:
       - name: justfile 冒烟（just --list）
         run: |
           # 版本与本地开发机一致（just 1.58.0）；升级时两处一起改。
+          # 2026-09-02 起仓库根有 justfile（`mod` 引入 12 个子 justfile），根上一条
+          # `just --list` 已能解析全部；下面的循环保留，因为它还覆盖「有 justfile 但
+          # 忘了在根加 mod」的那种（漏加不会让根报错，只是从视野里消失）。
           # 拉官方 tarball 未做 sha256 校验——homelab 单用户场景可接受（记一笔）。
           curl -sSfL https://github.com/casey/just/releases/download/1.58.0/just-1.58.0-x86_64-unknown-linux-musl.tar.gz -o /tmp/just.tar.gz
           tar -xzf /tmp/just.tar.gz -C /tmp just
