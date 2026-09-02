@@ -1,6 +1,6 @@
 # ArgoCD Application Patterns
 
-> Last updated: 2026-09-02
+> Last updated: 2026-09-03
 > Status: 生效事实
 >
 > 当前 ArgoCD 管理模式分析、可选 pattern 对比与取舍建议。
@@ -33,7 +33,7 @@ root (Application)
 
 | 子模式 | 代表 | 说明 |
 |--------|------|------|
-| Helm Chart + 本地 values | `loki.yaml`, `kyverno.yaml` | 多源：remote chart repo + `$values/k8s/helm/values/<app>.yaml`（oracle 变体 `<app>-oracle.yaml`）。⚠️ chart 也可以来自 **OCI registry**（当前只有 `multica.yaml`）：那时 `repoURL` 写不带 `https://` 的 `ghcr.io/<org>/charts` |
+| Helm Chart + 本地 values | `loki.yaml`, `kyverno.yaml` | 多源：remote chart repo + `$values/k8s/helm/values/<app>.yaml`（oracle 变体 `<app>-oracle.yaml`）。⚠️ chart 也可以来自 **OCI registry**（`multica` 与 `cnpg-operator`）：那时 `repoURL` 写不带 `https://` 的 `ghcr.io/<org>/charts` |
 | Kustomize 目录 | `oracle-k3s.yaml` | `cloud/oracle/manifests/` 整棵 kustomize 树 |
 | 目录源（目录即清单） | `personal-services.yaml`, `monitoring-dashboards.yaml` | 一个 App ↔ `k8s/helm/manifests/` 下一个子目录，目录内文件全部纳管；2026-07-31 起取代 `directory.include` glob（所有权地图见 `k8s/helm/manifests/README.md`） |
 
@@ -180,7 +180,7 @@ application repo https://xxx.github.io/chart is not permitted in project 'homela
 同样分集群的还有 `project` 字段本身：homelab 的 App 挂 `homelab`，oracle 的挂 `oracle-k3s`，
 写反了服务端拒绝、CI 的 H2 也拦（[决策](../decisions/argocd-project-per-cluster.md)）。
 
-**OCI registry 的写法与 HTTP repo 不同**（2026-08-18 加 multica 时确立，本仓库首个 OCI chart）：
+**OCI registry 的写法与 HTTP repo 不同**（2026-08-18 加 multica 时确立，2026-09-03 起 cnpg-operator 也走 OCI）：
 `repoURL` 与 `sourceRepos` 都写不带 `oci://` 前缀的裸地址（`ghcr.io/multica-ai/charts`），
 ArgoCD 官方文档原话 "note: the `oci://` syntax is not included."。公开 registry
 不需要注册 repository Secret（`enableOCI` 只对私有的有意义）：
@@ -191,6 +191,13 @@ helm 与 ArgoCD 在这点上不一致，容易来回踩）。
 另注意 chart 版本 pin: `argocd/applications/*.yaml` 里 pin 的 `targetRevision`
 部署前须 `helm search repo <chart> --versions` 核对存在（Kyverno/Trivy 落地时因 pin 了
 不存在的版本 sync 失败过）。
+
+☠️ **chart 仓库的可达性本身就是个依赖，而且会静默**（2026-09-03）：`cnpg-operator` 原来的
+`https://cloudnative-pg.github.io/charts` 301 重定向到 `cloudnative-pg.io`，那个域名在公共
+resolver 上解析不出来（1.1.1.1 / 8.8.8.8 均空）。集群当时**看起来是 Synced** —— 因为
+repo-server 用的是缓存；真正会炸的时刻是它需要重新拉 chart（重启 / 缓存过期 / 改
+`targetRevision`）。是新加的渲染检查在 CI 上照出来的，本机复现不了（本机 DNS 有缓存）。
+换到 OCI 源前用**渲染等价性验证法**核对：两个源同版本渲染的 22 个对象逐字节一致。
 
 ### 2. Application 名 = Helm release 名 → 资源名会带后缀
 
