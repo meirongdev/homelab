@@ -31,6 +31,18 @@ INDEXED = ["reference", "decisions", "runbooks", "guides", "records"]
 # R4 状态标记：状态行必须带其中之一，否则无法扫读
 STATUS_MARKERS = ["✅", "🚧", "📐", "⚠️", "❌"]
 
+# ── R8 ────────────────────────────────────────────────────────────────────
+# 索引行是导航，不是文档。一条事故会同时落进 records 正文、records 索引、reference 索引、
+# AGENTS.md，写第二遍时人总想把整个教训抄进去 —— 2026-09-02 盘点时 records 索引最长一行
+# 675 字符、reference 索引 478，读者要横着读三屏才看得到下一条，而这些副本还会各自漂移
+# （reference 索引写「30 个 Application」时实际已是 32 个）。
+# 上限刻意给得宽（一行放得下一句判据 + 一个 ☠️），只拦「把正文搬进索引」那种。
+INDEX_ROW_MAX = 300
+# 常驻上下文的字节预算。AGENTS.md 是唯一一份每次会话都全量加载的文件，越长越稀释；
+# 根 README 一度写着「~9 KB」而实际已 12.6 KB —— 声明和事实分头漂。
+# 超了不是加一句话的问题：把细节挪进 reference/，这里只留指针。
+AGENTS_MAX_BYTES = 14000
+
 DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}-")
 DATE_ANY = re.compile(r"\d{4}-\d{2}-\d{2}|\d{8}")
 MD_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
@@ -132,6 +144,54 @@ def check_status_enum(md, rel, text):
         return  # 缺状态由 R3 报，不重复
     if not any(m in line for m in STATUS_MARKERS):
         fail("R4", md, f"状态行缺枚举标记（{'/'.join(STATUS_MARKERS)}）: {line.strip()[:60]}", ln)
+
+
+def check_index_rows():
+    """R8 —— 目录 README 的索引行不得超过 INDEX_ROW_MAX 字符。
+
+    表格行按整行算；列表项把它的续行（缩进行）并进来一起算，因为读者看到的是同一条。
+    """
+    for d in INDEXED + [str(p.relative_to(DOCS)) for p in sorted((DOCS / "plans").glob("*")) if p.is_dir()]:
+        idx = DOCS / d / "README.md"
+        if not idx.exists():
+            continue
+        rows, start, cur = [], 0, None
+        for i, ln in enumerate(idx.read_text().splitlines(), 1):
+            is_row = ln.startswith("| ") and not ln.startswith("|---")
+            is_item = ln.startswith("- [")
+            if is_row or is_item:
+                if cur is not None:
+                    rows.append((start, cur))
+                start, cur = i, ln
+            elif cur is not None and is_item_cont(ln, cur):
+                cur += " " + ln.strip()
+            elif cur is not None:
+                rows.append((start, cur))
+                cur = None
+        if cur is not None:
+            rows.append((start, cur))
+        for ln_no, row in rows:
+            if len(row) > INDEX_ROW_MAX:
+                fail("R8", idx,
+                     f"索引行 {len(row)} 字符 > {INDEX_ROW_MAX}——索引是导航不是文档，"
+                     f"细节留在正文里: {row[:60]}…", ln_no)
+
+
+def is_item_cont(line, cur):
+    """列表项的续行（缩进且非空）才并进来；表格行没有续行。"""
+    return cur.startswith("- [") and line.startswith("  ") and line.strip()
+
+
+def check_agents_budget():
+    """AGENTS.md 的字节预算 —— 常驻上下文越长越稀释，且它自己不会喊疼。"""
+    p = DOCS / "AGENTS.md"
+    if not p.exists():
+        return
+    n = len(p.read_bytes())
+    if n > AGENTS_MAX_BYTES:
+        fail("R8", p,
+             f"{n} 字节 > 预算 {AGENTS_MAX_BYTES}——它是唯一每次会话全量加载的文件。"
+             "把细节挪进 reference/ 再从这里指过去，别在这里加句话")
 
 
 def check_indexes():
@@ -315,6 +375,7 @@ RULES_COVERED = [
     ("R3", "H1 在首行 + 各目录文首必填字段", "✅ 自动"),
     ("R4", "plans/decisions 状态带枚举标记", "✅ 自动"),
     ("R5", "目录 README 索引双向完整 + plans/README.md 份数与实际一致", "✅ 自动"),
+    ("R8", f"索引行 ≤{INDEX_ROW_MAX} 字符 + AGENTS.md ≤{AGENTS_MAX_BYTES} 字节", "✅ 自动"),
     ("--", "docs 内相对链接 + 非 docs 文件对 docs/ 的引用", "✅ 自动"),
     ("--", "非 docs README 的目录树只画真实存在的子目录", "✅ 自动"),
     ("--", "`Last updated:` 不早于最后一次内容提交（浅克隆时跳过）", "✅ 自动"),
@@ -342,6 +403,8 @@ def main():
         check_status_enum(md, rel, text)
         check_links(md, text)
     check_indexes()
+    check_index_rows()
+    check_agents_budget()
     check_plan_counts()
     check_readme_trees()
     check_external_refs()
