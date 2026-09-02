@@ -23,6 +23,7 @@ CI 在每次 PR 与 push to main 时跑（`.github/workflows/docs-check.yml`）�
 | R3 | H1 位置 + 文首必填字段 | ✅ 脚本 |
 | R4 | 状态枚举标记 | ✅ 脚本 |
 | R5 | 目录索引双向完整 + `plans/README.md` 份数与实际一致 | ✅ 脚本 |
+| R8 | 索引行长度上限 + `AGENTS.md` 字节预算 | ✅ 脚本 |
 | — | 相对链接 + 非 docs 文件对 `docs/` 的引用 | ✅ 脚本 |
 | — | 非 docs README 的目录树只画真实存在的子目录 | ✅ 脚本 |
 | — | `Last updated` 不早于最后一次内容提交（R3 的时效部分）| ✅ 脚本 |
@@ -50,7 +51,8 @@ CI 在每次 PR 与 push to main 时跑（`.github/workflows/docs-check.yml`）�
 | `records/` | 那次到底怎么回事？ | 已发生的故障/排障复盘 | 计划、建议 |
 | `plans/<类别>/` | 当时打算怎么做？ | 带日期的方案，**写完即冻结** | 需要长期维护的事实 |
 | `plans/archive/` | 当初为什么考虑过 X，后来为什么没做？ | 不存在于当前系统的方案 | 已完成的方案（见下） |
-| `ROADMAP.md` | 还剩什么没做？ | 唯一的开放项清单 | 实施细节（链到 decisions/plans） |
+| `ROADMAP.md` | 还剩什么没做？为什么不做？ | 唯一的开放项清单 + 不做的结论 + 待重评表 | 实施细节（链到 decisions/plans）· **已完成的条目**（进 `CHANGELOG.md`） |
+| `CHANGELOG.md` | 做过什么？ | 已完成条目，一条一行 | 开放项 · 展开的实施细节 |
 
 类别：`apps` / `architecture` / `networking` / `observability` / `security` / `storage`。
 
@@ -110,6 +112,23 @@ CI 在每次 PR 与 push to main 时跑（`.github/workflows/docs-check.yml`）�
 
 `reference/` `decisions/` `runbooks/` `guides/` `records/` 和 `plans/<类别>/` 都必须有 README，
 **列出该目录的全部文档**，且只列自己目录的（不跨目录索引）。加文档就更新索引。
+
+## R8 索引行有长度上限，AGENTS.md 有字节预算
+
+**索引行 ≤ 300 字符；`AGENTS.md` ≤ 14000 字节。**两条都由脚本强制。
+
+一次事故会同时落进四处：`records/` 正文、`records/README.md` 索引行、
+`reference/README.md` 索引行、`AGENTS.md`。写第二遍时人总想把整个教训抄进去，于是索引
+长成了小文档 —— 2026-09-02 盘点时 records 索引最长一行 **675 字符**、reference 索引 478，
+要横着读三屏才看得到下一条。更糟的是这些副本各自漂移：reference 索引写着「30 个
+Application」时实际已经是 32 个。
+
+**索引是导航，不是文档**：一行放得下「是什么 + 一句判据」就够，细节留在正文里，
+读者点进去看。上限给到 300 是刻意宽松的，只拦「把正文搬进索引」那种。
+
+`AGENTS.md` 的预算是另一回事：它是唯一一份**每次会话都全量加载**的文件，越长越稀释。
+超预算时正确的动作是把细节挪进 `reference/` 再从那里指过去，不是删字。
+（根 README 一度写着「~9 KB」而实际 12.6 KB —— 声明和事实分头漂，也是这条要防的。）
 
 ## R6 唯一真相源
 

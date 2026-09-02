@@ -17,12 +17,9 @@
 
 - [services.md](services.md) — **服务清单唯一真相源**（哪个服务在哪个集群/ns/域名）+ 按服务的运维备忘
 - [open-notebook.md](open-notebook.md) — AI 研读知识库：部署形态、模型接线（DGX + Mac OMLX）、配置真相源地图、备份口径
-- [litellm-gateway.md](litellm-gateway.md) — LLM 网关运维事实：☠️ **配置真相源分两半**：
-  模型/路由在 git，**虚拟 key 的模型白名单在 Postgres**，改别名不同步改 key 就「配置正确 + 调用全挂」；
-  `/v1/models` 返回的是「该 key 能访问什么」不是 live config（自查会误判）；subPath + 只在启动时读
-  配置（已由 `checksum/config` 注解自动化）；`nvidia/*` 透传坏在 `model` 字段的**双前缀**（不是 key 的问题，key 能访问 102 个模型），且它污染 `/v1/models`；附怎么查哪些模型能免费用（OpenRouter 按模型、公开 API 免鉴权可查，`:free` 后缀不可靠；
-  NVIDIA 不按模型而是信用点制）+ 只列近 3 个月发布的模型表 + 可用性实测；
-  ☠️ **同一模型换 provider，思维链是否分离会变**，要按 (provider, model) 组合验证
+- [litellm-gateway.md](litellm-gateway.md) — LLM 网关运维事实。☠️ **配置真相源分两半**：模型/路由在 git，
+  虚拟 key 的模型白名单在 Postgres，改别名不同步改 key 就「配置正确 + 调用全挂」。
+  另含 `/v1/models` 为何会自查误判、`nvidia/*` 双前缀、免费模型怎么查、按 (provider, model) 验证思维链
 - [jobs-sg.md](jobs-sg.md) — SG 岗位周报：独立 ns + 3 个 CronJob、digest 固定、备份两条路径、bootstrap 依赖
 - [calibre-metadata.md](calibre-metadata.md) — 书库元数据：覆盖率实测、mtime 冒充出版日期（487 本）、回补匹配门与判据、拿不到书评/评分的边界
 
@@ -38,7 +35,8 @@
 - [observability-multicluster.md](observability-multicluster.md) — 日志/指标/链路追踪统一架构（含 dgx-spark/macbook 外部主机与 SMART 采集）
 - [observability-otel-logging.md](observability-otel-logging.md) — OTel 日志管道细节 + 4 种应用接入模式
 - [observability-alerting-slo.md](observability-alerting-slo.md) — 告警路由（Telegram）与覆盖盲区、Dashboards 组织约定、SLI/SLO（Sloth）
-- [omlx-inference-metrics.md](omlx-inference-metrics.md) — Mac OMLX 推理指标：**OMLX 无原生 `/metrics`**，靠**两条互补链路**（json-exporter 两个 job 拿实时状态 + node_exporter textfile 快照拿 `omlx_alltime_*` 的**秒数分母与 per-model 账本**）；☠️ 累计平均 TPS 不是当前速度 / 天花板核算 ≠ 实际内存 / 两套计数器同名不同义（已靠抓取时改名分开）/ null 字段的日志噪音；并发上限 2 与 TTL 900s 等物理约束
+- [omlx-inference-metrics.md](omlx-inference-metrics.md) — Mac OMLX 推理指标：**无原生 `/metrics`**，靠
+  json-exporter + node_exporter textfile 两条互补链路。☠️ 累计平均 TPS 不是当前速度；两套计数器同名不同义
 - [dead-mans-switch.md](dead-mans-switch.md) — 唯一判定方不与被监控方共命运的告警：目的、6 跳链路、覆盖矩阵与三处失明盲区、演练程序
 - [k8s-qos-resource-management.md](k8s-qos-resource-management.md) — 资源配额与 QoS 约定
 - [cronjob-fleet.md](cronjob-fleet.md) — CronJob 舰队不变量、ResourceQuota 口径（`pods` vs `count/pods`）、Job 告警覆盖矩阵
@@ -60,8 +58,8 @@
 
 ### GitOps
 
-- [argocd-app-patterns.md](argocd-app-patterns.md) — 控制面部署形态、30 个 Application 清单与备注、pattern 对比、新增 Application 的 4 个坑
-- [manifest-safety-checks.md](manifest-safety-checks.md) — CI 强制的清单结构规则 H1-H5 + 「静态查不出、只能靠人」的那几类
+- [argocd-app-patterns.md](argocd-app-patterns.md) — 控制面部署形态、Application 清单（按 project 分组）与备注、pattern 对比、新增 Application 的 4 个坑
+- [manifest-safety-checks.md](manifest-safety-checks.md) — CI 强制的清单规则 H1-H5 / V1-V3 / E1 + 渲染检查 + 「静态查不出、只能靠人」的那几类
 
 ---
 

@@ -689,7 +689,7 @@ spec:
         # 集群名（原开放项 #7）。本条锁 homelab 的理由是**另一个**：oracle 侧刻意
         # 只抓 cadvisor、不存在 job="kubelet" 的抓取，判据在此拓扑下不成立。
         # eso-alerts 那条仍锁 homelab，理由与 external-dns 旧注释同源（"oracle 是
-        # best-effort OTel"）—— 那个理由已被实测推翻，见 ROADMAP 已完成表 #7。
+        # best-effort OTel"）—— 那个理由已被实测推翻，见 docs/CHANGELOG.md 的 2026-08-24 条。
         # ⚠️ 若将来 oracle 也开始抓 kubelet /metrics，把这里改回按 cluster 聚合即可。
         - alert: KubeletDown
           expr: |

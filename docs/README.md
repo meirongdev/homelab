@@ -1,6 +1,6 @@
 # Homelab Docs Portal
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-02
 > 这是入口索引。运行态事实都在下面链接的文档里，本页不复制副本。
 > 写文档的强制规则（R1–R7）见 [RULES.md](RULES.md)，本页只做导航。
 
@@ -11,7 +11,8 @@
 | 整体长什么样 | [ARCHITECTURE.md](ARCHITECTURE.md)：单页双集群总览 |
 | 怎么在这个 repo 里干活 | [AGENTS.md](AGENTS.md)：命令、约定、硬约束。它是**唯一的 AI 上下文文件**，根 `AGENTS.md`/`CLAUDE.md`/`.gemini.md`/copilot 都软链到它；各组件细节按域在 [reference/](reference/README.md) |
 | 现在跑着哪些服务 | [reference/services.md](reference/services.md)：**服务清单的唯一真相源** |
-| 还剩什么没做 | [ROADMAP.md](ROADMAP.md)：开放项 + 已完成 + 明确不做 |
+| 还剩什么没做 | [ROADMAP.md](ROADMAP.md)：开放项 + 明确不做 + **待重评**（触发条件已满足但没重看的结论） |
+| 做过什么 | [CHANGELOG.md](CHANGELOG.md)：已完成条目，一条一行（2026-09-02 从 ROADMAP 拆出） |
 | 出事了怎么办 | [runbooks/](runbooks/README.md)：可直接执行的 SOP |
 | 为什么是这个方案 | [decisions/](decisions/README.md)：轻量 ADR |
 | 安全做到哪一层 | [reference/security.md](reference/security.md)：逐层状态 + 威胁覆盖矩阵 |

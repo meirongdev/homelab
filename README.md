@@ -9,7 +9,8 @@ Network note: both clusters now use Cilium for the local data plane and Gateway 
 - **[Docs Portal](docs/README.md)**: start here — 分层说明与全部入口。
 - **[Project Conventions & AI Guide](docs/AGENTS.md)**: 唯一的 AI 助手上下文文件（命令、约定、硬约束）；各组件细节在 [docs/reference/](docs/reference/README.md)。
 - **[New machine bootstrap](docs/guides/dev-machine-bootstrap.md)**: 换机器后把本机配到能 clone/改/验这个 repo。
-- **[Project Roadmap](docs/ROADMAP.md)**: Current status and future plans.
+- **[Project Roadmap](docs/ROADMAP.md)**: 还剩什么没做 · 明确不做 · 待重评。
+- **[Changelog](docs/CHANGELOG.md)**: 做过什么（2026-09-02 从 ROADMAP 拆出）。
 
 每个顶层目录都有自己的 README，说明它管什么、怎么跑：
 
@@ -42,7 +43,7 @@ For AI assistant context this project uses **one file**, symlinked so each tool 
 
 | File | Symlinked from | Role |
 |---|---|---|
-| `docs/AGENTS.md` | `AGENTS.md`, `CLAUDE.md`, `.gemini.md`, `.github/copilot-instructions.md` | 唯一常驻上下文（~9 KB）：命令、约定、硬约束 + 按域指向 `docs/reference/` |
+| `docs/AGENTS.md` | `AGENTS.md`, `CLAUDE.md`, `.gemini.md`, `.github/copilot-instructions.md` | 唯一常驻上下文：命令、约定、硬约束 + 按域指向 `docs/reference/`。**有字节预算**（R8，由 `check-docs.py` 强制）——此处刻意不写具体大小，写了就会漂 |
 
 2026-08-03 起收敛为单文件（此前的长版 CONVENTIONS 文件已按 R1 拆进 `docs/reference/`
 各域文档并删除）：常驻上下文保持精简，组件级细节按需读 reference——**长内容不要往
