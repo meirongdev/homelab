@@ -422,10 +422,12 @@ deploy-argocd: add-repos
         --values values/argocd-oracle.yaml \
         --wait \
         --timeout 10m
-    # 2. 注册 AppProject
+    # 2. bootstrap 两个 AppProject（homelab / oracle-k3s，每集群一个）。
+    #    日常改 project 不走这里：argocd/projects/ 由 `projects` App 托管，git push 即生效；
+    #    这一步只为全新装的 ArgoCD 在 root App 到位前先有 project 可挂。幂等。
     #    （HTTPRoute 不在这里：oracle 的网关路由由 oracle-k3s kustomize App 管，
     #      见 cloud/oracle/manifests/argocd/route-argocd.yaml）
-    kubectl --context {{argocd_ctx}} apply -f ../../argocd/projects/homelab.yaml
+    kubectl --context {{argocd_ctx}} apply -f ../../argocd/projects/
     @echo "✅ ArgoCD deployed on oracle-k3s! Access at https://argocd.meirong.dev"
     @echo "Initial password: run 'just argocd-password'"
     @echo "⚠️ Applications 是单独一步：just deploy-argocd-apps"

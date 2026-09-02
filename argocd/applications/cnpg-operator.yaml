@@ -6,7 +6,7 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: homelab
+  project: oracle-k3s
   sources:
     # CloudNativePG operator chart —— 部署前 `helm search repo cnpg/cloudnative-pg --versions` 核对。
     - repoURL: https://cloudnative-pg.github.io/charts

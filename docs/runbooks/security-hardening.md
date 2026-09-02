@@ -1,6 +1,6 @@
 # Security Hardening Runbook — 集群内部安全（Phase 0 + 1）
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-02
 >
 > **触发条件**：部署/验证/回滚集群内部安全组件（PSA / kube-bench / Trivy / Kyverno / 节点加固 / Hubble）。
 > **成功判定**：各层验证步骤通过（每 Phase 内嵌验证命令与冒烟/巡检判据）。
@@ -44,13 +44,12 @@ kube-bench 镜像 tag（`k8s/helm/manifests/kube-bench/kube-bench.yaml`）与 k3
 
 > 大部分经 `git push` → ArgoCD 3 分钟自动同步。`kubectl`/`helm` 上下文 = `k3s-homelab`。
 
-### 0. 前置：注册 AppProject 的新 Helm 仓库
+### 0. 前置：AppProject 放行新的 Helm 仓库
 
-`argocd/projects/homelab.yaml` 的 `sourceRepos` 已加 kyverno + aquasecurity 仓库，但 AppProject 不归 ArgoCD 自动同步，需手动 apply 一次：
-
-```bash
-kubectl --context k3s-homelab apply -f argocd/projects/homelab.yaml
-```
+`argocd/projects/homelab.yaml` 的 `sourceRepos` 已含 kyverno + aquasecurity 仓库（homelab 侧组件），
+oracle 侧的 falco / trivy 在 `argocd/projects/oracle-k3s.yaml`。2026-09-02 起两个 project 文件由
+`projects` App 托管，改完 `git push` 即生效，不再手工 apply
+（[决策](../decisions/argocd-project-per-cluster.md)）。
 
 ### 1. PSA Pod 安全基线（最先，最低风险）
 

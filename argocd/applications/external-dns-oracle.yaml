@@ -12,7 +12,7 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: homelab
+  project: oracle-k3s
 
   sources:
     # 与 homelab 侧保持同 chart 版本，避免两实例行为漂移。

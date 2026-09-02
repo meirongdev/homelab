@@ -1,0 +1,39 @@
+---
+# projects — 让 AppProject 也走 GitOps。
+#
+# 2026-09-02 之前 AppProject 不在 root App 的托管路径下（root 只 watch argocd/applications/），
+# 改 sourceRepos / destinations 必须手工 `kubectl apply`，git push 不生效，四篇 runbook 都得
+# 提醒这一步。现在改 argocd/projects/*.yaml + push 即生效。
+#
+# 挂在内置的 `default` project 下（root 也是）：它们是只写 argocd ns 的元 App，
+# 若挂在 homelab / oracle-k3s 任一 project 下，会出现「一个 App 管理自己所属的 project」的自引用。
+# `default` 是 ArgoCD 内置、永远存在、全放行的 project，只给这两个元 App 用（CI 规则 H2 强制）。
+#
+# ⚠️ prune 刻意关掉：AppProject 带 resources-finalizer，误删文件若被 prune 会连带波及该 project
+# 下的 Application。删 project 是极少发生的事，手工做。selfHeal 保留（改动 push 后立即收敛）。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: projects
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/meirongdev/homelab
+    targetRevision: main
+    path: argocd/projects
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true

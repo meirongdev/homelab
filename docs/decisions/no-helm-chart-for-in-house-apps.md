@@ -31,6 +31,9 @@
 理由按权重：
 
 1. **`AppProject.sourceRepos` 是白名单，而 `AppProject` 不受 GitOps 管理。**
+   （2026-09-02 更新：AppProject 已由 `projects` App 托管，本条的「手工 apply」那一半不再成立，
+   见 [argocd-project-per-cluster](argocd-project-per-cluster.md)；白名单要改一次这一半仍然成立，
+   且现在要改的是**目标集群对应的那个** project 文件。）
    chart 若放在应用自己的仓库，必须往 `argocd/projects/homelab.yaml` 的 `sourceRepos`
    加一条：而 root App 的 `path` 是 `argocd/applications`，**`argocd/projects/` 不在
    任何 Application 的托管路径下**（已核 `argocd/applications/root.yaml:19`）。

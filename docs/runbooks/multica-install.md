@@ -1,6 +1,6 @@
 # Runbook — Multica 安装与配置
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-02
 >
 > **触发条件**：首次部署 Multica，或 homelab 重建后恢复它、或把它迁到另一个集群。
 > **成功判定**：五条同时成立：
@@ -96,18 +96,15 @@ property 时，**整个 Secret 都不生成**，会连 `JWT_SECRET` 一起没掉
 > 邮件为什么不用 Cloudflare：Email Sending 在 **Workers Free 档不可用**，
 > 见 [decisions/multica-email-delivery.md](../decisions/multica-email-delivery.md)。
 
-## 步骤 2 — 放开 AppProject 的 chart 源（**不由 GitOps 托管**）
+## 步骤 2 — 放开 AppProject 的 chart 源
 
-`ghcr.io/multica-ai/charts` 必须在 `argocd/projects/homelab.yaml` 的 `sourceRepos` 里，
+`ghcr.io/multica-ai/charts` 必须在 `argocd/projects/homelab.yaml` 的 `sourceRepos` 里
+（multica 部署在 homelab，所以是 homelab 那个 project），
 否则 Application 报 `application repo ... is not permitted in project 'homelab'`。
 
-AppProject **不在 root App 的托管路径下**（root 的 path 是 `argocd/applications/`），
-所以 **`git push` 不会让它生效**，必须手工 apply：
-
-```bash
-cd /Users/matthew/projects/homelab
-kubectl --context oracle-k3s apply -f argocd/projects/homelab.yaml
-```
+2026-09-02 起 `argocd/projects/` 由 `projects` App 托管：改完 **`git push` 即生效**，
+不再需要手工 apply（[决策](../decisions/argocd-project-per-cluster.md)）。
+只有全新装的 ArgoCD 才靠 `just deploy-argocd` 第 2 步先 bootstrap 一次。
 
 ⚠️ **OCI 源的写法与 HTTP repo 不同**：`repoURL` 与 `sourceRepos` 都写**不带 `oci://`
 前缀**的裸地址；公开 registry 不需要注册 repository Secret。但本地用 `helm show values`

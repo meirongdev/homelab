@@ -12,13 +12,15 @@ argocd/
 │                   #   子目录不生效），所以改任一 *.yaml + push 即生效。
 │                   #   （kube-prometheus-stack / otel / external-dns / backup /
 │                   #     personal-services / vault-eso / gateway / falco / …）
-├── projects/       # AppProject（homelab.yaml）：命名空间/来源白名单等权限边界
+├── projects/       # AppProject，每集群一个（homelab.yaml / oracle-k3s.yaml），各只允许
+│                   #   一条 destination；由 applications/projects.yaml 那个 App 托管，push 即生效。
+│                   #   root / projects 两个元 App 挂内置 `default`（CI 规则 H2 强制）。
 └── install/        # 安装期 patch（argocd-cm-patch.yaml，注入 config）
 ```
 
 ## 快速上手
 
-- 安装控制面: `cd k8s/helm && just deploy-argocd`（幂等；只装 chart + AppProject，**不含** Application 注册）
+- 安装控制面: `cd k8s/helm && just deploy-argocd`（幂等；装 chart + bootstrap 两个 AppProject，**不含** Application 注册）
 - 注册 Application: `just deploy-argocd-apps`（单独一步）
 - 初始 admin 密码: `just argocd-password`
 - 加服务: 走 skill `.claude/skills/add-service/SKILL.md`（要点见 [docs/AGENTS.md · Working Conventions](../docs/AGENTS.md)）
@@ -29,7 +31,9 @@ argocd/
 `destination.server: https://kubernetes.default.svc` 指的是 **oracle**；
 homelab 负载必须显式写 `https://100.94.186.7:6443`。写错再跑
 `just deploy-argocd-apps` 会把整套 homelab 负载装到 oracle 上。
-CI 的 H2 规则（`scripts/check-manifests.py`）会校验 `path` 与 `destination` 同集群。
+两道网（2026-09-02 起）：AppProject 按集群拆分，`homelab` project 只允许 homelab 那条 destination，
+写错时 ArgoCD 服务端直接拒绝；CI 的 H2 规则（`scripts/check-manifests.py`）再校验 `path` /
+`project` 与 `destination` 同集群。取舍见 [decisions/argocd-project-per-cluster.md](../docs/decisions/argocd-project-per-cluster.md)。
 
 ## 详见
 

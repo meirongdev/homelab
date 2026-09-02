@@ -11,7 +11,7 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: homelab
+  project: oracle-k3s
 
   source:
     repoURL: https://github.com/meirongdev/homelab

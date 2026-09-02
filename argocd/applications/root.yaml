@@ -11,7 +11,10 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: homelab
+  # 内置 default project：root / projects 两个元 App 只写 argocd ns，若挂 homelab / oracle-k3s
+  # 任一 project 会形成「App 管理自己所属 project」的自引用（CI 规则 H2 强制这一点）。
+  # ⚠️ root 不自管，本文件改了得手工 `kubectl --context oracle-k3s apply -f` 一次（2026-09-02 已做）。
+  project: default
 
   source:
     repoURL: https://github.com/meirongdev/homelab

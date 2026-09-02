@@ -1,6 +1,6 @@
 # 清单安全规则 (Manifest Safety Checks)
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-02
 > Status: 生效事实
 > Scope: CI 强制的仓库规则，本文是 source of truth。三个检查器：
 > `scripts/check-manifests.py` 的 **H1-H5**（清单结构）、
@@ -51,11 +51,13 @@ prune 掉整个 `personal-services` ns → 级联删光同 ns 的 open-notebook 
 与应用同生共死是正确的。把它们列进来会在 5 个文件上制造误报，而误报会让整个检查被无视，
 那比没有检查更糟。
 
-### H2：Application 的 `source.path` 与 `destination` 必须指向同一个集群
+### H2：Application 的 `source.path` / `project` 与 `destination` 必须同集群；AppProject 只许一条 destination
 
 2026-08-02 起 ArgoCD 控制面在 oracle-k3s，于是 `destination.server` 的
 `https://kubernetes.default.svc` 指的是 oracle。homelab 的负载必须显式写
 `https://100.94.186.7:6443`。
+
+**① `source.path` ↔ `destination`**
 
 | `source.path` 前缀 | 必须的 `destination.server` |
 |---|---|
@@ -63,16 +65,31 @@ prune 掉整个 `personal-services` ns → 级联删光同 ns 的 open-notebook 
 | `backup/overlays/homelab` | `https://100.94.186.7:6443`（homelab） |
 | `cloud/oracle/manifests/…` | `https://kubernetes.default.svc`（oracle） |
 | `backup/overlays/oracle` | `https://kubernetes.default.svc`（oracle） |
-| `argocd/applications` | `https://kubernetes.default.svc`（oracle） |
+| `argocd/…`（root / projects 元 App） | `https://kubernetes.default.svc`（oracle） |
 
 ☠️ 写错的后果不是「一个应用装错地方」，而是**把 homelab 全套负载装到 oracle**
 （`AGENTS.md` 里那条 ☠️ 说的就是这个）。迁移期的正确顺序见
 [../runbooks/argocd-control-plane-on-oracle.md](../runbooks/argocd-control-plane-on-oracle.md)。
 
-**chart 型 source（`sources[]` 里只有 chart + `$values` 引用）跳过检查**：
-它们没有 `path`，而 values 文件一律放在 `k8s/helm/values/` 下、与目标集群无关
-（`k8s/helm/values/loki.yaml` 对应的是 oracle 上的 Loki），静态上无从判断，
-强行猜只会误报。这类 App 改 destination 时没有网可兜，要格外小心。
+chart 型 source（`sources[]` 里只有 chart + `$values` 引用）没有 `path`，这一条对它们无从判断
+（values 文件一律在 `k8s/helm/values/` 下、与目标集群无关），所以有了 ②。
+
+**② `project` ↔ `destination`（2026-09-02 加，[决策](../decisions/argocd-project-per-cluster.md)）**
+
+| `destination.server` | 必须的 `project` |
+|---|---|
+| `https://100.94.186.7:6443` | `homelab` |
+| `https://kubernetes.default.svc` | `oracle-k3s` |
+| （source 在 `argocd/` 下的元 App，不论 destination） | `default` |
+
+每集群一个 AppProject，各自只允许一条 destination，所以 project ↔ destination 脱节时 ArgoCD
+服务端会直接拒绝同步（`destination server ... is not permitted`，响亮）。本规则的意义是在
+push 之前就拦住，并给 chart 型 App 补上静态兜底。`default` 是内置全放行 project，只许 root /
+projects 两个元 App 用，其它 App 挂它会被本规则拦。
+
+**③ AppProject 必须且只能有一条 destination**，且必须是该 project 名字对应的那台集群
+（表在 `scripts/check-manifests.py` 的 `PROJECT_FOR_SERVER`，是集群表的唯一副本）。
+多列或通配会让服务端那半兜底静默失守。新集群入编 = 新 project 文件 + 登记进这张表。
 
 ### H3：`ReferenceGrant` 必须声明 `v1beta1`
 

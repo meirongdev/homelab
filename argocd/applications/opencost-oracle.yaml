@@ -13,7 +13,7 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: homelab
+  project: oracle-k3s
 
   sources:
     # chart 版本 —— 与 homelab 侧 opencost.yaml 保持同版本，避免两集群指标语义漂移。

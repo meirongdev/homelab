@@ -16,7 +16,7 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: homelab
+  project: oracle-k3s
   sources:
     # chart 版本与 homelab 实例保持一致 —— 两侧同版本，避免行为漂移。
     # 升级前 `helm search repo aqua/trivy-operator --versions` 核对（chart 版本 ≠ Trivy 版本）。

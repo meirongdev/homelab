@@ -1,7 +1,7 @@
 # Homelab Architecture
 
 > 单页架构总览，双集群 homelab（homelab + oracle-k3s）。
-> Last updated: 2026-09-01
+> Last updated: 2026-09-02
 
 ## Network Topology
 
@@ -56,6 +56,7 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 | 子域名 DNS | external-dns (HTTPRoute 声明式，取代 Terraform 手管) | [`decisions/external-dns-adoption.md`](decisions/external-dns-adoption.md) |
 | 成本/右尺寸 | OpenCost 走 collector 旁路 + KRR 窄口径采集 | [`decisions/opencost-krr-data-sources.md`](decisions/opencost-krr-data-sources.md) |
 | 配置漂移体检 | ArgoCD 原生 `orphanedResources` (否决 kor) | [`decisions/orphaned-resources.md`](decisions/orphaned-resources.md) |
+| GitOps 权限边界 | 每集群一个 AppProject（`homelab` / `oracle-k3s`），元 App 挂 `default`；写错 destination 由服务端拒绝 | [`decisions/argocd-project-per-cluster.md`](decisions/argocd-project-per-cluster.md) |
 | 关系型数据库 | 每个集群一个共享实例。oracle 用 CNPG 起两个 Cluster：`apps-pg`(共享应用库) 和 `zitadel-pg`(身份面独立)，加租户就是加 `Database`/`DatabaseRole` CR。homelab 有同名的 `databases/apps-pg`，但那是裸 Deployment（租户 litellm/multica，2026-08-25 合并而来），刻意不装 CNPG，operator 自己比省下的 postmaster 还贵 | [`decisions/shared-postgres-platform.md`](decisions/shared-postgres-platform.md) |
 | 备份工具 | restic (非 Kopia)，无 server 直推 106 | [`plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md`](plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md) |
 | SSO | 应用原生 OIDC, 非共享入口层 SSO | [`plans/security/2026-03-08-cilium-zitadel-sso-plan.md`](plans/security/2026-03-08-cilium-zitadel-sso-plan.md) |
