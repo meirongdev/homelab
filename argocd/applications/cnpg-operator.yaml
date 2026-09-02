@@ -8,8 +8,19 @@ metadata:
 spec:
   project: oracle-k3s
   sources:
-    # CloudNativePG operator chart —— 部署前 `helm search repo cnpg/cloudnative-pg --versions` 核对。
-    - repoURL: https://cloudnative-pg.github.io/charts
+    # CloudNativePG operator chart，OCI 源（本仓库第二个，第一个是 multica）。
+    #
+    # ☠️ 2026-09-03 从 `https://cloudnative-pg.github.io/charts` 换过来：那个地址 **301 重定向到
+    # `cloudnative-pg.io/charts/index.yaml`**，而 `cloudnative-pg.io` 当时在公共 resolver 上
+    # 解析不出来（1.1.1.1 / 8.8.8.8 均返回空；本机只是缓存命中）。后果不只是 CI 红 ——
+    # ArgoCD 的 repo-server 一旦需要重新拉 chart（重启 / 缓存过期 / 换 targetRevision）
+    # 就会同样失败，而集群此刻看起来是 Synced，因为它用的是缓存。
+    # 换源前用「渲染等价性验证法」核过：两个源同版本渲染出的 22 个对象**逐字节一致**，
+    # 对集群是 no-op（同 decisions/manual-helm-to-argocd-adoption.md 的做法）。
+    # ⚠️ OCI 的 repoURL **不带 `oci://` 前缀**（ArgoCD 官方文档原话），但本地 `helm show/template`
+    # 要带 —— 两者在这点上不一致，来回踩过。核对版本：
+    #   helm show chart oci://ghcr.io/cloudnative-pg/charts/cloudnative-pg --version <ver>
+    - repoURL: ghcr.io/cloudnative-pg/charts
       chart: cloudnative-pg
       targetRevision: "0.29.0"   # operator appVersion 1.30.0
       helm:
