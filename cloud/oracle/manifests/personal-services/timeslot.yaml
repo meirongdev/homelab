@@ -11,21 +11,33 @@
 # 只改三处：镜像钉 digest（现网 :latest 实际就解析到它）、resources 按实测填（1m / 8Mi）、
 # priorityClassName bulk。
 #
-# ☠️ 口令（2026-09-02 查明，待处理）：initContainer 读的 Secret `timeslot-secrets` 是当年 helm 装出来的，
-# 里面是**上游 chart 的默认口令**（chart 在公开仓库，等于公开）——`deploy-timeslot` 配方声称从 Vault
-# `secret/oracle-k3s/timeslot` 取值，但 Vault 里根本没有这个路径（ESO 实测 SecretSyncedError）。
-# 该 Secret 不在 git、不在 ESO，是本文件唯一的清单外依赖，刻意先沿用以保证接管本身零风险。
-# 轮换步骤（需要 Vault 写权限，两步）：
-#   1. VAULT_ADDR=https://vault.meirong.dev vault kv put secret/oracle-k3s/timeslot admin_password=<新随机口令>
-#   2. 本文件加一段 ExternalSecret（target `timeslot-admin`，remoteRef key oracle-k3s/timeslot /
-#      property admin_password），把下面 secretKeyRef.name 改成 timeslot-admin，push；
-#      稳定后 `kubectl -n personal-services delete secret timeslot-secrets`。
+# ☠️ 口令的来历（2026-09-02 查明，09-03 已轮换）：initContainer 原先读的是 helm 装出来的 Secret
+# `timeslot-secrets`，里面是**上游 chart 的默认口令**（chart 在公开仓库，等于公开）。
+# `deploy-timeslot` 配方声称从 Vault `secret/oracle-k3s/timeslot` 取值，但那个路径**根本不存在**
+# （实测 `vault kv get` 报 No value found，ESO 报 SecretSyncedError），所以那条 `--set` 从来没生效过。
+# 教训：`--set foo=$(取值命令)` 里取值失败时 shell 只给空串，helm 照样成功、chart 用默认值兜底，
+# 全程零报错 —— 这类「配置写了但从未生效」只能靠实际读一次线上值才发现。
+# 现在口令是 Vault 里的 32 位随机值，经下面的 ExternalSecret 下发。
 # 再往后（可选）：ESO 整份渲染 config.json，删掉 initContainer 与 ConfigMap。
-#
-# 合并后一次性清理 helm 的 release 存档（ArgoCD 不会动它们；`helm list` 会一直显示 timeslot 直到删掉）：
-#   kubectl --context oracle-k3s -n personal-services delete secret \
-#     sh.helm.release.v1.timeslot.v1 sh.helm.release.v1.timeslot.v2
-# ☠️ 不要 `helm uninstall timeslot`：那会真删 Deployment / PVC。
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: timeslot-admin
+  namespace: personal-services
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: timeslot-admin
+    creationPolicy: Owner
+  data:
+    - secretKey: admin_password
+      remoteRef:
+        key: oracle-k3s/timeslot
+        property: admin_password
+---
 # 应用配置模板。口令占位符由 initContainer 用 awk 替换（上游 chart 用 sed + $(...) 会被 shell
 # 当命令替换展开成空串，这是被修掉的 chart bug 之一）。
 apiVersion: v1
@@ -99,7 +111,7 @@ spec:
             - name: ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: timeslot-secrets   # 见文件头 ☠️：helm 遗留、含 chart 默认口令，轮换后改 timeslot-admin
+                  name: timeslot-admin     # ESO 从 Vault oracle-k3s/timeslot 下发（见文件头）
                   key: admin_password
           resources:
             requests:
