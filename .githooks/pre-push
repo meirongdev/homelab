@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# 提交前跑本地检查 —— 与 CI 同一批脚本。
+#
+# ☠️ 为什么是 pre-push 而不是 pre-commit：`check-docs.py` 的 STAMP 那条判据是「该文件最后
+# 一次**内容提交**的日期」，而未提交的改动没有提交日期 —— 在工作区里改完就跑，STAMP 永远
+# 不报，一 push 就红（2026-08-24、2026-09-02 各真红过一次）。放 pre-push 时改动已经有
+# commit 日期了，本地和 CI 的判据才一致。
+#
+# 启用（clone 后一次性）：
+#   git config core.hooksPath .githooks
+# 单次跳过：git push --no-verify
+#
+# 渲染检查（scripts/render-manifests.py）刻意不在这里：要联网拉 16 个 chart、约 2 分钟，
+# 每次 push 都等太久。CI 会跑；本地手动 `just check-render`。
+set -uo pipefail
+
+if ! command -v just >/dev/null 2>&1; then
+    echo "pre-push: 没装 just，跳过本地检查（CI 仍会跑）" >&2
+    exit 0
+fi
+
+cd "$(git rev-parse --show-toplevel)" || exit 0
+just check || {
+    echo ""
+    echo "pre-push 拦下了 —— 上面哪条红了就修哪条。"
+    echo "确认要跳过：git push --no-verify"
+    exit 1
+}

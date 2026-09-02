@@ -1,6 +1,6 @@
 # 新机器开发环境 bootstrap（配到能改 homelab repo）
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-02
 > 面向「换了一台 Mac，要把本机环境配到能 clone、改、验证这个 repo」的流程。
 > 排障/恢复类走 [runbooks/](../runbooks/README.md)；AI 助手上下文见 [../AGENTS.md](../AGENTS.md)（唯一上下文文件，细节按域在 [reference/](../reference/README.md)）。
 
@@ -60,10 +60,27 @@ kubectl --context oracle-k3s get nodes
 ## 4. 本地验证（提交前跑 CI 同款检查）
 
 ```bash
-python3 scripts/check-docs.py                # 文档规则 R1-R7 里可自动查的部分（纯标准库）
-python3 scripts/check-docs.py --list         # 看哪几条是脚本查不了、只能靠人的
-uv run --with pyyaml python scripts/check-manifests.py   # 清单安全 H1-H5
+# 全部本地检查（与 CI 同一批脚本），在仓库根跑
+just check
+
+# 单跑某一条 / 看哪几条只能靠人
+python3 scripts/check-docs.py --list
+
+# 渲染检查：把 ArgoCD 真正会 apply 的对象渲染出来过 schema。
+# 单独一条是因为它要联网拉 16 个 chart、约 2 分钟。需要 kubectl / helm / kubeconform。
+just check-render
 ```
+
+**装上 pre-push 钩子**（clone 后一次性，让 `just check` 在 push 前自动跑）：
+
+```bash
+git config core.hooksPath .githooks
+```
+
+☠️ 它是 **pre-push 不是 pre-commit**，这不是随手选的：`check-docs.py` 的 STAMP 那条按
+「该文件最后一次**内容提交**的日期」判定，而未提交的改动没有提交日期 —— 在工作区里改完
+就跑，STAMP 永远不报，一 push 就红（真红过两次）。放 pre-push 时改动已经有 commit 日期，
+本地与 CI 的判据才一致。单次跳过用 `git push --no-verify`。
 
 ## 5. 需要从旧机器带过来的东西（gitignored，新 clone 没有）
 
