@@ -184,3 +184,58 @@ Open Notebook 的接线只能在应用里看（值存的是模型 id，不是名
    可行形态：黑盒 exporter 抓 `:8000/v1/models` 把 name 导出成指标 + `absent()` /
    与 git 里的期望值不符就 warning。⚠️ 别照抄"抓得到就算活着"——那正是
    `DgxSparkVllmStuck` 要补的盲区。
+
+## 9. 附录：本仓库管不到的依赖（谁有权限改）
+
+换栈这件事**大部分东西不在 git 里**，也不在本仓库能写的地方。出事先照这张表定位归属，
+别在 `homelab` 里找不存在的那一半。
+
+### A. 上游推理源（本仓库只有消费权，没有写权限）
+
+| 依赖 | 在哪 | 换栈时的角色 | 坏了是响的还是哑的 |
+|---|---|---|---|
+| DGX 两台 GB10（`100.97.87.120` head / `100.67.164.92` TP worker） | **别人 tailnet 的共享节点**，经 Tailscale node sharing 进来 | served name / ctx / 冷启动 / 并发上限全部由它单方面决定 | 引擎死 = 响（三条定向告警）；**换模型 = 哑**（只有第一个 404 才发现，见 ROADMAP 哨兵那条） |
+| `nv-dgx-spark` 仓库 | 本机 `~/projects/meirongdev/nv-dgx-spark` | `make qwen38fn-*` / `v4flash-*`、liveness 探针、memwatch、**权重与镜像保留期 = 我们的回滚窗口** | 那边改 make 目标名/namespace，我们三条告警的 runbook 指针就过期（哑） |
+| Mac 上的 OMLX（`100.89.15.120:8000`） | 另一台机器（笔记本） | 兜底上游 + embedding / TTS / STT 全在这；`fast` profile 的开关名也在它那边 | 兜底拿不拿得到是哑的（且受 key 白名单影响，见 §3） |
+| OpenRouter / NVIDIA build.nvidia.com | 第三方 SaaS | 第三、第四来源；**目录与限额在对方手里**（NVIDIA 点数制 + 40 RPM，OpenRouter 以接口的 pricing 为准） | 免费档 429/503 是响的；目录漂移是哑的 |
+
+### B. 运行时状态：在本仓库部署、但**不在 git 里**
+
+| 状态 | 真身 | 后果 |
+|---|---|---|
+| 虚拟 key 的模型白名单、花费账本 | LiteLLM 在 `databases/apps-pg` 的 `litellm` 库 | §3；漏改 = 清单正确 + Synced + 全 403 |
+| Open Notebook 已注册的模型与 defaults | 应用自己的数据库 | provisioner 只增不删 → 旧条目变死选项，得手删（§6） |
+| Calibre 书库内容与 `#meta_src` 标记 | oracle 节点上的 `calibre-books-local` PVC | 元数据作业跑没跑成只能查库，git 里看不出来 |
+
+### C. 消费方配置：在本机 dotfiles
+
+`~/.codex/*.config.toml` 与 `~/.codex/models.json`（窗口靠 catalog 的 `context_window`，
+不是 `model_context_window`）、`~/.qwen/settings.json`（真正生效的端点是
+`security.auth.baseUrl`）、`~/Library/Application Support/k8sgpt/k8sgpt.yaml`、
+`~/.zshrc` 里的 `LITELLM_VK`（所有本机消费方共用一把，坑 A 一旦发生是全体）。
+DGX profile 与 Qwen 启动默认由 `nv-dgx-spark/scripts/qwen-model-switch.sh` 管；
+☠️ Mac 本地 omlx 与 DGX 都用 8000，**改端点先看主机名**。
+
+### D. 应用源码在别的仓库：homelab 只给 env
+
+| 镜像 | 源码 | 我们改不动的东西 |
+|---|---|---|
+| `ghcr.io/meirongdev/jobs-sg` | `~/projects/meirongdev/jobs-sg` | 提示词、严格 JSON 契约、**关思考的 kwargs 名**（`{"thinking":false}` 在新栈是静默空操作）、`DefaultTimeout` |
+| `litellm/litellm@sha256:…` | 上游开源 | 通配别名的拼接行为（`nvidia/*` 双前缀那条） |
+| calibre 镜像 | KovidG 上游 | 我们内嵌的脚本在 git，但 calibre 本体与书库格式不在 |
+
+**这一类是本次最贵的教训**：一条静默失效（关思考的开关名）源头在别人的仓库与镜像里，
+本仓库 grep 不到。判据只能是运行时的 `usage.completion_tokens_details.reasoning_tokens`。
+
+### E. 密钥真值在 Vault，git 里只有引用
+
+`secret/homelab/litellm*`（master key / UI 口令 / OpenRouter / NVIDIA）、
+`secret/oracle-k3s/calibre-metadata`（那把窄白名单 key），经 ESO → Deployment env。
+所以"改一把 key"往往是 Vault + Postgres 两处，而不是改一个文件。
+
+### F. 第三方与网络
+
+Cloudflare（Tunnel / DNS / WAF —— 管理接口经公网会被 `error code: 1010` 挡，所以走
+NodePort）、Tailscale（tailnet 归属决定了 oracle 这类 tagged 设备**根本连不到**共享节点，
+这正是 `litellm-external` 存在的原因）、GitHub（ArgoCD 的 git 源 + CI + pre-push 钩子）、
+镜像与权重分发（litellm 镜像按 digest pin；vLLM 镜像与 NVFP4 权重由上游拉，本仓库不碰）。
