@@ -350,6 +350,13 @@ reranker / nemoguard / 视觉 / riva-translate / palmyra 垂类）全部早于�
   `reasoning_tokens=0`、`content` 干净）。`reasoning_effort` 只接受
   `none`/`low`/`medium`/`xhigh`，**`high` 会被 400 拒**（报错文本还漏了 `none`，别照抄）。
   ⚠️ 这套枚举与旧栈 V4-Flash 完全不同（那边只有 `max` 真生效），**别跨栈照抄档位**；
+- ☠️ **关思考的 kwargs 名换了，写错是静默空操作**：新栈认 `enable_thinking`，旧栈那套
+  `thinking` 打上去**不报错也不生效**。2026-09-03 用 jobs-sg 线上那份提示词实测三种写法
+  **都回 200**，差别只在 `usage.completion_tokens_details.reasoning_tokens`：基线 142、
+  `{"thinking": false}` 134（等于没关）、`{"enable_thinking": false}` 0（各 n=1，同一条
+  短岗位描述；三档的 JSON 内容一致）。
+  **判据只能看 reasoning_tokens，不能看请求成没成。**踩中这条的是 jobs-sg 的
+  `DisableThinking`（见 [jobs-sg.md](jobs-sg.md)），它默认不发所以线上没坏；
 - 逃生口是别名 `mac/ornith-fast`，走 OMLX 的 `fast` profile（`enable_thinking: false`），
   与 `mac/ornith` 共用同一份驻留权重、不触发换入换出；
 - 实测数据、为什么换 Ornith、以及「换模型不能消除该失效模式」的反例，见

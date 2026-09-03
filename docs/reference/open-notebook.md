@@ -47,7 +47,9 @@
    "整本书塞得进去"是靠旧栈 1M ctx 成立的，新栈是 262144。兜底的 Mac Ornith 也是 262k，
    **切过去拿不到更多窗口**。长书开始截断或报超窗时先按这条判，别先怀疑上游挂了。
 2. **改名不会带走旧条目**：provisioner 只增不删（unmanaged models 只打 note），
-   UI 里那份 `deepseek-v4-flash` 要手删，否则它一直是个"选中即报错"的死选项。
+   旧条目必须手删。✅ 2026-09-03 已删掉 UI 里的 `deepseek-v4-flash`——删前先扫过
+   3 个 notebook 与全部 profile，确认没有任何一处引用那个 model id（有一个 endpoint
+   路径 `/podcasts`、`/search-templates` 在本版本是 404，扫不到不代表没有，别照着抄）。
 
 上游模型的事实（served name / ctx / 冷启动 / 回滚）以
 [litellm-gateway.md](litellm-gateway.md) 的「DGX 主力模型」为准，这里不重复。

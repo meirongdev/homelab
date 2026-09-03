@@ -37,9 +37,16 @@
 #     （max_model_len 1000000）—— 正是 08-07 三轮 DRY-RUN 调校护栏时用的那个模型。
 #   · ☠️ **2026-09-02 DGX 换了主力模型**（`deepseek-v4-flash` → `qwen38-flash-next`，
 #     max_model_len 1M → 262144，旧名已从 `/v1/models` 消失）。上面「别换模型」的前提
-#     由上游单方面消失了，不是本仓库的选择。护栏（`max_tokens 2000` 等）是按旧模型
-#     调的：**换模型后先 `DRY_RUN=1` 重跑一轮**再置 0，判据看 `finish_reason` 与
-#     `content` 是否为 null（旧模型就是在这条上崩过的）。
+#     由上游单方面消失了，不是本仓库的选择。
+#   · ✅ **护栏已对新模型复验**（2026-09-03，n=4）：用本文件线上那份提示词 + 同规模
+#     摘录（6000 字符）+ 同样的 `max_tokens=2000`/`temperature=0` 经网关实打，
+#     四次全部 `finish_reason=stop`、completion 389–512 token、JSON 四次都解析成
+#     title/authors/description/tags。**没有复现 `content=null` 那条崩溃。**
+#     下面那条注释里 800 崩掉的原始 token 账（旧模型）没留记录，只有现象；新模型的
+#     账记在下面，是实测出来的。
+#   · ⚠️ 复验走的是合成摘录，**不等于真书库的 DRY-RUN 通过**：真实扉页/版权页更脏
+#     （OCR 噪声、多语言、目录极长）。改动提示词、判据或模型后仍按原规矩
+#     **先 `DRY_RUN=1` 跑一轮**再置 0。
 #   · 根因未变：oracle pod 直连 `100.97.87.120:8000` 仍然 **timeout**（同日实测）。
 #
 # 接通方式（三处改动，缺一不可）：
@@ -280,10 +287,13 @@ data:
             "model": LLM_MODEL,
             "messages": [{"role": "user", "content": PROMPT + text}],
             # ⚠️ qwen38-flash-next（与之前的 deepseek-v4-flash 一样）是**推理模型**：
-            # 它先产出 reasoning_content，
-            # 再产出 content。800 在 6000 字摘录下会被推理阶段吃光，
-            # 结果是 finish_reason=length 且 **content 为 null**（不是报错、不是空串）。
-            # 2026-08-07 首次 DRY-RUN 就是这样崩的。2000 给推理留够余量。
+            # 它先产出 reasoning_content 再产出 content。预算不够时 vLLM 的 reasoning
+            # parser 不会伪造闭合标签 —— 结果是 finish_reason=length 且
+            # **content 为 null**（不报错、不是空串），2026-08-07 首次 DRY-RUN 就是这样崩的。
+            # 旧模型在 800 下怎么崩的没有留下 token 级记录，只有现象（08-07 实录）。
+            # 新模型的账有实测：6000 字摘录下整个 completion（含 reasoning）
+            # 389–512 token，其中 reasoning 280–350 —— 2000 约 4 倍冗余。
+            # 见文件头 2026-09-03 那条复验。
             "max_tokens": 2000,
             "temperature": 0,
         }).encode()
