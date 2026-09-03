@@ -94,26 +94,37 @@ git 里那份网关清单帮不上忙，只有 `LLM_MODELS` 跟着改才有效�
 ✅ 严格 JSON 这条契约已在新模型上复验（2026-09-03，直接打网关、用仓库里那份
 `ExtractPrompt`）：三种参数（默认 / `{"thinking":false}` / `{"enable_thinking":false}`）
 都回合法 JSON 且六个 key 齐全，reasoning 分别是 142 / 134 / 0。
-☠️ 由此暴露一条**上游仓库的坑**：`OpenAIExtractor.DisableThinking` 发的 kwargs 名是
-`thinking`（旧栈的形状），**在新栈上是静默空操作** —— `{"thinking":false}` 的 reasoning
-是 134，与基线 142 同量级，而 `{"enable_thinking":false}` 才是 0。三种写法都回 200，
-所以**只能拿 `usage.completion_tokens_details.reasoning_tokens` 判**，请求成功不是证据。
-默认没发这个字段，线上行为未变；清积压时按它跑不提速，只是多烧 token
-（本次 n=1 短输入：170 vs 26 completion token，约 6 倍；旧栈那批 4 条真实岗位的历史
-实测是 18.8 倍，见上游 `internal/llm/client.go` 注释）。
-`internal/llm/thinking_test.go` 断言的也是 `thinking` 这个键 —— 改名要在 jobs-sg 仓库做。
+☠️ 当时暴露的那条**上游仓库的坑已修**（`c658cdc`，镜像 `0632049`，2026-09-03）：
+原先 `DisableThinking` 写死发 `{"thinking": false}`（旧栈的形状），**在新栈上是静默空
+操作** —— 134 reasoning（基线 142），而 `{"enable_thinking":false}` 才是 0，三种写法都回
+200，所以只能拿 `usage.completion_tokens_details.reasoning_tokens` 判。现在：
+
+- 键名变成配置项 `LLM_THINKING_KWARG`，默认 `enable_thinking`（实测唯一生效的那个）；
+- 客户端会解 `reasoning_tokens`，设了 `LLM_THINKING=false` 而模型仍在推理时每进程打一条
+  `reasoning was not disabled` 的 WARN，并点名让你改哪个键 —— 这类静默从此会自己现形；
+- 换模型的验收不用手写请求：`LLM_LIVE_URL=… LLM_LIVE_MODEL=… go test ./internal/llm -run
+  Live -v`（默认跳过、不进 CI）真调一次并断言推理确实被关掉，挂了就换 `LLM_LIVE_KWARG` 试。
+
+模型相关参数**全部下沉成 `LLM_*` 环境变量**（`internal/llm/config.go` 一处解析）：
+`LLM_BASE_URL / LLM_MODELS / LLM_TIMEOUT / LLM_CONCURRENCY / LLM_RETRIES / LLM_THINKING /
+LLM_THINKING_KWARG / LLM_MAX_TOKENS / LLM_MAX_DESC_CHARS / LLM_PROMPT / LLM_PROMPT_VERSION /
+LLM_API_KEY / LLM_AUTH_HEADER / LLM_EXTRA_BODY`。**换模型不再需要改代码或发版**，
+参数写错只丢那一个旋钮并打告警（启动日志 `llm enabled` 打的是生效值）。
+配置面全表与调参口径在上游 `docs/09-deploy-runbook.md` §3.2/§5，本文只留 homelab 的取值与理由。
 
 **取舍**：省掉 VK 与 Vault 依赖，但没有 LLM 网关的 `custom_m2` 回退，也没有用量计量；
 DGX 是跨 tailnet 共享的境内机器（RTT 66–83ms），不可用时 enrich fail-open 退回纯规则。
 （此前“切回网关”的三处改法已随 **LLM 网关 2026-08-08 退役**一并失效，直连 DGX
 是当前唯一形态，后续换 LLM 网关时另行规划。）
 
-**单次调用实测 66.5s**（2,326 字描述 / 497 prompt tokens / 937 completion tokens，
-reasoning 占大头）。短 prompt 只要 15s，别拿短 prompt 的数字做容量规划。
-⚠️ 这组数字（含 300s 超时、6.5 条/分钟、每晚排空 ~1100 条）是**旧模型**测的：新栈
-prefill 快约一倍、decode 略慢、并发上限更高，2026-09-02 换栈后第一轮要重测再回校。
-本轮复验只用了短输入（fixture 最长一条描述仅 66 字符），**长描述的端到端耗时没在这里测**，
-别拿 66 字符那次的秒数当容量依据。
+**单次调用耗时（按新模型回校，上游 2026-09-03 用 16 条真实岗位、并发 8 实测）**：
+开推理均值 **18.7s**、最坏 58.7s、吞吐 **15 条/分钟**；`LLM_THINKING=false` 是
+2.8s / 6.1s / **154 条/分钟**。旧模型那组（66.5s 均值、937 completion tokens、
+3.0 条/分钟）就此作废 —— 下面几段保留它们，只为那条"超时卡在真实耗时下面"的教训。
+
+⚠️ 小样本测不出尾巴：上面 58.7s 是 16 条样本的最坏值，而生产日志里**约 1.3% 的调用超过
+300s**（上游 09-02 那轮 3/204、09-03 那轮 3/242；本仓库 09-03 那轮同样 3/242 = 1.2%）。
+判断要不要干预看的是这个比例，不是抽样最坏值。短 prompt 更不能拿来规划容量（只要 15s 上下）。
 
 ⚠️ **超时值曾经卡在真实耗时下面（2026-08-03）**：上游硬编码 60s，而真实调用要 66.5s，
 于是几乎每次都差几秒超时 → 每条白烧 2×60s → fail-open 留在积压里，实测排空只有
@@ -127,12 +138,18 @@ prefill 快约一倍、decode 略慢、并发上限更高，2026-09-02 换栈后
 不是连接阶段（错误信息里的 "awaiting headers" 极具误导性）；客户端放弃**不会**让服务端
 停止生成，每次超时还白耗一次共享 GPU 容量。
 
-**吞吐（集群实测，reasoning 开）：并发 8 下 3.0 条/分钟。**
+**吞吐：上游抽样 15 条/分钟（并发 8，reasoning 开）；本仓库整轮实测 6.9 条/分钟。**
+后者 = 2026-09-03 那轮 242 次 LLM 调用 / 35 分钟。两个数差一倍是**口径不同**
+（16 条抽样 vs 整轮真实岗位，且共享 GPU 上还有别的租户），照实记录，别互相替换。
 进度逐条落库，中途被 deadline 杀掉不丢；`enrich_cache` 按 `description_sha256` 去重。
 
-⚠️ 别按「单条 66.5s ÷ 并发 8 = 7.5 条/分钟」推算，那是本文档早期写错的数字。
-实测只有 **3.0 条/分钟**：单条独占是 66.5s，但 8 并发时每条被拉长到约 160s，
-即 8× 并发只换来 **3.3×** 吞吐，DGX 已接近饱和。据此：
+☠️ **积压已经排空**：`jobs_sg_enrich_backlog` 在 2026-09-03 是 **3**（就是那轮超时的 3 条），
+所以旧模型时代"9 个夜间窗口"那类排空预算从此不再适用；下面的表格保留作历史。
+
+⚠️ 旧模型下也别按「单条 66.5s ÷ 并发 8 = 7.5 条/分钟」推算（那是本文早期写错的数字）：
+当时实测只有 3.0 条/分钟 —— 单条独占 66.5s，但 8 并发时每条被拉长到约 160s，
+即 8× 并发只换来 **3.3×** 吞吐，DGX 已接近饱和。那条**并发饱和**的结论与新模型无关，
+仍然成立（新栈并发上限更高一些：`--max-num-seqs 8` 而 KV 上限实测 5.34）。据此（历史）：
 
 | | 条数 | reasoning 开（3.0/分钟） |
 |---|---|---|
@@ -146,8 +163,10 @@ prefill 快约一倍、decode 略慢、并发上限更高，2026-09-02 换栈后
 ## 真正的提速杠杆：关掉 reasoning（`LLM_THINKING=false`）
 
 reasoning 占了这个模型 **约 95%** 的 output token。上游 `472aaf5` 加了
-`LLM_THINKING` 开关（`false` 时发 `chat_template_kwargs: {"thinking": false}`）。
-实测 4 条真实岗位（DGX 空闲时）：
+`LLM_THINKING` 开关，`false` 时发 `chat_template_kwargs`。☠️ 那个键名从 `c658cdc`
+起是配置项 `LLM_THINKING_KWARG`，**默认 `enable_thinking`**（新栈实测唯一生效的键名；
+旧栈用的是 `thinking`）—— 下面这张表是在旧栈上用 `thinking` 测的，
+倍率关系仍然可参考，键名别照抄。实测 4 条真实岗位（DGX 空闲时）：
 
 | | reasoning 开 | reasoning 关 |
 |---|---|---|
@@ -165,12 +184,15 @@ reasoning 占了这个模型 **约 95%** 的 output token。上游 `472aaf5` 加
 且默认**不发**该字段（请求体与从前逐字节一致），它是 vLLM/模板专用的，
 换成 LLM 网关或没有该模板的模型会被拒。
 
-**用法定位**：只用来啃积压，不用于稳态。稳态每日约 200 条、reasoning 开着约 1 小时
-就跑完，精度留着更值。清单里因此**不设** `LLM_THINKING`（= 默认开启），
-啃积压走一次性 Job（不进 git，见下节）。
+**用法定位**：只用来啃积压，不用于稳态。清单里因此**不设** `LLM_THINKING`（= 默认开启），
+啃积压走一次性 Job（不进 git，见下节）。2026-09-03 复核：积压已排空（backlog=3），
+稳态每轮约 240 条、35 分钟跑完，所以更没必要拿质量换速度。
+☠️ 稳态真正该动的旋钮是 **`LLM_RETRIES=0`**（已写进清单）：超时那 1.2% 本来第二天就会重试，
+当场重试几乎必然再烧满一个 300s，纯浪费。
 
 ## 一次性积压回填
 
+（以下是一次性回填的历史记录：baseline 积压已于 2026-09-03 前排空，backlog=3。）
 baseline 之后有约 4,900 条积压。按默认（reasoning 开）3.0 条/分钟要跑约 **9 个**夜间窗口；
 用 `LLM_THINKING=false` 的一次性 Job，集群实测 **26～29 条/分钟**（约 2 小时跑完）：
 
@@ -342,8 +364,10 @@ CR + git write-back 凭据，收益不抵复杂度。手动更新 digest。
 ⚠️ **「只改 digest 一行」不总是够**。2026-08-08 从 `ff5e24e` 升到 `90cd4e8`（跨 81 个
 commit）时，同批必须改 `web.yaml` + `monitoring.yaml`：新镜像把 `/metrics` 挪到 9090，
 只换 digest 会让 ServiceMonitor 继续抓 8080 → **指标全断且不报错，所有告警一起变瞎**。
-升级前先看上游 `git diff <旧sha>..<新sha> -- deploy/`，那是「清单要跟着改什么」的清单；
-上游 `docs/09-deploy-runbook.md` 是配套的踩坑册。
+升级前先看上游 `git diff <旧sha>..<新sha> -- deploy/ internal/metrics`，那是「清单要跟着改
+什么」的清单；上游 `docs/09-deploy-runbook.md` 是配套的踩坑册。
+✅ 反例（够的那类）：2026-09-03 `fdb3b59 → 0632049`，`internal/metrics` 零改动、
+`deploy/monitoring.yaml` 只有注释措辞变化 → 只换 digest 加一个 env（`LLM_RETRIES`）即可。
 
 ### schema 迁移：web 只读，索引靠写侧进程建
 
@@ -602,7 +626,8 @@ CI 当时是绿的：`testdata/fixture/jobs.jsonl` 由 `scripts/genfixture` 从*
 | enrich 积压（baseline 后） | ~4,900（SWE 子集） |
 | enrich 规则层（修复后） | **4,837 条 / 30 秒 / 0 错误**（修复前 75 条 / 14 分钟） |
 | enrich 归档扫描（集群内，500m limit） | 约 150s，一次性；CPU 顶满，之后降到 ~1m |
-| 单条 LLM 抽取 | 66.5s（真实描述；短 prompt 约 15s，别用它规划容量） |
+| 单条 LLM 抽取（旧模型） | 66.5s（真实描述；短 prompt 约 15s，别用它规划容量） |
+| 单条 LLM 抽取（新模型，2026-09-03 回校） | 均值 **18.7s** / 最坏 58.7s，并发 8 下 15 条/分钟；整轮实测 6.9 条/分钟 |
 | 节点容量 | 8 核 / 7600m allocatable，idle 用量约 9%、requests 合计 27% |
 
 ⚠️ 别按「库里岗位数 ÷ 100」估页数，`seen`（88k）远大于 `new`（9.5k），按后者算会把

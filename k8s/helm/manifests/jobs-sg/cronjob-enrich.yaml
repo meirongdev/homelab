@@ -27,10 +27,14 @@
 # 更慢。上游 738cb98 改成「每轮只扫归档一次」后：同一份归档、同样数据，规则层
 # 75 条/14 分钟 → **4837 条/30 秒**，容器 CPU 降到 ~0%。
 #
-# 现在真正的瓶颈是 DGX 推理时间（实测真实岗位描述约 70s/条 —— 短 prompt 只要 15s，
-# 真实描述长、reasoning 输出也长）。并发 8 → 约 6.5 条/分钟，
-# baseline 后约 4900 条积压要跑 ~4 个晚上收敛（每晚 3h 窗口约 1100 条，进度落库不丢）。
-# 稳态每日新增几百条，约半小时跑完。
+# 瓶颈是 DGX 推理时间，不在本作业这边。耗时按新模型回校过（上游 2026-09-03，
+# 16 条真实岗位、并发 8）：开推理均值 18.7s / 最坏 58.7s / 15 条每分钟。
+# 本仓库自己的口径：2026-09-03 那轮 244 条规则岗位、242 次 LLM 调用、35 分钟跑完
+# （≈6.9 条/分钟）、超时 3 条（1.2%）。两个数不一致是**口径不同**（16 条抽样 vs 整轮
+# 真实岗位，且共享 GPU 上还有别的租户），先照实记录，别拿其中一个替另一个。
+# baseline 那 ~4900 条积压已排空（2026-09-03 `jobs_sg_enrich_backlog` = 3，
+# 就是那轮超时的 3 条），所以"几个晚上收敛"这类排空预算从此不再适用。
+# 进度逐条落库，中途被 activeDeadlineSeconds 杀掉不丢。
 #
 # 想更快只能加并发（现在 CPU 是空的，加并发确实有效）—— 但 DGX 是跨 tailnet 共享的
 # 境内机器，同时在给 Open Notebook 供交互式推理，往上加会挤占它。8 是刻意保守的。
@@ -72,22 +76,50 @@ spec:
                   value: http://100.97.87.120:8000
                 # 裸 vLLM 的模型 id，不带网关的 provider 前缀。
                 # ⚠️ 必须与 DGX 当前 serve 的模型同名，写错回 404（不是 401）。
-                # 2026-09-02 由 deepseek-v4-flash 换为 qwen38-flash-next。本文件里 66.5s/条、
-                # 排空速率、937 completion tokens 等数字全是旧模型实测的，
-                # 换栈后第一轮跑完要按新模型回校（新栈 prefill 快得多、decode 略慢）。
+                # 2026-09-02 由 deepseek-v4-flash 换为 qwen38-flash-next。
+                # ☠️ 上游 0632049 起，换模型**只改这一行**（模型相关参数全部下沉成 LLM_*）：
+                #    若新栈关思考的键名不是 enable_thinking，还要一起改 LLM_THINKING_KWARG。
+                #    验收不用手写请求，上游带了一条默认跳过、不进 CI 的实测用例：
+                #      LLM_LIVE_URL=http://100.97.87.120:8000 LLM_LIVE_MODEL=<新模型> \
+                #        go test ./internal/llm -run Live -v
+                #    它会真调一次并断言推理确实被关掉；挂了就换 LLM_LIVE_KWARG 试，
+                #    试通的值就是要写进清单的那个。
                 - name: LLM_MODELS
                   value: qwen38-flash-next
                 - name: LLM_CONCURRENCY
                   value: "8"
-                # ⚠️ 单次调用超时。上游原本硬编码 60s，而实测真实岗位描述一次要 **66.5s**
-                # （2,326 字描述 / 497 prompt tokens / 937 completion tokens，reasoning 占大头）
-                # —— 超时值恰好卡在真实耗时**下面**，是最糟的位置：几乎每次都差几秒超时，
-                # 每条白烧 2×60s 后 fail-open 留在积压里，实测排空速率只有 2.1 条/分钟。
-                # 且该端点非流式，生成完才回 header（错误信息是 "awaiting headers"），
-                # 这个预算覆盖整个生成过程；客户端放弃也不会让服务端停止生成，白耗共享 GPU。
-                # 显式写成 300s（= 上游 llm.DefaultTimeout），要调不用重新构镜像。
+                # 单次调用预算（= 上游 llm.DefaultTimeout，可配，不必重构镜像）。
+                # 该端点非流式、生成完才回 header，所以这个预算覆盖**整个生成过程**
+                # （错误信息里的 "awaiting headers" 就是它）；客户端放弃也不会让服务端
+                # 停止生成，每次超时都白占一份共享 GPU。
+                # ☠️ 历史上它曾**恰好卡在真实耗时下面**（硬编码 60s vs 旧模型实测 66.5s/条）：
+                #    几乎每次都差几秒超时、每条白烧 2×60s，排空只剩 2.1 条/分钟，
+                #    表现像"慢"不像"坏" —— 卡在边界上的超时最难发现。别把它调回 60。
+                # 新模型实测（上游 2026-09-03）：均值 18.7s、最坏 58.7s。**300s 不算充足余量**：
+                # 约 1.3% 的调用会超过它（上游 3/204、3/242；我们 2026-09-03 那轮同样 3/242
+                # = 1.2%），成因是推理模型在个别岗位上跑飞。对策不是调大这个值（那只会让
+                # 跑飞更贵），见下面 LLM_RETRIES。
                 - name: LLM_TIMEOUT
                   value: "300"
+                # 关掉当场重试。跑飞的岗位超时是 fail-open 的，它留在积压里、第二天那轮本来
+                # 就会再试；而当场重试同一条岗位、同一个模型，几乎必然再烧满一个 LLM_TIMEOUT。
+                # 实测 2026-09-03 那轮 242 次调用超时 3 条，默认 retries=1 等于白占
+                # 3×2×300s 的共享 GPU 槽位，换回来的成功率几乎为 0。
+                # 上游 runbook §5 结论一致：LLM_RETRIES=0 比加大超时或 LLM_MAX_TOKENS 封顶
+                # 都划算 —— 封顶值必须落在很窄的带里（开推理正常抽取 p50 475 / p90 2631 /
+                # max 4359 completion tokens），封低了模型先把推理写满、content 返回 null，
+                # 一次慢成功变成硬失败。所以这里**不设** LLM_MAX_TOKENS。
+                - name: LLM_RETRIES
+                  value: "0"
+                # 刻意**没有** LLM_THINKING —— 它是应急旋钮，不是常态配置：
+                #  · 上游实测开推理 15 条/分钟，LLM_THINKING=false 是 154 条/分钟，
+                #    代价是抽取略松（词仍过 tech_taxonomy 白名单，杂词落进 unmapped_tech）。
+                #  · 现在没有积压要排（jobs_sg_enrich_backlog = 3），拿质量换速度不划算。
+                #  · 键名旋钮是 LLM_THINKING_KWARG（默认 enable_thinking）。☠️ 换栈后旧键名
+                #    `{"thinking":false}` 会回 200 但完全不生效；现在代码自己会打
+                #    `reasoning was not disabled` 的 WARN，不再只能人肉比对 usage。
+                # 真要应急排空：临时加 LLM_THINKING=false，排空后删掉（历史实测见
+                # docs/reference/jobs-sg.md「真正的提速杠杆」）。
                 # 这里**没有**网关的 virtual key：直连 DGX 不需要，
                 # external-secret.yaml 也不再声明该键。若改走 LLM 网关才需要补回
                 # （改 LLM_BASE_URL + 删 LLM_MODELS + 声明对应的 key）。

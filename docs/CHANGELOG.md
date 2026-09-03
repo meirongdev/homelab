@@ -87,6 +87,7 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-08-25 | **homelab 两个 Postgres 收敛成一个**：`litellm-pg` + `multica-postgres` → `databases/apps-pg`，逐表对账。**刻意不装 CNPG**（operator 自身开销比省下的 postmaster 还贵），所以两集群的 `apps-pg` 同名同角色但形态不同 ([决策四](decisions/shared-postgres-platform.md)) |
 | 2026-08-26 | **接上 godot-games**：Nakama 挂服务端 Lua 模块（initContainer 从 OCI 镜像拷入，换 tag 即发版）+ 按契约设 `runtime.lua_{min,max}_count`（**必须成对**，只调 max 直接启动失败）+ 新服务 `game.meirong.dev` ([services.md](reference/services.md)) |
 | 2026-08-27 | **游戏大厅打通**：`game.meirong.dev` 的 HTTPRoute 变三条规则（`/v2/*` + `/ws` → nakama，其余静态站）。☠️ **上游 e2e 直连 nakama 域名、结构上绕过这两条**，路由漏写 e2e 照样全绿，唯一判据是用浏览器真开一次 ([services.md](reference/services.md)) |
+| 2026-09-03 | **jobs-sg 升到 `0632049` + `LLM_RETRIES=0`**：上游把模型相关参数全部下沉成 `LLM_*`（换模型不再改代码/发版），并填掉那条"关思考的 kwargs 键名换栈后静默空操作"的坑（键名改成 `LLM_THINKING_KWARG`，默认 `enable_thinking`；仍在推理时自己打 WARN）。耗时按新模型回校：均值 18.7s、15 条/分钟（抽样）与本仓库整轮 6.9 条/分钟并列记录，约 1.3% 调用超 300s → 对策是关掉当场重试（`LLM_RETRIES=0`）而不是加大超时或封顶 token。☠️ 刻意**不设** `LLM_THINKING`：积压已排空（backlog=3），拿抽取质量换速度不划算 ([jobs-sg.md](reference/jobs-sg.md)) |
 | 2026-09-03 | **DGX 主力模型全线换引用**：上游 nv-dgx-spark 2026-09-02 把 :8000 从 `deepseek-v4-flash` 换成 `qwen38-flash-next`（NVFP4，ctx 1M→262k，冷启动 8–11min），旧名已从 `/v1/models` 消失。跟着改的是网关别名 + jobs-sg 直连 + Open Notebook 接线 + oracle calibre 作业，另把 `DgxSparkVllmDown` 的 `for` 10m→15m（新栈加载 8–11min，10m 会被正常重启烧掉）。☠️ 爆炸半径实测：**8 把虚拟 key 的白名单**要同步改 ([网关事实](reference/litellm-gateway.md) · [决策修订](decisions/litellm-llm-gateway.md)) |
 
 ### 审计与清理（历史）

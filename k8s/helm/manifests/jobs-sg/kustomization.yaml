@@ -122,7 +122,20 @@ resources:
 # 三个坑的实测数据都在 docs/reference/jobs-sg.md。
 images:
   - name: ghcr.io/meirongdev/jobs-sg
-    # fdb3b59 (2026-08-27)：修首页 work_mode 图例的过期文案 —— 数据已是
+    # 0632049 (2026-09-03, tag sha-0632049388ae)：上游把**模型相关参数全部下沉到 LLM_***
+    # （新增 internal/llm/config.go），换模型不再改代码、不需要发版。对 homelab 最要紧的是
+    # 那条静默失效被堵住了：关推理的 `chat_template_kwargs` 键名换栈后不报错也不生效，
+    # 现在键名是 `LLM_THINKING_KWARG`（默认 enable_thinking，实测唯一生效的那个），
+    # 且客户端会解 `reasoning_tokens` —— 设了 `LLM_THINKING=false` 而模型仍在推理时，
+    # 每进程打一条 `reasoning was not disabled` 的 WARN，点名要改的键名。
+    # 随带 29a391b：耗时数字按新模型回校（开推理均值 18.7s、15 条/分钟 @并发8），
+    # 并清掉 Bifrost 退役残留的文档。
+    # ✅ 上游 deploy/monitoring.yaml 那 4 行只是注释口径（排空 ~420→~900 条/晚），
+    #    **指标名与端口都没动**（internal/metrics 在 fdb3b59..HEAD 零改动），
+    #    homelab 侧 ServiceMonitor 不需要跟着改 —— 那条「只换 digest 不总是够」的坑这次不适用。
+    # 本次配套改动：cronjob-enrich.yaml 新增 `LLM_RETRIES=0`（理由写在那处注释）。
+    #
+    # 其前身 fdb3b59 (2026-08-27)：修首页 work_mode 图例的过期文案 —— 数据已是
     # Unknown 九成，旧文案却还在教读者 "say nothing ⇒ counted as Onsite"，
     # 数字和说明自相矛盾（work_mode 修复 af34eed 时漏改的模板字符串）。
     # 只动了 internal/view/market.go 一行模板文案，行为中性；顺带带上
@@ -178,4 +191,4 @@ images:
     # store.addedColumns 在写者启动时 ALTER 补上。
     # ⚠️ 回滚到早于 4af8944 的镜像是安全的（多出来的列不碍旧代码），但审计列
     # 停更、/metrics 的 reconcile 偏差/覆盖率指标消失。
-    digest: sha256:141203f141b5b91d19b65f3e4a66e157b4348c728e992fe284639a1467bd63c6
+    digest: sha256:562ec201fabfbd12f1a0ef8fa7db675f12a0399c0f83c583a9fa3b8264b64b9c
