@@ -29,6 +29,9 @@
 
 上游（`~/projects/meirongdev/nv-dgx-spark`）单方面换栈，本仓库只是跟着改引用。**这一节是本
 仓库关于该上游的唯一真相源**；换栈的技术理由与压测数据在 nv-dgx-spark 仓库，不在这里复制。
+☠️ **下次上游再换模型/回滚，照
+[runbooks/dgx-model-swap-homelab-followup.md](../runbooks/dgx-model-swap-homelab-followup.md) 走**
+——它把"改哪四处、为什么必须动 key、哪三条阈值要重估、怎么验收"写成了可照抄的 SOP。
 
 | | |
 |---|---|
