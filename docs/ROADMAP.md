@@ -43,6 +43,11 @@
   ClusterMesh 纯待命，加自愈探针不划算；另一条路是明确退役它、跨集群一律走 NodePort。
   机制与判据见 [reference/tailscale-network.md](reference/tailscale-network.md)。
 
+- **DGX 再换模型时，这两件值得先做掉**（今天是手写命令，下次还要重想）：① 把采集
+  （served name / ctx / KV 上限 / 冷启动）与"列出待改虚拟 key"脚本化；② 给 served name
+  漂移加哨兵，让上游换模型由本仓库主动发现而不是等第一个 404。SOP 与七项采集清单见
+  [runbooks/dgx-model-swap-homelab-followup.md](runbooks/dgx-model-swap-homelab-followup.md)。
+
 - **DGX 新主力栈的质量闸门没跑**。2026-09-02 换栈只过了速度闸门：NVFP4 是无校准 RTN
   量化，公开分数由量化方自报，本仓库未独立验证（aider-polyglot 在 nv-dgx-spark 侧待跑）。
   跑挂就 `make qwen38fn-rollback` 回 V4-Flash —— ☠️ 那要把网关别名 + jobs-sg +
