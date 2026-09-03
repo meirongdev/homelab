@@ -45,7 +45,10 @@
 
 - **DGX 再换模型时值得先做掉的优化**（这次的成本：16 处 git 字面值人肉搜替 + 8 把虚拟 key
   + 3 条阈值 + 7 项现场采集，全靠记忆串联）。四件事：① CI 字面值门禁（漏改一处从静默 404
-  变 CI 红灯）；② 契约回归脚本（判据只认 `usage`，识破"200 但空操作"）；③ 虚拟 key 卫生
+  变 CI 红灯）；② 契约回归脚本（判据只认 `usage`，识破"200 但空操作"）—— ☠️ 范围已缩小：
+  jobs-sg 那条链路上游 2026-09-03 自带了实测用例
+  （`LLM_LIVE_URL=… LLM_LIVE_MODEL=… go test ./internal/llm -run Live -v`），本仓库的脚本
+  只需覆盖 calibre 的提示词与网关别名；③ 虚拟 key 卫生
   —— 顺带修一个**当下就坏**的缺陷：16 把 key 只有 1 把有 alias，且 4 把的白名单里还挂着
   已死的 `mac/qwen3.6-35b`，那几条 fallback 现在就是断的；④ served name 漂移哨兵 ——
   ☠️ 形态已从"json-exporter 抓 `/v1/models`"改成**一条 PromQL**（vLLM 指标自带 `model_name`
@@ -59,13 +62,6 @@
   跑挂就 `make qwen38fn-rollback` 回 V4-Flash —— ☠️ 那要把网关别名 + jobs-sg +
   Open Notebook + oracle calibre **四处一起回退**，外加虚拟 key 白名单，见
   [litellm-gateway.md](reference/litellm-gateway.md) 坑 A。
-
-- **jobs-sg 的 `DisableThinking` 在新栈上是静默空操作**。它发的是
-  `chat_template_kwargs {"thinking": false}`（旧栈的 kwargs 名），新栈只认
-  `enable_thinking`：实测 `{"thinking":false}` 的 reasoning tokens 是 134（基线 142），
-  `{"enable_thinking":false}` 才是 0。默认不发这个字段所以线上没坏，但**别指望用它清积压**
-  （白花约 6 倍 token）。改 kwargs 名是 jobs-sg 上游仓库的活，见
-  [jobs-sg.md](reference/jobs-sg.md)。
 
 - **DGX 别名的 key 白名单已同步，但 fallback 是否也受白名单约束仍未验证**。
   2026-09-03 实测 16 把 key 有 8 把引用 DGX 别名（已全部换成新名），其中 4 把**只有**
