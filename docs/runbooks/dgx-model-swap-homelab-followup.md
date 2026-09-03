@@ -176,14 +176,19 @@ Open Notebook 的接线只能在应用里看（值存的是模型 id，不是名
 | 2026-08-25 | Mac 兜底换 Ornith，别名改名 → key 白名单没跟着改，**全挂** | 坑 A 的由来；从此"改别名必同步改 key" |
 | 2026-09-02/03 | DGX 换 Flash-Next，本文全流程 | 8/16 把 key 受影响；两条阈值要重估；`{"thinking":false}` 变静默空操作 |
 
-下一次想省事，值得做的是这两件（已挂 [ROADMAP 开放项](../ROADMAP.md)）：
+下一次想省事的完整方案（含实测成本、优先级、被否决的选项）已展开成
+[plans/apps/2026-09-03-dgx-model-swap-optimizations.md](../plans/apps/2026-09-03-dgx-model-swap-optimizations.md)，
+本节只留结论与指针，实施细节**以那份为准**，两边不各存一份：
 
-1. **把 §1 与 §3 脚本化**：一条命令采完 served name/ctx/KV 上限，一条命令 DRY-RUN 列出
-   待改 key。今天它们是手写的，下次还要重想。
-2. **给 served name 漂移加哨兵**，让"上游换模型"由本仓库主动发现而不是等第一个 404。
-   可行形态：黑盒 exporter 抓 `:8000/v1/models` 把 name 导出成指标 + `absent()` /
-   与 git 里的期望值不符就 warning。⚠️ 别照抄"抓得到就算活着"——那正是
-   `DgxSparkVllmStuck` 要补的盲区。
+1. **§1 与 §3 脚本化**（采集 + 列待改 key），并把散在 5 个文件里的 **16 处模型名字面值**
+   收敛到 8 处、由 CI 断言它们等于 `versions.just` 里那个声明值。今天 16 处是人肉搜替。
+2. **给 served name 漂移加哨兵** —— ☠️ **形态已改**：原设想"黑盒 exporter 抓
+   `:8000/v1/models` 导出指标"被更省的方案取代：vLLM 指标**自带 `model_name` 标签**，
+   而 `job="vllm-dgx-spark"` 本来就在抓 `:8000/metrics`，所以**一条 PromQL 就够**
+   （`absent(...model_name=期望值) and on() up == 1`），零新组件。
+   顺带实测：这版 vLLM 没有 per-model 健康端点，`/health/<name>` 与 `/v1/models/<name>` 都 404，
+   "按模型探活"这条路本来就不存在。
+   ⚠️ 别照抄"抓得到就算活着"——那正是 `DgxSparkVllmStuck` 要补的盲区；本哨兵只认"名字漂移"。
 
 ## 9. 附录：本仓库管不到的依赖（谁有权限改）
 

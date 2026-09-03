@@ -32,6 +32,10 @@
 ☠️ **下次上游再换模型/回滚，照
 [runbooks/dgx-model-swap-homelab-followup.md](../runbooks/dgx-model-swap-homelab-followup.md) 走**
 ——它把"改哪四处、为什么必须动 key、哪三条阈值要重估、怎么验收"写成了可照抄的 SOP。
+想**减少下一次的工作量**（CI 字面值门禁 / 契约回归 probe / 虚拟 key 卫生 / served name 漂移
+哨兵，含被否决的选项）→
+[plans/apps/2026-09-03-dgx-model-swap-optimizations.md](../plans/apps/2026-09-03-dgx-model-swap-optimizations.md)
+（📐 未实施，所以本页的机制描述仍是现状，别照着它以为门禁已经存在）。
 
 | | |
 |---|---|

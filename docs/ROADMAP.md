@@ -43,9 +43,15 @@
   ClusterMesh 纯待命，加自愈探针不划算；另一条路是明确退役它、跨集群一律走 NodePort。
   机制与判据见 [reference/tailscale-network.md](reference/tailscale-network.md)。
 
-- **DGX 再换模型时，这两件值得先做掉**（今天是手写命令，下次还要重想）：① 把采集
-  （served name / ctx / KV 上限 / 冷启动）与"列出待改虚拟 key"脚本化；② 给 served name
-  漂移加哨兵，让上游换模型由本仓库主动发现而不是等第一个 404。SOP 与七项采集清单见
+- **DGX 再换模型时值得先做掉的优化**（这次的成本：16 处 git 字面值人肉搜替 + 8 把虚拟 key
+  + 3 条阈值 + 7 项现场采集，全靠记忆串联）。四件事：① CI 字面值门禁（漏改一处从静默 404
+  变 CI 红灯）；② 契约回归脚本（判据只认 `usage`，识破"200 但空操作"）；③ 虚拟 key 卫生
+  —— 顺带修一个**当下就坏**的缺陷：16 把 key 只有 1 把有 alias，且 4 把的白名单里还挂着
+  已死的 `mac/qwen3.6-35b`，那几条 fallback 现在就是断的；④ served name 漂移哨兵 ——
+  ☠️ 形态已从"json-exporter 抓 `/v1/models`"改成**一条 PromQL**（vLLM 指标自带 `model_name`
+  且已被 `vllm-dgx-spark` 抓取）。展开方案与否决项 →
+  [plans/apps/2026-09-03-dgx-model-swap-optimizations.md](plans/apps/2026-09-03-dgx-model-swap-optimizations.md)；
+  SOP 与七项采集清单见
   [runbooks/dgx-model-swap-homelab-followup.md](runbooks/dgx-model-swap-homelab-followup.md)。
 
 - **DGX 新主力栈的质量闸门没跑**。2026-09-02 换栈只过了速度闸门：NVFP4 是无校准 RTN
