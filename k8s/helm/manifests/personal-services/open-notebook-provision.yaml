@@ -56,9 +56,9 @@ data:
         # 双节点 TP=2）。端点不变，只有 served name 变；旧名已从 /v1/models 消失。
         # ☠️ 名字必须与裸 vLLM 的 served name 逐字相同 —— 这里**不走 LLM 网关**，
         #    填网关别名（custom_dgx/…）会 404。
-        # ⚠️ 本 provisioner 只增不删（unmanaged models 只打 note），所以改名后**旧条目
-        #    deepseek-v4-flash 会留在 UI 里**当死模型（选中即报错）。清理要在 UI 手删，
-        #    别指望 git push 把它带走。
+        # ⚠️ 本 provisioner 只增不删（unmanaged models 只打 note）：改模型名之后**旧条目会
+        #    留在 UI 里**当死模型（选中即报错），git push 带不走它，得手动删。
+        #    2026-09-03 那次删的是 deepseek-v4-flash，删前扫过全部 notebook/profile 无引用。
         {"name": "qwen38-flash-next", "type": "language", "credential": "dgx-vllm"},
         # 备用对话模型（非默认）：DGX 是跨境共享机器且暂无告警（ROADMAP #4），
         # 它不可达时在 UI 里一键切到这个本地 35B（262k ctx）兜底。

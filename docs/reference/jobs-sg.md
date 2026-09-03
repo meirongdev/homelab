@@ -91,6 +91,17 @@ git 里那份网关清单帮不上忙，只有 `LLM_MODELS` 跟着改才有效�
 [litellm-gateway.md](litellm-gateway.md) 的「DGX 主力模型」。
 ⚠️ 新模型**尚未按 enrich 的提示词复测严格 JSON**（只验过 tool call 与补全可用），
 换栈后第一轮跑完要看有多少条目 fail-open 退回规则结果。
+✅ 严格 JSON 这条契约已在新模型上复验（2026-09-03，直接打网关、用仓库里那份
+`ExtractPrompt`）：三种参数（默认 / `{"thinking":false}` / `{"enable_thinking":false}`）
+都回合法 JSON 且六个 key 齐全，reasoning 分别是 142 / 134 / 0。
+☠️ 由此暴露一条**上游仓库的坑**：`OpenAIExtractor.DisableThinking` 发的 kwargs 名是
+`thinking`（旧栈的形状），**在新栈上是静默空操作** —— `{"thinking":false}` 的 reasoning
+是 134，与基线 142 同量级，而 `{"enable_thinking":false}` 才是 0。三种写法都回 200，
+所以**只能拿 `usage.completion_tokens_details.reasoning_tokens` 判**，请求成功不是证据。
+默认没发这个字段，线上行为未变；清积压时按它跑不提速，只是多烧 token
+（本次 n=1 短输入：170 vs 26 completion token，约 6 倍；旧栈那批 4 条真实岗位的历史
+实测是 18.8 倍，见上游 `internal/llm/client.go` 注释）。
+`internal/llm/thinking_test.go` 断言的也是 `thinking` 这个键 —— 改名要在 jobs-sg 仓库做。
 
 **取舍**：省掉 VK 与 Vault 依赖，但没有 LLM 网关的 `custom_m2` 回退，也没有用量计量；
 DGX 是跨 tailnet 共享的境内机器（RTT 66–83ms），不可用时 enrich fail-open 退回纯规则。
@@ -101,6 +112,8 @@ DGX 是跨 tailnet 共享的境内机器（RTT 66–83ms），不可用时 enric
 reasoning 占大头）。短 prompt 只要 15s，别拿短 prompt 的数字做容量规划。
 ⚠️ 这组数字（含 300s 超时、6.5 条/分钟、每晚排空 ~1100 条）是**旧模型**测的：新栈
 prefill 快约一倍、decode 略慢、并发上限更高，2026-09-02 换栈后第一轮要重测再回校。
+本轮复验只用了短输入（fixture 最长一条描述仅 66 字符），**长描述的端到端耗时没在这里测**，
+别拿 66 字符那次的秒数当容量依据。
 
 ⚠️ **超时值曾经卡在真实耗时下面（2026-08-03）**：上游硬编码 60s，而真实调用要 66.5s，
 于是几乎每次都差几秒超时 → 每条白烧 2×60s → fail-open 留在积压里，实测排空只有

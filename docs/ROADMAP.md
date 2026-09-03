@@ -43,6 +43,25 @@
   ClusterMesh 纯待命，加自愈探针不划算；另一条路是明确退役它、跨集群一律走 NodePort。
   机制与判据见 [reference/tailscale-network.md](reference/tailscale-network.md)。
 
+- **DGX 新主力栈的质量闸门没跑**。2026-09-02 换栈只过了速度闸门：NVFP4 是无校准 RTN
+  量化，公开分数由量化方自报，本仓库未独立验证（aider-polyglot 在 nv-dgx-spark 侧待跑）。
+  跑挂就 `make qwen38fn-rollback` 回 V4-Flash —— ☠️ 那要把网关别名 + jobs-sg +
+  Open Notebook + oracle calibre **四处一起回退**，外加虚拟 key 白名单，见
+  [litellm-gateway.md](reference/litellm-gateway.md) 坑 A。
+
+- **jobs-sg 的 `DisableThinking` 在新栈上是静默空操作**。它发的是
+  `chat_template_kwargs {"thinking": false}`（旧栈的 kwargs 名），新栈只认
+  `enable_thinking`：实测 `{"thinking":false}` 的 reasoning tokens 是 134（基线 142），
+  `{"enable_thinking":false}` 才是 0。默认不发这个字段所以线上没坏，但**别指望用它清积压**
+  （白花约 6 倍 token）。改 kwargs 名是 jobs-sg 上游仓库的活，见
+  [jobs-sg.md](reference/jobs-sg.md)。
+
+- **DGX 别名的 key 白名单已同步，但 fallback 是否也受白名单约束仍未验证**。
+  2026-09-03 实测 16 把 key 有 8 把引用 DGX 别名（已全部换成新名），其中 4 把**只有**
+  DGX 别名、白名单里没有 `mac/ornith`。按坑 A 的推论它们的"主→兜底"拿不到兜底，
+  但要证实得制造 DGX 不可达 —— 共享 GPU 机器不能为验证去停。判据见
+  [litellm-gateway.md](reference/litellm-gateway.md) 坑 A。
+
 - **oracle-k3s：1 个 Docker Hub 镜像仍未被 Trivy 扫过**（`rsshub-browserless`，扫描 Job 因匿名
   拉取配额 FATAL）。**失败的扫描不会自动重试**，配额恢复后须人工推一次
   `kubectl --context oracle-k3s -n trivy-system rollout restart deploy/trivy-operator`。
