@@ -1,6 +1,6 @@
 # Homelab Changelog
 
-> Last updated: 2026-09-03
+> Last updated: 2026-09-04
 > 已经做完的事，一条一行，按阶段/时间倒着找。**这里只回答「做过什么」**——
 > 还剩什么没做看 [ROADMAP.md](ROADMAP.md)，现在是什么样看 [reference/](reference/README.md)。
 > 2026-09-02 从 ROADMAP 拆出：那份文件长到 23.8KB，9 条开放项被 65 条历史淹没，
@@ -89,6 +89,7 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-08-27 | **游戏大厅打通**：`game.meirong.dev` 的 HTTPRoute 变三条规则（`/v2/*` + `/ws` → nakama，其余静态站）。☠️ **上游 e2e 直连 nakama 域名、结构上绕过这两条**，路由漏写 e2e 照样全绿，唯一判据是用浏览器真开一次 ([services.md](reference/services.md)) |
 | 2026-09-03 | **jobs-sg 升到 `0632049` + `LLM_RETRIES=0`**：上游把模型相关参数全部下沉成 `LLM_*`（换模型不再改代码/发版），并填掉那条"关思考的 kwargs 键名换栈后静默空操作"的坑（键名改成 `LLM_THINKING_KWARG`，默认 `enable_thinking`；仍在推理时自己打 WARN）。耗时按新模型回校：均值 18.7s、15 条/分钟（抽样）与本仓库整轮 6.9 条/分钟并列记录，约 1.3% 调用超 300s → 对策是关掉当场重试（`LLM_RETRIES=0`）而不是加大超时或封顶 token。☠️ 刻意**不设** `LLM_THINKING`：积压已排空（backlog=3），拿抽取质量换速度不划算 ([jobs-sg.md](reference/jobs-sg.md)) |
 | 2026-09-03 | **DGX 主力模型全线换引用**：上游 nv-dgx-spark 2026-09-02 把 :8000 从 `deepseek-v4-flash` 换成 `qwen38-flash-next`（NVFP4，ctx 1M→262k，冷启动 8–11min），旧名已从 `/v1/models` 消失。跟着改的是网关别名 + jobs-sg 直连 + Open Notebook 接线 + oracle calibre 作业，另把 `DgxSparkVllmDown` 的 `for` 10m→15m（新栈加载 8–11min，10m 会被正常重启烧掉）。☠️ 爆炸半径实测：**8 把虚拟 key 的白名单**要同步改 ([网关事实](reference/litellm-gateway.md) · [决策修订](decisions/litellm-llm-gateway.md)) |
+| 2026-09-04 | **jobs-sg enrich 稳态给推理封顶**（`LLM_EXTRA_BODY={"reasoning_effort":"medium"}`）：qwen38-flash-next 在长岗位上把推理写飞，超时从 1.2%（3/242）一夜变 7.8%（21/269），而引擎读数与前夜一致——不是 DGX 慢，是生成长度没有上界（跑飞那条 16754 completion token，16448 是推理）。跑飞率随正文长度上升（<1500 字符 0/54，>3500 字符 15.9%）。☠️ `chat_template_kwargs` 的三个推理预算键全部静默无效，生效的是顶层 `reasoning_effort`，本文早前先写反了（判据错选成"能不能关掉推理"），且它的失效形态是 HTTP 400 整轮全挂。实测封顶后：前夜超时的 5 条全部 8–22s 完成、抽词更全，8 条正常岗位 244s→82s ([jobs-sg.md](reference/jobs-sg.md)) |
 
 ### 审计与清理（历史）
 

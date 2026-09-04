@@ -1,6 +1,6 @@
 # jobs-sg — 新加坡 SWE 岗位趋势周报（架构事实）
 
-> Last updated: 2026-09-03
+> Last updated: 2026-09-04
 > Status: 生效事实
 > Scope: jobs-sg 在 homelab 集群的部署形态、镜像固定方式、备份口径、首次上线依赖顺序
 > 本文是 source of truth。应用代码在 [meirongdev/jobs-sg](https://github.com/meirongdev/jobs-sg)。
@@ -104,6 +104,10 @@ git 里那份网关清单帮不上忙，只有 `LLM_MODELS` 跟着改才有效�
   `reasoning was not disabled` 的 WARN，并点名让你改哪个键 —— 这类静默从此会自己现形；
 - 换模型的验收不用手写请求：`LLM_LIVE_URL=… LLM_LIVE_MODEL=… go test ./internal/llm -run
   Live -v`（默认跳过、不进 CI）真调一次并断言推理确实被关掉，挂了就换 `LLM_LIVE_KWARG` 试。
+  ✅ 本仓库侧已跑通一次（2026-09-03，打现网 DGX）：`PASS —— qwen38-flash-next:
+  27.6s with enable_thinking=false, extracted 13 terms`，即 `LLM_THINKING_KWARG` 用默认值就对。
+  ⚠️ 别拿这 27.6s 去推翻上面那张耗时表：那是**单次冷跑**（上游 2.8s 是 16 条样本的均值），
+  而且这一条描述比样本长。它的价值只在于"键名对不对"这个判据。
 
 模型相关参数**全部下沉成 `LLM_*` 环境变量**（`internal/llm/config.go` 一处解析）：
 `LLM_BASE_URL / LLM_MODELS / LLM_TIMEOUT / LLM_CONCURRENCY / LLM_RETRIES / LLM_THINKING /
@@ -149,7 +153,10 @@ DGX 是跨 tailnet 共享的境内机器（RTT 66–83ms），不可用时 enric
 ⚠️ 旧模型下也别按「单条 66.5s ÷ 并发 8 = 7.5 条/分钟」推算（那是本文早期写错的数字）：
 当时实测只有 3.0 条/分钟 —— 单条独占 66.5s，但 8 并发时每条被拉长到约 160s，
 即 8× 并发只换来 **3.3×** 吞吐，DGX 已接近饱和。那条**并发饱和**的结论与新模型无关，
-仍然成立（新栈并发上限更高一些：`--max-num-seqs 8` 而 KV 上限实测 5.34）。据此（历史）：
+仍然成立，而且新栈更紧：`--max-num-seqs 8` 之下 KV 池实测 `kv_cache_max_concurrency=5.34`
+（见 [litellm-gateway.md](litellm-gateway.md)），**低于清单里的 `LLM_CONCURRENCY=8`** ——
+也就是有相当一部分时间是在引擎侧排队，不是在本地空转。要不要把 8 降到 5 是个待测项
+（降了可能少排队、也可能只是把同一批活拉得更长），**未实测不改**。据此（历史）：
 
 | | 条数 | reasoning 开（3.0/分钟） |
 |---|---|---|
@@ -180,15 +187,60 @@ reasoning 占了这个模型 **约 95%** 的 output token。上游 `472aaf5` 加
 但 `writeResult` 会把每个词过 `tech_taxonomy` **白名单**，没命中的进
 `unmapped_tech`，**进不了 `job_tech`**，白名单才是真正的质量闸门。
 
-⚠️ `reasoning_effort` 这个参数该模型**静默忽略**，只有 `chat_template_kwargs` 有效。
-且默认**不发**该字段（请求体与从前逐字节一致），它是 vLLM/模板专用的，
-换成 LLM 网关或没有该模板的模型会被拒。
+当前这套栈上生效的是顶层 `reasoning_effort`，`chat_template_kwargs` 里的推理预算键反而
+无效。☠️ 本文早先写反了（原话是「`reasoning_effort` 该模型静默忽略，只有
+`chat_template_kwargs` 有效」），错在判据选成了"能不能把推理关掉"：`reasoning_effort`
+确实关不掉推理，`low` 仍有约 461 token，但它能封顶。2026-09-04 在 qwen38-flash-next
+上实测：
 
-**用法定位**：只用来啃积压，不用于稳态。清单里因此**不设** `LLM_THINKING`（= 默认开启），
-啃积压走一次性 Job（不进 git，见下节）。2026-09-03 复核：积压已排空（backlog=3），
-稳态每轮约 240 条、35 分钟跑完，所以更没必要拿质量换速度。
-☠️ 稳态真正该动的旋钮是 **`LLM_RETRIES=0`**（已写进清单）：超时那 1.2% 本来第二天就会重试，
-当场重试几乎必然再烧满一个 300s，纯浪费。
+| 请求 | 结果 |
+|---|---|
+| 不带参数（`max_tokens=3000` 兜底） | 撞满 3000、`finish=length`、`content` 为空 |
+| `chat_template_kwargs.thinking_budget=256` | 同上，静默无效 |
+| `chat_template_kwargs.reasoning_max_tokens=256` | 同上，静默无效 |
+| `chat_template_kwargs.max_thinking_tokens=256` | 同上，静默无效 |
+| 顶层 `reasoning_effort: "low"` | 11.6s、reasoning 461、`finish=stop`、JSON 完整 |
+| 顶层 `reasoning_effort: "minimal"` | HTTP 400 |
+
+那个 400 就是服务端在校验这个字段的证据。⚠️ 它的失效形态因此和 `chat_template_kwargs`
+相反：换模型后该值若不被支持，是整轮 400 全挂，而不是悄悄不生效。
+
+**用法定位**：`LLM_THINKING=false` 只用来啃积压，不用于稳态；清单里因此不设它
+（= 默认开启），啃积压走一次性 Job（不进 git，见下节）。稳态用下一节的封顶。
+
+## 稳态旋钮：给推理封顶（`LLM_EXTRA_BODY` + `reasoning_effort`）
+
+qwen38-flash-next 会在个别岗位上把推理写飞，这是 enrich 记 partial 的常态成因。
+☠️ 起手别去查"DGX 是不是慢了"：2026-09-04 那轮 `errors=21`，而引擎读数与前夜一致
+（每输出 token 0.043s、排队 0.06s、无抢占）。实测到的形态：
+
+- 那条 OCBC 岗位不封顶要 16754 completion token（16448 是推理，占 98.2%），独占 GPU
+  跑 324s，夜里 8 并发折算约 720s。它会自己停，`finish=stop`，答案也对，只是 300s 内
+  拿不到。
+- 跑飞率随岗位长度上升（同一轮 298 条）：正文 <1500 字符 0/54，1500–2500 1.2%，
+  2500–3500 8.3%，>3500 **15.9%**。长不等于必挂，当晚最长的一条（12151 字符）就成功了。
+  生成长度是双峰的，正常 1000–2000 token、跑飞 >7000，所以这是触发了循环，
+  而不是内容多算得久。
+- ☠️ 前任 `deepseek-v4-flash` 不出这个问题，靠的是自带天花板而不是速度：它每 token 慢
+  50%（0.064 vs 0.043s），300s 只买得到约 4700 token，而它三晚约 640 次调用 p99≈4700、
+  无一超过 5000，恰好落在预算里边，余量≈0。2026-09-01 那晚 DGX 慢了 70%
+  （0.064→0.110s，预算掉到 2737），当场挂 3 条。那次记的「DGX 变慢」和这次同源：
+  预算和生成长度的上沿贴得太近，两边哪头动都会挂。
+
+封顶只能封推理。调大 `LLM_TIMEOUT` 没用，生成长度没有上界（`max_model_len` 是 262144）；
+`LLM_MAX_TOKENS` 硬封顶更糟，模型会先把推理写满、`content` 返回 null，一次慢成功变成
+硬失败。清单里用的是 `LLM_EXTRA_BODY={"reasoning_effort":"medium"}`，键名与失效形态见
+上一节。2026-09-04 实测：
+
+| | 默认 | `reasoning_effort: medium` |
+|---|---|---|
+| 前一夜超时的 5 条 | 全部 >300s 超时 | 全部 8–22s 完成，抽词更全（OCBC 那条 46→50 词）|
+| 8 条正常岗位合计 | 244s / 9763 reasoning token | 82s / 3487 token，抽词几乎不变 |
+
+`LLM_RETRIES` 留 `0`，理由是封顶后本来就不该有超时。☠️ 别沿用旧理由：清单注释曾写
+「重试成功率几乎为 0」，那是 3 个样本得出的；把 2026-09-04 那轮超时的 21 条隔天重跑，
+16 条一次就过（76%）。同一条岗位每次都是重新抽签，`temperature: 0` 也挡不住连续批处理
+带来的抖动。封顶后若仍有残留超时，那时一次重试只值约 20s，改成 1 是便宜的保险。
 
 ## 一次性积压回填
 
