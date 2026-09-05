@@ -14,7 +14,7 @@ spec:
       targetRevision: "9.1.0"
       helm:
         valueFiles:
-          - $values/k8s/helm/values/falco.yaml
+          - $values/cloud/oracle/values/falco.yaml
     - repoURL: https://github.com/meirongdev/homelab
       targetRevision: main
       ref: values

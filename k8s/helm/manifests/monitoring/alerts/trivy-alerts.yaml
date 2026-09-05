@@ -4,7 +4,7 @@
 # 指标来自 Trivy Operator 控制器（/metrics :8080，operator.metricsFindingsEnabled=true）：
 #   - homelab:   ServiceMonitor 由 chart 启用（values/trivy-operator.yaml，带 release 标签）
 #   - oracle-k3s: 本集群无 Prometheus Operator（CRD 为 0），由 otel-collector 直抓
-#                 trivy-operator:8080 再 remote-write（values/trivy-operator-oracle.yaml
+#                 trivy-operator:8080 再 remote-write（cloud/oracle/values/trivy-operator.yaml
 #                 里 serviceMonitor.enabled=false）
 #   **2026-08-03 起双集群覆盖**：下列聚合规则本就写成 `sum by (cluster)`，
 #   oracle 指标一到就自动生效，未改任何表达式；只有 MetricsAbsent 这类
@@ -45,7 +45,7 @@ spec:
         #    本文件头 17 行的「首次部署后 curl :8080/metrics 核对指标名」那一步没做过。
         #    同类陷阱：records/2026-08-30-memory-alert-page-cache-false-alarm.md。
         # ⚠️ 改名后立刻有 43 条 High 命中（全在 oracle），逐条读过 report 确认都是上游镜像
-        #    自带的测试/自签夹具，已在 values/trivy-operator-oracle.yaml 的 ignoreFile
+        #    自带的测试/自签夹具，已在 cloud/oracle/values/trivy-operator.yaml 的 ignoreFile
         #    按 **path** 精确豁免（不按 rule id 全局豁免——那会连真的私钥泄漏一起挡掉）。
         - alert: TrivyExposedSecretFound
           expr: sum by (cluster) (trivy_image_exposedsecrets{severity=~"High|Critical"}) > 0

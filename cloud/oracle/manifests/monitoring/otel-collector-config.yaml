@@ -221,7 +221,7 @@ receivers:
   # 症状都是「Telegram 安静」——而安静在修掉 systemd 误报（同日）之后正是**正常状态**。
   # 这里真正吃重的其实是抓取本身产生的 `up` 序列：告警靠 up==0 / absent(up)，
   # 不依赖任何业务计数器有没有增长（Falco 长期零告警是好事，不能当成死亡判据）。
-  # 前置：values/falco.yaml 里 metrics.enabled=true（渲染出 falco-metrics Service）
+  # 前置：cloud/oracle/values/falco.yaml 里 metrics.enabled=true（渲染出 falco-metrics Service）
   # **且** falco.webserver.prometheus_metrics_enabled=true（只开前者端点不出数据）。
   prometheus/falco:
     config:

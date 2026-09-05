@@ -2,7 +2,7 @@
 # 值/设计与 homelab 侧 k8s/helm/manifests/namespace-guardrails/priorityclasses.yaml 保持一致，
 # 详见该文件头部注释。本目录经 oracle-k3s App (Kustomize) 同步到 oracle 集群。
 #
-# ⚠️ **两份清单必须逐字段同步**（k8s/helm/values/ 下多份 values 是两集群共用的）。
+# ⚠️ **两份清单必须逐字段同步**（values 按集群分树后，同一个 PriorityClass 名在两棵树里各自引用）。
 # 2026-08-06 就因为 homelab 那份漏了一个 class，害 homelab 的 opencost 与
 # trivy-operator 静默下线 25 分钟——细节见那个文件里的记录。
 #

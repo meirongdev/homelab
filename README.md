@@ -43,7 +43,7 @@ git config core.hooksPath .githooks   # 一次性：让 just check 在 push 前�
 3. **Secrets**: `cd k8s/helm && just deploy-vault && just vault-init && just vault-unseal && just deploy-eso`
 4. **GitOps**: `cd k8s/helm && just deploy-argocd`（装控制面到 **oracle-k3s**）然后
    `just deploy-argocd-apps`（注册 Application，**是单独一步**）— 之后 ArgoCD 自动部署
-   Git 里全部纳管应用，包括 LGTM/otel/external-dns（改 `k8s/helm/values/` 或
+   Git 里全部纳管应用，包括 LGTM/otel/external-dns（改 `k8s/helm/values/`、`cloud/oracle/values/` 或
    `argocd/applications/` + `git push` 生效）
 5. **External Access**: `cd cloudflare/terraform && just init && just apply`
 

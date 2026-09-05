@@ -1,6 +1,6 @@
 # ArgoCD Application Patterns
 
-> Last updated: 2026-09-03
+> Last updated: 2026-09-05
 > Status: 生效事实
 >
 > 当前 ArgoCD 管理模式分析、可选 pattern 对比与取舍建议。
@@ -16,7 +16,8 @@ root (Application)
      ├── loki / tempo / sloth / kyverno / tetragon / trivy-operator /
      │   trivy-operator-oracle / falco / cnpg-operator / opencost / opencost-oracle /
      │   kube-prometheus-stack / external-dns-oracle / otel-collector
-     │                          # 多源 Helm：remote chart + $values/k8s/helm/values/<app>.yaml
+     │                          # 多源 Helm：remote chart + $values/<该集群的 values 树>/<app>.yaml
+     │                          #   homelab → k8s/helm/values/，oracle → cloud/oracle/values/
      ├── external-dns           # 混合多源：chart + manifests/external-dns/（目录源，管 ExternalSecret）
      ├── oracle-k3s             # Kustomize 树（跨集群推 cloud/oracle/manifests/）
      ├── backup                 # Kustomize（backup/overlays/homelab）
@@ -33,7 +34,7 @@ root (Application)
 
 | 子模式 | 代表 | 说明 |
 |--------|------|------|
-| Helm Chart + 本地 values | `loki.yaml`, `kyverno.yaml` | 多源：remote chart repo + `$values/k8s/helm/values/<app>.yaml`（oracle 变体 `<app>-oracle.yaml`）。⚠️ chart 也可以来自 **OCI registry**（`multica` 与 `cnpg-operator`）：那时 `repoURL` 写不带 `https://` 的 `ghcr.io/<org>/charts` |
+| Helm Chart + 本地 values | `loki.yaml`, `kyverno.yaml` | 多源：remote chart repo + `$values/k8s/helm/values/<app>.yaml`（oracle 应用引用 `$values/cloud/oracle/values/<app>.yaml`，一棵集群一棵 values 树）。⚠️ chart 也可以来自 **OCI registry**（`multica` 与 `cnpg-operator`）：那时 `repoURL` 写不带 `https://` 的 `ghcr.io/<org>/charts` |
 | Kustomize 目录 | `oracle-k3s.yaml` | `cloud/oracle/manifests/` 整棵 kustomize 树 |
 | 目录源（目录即清单） | `personal-services.yaml`, `monitoring-dashboards.yaml` | 一个 App ↔ `k8s/helm/manifests/` 下一个子目录，目录内文件全部纳管；2026-07-31 起取代 `directory.include` glob（所有权地图见 `k8s/helm/manifests/README.md`） |
 
@@ -229,7 +230,7 @@ sources:
     targetRevision: "1.2.3"
     helm:
       releaseName: foo        # ← App 叫 foo-oracle，release 仍叫 foo
-      valueFiles: [$values/k8s/helm/values/foo-oracle.yaml]
+      valueFiles: [$values/cloud/oracle/values/foo.yaml]
 ```
 
 > 本地 `helm template -f values.yaml` 默认复现不出这个问题，但只要显式把 release 名
@@ -279,14 +280,14 @@ spec:
         targetRevision: '{{ chartVersion }}'
         helm:
           valueFiles:
-            - $values/k8s/helm/values/{{ name }}.yaml
+            - $values/{{ valuesTree }}/{{ name }}.yaml   # homelab=k8s/helm/values，oracle=cloud/oracle/values
       destination:
         server: '{{ destination }}'
         namespace: '{{ namespace }}'
 ```
 
 **变体**:
-- **Git generator**：按目录或配置文件批量生成（最适合已有标准化 `k8s/helm/values/` 的场景）
+- **Git generator**：按目录或配置文件批量生成（最适合已有标准化 values 树的场景）
 - **Cluster generator**：按集群列表生成，新加集群自动对所有应用生效（适合多集群同质化部署，不适合双集群异构）
 - **Matrix generator**：组合两个 generator，实现集群 × 应用的笛卡尔积
 - **SCM provider generator**：按 GitHub org/repo 列表生成

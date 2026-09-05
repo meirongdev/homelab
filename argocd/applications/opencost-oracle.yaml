@@ -1,7 +1,7 @@
 ---
 # OpenCost — oracle-k3s 集群成本归因（跨集群部署，模式同 falco.yaml）
 # Chart: opencost/opencost
-# Values: k8s/helm/values/opencost-oracle.yaml
+# Values: cloud/oracle/values/opencost.yaml
 # 数据源为 collector（oracle 本地无 Prometheus，也不跨 Tailscale 查 homelab）。
 # 成本指标由 oracle otel-collector 抓 :9003 后 remote-write 到中枢 Prometheus。
 # 见 docs/plans/observability/2026-07-30-opencost-multicluster.md
@@ -22,7 +22,7 @@ spec:
       targetRevision: "2.5.28"
       helm:
         valueFiles:
-          - $values/k8s/helm/values/opencost-oracle.yaml
+          - $values/cloud/oracle/values/opencost.yaml
     - repoURL: https://github.com/meirongdev/homelab
       targetRevision: main
       ref: values

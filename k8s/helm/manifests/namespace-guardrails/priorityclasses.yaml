@@ -11,7 +11,7 @@
 # （读者注意：集群作用域资源不受 dest.namespace 影响，本文件在 homelab 生效。）
 #
 # ⚠️ **本文件与 cloud/oracle/manifests/base/priorityclasses.yaml 必须逐字段同步。**
-# 两边由不同的 ArgoCD App 下发，但 k8s/helm/values/ 下的多份 values 是**两集群共用**的
+# 两边由不同的 ArgoCD App 下发，values 也各在自己的树（k8s/helm/values/ 与 cloud/oracle/values/）
 # ——名字/值任一边漂了，缺失的那一侧就会在下次滚动时炸。
 #
 # 2026-08-06 这条警告是拿一次真实下线换来的：homelab 这份当时漏了 `meirong-bulk`

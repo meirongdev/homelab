@@ -1,10 +1,10 @@
 # K8s 资源管理与 QoS 策略
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-05
 > Status: 生效事实（本文只定原则，不存具体数值）
 
 本文档记录 Homelab 中 CPU/Memory requests & limits 的设定原则。
-**具体数值不在本文维护**，以 `k8s/helm/values/` 与集群实际为准
+**具体数值不在本文维护**，以 `k8s/helm/values/`（homelab）、`cloud/oracle/values/`（oracle）与集群实际为准
 （`kubectl -n <ns> get deploy -o yaml`）。2026-07-06 那轮调整的推导过程见
 [plans/archive/2026-07-06-resource-optimization.md](../plans/archive/2026-07-06-resource-optimization.md)（历史快照）。
 

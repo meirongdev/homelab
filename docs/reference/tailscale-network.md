@@ -1,6 +1,6 @@
 # Tailscale Cross-Cluster Networking
 
-> Last updated: 2026-09-03
+> Last updated: 2026-09-05
 > Status: 生效事实
 >
 > Rewritten 2026-07-07 after the topology review. The original design (each K3s node
@@ -521,7 +521,7 @@ kubectl --context k3s-homelab -n kube-system get pods -l k8s-app=cilium -o \
 | 集群 | values 文件 | 部署入口 |
 |---|---|---|
 | homelab | [`k8s/cilium/values.yaml`](../../k8s/cilium/values.yaml) | `cd k8s/helm && just deploy-cilium`（`ctx := "k3s-homelab"`） |
-| oracle | [`cloud/oracle/values/cilium-values.yaml`](../../cloud/oracle/values/cilium-values.yaml) | `cd cloud/oracle && just deploy-cilium` |
+| oracle | [`cloud/oracle/values/cilium.yaml`](../../cloud/oracle/values/cilium.yaml) | `cd cloud/oracle && just deploy-cilium` |
 
 `clustermesh.config.clusters[].ips` 是真源，它同时生成 `cilium-kvstoremesh` secret 的
 endpoint 与 clustermesh-apiserver 的 `hostAliases`。**两个 `deploy-cilium` 都带

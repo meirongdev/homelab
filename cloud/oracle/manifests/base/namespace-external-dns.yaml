@@ -5,7 +5,7 @@
 # 护栏无效，因为被 prune 的是 ns 不是 PVC）。
 # 复盘见 docs/records/2026-08-03-namespace-prune-cascade.md
 # Namespace + Cloudflare API token for the oracle-k3s external-dns instance (the chart itself
-# is ArgoCD-managed: argocd/applications/external-dns-oracle.yaml, values/external-dns-oracle.yaml).
+# is ArgoCD-managed: argocd/applications/external-dns-oracle.yaml, cloud/oracle/values/external-dns.yaml).
 #
 # Reuses the SAME meirong.dev zone token homelab's instance uses (Vault secret/homelab/external-dns,
 # property=api_token) — it's a zone-scoped Cloudflare API token, so it works for oracle's

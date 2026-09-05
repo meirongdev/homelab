@@ -102,7 +102,7 @@ spec:
           # mariadb 系 12 条，其余 mesa/GL），而 v1 只有 5 条 —— 升级反而把
           # TrivyImageCriticalVulnerabilities 从 73 推到 189。
           # -slim 实测 **8 条**（其中 6 条已在 trivy ignoreFile：stdlib/tar/grpc/protobufjs，
-          # 余 2 条 libgnutls30 见 values/trivy-operator-oracle.yaml 的豁免理由）。
+          # 余 2 条 libgnutls30 见 cloud/oracle/values/trivy-operator.yaml 的豁免理由）。
           # 两个变体逐项比对过：**只差 chromium**（ping/curl 都在），app 版本同为 2.5.0，
           # liquidjs 10.26.0 / fast-xml-parser 5.8.0 / protobufjs 7.2.6 与裸镜像完全一致
           # → 丢掉的只有 "Real Browser" 监控类型，本实例 16 个监控是 15 http + 1 push，

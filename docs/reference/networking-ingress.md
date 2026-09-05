@@ -1,6 +1,6 @@
 # Networking & Ingress — 入口链路与 DNS 自动化
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-05
 > Status: 生效事实
 >
 > 南北向入口（Cloudflare → Cilium Gateway）与 DNS 自动化（external-dns）。
@@ -29,7 +29,7 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
   [../records/2026-08-11-gateway-api-crd-stall.md](../records/2026-08-11-gateway-api-crd-stall.md)；
   两 justfile 的 `cilium_version` 都是 1.20.0）。
   该配方会 pin `--version 1.20.0` 并恢复 live `cilium-ca`（fresh install 会自签，装完要重跑
-  `just connect-clustermesh …`）。oracle 侧 values 在 `cloud/oracle/values/cilium-values.yaml`
+  `just connect-clustermesh …`）。oracle 侧 values 在 `cloud/oracle/values/cilium.yaml`
   （`cd cloud/oracle && just deploy-cilium`）。
 - **⚠️ `gatewayAPI.enableAppProtocol: true` 是两集群硬前提**: 没有它，ZITADEL console 的
   v1 gRPC 过网关 404（Envoy grpc_web filter 把转换后的原生 gRPC 用 HTTP/1.1 发给需要 h2c 的

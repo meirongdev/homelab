@@ -1,6 +1,6 @@
 # oracle-k3s 缩容到 2 OCPU / 12GB
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-05
 > Status: 生效事实 + 切换 SOP
 > 触发条件：需要改 `VM.Standard.A1.Flex` 的 shape（vendor 回收额度、腾额度开第二台、
 > 或事后要涨回去）。任何改 `ocpus` / `memory_gb` 的动作都走本文。
@@ -43,7 +43,7 @@
 
 | # | 改什么 | 在哪 | 怎么生效 |
 |---|--------|------|---------|
-| 1 | CPU requests 2712m → 1372m（43 处） | `cloud/oracle/manifests/**`、`k8s/helm/values/{loki,tempo,falco,cnpg-operator,opencost-oracle,trivy-operator-oracle}.yaml` | `git push` → ArgoCD |
+| 1 | CPU requests 2712m → 1372m（43 处） | `cloud/oracle/manifests/**`、`cloud/oracle/values/{loki,tempo,falco,cnpg-operator,opencost-oracle,trivy-operator-oracle}.yaml` | `git push` → ArgoCD |
 | 2 | argocd-server 50→25m、argocd-redis 25→15m | `k8s/helm/values/argocd.yaml` | **`cd k8s/helm && just deploy-argocd`**（manual-helm，push 不生效） |
 | 3 | `bulk`(-10) PriorityClass + 9 个可牺牲应用挂上 | `cloud/oracle/manifests/base/priorityclasses.yaml` 等 | `git push` → ArgoCD |
 | 4 | LimitRange `defaultRequest.cpu` 50m→15m | `cloud/oracle/manifests/personal-services/personal-services-limits.yaml` | `git push`（**要重建 timeslot pod 才吃到新默认值**） |
@@ -284,7 +284,7 @@ reconcile，撞上只剩 2 核。表现是 app 短暂 `Unknown`/`Progressing`、
    （`topologyKey: kubernetes.io/hostname`），为多节点 HA 设计。replicas=1 时
    `maxUnavailable` 25% 向下取整为 **0** → 旧 pod 不许先走；`maxSurge` 起的新 pod
    又撞旧 pod 的 anti-affinity → 不可调度。两边互等。
-   修复：`k8s/helm/values/loki.yaml` 的 `gateway.affinity: null`。
+   修复：`cloud/oracle/values/loki.yaml` 的 `gateway.affinity: null`。
 
 2. **`affinity: {}` 不生效，必须写 `null`。** 模板是 `{{- with .Values.gateway.affinity }}`，
    直觉上 `{}` 是假值该跳过；但 Helm 合并 values 时**空 map 不覆盖非空的 chart 默认值**
@@ -292,7 +292,7 @@ reconcile，撞上只剩 2 核。表现是 app 短暂 `Unknown`/`Progressing`、
    revision 也对、渲染结果一字未变、pod 继续 Pending。
    > ⚠️ **"Synced" 只保证 live == 渲染结果，不保证渲染结果 == 你的意图。**
    > 这类 nested map 覆盖推之前先本地核对：
-   > `helm template loki grafana/loki --version <v> -f k8s/helm/values/loki.yaml`
+   > `helm template loki grafana/loki --version <v> -f cloud/oracle/values/loki.yaml`
 
 3. **改掉 affinity 是必要不充分的，pod anti-affinity 是对称的。** 新 pod 自己没规则了，
    但**还在跑的旧 pod 带着规则**，禁止同节点再来一个 gateway。报错措辞会从

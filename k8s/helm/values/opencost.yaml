@@ -37,7 +37,7 @@ opencost:
     # WAL 持久化：已评估、不可行（configPath 被 emptyDir 硬绑；extraEnv 重复 env 被
     # ServerSideApply 的 listMap 校验拒绝，App 会卡死 sync=Unknown）。代价 ≈0：
     # 消费方只有 Grafana 读中枢 Prometheus 指标。维持 emptyDir、重建历史归零的现状。
-    # 证据与复活条件见 opencost-oracle.yaml 同块注释与
+    # 证据与复活条件见 cloud/oracle/values/opencost.yaml 同块注释与
     # docs/records/2026-08-19-opencost-bingen-replay-crashloop.md
 
     # opencost ns 不在 namespace-guardrails 的 LimitRange 覆盖范围内（该 App 只管 4 个既有 ns），
@@ -120,7 +120,7 @@ opencost:
   ui:
     enabled: true
 
-# 2026-08-06：同 opencost-oracle.yaml —— 纯观测组件归 bulk，理由见那份注释。
+# 2026-08-06：同 cloud/oracle/values/opencost.yaml —— 纯观测组件归 bulk，理由见那份注释。
 # homelab 侧内存压力比 oracle 更紧（7d 最低 MemAvailable 3.31G/12.66G）。
 # ⚠️ 键在**顶层**（chart 2.5.28 values 第 115 行），不是 opencost.* 下面。
 priorityClassName: bulk
