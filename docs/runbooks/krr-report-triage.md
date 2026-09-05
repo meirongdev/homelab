@@ -1,6 +1,6 @@
 # KRR 报告分诊与采纳
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-05
 > Status: 生效 SOP
 > 触发条件：周一收到 KRR 推送到 Telegram 的两份报告（homelab 09:00 / oracle-k3s 09:15）；
 > 或改 shape、加服务、扩容之后主动跑一次核对。
@@ -252,7 +252,7 @@ kubectl --context <ctx> -n <ns> get deploy <name> \
 resources 的 `just deploy-cilium`，因为 oracle 那份 recipe 缺 pin，把 Cilium 从 1.19.1
 静默升到了 1.20.0，并连带冲掉 ClusterMesh 的跨集群 CA 信任。
 Cilium 相关的额外必跑步骤见 `k8s/cilium/values.yaml` 与
-`cloud/oracle/values/cilium-values.yaml` 的文首注释。
+`cloud/oracle/values/cilium.yaml` 的文首注释。
 
 ---
 

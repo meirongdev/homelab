@@ -2,7 +2,7 @@
 #
 # 投递链路：oracle 的 loki-0（`-target=all`，ruler 在单体里）→ 跨 Tailscale POST 到
 # homelab 的 Alertmanager（NodePort 31093，见 k8s/helm/manifests/monitoring/monitoring-external.yaml）
-# → 既有的 Telegram 路由/模板。ruler 的开关与目录在 k8s/helm/values/loki.yaml 的 `rulerConfig`。
+# → 既有的 Telegram 路由/模板。ruler 的开关与目录在 cloud/oracle/values/loki.yaml 的 `rulerConfig`。
 #
 # ⚠️ 两个必须同时对上的细节，错一个规则就静默不加载：
 #   1. label `loki_rule` —— chart 的 sidecar（容器 loki-sc-rules）按 `LABEL=loki_rule` WATCH

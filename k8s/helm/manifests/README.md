@@ -25,6 +25,7 @@
 
 - App 定义在 `argocd/applications/<app>.yaml`；`monitoring/` 对应的 App 名是历史名
   `monitoring-dashboards`（改 Application 名会触发 ArgoCD 删旧建新，故保留）。
-- Helm 应用的 values 在 `../values/<app>.yaml`，oracle 集群变体为 `<app>-oracle.yaml`。
+- homelab Helm 应用的 values 在 `../values/<app>.yaml`；oracle 应用的在
+  `../../../cloud/oracle/values/<app>.yaml`——一棵集群一棵 values 树，跨树引用会被 CI（H2 ②）拦。
 - oracle-k3s 集群的清单不在这里，在 `cloud/oracle/manifests/`（kustomize 树，
   新文件必须登记进 `kustomization.yaml`，与本目录的"放进即生效"不同）。

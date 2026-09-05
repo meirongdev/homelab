@@ -1,6 +1,6 @@
 # Observability — OTel 日志与追踪架构
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-05
 > Status: 生效事实
 >
 > 2026-07-31 homelab collector 首次真实落地 + 2026 OTel 对齐，见 [`decisions/otel-2026-alignment.md`](../decisions/otel-2026-alignment.md)。
@@ -277,11 +277,11 @@ kubectl logs -n personal-services -l app=calibre-web -c calibre-web -f
 | 文件 | 说明 |
 |------|------|
 | `k8s/helm/values/opentelemetry-collector.yaml` | OTel Collector Helm values（logs + traces） |
-| `k8s/helm/values/tempo.yaml` | Tempo Helm values（traces backend） |
+| `cloud/oracle/values/tempo.yaml` | Tempo Helm values（traces backend） |
 | `k8s/helm/values/kube-prometheus-stack.yaml` | Grafana datasources（Tempo tracesToLogs/Metrics） |
 | `cloud/oracle/manifests/monitoring/monitoring-external.yaml` | oracle 侧跨集群 NodePort：Loki 31080 / Tempo 写 31317 / 查询 31320（homelab 侧仅剩 Prometheus remote_write 31090） |
 | `cloud/oracle/manifests/monitoring/otel-collector.yaml` | Oracle-k3s OTel Collector（logs + metrics + traces） |
-| `k8s/helm/values/loki.yaml` | Loki config（promtail.enabled: false） |
+| `cloud/oracle/values/loki.yaml` | Loki config（promtail.enabled: false） |
 | `k8s/helm/manifests/monitoring/dashboards/grafana-dashboards.yaml` | 4 个 Loki Dashboard ConfigMap |
 | `cloud/oracle/manifests/personal-services/calibre-web.yaml` | 曾是 log-exporter sidecar 的唯一实例；2026-08-29 删除（文件内留有原因注释） |
 | `argocd/applications/monitoring-dashboards.yaml` | Dashboard GitOps Application |

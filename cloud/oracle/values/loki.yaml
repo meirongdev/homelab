@@ -183,7 +183,7 @@ gateway:
   # 硬编码 anti-affinity。只有显式 `null` 才会删掉这个键。
   # 2026-08-05 先写了 `{}`，ArgoCD 报 Synced、渲染结果一字未变、pod 继续 Pending ——
   # **"Synced" 只保证 live == 渲染结果，不保证渲染结果 == 你的意图**。
-  # 改这类 nested map 覆盖后一定先 `helm template ... -f values/loki.yaml` 本地渲染核对。
+  # 改这类 nested map 覆盖后一定先 `helm template ... -f cloud/oracle/values/loki.yaml` 本地渲染核对。
   affinity: null
 
 # 明确禁用分布式组件（重要！）

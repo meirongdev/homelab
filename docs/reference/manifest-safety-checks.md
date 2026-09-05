@@ -1,6 +1,6 @@
 # 清单安全规则 (Manifest Safety Checks)
 
-> Last updated: 2026-09-03
+> Last updated: 2026-09-05
 > Status: 生效事实
 > Scope: CI 强制的仓库规则，本文是 source of truth。四个检查器：
 > `scripts/check-manifests.py` 的 **H1-H5**（清单结构）、
@@ -52,7 +52,7 @@ prune 掉整个 `personal-services` ns → 级联删光同 ns 的 open-notebook 
 与应用同生共死是正确的。把它们列进来会在 5 个文件上制造误报，而误报会让整个检查被无视，
 那比没有检查更糟。
 
-### H2：Application 的 `source.path` / `project` 与 `destination` 必须同集群；AppProject 只许一条 destination
+### H2：Application 的 `source.path` / `$values` / `project` 与 `destination` 必须同集群；AppProject 只许一条 destination
 
 2026-08-02 起 ArgoCD 控制面在 oracle-k3s，于是 `destination.server` 的
 `https://kubernetes.default.svc` 指的是 oracle。homelab 的负载必须显式写
@@ -72,10 +72,27 @@ prune 掉整个 `personal-services` ns → 级联删光同 ns 的 open-notebook 
 （`AGENTS.md` 里那条 ☠️ 说的就是这个）。迁移期的正确顺序见
 [../runbooks/argocd-control-plane-on-oracle.md](../runbooks/argocd-control-plane-on-oracle.md)。
 
-chart 型 source（`sources[]` 里只有 chart + `$values` 引用）没有 `path`，这一条对它们无从判断
-（values 文件一律在 `k8s/helm/values/` 下、与目标集群无关），所以有了 ②。
+**② `$values` 引用 ↔ `destination`（2026-09-04 加）**
 
-**② `project` ↔ `destination`（2026-09-02 加，[决策](../decisions/argocd-project-per-cluster.md)）**
+chart 型 source（`sources[]` 里只有 chart + `$values` 引用）没有 `path`，它唯一带集群归属的
+东西是 values 文件的路径，所以 values 必须一棵集群一棵树：
+
+| `valueFiles` 路径前缀 | 必须的 `destination.server` |
+|---|---|
+| `k8s/helm/values/…` | `https://100.94.186.7:6443`（homelab） |
+| `cloud/oracle/values/…` | `https://kubernetes.default.svc`（oracle） |
+
+此前两集群的 values 挤在同一棵 `k8s/helm/values/` 树里，oracle 的靠 `-oracle` 后缀区分，而
+falco / loki / tempo / cnpg-operator 四个 oracle 独有的文件连后缀都没有——**values 属于哪个
+集群纯靠文件名猜，放错树 CI 看不见、`Synced` 照绿**。后缀那套还有个隐藏失败模式：
+`<app>.yaml` 与 `<app>-oracle.yaml` 成对（external-dns / opencost / trivy-operator），改了
+一边忘另一边 = 两集群配置静默分叉。表在 `scripts/check-manifests.py` 的 `VALUES_CLUSTER`。
+
+> **本条查不到的**：manual-helm 的 values 由 justfile 的 `--values` 直接给出，不经
+> Application——ArgoCD 本体的 `values/argocd.yaml` + `values/argocd-oracle.yaml` 就是这类
+> （装在 oracle，配方在 `k8s/helm/justfile`）。判断归谁管：`kubectl -n <ns> get secret -l owner=helm`。
+
+**③ `project` ↔ `destination`（2026-09-02 加，[决策](../decisions/argocd-project-per-cluster.md)）**
 
 | `destination.server` | 必须的 `project` |
 |---|---|
@@ -88,7 +105,7 @@ chart 型 source（`sources[]` 里只有 chart + `$values` 引用）没有 `path
 push 之前就拦住，并给 chart 型 App 补上静态兜底。`default` 是内置全放行 project，只许 root /
 projects 两个元 App 用，其它 App 挂它会被本规则拦。
 
-**③ AppProject 必须且只能有一条 destination**，且必须是该 project 名字对应的那台集群
+**④ AppProject 必须且只能有一条 destination**，且必须是该 project 名字对应的那台集群
 （表在 `scripts/check-manifests.py` 的 `PROJECT_FOR_SERVER`，是集群表的唯一副本）。
 多列或通配会让服务端那半兜底静默失守。新集群入编 = 新 project 文件 + 登记进这张表。
 

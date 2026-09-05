@@ -1,6 +1,6 @@
 # Observability — 告警、看板组织与 SLO
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-05
 > Status: 生效事实
 >
 > 遥测的消费侧：告警路由与覆盖盲区、Grafana 看板组织约定、SLI/SLO 体系。
@@ -41,7 +41,7 @@
   **刻意不抓 cilium-agent 的同类指标**：那要开 `prometheus.enabled` 对 Cilium 做 helm
   upgrade，而 agent 只连本集群缓存，真正断掉的那一跳恰恰是 kvstoremesh
   （早期还担心升级会抹掉 oracle 未固化的 peer 配置，2026-08-05 已固化进
-  `cilium-values.yaml`，见 [tailscale-network.md](tailscale-network.md)）。
+  `cilium.yaml`，见 [tailscale-network.md](tailscale-network.md)）。
   三种**互不蕴含**的故障各一条规则：`readiness_status == 0`（配了连不上）·
   `remote_clusters == 0`（peer 配置整个消失，此时前者无序列可判，故必须单列）·
   `absent(...)`（看不见了，即 2026-08-05 那个盲区本身）。
@@ -72,7 +72,7 @@
   在此之前 Falco **既没被抓指标也没有任何规则**：引擎死、驱动没起来、规则解析失败、
   falcosidekick 推不动 Telegram，症状都只是「Telegram 安静」。而这原本被一个巧合掩盖着：
   Falco 每天在刷约 500 条 systemd 误报，「今天有 Falco 消息」实际充当了心跳。
-  同日修掉那条误报（见 `values/falco.yaml`）等于拆掉假心跳，所以这 5 条必须同批落地。
+  同日修掉那条误报（见 `cloud/oracle/values/falco.yaml`）等于拆掉假心跳，所以这 5 条必须同批落地。
   指标经 oracle otel 两个 job 抓：`falco`（falco-metrics:8765，需同时开
   `metrics.enabled` 与 `falco.webserver.prometheus_metrics_enabled`，只开前者端点没数据）
   与 `falcosidekick`（:2801，默认就有）→ remote-write，`cluster=oracle-k3s`。

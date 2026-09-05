@@ -98,7 +98,7 @@ resources:
 # 15–50Mi 之间来回（拉规则包时涨），CPU 几乎为 0。
 # ☠️ 与 loki 的 loki-sc-rules 同一形状：pod 级 QoS 因主容器 falco 有 requests 而记作
 #   Burstable，所以 runbook §5「数 BestEffort pod」的收敛判据**看不见它**，
-#   要按容器扫 `.resources.requests.memory == ""`。详见 k8s/helm/values/loki.yaml。
+#   要按容器扫 `.resources.requests.memory == ""`。详见 cloud/oracle/values/loki.yaml。
 # artifact.install 是 initContainer：请求量按 max(init, sum(containers)) 计入调度，
 #   falco 容器本身就是 30m/160Mi，所以给它 10m/64Mi 不改变节点账面，只是补齐口径。
 falcoctl:

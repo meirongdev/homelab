@@ -1,7 +1,7 @@
 ---
 # Tempo — 分布式追踪后端（SingleBinary + filesystem 存储），双集群唯一追踪存储
 # Chart: grafana/tempo
-# Values: k8s/helm/values/tempo.yaml
+# Values: cloud/oracle/values/tempo.yaml
 # 2026-07-06: 从 Helm 直接管理迁入 ArgoCD（参照 falco.yaml 的 multi-source 模式）
 # 2026-08-02: destination 从 homelab 迁 oracle-k3s（与 loki 同批，理由见 loki.yaml 头注）。
 apiVersion: argoproj.io/v1alpha1
@@ -20,7 +20,7 @@ spec:
       targetRevision: "1.24.4"
       helm:
         valueFiles:
-          - $values/k8s/helm/values/tempo.yaml
+          - $values/cloud/oracle/values/tempo.yaml
     - repoURL: https://github.com/meirongdev/homelab
       targetRevision: main
       ref: values

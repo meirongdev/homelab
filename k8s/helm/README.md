@@ -12,10 +12,19 @@
 
 ```
 k8s/helm/
-├── values/     # Helm values，一个应用一份 <app>.yaml（oracle 变体 <app>-oracle.yaml）
+├── values/     # **homelab 集群**的 Helm values，一应用一份 <app>.yaml；oracle 的在 ../../cloud/oracle/values/
 ├── manifests/  # 原生清单，**一个子目录 ↔ 一个 ArgoCD Application**（所有权地图见 manifests/README.md）
 └── justfile    # 部署配方；共享版本变量从仓库根的 versions.just import
 ```
+
+⚠️ **一棵集群一棵 values 树**（2026-09-04）：本目录只放 homelab 的 values，oracle 的一律在
+`cloud/oracle/values/`，Application 只能引用自己那棵——CI 的
+[H2 ②](../../docs/reference/manifest-safety-checks.md) 查 `$values` 路径 ↔ destination。
+此前两集群挤在同一棵目录里靠 `-oracle` 后缀区分，falco / loki / tempo / cnpg-operator 四个
+oracle 独有的文件连后缀都没有，「values 属于哪个集群」纯靠猜。
+
+> 例外：ArgoCD 本体的 `values/argocd.yaml` + `values/argocd-oracle.yaml` 装在 oracle，但它是
+> manual-helm、由本目录 justfile 的 `--values` 直接给出，不经 Application，所以 H2 查不到它。
 
 ## 部署方式
 

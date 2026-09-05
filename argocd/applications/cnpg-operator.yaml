@@ -25,7 +25,7 @@ spec:
       targetRevision: "0.29.0"   # operator appVersion 1.30.0
       helm:
         valueFiles:
-          - $values/k8s/helm/values/cnpg-operator.yaml
+          - $values/cloud/oracle/values/cnpg-operator.yaml
     - repoURL: https://github.com/meirongdev/homelab
       targetRevision: main
       ref: values

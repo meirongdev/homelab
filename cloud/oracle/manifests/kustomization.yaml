@@ -13,7 +13,7 @@ resources:
   # PriorityClasses（控制面驱逐优先级，见 base/priorityclasses.yaml）
   - base/priorityclasses.yaml
   # external-dns: ns + Cloudflare token ExternalSecret (chart is ArgoCD-managed, see
-  # argocd/applications/external-dns-oracle.yaml + k8s/helm/values/external-dns-oracle.yaml)
+  # argocd/applications/external-dns-oracle.yaml + cloud/oracle/values/external-dns.yaml)
   - base/namespace-external-dns.yaml
   - base/external-dns.yaml
   # 共享数据库平台（2026-08-06）。CNPG Cluster `apps-pg` —— 应用不再各自起 postgres，

@@ -1,6 +1,6 @@
 # Identity — ZITADEL / OIDC 接入
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-05
 > Status: 生效事实
 >
 > 身份面的部署形态与各应用接入细节。安全视角的摘要在 [security.md §3](security.md)；
@@ -20,7 +20,7 @@
 - **✅ 2026-07-06 迁至 oracle-k3s**: ZITADEL v4.10.1 + Login V2（`zitadel-login` pod）跑在
   `cloud/oracle/manifests/zitadel/`。masterkey 沿用同一个 `secret/homelab/zitadel`，
   签名密钥/OIDC token 全程有效，切换对 OIDC client 无感。homelab 侧 ZITADEL 已彻底退役。
-- **⚠️ Cilium `enable-gateway-api-app-protocol: true` 是硬前提**（`cloud/oracle/values/cilium-values.yaml`）：
+- **⚠️ Cilium `enable-gateway-api-app-protocol: true` 是硬前提**（`cloud/oracle/values/cilium.yaml`）：
   没有它 console 的 v1 gRPC（auth.v1/admin.v1）过网关 404。踩坑记录
   [../records/2026-06-07-zitadel-console-grpc-404.md](../records/2026-06-07-zitadel-console-grpc-404.md)。
 - **部署机制是 k3s `HelmChart` CR，不是 ArgoCD Helm App**: 改 `valuesContent` → git push →

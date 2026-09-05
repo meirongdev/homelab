@@ -2,7 +2,7 @@
 """清单结构安全检查 —— 把**已经发生过的事故**变成 CI 能拦的规则。
 
     H1  Namespace / CRD 必须独占文件      ← 2026-08-03 级联删除事故
-    H2  Application 的 path / project 与 destination 同集群，AppProject 只许一个 destination
+    H2  Application 的 path / $values / project 与 destination 同集群，AppProject 只许一个 destination
         ← AGENTS.md 的 ☠️ 警告；2026-09-02 起 project 那半由 ArgoCD 服务端兜底，本规则保证两边不脱节
     H3  ReferenceGrant 必须声明 v1beta1   ← 声明集群未提供的版本会炸掉整个 App
     H4  清单里的 PVC 必须有备份归属        ← 备份脚本是显式白名单，漏了静默无声
@@ -63,9 +63,19 @@ PATH_CLUSTER = [
     ("argocd", ORACLE_SERVER),  # root / projects 两个元 App（in-cluster，只写 argocd ns）
 ]
 
+# ── H2（②）──────────────────────────────────────────────────────────────
+# chart 型 App 没有 path，它唯一带集群归属的东西是 `$values/<路径>` 引用的 values 文件。
+# 2026-09-04 之前两集群的 values 全挤在 k8s/helm/values/ 一棵树里，靠 `-oracle` 后缀区分，
+# 而 falco / loki / tempo / cnpg-operator 这四个 oracle 独有的文件连后缀都没有——「values
+# 属于哪个集群」纯靠文件名猜，放错树 CI 也看不见。现在一棵集群一棵树，与 PATH_CLUSTER 配对。
+VALUES_CLUSTER = [
+    ("k8s/helm/values", HOMELAB_SERVER),
+    ("cloud/oracle/values", ORACLE_SERVER),
+]
+
 # 2026-09-02 起每个集群一个 AppProject（docs/decisions/argocd-project-per-cluster.md）：
 # destination 由 ArgoCD 服务端拒绝跨集群误投，本脚本负责「project 与 destination 不脱节」。
-# chart 型 source 没有 path，此前 H2 对它们完全没网可兜，project 这一半正好补上。
+# chart 型 source 没有 path，由 ②（values 归属）+ ③（project）两半兜住。
 # root / projects 两个元 App（source 在 argocd/ 下）挂内置的 `default` project：
 # 挂 homelab / oracle-k3s 任一都会出现「App 管理自己所属 project」的自引用。
 PROJECT_FOR_SERVER = {HOMELAB_SERVER: "homelab", ORACLE_SERVER: "oracle-k3s"}
@@ -171,7 +181,7 @@ def check_h1(p, docs):
 
 
 def check_h2(p, docs):
-    """H2 —— Application 的 path / project 与 destination 必须同集群；AppProject 只许一个 destination。"""
+    """H2 —— Application 的 path / $values / project 与 destination 必须同集群；AppProject 只许一条 destination。"""
     for d in docs:
         kind = d.get("kind")
         spec = d.get("spec") or {}
@@ -206,7 +216,30 @@ def check_h2(p, docs):
                             f"⚠️ `kubernetes.default.svc` 指的是 oracle（2026-08-02 起控制面在那）。",
                         )
                     break
-        # ② project ↔ destination（对 chart 型 source 是唯一的静态兜底）
+        # ② $values/<路径> ↔ destination —— chart 型 App 没有 path，values 是它唯一
+        #    带集群归属的东西，所以这条是它唯一的 values 侧兜底
+        for src in sources:
+            helm = (src or {}).get("helm") or {}
+            for vf in (helm.get("valueFiles") or []):
+                head = vf.split("/", 1)[0]
+                if not head.startswith("$"):
+                    continue        # 不带 $ref 前缀 = 与 chart 同仓库的相对路径，本仓库不用这种写法
+                vpath = vf.split("/", 1)[1].rstrip("/") if "/" in vf else vf
+                hit = next((prx for prx, _ in VALUES_CLUSTER
+                            if vpath == prx or vpath.startswith(prx + "/")), None)
+                if hit is None:
+                    fail("H2", p, f"App `{name}` 的 valueFiles `{vf}` 不在已知 values 树里"
+                                  f"（只有 {' / '.join(prx for prx, _ in VALUES_CLUSTER)}）；"
+                                  "新 values 树要先登记进 check-manifests.py 的 VALUES_CLUSTER")
+                elif server != dict(VALUES_CLUSTER)[hit]:
+                    expect = dict(VALUES_CLUSTER)[hit]
+                    who = "homelab" if hit == "k8s/helm/values" else "oracle-k3s"
+                    fail("H2", p, f"App `{name}` 引用的 values `{vpath}` 属于 {who}，"
+                                  f"但 destination.server 是 `{server or '<空>'}`，应为 `{expect}`。"
+                                  "一棵集群一棵 values 树；跨树引用即使 Synced 也是在给"
+                                  "另一个集群喂另一套配置")
+
+        # ③ project ↔ destination（chart 型 App 的另一半兜底：values 归属见 ②）
         is_meta = any(path == META_PATH_PREFIX or path.startswith(META_PATH_PREFIX + "/") for path in paths)
         if is_meta:
             if project != META_PROJECT:
@@ -311,7 +344,7 @@ def check_h4():
 
 RULES = [
     ("H1", "Namespace/CRD 必须独占文件", "2026-08-03 级联删除：删 calibre 清单 → prune 掉整个 ns → 删光同 ns 的 open-notebook 数据"),
-    ("H2", "Application path/project ↔ destination 同集群；AppProject 单 destination", "控制面 2026-08-02 迁 oracle 后，kubernetes.default.svc 改指 oracle；写错会把 homelab 全套装到 oracle。2026-09-02 起每集群一个 AppProject，服务端也兜底"),
+    ("H2", "Application path/$values/project ↔ destination 同集群；AppProject 单 destination", "控制面 2026-08-02 迁 oracle 后，kubernetes.default.svc 改指 oracle；写错会把 homelab 全套装到 oracle。2026-09-02 起每集群一个 AppProject，服务端也兜底"),
     ("H3", "ReferenceGrant 必须 v1beta1", "v1beta1 仍是 CRD 的 storage 版本；声明集群未提供的版本会让整个 App ComparisonError 不可用"),
     ("H4", "PVC 必须有备份归属", "备份脚本是显式白名单；trends-data 曾因此静默未备份 2 个月（45MB）"),
     ("H5", "Namespace 必须显式声明 PSA 等级", "漏写不是没定级，是静默吃内置默认 privileged；zitadel ns 就这样敞了一个多月（2026-07-06→08-10）"),

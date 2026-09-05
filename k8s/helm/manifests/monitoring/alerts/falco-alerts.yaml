@@ -7,7 +7,7 @@
 # topic* — and silence was indistinguishable from "nothing happened".
 #
 # That was survivable only by accident: Falco was emitting ~500 false positives/day
-# (host systemd reading /etc/shadow, see k8s/helm/values/falco.yaml), so "there are Falco
+# (host systemd reading /etc/shadow, see cloud/oracle/values/falco.yaml), so "there are Falco
 # messages today" was doing the job of a heartbeat. Killing that false positive the same
 # day removed the accidental heartbeat, which is exactly why these rules had to land with
 # it. A detector nobody can tell is dead is not a control, it is a decoration.
@@ -89,7 +89,7 @@ spec:
         #    falcosidekick 2.34.1 的 /metrics 上 `falcosecurity_falcosidekick_outputs_total`
         #    **整族一个子序列都没有**（只有 falco_events_total / inputs_total）。这不是版本
         #    不支持，而是 CounterVec 在首次 dispatch 前不产出任何行 —— 而 telegram 输出的
-        #    `minimumpriority: warning`（values/falco.yaml）比当前收到的事件（全是 notice）
+        #    `minimumpriority: warning`（cloud/oracle/values/falco.yaml）比当前收到的事件（全是 notice）
         #    高，所以一次都没派发过。要端到端验证只能造一条 warning 事件，
         #    ⚠️ 那会真的往 Telegram 群里发一条消息。
         - alert: FalcoTelegramDeliveryFailing
@@ -103,7 +103,7 @@ spec:
             description: >-
               falcosidekick 把告警发往 Telegram 时收到错误。告警仍在 Loki 里，但不会有人
               被通知到。先看 secret `falcosidekick-telegram` 的 token 是否还有效、
-              chatid/thread id 是否仍存在（配置见 k8s/helm/values/falco.yaml）。
+              chatid/thread id 是否仍存在（配置见 cloud/oracle/values/falco.yaml）。
 
         # (4) 内核缓冲区丢事件 = **检测盲区**，且是静默的：Falco 照常运行、照常报别的规则，
         # 只是丢掉的那些 syscall 永远不会被评估。任何非零增长都值得看一眼，所以阈值是 >0。

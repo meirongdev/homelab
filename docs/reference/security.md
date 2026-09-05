@@ -1,6 +1,6 @@
 # K3s 集群安全架构 (Security Architecture)
 
-> Last updated: 2026-09-03
+> Last updated: 2026-09-05
 > Status: 生效事实
 > Scope: 双集群（homelab + oracle-k3s）的纵深防御模型，本文是 source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
@@ -31,7 +31,7 @@
 | 3 | 密钥 | Vault + ESO + 健康告警 | ✅ 生产 | `k8s/helm/values/vault-*`, `manifests/monitoring/alerts/eso-alerts.yaml` | 双 |
 | 4 | 准入：Pod 基线 | Pod Security Admission | ✅ 生产 | `just harden-psa` / oracle ns 清单 | 双 |
 | 5 | 准入：策略即代码 | Kyverno（3 条 Audit + `disallow-latest-tag` Enforce，见 §5.2）| ✅ 生产 | `values/kyverno.yaml`, `manifests/kyverno-policies/` | homelab |
-| 6 | 供应链/CVE | Trivy Operator（运行中镜像）+ Renovate（仓库声明的依赖，🚧 待装 App）| ✅ 生产 | `values/trivy-operator.yaml` · `values/trivy-operator-oracle.yaml` · `.github/renovate.json5` | 双集群（oracle 2026-08-03 补齐）|
+| 6 | 供应链/CVE | Trivy Operator（运行中镜像）+ Renovate（仓库声明的依赖，🚧 待装 App）| ✅ 生产 | `values/trivy-operator.yaml` · `cloud/oracle/values/trivy-operator.yaml` · `.github/renovate.json5` | 双集群（oracle 2026-08-03 补齐）|
 | 7 | CIS 合规 | kube-bench（周巡检，钉 control-plane；worker 的 node 级检查未覆盖·有意接受） | ✅ 生产 | `manifests/kube-bench/kube-bench.yaml` | homelab |
 | 8 | 节点加固 | k3s `protect-kernel-defaults` + sysctl | ⏳ 待重启生效 | `k8s/ansible/playbooks/setup-k3s.yaml` | homelab |
 | 9 | 网络 | Cilium NetworkPolicy + Hubble 可见性 | 🟡 仅可见性 | Cilium（默认拒绝刻意延后） | 双 |
@@ -212,14 +212,14 @@
 eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异常外联）。**按集群硬件选型**：
 
 - **homelab → Tetragon**（`values/tetragon.yaml`，ns `tetragon`，Helm App）。Cilium 原生、内核态过滤只上报命中事件 → 省 CPU，适配热笔记本。v1：默认进程 exec/exit 可见性 → `export-stdout` → 现有 OTel→Loki（按 pod=tetragon 查，可见容器内 shell/kubectl exec/异常进程）+ Prometheus 指标(ServiceMonitor 带 release 标签)。自定义 TracingPolicy（敏感文件/提权检测）+ 基于其指标的告警为后续调优。
-- **oracle → Falco + Falcosidekick → Telegram**（`values/falco.yaml`，ns `falco`，Helm App 部署到 oracle 集群）。规则库开箱即用；oracle VM CPU 余量大。`driver: modern_ebpf`(CO-RE 无需内核模块)。**双出口**：① Falco JSON→stdout→OTel→Loki（always-on，零依赖）；② Falcosidekick→Telegram（原生 output，warning+，併入群 MatthewDaily「🚨 Homelab 告警」话题；2026-07 前曾经 Gotify 转发，已随其下线迁移，见 `decisions/alerting-telegram-migration.md`）。
-  - **Telegram 推送前置（一次性）**：token 走 Vault `secret/homelab/telegram`（与 homelab Alertmanager 共用同一个 bot，跨集群读取）→ ESO(`cloud/oracle/manifests/falco/falcosidekick-secret.yaml`)生成 `falcosidekick-telegram` secret(key `TELEGRAM_TOKEN`)；chatid/messagethreadid 明文配在 `values/falco.yaml`。token 未配好不影响 Falco→Loki 检测，只是 falcosidekick 推送失败。
+- **oracle → Falco + Falcosidekick → Telegram**（`cloud/oracle/values/falco.yaml`，ns `falco`，Helm App 部署到 oracle 集群）。规则库开箱即用；oracle VM CPU 余量大。`driver: modern_ebpf`(CO-RE 无需内核模块)。**双出口**：① Falco JSON→stdout→OTel→Loki（always-on，零依赖）；② Falcosidekick→Telegram（原生 output，warning+，併入群 MatthewDaily「🚨 Homelab 告警」话题；2026-07 前曾经 Gotify 转发，已随其下线迁移，见 `decisions/alerting-telegram-migration.md`）。
+  - **Telegram 推送前置（一次性）**：token 走 Vault `secret/homelab/telegram`（与 homelab Alertmanager 共用同一个 bot，跨集群读取）→ ESO(`cloud/oracle/manifests/falco/falcosidekick-secret.yaml`)生成 `falcosidekick-telegram` secret(key `TELEGRAM_TOKEN`)；chatid/messagethreadid 明文配在 `cloud/oracle/values/falco.yaml`。token 未配好不影响 Falco→Loki 检测，只是 falcosidekick 推送失败。
   - falco ns（含 PSA privileged 标签 + ESO secret）由 oracle-k3s kustomize App 拥有；Falco 工作负载由独立 `falco` Helm App 部署（`CreateNamespace=false`）。
   - **⚠️ 规则误报会吃掉整条通道**：2026-08-10 复核发现，近 25 小时 Falco 的全部 135 条告警
     都是同一条误报（`Read sensitive file untrusted`，宿主 systemd 拉起带 `User=` 的单元时
     查 NSS/PAM 读 `/etc/shadow` + `/etc/pam.d/*`），约 500 条/天全部推进 Telegram。
     上游那串 `proc.name` 白名单接不住它，因为 `systemd-executor` 的 comm 是**一个纯数字**
-    （实测 `proc.name="9"`），只能按 `proc.exepath` 排除，见 `values/falco.yaml` 的 override。
+    （实测 `proc.name="9"`），只能按 `proc.exepath` 排除，见 `cloud/oracle/values/falco.yaml` 的 override。
   - **自身健康告警（2026-08-10 补齐，5 条）**：在此之前 Falco **没有任何指标被抓、没有任何规则**，
     死了也没人知道；而上面那条误报恰好在冒充心跳（「今天有 Falco 消息」）。修掉误报的同时也拆掉了这个心跳，
     所以同批接入了 `falco`(falco-metrics:8765) 与 `falcosidekick`(:2801) 两个 otel 抓取 job

@@ -67,7 +67,7 @@ deploy-cilium:
         --namespace kube-system \
         --kube-context {{ctx}} \
         --version {{cilium_version}} \
-        --values values/cilium-values.yaml \
+        --values values/cilium.yaml \
         --reset-values \
         --wait \
         --timeout 10m
@@ -129,7 +129,7 @@ install-eso:
         --create-namespace \
         --kube-context {{ctx}} \
         --version {{eso_version}} \
-        --values values/external-secrets-values.yaml \
+        --values values/external-secrets.yaml \
         --wait --timeout 5m
 
 # Create Vault token secret (needed by ClusterSecretStore)

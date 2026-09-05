@@ -1,6 +1,6 @@
 # Homelab 文档组织规则 (R1–R7)
 
-> Last updated: 2026-09-02
+> Last updated: 2026-09-05
 > 2026-08-14 从 [docs/README.md](README.md)（门户）拆出：门户只做导航，写文档的规则集中在本页。
 >
 > 以下 7 条是强制的。新增或改动文档前先对照，违反的按下面的处理方式修。
@@ -139,7 +139,7 @@ Application」时实际已经是 32 个。
 | 服务清单 | [reference/services.md](reference/services.md) |
 | 开放项 / 待办 | [ROADMAP.md](ROADMAP.md) |
 | 安全逐层状态 | [reference/security.md](reference/security.md) |
-| 资源实际数值 | `k8s/helm/values/` 与集群本身（文档只写原则） |
+| 资源实际数值 | `k8s/helm/values/`（homelab）· `cloud/oracle/values/`（oracle）与集群本身（文档只写原则） |
 
 ## R7 命令必须可执行
 

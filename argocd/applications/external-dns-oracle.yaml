@@ -1,6 +1,6 @@
 ---
 # external-dns — oracle-k3s 实例（跨集群部署，模式同 falco/opencost-oracle）
-# Chart: external-dns/external-dns · Values: k8s/helm/values/external-dns-oracle.yaml
+# Chart: external-dns/external-dns · Values: cloud/oracle/values/external-dns.yaml
 # 2026-07-31: chart 本体从 manual-helm（just deploy-external-dns-oracle）采纳进 ArgoCD。
 # ns + Cloudflare token 的 ExternalSecret 由 oracle-k3s kustomize App 提供
 # （cloud/oracle/manifests/base/external-dns.yaml），本 App 只管 chart。
@@ -30,7 +30,7 @@ spec:
         # selector/labels 不匹配；加了它 → 与 live 逐字节一致。
         releaseName: external-dns
         valueFiles:
-          - $values/k8s/helm/values/external-dns-oracle.yaml
+          - $values/cloud/oracle/values/external-dns.yaml
         # 同 homelab：DNSEndpoint CRD 集群里已存在，且本集群不用 crd source。
         skipCrds: true
     - repoURL: https://github.com/meirongdev/homelab

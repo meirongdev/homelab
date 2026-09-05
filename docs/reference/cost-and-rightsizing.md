@@ -1,6 +1,6 @@
 # 成本归因与资源右尺寸
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-05
 > Status: 生效事实
 
 两套互补的工具：**OpenCost** 回答「钱花在哪」（常驻，出指标 → Grafana），
@@ -30,7 +30,7 @@ oracle OpenCost ──(otel prometheus/opencost)─────┘        按 cl
 | 项 | homelab | oracle-k3s |
 |---|---|---|
 | Application | `argocd/applications/opencost.yaml` | `argocd/applications/opencost-oracle.yaml` |
-| values | `k8s/helm/values/opencost.yaml` | `k8s/helm/values/opencost-oracle.yaml` |
+| values | `k8s/helm/values/opencost.yaml` | `cloud/oracle/values/opencost.yaml` |
 | namespace | `opencost`（App 自建） | `opencost`（由 oracle kustomize 树持有） |
 | 指标进中枢 | ServiceMonitor（需 `release: kube-prometheus-stack` 标签） | otel `prometheus/opencost` receiver |
 

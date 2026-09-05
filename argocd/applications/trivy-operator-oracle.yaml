@@ -25,7 +25,7 @@ spec:
       targetRevision: "0.33.1"
       helm:
         valueFiles:
-          - $values/k8s/helm/values/trivy-operator-oracle.yaml
+          - $values/cloud/oracle/values/trivy-operator.yaml
     - repoURL: https://github.com/meirongdev/homelab
       targetRevision: main
       ref: values

@@ -27,7 +27,8 @@ cloud/oracle/
 │   ├── personal-services/  # 个人服务（清单即真相源，名单见 services.md）
 │   └── kustomization.yaml
 ├── terraform/      # OCI 基础设施（VCN、实例）。全仓库唯一用 make 的 terraform root
-├── values/         # manual-helm 的 values：cilium-values.yaml、external-secrets-values.yaml
+├── values/         # **oracle 集群**全部 helm values：ArgoCD App 的 <app>.yaml + manual-helm 的
+│                   # cilium.yaml、external-secrets.yaml。一棵集群一棵树（CI H2 ②）
 ├── justfile        # 节点 / CNI / bootstrap / 巡检。日常部署不走这里
 └── .env.example    # VAULT_TOKEN（`just create-vault-token` 用）
 ```

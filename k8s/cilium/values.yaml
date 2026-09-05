@@ -67,7 +67,7 @@ clustermesh:
   # （KVStoreMesh 下 agent 连的是本地 apiserver，那段本来就通）、NodePort 也 TCP 可达。
   # 真判据只有两个：`cilium status` 里 `remote configuration: retrieved=false`，
   # 以及**对端** clustermesh-apiserver 的 etcd 容器日志 `remote error: tls: bad certificate`。
-  # 详细复盘见 cloud/oracle/values/cilium-values.yaml 同位注释。
+  # 详细复盘见 cloud/oracle/values/cilium.yaml 同位注释。
   useAPIServer: true
   config:
     enabled: true

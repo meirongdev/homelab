@@ -29,6 +29,9 @@
    导致 root App 对该 Application 永久 OutOfSync，同 kyverno-policies 的既有注释）。
 2. `values/` 命名统一为 `<app>.yaml`（oracle 变体 `<app>-oracle.yaml`），终结一半文件带
    `-values` 后缀一半不带的状态；空孤儿 `calibre-values.yaml`（0 字节、零引用）删除。
+   > **2026-09-04 更新**：`-oracle` 后缀这一半已被取代——values 改为按集群分树
+   > （`k8s/helm/values/` = homelab、`cloud/oracle/values/` = oracle），后缀不再需要。
+   > 见 [reference/manifest-safety-checks.md](../reference/manifest-safety-checks.md) 的 H2 ②。
 3. `monitoring-dashboards` App **不改名**（尽管它管的早已不止 dashboards）：Application 改名
    = tracking 变更 = ArgoCD 删旧建新，告警链路短暂中断，收益只是名字好看。目录名用 `monitoring/`
    表达真实语义，App 名在注释里标注为历史名。
