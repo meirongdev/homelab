@@ -1,6 +1,15 @@
 # calibre-web 电子书同步
 
-自动将本地电子书同步到 calibre-web。
+> Last updated: 2026-09-06
+>
+> ☠️ **calibre 全家在 oracle-k3s**（2026-08-03 迁走），脚本默认 `--context oracle-k3s`；
+> 别按「homelab 的书库」去规划。本文是这个流程的真相源，`scripts/README.md` 不再复制它。
+> ⚠️ 同一件事在仓库里还有第二份实现：
+> `.claude/skills/sync-ebooks/scripts/sync_ebooks.py`（全参数化、带 kubectl 超时）。
+> **两份都还能用，所以先不删**——合并计划见
+> [ROADMAP 开放项 #15](../ROADMAP.md)。
+
+自动将本地电子书同步到 calibre-web（ingest 目录 + 入库校验）。
 
 ## 快速开始
 
