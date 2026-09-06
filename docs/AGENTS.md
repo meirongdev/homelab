@@ -14,19 +14,21 @@
 ## Project Structure
 
 ```
-proxmox/{terraform,ansible}/   # VM 预配 (Proxmox VE)
-k8s/{ansible,cilium,helm}/     # K3s 安装 · Cilium values(手动管理) · 应用部署(values/,manifests/)
-cloud/oracle/                  # Oracle Cloud K3s (terraform|ansible|manifests/)
+proxmox/{terraform,terraform-storage,ansible}/  # pve 上的 VM · 106 上的 worker VM · 两台宿主机
+k8s/{ansible,cilium,helm}/     # K3s 安装 · Cilium values(手动管理) · 应用部署(manifests/,values/=homelab)
+cloud/oracle/                  # Oracle Cloud K3s (terraform|ansible|manifests|values|cloudflare)
 argocd/                        # GitOps (install|projects|applications/)
-cloudflare/terraform/          # Tunnel + DNS + WAF          tailscale/terraform/  # ACL + 预授权密钥
+cloudflare/terraform/          # Tunnel + DNS + WAF          tailscale/{terraform,ansible}/  # ACL · 节点 tailscale
 zitadel/                       # 身份/SSO                     backup/               # restic (kustomize)
-macbook/ansible/               # 远程无头 M2 MacBook
+macbook/ansible/               # 远程无头 M2 MacBook         images/               # 自研镜像(各一条 build workflow)
+scripts/                       # CI 的 6 个检查器（just check 跑的就是这些）+ oracle 巡检
 docs/                          # 见下方「Documentation Rules」
+根 justfile · versions.just    # 根 justfile 聚合 12 个子 justfile；versions.just = 两集群共享的版本
 ```
 
 ## Key Commands
 
-完整清单跑 `just --list`（执行目录 `k8s/helm/`，除非另有说明）。**这里只列带坑的**：
+完整清单跑根目录 `just --list`（聚合 12 个子 justfile）。下表配方属 homelab 应用层，从根跑要加前缀：`just helm deploy-cilium` ≡ `cd k8s/helm && just deploy-cilium`。**只列带坑的**：
 
 | 命令 | 坑 |
 |------|-----|
