@@ -268,7 +268,13 @@ def main():
         print(f"❌ {len(failures)} 个 App 渲染或校验失败: {', '.join(sorted(set(failures)))}")
         print("   规则背景见 docs/reference/manifest-safety-checks.md「渲染检查」一节")
         return 1
-    print(f"✅ {len(apps)} 个 App 全部渲染成功并通过 schema 校验（kube {KUBE_VERSION}）")
+    if args.no_schema:
+        # ☠️ 别把「渲染成功」说成「校验通过」：--no-schema 时 kubeconform 压根没跑
+        # （第 227 行就把它从依赖里摘掉了）。谎报验过什么，比不验更坏——本脚本自己
+        # 就是为「跳过 ≠ 通过」而写的。
+        print(f"✅ {len(apps)} 个 App 全部渲染成功（--no-schema：**未跑 kubeconform**，schema 未校验）")
+    else:
+        print(f"✅ {len(apps)} 个 App 全部渲染成功并通过 schema 校验（kube {KUBE_VERSION}）")
     print("   注意：合法 ≠ 正确。它拦的是写错层级 / 空渲染 / 漏登记，拦不住值填错。")
     return 0
 
