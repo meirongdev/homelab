@@ -93,8 +93,14 @@ spec:
       targetPort: <container-port>
 ```
 
-- **requests/limits 要显式写**。homelab 有 LimitRange 兜底 + Kyverno 审计，
-  oracle-k3s **两者都没有**——那里不写就是真的不设限。
+- **requests/limits 要显式写**。homelab 有 LimitRange 兜底 + Kyverno 审计；oracle-k3s 没有
+  Kyverno，但 ☠️ **不要以为它「不写就不设限」**——`personal-services`（本文推荐的默认落点）
+  有自己的 [LimitRange + ResourceQuota](../../cloud/oracle/manifests/personal-services/personal-services-limits.yaml)：
+  不写 resources 的容器会被注入 `500m / 256Mi` **上限**，超了是 OOMKill 而不是「随便用」；
+  该 ns 另有 `pods: 30` 与 `count/jobs.batch: 20` 的对象数配额，顶到就是 Pod 建不出来。
+  ⚠️ LimitRange **只在准入时注入、不追溯已有 Pod**，所以改了它要把该 ns 里早于它的
+  Deployment 逐个重启，否则 `kubectl get limitrange` 看着正常而老 Pod 仍是 BestEffort
+  （查法：`kubectl -n <ns> get pods -o custom-columns=NAME:.metadata.name,QOS:.status.qosClass`）。
 - **PVC 一律 `local-path`**（两集群唯一的 StorageClass；`nfs-client` provisioner 已于
   2026-07-11 卸载，写它的 PVC 会永远 `Pending`）。sqlite 类应用尤其不能用 NFS。
   唯一例外是只读媒体的静态 NFS PV，边界见
@@ -142,30 +148,34 @@ spec:
 
 所有字段都显式写出来，否则 ArgoCD 会因为 live/declared 差异长期 OutOfSync。
 
-**Gateway 在 `kube-system`，跨 ns 引用后端必须要 ReferenceGrant**（写在**目标** ns）。
-已有的 grant：homelab `personal-services` / `monitoring` / `vault` / `argocd`，
-oracle `personal-services` / `homepage` / `rss-system`。先查一遍再决定要不要新建：
+☠️ **后端 Service 与 HTTPRoute 同 ns 时，不需要 ReferenceGrant**——绝大多数新服务都属于
+这一类，这一步直接跳过。让 `kube-system` 里的 Gateway 接管你这个 ns 的路由的，是 listener
+上的 `allowedRoutes: {namespaces: {from: All}}`，不是 grant。仓库里现存的 7 个 grant 全是
+同 ns 的空操作（`jobs-sg` / `litellm` / `media` / `zitadel` 四个 ns 一个 grant 都没有，
+路由照常 200/302），**照抄它们只会多一个不起作用的对象**。判据与实测见
+[reference/networking-ingress.md](../reference/networking-ingress.md)。
 
-```bash
-kubectl --context <k3s-homelab|oracle-k3s> get referencegrant -A
-```
+**只有** `backendRefs` 真的指向别的 namespace 时才要写 grant（写在**目标** ns）：
 
 ```yaml
 ---
 apiVersion: gateway.networking.k8s.io/v1beta1   # ☠️ 必须是 v1beta1
 kind: ReferenceGrant
 metadata:
-  name: allow-gateway-to-<namespace>
-  namespace: <namespace>
+  name: allow-<路由所在 ns>-to-<后端所在 ns>
+  namespace: <后端 Service 所在的 ns>      # ← grant 写在**被引用**的一侧
 spec:
   from:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
-      namespace: <namespace>
+      namespace: <HTTPRoute 所在的 ns>     # ← 与上面的 namespace 不同，否则这条是空操作
   to:
     - group: ""
       kind: Service
 ```
+
+⚠️ 上面两个 ns **必须不同**。写成一样的（仓库里现存的 7 个就是这样）不会报错，
+也不会生效——同 ns 引用本来就不需要授权。
 
 ⚠️ 用 `v1beta1` 的理由**不是**「`v1` 不存在」——`v1` 早就有了，而是本仓库现装的 Gateway API
 CRD 里 `v1beta1` 仍是 **storage 版本**，写 `v1` 属于无谓 churn 且历史上报过
@@ -256,7 +266,7 @@ git push origin main
 ```bash
 CTX=<k3s-homelab|oracle-k3s>
 kubectl --context $CTX -n <namespace> get pods -l app=<service-name>
-kubectl --context $CTX -n <namespace> rollout status deployment/<service-name> -n <namespace>
+kubectl --context $CTX -n <namespace> rollout status deployment/<service-name>
 kubectl --context $CTX -n <namespace> get httproute <service-name> -o jsonpath='{.status.parents[0].conditions}'
 dig +short <subdomain>.meirong.dev
 curl -sS -o /dev/null -w '%{http_code}\n' https://<subdomain>.meirong.dev

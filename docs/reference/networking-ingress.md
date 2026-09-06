@@ -1,6 +1,6 @@
 # Networking & Ingress — 入口链路与 DNS 自动化
 
-> Last updated: 2026-09-05
+> Last updated: 2026-09-06
 > Status: 生效事实
 >
 > 南北向入口（Cloudflare → Cilium Gateway）与 DNS 自动化（external-dns）。
@@ -39,14 +39,23 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 ## Gateway API 布局与 HTTPRoute 约定
 
 - **homelab**: `k8s/helm/manifests/gateway/`（ArgoCD `gateway` App）：`gateway.yaml` =
-  GatewayClass + Gateway 本体；每条对外路由一个 `route-<service>.yaml`（ReferenceGrant +
-  HTTPRoute 成对）。**新子域名 = 新建一个 `route-*.yaml`**。parentRef
-  `homelab-gateway`/`kube-system`/8000。
+  GatewayClass + Gateway 本体；每条对外路由一个 `route-<service>.yaml`。
+  **新子域名 = 新建一个 `route-*.yaml`**。parentRef `homelab-gateway`/`kube-system`/**80**
+  （☠️ 本行 2026-09-06 前写的是 8000 —— 那正是 2026-08-01 事故里的两条错误指令之一，
+  实测全仓 25 条 parentRef 无一例外都是 80）。
 - **oracle-k3s**: HTTPRoute 与服务写在同一个 manifest 文件里
   （`cloud/oracle/manifests/personal-services/<service>.yaml`），parentRef
   `oracle-gateway`/`kube-system`/80。
-- **跨 ns 引用必须有目标 ns 里的 ReferenceGrant，且 apiVersion 写 `v1beta1`**：
-  声明成 `v1` 会让整个 App `ComparisonError`（CI H3 拦截）。
+- ☠️ **HTTPRoute 与后端 Service 同 ns 时不需要 ReferenceGrant**（2026-09-06 实测）。
+  让 `kube-system` 里的 Gateway 接管别的 ns 的路由的，是 listener 上的
+  `allowedRoutes: {namespaces: {from: All}}`（两个 Gateway 都这么写），**与 grant 无关**；
+  ReferenceGrant 只管**跨 ns 的 `backendRefs`**。判据：`jobs-sg` / `litellm` / `media` /
+  `zitadel` 四个 ns 有线上路由却**没有任何 grant**，六个域名实测 200/302，与有 grant 的
+  `monitoring` / `argocd` 无差别。仓库现存的 7 个 grant **全是同 ns 的，因而都是空操作**
+  （全仓 29 条 backendRef 无一跨 ns）——留着无害，但别把它当成新增服务的必做步骤，
+  更别以为它在给 Gateway 兜底：真要收紧，改的是 `allowedRoutes`。
+- **真跨 ns 引用时**，目标 ns 里必须有 ReferenceGrant，且 apiVersion 写 `v1beta1`：
+  声明成 `v1` 会让整个 App `ComparisonError`（CI H3 拦截 —— 该规则本身仍然有效）。
 - **HTTPRoute 模板纪律**: `parentRefs` 写全 `group`/`kind`，`backendRefs` 写全
   `group`/`kind`/`weight`，否则 Gateway controller 补默认值导致 ArgoCD 永久 OutOfSync。
 - **单个路径开小灶用 `Exact`，☠️ 不能用 `PathPrefix`**。规范原文「precedence must be

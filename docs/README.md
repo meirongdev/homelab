@@ -1,8 +1,8 @@
 # Homelab Docs Portal
 
-> Last updated: 2026-09-02
+> Last updated: 2026-09-06
 > 这是入口索引。运行态事实都在下面链接的文档里，本页不复制副本。
-> 写文档的强制规则（R1–R7）见 [RULES.md](RULES.md)，本页只做导航。
+> 写文档的强制规则（R1–R8）见 [RULES.md](RULES.md)，本页只做导航。
 
 ## 从哪里开始
 
@@ -38,6 +38,6 @@
 
 ## 新增 / 修改文档
 
-写文档前先读 [RULES.md](RULES.md) 的 R1–R7（目录归属、命名、文首字段、状态枚举、索引维护、
-唯一真相源），CI 的 `check-docs.py` 强制（`python3 scripts/check-docs.py`）。
+写文档前先读 [RULES.md](RULES.md) 的 R1–R8（目录归属、命名、文首字段、状态枚举、索引维护、
+唯一真相源、长度预算），CI 的 `check-docs.py` 强制（`python3 scripts/check-docs.py`）。
 放错目录、漏建索引都算违规。
