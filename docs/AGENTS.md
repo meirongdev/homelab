@@ -94,8 +94,8 @@ GitOps/App `argocd-app-patterns.md` · 入口/DNS `networking-ingress.md` · 跨
 - **任务运行器** `just`（唯一例外 `cloud/oracle/terraform/` 用 `make`）·
   **Commits** Conventional Commits · **Helm** 配置进 `values/*.yaml`，不用内联 `--set` ·
   **SSH** 全舰队 key `~/.ssh/vgio`。
-- **新增服务**走 skill `.claude/skills/add-service/SKILL.md`（manifest → HTTPRoute → homepage →
-  Uptime Kuma 全流程）。落点按资源画像选，判据与实测容量见
+- **新增服务**走 [runbooks/add-service.md](runbooks/add-service.md)（manifest → HTTPRoute → homepage →
+  Uptime Kuma 全流程；skill `.claude/skills/add-service/SKILL.md` 只是它的入口壳，改流程改 runbook）。落点按资源画像选，判据与实测容量见
   [cluster-placement-for-new-services.md](decisions/cluster-placement-for-new-services.md)：
   计算密集 / 大流量公共服务 / 只有 amd64 镜像 → homelab；轻量无状态 → oracle-k3s。
   ⚠️ 两边都不宽裕，**别照搬上游 manifest 的 requests**，按实测填。

@@ -1,7 +1,7 @@
 # Runbooks
 
 > 可直接执行的运维操作手册（SOP）。**只收针对本 homelab 基础设施、可照抄执行的流程。**
-> Last updated: 2026-09-03
+> Last updated: 2026-09-06
 
 | Runbook | 什么时候用 |
 |---------|-----------|
@@ -22,6 +22,7 @@
 | [oracle-k3s-shape-downsize.md](oracle-k3s-shape-downsize.md) | 改 A1 shape（`ocpus`/`memory_gb`）；含 requests 右尺寸前置、hugepages 回收、system-reserved、停机面与验证 |
 | [krr-report-triage.md](krr-report-triage.md) | 周一收到 KRR 报告后怎么读怎么处理：五类分诊、地板值与空结果两类误读、改哪里怎么下发、改完怎么验证生效 |
 | [dgx-model-swap-homelab-followup.md](dgx-model-swap-homelab-followup.md) | DGX 换了主力模型或回滚旧模型：先分流「换栈 vs 引擎挂了」，采 7 项事实 → 改四处清单 → ☠️ 同步 Postgres 里全部虚拟 key 白名单（历史上 16 把有 8 把受影响）→ 重估三条监控量 → 按五条硬判据验收 |
+| [add-service.md](add-service.md) | 往任一集群部署新服务：定落点 → 清单 → HTTPRoute（=改 DNS）→ GitOps 注册 → homepage/Uptime Kuma → 验收；含 ☠️ PVC 备份归属、新 ns 的 PSA、ReferenceGrant 版本、路由竞态四类静默失效。skill `add-service` 的真相源 |
 | [suspicious-traffic-investigation.md](suspicious-traffic-investigation.md) | cf-analytics 面板出现认不出来的流量：按 UA/IP 下钻到 path 与状态码、判读四条经验、加白名单还是加 WAF 规则 |
 
 > 故障复盘见 [records/](../records/README.md)；非基础设施的工具流程见 [guides/](../guides/README.md)

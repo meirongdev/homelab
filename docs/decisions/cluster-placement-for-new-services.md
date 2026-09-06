@@ -101,7 +101,7 @@
 - homelab 上的 PVC 依然只有 `local-path`（无冗余），落地时照 H4 规则确认备份归属。
 - homelab 的 HTTPRoute 一路由一文件（`k8s/helm/manifests/gateway/route-<service>.yaml`），
   且首次部署要查 `ResolvedRefs`：homelab 侧有路由/工作负载的同步排序竞态。
-  流程见 skill `.claude/skills/add-service/SKILL.md`。
+  流程见 [runbook](../runbooks/add-service.md)（skill `.claude/skills/add-service/SKILL.md` 只是它的入口壳）。
 - 密钥路径随集群走：homelab 用 `secret/homelab/<service>`，oracle 用 `secret/oracle-k3s/<service>`。
 
 ## 推翻条件
