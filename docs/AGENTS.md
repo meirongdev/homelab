@@ -16,19 +16,19 @@
 ```
 proxmox/{terraform,terraform-storage,ansible}/  # pve 上的 VM · 106 上的 worker VM · 两台宿主机
 k8s/{ansible,cilium,helm}/     # K3s 安装 · Cilium values(手动管理) · 应用部署(manifests/,values/=homelab)
-cloud/oracle/                  # Oracle Cloud K3s (terraform|ansible|manifests|values|cloudflare)
+cloud/oracle/                  # Oracle K3s (terraform|ansible|manifests|values|cloudflare|bootstrap=手工 RBAC)
 argocd/                        # GitOps (install|projects|applications/)
 cloudflare/terraform/          # Tunnel + DNS + WAF          tailscale/{terraform,ansible}/  # ACL · 节点 tailscale
 zitadel/                       # 身份/SSO                     backup/               # restic (kustomize)
 macbook/ansible/               # 远程无头 M2 MacBook         images/               # 自研镜像(各一条 build workflow)
 scripts/                       # CI 的 6 个检查器（just check 跑的就是这些）+ oracle 巡检
 docs/                          # 见下方「Documentation Rules」
-根 justfile · versions.just    # 根 justfile 聚合 12 个子 justfile；versions.just = 两集群共享的版本
+根 justfile · versions.just    # 根 justfile 聚合全部子 justfile；versions.just = 两集群共享的版本
 ```
 
 ## Key Commands
 
-完整清单跑根目录 `just --list`（聚合 12 个子 justfile）。下表配方属 homelab 应用层，从根跑要加前缀：`just helm deploy-cilium` ≡ `cd k8s/helm && just deploy-cilium`。**只列带坑的**：
+完整清单跑根目录 `just --list`（聚合全部子 justfile）。下表配方属 homelab 应用层，从根跑要加前缀：`just helm deploy-cilium` ≡ `cd k8s/helm && just deploy-cilium`。**只列带坑的**：
 
 | 命令 | 坑 |
 |------|-----|
@@ -76,7 +76,7 @@ docs/                          # 见下方「Documentation Rules」
   ⚠️ worker 与控制面 **不在同一网段**（LAN vs pve 的 `10.10.10.0/24`），且它多一条
   ip rule。加/改它必读 `k8s/ansible/playbooks/setup-k3s-worker.yaml` 的文件头三条约束
   （[ADR](decisions/storage106-as-homelab-worker.md)）。
-- oracle 重启/改 shape 后跑 `cd cloud/oracle && just verify-node`（只读核全部不变量；
+- oracle 重启/改 shape 后跑 `just oracle verify-node`（只读核全部不变量；
   **别在文档里写死它报的条数**，那是动态累加的）。
 
 **按域查细节（`docs/reference/`）**：术语/命名正典 `terminology.md`（写文档或注释前先对
@@ -101,17 +101,18 @@ GitOps/App `argocd-app-patterns.md` · 入口/DNS `networking-ingress.md` · 跨
   计算密集 / 大流量公共服务 / 只有 amd64 镜像 → homelab；轻量无状态 → oracle-k3s。
   ⚠️ 两边都不宽裕，**别照搬上游 manifest 的 requests**，按实测填。
 - 新服务的硬性要求（错了通常静默失效）：⚠️ arm64 先确认镜像有 `linux/arm64`，pin
-  **多架构 index digest** 不是单架构的 · 跨 ns 引用要 ReferenceGrant（清单写 `v1beta1`，
-  理由见 H3）· 可写 PVC 一律 `local-path`（唯一例外是只读媒体的静态 NFS PV，见 Storage
-  Notes）· oracle 密钥放 `secret/oracle-k3s/<service>` ·
+  **多架构 index digest** 不是单架构的 · 同 ns 后端**不需要** ReferenceGrant（Gateway 靠
+  listener 的 `allowedRoutes` 接管；真跨 ns 才要，写 `v1beta1`，见 H3）· 可写 PVC 一律
+  `local-path`（唯一例外是只读媒体的静态 NFS PV，见 Storage Notes）·
+  oracle 密钥放 `secret/oracle-k3s/<service>` ·
   非核心挂 `priorityClassName: bulk`。
 - ⚠️ **判断内存余量看 `free -m` 的 available 或 `rssBytes`，别信 `kubectl top node`**；
   requests 只反映申报、不反映实占（两者可差数百 Mi）。→ [k8s-qos-resource-management.md](reference/k8s-qos-resource-management.md)
 
 ## Documentation Rules
 
-写文档前读 [docs/RULES.md](RULES.md) 的 R1–R7（目录归属/命名/文首字段/状态枚举/索引维护/
-唯一真相源），CI 的 `check-docs.py` 强制。放错目录、漏建索引都算违规。最常踩的三条：
+写文档前读 [docs/RULES.md](RULES.md) 的 R1–R8（目录归属/命名/文首字段/状态枚举/索引维护/
+唯一真相源/长度预算），CI 的 `check-docs.py` 强制。放错目录、漏建索引都算违规。最常踩的三条：
 
 - **架构事实**进 `reference/`（唯一真相源），别在 plan 里留唯一副本；
   **决策**进 `decisions/`；**可重复 SOP** 进 `runbooks/`；**故障复盘**进 `records/`。

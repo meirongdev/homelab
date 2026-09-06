@@ -1,6 +1,6 @@
 # 清单安全规则 (Manifest Safety Checks)
 
-> Last updated: 2026-09-05
+> Last updated: 2026-09-06
 > Status: 生效事实
 > Scope: CI 强制的仓库规则，本文是 source of truth。四个检查器：
 > `scripts/check-manifests.py` 的 **H1-H5**（清单结构）、
@@ -21,7 +21,7 @@ repo 里已经有大量「⚠️ 别踩这个坑」的注释和复盘。问题�
 1. **已经发生过**（或已经在静默发生），不是假想风险
 2. **能被静态检查抓住**：写进 CI，而不是写进注释指望下次有人记得
 
-> ⚠️ 与 [docs/RULES.md](../RULES.md) 的 R1-R7 关系：那套管文档组织（由
+> ⚠️ 与 [docs/RULES.md](../RULES.md) 的 R1-R8 关系：那套管文档组织（由
 > `scripts/check-docs.py` 强制），这套管清单结构。两者同一哲学：
 > 规则没有强制手段就会腐化。
 
@@ -131,6 +131,13 @@ kind: ReferenceGrant
 >   「集群里这个 CRD 提供哪些版本」：
 >   `kubectl get crd referencegrants.gateway.networking.k8s.io -o jsonpath='{.spec.versions[*].name}'`
 
+> ☠️ **规则有效，但仓库现存的 7 个 grant 其实一个都没在起作用**（2026-09-06 实测）：
+> 它们全是同 ns 的（HTTPRoute 与 Service 在一个 ns），而 ReferenceGrant 只管**跨 ns 的
+> `backendRefs`**；全仓 29 条 backendRef 无一跨 ns。让 `kube-system` 的 Gateway 接管别的
+> ns 的路由的是 listener 的 `allowedRoutes`。所以 H3 该留着（真写 grant 时它救命），
+> 但**新增服务不必写 grant**——判据与实测见
+> [networking-ingress.md](networking-ingress.md)。
+>
 > 相关但不由 CI 检查的一条：本仓库的 ReferenceGrant 的 `to[]` 都不限定 `name`，
 > 即「授权网关访问该 ns 下全部 Service」。这是刻意的简化，不是缺陷，见下方
 > 「查不出来的那些」里的 ReferenceGrant 寄生条目。

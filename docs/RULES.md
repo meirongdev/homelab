@@ -1,4 +1,4 @@
-# Homelab 文档组织规则 (R1–R7)
+# Homelab 文档组织规则 (R1–R8)
 
 > Last updated: 2026-09-06
 > 2026-08-14 从 [docs/README.md](README.md)（门户）拆出：门户只做导航，写文档的规则集中在本页。

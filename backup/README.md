@@ -5,6 +5,9 @@ restic 无 server 架构：**三个 CronJob 直推**到 106 ZFS 上的单一加�
 `restic-backup-worker` 02:00（worker 的 hostPath 只有它自己能读，控制面那份读不到）·
 homelab 控制面 `restic-backup` 03:00 · oracle `restic-backup` 03:30（错峰）。
 两台 VM 另有 PVE 侧周备（k8s-node 在 pve、worker 在 106）。
+⚠️ **第四个 CronJob 不备份**：homelab 还有 `restic-restore-drill`，每月 1 日 04:00 跑恢复演练
+（排在两个夜备之后）。所以 homelab 上 `kubectl -n backup get cronjob` 看到的是**三条**，
+oracle 上一条——「三个备份 Job」是跨两集群的总数，不是任一集群的条数。
 
 ⚠️ **106 不是「纯冷备份目标」**：它同时是 worker `k8s-worker-106` 的宿主和媒体只读 NFS 源，
 且仓库走 sftp——106 不可达 = 当晚备不上、且**恢复也无从恢复**。宕机面逐项见
@@ -19,6 +22,7 @@ backup/
     ├── homelab/             # Vault raft snapshot + open-notebook 的 sqlite/json
     │                        #   + Open Notebook 的 SurrealDB 逻辑导出(/export)
     │                        # worker-cronjob.yaml + worker-backup-script.yaml = 第二台节点的独立 Job
+    │                        # restore-drill-{cronjob,script}.yaml = 每月恢复演练（不备份）
     └── oracle/              # PG pg_dumpall + 各 sqlite/config PVC + calibre 书库(BOOKS_DIR)
 ```
 
@@ -39,7 +43,7 @@ calibre 书库 2026-08-03 随服务迁 oracle，已不在 homelab overlay 里。
 ## 快速上手
 
 ```bash
-just backup-run     # 手动触发一次（cd k8s/helm）
+just helm backup-run     # 手动触发一次（从仓库根；≡ cd k8s/helm && just backup-run）
 ```
 
 ## 详见
