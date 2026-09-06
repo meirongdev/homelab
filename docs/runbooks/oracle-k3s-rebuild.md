@@ -10,7 +10,7 @@
 > 数据一律从 restic 恢复（见 [backup-recovery.md](backup-recovery.md)），
 > 无更早状态可退。注豁免。
 >
-> Last updated: 2026-09-01
+> Last updated: 2026-09-06
 > Status: 生效 SOP
 
 ## 现状（一句话）
@@ -50,8 +50,8 @@ oracle-k3s 的 local-path PVC（**11 个**，2026-08-20 对着 live 集群重新
 
 ```bash
 cd cloud/oracle/terraform
-make plan    # 核对实例形状/是否保留 boot volume
-make apply
+just plan    # 核对实例形状/是否保留 boot volume
+just apply
 ```
 
 - ⚠️ terraform state 在本地（ROADMAP 开放项 #2，未离站）：这台 Mac 丢了 state 就得

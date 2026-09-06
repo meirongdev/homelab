@@ -310,7 +310,8 @@ logs app ns="rss-system":
 # ─── Teardown ──────────────────────────────────────────────────
 # 2026-09-02 删掉了 `teardown-apps`（kubectl delete -k 整树：selfHeal 会立刻重建，且一条命令无确认）
 # 与把它和 DNS 销毁串在一起的 `teardown`。退役单个服务照 docs/runbooks/stateful-service-cross-cluster-migration.md
-# 的「退役与残余清扫」走；整集群销毁走 terraform（cloud/oracle/terraform，`make destroy`）。
+# 的「退役与残余清扫」走；整集群销毁去 `cloud/oracle/terraform/` 跑 `terraform destroy`
+# （那里的 justfile 刻意不提供 destroy 配方——销毁 OCI 基础设施只该手敲一次并逐字读过）。
 
 # Destroy Cloudflare tunnel DNS records
 teardown-cloudflare-dns:

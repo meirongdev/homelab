@@ -6,13 +6,13 @@
 
 **目录说明与完整流程都在 [cloud/oracle/README.md](oracle/README.md)**，这里只放两条容易踩的：
 
-- ⚠️ `cloud/oracle/terraform/` 用 **`make`**，不是 `just`——仓库里其它 terraform root 都用 `just`。
+- `cloud/oracle/terraform/` 有自己的 `justfile`（2026-09-06 前是全仓库唯一用 `make` 的 root）。
 - ⚠️ 节点不可恢复时照 [runbooks/oracle-k3s-rebuild.md](../docs/runbooks/oracle-k3s-rebuild.md) 走：
   oracle 全部 PVC 是 `local-path`（无冗余、无快照），唯一安全网是 106 上的 restic 夜备。
 
 ## 快速上手
 
 ```bash
-cd cloud/oracle/terraform && make init && make apply   # 预配 VM
+cd cloud/oracle/terraform && just init && just apply   # 预配 VM
 cd cloud/oracle && just bootstrap                       # 装 K3s + Cilium + ESO + tunnel
 ```

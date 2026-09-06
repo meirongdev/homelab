@@ -1,6 +1,6 @@
 # oracle-k3s 缩容到 2 OCPU / 12GB
 
-> Last updated: 2026-09-05
+> Last updated: 2026-09-06
 > Status: 生效事实 + 切换 SOP
 > 触发条件：需要改 `VM.Standard.A1.Flex` 的 shape（vendor 回收额度、腾额度开第二台、
 > 或事后要涨回去）。任何改 `ocpus` / `memory_gb` 的动作都走本文。
@@ -164,8 +164,8 @@ oci compute instance action --action SOFTSTOP \
 
 ```bash
 cd /Users/matthew/projects/homelab/cloud/oracle/terraform
-make plan     # 必须是 0 to add, 1 to change, 0 to destroy —— 见下方"如果 plan 想重建"
-make apply
+just plan     # 必须是 0 to add, 1 to change, 0 to destroy —— 见下方"如果 plan 想重建"
+just apply
 ```
 
 开机（`--action START`），等 SSH 起来。
@@ -177,10 +177,10 @@ make apply
 
 ```bash
 cd /Users/matthew/projects/homelab/cloud/oracle/terraform
-make plan     # plan 每次都 refresh，所以会显示"零基础设施变更"，看着像没事
+just plan     # plan 每次都 refresh，所以会显示"零基础设施变更"，看着像没事
 terraform state show oci_core_instance.k3s | grep -E "ocpus|memory_in_gbs"
 #   ← 这里才照出真相：refresh 是**内存里**的，不落盘。手工改完这里仍是旧值 4/24
-make apply    # 0 added, 0 changed, 0 destroyed —— 只把 refresh 结果和 outputs 落盘
+just apply    # 0 added, 0 changed, 0 destroyed —— 只把 refresh 结果和 outputs 落盘
 ```
 
 为什么要管：`plan` 自带 refresh 所以不会误判，但 `terraform state show` 和任何直读
@@ -256,7 +256,7 @@ max_over_time((node_memory_MemTotal_bytes{cluster="oracle-k3s"}
 
 ## 踩坑与回滚
 
-**如果 `make plan` 想重建实例**：立刻停。2026-08-05 实测正确的输出是
+**如果 `just plan` 想重建实例**：立刻停。2026-08-05 实测正确的输出是
 `0 to add, 1 to change, 0 to destroy` + `~ shape_config` 就地更新。出现
 `must be replaced` 一定是别的字段漂移了（镜像 OCID、`create_vnic_details`），
 先查漂移，**绝不要**带着 replace 跑 apply：`preserve_boot_volume = true` 保得住盘，
