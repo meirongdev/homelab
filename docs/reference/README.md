@@ -61,6 +61,10 @@
 - [argocd-app-patterns.md](argocd-app-patterns.md) — 控制面部署形态、Application 清单（按 project 分组）与备注、pattern 对比、新增 Application 的 4 个坑
 - [manifest-safety-checks.md](manifest-safety-checks.md) — CI 强制的清单规则 H1-H5 / V1-V3 / E1 + 渲染检查 + 「静态查不出、只能靠人」的那几类
 
+### 仓库工程与 agent 工具链
+
+- [agent-tooling.md](agent-tooling.md) — agent 上下文的唯一入口（`docs/AGENTS.md` + 三个软链）、哪些 agent 文件是仓库内容哪些是本机各装一份、技能壳/vendored/ignored 三类来源、☠️ opsx 产物不落库的边界
+
 ---
 
 > **本目录只放常青事实。** 带日期的诊断/建议（架构优化、技术债盘点、资源右尺寸建议）
