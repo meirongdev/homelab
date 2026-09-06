@@ -27,25 +27,26 @@ cp terraform.tfvars.example terraform.tfvars
 ## Step 3: Initialize Terraform
 
 ```bash
-make init
+just init
 ```
 
 ## Step 4: Import all resources
 
 ```bash
-make import \
-  VCN_ID=ocid1.vcn.oc1... \
-  IGW_ID=ocid1.internetgateway.oc1... \
-  RT_ID=ocid1.routetable.oc1... \
-  SL_ID=ocid1.securitylist.oc1... \
-  SUBNET_ID=ocid1.subnet.oc1... \
-  INSTANCE_ID=ocid1.instance.oc1...
+# 六个参数按位置：VCN / 互联网网关 / 路由表 / 安全列表 / 子网 / 实例
+just import \
+  ocid1.vcn.oc1... \
+  ocid1.internetgateway.oc1... \
+  ocid1.routetable.oc1... \
+  ocid1.securitylist.oc1... \
+  ocid1.subnet.oc1... \
+  ocid1.instance.oc1...
 ```
 
 ## Step 5: Review drift
 
 ```bash
-make plan
+just plan
 ```
 
 The plan will show differences between your Terraform config and the imported state.
@@ -57,7 +58,7 @@ Common expected diffs:
 ## Step 6: Apply to reach desired state
 
 ```bash
-make apply
+just apply
 ```
 
 This scales the instance to 4 OCPUs / 24GB RAM and aligns all resource settings.

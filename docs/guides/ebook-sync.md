@@ -7,7 +7,7 @@
 > ⚠️ 同一件事在仓库里还有第二份实现：
 > `.claude/skills/sync-ebooks/scripts/sync_ebooks.py`（全参数化、带 kubectl 超时）。
 > **两份都还能用，所以先不删**——合并计划见
-> [ROADMAP 开放项 #15](../ROADMAP.md)。
+> [ROADMAP 开放项 #15](../ROADMAP.md#开放项)。
 
 自动将本地电子书同步到 calibre-web（ingest 目录 + 入库校验）。
 

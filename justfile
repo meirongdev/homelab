@@ -4,7 +4,7 @@
 # 子目录，所以配方里的相对路径（`values/…`、`../../argocd/…`）行为完全一致（2026-09-02 实测）。
 # 从根跑就是 `just helm deploy-cilium`。
 #
-# 为什么要它：12 个 justfile 散在 8 个目录，`just --list` 一次只看得见一个，
+# 为什么要它：子 justfile 散在多个目录（本文件 mod 的全部成员），`just --list` 一次只看得见一个，
 # 新来的人（和 agent）不翻目录树就不知道有哪些配方；CI 的冒烟也从循环变成一条命令。
 #
 # ⚠️ 加子目录 justfile 时记得在这里加一行 `mod`，否则它不在根的视野里。
@@ -14,6 +14,7 @@ mod ansible 'k8s/ansible/justfile'                    # K3s 装机 / 加 worker 
 mod helm 'k8s/helm/justfile'                          # 应用部署、Vault、ArgoCD、Cilium（homelab）
 mod oracle 'cloud/oracle/justfile'                    # oracle-k3s：节点、CNI、bootstrap、巡检
 mod oracle-ansible 'cloud/oracle/ansible/justfile'    # oracle 节点预配剧本
+mod oracle-terraform 'cloud/oracle/terraform/justfile'  # oracle OCI 基础设施（2026-09-06 前是 Makefile）
 mod oracle-cloudflare 'cloud/oracle/cloudflare/justfile'  # oracle 侧 Tunnel terraform
 mod cloudflare 'cloudflare/terraform/justfile'        # homelab 侧 DNS + Tunnel + WAF terraform
 mod tailscale 'tailscale/terraform/justfile'          # ACL + 预授权密钥
@@ -23,8 +24,6 @@ mod proxmox-storage 'proxmox/terraform-storage/justfile'  # 106 上的 worker VM
 mod proxmox-ansible 'proxmox/ansible/justfile'        # pve / 106 宿主机配置
 mod macbook 'macbook/ansible/justfile'                # 远程无头 M2 MacBook
 
-# ⚠️ cloud/oracle/terraform 是全仓库唯一用 make 的 root（`cd cloud/oracle/terraform && make apply`），
-# 没有 justfile，所以这里没有它的 mod。
 
 # 渲染检查不在这里：它要联网拉 16 个 chart、约 2 分钟，单独跑 `just check-render`。
 # 本仓库的全部本地检查（与 CI 同一批脚本）。push 前跑一遍

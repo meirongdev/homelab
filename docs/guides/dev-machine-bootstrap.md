@@ -1,6 +1,6 @@
 # 新机器开发环境 bootstrap（配到能改 homelab repo）
 
-> Last updated: 2026-09-02
+> Last updated: 2026-09-06
 > 面向「换了一台 Mac，要把本机环境配到能 clone、改、验证这个 repo」的流程。
 > 排障/恢复类走 [runbooks/](../runbooks/README.md)；AI 助手上下文见 [../AGENTS.md](../AGENTS.md)（唯一上下文文件，细节按域在 [reference/](../reference/README.md)）。
 
@@ -19,7 +19,7 @@ brew install just uv terraform helm kubectl git python3
 uv tool install ansible        # 提供 ansible-playbook（justfile 直接调它）
 ```
 
-- `just`：repo 的主任务运行器（**不是 make**；只有 `cloud/oracle/terraform/` 用 make）。
+- `just`：repo 的主任务运行器（全部 root 都用它，含 `cloud/oracle/terraform/`——那里 2026-09-06 前是 Makefile）。
 - `uv`：`check-manifests.py` 用 `uv run --with pyyaml`；ansible 建议 `uv tool install` 隔离。
 - `terraform`：7 个 root 都用它：`proxmox/terraform`、`proxmox/terraform-storage`
   （106 上的 worker VM，2026-08-15 新增）、`cloudflare/terraform`、`tailscale/terraform`、

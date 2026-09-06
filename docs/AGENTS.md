@@ -36,7 +36,6 @@ docs/                          # 见下方「Documentation Rules」
 | `just deploy-argocd` | ⚠️ 控制面在 oracle-k3s；本配方不含 Application 注册 |
 | `just deploy-gateway-api-crds` | ⚠️ 升 Cilium 必跑（见下 Ingress 条）|
 | `just connect-clustermesh <homelab-ts>:32379 <oracle-ts>:32379` | 需两个端点参数 |
-| `make init/plan/apply`（`cloud/oracle/terraform/`）| 唯一用 `make` 的 terraform root |
 
 - **GitOps**：`git push` → ArgoCD 3 分钟轮询自动同步，**不可手动 `kubectl apply` 覆盖**。
   LGTM/otel/external-dns/backup 全 GitOps。
@@ -93,7 +92,7 @@ GitOps/App `argocd-app-patterns.md` · 入口/DNS `networking-ingress.md` · 跨
 
 ## Working Conventions
 
-- **任务运行器** `just`（唯一例外 `cloud/oracle/terraform/` 用 `make`）·
+- **任务运行器** `just`（每个 root 都有 justfile，根 `just --list` 聚合全部）·
   **Commits** Conventional Commits · **Helm** 配置进 `values/*.yaml`，不用内联 `--set` ·
   **SSH** 全舰队 key `~/.ssh/vgio`。
 - **新增服务**走 [runbooks/add-service.md](runbooks/add-service.md)（manifest → HTTPRoute → homepage →

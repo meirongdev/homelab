@@ -1,0 +1,30 @@
+# oracle OCI 基础设施的 terraform root。
+#
+# 2026-09-06 前这里是 Makefile，也是全仓库唯一不用 just 的 root（AGENTS.md 曾专门花一行
+# 记这个例外）。换成 justfile 是为了让 `just --list` 一次看得见全部入口，并让 CI 的
+# `just --list` 冒烟覆盖到它——配方与旧 Makefile 一一对应，没有新增动作。
+#
+# ⚠️ 刻意不提供 `destroy`：销毁 OCI 基础设施只该手敲一次并逐字读过输出。
+#    整集群退役的顺序与残余清扫见 docs/runbooks/oracle-k3s-rebuild.md。
+#
+# state 在本地（ROADMAP 开放项 #2），且 `terraform.tfvars` 被 gitignore：
+# 换机器要先按 IMPORT.md 把已有资源 import 回来。
+
+init:
+    terraform init
+
+plan:
+    terraform plan
+
+apply:
+    terraform apply
+
+# 导入已有 OCI 资源；六个参数按位置 = VCN/网关/路由表/安全列表/子网/实例 的 OCID（见 IMPORT.md）
+import vcn igw rt sl subnet instance:
+    terraform import oci_core_vcn.main {{vcn}}
+    terraform import oci_core_internet_gateway.main {{igw}}
+    terraform import oci_core_route_table.public {{rt}}
+    terraform import oci_core_security_list.main {{sl}}
+    terraform import oci_core_subnet.public {{subnet}}
+    terraform import oci_core_instance.k3s {{instance}}
+    @echo "导入完成 —— 跑 just plan 核对漂移（预期见 IMPORT.md Step 5）"

@@ -1,7 +1,8 @@
 // Renovate 配置 —— 让「版本钉扎」不再靠人肉记账。
 //
-// 为什么引入（2026-08-13）：28 个 ArgoCD App、两套 ansible、四个 justfile 的版本变量
-// 已经过了人肉能管住的规模，而漂移是**静默**的：
+// 为什么引入（2026-08-13）：ArgoCD App、各套 ansible、各 root 的 justfile 里的版本变量，
+// 都已经过了人肉能管住的规模（**刻意不写条数**——写死就会漂，与 docs/RULES.md 的 R8 同理），
+// 而漂移本身是**静默**的：
 //   · 2026-08-11 Cilium 1.20 升级漏配 Gateway API CRD → 控制器静默不初始化 30 小时，
 //     旧路由照常 200、无告警，只有新增路由 503；
 //   · 2026-08-13 复查发现 oracle 的 ansible 剧本**仍钉着 v1.2.1**，注释却写"与 homelab 一致"
@@ -79,6 +80,9 @@
         "^cloud/oracle/ansible/playbooks/.+\\.yaml$",
         "^proxmox/ansible/playbooks/.+\\.yaml$",
         "^macbook/ansible/playbooks/.+\\.yaml$",
+        // tailscale/ansible 目前没有版本 pin，但它只有 roles/ 没有 playbooks/，
+        // 只写 playbooks 的话，将来 pin 在 defaults 里就会**静默地没人管**。
+        "^tailscale/ansible/.+\\.yaml$",
       ],
       matchStrings: [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+?)(?: registryUrl=(?<registryUrl>\\S+))?\\s*\\n\\s*[a-z0-9_]+:\\s*\"?(?<currentValue>[^\"\\s#]+)\"?",
