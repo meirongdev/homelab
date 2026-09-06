@@ -83,7 +83,8 @@
 
 - 新自研应用的落地路径固定：`k8s/helm/manifests/<app>/`（homelab）或
   `cloud/oracle/manifests/<app>/`（oracle），加 `argocd/applications/<app>.yaml`。
-  `.claude/skills/add-service/SKILL.md` 已是这个流程，无需改动。
+  新增服务的 SOP 已按这个流程写（当时的载体是 `.claude/skills/add-service/SKILL.md`，
+  2026-09-05 起真相源是 [runbook](../runbooks/add-service.md)），无需改动。
 - 应用自己的仓库里**可以**放 `deploy/` 参照清单，但**真相源是 homelab 仓库**，
   ArgoCD 不指向应用仓库：否则就撞回第 1 条的 `sourceRepos` 陷阱。
 - ⚠️ `k8s/helm/` 这个目录名是历史命名：它下面的 `manifests/` 与 Helm 无关。
