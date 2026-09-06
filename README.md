@@ -26,6 +26,7 @@ Network note: both clusters now use Cilium for the local data plane and Gateway 
 | [backup/](backup/README.md) | restic 夜备（双集群 → 106） |
 | [macbook/](macbook/README.md) | 远程无头 M2 MacBook 的 Ansible 配置 |
 | [images/](images/README.md) | 自建容器镜像（Dockerfile 源） |
+| [scripts/](scripts/README.md) | CI 的 6 个检查器（`just check` 跑的就是这些）+ oracle 节点巡检 |
 
 ## 本地检查
 
