@@ -1,7 +1,14 @@
 # Images — 自建容器镜像（Dockerfile 源）
 
-本目录下的镜像由 CI 构建并推送到 `ghcr.io/meirongdev/*`（各自一个 workflow，
-按路径触发）。其余服务用的都是上游官方镜像，不在此维护。
+本目录只放 **Dockerfile 在本仓库**的镜像：CI 构建并推送到 `ghcr.io/meirongdev/*`
+（各自一个 workflow，按路径触发）。之所以在仓库根而不在 `k8s/` 下：构建与集群解耦
+（产物是 ghcr 上的镜像），消费方是各自的清单——清单里 pin 的是 digest，改这里不会
+改到任何 Deployment。新自建镜像就在这里加目录 + 加一条 workflow。
+
+⚠️ **`ghcr.io/meirongdev/*` 不等于本目录**：清单里还引用着 `jobs-sg`、
+`godot-games-web`、`godot-games-nakama-modules`，它们的构建不在本仓库（这里的 workflow
+只构建上面这两个），本仓库只 pin digest。
+其余服务用的都是上游官方镜像。
 
 ```
 images/
