@@ -107,7 +107,11 @@ Grafana 用**只读角色** `blogstats_ro` 连（`SELECT` + 未来新表的 DEFA
   ⚠️ **已知盲区**：从未成功过一次时 KSM 不发 `kube_cronjob_status_last_successful_time`
   这个序列，所以「CronJob 对象被误删」在首次激活前无法与「还没激活」区分，故只守
   「成功过、然后停了」。激活后请确认那个 stat 面板有值。
-- 备份多一段 `pg_dump`（`backup/overlays/homelab/backup-script.yaml` 的 2f）。
+- 备份多一段 `pg_dump`（`backup/overlays/homelab/backup-script.yaml` 的 2f），凭据走
+  **独立的 ExternalSecret + optional 卷**，照 `open-notebook-surreal` 的成例：往共享的
+  `restic-backup` 里加 key 会让整条夜备的凭据随一个新 Vault 路径的缺失一起同步失败，
+  而且 `ExternalSecretNotReady`（15m 就响）会指着 backup ns 报警 —— 一个还没激活的新功能
+  不该让关键子系统的健康信号说谎。
   ☠️ 这个库**没有自己的 PVC**，那一行是它唯一的备份，而 H4 查不出「实例里多了个库」——
   同 nakama 的坑。丢了也不能重算：上游只留 8 天。
 - ⚠️ `apps-pg` 的 Deployment 多了两个 `optional: true` 的 env → **ArgoCD 同步时 Postgres
@@ -128,12 +132,14 @@ Grafana 用**只读角色** `blogstats_ro` 连（`SELECT` + 未来新表的 DEFA
      readonly_password="$(openssl rand -base64 24)"
    ```
 
-   写完确认三个 ExternalSecret 变绿（缺这个路径时它们各自失败，互不牵连，这是刻意拆开的）：
+   写完确认三个 ExternalSecret 变绿。⚠️ 在此之前它们是 `Ready=False`，15 分钟后
+   `ExternalSecretNotReady` 会报 —— **这是预期的「等激活」信号**，三个对象都是本次新增的，
+   刻意拆开就是为了让失败面只有它们自己：
 
    ```bash
    kubectl --context k3s-homelab get externalsecret -n databases apps-pg-blogstats
    kubectl --context k3s-homelab get externalsecret -n monitoring blogstats-db
-   kubectl --context k3s-homelab get externalsecret -n backup restic-backup
+   kubectl --context k3s-homelab get externalsecret -n backup blogstats-pg
    ```
 
 2. 在**已经跑着**的实例上建租户。`initdb` 脚本只在数据目录为空时执行，改它对现有实例

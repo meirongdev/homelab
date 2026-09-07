@@ -175,10 +175,11 @@ data:
     # 博客按文章的日访问量长期表（blog_pageviews，2026-09-07）。同 nakama：**这个库没有
     # 自己的 PVC**，这一行是它唯一的备份，而 H4 查不出「实例里多了个库」。
     # ☠️ 丢了不能重算：上游 Cloudflare 按 path 只留 8 天，表里更早的天数没有第二份来源。
-    # 凭据来自 external-secret.yaml 的 BLOGSTATS_DB_PASSWORD（Vault secret/homelab/blogstats
-    # → owner_password，与 rollup 作业写库用的是同一个）。
+    # 凭据来自 blogstats-external-secret.yaml（Vault secret/homelab/blogstats →
+    # owner_password，与 rollup 作业写库用的是同一个），走**独立的 optional 卷** ——
+    # 理由同 open-notebook：新应用的密钥不该能拖垮整条夜备。
     echo "[backup] pg_dump blogstats DB..."
-    export PGPASSWORD="$(cat /creds/BLOGSTATS_DB_PASSWORD 2>/dev/null || true)"
+    export PGPASSWORD="$(cat /creds-blogstats/BLOGSTATS_DB_PASSWORD 2>/dev/null || true)"
     if [ -z "$PGPASSWORD" ]; then
       echo "[warn] BLOGSTATS_DB_PASSWORD absent (vault secret/homelab/blogstats not written?) — blogstats NOT in this backup"
     elif pg_dump -h apps-pg.databases.svc -U blogstats -d blogstats -Fc -f /work/blogstats.dump 2>/dev/null; then
