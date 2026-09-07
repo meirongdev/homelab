@@ -51,9 +51,38 @@ data:
     SQL
     }
 
+    # 只读角色：给「读方不是应用自己」的租户用（目前只有 blogstats —— 读它的是 Grafana，
+    # 面板里的 SQL 不该有改表的能力）。
+    # ⚠️ 表是消费方自己 `CREATE TABLE IF NOT EXISTS` 建的，建库这一刻还不存在 ——
+    #    所以 `GRANT ... ON ALL TABLES` 此时是空操作，真正生效的是 DEFAULT PRIVILEGES
+    #    那一行（它必须以 owner 或超管身份执行，这里是超管）。
+    create_readonly() {
+      local role="$1" db="$2" pw="$3"
+      if [ -z "$pw" ]; then
+        echo "[init] FATAL: 只读角色 $role 的口令为空 —— Secret apps-pg-blogstats 同步了吗？" >&2
+        exit 1
+      fi
+      psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres \
+           -v role="$role" -v pw="$pw" -v db="$db" <<'SQL'
+    SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'role', :'pw')
+      WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'role')\gexec
+    SELECT format('GRANT CONNECT ON DATABASE %I TO %I', :'db', :'role')\gexec
+    SQL
+      psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$db" \
+           -v role="$role" -v owner="$db" <<'SQL'
+    SELECT format('GRANT USAGE ON SCHEMA public TO %I', :'role')\gexec
+    SELECT format('GRANT SELECT ON ALL TABLES IN SCHEMA public TO %I', :'role')\gexec
+    SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT SELECT ON TABLES TO %I', :'owner', :'role')\gexec
+    SQL
+    }
+
     create_tenant litellm "${LITELLM_PASSWORD:-}"
     create_tenant multica "${MULTICA_PASSWORD:-}"
     create_tenant nakama "${NAKAMA_PASSWORD:-}"
+    # blogstats（2026-09-07）：博客按文章的日访问量长期表。写方是 monitoring ns 的
+    # blog-stats-rollup CronJob，读方是 Grafana（走下面那个只读角色）。
+    create_tenant blogstats "${BLOGSTATS_PASSWORD:-}"
+    create_readonly blogstats_ro blogstats "${BLOGSTATS_RO_PASSWORD:-}"
 
     # nakama 的 migrate 会 `CREATE EXTENSION pg_trgm`。pg_trgm 在 PG13+ 是 trusted 扩展，
     # 库 owner 自己也建得起来（multica 的 pg_trgm/pgcrypto 就是租户自己建的），
@@ -150,6 +179,18 @@ spec:
             - name: NAKAMA_PASSWORD
               valueFrom:
                 secretKeyRef: { name: apps-pg-bootstrap, key: NAKAMA_PASSWORD }
+            # blogstats 的两个口令来自**另一个** Secret（apps-pg-blogstats），不是上面
+            # 那份 —— 理由见 blogstats-externalsecret.yaml 文件头（ESO 的失败面隔离）。
+            # ☠️ `optional: true` 是必须的：Vault 里还没写 homelab/blogstats 时该 Secret
+            #    不存在，非 optional 的 secretKeyRef 会让**整个 apps-pg 起不来**，
+            #    连带 litellm/multica/nakama 一起停。缺口令只影响「数据目录为空时新建
+            #    租户」这一条路径（initdb 里有 FATAL 兜着），现存实例读不到也无所谓。
+            - name: BLOGSTATS_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: apps-pg-blogstats, key: BLOGSTATS_PASSWORD, optional: true }
+            - name: BLOGSTATS_RO_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: apps-pg-blogstats, key: BLOGSTATS_RO_PASSWORD, optional: true }
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
