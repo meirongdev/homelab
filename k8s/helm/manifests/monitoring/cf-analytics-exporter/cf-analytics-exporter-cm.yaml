@@ -32,6 +32,9 @@ data:
       cf_analytics_daily_requests_by_class{host,date,class}   按来源分类的请求数
       cf_analytics_daily_client_ips_by_class{host,date,class} 按来源分类的独立 IP 数
       cf_analytics_daily_bot_requests{date,category}   全站已验证爬虫，按 Cloudflare 分类
+      cf_analytics_daily_page_requests{path,date}        博客 HTML 页面的 200 请求数（见下）
+      cf_analytics_daily_page_requests_browser{path,date} 同上，只数 UA 是已知浏览器的那部分
+      cf_analytics_page_rows_truncated            按 path 的查询撞到行数上限则为 1
       cf_analytics_host_window_days               实际取到按域名数据的完整天数
       cf_analytics_host_days_failed               本轮出错（非保留期原因）的天数
       cf_analytics_rows_truncated                 有某天撞到 ROW_LIMIT 则为 1（IP 数被低估）
@@ -45,6 +48,22 @@ data:
 
     ☠️ **不导出任何客户端 IP 本身**，只导出去重后的计数。原始 IP 是访客 PII，且仓库
        有「不落公网 IP」的硬约束；放进 label 还会把基数炸到几千。
+
+    按 path 的两个指标（2026-09-07 新增）只覆盖 `BLOG_HOST` 一个域名，且只数
+    `edgeResponseStatus=200` + `edgeResponseContentTypeName=html`：
+      · 不加 html 过滤，css/js/字体会把行数顶到上限（2026-09-06 实测：不过滤 1000 行
+        就截断、647 个 path，真正的页面不到一半）；
+      · 304 不用管 —— 实测该域名 HTML 的 304 是 **0 行**（Pages 每次都返回 200），
+        「只数 200」不会漏掉带缓存的回访；
+      · **Prometheus 侧只留每天前 `PAGE_TOP_N` 个 path**，其余并进 `path="__other__"`
+        （538 个 path × 8 天会白占几千条 series，同
+        decisions/prometheus-series-reduction.md 的取向）。要完整的尾巴走 `/pages.csv`。
+
+    `/pages.csv`（`day,path,requests,browser_requests`）是给**长期留存**用的：CF 按 path
+    只留 8 天、Prometheus 只留 14 天，而「某篇文章累计被读了多少」按年算，所以
+    blog-stats-rollup CronJob 每天把这份 CSV UPSERT 进 Postgres
+    （manifests/monitoring/blog-stats-rollup.yaml）。窗口里每天重发一遍是刻意的：
+    ≤8 天的中断下一轮自己补齐。
 
     Cloudflare 免费版的两条实测硬限制（2026-08-15 用本仓库 token 实测，别照抄文档猜）:
       1. httpRequestsAdaptiveGroups（按 host/IP 拆分的那个数据集）**单次查询时间跨度 ≤ 1 天**
@@ -87,6 +106,13 @@ data:
     HOST_WINDOW_DAYS = int(os.environ.get("HOST_WINDOW_DAYS", "8"))
     # 单日行数上限。CF 硬上限 10000；2026-08-15 实测四维分组下本 zone 约 1800–3600 行。
     ROW_LIMIT = int(os.environ.get("ROW_LIMIT", "10000"))
+    # 按 path 统计只针对博客那一个域名 —— 其余子域是服务不是内容，按 path 拆没有意义
+    # （argocd/vault 的 path 全是自建监控的探针打的）。
+    BLOG_HOST = os.environ.get("BLOG_HOST", "meirong.dev")
+    # 每天进 Prometheus 的 path 数上限，其余并进 __other__。2026-09-06 实测该域名单日
+    # 538 个 HTML path，全量进指标 ≈ 8600 条 series，不值当。
+    PAGE_TOP_N = int(os.environ.get("PAGE_TOP_N", "50"))
+    OTHER = "__other__"
 
     # ☠️ **显式白名单**：判定「这个请求是我自己的机器发的」全靠这份 User-Agent 子串名单。
     # 新上一个会访问公网域名的组件（探测器/同步器/webhook）**必须加进来**，否则它会被
@@ -146,6 +172,23 @@ data:
         if ua.startswith("mozilla/"):
             return "browser"
         return "unknown"
+
+    # CF 把爬虫也塞进 userAgentBrowser 这个枚举（实测有 GoogleBot / BingBot / AppleBot），
+    # 所以「看着像浏览器」= 非空、不是 Unknown、且名字里不带 bot/spider/crawl。
+    # ⚠️ 与 classify() 的 `browser` **不是一回事**，别互相对账：那个看原始 UA 前缀
+    #    （`Mozilla/` 开头就算），这个看 CF 解析出来的浏览器名。伪装成 Chrome 的爬虫
+    #    在两边都会被算成浏览器 —— 这仍然是近似，只是比数原始请求准。
+    BOTISH_UA_BROWSERS = ("bot", "spider", "crawl")
+
+
+    def is_browser_ua(bot_category: str, ua_browser: str) -> bool:
+        if bot_category:
+            return False
+        b = (ua_browser or "").strip().lower()
+        if not b or b == "unknown":
+            return False
+        return not any(sub in b for sub in BOTISH_UA_BROWSERS)
+
 
     _cache = {}
     _lock = threading.Lock()
@@ -230,6 +273,39 @@ data:
     }
     """
 
+    # 博客文章的按 path 统计。三个维度都是免费版拿得到的（2026-09-06 实测，逐个试过来的）：
+    #   clientRequestPath      —— reference 的「拿得到」清单里漏了它，实际可用（runbook §2
+    #                             早就在用），本次实测确认。
+    #   verifiedBotCategory    —— 权威爬虫判定，与上面 Q_HOST_DAY 同一个字段。
+    #   userAgentBrowser       —— **低基数枚举**（实测单日只有 10 个取值：Unknown/Chrome/
+    #                             MobileSafari/GoogleBot/ChromeMobile/BingBot/Edge/Firefox/
+    #                             Safari/AppleBot），所以敢当分组维度用；原始 userAgent 不敢
+    #                             （几百上千）。加它只让行数从 886 涨到 962（+8.6%），
+    #                             换来的是比「非验证爬虫」准得多的真人近似。
+    # ⚠️ html + 200 两个过滤器缺一不可，理由见文件头。limit 给到硬上限 10000（实测 962 行，
+    #    10 倍余量）；真撞上了由 cf_analytics_page_rows_truncated 报出来。
+    Q_PAGE_DAY = """
+    query ($zone: String!, $day: Date!, $host: String!, $limit: Int!) {
+      viewer {
+        zones(filter: {zoneTag: $zone}) {
+          httpRequestsAdaptiveGroups(
+            limit: $limit,
+            filter: {
+              date_geq: $day, date_leq: $day,
+              clientRequestHTTPHost: $host,
+              edgeResponseStatus: 200,
+              edgeResponseContentTypeName: "html"
+            },
+            orderBy: [count_DESC]
+          ) {
+            dimensions { clientRequestPath verifiedBotCategory userAgentBrowser }
+            count
+          }
+        }
+      }
+    }
+    """
+
 
     def _zone_rows(data: dict, field: str) -> list:
         zones = data["viewer"]["zones"]
@@ -300,6 +376,32 @@ data:
         }
 
 
+    def fetch_page_day(day: str) -> dict:
+        """某一完整 UTC 日、博客域名下每个 HTML 页面的请求数。
+
+        返回 {path: (requests, browser_requests)}，外加 truncated 标记。
+        ⚠️ `/cdn-cgi/` 开头的一律丢掉：那是 Cloudflare 边缘自己的端点（challenge 脚本、
+           `/cdn-cgi/content`），2026-09-06 实测单日 619 次，混进来会成为第二名的「文章」。
+        """
+        rows = _zone_rows(
+            gql(Q_PAGE_DAY, {"zone": ZONE_ID, "day": day, "host": BLOG_HOST, "limit": ROW_LIMIT}),
+            "httpRequestsAdaptiveGroups",
+        )
+
+        pages = {}
+        for r in rows:
+            d = r["dimensions"]
+            path = (d.get("clientRequestPath") or "").replace("\r", "").replace("\n", "")[:300]
+            if not path or path.startswith("/cdn-cgi/"):
+                continue
+            n = r.get("count", 0)
+            total, browser = pages.get(path, (0, 0))
+            pages[path] = (total + n, browser + (n if is_browser_ua(d["verifiedBotCategory"],
+                                                                   d.get("userAgentBrowser")) else 0))
+
+        return {"pages": pages, "truncated": len(rows) >= ROW_LIMIT}
+
+
     def refresh() -> None:
         data = {
             "uniques": {},               # date -> uniques
@@ -309,6 +411,8 @@ data:
             "requests_by_class": {},     # (date, host, class) -> count
             "client_ips_by_class": {},   # (date, host, class) -> distinct ip count
             "bot_requests": {},          # (date, category) -> count
+            "pages": {},                 # (date, path) -> (requests, browser_requests)
+            "page_truncated": 0,
             "host_window_days": 0,
             "host_days_failed": 0,
             "truncated": 0,
@@ -323,6 +427,7 @@ data:
             data["errors"].append(f"uniques: {exc}")
 
         # 逐日往回走；撞到保留期就停（窗口到头，不算失败）。
+        pages_ok = True
         for offset in range(1, HOST_WINDOW_DAYS + 1):
             day = utc_date(offset)
             try:
@@ -345,6 +450,22 @@ data:
                     data[key][(day, host, cls)] = val
             for category, cnt in got["bot_requests"].items():
                 data["bot_requests"][(day, category)] = cnt
+
+            # 按 path 的那一问单独容错：它是**附加**的一次调用，坏了不该让当天按域名的
+            # 数据也一起丢。撞保留期说明窗口到头（上面的 host 查询同一个数据集、同一个
+            # 窗口，正常会先 break），这里只是兜住顺序反过来的情况。
+            if pages_ok:
+                try:
+                    got_pages = fetch_page_day(day)
+                except RetentionExceeded:
+                    pages_ok = False
+                except Exception as exc:  # noqa: BLE001
+                    ok = False
+                    data["errors"].append(f"{day} pages: {exc}")
+                else:
+                    data["page_truncated"] |= int(got_pages["truncated"])
+                    for path, (total, browser) in got_pages["pages"].items():
+                        data["pages"][(day, path)] = (total, browser)
 
         with _lock:
             prev_ts = _cache.get("last_success_ts", 0)
@@ -417,6 +538,48 @@ data:
             [f'cf_analytics_daily_bot_requests{{category="{_esc(cat)}",date="{d}"}} {v}'
              for (d, cat), v in sorted(c.get("bot_requests", {}).items())],
         )
+        # 按 path：每天各自取前 PAGE_TOP_N，其余并进 __other__（基数控制，见文件头）。
+        # 排序键是 browser_requests 优先 —— 「哪篇被人读得多」比「哪篇被打得多」有用，
+        # 而爬虫能把一篇没人看的文章顶到总请求数第一。
+        page_samples, page_browser_samples = [], []
+        by_day = {}
+        for (d, path), pair in c.get("pages", {}).items():
+            by_day.setdefault(d, []).append((path, pair))
+        for d in sorted(by_day):
+            rows = sorted(by_day[d], key=lambda kv: (-kv[1][1], -kv[1][0], kv[0]))
+            top, tail = rows[:PAGE_TOP_N], rows[PAGE_TOP_N:]
+            for path, (total, browser) in top:
+                page_samples.append(
+                    f'cf_analytics_daily_page_requests{{path="{_esc(path)}",date="{d}"}} {total}')
+                page_browser_samples.append(
+                    f'cf_analytics_daily_page_requests_browser{{path="{_esc(path)}",date="{d}"}} {browser}')
+            if tail:
+                page_samples.append(
+                    f'cf_analytics_daily_page_requests{{path="{OTHER}",date="{d}"}} '
+                    f'{sum(v[0] for _, v in tail)}')
+                page_browser_samples.append(
+                    f'cf_analytics_daily_page_requests_browser{{path="{OTHER}",date="{d}"}} '
+                    f'{sum(v[1] for _, v in tail)}')
+
+        gauge(
+            "cf_analytics_daily_page_requests",
+            f'Successful (200) HTML page requests per path on {BLOG_HOST} for a complete UTC day. '
+            f'Only the top {PAGE_TOP_N} paths of each day are exposed; the rest are summed into '
+            f'path="{OTHER}". Full detail (all paths, for long-term storage) is at /pages.csv.',
+            page_samples,
+        )
+        gauge(
+            "cf_analytics_daily_page_requests_browser",
+            "Subset of the above whose Cloudflare-parsed browser name is a real browser "
+            "(not empty/Unknown, not a bot name, not a verified bot). Best-effort human proxy: "
+            "a crawler claiming to be Chrome still lands here.",
+            page_browser_samples,
+        )
+        gauge(
+            "cf_analytics_page_rows_truncated",
+            "1 if the per-path query hit the API row limit, so per-page counts are incomplete.",
+            [f'cf_analytics_page_rows_truncated {c.get("page_truncated", 0)}'],
+        )
         gauge(
             "cf_analytics_host_window_days",
             "Complete days for which per-hostname data was retrieved (bounded by the plan's retention).",
@@ -446,10 +609,33 @@ data:
         return ("\n".join(lines) + "\n").encode()
 
 
+    def render_pages_csv() -> bytes:
+        """按 path 的完整明细，给 blog-stats-rollup 的 psql `\\copy` 直接吃。
+
+        · **不做 top-N**：长期表要完整的尾巴（指标那边做了 top-N，两者刻意不同口径）。
+        · 用 CSV 不用 JSON：消费端是 psql 的 `\\copy ... WITH (FORMAT csv)`，
+          零解析代码、零依赖（容器里只有 psql 和 busybox wget）。
+        · path 一律加引号并把内部引号双写（RFC4180）；CR/LF 已在 fetch_page_day 里剪掉，
+          所以一行就是一条记录。
+        · 首刷完成前这里只有表头 —— 消费端**必须**把「零行」当失败（那边有个
+          RAISE EXCEPTION 兜着），否则一次空推会被当成「昨天没人访问」。
+        """
+        with _lock:
+            pages = dict(_cache.get("pages", {}))
+
+        lines = ["day,path,requests,browser_requests"]
+        for (day, path), (total, browser) in sorted(pages.items()):
+            quoted = path.replace('"', '""')
+            lines.append(f'{day},"{quoted}",{total},{browser}')
+        return ("\n".join(lines) + "\n").encode()
+
+
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802
             if self.path == "/metrics":
                 self._send(200, render_metrics(), "text/plain; version=0.0.4")
+            elif self.path == "/pages.csv":
+                self._send(200, render_pages_csv(), "text/csv; charset=utf-8")
             elif self.path == "/healthz":
                 # ⚠️ 进程存活探针，**刻意不看数据新鲜度**。若这里因 CF 抓取失败而 503，
                 # liveness 会重启 pod、readiness 会把它踢出 Endpoints —— 后者更坏：
