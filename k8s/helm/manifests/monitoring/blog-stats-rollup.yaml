@@ -1,0 +1,188 @@
+# blog-stats-rollup — 把博客按文章的日访问量从 Cloudflare 的 8 天窗口搬进 Postgres 长期表。
+#
+# 为什么需要它：`meirong.dev` 是 Cloudflare Pages 托管的博客（不在集群里，② cloudflared
+# 和 ③ cilium-envoy 都看不到它），唯一看得见的是 ① Cloudflare 边缘。而边缘那份按 path
+# 的数据**只留 8 天**（免费版 `httpRequestsAdaptiveGroups` 保留期 1w1d），Prometheus 也
+# 只留 14 天 —— 「某篇文章累计被读了多少」按年算，两个都存不住。所以每天把
+# cf-analytics-exporter 的 /pages.csv UPSERT 进一张永久表。
+#   口径与免费版能力边界 → docs/reference/public-traffic-analysis.md
+#   为什么落 Postgres 而不是抬 retention / 上 Umami → docs/decisions/blog-pageview-rollup-store.md
+#
+# ✅ **幂等**（上游 CronJob 页唯一用 "should" 写的要求）：exporter 每次都吐整个 8 天窗口，
+#    主键 (day, path) + ON CONFLICT DO UPDATE 覆盖 → **≤8 天的中断下一轮自己补齐**，
+#    不需要补数脚本。超过 8 天才是永久空洞，那由 BlogStatsRollupStale 告警兜。
+# ☠️ **零行必须当失败**：exporter 首刷未完成时 /pages.csv 只有表头，静默写 0 行会被读成
+#    「昨天没人访问」。所以脚本里那句 RAISE EXCEPTION 是**判据不是保险**，别删。
+#
+# ⚠️ 三步激活（`suspend: true` 就是为了不在这三步之前每天失败一次报警）：
+#   1. 生成口令写进 Vault（在能连 vault.meirong.dev 的机器上）：
+#        vault kv put secret/homelab/blogstats \
+#          owner_password="$(openssl rand -base64 24)" readonly_password="$(openssl rand -base64 24)"
+#   2. 在**已经跑着**的 apps-pg 上手工建租户 —— initdb 脚本只在数据目录为空时执行，
+#      改它对现有实例无效（apps-pg.yaml 文件头记的就是这个坑）。整段 SQL 见
+#      k8s/helm/manifests/databases/blogstats-externalsecret.yaml 的文件头。
+#   3. 把下面的 `suspend: true` 改成 false 并 push；先手工验一轮：
+#        kubectl --context k3s-homelab create job -n monitoring blog-stats-manual \
+#          --from=cronjob/blog-stats-rollup
+---
+# blogstats 库的两个口令。刻意**不并进** apps-pg-bootstrap / grafana-admin-credentials
+# 那两个已有 ExternalSecret：ESO 里一个 remoteRef 取不到就整个 ExternalSecret 同步失败，
+# 并进去等于让「Vault 里还没写这个新路径」把正在用的 Postgres 口令或 Grafana 的 OIDC
+# 密钥一起拖成 stale（Secret 本身有 deletionPolicy: Retain 不会消失，但从此不再更新，
+# 而且不报错）。单独一个对象 = 失败面只有它自己。
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: blogstats-db
+  namespace: monitoring
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: blogstats-db
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    # owner：本 CronJob 写库用。
+    - secretKey: owner-password
+      remoteRef: { key: homelab/blogstats, property: owner_password }
+    # 只读：Grafana 的 Postgres 数据源用（面板里的 SQL 只能 SELECT）。
+    # 注入方式见 k8s/helm/values/kube-prometheus-stack.yaml 的 BLOGSTATS_PG_PASSWORD。
+    - secretKey: readonly-password
+      remoteRef: { key: homelab/blogstats, property: readonly_password }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: blog-stats-rollup
+  namespace: monitoring
+  labels: { app: blog-stats-rollup }
+spec:
+  # ⚠️ 见文件头的三步激活。三步做完再改 false。
+  suspend: true
+  # 10:30 CST = 02:30 UTC：CF 的「昨天(UTC)」在 08:00 CST 就已封盘，留 2.5h 给 exporter
+  # 的 6h 刷新周期把它取进来；同时避开三个 restic 夜备（02:00 / 03:00 / 03:30）。
+  schedule: "30 10 * * *"
+  timeZone: "Asia/Shanghai"
+  concurrencyPolicy: Forbid
+  # Forbid + 自动触发 → 两个 deadline 都必须有（decisions/cronjob-and-job-hygiene.md）：
+  # 没有 activeDeadlineSeconds，卡死的 Job 会让后续每次排期记成 missed，累到 100 次
+  # CronJob 永久停摆且不自愈。
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  # 3 而不是默认 1：失败的那次日志就是排查材料（同 backup / krr）。
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # 断卡死的开关，不是性能预算：实测一轮 = 一次 wget + 1600 行 COPY，秒级。
+      # 600s 给到 ~60× 余量，仍远小于 24h 排期间隔。
+      # ☠️ 必须挂在 jobTemplate.spec 下；写到 CronJob.spec 下是未知字段、静默丢弃。
+      activeDeadlineSeconds: 600
+      # 允许一次重试：唯一预期内的瞬时失败是撞上 exporter 正在刷新窗口。
+      backoffLimit: 2
+      template:
+        metadata:
+          labels: { app: blog-stats-rollup }
+        spec:
+          restartPolicy: Never
+          priorityClassName: bulk
+          # 无状态周期作业 → 106 worker（同 krr 的分担通道）。只连集群内两个 Service，
+          # 无 PVC、无 hostPath、无节点语义。
+          # ⚠️ 后果与 krr 不同的一点：这个作业漏跑**有**告警覆盖
+          # （BlogStatsRollupStale），节点下线不会静默。
+          nodeSelector:
+            kubernetes.io/hostname: k8s-worker-106
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 70          # alpine 变体里的 postgres 用户是 70，不是 999
+            runAsGroup: 70
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: rollup
+              # 只用到 psql + busybox wget，两者都在这个镜像里（实测 psql 17.11 /
+              # /usr/bin/wget）。多架构 index digest（amd64 + arm64/v8 皆在）。
+              # ⚠️ registry 前缀 `docker.io/` 必须显式写：Kyverno 的
+              #    restrict-image-registries 是字面前缀匹配，省略它虽然能跑但会留一条
+              #    静默的 Audit 违规。
+              image: docker.io/library/postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+              env:
+                - name: PGHOST
+                  value: apps-pg.databases.svc.cluster.local
+                - name: PGUSER
+                  value: blogstats
+                - name: PGDATABASE
+                  value: blogstats
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: blogstats-db, key: owner-password }
+                # path 里有 URL 编码过的中文 tag，显式定 client encoding，别赌容器 locale
+                - name: PGCLIENTENCODING
+                  value: UTF8
+                - name: SRC
+                  value: http://cf-analytics-exporter.monitoring.svc.cluster.local:9901/pages.csv
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+
+                  # 先落盘再入库，是为了让日志分得清「取数失败」和「入库失败」
+                  # （wget 非零退出直接结束本轮，psql 压根不会连库）。
+                  echo "[rollup] fetch $SRC"
+                  wget -q -T 30 -O /tmp/pages.csv "$SRC"
+                  echo "[rollup] csv = $(wc -l < /tmp/pages.csv) lines"
+
+                  psql -v ON_ERROR_STOP=1 -f - <<'SQL'
+                  BEGIN;
+
+                  CREATE TABLE IF NOT EXISTS blog_pageviews (
+                    day              date        NOT NULL,
+                    path             text        NOT NULL,
+                    requests         integer     NOT NULL,
+                    browser_requests integer     NOT NULL,
+                    updated_at       timestamptz NOT NULL DEFAULT now(),
+                    PRIMARY KEY (day, path)
+                  );
+
+                  CREATE TEMP TABLE stage (
+                    day date, path text, requests integer, browser_requests integer
+                  ) ON COMMIT DROP;
+
+                  \copy stage (day, path, requests, browser_requests) FROM '/tmp/pages.csv' WITH (FORMAT csv, HEADER true)
+
+                  DO $$
+                  DECLARE n bigint;
+                  BEGIN
+                    SELECT count(*) INTO n FROM stage;
+                    IF n = 0 THEN
+                      RAISE EXCEPTION 'stage 零行 —— exporter 首刷未完成或 /pages.csv 变空，本轮不写库';
+                    END IF;
+                    RAISE NOTICE '[rollup] staged % rows', n;
+                  END $$;
+
+                  INSERT INTO blog_pageviews (day, path, requests, browser_requests)
+                  SELECT day, path, requests, browser_requests FROM stage
+                  ON CONFLICT (day, path) DO UPDATE
+                    SET requests         = EXCLUDED.requests,
+                        browser_requests = EXCLUDED.browser_requests,
+                        updated_at       = now();
+
+                  COMMIT;
+
+                  \echo '[rollup] table now:'
+                  SELECT count(*) AS rows, min(day) AS since, max(day) AS latest FROM blog_pageviews;
+                  SQL
+              volumeMounts:
+                - { name: tmp, mountPath: /tmp }
+              resources:
+                # psql 一次性作业，估值（新对象无实测）：首轮跑完按 rssBytes 复核。
+                requests: { cpu: 10m, memory: 32Mi }
+                limits: { memory: 128Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+          volumes:
+            - name: tmp
+              emptyDir: {}
