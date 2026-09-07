@@ -9,6 +9,8 @@ resources:
   - ../../base
   - external-secret.yaml
   - open-notebook-external-secret.yaml
+  # 博客访问量长期表的 dump 凭据（2026-09-07，同样拆开 + optional，见文件头）
+  - blogstats-external-secret.yaml
   - backup-script.yaml
   # 月度恢复演练（2026-08-13）：真恢复 + 跑判据，把"备份在跑"升级成"备份被证明能恢复"。
   # 只在 homelab 侧有一份 —— 它读的是同一个 106 仓库，一次演练同时覆盖两个集群的快照。

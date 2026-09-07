@@ -20,6 +20,8 @@ spec:
               volumeMounts:
                 # Open Notebook 的 SurrealDB 口令（逻辑导出用）
                 - { name: creds-open-notebook, mountPath: /creds-open-notebook, readOnly: true }
+                # 博客访问量长期表的 pg_dump 口令（2f 段）
+                - { name: creds-blogstats, mountPath: /creds-blogstats, readOnly: true }
           volumes:
             - name: creds-open-notebook
               secret:
@@ -28,5 +30,10 @@ spec:
                 # optional：Vault 里还没写 secret/homelab/open-notebook 时，Pod 照常启动，
                 # 脚本只跳过这一项并打 warn——不让一个新应用的密钥拖垮整条夜备。
                 optional: true
+            - name: creds-blogstats
+              secret:
+                secretName: blogstats-pg
+                defaultMode: 0400
+                optional: true   # 同上：secret/homelab/blogstats 还没写时不阻塞夜备
           # nfsdata 挂载已移除（2026-07-11）：全部 PVC 已迁 local-path，
           # 备份 Job 不再依赖 106 的 NFS 在线（106 只作为 sftp 备份目标）
