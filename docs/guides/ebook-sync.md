@@ -1,6 +1,6 @@
 # calibre-web 电子书同步
 
-> Last updated: 2026-09-06
+> Last updated: 2026-09-07
 >
 > ☠️ **calibre 全家在 oracle-k3s**（2026-08-03 迁走），脚本默认 `--context oracle-k3s`；
 > 别按「homelab 的书库」去规划。本文是这个流程的真相源，`scripts/README.md` 不再复制它。
@@ -72,8 +72,18 @@ just cleanup-logs                 # 历史清理记录
 `scripts/cleanup-duplicates.py` 做归一化标题匹配（不是完全同名）、把同一本书的 EPUB/PDF
 合并成一个条目、用 pod 内的 `calibredb` 删除（会清 link 表，书移入 `.caltrash`，14 天可恢复）。
 
+☠️ **「14 天可恢复」的前提是 `calibredb remove <id>` 不带 `--permanent`**。带上了就直接删书文件、
+不进 `.caltrash`，上面那句承诺当场失效（2026-09-07 手删 3 条时踩到：`.caltrash` 里查无此书，
+只能走 restic 夜备恢复整个书库目录，而 restic 是**整库回滚**粒度，捞单本书要把快照 restore 到别处再挑）。
+手动删书请走 `just cleanup-calibre-duplicates`；真要手敲 `calibredb remove`，先确认不带 `--permanent`，
+并且删前把 `id`/`title`/`pubdate` 打出来核对一遍——`remove` 是连目录一起删，写错 id 毁的是书不是行。
+
 ☠️ **两条只能靠人看的**：Manning `MEAP` 是预售草稿，要输给无版本标记的正式版（哪怕草稿文件大得多）；
 `... Workbook` 这类配套分册标题前缀与主书完全一致，会被模糊匹配判成重复。
+判据别只盯 pubdate：**「新下载的那本」完全可能就是草稿**，库里那条反而是成品（2026-09-07：
+本地 `Grokking Machine Learning, Second Edition (MEAP v3)` 的 `toc.ncx` 只到第 10 章，
+而库里那条尾号 513 页的 2021 年 PDF 是完整第 1 版——按「新版覆盖旧版」删旧的就亏了）。
+数一下 TOC 章数 / 页数再决定删谁。
 判定依据与踩坑全文 → [records/2026-08-18-calibre-dedup-stale-paths.md](../records/2026-08-18-calibre-dedup-stale-paths.md)。
 
 ## 元数据补全
