@@ -1,9 +1,9 @@
 # CronJob 舰队现状：不变量、配额口径、Job 告警覆盖
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-07
 > Status: 生效事实（本文只存不变量与口径，逐个 CronJob 的取值在各自清单里）
 
-双集群一共 22 个 CronJob（homelab 9 / oracle-k3s 13）。本文回答"现在是什么样"；
+双集群一共 23 个 CronJob（homelab 10 / oracle-k3s 13）。本文回答"现在是什么样"；
 为什么这么定见 [../decisions/cronjob-and-job-hygiene.md](../decisions/cronjob-and-job-hygiene.md)。
 
 ⚠️ **本文刻意不放 22 行的字段总表**：那种表的每一格都会漂，而清单本身才是真相源。
@@ -13,10 +13,16 @@
 
 | 不变量 | 状态 |
 |---|---|
-| `concurrencyPolicy: Forbid` | 22/22，全舰队一致，无例外 |
+| `concurrencyPolicy: Forbid` | 23/23，全舰队一致，无例外 |
 | 会自动触发且 `Forbid` 的都有 `activeDeadlineSeconds` | 已齐 |
 | 会自动触发且 `Forbid` 的都有 `startingDeadlineSeconds` | 已齐 |
-| `successfulJobsHistoryLimit` / `failedJobsHistoryLimit` 显式声明 | 22/22（值刻意不统一，见下） |
+| `successfulJobsHistoryLimit` / `failedJobsHistoryLimit` 显式声明 | 23/23（值刻意不统一，见下） |
+
+⚠️ 第 23 个是 2026-09-07 新增的 `blog-stats-rollup`（monitoring，博客访问量落库），
+**以 `suspend: true` 进仓库** —— 它要等三步手工激活（Vault 口令 + 建租户 + 翻 suspend），
+见 [../decisions/blog-pageview-rollup-store.md](../decisions/blog-pageview-rollup-store.md)。
+suspend 期间两个 deadline 照样写齐了（激活时不用再想一遍），但 KSM 不发
+`kube_cronjob_status_last_successful_time`，所以它的 stale 告警在激活前不会有值。
 
 ### 剩下 6 个"缺"两个 deadline 的，都有正当理由
 

@@ -1,0 +1,175 @@
+# 博客按文章的访问量：扩现有 exporter + 每日 rollup 落 Postgres
+
+> 日期: 2026-09-07
+> 状态: ⚠️ 部分完成（代码/清单/面板已进 git；租户口令与激活是三步手工，见「激活」）
+
+## 上下文
+
+想回答的问题只有一句：**哪几篇文章真的被人读了**。
+
+难点不在采集，在于这个博客**不在集群里**：`meirong.dev`（apex）是 Cloudflare Pages
+托管的静态站（`meirongdevblog.pages.dev`，橙云），所以
+[reference/public-traffic-analysis.md](../reference/public-traffic-analysis.md) 里那三个
+数据源有两个对它完全失明 —— ② cloudflared 和 ③ cilium-envoy 都在隧道之后，而博客的流量
+压根不进集群。唯一看得见它的是 ① Cloudflare 边缘。
+
+而 ① 已经有一条完整的桥：`cf-analytics-exporter` → Prometheus → Grafana。它 2026-08-15
+上线时就在数主站，只是**按域名**：2026-08-14 实测 `meirong.dev` 10,056 请求 / 1,868 个
+疑似真人 IP。缺的不是一套系统，是**一个维度**（`clientRequestPath`）。
+
+三个候选存储的保留期都不够（这是本次真正要解决的约束）：
+
+| 层 | 保留期 | 依据 |
+|---|---|---|
+| Cloudflare `httpRequestsAdaptiveGroups`（按 path 那个数据集） | **~8 天**（1w1d），且单查跨度 ≤1 天 | 2026-08-15 实测 |
+| Prometheus | 14d / 10240MB | `values/kube-prometheus-stack.yaml`（[cronjob-and-job-hygiene](cronjob-and-job-hygiene.md) 采纳 4 抬的） |
+| Loki | 168h | `cloud/oracle/values/loki.yaml` |
+
+「某篇文章累计被读了多少」按年算，三个都存不住。
+
+## 决策
+
+### 一、按 path 的维度加在现有 exporter 里，不新起一个进程
+
+同一个 6h 刷新循环里多一次 API 调用（每天一次、8 天窗口 = 每轮多 8 次调用），复用现成的
+token、逐日容错、保留期识别、告警和面板范式。查询形态是逐条实测定的（2026-09-06，
+本仓库的 token）：
+
+| 查询 | 行数 | 结论 |
+|---|---|---|
+| `dimensions{clientRequestPath verifiedBotCategory}`，只按 host+200 过滤 | **1000（截断）**，647 个 path | 不可用：css/js/字体把行占满 |
+| 加 `edgeResponseContentTypeName:"html"` | 886，538 个 path | 可用 |
+| 再加 `userAgentBrowser` 维度 | **962**（+8.6%） | 采纳：几乎不要钱的真人近似 |
+| 同上但只要 304 | **0 行** | 「只数 200」不漏带缓存的回访 |
+
+`clientRequestPath` **免费版拿得到** —— reference 里那份「拿得到的字段」清单漏了它
+（runbook §2 早就在用），本次实测确认。`userAgentBrowser` 是低基数枚举（单日只有 10 个
+取值：Unknown / Chrome / MobileSafari / GoogleBot / ChromeMobile / BingBot / Edge /
+Firefox / Safari / AppleBot），所以敢当分组维度用；原始 `userAgent` 不敢（几百上千）。
+
+☠️ **「浏览器请求」是真人的近似，不是真人数。** 免费版拿不到 `botScore`，伪装成 Chrome
+的爬虫照样算进来。反过来它也确实有用：2026-09-04 实测首页 `/` 的 1,539 次请求里只有 **68**
+次来自已知浏览器，而具体文章页是 3–17 次全部来自浏览器 —— 排序键用它而不是总请求数，
+否则被脚本刷的首页和 tag 页会把文章挤下去。
+
+指标侧每天只留前 50 个 path（其余进 `__other__`）：538 个 path × 2 个指标 × 8 天 ≈ 8600
+条 series，不值当（同 [prometheus-series-reduction](prometheus-series-reduction.md) 的取向）。
+
+### 二、长期留存落 `apps-pg` 的第四个租户，不抬 retention
+
+exporter 多一个 `/pages.csv` 端点（完整明细、不做 top-N），`blog-stats-rollup` CronJob
+每天把它 UPSERT 进 `blogstats.blog_pageviews`（主键 `(day, path)`）。
+
+- **为什么不抬 Prometheus retention**：要的是按年，不是按月；而 retention 是全局的，
+  为一个博客指标把 10 万条 series 一起留一年，方向不对。
+- **为什么不用 Loki 的 per-stream retention**：Loki 拒重复条目、日推的幂等补写会变成
+  「同一天多条」，LogQL 侧还得再去重；而「某篇累计多少」本来就是关系型聚合。
+- **为什么不新起一个 Postgres**：homelab 刻意不装 CNPG，共享实例就是为这种「一张表的
+  应用」准备的（[shared-postgres-platform](shared-postgres-platform.md) 决策四）。
+- **幂等是设计的一部分**：exporter 每次吐整个 8 天窗口 → `ON CONFLICT DO UPDATE` →
+  **≤8 天的中断下一轮自己补齐**，不需要补数脚本。超过 8 天才是永久空洞。
+- 体量：实测每天 538 行 ≈ 20 万行/年，可忽略。
+
+Grafana 用**只读角色** `blogstats_ro` 连（`SELECT` + 未来新表的 DEFAULT PRIVILEGES）。
+本地起 PG 17 实测：`SELECT` 通、`INSERT` 报 `permission denied`、`DROP` 报
+`must be owner` —— 面板里的 SQL 改不了库。
+
+### 三、明确不做的
+
+- **❌ 自托管 Umami / Plausible / GoatCounter**：`personal-services` 是目录即清单，加个
+  租户和 HTTPRoute 十分钟能上线。但换来的是在 LGTM 之外再养一个应用（自己的升级、备份、
+  登录），数据进不了现有面板与告警，而它多给的那点（referrer、会话）目前不值这个价。
+  同 [cf-analytics-custom-exporter](cf-analytics-custom-exporter.md) 的取向：宁可自己写
+  一百行，不多养一个栈。
+- **❌ 升 zone 套餐**：[ROADMAP](../ROADMAP.md) 已经把「升 Pro/Business」记成前提未满足，
+  而按 path 在免费版就拿得到。
+- **⏸️ Cloudflare Web Analytics（RUM 数据集）**：`rumPageloadEventsAdaptiveGroups` 带
+  `requestPath` / `refererHost` / `deviceType`，且只有真浏览器会执行 beacon —— 是比
+  `userAgentBrowser` 干净得多的真人信号，Pages 侧还能一键注入。**没做的原因是权限未验证**：
+  RUM 在 GraphQL 里是 **account 作用域**，而本仓库这把 token 是 Zone > Analytics > Read
+  （复用 external-dns 那份），大概率读不到，要另发 account-scoped token。`[need manual confirm]`
+  ——先测能不能读，能读就是下一步，届时本管道只换数据集，rollup 与面板不用动。
+- **⏸️ 自建 beacon（浏览器侧打点）**：能拿到阅读时长、滚动深度、referrer，但代价是
+  博客要挂一段 JS（本仓库改不到那个 repo）、多一个公网端点、且被 adblock 吃掉一部分
+  （读者是开发者，这个损耗不小）。**它和本方案量的不是一回事**（边缘数完整但含爬虫，
+  beacon 干净但漏统计），真要做是加第 ④ 列而不是替换。
+
+## 后果
+
+- 面板 `blog-pageviews`（Grafana / Platform 文件夹）分两半：上半 Prometheus，**最近 8 天**、
+  按 path、含健康信号；下半 Postgres，**长期**、吃时间选择器。两半的窗口不同，
+  ☠️ 别互相对账。
+- `public-traffic-analysis.md` 的「三个数据源」表**不加第 ④ 列** —— 这仍然是 ① 的数据，
+  只是多了一个维度和一个更长的存储。
+- 新增两条告警（[observability-alerting-slo](../reference/observability-alerting-slo.md)）：
+  `CFAnalyticsPageRowsTruncated`（按 path 的查询撞行上限）与 `BlogStatsRollupStale`
+  （超 3 天没成功 → 距永久丢数还有 5 天）。
+  ⚠️ **已知盲区**：从未成功过一次时 KSM 不发 `kube_cronjob_status_last_successful_time`
+  这个序列，所以「CronJob 对象被误删」在首次激活前无法与「还没激活」区分，故只守
+  「成功过、然后停了」。激活后请确认那个 stat 面板有值。
+- 备份多一段 `pg_dump`（`backup/overlays/homelab/backup-script.yaml` 的 2f）。
+  ☠️ 这个库**没有自己的 PVC**，那一行是它唯一的备份，而 H4 查不出「实例里多了个库」——
+  同 nakama 的坑。丢了也不能重算：上游只留 8 天。
+- ⚠️ `apps-pg` 的 Deployment 多了两个 `optional: true` 的 env → **ArgoCD 同步时 Postgres
+  会滚动重启一次**（`strategy: Recreate` + 单 RWO PVC，秒级），litellm / multica / nakama
+  会短暂断连重连。`optional` 是必须的：Vault 里还没写口令时非 optional 的 `secretKeyRef`
+  会让整个 apps-pg 起不来。
+
+## 激活（三步，做完才有数据）
+
+前两步动的是「口令」这类不该进 git 的东西，所以刻意留成手工；CronJob 以
+`suspend: true` 进仓库，就是为了不在这三步之前每天失败一次报警。
+
+1. 生成两个口令写进 Vault（在能连 `vault.meirong.dev` 的机器上）：
+
+   ```bash
+   vault kv put secret/homelab/blogstats \
+     owner_password="$(openssl rand -base64 24)" \
+     readonly_password="$(openssl rand -base64 24)"
+   ```
+
+   写完确认三个 ExternalSecret 变绿（缺这个路径时它们各自失败，互不牵连，这是刻意拆开的）：
+
+   ```bash
+   kubectl --context k3s-homelab get externalsecret -n databases apps-pg-blogstats
+   kubectl --context k3s-homelab get externalsecret -n monitoring blogstats-db
+   kubectl --context k3s-homelab get externalsecret -n backup restic-backup
+   ```
+
+2. 在**已经跑着**的实例上建租户。`initdb` 脚本只在数据目录为空时执行，改它对现有实例
+   无效 —— 但那个脚本本身是幂等的（建角色/建库都带 `WHERE NOT EXISTS`）且就挂在 pod 里，
+   所以把它再跑一遍即可，前三个租户原地跳过：
+
+   ```bash
+   cd /Users/matthew/projects/homelab   # 任意目录都行，这里只是给 context 一个落点
+   PW=$(kubectl --context k3s-homelab get secret apps-pg-blogstats -n databases \
+          -o jsonpath='{.data.BLOGSTATS_PASSWORD}' | base64 -d)
+   RO=$(kubectl --context k3s-homelab get secret apps-pg-blogstats -n databases \
+          -o jsonpath='{.data.BLOGSTATS_RO_PASSWORD}' | base64 -d)
+   kubectl --context k3s-homelab exec -n databases deploy/apps-pg -- \
+     env BLOGSTATS_PASSWORD="$PW" BLOGSTATS_RO_PASSWORD="$RO" \
+     /docker-entrypoint-initdb.d/10-tenants.sh
+   ```
+
+   ⚠️ 显式传 env 是为了不依赖 pod 重启：那两个 env 是本次随 Deployment 加的，
+   ConfigMap 挂载会自己刷新，env 不会。
+
+3. 先手工验一轮，绿了再把 `suspend` 改成 `false` 并 push：
+
+   ```bash
+   kubectl --context k3s-homelab create job -n monitoring blog-stats-manual \
+     --from=cronjob/blog-stats-rollup
+   kubectl --context k3s-homelab logs -n monitoring -l app=blog-stats-rollup --tail=30
+   ```
+
+   预期日志：`[rollup] csv = N lines` → `staged N rows` → 表行数与 `min/max(day)`。
+   ☠️ 若 `staged 0 rows` 会**直接报错退出**（不是静默成功）：那说明 exporter 首刷还没
+   完成或 `/pages.csv` 空了 —— 空推会被读成「昨天没人访问」，所以这里刻意判失败。
+
+## 相关
+
+- 口径、免费版能力边界、PromQL 配方 → [reference/public-traffic-analysis.md](../reference/public-traffic-analysis.md)
+- 为什么自己写这个 exporter → [cf-analytics-custom-exporter](cf-analytics-custom-exporter.md)
+- 共享 Postgres 的租户约定 → [shared-postgres-platform](shared-postgres-platform.md)
+- CronJob 的两个 deadline 为什么必须有 → [cronjob-and-job-hygiene](cronjob-and-job-hygiene.md)
+- 博客自身的托管归属（不在集群里）→ [reference/networking-ingress.md](../reference/networking-ingress.md) 的「不走这条链的 meirong.dev 主机名」

@@ -1,10 +1,10 @@
 # 公网访问分析：谁在访问我的服务
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-07
 > Status: 生效事实
-> Scope: 「有多少人访问了哪个域名、其中多少是真人 / 爬虫 / 我自己的机器」：
-> 口径定义、可信度分级、已知失真、查询配方。数据由 cf-analytics-exporter 从
-> Cloudflare Analytics API 桥接。
+> Scope: 「有多少人访问了哪个域名、其中多少是真人 / 爬虫 / 我自己的机器」，以及
+> 「博客的哪几篇文章被读了」：口径定义、可信度分级、已知失真、查询配方。数据由
+> cf-analytics-exporter 从 Cloudflare Analytics API 桥接。
 > 入口链路本身（Tunnel 健康、cloudflared 指标）见
 > [cloudflare-tunnel-observability.md](cloudflare-tunnel-observability.md)。
 > 看到认不出来的流量、想下钻到具体 IP/path/状态码，见
@@ -94,6 +94,9 @@ exporter 把每一条 `(clientIP, host, verifiedBotCategory, userAgent)` 分组�
 | `cf_analytics_daily_client_ips_by_class{host,date,class}` | 按来源的独立 IP 数，☠️ **不可相加** |
 | `cf_analytics_daily_bot_requests{date,category}` | 全站已验证爬虫，按 CF 分类 |
 | `cf_analytics_daily_uniques{date}` | Cloudflare 自己算的全站 uniq（另一个数据集） |
+| `cf_analytics_daily_page_requests{path,date}` | 博客单个页面的 200 HTML 请求数（含爬虫） |
+| `cf_analytics_daily_page_requests_browser{path,date}` | 同上，只数 UA 是已知浏览器的（**通常你要的是这个**） |
+| `cf_analytics_page_rows_truncated` | 按 path 的查询撞到行数上限则为 1 |
 | `cf_analytics_scrape_success` / `_last_success_timestamp_seconds` | 采集健康 |
 | `cf_analytics_host_window_days` / `_host_days_failed` / `_rows_truncated` | 窗口与数据质量 |
 
@@ -103,6 +106,60 @@ exporter 把每一条 `(clientIP, host, verifiedBotCategory, userAgent)` 分组�
 ☠️ **三个「独立 IP」互不等价，别互相对账**：`client_ips`（我们数的）、
 `client_ips_human`（剔除后）、`daily_uniques`（Cloudflare 的 uniq，口径不公开、
 adaptive 数据集有自适应采样）。2026-08-14 分别是 2416 / 1966 / 2376。
+
+## 按文章（path）的访问量
+
+只对**博客那一个域名**（`meirong.dev`，exporter 的 `BLOG_HOST`）拆 path —— 其余子域是
+服务不是内容，它们的 path 全是自建监控探针打出来的。
+
+**只数 `edgeResponseStatus=200` 且 `edgeResponseContentTypeName=html` 的请求**，三条实测
+理由（2026-09-06，本仓库 token）：
+
+| 查询形态 | 行数 | 说明 |
+|---|---|---|
+| 只按 host + 200 过滤 | **1000 就截断**，647 个 path | css/js/字体把行占满，页面不到一半 |
+| 加 `html` 过滤 | 886，538 个 path | 可用 |
+| 再加 `userAgentBrowser` 维度 | **962**（+8.6%） | 当前形态，离 10000 上限有 10 倍余量 |
+| 同上但只要 304 | **0 行** | 该域名 HTML 从不返回 304 → 只数 200 不漏带缓存的回访 |
+
+☠️ **`_browser` 是真人的近似，不是真人数。** 判据是 Cloudflare 解析出的浏览器名
+（`userAgentBrowser`）既不为空、不是 `Unknown`、也不含 bot/spider/crawl，且 CF 没把它
+标成已验证爬虫。伪装成 Chrome 的爬虫仍然算在里面 —— 免费版拿不到 `botScore`，这是能做到
+的上限。它与分类法里的 `browser` class **不是一回事**（那个看原始 UA 前缀），别互相对账。
+
+⚠️ **两列差一个量级是正常的，不是故障**：2026-09-04 实测首页 `/` 的 1,539 次 HTML 请求里
+只有 **68** 次来自已知浏览器（脚本刷首页），而具体文章页是 3–17 次、几乎全部来自浏览器。
+所以排序、看趋势一律用 `_browser` 那一列。
+
+⚠️ **指标侧每天只保留前 50 个 path**（按 `_browser` 降序），其余并进 `path="__other__"`。
+完整长尾只在下面那张长期表里，因为 538 个 path × 2 指标 × 8 天 ≈ 8600 条 series 不值当。
+
+### 长期表 `blogstats.blog_pageviews`
+
+Cloudflare 按 path 只留 8 天、Prometheus 只留 14 天，而「某篇文章累计被读了多少」按年算。
+所以 exporter 多一个 `/pages.csv`（完整明细、不做 top-N），`blog-stats-rollup` CronJob
+每天 UPSERT 进共享实例 `apps-pg` 的 `blogstats` 库：
+
+```text
+blog_pageviews(day, path, requests, browser_requests, updated_at)  PK (day, path)
+```
+
+窗口里每天都重发一遍是刻意的：**≤8 天的中断下一轮自己补齐**，超过 8 天才是永久空洞
+（`BlogStatsRollupStale` 3 天就报，留 5 天处置余量）。取舍全集与激活步骤见
+[decisions/blog-pageview-rollup-store.md](../decisions/blog-pageview-rollup-store.md)。
+
+面板 `blog-pageviews`（Grafana / Platform）上半来自 Prometheus（8 天、按 path），
+下半来自这张表（长期、吃时间选择器）。☠️ 两半窗口不同，别互相对账。
+
+Grafana 用只读角色 `blogstats_ro` 连（实测 `INSERT`/`DROP` 均被拒）。想在命令行看：
+
+```bash
+# 集群 k3s-homelab。口令在 Vault homelab/blogstats，这里从 ESO 同步好的 Secret 取
+kubectl --context k3s-homelab exec -n databases deploy/apps-pg -- \
+  psql -U postgres -d blogstats -c \
+  "SELECT path, sum(browser_requests) v FROM blog_pageviews
+     WHERE path LIKE '/posts/%' GROUP BY path ORDER BY v DESC LIMIT 10"
+```
 
 ## 常用问题 → PromQL
 
@@ -128,6 +185,16 @@ sum(cf_analytics_daily_requests_by_class{host="__total__", class="self_monitor",
 # 谁在爬我的站？（Cloudflare 验证过的）
 sort_desc(sum by (category) (cf_analytics_daily_bot_requests{date="$date"}))
 
+# 昨天哪几篇文章被读得最多？（只数已知浏览器，排除 __other__ 汇总桶）
+topk(10, cf_analytics_daily_page_requests_browser{date="$date", path!="__other__"})
+
+# 某篇文章这 8 天的曲线（date 是标签 → 用 barchart + instant，不要用时间轴）
+cf_analytics_daily_page_requests_browser{path="/posts/kafka-producer-tccl-fat-jar/"}
+
+# 这个页面是被人读还是被脚本刷？（比值越低越像脚本）
+cf_analytics_daily_page_requests_browser{date="$date"}
+  / cf_analytics_daily_page_requests{date="$date"}
+
 # 某域名流量涨了 —— 是真人还是爬虫？（对比两天）
 max by (host) (cf_analytics_daily_client_ips_human{date="2026-08-14"})
   - max by (host) (cf_analytics_daily_client_ips_human{date="2026-08-13"})
@@ -140,7 +207,13 @@ zone `meirong.dev` 是 Free 套餐（`plan id = 0feeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 
 拿得到：`verifiedBotCategory` · `userAgent` · `userAgentBrowser` · `userAgentOS` ·
 `clientDeviceType` · `requestSource` · `clientIP` · `clientCountryName` ·
-`clientRequestHTTPHost`
+`clientRequestHTTPHost` · `clientRequestPath` · `edgeResponseStatus` ·
+`edgeResponseContentTypeName`
+
+⚠️ 后三个是 2026-09-07 补测的（`clientRequestPath` 此前漏记过，而
+[runbooks/suspicious-traffic-investigation.md](../runbooks/suspicious-traffic-investigation.md)
+§2 一直在用它）—— 「清单里没写」不等于「拿不到」，加维度前自己发一条查询试，别照抄清单。
+`edgeResponseContentTypeName` 既能当维度也能当过滤器（按 path 那个查询就靠它把静态资源挡在外面）。
 
 拿不到（403 `does not have access to the field`）：
 

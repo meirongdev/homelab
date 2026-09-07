@@ -1,6 +1,6 @@
 # Observability — 告警、看板组织与 SLO
 
-> Last updated: 2026-09-05
+> Last updated: 2026-09-07
 > Status: 生效事实
 >
 > 遥测的消费侧：告警路由与覆盖盲区、Grafana 看板组织约定、SLI/SLO 体系。
@@ -90,13 +90,20 @@
   并用 `promtool check rules` 过了语法（Prometheus 容器是 distroless，无 `sh`，
   得用 `kubectl exec -i … promtool check rules /dev/stdin` 喂进去）。
 
-- **cf-analytics 告警**（`manifests/monitoring/alerts/cf-analytics-alerts.yaml`，2026-08-15 新增，4 条）:
+- **cf-analytics 告警**（`manifests/monitoring/alerts/cf-analytics-alerts.yaml`，2026-08-15 新增，
+  2026-09-07 扩到 6 条、分成 `cf-analytics` 与 `blog-stats` 两个组）:
   cf-analytics-exporter 每 6h 调一次 Cloudflare Analytics API，把「按域名的访问 IP 数/请求数」
   桥成指标，并按来源分类（真人 / 爬虫 / 自建监控）→ [public-traffic-analysis.md](public-traffic-analysis.md)。
   它的失效全是静默的：pod Running、探针绿、面板照常出图，只是数字停在几天前。
   `CFAnalyticsScrapeFailing`（抓取报错）· `CFAnalyticsDataStale`（>24h 没有成功过一轮）·
   `CFAnalyticsMetricsAbsent`（序列整体消失，即会屏蔽掉前两条的那个盲区）·
-  `CFAnalyticsRowsTruncated`（撞到 API 10000 行上限 → 独立 IP 数被低估）。
+  `CFAnalyticsRowsTruncated`（撞到 API 10000 行上限 → 独立 IP 数被低估）·
+  `CFAnalyticsPageRowsTruncated`（按文章那一问撞上限 → 页面明细的长尾被截，实测 962/10000 行）·
+  `BlogStatsRollupStale`（博客访问量的每日 rollup 超 3 天没成功 → 距**永久丢数**还有 5 天，
+  因为 Cloudflare 按 path 只留 8 天；判据用 `kube_cronjob_status_last_successful_time`
+  而不是 `KubeJobFailed`，后者对「被 suspend / 对象被删 / 节点长期下线」三种情况一声不响）。
+  ⚠️ 那条 stale 的已知盲区（刻意）：从未成功过一次时 KSM 压根不发那个序列，所以
+  `absent()` 变体在「还没激活」和「对象被误删」之间无法区分，故只守「成功过、然后停了」。
   ⚠️ 两处特意为之：① **探针只探进程不探数据新鲜度**，拿抓取结果当 readiness 会把
   pod 踢出 Endpoints，Prometheus 连 `scrape_success=0` 都抓不到，抓取故障退化成"没数据"，
   告警自己把自己关掉；② `CFAnalyticsDataStale` 必须带 `> 0` 前置条件，

@@ -1,0 +1,835 @@
+# Grafana Dashboard: 博客按文章的访问量（meirong.dev）
+#
+# 两个数据源，量的不是同一段时间，别互相对账：
+#   Prometheus ← cf-analytics-exporter（Cloudflare GraphQL）—— 最近 **8 天**，按 path
+#   Postgres   ← blog-stats-rollup CronJob 每天搬过去的 blog_pageviews —— **长期**
+#     manifests/monitoring/cf-analytics-exporter/ · manifests/monitoring/blog-stats-rollup.yaml
+#
+# 📖 **读数前先看 docs/reference/public-traffic-analysis.md**：
+#   ☠️ 「浏览器请求」是**真人的近似，不是真人数** —— 免费版拿不到 botScore，
+#      伪装成 Chrome 的爬虫照样算在里面。反过来首页那种被脚本刷的页面，
+#      两列（全部 / 浏览器）会差一个量级，这不是故障。
+#   ⚠️ 上半部分的 date 是**标签不是时间戳** → 用 instant 查询 + 变量，不要用时间轴；
+#      下半部分才吃上方的时间选择器（SQL 里的 $__timeFilter）。
+#   ⚠️ 指标侧每天只留前 50 个 path（其余进 __other__），完整长尾只在 Postgres 那半边。
+#
+# Postgres 数据源（uid blogstats，只读角色 blogstats_ro）声明在
+# k8s/helm/values/kube-prometheus-stack.yaml 的 additionalDataSources。
+#
+# Auto-loaded via kube-prometheus-stack grafana-sc-dashboard sidecar
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blog-pageviews-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Platform"
+data:
+  blog-pageviews.json: |-
+    {
+      "annotations": {
+        "list": []
+      },
+      "description": "博客（meirong.dev）按文章的访问量。上半部分来自 Cloudflare 边缘经 cf-analytics-exporter（只有最近 8 天），下半部分来自 blog-stats-rollup 每天搬进 Postgres 的长期表。⚠️ 「浏览器请求」是真人的近似不是真人数，口径见 docs/reference/public-traffic-analysis.md。",
+      "editable": true,
+      "graphTooltip": 1,
+      "links": [
+        {
+          "asDropdown": true,
+          "icon": "external link",
+          "keepTime": true,
+          "tags": [
+            "cloudflare"
+          ],
+          "targetBlank": false,
+          "title": "相关面板",
+          "tooltip": "",
+          "type": "dashboards",
+          "url": ""
+        }
+      ],
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {
+              "text": "Prometheus",
+              "value": "prometheus"
+            },
+            "hide": 2
+          },
+          {
+            "name": "date",
+            "label": "日期 (UTC)",
+            "description": "只列出有按 path 数据的日子（Cloudflare 免费版对该数据集只留 7-8 天）。默认最新的完整一天。",
+            "type": "query",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${datasource}"
+            },
+            "query": {
+              "query": "label_values(cf_analytics_daily_page_requests, date)",
+              "refId": "StandardVariableQuery"
+            },
+            "includeAll": false,
+            "multi": false,
+            "options": [],
+            "refresh": 2,
+            "sort": 2
+          }
+        ]
+      },
+      "panels": [
+        {
+          "type": "row",
+          "title": "📄 按文章（选定日期 · Cloudflare 边缘，只有最近 8 天）",
+          "id": 100,
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 0
+          },
+          "panels": []
+        },
+        {
+          "type": "stat",
+          "title": "HTML 页面请求（全站）",
+          "description": "选定 UTC 日，meirong.dev 上所有返回 200 的 HTML 请求。含爬虫、含伪装成浏览器的爬虫。",
+          "id": 101,
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 1
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(cf_analytics_daily_page_requests{date=\"$date\"})",
+              "refId": "A",
+              "editorMode": "code",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "purple"
+              },
+              "decimals": 0,
+              "unit": "none",
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "purple",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "auto",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "type": "stat",
+          "title": "其中 UA 是已知浏览器",
+          "description": "Cloudflare 解析出的浏览器名是真浏览器（非 Unknown、非爬虫名、非已验证爬虫）的那部分。这是本面板里最接近「有人真的打开了页面」的数字，但仍是近似。",
+          "id": 102,
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 1
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(cf_analytics_daily_page_requests_browser{date=\"$date\"})",
+              "refId": "A",
+              "editorMode": "code",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "green"
+              },
+              "decimals": 0,
+              "unit": "none",
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "auto",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "type": "stat",
+          "title": "浏览器占比",
+          "description": "浏览器请求 / 全部 HTML 请求。这个比例低不代表出错 —— 首页常年被脚本刷，2026-09-04 实测 / 的 1539 次请求里只有 68 次来自已知浏览器。",
+          "id": 103,
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 12,
+            "y": 1
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(cf_analytics_daily_page_requests_browser{date=\"$date\"}) / sum(cf_analytics_daily_page_requests{date=\"$date\"})",
+              "refId": "A",
+              "editorMode": "code",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "text"
+              },
+              "decimals": 1,
+              "unit": "percentunit",
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "auto",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "type": "stat",
+          "title": "rollup 最近一次成功",
+          "description": "blog-stats-rollup CronJob 上一次成功的时间。超过 3 天 BlogStatsRollupStale 会响 —— Cloudflare 那边只留 8 天，停久了就是永久丢数。空值 = 还没成功过（含 suspend 状态）。",
+          "id": 104,
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 18,
+            "y": 1
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "max(kube_cronjob_status_last_successful_time{cluster=\"homelab\", namespace=\"monitoring\", cronjob=\"blog-stats-rollup\"}) * 1000",
+              "refId": "A",
+              "editorMode": "code",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "text"
+              },
+              "decimals": 0,
+              "unit": "dateTimeAsIso",
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "auto",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "type": "bargauge",
+          "title": "Top 15 文章 · 浏览器请求（选定日期）",
+          "id": 111,
+          "description": "只看 UA 是已知浏览器的请求，按篇排序。指标侧每天只保留前 50 个 path，第 51 名之后并进 __other__（此处已排除），完整长尾在下方 Postgres 面板。",
+          "gridPos": {
+            "h": 11,
+            "w": 12,
+            "x": 0,
+            "y": 5
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "topk(15, cf_analytics_daily_page_requests_browser{date=\"$date\", path!=\"__other__\"})",
+              "refId": "A",
+              "editorMode": "code",
+              "instant": true,
+              "range": false,
+              "legendFormat": "{{path}}"
+            }
+          ],
+          "options": {
+            "displayMode": "gradient",
+            "orientation": "horizontal",
+            "showUnfilled": true,
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "continuous-GrYlRd"
+              },
+              "decimals": 0,
+              "unit": "none",
+              "mappings": []
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "table",
+          "title": "页面明细（选定日期）",
+          "id": 112,
+          "description": "同一天里每个页面的两个数字并排：全部 HTML 请求 vs 已知浏览器请求。两列差得越远，说明那个页面越是被脚本/爬虫打的。",
+          "gridPos": {
+            "h": 11,
+            "w": 12,
+            "x": 12,
+            "y": 5
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (path) (cf_analytics_daily_page_requests{date=\"$date\"})",
+              "refId": "A",
+              "editorMode": "code",
+              "instant": true,
+              "range": false,
+              "format": "table"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (path) (cf_analytics_daily_page_requests_browser{date=\"$date\"})",
+              "refId": "B",
+              "editorMode": "code",
+              "instant": true,
+              "range": false,
+              "format": "table"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "joinByField",
+              "options": {
+                "byField": "path",
+                "mode": "outer"
+              }
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time 1": true,
+                  "Time 2": true
+                },
+                "renameByName": {
+                  "Value #A": "全部请求",
+                  "Value #B": "浏览器请求"
+                }
+              }
+            },
+            {
+              "id": "sortBy",
+              "options": {
+                "fields": {},
+                "sort": [
+                  {
+                    "field": "浏览器请求",
+                    "desc": true
+                  }
+                ]
+              }
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "filterable": true
+              },
+              "decimals": 0,
+              "mappings": []
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "row",
+          "title": "📈 长期留存（Postgres · 用上方时间选择器，不受「日期」变量影响）",
+          "id": 200,
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 16
+          },
+          "panels": []
+        },
+        {
+          "type": "timeseries",
+          "title": "每日总量",
+          "id": 201,
+          "description": "blog_pageviews 表里的每日汇总。这张表是 rollup CronJob 每天从 8 天窗口补写的，所以历史长度只受表的年龄限制，不受 Cloudflare 保留期限制。",
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 17
+          },
+          "datasource": {
+            "type": "postgres",
+            "uid": "blogstats"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "blogstats"
+              },
+              "refId": "A",
+              "editorMode": "code",
+              "format": "time_series",
+              "rawQuery": true,
+              "rawSql": "SELECT day::timestamptz AS time,\n       sum(requests)         AS \"全部请求\",\n       sum(browser_requests) AS \"浏览器请求\"\nFROM blog_pageviews\nWHERE $__timeFilter(day)\nGROUP BY day\nORDER BY day"
+            }
+          ],
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "bars",
+                "fillOpacity": 60,
+                "lineWidth": 1,
+                "stacking": {
+                  "mode": "none"
+                }
+              },
+              "decimals": 0,
+              "unit": "none",
+              "mappings": []
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "table",
+          "title": "累计 Top 30 文章（按浏览器请求，时间范围内）",
+          "id": 202,
+          "description": "只统计 /posts/ 与 /reading/ 下的页面（首页、tag 页、列表页不算文章）。path 就是文章的 URL 路径，标题不在库里 —— 需要标题时用 meirong.dev/index.json 对。",
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 12,
+            "y": 17
+          },
+          "datasource": {
+            "type": "postgres",
+            "uid": "blogstats"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "blogstats"
+              },
+              "refId": "A",
+              "editorMode": "code",
+              "format": "table",
+              "rawQuery": true,
+              "rawSql": "SELECT path,\n       sum(browser_requests) AS \"浏览器请求\",\n       sum(requests)         AS \"全部请求\",\n       max(day)              AS \"最近一天\"\nFROM blog_pageviews\nWHERE $__timeFilter(day)\n  AND (path LIKE '/posts/%' OR path LIKE '/reading/%')\n  AND path <> '/posts/'\nGROUP BY path\nORDER BY 2 DESC\nLIMIT 30"
+            }
+          ],
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "filterable": true
+              },
+              "decimals": 0,
+              "color": {
+                "mode": "continuous-BlYlRd"
+              },
+              "custom.cellOptions": {
+                "type": "color-text"
+              },
+              "mappings": []
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "row",
+          "title": "🩺 采集健康",
+          "id": 300,
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 26
+          },
+          "panels": []
+        },
+        {
+          "type": "stat",
+          "title": "表里有多少天数据",
+          "description": "blog_pageviews 里 distinct day 的个数（不受时间选择器影响）。它应该每天 +1；长期不涨说明 rollup 停了，看左边那个「最近一次成功」。",
+          "id": 301,
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 27
+          },
+          "datasource": {
+            "type": "postgres",
+            "uid": "blogstats"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "postgres",
+                "uid": "blogstats"
+              },
+              "refId": "A",
+              "editorMode": "code",
+              "format": "table",
+              "rawQuery": true,
+              "rawSql": "SELECT count(DISTINCT day) AS \"天数\" FROM blog_pageviews"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "blue"
+              },
+              "decimals": 0,
+              "unit": "none",
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "blue",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "auto",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "type": "stat",
+          "title": "按 path 的查询被截断",
+          "description": "1 = 某天的按 path 查询撞到 Cloudflare 的 10000 行上限，那天的明细不完整（CFAnalyticsPageRowsTruncated 同源）。2026-09-06 实测 962 行，有 10 倍余量。",
+          "id": 302,
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 27
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "max(cf_analytics_page_rows_truncated)",
+              "refId": "A",
+              "editorMode": "code",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "orange"
+              },
+              "decimals": 0,
+              "unit": "none",
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "orange",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "auto",
+            "justifyMode": "auto"
+          }
+        },
+        {
+          "type": "stat",
+          "title": "exporter 最近一次全绿",
+          "description": "cf-analytics-exporter 上一次完整成功的抓取时间（每 6h 一轮）。它停了，按文章的数字也就停了。",
+          "id": 303,
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 12,
+            "y": 27
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "max(cf_analytics_last_success_timestamp_seconds) * 1000",
+              "refId": "A",
+              "editorMode": "code",
+              "instant": true,
+              "range": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "fixed",
+                "fixedColor": "text"
+              },
+              "decimals": 0,
+              "unit": "dateTimeAsIso",
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "auto",
+            "justifyMode": "auto"
+          }
+        }
+      ],
+      "refresh": "",
+      "schemaVersion": 39,
+      "style": "dark",
+      "tags": [
+        "cloudflare",
+        "blog"
+      ],
+      "time": {
+        "from": "now-90d",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "博客 / 按文章的访问量",
+      "uid": "blog-pageviews",
+      "version": 1
+    }
