@@ -1,5 +1,6 @@
 ---
-# cf-analytics-exporter alerting.
+# cf-analytics-exporter + blog-stats-rollup alerting（同一条管道的两段：
+# 边缘取数 → Prometheus 指标 → 每日 rollup 落 Postgres 长期表）。
 #
 # 这个 exporter 的失效方式全是**静默**的：pod Running、探针绿（探针只探进程，故意不探
 # 数据新鲜度，见 cf-analytics-exporter/cf-analytics-exporter.yaml 的注释），面板照常画
@@ -74,3 +75,37 @@ spec:
           annotations:
             summary: "cf-analytics 独立 IP 数被 API 行数上限截断"
             description: "某一天的 (clientIP, host) 分组数达到 ROW_LIMIT(10000)，独立 IP 数被低估。Cloudflare 的 limit 已是硬上限 10000，要继续拆分得改成按 host 逐个查询（域名数 × 天数 次调用）。"
+
+        # 同上，但是**按 path 那一问**撞了上限（两个查询共用 ROW_LIMIT，失真方式不同：
+        # 这里丢的是页面明细，不是 IP 数）。2026-09-06 实测单日 962 行（html+200 过滤后），
+        # 10 倍余量；真触发说明博客流量涨了一个量级，或者 html 过滤器被改坏了
+        # （去掉过滤器实测立刻 1000+ 行）。
+        # 处置：先看是不是过滤条件被改动，其次按 path 前缀拆成多次查询。
+        - alert: CFAnalyticsPageRowsTruncated
+          expr: cf_analytics_page_rows_truncated == 1
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "cf-analytics 按文章的访问量被 API 行数上限截断"
+            description: "按 path 的查询单日行数达到 ROW_LIMIT(10000)，当天的文章访问量不完整（长尾被截掉），blog_pageviews 表里那一天也跟着不全。先确认 exporter 里 html/200 两个过滤条件没被改掉。"
+
+    # blog-stats-rollup：把 8 天窗口的按文章数据搬进 Postgres 长期表。
+    - name: blog-stats
+      rules:
+        # ☠️ 这条守的是**永久丢数**：Cloudflare 按 path 只留 8 天，rollup 停了超过 8 天，
+        #    那几天的文章访问量就再也取不回来了（Prometheus 那份 14 天后也过期）。
+        #    3 天报 = 留 5 天余量给处置。
+        # ⚠️ 判据是「有多久没成功过」而不是 KubeJobFailed：作业被 suspend、CronJob 对象
+        #    被误删、节点长期下线这三种都不产生失败的 Job，KubeJobFailed 一声不响。
+        # ⚠️ 已知盲区（刻意）：从未成功过一次时 KSM 压根不发这个序列，所以
+        #    `absent()` 变体会在「还没激活」和「对象被删」之间无法区分 —— 激活前会天天假阳性。
+        #    故只守「成功过、然后停了」。首次激活后请确认这条能在面板上查到值。
+        - alert: BlogStatsRollupStale
+          expr: time() - max(kube_cronjob_status_last_successful_time{cluster="homelab", namespace="monitoring", cronjob="blog-stats-rollup"}) > 3 * 86400
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "博客访问量 rollup 超过 3 天没成功"
+            description: "blog-stats-rollup 已超过 3 天没有成功过一轮。Cloudflare 按 path 的数据只留 8 天，再过 5 天这段时间的文章访问量就永久丢了。看最近几个 Job 的日志：`kubectl --context k3s-homelab logs -n monitoring -l app=blog-stats-rollup --tail=50`。常见原因：apps-pg 的 blogstats 租户口令变了、106 worker 下线、exporter 的 /pages.csv 空了。"

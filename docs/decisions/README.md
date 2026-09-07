@@ -34,6 +34,7 @@
 | [omlx-speech-model-selection](omlx-speech-model-selection.md) | ❌ Mac 新增的 4 个语音模型全部不采纳，STT/TTS 接线不动：两个新 TTS **结构上**驱动不了（只能传 `voice`，它们要 `instruct`/参考音频），两个新 ASR 在生产口径（10 分钟 mp3 切段）各有一种 HTTP 200 的静默失败：截断在 45s / 长音频重复崩塌 |
 | [argocd-project-per-cluster](argocd-project-per-cluster.md) | 每集群一个 AppProject（homelab / oracle-k3s，各只一条 destination），root / projects 元 App 挂 `default`；写错 destination 改由 ArgoCD 服务端拒绝，H2 加查 project ↔ destination；AppProject 从此由 `projects` App 托管 |
 | [home-stack-repo-boundary](home-stack-repo-boundary.md) | `stack.meirong.dev` 上线后两个仓库同写一个 zone：**按资源类型切**（否决「homelab 全管」与「home-stack 全管」）；home-stack 只拥有 Worker + 那一条 DNS 记录，homelab 独占隧道/WAF/zone 设置；☠️ 那条记录别声明第二份、别当游离记录清理 |
+| [blog-pageview-rollup-store](blog-pageview-rollup-store.md) | 博客按文章的访问量：扩现有 cf-analytics-exporter 加 `clientRequestPath`（html+200 过滤后 962 行/天，实测可用），长期留存落 `apps-pg` 第四个租户而不是抬 retention；**否决**自托管 Umami（多养一个栈）；☠️「浏览器请求」是真人近似不是真人数 |
 
 ## 写新 ADR
 

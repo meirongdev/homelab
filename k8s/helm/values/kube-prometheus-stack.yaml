@@ -46,6 +46,17 @@ grafana:
       secretKeyRef:
         name: grafana-admin-credentials
         key: oauth-client-secret
+    # blogstats 库的**只读**口令，给下面 additionalDataSources 里那个 postgres 数据源用
+    # （provisioning 里写 `$__env{...}`，密码不进 git）。ESO ← Vault homelab/blogstats，
+    # 对象是 monitoring/blogstats-db（声明在 manifests/monitoring/blog-stats-rollup.yaml）。
+    # ☠️ `optional: true` 必须有：Vault 里还没写那个路径时 Secret 不存在，非 optional 会让
+    #    **整个 Grafana 起不来**（连带所有面板和告警面板一起没了），代价远大于「多一个
+    #    连不上的数据源」。env 缺失时 Grafana 只是拿空口令去连，面板报认证失败，其余照常。
+    BLOGSTATS_PG_PASSWORD:
+      secretKeyRef:
+        name: blogstats-db
+        key: readonly-password
+        optional: true
 
   grafana.ini:
     # 启动稳定性（2026-07-04 修 CrashLoop）：关闭启动期对 grafana.com 的联网调用。
@@ -216,6 +227,34 @@ grafana:
           datasourceUid: prometheus
         nodeGraph:
           enabled: true
+    # 博客按文章的访问量长期表（blog_pageviews）。写方是 monitoring 的 blog-stats-rollup
+    # CronJob，这里**只读**：登录用 blogstats_ro 角色，它只有 SELECT + 未来新表的
+    # DEFAULT PRIVILEGES（实测 INSERT/DROP 都被拒），所以面板里的 SQL 改不了库。
+    # 面板：manifests/monitoring/dashboards/blog-pageviews-dashboard.yaml（uid blog-pageviews）
+    # 口径：docs/reference/public-traffic-analysis.md
+    # ⚠️ 不进 deleteDatasources —— 那份名单是给「先有过同名无 uid 数据源」的历史问题用的
+    #    （见上方注释），这个是新建的，加进去反而会每次 provisioning 先删一遍。
+    # ⚠️ `database` 顶层键与 `jsonData.database` 都写：Grafana 11 起读后者，前者是
+    #    向后兼容的旧位置。两个值一样，写全了免得升版本时数据源静默连错库。
+    - name: blogstats
+      type: postgres
+      uid: blogstats
+      url: apps-pg.databases.svc.cluster.local:5432
+      access: proxy
+      isDefault: false
+      user: blogstats_ro
+      database: blogstats
+      secureJsonData:
+        password: $__env{BLOGSTATS_PG_PASSWORD}
+      jsonData:
+        database: blogstats
+        # 集群内明文，与三个应用连同一个实例的方式一致（apps-pg 没有服务端 TLS）
+        sslmode: disable
+        postgresVersion: 1700
+        timescaledb: false
+        # 只有一个 rollup 作业在写，连接池给到 2 足够（Grafana 默认 100，纯浪费）
+        maxOpenConns: 2
+        maxIdleConns: 1
 
 # ── 默认规则裁剪 ────────────────────────────────────────────────────────────
 # 背景（2026-08-02 排障）：Prometheus 被规则评估压垮——CPU 长期贴着 1000m limit，
