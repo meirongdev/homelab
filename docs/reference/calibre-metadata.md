@@ -1,6 +1,6 @@
 # Calibre 元数据 — 覆盖率、污染与回补机制（架构事实）
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-07
 > Status: 生效事实
 > Scope: calibre 书库（oracle-k3s `personal-services`）的元数据现状、已知污染、
 > 回补作业的设计与判据，本文是 source of truth。书库本身的存储/备份口径见
@@ -171,13 +171,19 @@ EPUB 内的文件可以叫 `bm01` / `ch10` / `pt02` 任意名字，字母序取�
 
 ### 标题变体
 
-书名尾部括号在本库有**三种互斥含义**，实测都存在，所以两个变体都试、取过门的那个：
+书名尾部括号在本库有**四种互斥含义**，实测都存在，所以两个变体都试、取过门的那个：
 
 | 例 | 括号含义 | 哪个变体命中 |
 |---|---|---|
 | `…Best Practices (Md Johirul Islam)` | 作者名 | 去掉括号 |
 | `…Organizations (Casey Sisterson's Library)` | 收藏标记 | **保留原样** |
 | `What to Do (and NOT Do) in 75+…` | 书名的一部分 | **保留原样** |
+| `An Illustrated Guide to AI Agents (for . .)` | **下载源水印** | 去掉括号（非识别信息） |
+
+☠️ 第四种是 2026-09-07 补 46 本时定下来的：`(for . .)` / `(for Raymond Rhine)` 这类尾括号
+是**下载源烙进标题的水印**，本地文件名里就带着，**不是 CWA 导入产生的垃圾**。把它当导入故障去
+批量 `DELETE ... WHERE title LIKE '%(for . .)%'` 会连带删掉正常书籍。具名的（`(for 某人)`）
+本库历史上一直保留，与既有书目一致；匿名的 `(for . .)` 像坏标点，剥掉即可（那次剥了 4 条）。
 
 ### 实测产出率（2026-08-06）
 
@@ -350,3 +356,31 @@ version` 这类工具残渣只改 DB 是治标，文件重新入库就复发；�
 `scripts/cleanup-duplicates.py` 里是**被排除在判重之外**的（标题不携带识别信息，
 据此判重会把不同的书合并，实测两本 `book title` 的 sha256 与体积都不同）。
 → [records/2026-08-18-calibre-dedup-stale-paths.md](../records/2026-08-18-calibre-dedup-stale-paths.md)
+
+### ☠️ CWA 导入会把多人 `dc:creator` 落成**一个**作者（名字里带 `|`）
+
+EPUB 里 `<dc:creator>` 只有一个元素、内容写成 `Neal Ford, Mark Richards, Raju Gandhi` 时，
+CWA 不按逗号拆人，而是整串存进 `authors.name`，并把逗号改写成 `|`（分隔符是 calibre 用来
+表达「姓, 名」排序的，撞车了）。结果 UI 上是一个叫 `Neal Ford| Mark Richards` 的人，
+按作者浏览时这本书挂在不存在的人名下。2026-09-07 补 46 本时命中 2 本（另有 4 条是 calibre
+把 `Hossain Mir` 反解成 `Hossain| Mir`、把 `Edited by` 当成了一个人、尾随 `;` 进了名字）。
+
+查新增里的这类：
+
+```sql
+SELECT l.book, a.name FROM books_authors_link l JOIN authors a ON a.id = l.author
+WHERE l.book > <导入前的 MAX(id)> AND a.name LIKE '%|%';
+```
+
+拆开要用 `calibredb`（它会维护 link 表；直接 UPDATE `authors` 会留下孤儿行），
+**多值分隔符是 `&&`**，重音字符（`Catricalà`）过 `kubectl exec` 无损：
+
+```bash
+kubectl --context oracle-k3s -n personal-services exec deploy/calibre-web -c calibre-web -- \
+  calibredb --with-library=/calibre-library set_metadata <id> \
+    --field 'authors:Neal Ford&&Mark Richards&&Raju Gandhi'
+```
+
+同理可修 `title`。⚠️ 值要取自**书本身**（`pdftotext -f 1 -l 4` 取版权页 / EPUB 的
+`toc.ncx`·`nav.xhtml`），不要凭记忆也不要照抄文件名——同一批里文件名写的 `Sana Aburass`
+在扉页上是 **Sanad Aburass**。
