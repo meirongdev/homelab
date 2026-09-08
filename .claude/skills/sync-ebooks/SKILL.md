@@ -1,73 +1,59 @@
 ---
 name: sync-ebooks
-description: Sync local ebook files into the homelab calibre-web (cwa) ingest folder running on Kubernetes — validates integrity, de-dupes against the library, copies into the pod, and keeps a backup. Use when the user wants to sync/upload/import ebooks or books into calibre-web, or mentions calibre ingest, "同步电子书", "上传电子书到 calibre", or the book.meirong.dev library.
+description: Sync local ebook files into the homelab calibre-web (cwa) ingest folder running on Kubernetes — validates integrity, de-dupes against the library, transfers into the pod with sha256 verification, and keeps a backup. Use when the user wants to sync/upload/import ebooks or books into calibre-web, or mentions calibre ingest, "同步电子书", "上传电子书到 calibre", or the book.meirong.dev library.
 ---
 
 # Sync ebooks → calibre-web
 
-Wraps `scripts/sync_ebooks.py` (bundled). It resolves the calibre-web pod **dynamically**
-from a label selector (never a hardcoded pod name), validates epub/pdf integrity, skips
-books already in the library DB or the ingest folder, `kubectl cp`s new ones into the
-pod's ingest path, and keeps a local backup.
+**改流程请改 [docs/guides/ebook-sync.md](../../../docs/guides/ebook-sync.md)，不要改本文件。**
+本文只是让 agent 发现这个流程的壳 + 几条最容易踩的硬约束。
 
-## Quick start
+唯一实现是 **`scripts/sync-ebooks.sh`**（2026-09-08 起；此前并存的
+`.claude/skills/sync-ebooks/scripts/sync_ebooks.py` 已删除，能力已并入 bash —— 见
+[ROADMAP 开放项 #15](../../../docs/ROADMAP.md) 的收口）。
 
-Always preview first, then run for real:
+## 快速开始
+
+先看再传，两步：
 
 ```bash
-SKILL=.claude/skills/sync-ebooks/scripts/sync_ebooks.py
-python3 "$SKILL" --source ~/Downloads/books --dry-run   # classify only, no copy
-python3 "$SKILL" --source ~/Downloads/books             # actually sync
+./scripts/sync-ebooks.sh --check                 # 只分类，不传
+./scripts/sync-ebooks.sh --upload                # 传（会交互确认）
 ```
 
-Defaults target homelab calibre-web, so for the common case only `--source` is needed.
-calibre-web auto-imports from the ingest folder a few minutes after the copy.
+默认目标是 oracle-k3s 的 calibre-web，常见场景只需要 `--source`。
+全部参数跑 `--help`（`--context/--namespace/--selector/--ingest-path/--db-path/
+--backup-dir/--exts/--timeout/--cp-timeout/--no-filter-non-ebooks/--cleanup/--verbose`）。
 
-## Parameters
+## 硬约束（错了通常静默失效）
 
-| Flag | Default | Purpose |
-|------|---------|---------|
-| `--source` | `~/Downloads/books` | Local dir to scan (the main input) |
-| `--context` | `oracle-k3s` | kubectl context（2026-08-02 calibre 从 homelab 迁至 oracle-k3s）|
-| `--namespace` | `personal-services` | calibre-web namespace |
-| `--selector` | `app=calibre-web` | Label selector → pod |
-| `--ingest-path` | `/cwa-book-ingest` | Ingest folder in the pod |
-| `--db-path` | `/calibre-library/metadata.db` | calibre DB in the pod |
-| `--backup-dir` | `~/.local/share/calibre-web-sync-backup` | Local backup copy |
-| `--exts` | `.pdf,.epub,.mobi,.azw,.azw3,.cbz,.cbr,.djvu` | Supported extensions |
-| `--dry-run` / `--check-only` | off | Classify only, copy nothing |
-| `--skip-validation` | off | Skip epub/pdf integrity checks |
-| `--no-backup` | off | Don't keep a local backup |
-| `--filter-non-ebooks` | off | Skip resumes / Confluence exports / work docs by filename |
-| `--cp-timeout` | `600` | Per-file `kubectl cp` timeout (large books) |
-| `--timeout` | `60` | kubectl query/exec timeout |
-| `--verbose` | off | List the files that would sync |
+- ☠️ **传输走 `tar | kubectl exec -i`，不是 `kubectl cp`，且传完逐个比对 sha256。**
+  `kubectl cp` 会在非 ASCII 文件名上**退出码 0 却什么都没拷**（实测 1/41 个文件、32% 字节、
+  产出无效 zip）。所以别"顺手改成 kubectl cp 更简单"。校验和这一步 2026-09-08 已实测：
+  内容不同 → rc=1、远端缺文件 → rc=1、一致 → rc=0。
 
-## Workflow
+- ⚠️ **去重是启发式的**（文件名推标题 vs DB 标题，忽略 `(author)`/`[tag]` 后缀和尾部
+  ` - author`）。它会误判：曾把 11 本里的 5 本误判成重复。`--check` 的输出要人眼过一遍，
+  别只看数字。
 
-1. Run with `--dry-run` and confirm the "to sync" count looks right.
-2. Run without `--dry-run`. Exit code is non-zero if any copy failed.
-3. Wait a few minutes; verify in calibre-web (`book.meirong.dev`) or re-run `--dry-run`
-   (synced books should now show as duplicates/in-ingest).
+- ☠️ **数据库读不到就必须中止，不能当成空书库**。没有标题列表 = 去重被绕过 = 整批重复入库。
+  脚本现在会 abort（含"查询成功但 0 个标题"这种情形）。
 
-## Notes
+- ⚠️ **ingest 目录空不代表传失败**：calibre-web-automated 入库后会把文件从 ingest 移走。
+  判据看书库 DB 的书数变化（脚本上传后会自动打印前后对比），不是 ingest 列表。
 
-- **Dedup is heuristic** (title from filename vs DB title, ignoring `(author)`/`[tag]`
-  suffixes and a trailing ` - author`). It can miss matches with unusual separators;
-  re-running `--dry-run` after import is the safety check.
-- If the DB query fails the script **aborts** rather than treating everything as new
-  (which would re-ingest duplicates).
-- ⚠️ **This script does not verify what `kubectl cp` actually transferred** — it trusts the
-  exit code (`sync_ebooks.py` prints `OK` on returncode 0 and never re-checks). `kubectl cp` is
-  known to exit 0 having copied nothing for non-ASCII filenames, so confirm the byte size in the
-  pod before believing an `OK`. Note calibre-web-automated *removes* files from the ingest folder
-  once imported, so an empty ingest dir means success, not a lost copy — verify against the
-  library DB, not the ingest listing.
-- Other ebook tooling in `scripts/` is separate: `sync-ebooks.sh` powers the in-cluster
-  `calibre-ebook-sync` CronJob + `just sync-ebooks*` recipes; `cleanup-duplicates.py`
-  (`cd k8s/helm && just cleanup-calibre-dry-run` / `cleanup-calibre-duplicates`) removes
-  duplicate library entries. This skill is the interactive, local-machine path.
-- ☠️ A calibre `books.path` that resolves to nothing does **not** mean the file is gone —
-  renaming an author leaves the path stale, and a title containing a newline is stored
-  literally in the DB while the on-disk dir has it sanitized. Treating such a record as empty
-  deletes live files. → [records/2026-08-18-calibre-dedup-stale-paths.md](../../../docs/records/2026-08-18-calibre-dedup-stale-paths.md)
+- ⚠️ 大写扩展名（`.PDF`）本脚本能识别（`find -iname` + 扩展名转小写），
+  但 **CWA 自己的 ingest 匹配是区分大小写的**：真进了 ingest 目录却不被识别时，
+  在 pod 内把文件名改成小写以触发一次新的 inotify 事件。
+
+- ☠️ calibre 的 `books.path` 指不到文件**不等于**文件没了（作者改名会让路径失效；标题含
+  换行时 DB 存字面量而磁盘目录是净化过的）。把这种记录当空的会删掉活文件。
+  → [records/2026-08-18-calibre-dedup-stale-paths.md](../../../docs/records/2026-08-18-calibre-dedup-stale-paths.md)
+
+## 别搞混的三个东西
+
+| 东西 | 是什么 |
+|---|---|
+| `scripts/sync-ebooks.sh` | **本文这个**：本机跑，把书传进 ingest。`just sync-ebooks*` 四条配方调它 |
+| `cloud/oracle/manifests/personal-services/calibre-ebook-sync.yaml` 里内嵌的 `sync-ebooks.sh` | **同名但完全是另一个脚本**（80 行、0 次 kubectl）：CronJob `ebook-sync-monitor` 每 6h 在 pod 内跑的健康检查。走 GitOps 改 |
+| `scripts/cleanup-duplicates.py` | 删库里的重复条目（`just cleanup-calibre-dry-run`），不负责同步 |

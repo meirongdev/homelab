@@ -1,13 +1,12 @@
 # calibre-web 电子书同步
 
-> Last updated: 2026-09-07
+> Last updated: 2026-09-08
 >
 > ☠️ **calibre 全家在 oracle-k3s**（2026-08-03 迁走），脚本默认 `--context oracle-k3s`；
 > 别按「homelab 的书库」去规划。本文是这个流程的真相源，`scripts/README.md` 不再复制它。
-> ⚠️ 同一件事在仓库里还有第二份实现：
-> `.claude/skills/sync-ebooks/scripts/sync_ebooks.py`（全参数化、带 kubectl 超时）。
-> **两份都还能用，所以先不删**——合并计划见
-> [ROADMAP 开放项 #15](../ROADMAP.md#开放项)。
+> ✅ **2026-09-08 起只有一份实现**：`scripts/sync-ebooks.sh`。原先并存的
+> `.claude/skills/sync-ebooks/scripts/sync_ebooks.py` 已删除，它的超时、Running 过滤、
+> 全参数化与"失败带原因"都并进了 bash；技能壳只留指针。
 
 自动将本地电子书同步到 calibre-web（ingest 目录 + 入库校验）。
 
@@ -23,9 +22,27 @@
 
 ## 脚本
 
-`scripts/sync-ebooks.sh` — 本地运行，通过 `kubectl cp` 将文件传到 calibre-web ingest 目录（**唯一**传输通道；NFS 直传路径已随书库迁 `local-path` 于 2026-07-12 删除）。
+`scripts/sync-ebooks.sh` — 本地运行，把文件传到 calibre-web 的 ingest 目录（**唯一**传输
+通道；NFS 直传路径已随书库迁 `local-path` 于 2026-07-12 删除）。全部参数跑 `--help`。
 
-详细用法见 `scripts/README.md`。
+☠️ **传输走 `tar | kubectl exec -i`，不是 `kubectl cp`** —— 这不是风格问题：`kubectl cp`
+会在非 ASCII 文件名上**退出码 0 却什么都没拷**（实测 1/41 个文件、32% 字节、产出无效 zip），
+而书名里中文很常见。传完还逐个比对 sha256（2026-09-08 实测：内容不同 → 非零、
+远端缺文件 → 非零、一致 → 0）。别"简化"成 `kubectl cp`。
+
+### ☠️ 2026-09-08 修掉的三个先前缺陷（都是静默的）
+
+合并两份实现时才发现这个脚本**此前根本跑不通**，而四条 `just sync-ebooks*` 配方
+一直在空转、没人发现：
+
+| 缺陷 | 症状 | 判据 |
+|---|---|---|
+| `load_config` 末尾是 `[[ -f conf ]] && source`，配置文件不存在时返回 1 | `set -e` 下**在 main 第二行静默退出**，exit 1、零输出，看着像"没有新书" | `sync-ebooks.conf` 从来不在 git 里 → 任何全新克隆都中招 |
+| `validate_epub` 把 `sys.exit(0)` 放在 `try` 里配裸 `except:` | 裸 except 捕获 `SystemExit`，把成功转成失败 → **每本合法 epub 都判"损坏"**，一本都传不上 | 看着像"下载的书全坏了" |
+| `is_ebook` 的循环变量 `f` 没 `local`，而调用方 `do_check` 的循环变量也叫 `f` | 一返回 `$f` 就从全路径变成 `"epub"` → 校验报文件不存在；侥幸过关的会把字面量 `epub` 写进 pending.txt | 症状指向"文件坏了"，与真因无关 |
+
+三条共同点：**没有任何一条会报错**，都只是让结果变空或变错。所以改这个脚本后
+必须真跑一轮 `--check` 看分类数对不对，`bash -n` 通过不算验证过。
 
 ## K8s CronJob
 
@@ -55,7 +72,7 @@ kubectl --context oracle-k3s -n personal-services get cronjob ebook-sync-monitor
 ## 传输流程
 
 ```
-本机 ~/Downloads/books/ ──(kubectl cp + sha256 校验)──→ pod /cwa-book-ingest/ ──→ calibre-web 自动入库
+本机 ~/Downloads/books/ ──(tar | kubectl exec -i + sha256 校验)──→ pod /cwa-book-ingest/ ──→ calibre-web 自动入库
 ```
 
 ## 去重
