@@ -1,6 +1,6 @@
 # 公网访问分析：谁在访问我的服务
 
-> Last updated: 2026-09-07
+> Last updated: 2026-09-08
 > Status: 生效事实
 > Scope: 「有多少人访问了哪个域名、其中多少是真人 / 爬虫 / 我自己的机器」，以及
 > 「博客的哪几篇文章被读了」：口径定义、可信度分级、已知失真、查询配方。数据由
@@ -228,6 +228,41 @@ zone `meirong.dev` 是 Free 套餐（`plan id = 0feeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 **还有两条时间上的硬限制**：`httpRequestsAdaptiveGroups` 单次查询跨度 ≤ 1 天，
 且保留期只有 1w1d（约 8 天）。所以按域名的历史最多 7–8 天；更久要靠 Prometheus
 自己的 retention 把每天的值攒下来。全站 uniques 走 `httpRequests1dGroups`，不受此限。
+
+### 上面那条「别照抄清单」又应验了一次：RUM 其实读得到（2026-09-08 实测）
+
+本仓库这把 token（`secret/homelab/external-dns`，两处复用）**能读 account 作用域的
+`rumPageloadEventsAdaptiveGroups`**（Cloudflare Web Analytics 的 RUM 数据集），
+beacon 也早就在跑 —— 此前 ADR 记的「大概率要另发 account-scoped token」是**错的**，
+未做任何权限改动就查通了。
+
+☠️ **让我误判的那个查询**：`{ viewer { accounts { accountTag } } }`（不带 filter）
+返回 **0 个 account** + `not authorized for that account`（code `authz`），
+看起来就是「token 没有账号权限」。但**不带 filter 的 `accounts` 要的是「列出账号」权限**，
+那和「访问某个账号」是两回事。加上 `filter:{accountTag:"<id>"}` 就正常返回。
+**判作用域只能直接查目标数据集，别用代理查询。**
+
+它给的是**另一种口径**，不是本页那套的升级版：
+
+| | 边缘 `httpRequestsAdaptiveGroups` | RUM `rumPageloadEventsAdaptiveGroups` |
+|---|---|---|
+| 计数 | 逐请求**精确** | **抽样放大，粒度约 10** |
+| 爬虫 | 含（伪装 UA 的混在 `_browser` 里） | 天然不含（爬虫不执行 JS；`bot` 维度实测恒 0） |
+| 漏计 | 无 | 被 adblock 吃掉一部分 |
+| 作用域 | zone | **account —— 覆盖全部 13 个主机名，必须按 `requestHost` 过滤** |
+| 独有维度 | — | `deviceType` / `refererHost` / `refererPath` / `countryName` / `navigationType` / `siteTag` |
+
+7 天实测对比（`meirong.dev`）：边缘 `requests` 18,749（609 个 path）·
+边缘 `browser_requests` 3,653（19.5%）· RUM pageloads 891。差约 4 倍 =
+伪装 UA 的爬虫 + adblock 损耗 + 抽样。
+
+☠️ **抽样粒度是它的硬伤**：按文章的信号本身只有 3–17 次/天，而 RUM 的 `count`
+取值实测只落在 10 的倍数上 —— 长尾会被量化成 0 或 10，**不能拿它做按文章排序**。
+所以定位是「并存加一列」（补真人量级校准与边缘拿不到的维度），
+取舍全文见 [decisions/blog-pageview-rollup-store.md](../decisions/blog-pageview-rollup-store.md)。
+
+查询形态的三个坑：`dimensions` **不是入参**（选哪几个 dimension 字段就按它们分组）·
+`confidence` 裸选报 `level: not a number`（要带参数）· `limit` 必填。
 
 ## 维护约定
 
