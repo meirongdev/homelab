@@ -120,7 +120,7 @@ spec:
         checksum/config: "300626dcf6dc8d85"
         # 同理，但盯的是 codex_compat.py（litellm-codex-compat ConfigMap）：
         # 也是 subPath 挂载 + 只在启动时 import，改了不重启就是静默跑旧代码。
-        checksum/codex-compat-py: "f2c08822eb6a5ae1"
+        checksum/codex-compat-py: "e5da4a39d90243d4"
       labels:
         app: litellm
     spec:
