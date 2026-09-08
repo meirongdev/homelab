@@ -99,6 +99,11 @@ Grafana 用**只读角色** `blogstats_ro` 连（`SELECT` + 未来新表的 DEFA
 - 面板 `blog-pageviews`（Grafana / Platform 文件夹）分两半：上半 Prometheus，**最近 8 天**、
   按 path、含健康信号；下半 Postgres，**长期**、吃时间选择器。两半的窗口不同，
   ☠️ 别互相对账。
+  ⚠️ 另外**下半会比「昨天」落后 1 天**（有时 2 天），这是预期不是漏数：exporter 是
+  「启动即刷 + sleep 6h」，刷新相位随 pod 启动时刻漂，02:30Z 的 rollup 常读到上一次
+  （前一天 21:58Z 附近）刷新的结果，那份的 offset=1 天是前天。8 天窗口 + UPSERT
+  会在次日补齐，所以不要为此去调 cron 时刻或缩 `REFRESH_SECONDS`（相位追不住）。
+  2026-09-08 01:50Z 实测：`/pages.csv` 最新一天是 09-06。
 - `public-traffic-analysis.md` 的「三个数据源」表**不加第 ④ 列** —— 这仍然是 ① 的数据，
   只是多了一个维度和一个更长的存储。
 - 新增两条告警（[observability-alerting-slo](../reference/observability-alerting-slo.md)）：

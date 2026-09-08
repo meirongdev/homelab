@@ -116,8 +116,17 @@ metadata:
 spec:
   # 三步激活已于 2026-09-08 完成（Vault 口令 / 租户 / 首轮验证），故为 false。
   suspend: false
-  # 10:30 CST = 02:30 UTC：CF 的「昨天(UTC)」在 08:00 CST 就已封盘，留 2.5h 给 exporter
-  # 的 6h 刷新周期把它取进来；同时避开三个 restic 夜备（02:00 / 03:00 / 03:30）。
+  # 10:30 CST = 02:30 UTC：CF 的「昨天(UTC)」在 08:00 CST 就已封盘；同时避开三个
+  # restic 夜备（02:00 / 03:00 / 03:30）。
+  # ⚠️ 「留 2.5h 等 exporter 取到昨天」这个原意**并不成立**，别照这个假设去调时间：
+  # exporter 是「启动即刷 + sleep 6h」，刷新相位取决于 pod 的启动时刻，每次重启都会漂，
+  # 没有哪个固定 cron 时刻能保证落在某次刷新之后。实例：pod 起于 2026-09-07 15:58Z →
+  # 刷新落在 03:58/09:58/15:58/21:58Z，则 02:30Z 这一轮读到的是 21:58Z 那次的结果，
+  # 其 offset=1 天是前天，于是表里最新的一天比「昨天」落后 1 天（09-08 01:50Z 实测
+  # /pages.csv 最新为 09-06）。
+  # ✅ 这不是缺数：exporter 每次吐整个 8 天窗口 + 主键 UPSERT，某天只要在窗口内被取到过
+  # 就会补齐，落后一天之后自然填上。真正的永久空洞只有「连续 >8 天没成功」，那由
+  # BlogStatsRollupStale 兜。所以此处刻意不追刷新相位，也不缩 REFRESH_SECONDS。
   schedule: "30 10 * * *"
   timeZone: "Asia/Shanghai"
   concurrencyPolicy: Forbid
