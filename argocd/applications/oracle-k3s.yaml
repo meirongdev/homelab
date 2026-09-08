@@ -25,15 +25,18 @@ spec:
 
   syncPolicy:
     automated:
-      # ⚠️ 临时改成 false（2026-09-08，开放项 #13 的拆分窗口内）——拆完立刻改回 true。
-      # 为什么需要这个窗口：ArgoCD **不会**把已被本 App 拥有的对象让给新 App
-      # （新 App 报 SharedResourceWarning 并永久 OutOfSync）。所以交接只能发生在
-      # 「本 App 不再渲染这些对象」的那一刻，而那一刻若 prune 开着，它们会先被删掉
-      # 再由新 App 重建 —— 无状态对象也有几十秒到几分钟不可用。
-      # 关掉 prune 后：本 App 只是不再管它们，对象原地不动，新 App 直接接管（改写
-      # tracking 注解），**零停机、pod 不重启**。
-      prune: false
+      prune: true
       selfHeal: true
+      # ☠️ **从本树往外拆 App 时，必须先把 prune 临时改成 false**（2026-09-08 实测出来的
+      # 唯一零停机路径，开放项 #13 就是这么拆的）：
+      # ArgoCD **不会**把已被本 App 拥有的对象让给新 App —— 新 App 只会报
+      # `SharedResourceWarning` 并**永久 OutOfSync**（实测 10 个对象全部如此，且
+      # `generation` 不变，说明两边并没有互相改写，只是新 App 在拒绝接管）。
+      # 所以 runbook 原先的「新 App 同步一次就会抢到 tracking」是**错的**，
+      # 交接只能发生在「本 App 不再渲染这些对象」的那一刻。
+      # 那一刻若 prune 开着 → 对象先被删除、再由新 App 重建（无状态也有分钟级不可用）；
+      # 关掉 prune → 对象原地不动，新 App 接管注解，**pod 一个都不重启**（已实测）。
+      # 拆完记得改回 true，否则误删护栏永久失效。
     syncOptions:
       - ServerSideApply=true
       - CreateNamespace=false # namespace 已在 kustomize 树内
