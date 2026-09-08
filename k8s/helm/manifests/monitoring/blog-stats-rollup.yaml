@@ -14,16 +14,12 @@
 # ☠️ **零行必须当失败**：exporter 首刷未完成时 /pages.csv 只有表头，静默写 0 行会被读成
 #    「昨天没人访问」。所以脚本里那句 RAISE EXCEPTION 是**判据不是保险**，别删。
 #
-# ⚠️ 三步激活（`suspend: true` 就是为了不在这三步之前每天失败一次报警）：
-#   1. 生成口令写进 Vault（在能连 vault.meirong.dev 的机器上）：
-#        vault kv put secret/homelab/blogstats \
-#          owner_password="$(openssl rand -base64 24)" readonly_password="$(openssl rand -base64 24)"
-#   2. 在**已经跑着**的 apps-pg 上手工建租户 —— initdb 脚本只在数据目录为空时执行，
-#      改它对现有实例无效（apps-pg.yaml 文件头记的就是这个坑）。整段 SQL 见
-#      k8s/helm/manifests/databases/blogstats-externalsecret.yaml 的文件头。
-#   3. 把下面的 `suspend: true` 改成 false 并 push；先手工验一轮：
-#        kubectl --context k3s-homelab create job -n monitoring blog-stats-manual \
-#          --from=cronjob/blog-stats-rollup
+# ✅ 三步激活已于 2026-09-08 完成（Vault 口令 → apps-pg 建租户 → 首轮验证），
+#    表里已有 3345 行 / 2026-08-31..09-06。重建集群时的重放步骤见 ADR 的「激活」一节。
+#    ☠️ 首轮验证失败过一次，原因不在这三步里，而在下面 SQL 的载入方式：内联进 `args`
+#    时 kubelet 的 `$(VAR)` 展开会把 `$$` 转义成单个 `$`（`DO $$` → `DO $`），psql 报
+#    `syntax error at or near "$"`。git 与 CronJob 对象里存的都是对的，只有运行时那一刻
+#    是坏的 —— 所以 SQL 现在挂在 ConfigMap 里，别内联回来（详见 blog-stats-rollup-sql）。
 ---
 # blogstats 库的两个口令。刻意**不并进** apps-pg-bootstrap / grafana-admin-credentials
 # 那两个已有 ExternalSecret：ESO 里一个 remoteRef 取不到就整个 ExternalSecret 同步失败，
@@ -53,6 +49,64 @@ spec:
     - secretKey: readonly-password
       remoteRef: { key: homelab/blogstats, property: readonly_password }
 ---
+# rollup 的 SQL。☠️ **必须留在 ConfigMap 里，不能内联回 `args`** —— 这不是风格问题：
+# kubelet 对 command/args 做 `$(VAR)` 展开，而 `$$` 是「字面 $」的转义，所以内联时
+# `DO $$ ... END $$;` 到了容器里会变成 `DO $ ... END $;`，psql 报
+# `syntax error at or near "$"` —— 2026-09-08 首次激活时就这么失败的一轮。
+# git 里和 CronJob 对象里存的都是正确的 `$$`，只有运行时那一刻是坏的，所以
+# `kubectl get -o yaml` 比对不出来，只有真跑一轮才看得见。
+# ConfigMap 的内容不经过那层展开，SQL 逐字送到 psql。
+#
+# ⚠️ 不进 check-embedded-scripts.py（E1）的 TARGETS：那条规则管的是「ConfigMap 副本
+#    与外部源文件漂移」，这里 ConfigMap 就是唯一副本；(b) 的 checksum 注解也不需要 ——
+#    CronJob 每轮都是新 pod，读的必然是当前 ConfigMap（长驻进程才有那个坑）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blog-stats-rollup-sql
+  namespace: monitoring
+  labels: { app: blog-stats-rollup }
+data:
+  rollup.sql: |
+    BEGIN;
+
+    CREATE TABLE IF NOT EXISTS blog_pageviews (
+      day              date        NOT NULL,
+      path             text        NOT NULL,
+      requests         integer     NOT NULL,
+      browser_requests integer     NOT NULL,
+      updated_at       timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (day, path)
+    );
+
+    CREATE TEMP TABLE stage (
+      day date, path text, requests integer, browser_requests integer
+    ) ON COMMIT DROP;
+
+    \copy stage (day, path, requests, browser_requests) FROM '/tmp/pages.csv' WITH (FORMAT csv, HEADER true)
+
+    DO $$
+    DECLARE n bigint;
+    BEGIN
+      SELECT count(*) INTO n FROM stage;
+      IF n = 0 THEN
+        RAISE EXCEPTION 'stage 零行 —— exporter 首刷未完成或 /pages.csv 变空，本轮不写库';
+      END IF;
+      RAISE NOTICE '[rollup] staged % rows', n;
+    END $$;
+
+    INSERT INTO blog_pageviews (day, path, requests, browser_requests)
+    SELECT day, path, requests, browser_requests FROM stage
+    ON CONFLICT (day, path) DO UPDATE
+      SET requests         = EXCLUDED.requests,
+          browser_requests = EXCLUDED.browser_requests,
+          updated_at       = now();
+
+    COMMIT;
+
+    \echo '[rollup] table now:'
+    SELECT count(*) AS rows, min(day) AS since, max(day) AS latest FROM blog_pageviews;
+---
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -60,8 +114,8 @@ metadata:
   namespace: monitoring
   labels: { app: blog-stats-rollup }
 spec:
-  # ⚠️ 见文件头的三步激活。三步做完再改 false。
-  suspend: true
+  # 三步激活已于 2026-09-08 完成（Vault 口令 / 租户 / 首轮验证），故为 false。
+  suspend: false
   # 10:30 CST = 02:30 UTC：CF 的「昨天(UTC)」在 08:00 CST 就已封盘，留 2.5h 给 exporter
   # 的 6h 刷新周期把它取进来；同时避开三个 restic 夜备（02:00 / 03:00 / 03:30）。
   schedule: "30 10 * * *"
@@ -133,48 +187,12 @@ spec:
                   wget -q -T 30 -O /tmp/pages.csv "$SRC"
                   echo "[rollup] csv = $(wc -l < /tmp/pages.csv) lines"
 
-                  psql -v ON_ERROR_STOP=1 -f - <<'SQL'
-                  BEGIN;
-
-                  CREATE TABLE IF NOT EXISTS blog_pageviews (
-                    day              date        NOT NULL,
-                    path             text        NOT NULL,
-                    requests         integer     NOT NULL,
-                    browser_requests integer     NOT NULL,
-                    updated_at       timestamptz NOT NULL DEFAULT now(),
-                    PRIMARY KEY (day, path)
-                  );
-
-                  CREATE TEMP TABLE stage (
-                    day date, path text, requests integer, browser_requests integer
-                  ) ON COMMIT DROP;
-
-                  \copy stage (day, path, requests, browser_requests) FROM '/tmp/pages.csv' WITH (FORMAT csv, HEADER true)
-
-                  DO $$
-                  DECLARE n bigint;
-                  BEGIN
-                    SELECT count(*) INTO n FROM stage;
-                    IF n = 0 THEN
-                      RAISE EXCEPTION 'stage 零行 —— exporter 首刷未完成或 /pages.csv 变空，本轮不写库';
-                    END IF;
-                    RAISE NOTICE '[rollup] staged % rows', n;
-                  END $$;
-
-                  INSERT INTO blog_pageviews (day, path, requests, browser_requests)
-                  SELECT day, path, requests, browser_requests FROM stage
-                  ON CONFLICT (day, path) DO UPDATE
-                    SET requests         = EXCLUDED.requests,
-                        browser_requests = EXCLUDED.browser_requests,
-                        updated_at       = now();
-
-                  COMMIT;
-
-                  \echo '[rollup] table now:'
-                  SELECT count(*) AS rows, min(day) AS since, max(day) AS latest FROM blog_pageviews;
-                  SQL
+                  # SQL 在 ConfigMap 里，不内联 —— 见上面 blog-stats-rollup-sql 的
+                  # 文件头注释（内联会被 kubelet 的 $$ 转义吃掉一个 $）。
+                  psql -v ON_ERROR_STOP=1 -f /sql/rollup.sql
               volumeMounts:
                 - { name: tmp, mountPath: /tmp }
+                - { name: sql, mountPath: /sql, readOnly: true }
               resources:
                 # psql 一次性作业，估值（新对象无实测）：首轮跑完按 rssBytes 复核。
                 requests: { cpu: 10m, memory: 32Mi }
@@ -186,3 +204,6 @@ spec:
           volumes:
             - name: tmp
               emptyDir: {}
+            - name: sql
+              configMap:
+                name: blog-stats-rollup-sql
