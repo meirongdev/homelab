@@ -83,23 +83,59 @@ Grafana 用**只读角色** `blogstats_ro` 连（`SELECT` + 未来新表的 DEFA
   一百行，不多养一个栈。
 - **❌ 升 zone 套餐**：[ROADMAP](../ROADMAP.md) 已经把「升 Pro/Business」记成前提未满足，
   而按 path 在免费版就拿得到。
-- **⏸️ Cloudflare Web Analytics（RUM 数据集）**：`rumPageloadEventsAdaptiveGroups` 带
-  `requestPath` / `refererHost` / `deviceType`，且只有真浏览器会执行 beacon —— 是比
-  `userAgentBrowser` 干净得多的真人信号，Pages 侧还能一键注入。
-  **2026-09-08 实测：现有 token 读不到，已确认（原来的 `[need manual confirm]` 结清）。**
-  RUM 在 GraphQL 里是 **account 作用域**，而本仓库这把 token（复用
-  `secret/homelab/external-dns` 那份）是 zone 级：
-  `/user/tokens/verify` 返回 `active`（token 本身有效），但
-  `{ viewer { accounts { accountTag } } }` 返回 **0 个 account** +
-  `not authorized for that account`（code `authz`）。所以不是查询写错，是作用域不够。
-  ⚠️ 判据要用 `viewer.accounts` 这一问：直接查 RUM 数据集报的错会长得像「数据集不存在」，
-  容易误判成免费版没有这个数据集。
-  **要推进就得在 Cloudflare 控制台另发一把 account-scoped token（Account > Account
-  Analytics > Read），写进 Vault 新路径**——不要覆盖 `homelab/external-dns`，那把是
-  external-dns + cf-analytics-exporter 在用的生产凭据。
-  届时本管道只换数据集，rollup 与面板不用动。
-  ⚠️ 它和边缘数据**量的不是一回事**（beacon 会被 adblock 吃掉一部分，读者是开发者，
-  损耗不小），所以真要上是**并存加一列**对比，不是替换掉现在这条。
+- **⏸️ Cloudflare Web Analytics（RUM 数据集）—— 权限已确认可读，卡的是口径不是凭据**
+  （2026-09-08 实测结清 `[need manual confirm]`）。
+
+  **现有 token 就能读**（`secret/homelab/external-dns` 那把，无需另发 account-scoped
+  token）。beacon 也早就在跑，13 个主机名都有数据。
+
+  ☠️ **别用 `{ viewer { accounts { accountTag } } }` 判作用域** —— 我最初就是这么误判的：
+  不带 filter 的 `accounts` 需要「列出账号」权限，那和「访问某个账号」是两回事，
+  于是它返回 0 个 account + `not authorized for that account`（code `authz`），
+  看起来像 token 没权限。**带上 `filter:{accountTag:"<id>"}` 就正常返回。**
+  唯一可信的判据是直接查目标数据集本身。
+
+  查询形态（`limit` 必填；`dimensions` **不是入参**，选哪几个 dimension 字段就按它们分组；
+  `confidence` 要带参数，裸选会报 `level: not a number`）：
+
+  ```graphql
+  { viewer { accounts(filter:{accountTag:"<ACCOUNT_ID>"}) {
+      rumPageloadEventsAdaptiveGroups(
+        limit:100, filter:{date_geq:"<FROM>", date_leq:"<TO>"}, orderBy:[count_DESC]
+      ) { count dimensions { requestPath requestHost bot deviceType refererHost } }
+  } } }
+  ```
+
+  可用 dimension 比原先设想的多：`bot` / `requestHost` / `siteTag` / `refererPath` /
+  `userAgentBrowser` / `userAgentOS` / `countryName` / `navigationType` / `deliveryType`
+  + 各档时间粒度；聚合字段 `count` / `sum` / `avg` / `confidence`。
+
+  **⚠️ 真正的障碍是两条口径问题，不是权限：**
+
+  1. **RUM 的 `count` 是抽样后放大的，粒度约 10**。实测 top-10 的取值只有
+     `{20, 40, 90}` —— 全是 10 的倍数。而本仓库要的「按文章」信号本身就只有个位数到
+     十几（边缘数据实测具体文章页 3–17 次/天）。**抽样粒度和信号同一个量级 = 长尾被量化
+     成 0 或 10**，排序会失真。边缘数据是逐请求精确计数，这一点上反而更适合按文章排序。
+  2. **RUM 是 account 作用域，覆盖全部 13 个主机名**（`meirong.dev` 891 +
+     grafana 29 + trends 21 + jobs 20 + nakama-console 17 + home 13 + notebook 8 +
+     argocd 4 + pdf 4 + draw 3 + multica 2 + readlist 1 + game 1，7 天）。
+     要用必须按 `requestHost` 过滤，否则把自建服务的访问混进博客统计。
+
+  **两个数据源的实测对比（7 天，`meirong.dev`）：**
+
+  | 口径 | 7 天量 | 性质 |
+  |---|---|---|
+  | 边缘 `requests`（HTML 200） | 18,749（609 个 path） | 精确，但含伪装 UA 的爬虫 |
+  | 边缘 `browser_requests` | 3,653（占 19.5%） | 近似真人，仍含伪装 Chrome 的爬虫 |
+  | RUM pageloads（`bot=0`） | 891 | 干净（爬虫不执行 JS），但抽样+被 adblock 吃掉一部分 |
+
+  差约 4 倍，缺口 = 伪装 UA 的爬虫 + adblock 损耗 + 抽样。顺带一个反直觉的实测：
+  `bot` 维度在全部 1014 条里**恒为 0** —— 不是过滤器好用，而是 beacon 天然筛掉了爬虫，
+  所以这个维度对我们没有额外价值。
+
+  **结论不变且更有据**：真要上是**并存加一列**（RUM 补 deviceType/referrer/国家这类
+  边缘拿不到的维度，以及"有多少真人"的量级校准），**不替换**现有按文章的排序口径 ——
+  它的抽样粒度撑不起长尾。届时 rollup 与面板不用动，只多一路采集。
 - **⏸️ 自建 beacon（浏览器侧打点）**：能拿到阅读时长、滚动深度、referrer，但代价是
   博客要挂一段 JS（本仓库改不到那个 repo）、多一个公网端点、且被 adblock 吃掉一部分
   （读者是开发者，这个损耗不小）。**它和本方案量的不是一回事**（边缘数完整但含爬虫，
