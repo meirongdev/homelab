@@ -53,9 +53,26 @@ CRD 就一直没动过，落后运行中的 operator 三个 minor 版本。
 一次变更只解决一件事，出问题时才分得清是谁的错。故 Application 里显式
 `skipCrds: true`，把采纳保持为纯 no-op。
 
-**⏳ 待决（本次刻意不做）**：CRD v0.89.0 → v0.92.1。两条路：
-把 `skipCrds` 去掉让 ArgoCD 接管（之后 CRD 随 chart 版本自动跟进，一劳永逸），
-或 `kubectl apply --server-side` 手工升一次。建议前者，但要单独开窗口、单独验证。
+**✅ 2026-09-08 已完成**（走的是建议那条路：去掉 `skipCrds`，ArgoCD 接管，
+CRD 之后随 chart 版本自动跟进）。
+
+动手前的**决定性安全检查**——chart 里每个 CRD 的 `spec.versions[].name` 必须仍包含
+live 的 `status.storedVersions`。10 个逐个核对：`v1`↔`v1`、`v1alpha1`↔`v1alpha1`，
+无一被移除，所以升级不可能孤立既有 CR。⚠️ 换 chart 大版本时**要重做这个核对**；
+若哪天核对不过，那就不是改个开关的事，得走 CR 迁移、单独规划。
+⚠️ PyYAML 解析这些 CRD 会在 `=` 键上抛 `ConstructorError`（YAML 的 value 标签特例），
+核对脚本要先 `add_constructor('tag:yaml.org,2002:value', ...)`。
+
+实测结果：10 个 CRD 全部进资源树且 `Synced`，`controller-gen` 注解
+**v0.19.0 → v0.21.0**（确认真的换了新版）；**72 个 CR 一个没少**
+（1 Prometheus / 26 ServiceMonitor / 41 PrometheusRule / 1 PodMonitor /
+1 Alertmanager / 2 AlertmanagerConfig）；Prometheus 加载规则数前后均 **404**；
+prometheus / alertmanager / operator 三个 pod **零重启**。
+
+☠️ **接管的代价**：CRD 进了本 App 的清单集而它 `prune: true` —— 哪天 chart 移除某个
+CRD，ArgoCD 会 prune 它并**级联删光该类型的全部 CR**。chart 大版本升级时先
+diff 一眼 `crds/` 的文件数。（实测 ArgoCD 没给这些 cluster-scoped CRD 打
+tracking 注解，所以真实 prune 风险可能低于此，但按最坏情况记。）
 
 ## 决策三：`releaseName` 才是跨集群同 chart 的正解，`fullnameOverride` 不够
 
