@@ -31,15 +31,31 @@ spec:
       helm:
         valueFiles:
           - $values/k8s/helm/values/kube-prometheus-stack.yaml
-        # ⚠️ 刻意 skip CRD，这是本次采纳的核心取舍。
-        # `helm upgrade` **从不**升级 chart 的 crds/ 目录，所以集群里的 10 个
-        # monitoring.coreos.com CRD 至今停在 operator **v0.89.0**，而实际运行的
-        # operator 是 **v0.92.1**（chart 87.6.0 自带）——这个陈旧是 Helm 造成的既存事实。
-        # 若让 ArgoCD 接管 CRD，首次同步会顺带把 10 个 CRD 升到 v0.92.1：那是一次
-        # 独立的、有自己风险面的变更（~1MB CRD × 10、可能影响既有 CR 校验），
-        # 不该被"迁 GitOps"这件事夹带执行。故先 skip，保持采纳是纯 no-op。
-        # CRD 陈旧作为独立待决项记录在 docs/decisions/manual-helm-to-argocd-adoption.md。
-        skipCrds: true
+        # ✅ **2026-09-08：`skipCrds` 已移除，CRD 交给 ArgoCD 接管**
+        # （原 ROADMAP 开放项 #4 收口；采纳时刻意 skip 的理由见
+        #  docs/decisions/manual-helm-to-argocd-adoption.md 决策二）。
+        #
+        # 背景：`helm upgrade` **从不**升级 chart 的 `crds/` 目录，所以 10 个
+        # monitoring.coreos.com CRD 一直停在 operator v0.89.0，而运行的 operator
+        # 是 v0.92.1。交给 ArgoCD 后 CRD 随 chart 版本自动跟进，这个漂移不会再攒。
+        #
+        # 动手前做的决定性安全检查（别跳过，换 chart 大版本时要重做一遍）：
+        # **chart 里每个 CRD 的 `versions` 必须仍包含 live 的 `status.storedVersions`。**
+        # 10 个 CRD 逐个核对过：v1 对 v1、v1alpha1 对 v1alpha1，无一被移除 ——
+        # 所以升级不会孤立任何既有 CR。若哪天核对不过，那就**不是**改个开关的事，
+        # 得走 CR 迁移，停下来单独规划。
+        # 核对方法：把 chart pull 下来比对 `spec.versions[].name` 与
+        # `kubectl get crd -o json` 的 `status.storedVersions`。
+        # ⚠️ PyYAML 解析这些 CRD 会在 `=` 键上抛 ConstructorError（YAML 的 value 标签
+        #    特例），要先 `add_constructor('tag:yaml.org,2002:value', ...)`。
+        #
+        # ⚠️ `ServerSideApply=true`（见下方 syncOptions）是前提：单个 CRD 近 1MB，
+        #    客户端 apply 会撞 `last-applied-configuration` 注解的大小上限。
+        #
+        # ☠️ **接管的代价**：CRD 进了本 App 的清单集，而本 App `prune: true`。
+        #    哪天 chart 移除某个 CRD，ArgoCD 就会 prune 它 → **级联删光该类型的全部 CR**
+        #    （当前 72 个：26 ServiceMonitor + 41 PrometheusRule + Prometheus/Alertmanager
+        #    /PodMonitor/2 AlertmanagerConfig）。chart 大版本升级时先 diff 一眼 crds/ 的文件数。
     - repoURL: https://github.com/meirongdev/homelab
       targetRevision: main
       ref: values
