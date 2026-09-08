@@ -63,7 +63,7 @@
 
 ### 仓库工程与 agent 工具链
 
-- [agent-tooling.md](agent-tooling.md) — agent 上下文的唯一入口（`docs/AGENTS.md` + 三个软链）、哪些 agent 文件是仓库内容哪些是本机各装一份、技能壳/vendored/ignored 三类来源、☠️ opsx 产物不落库的边界
+- [agent-tooling.md](agent-tooling.md) — agent 上下文的唯一入口（`docs/AGENTS.md` + 三个软链）、哪些 agent 文件是仓库内容哪些是本机各装一份、技能壳/vendored/ignored 三类来源、☠️ opsx 已整套移除（产物不落库）及别加回来的理由
 
 ---
 

@@ -1,6 +1,6 @@
 # Agent 工具链与仓库边界 (Agent Tooling)
 
-> Last updated: 2026-09-06
+> Last updated: 2026-09-08
 > Status: 生效事实
 > 本文回答三件事：**AI 助手的上下文从哪里进来**、**哪些 agent 文件是仓库内容（进 git）**、
 > **哪些是本机每套 agent 各装一份的工具（不进 git）**，以及这两条边界上已知的重复与代价。
@@ -29,7 +29,7 @@
 | **项目自有的流程** | `docs/runbooks/`、`docs/guides/`、`docs/reference/` | ✅ | 新增服务、备份恢复、电子书同步的流程 |
 | **agent 技能入口（壳）** | `.claude/skills/<name>/SKILL.md` | ✅（只跟踪壳） | `add-service`：正文只有指针 |
 | **vendored 第三方技能** | `.agents/skills/<name>/` | ✅ | `humanizer`（含自带 LICENSE / plugin.json） |
-| **per-agent 安装的工具** | `.agent/` `.codex/` `.gemini/` `.qwen/{commands,skills,tmp}` `openspec/` `.claude/commands/` `.claude/skills/openspec-*/` `.github/{prompts,skills}/` | ❌ `.gitignore` | opsx 全套 |
+| **per-agent 安装的工具** | `.qwen/{skills,tmp}` `.qwen/skill-curator.json` | ❌ `.gitignore` | qwen 的 5 个 auto-skill |
 
 要点：
 
@@ -47,19 +47,30 @@
   内联真实凭据（例如 `wrangler` 命令带着 `CLOUDFLARE_API_TOKEN`）。以前只靠
   `~/.config/git/ignore` 兜，换台机器就没保护了，所以规则固化在仓库的 `.gitignore` 里。
 
-## 已知的重复与代价（本机现状，非仓库内容）
+## opsx / OpenSpec 已整套移除（2026-09-08）
 
-opsx / OpenSpec 的 4 个 `SKILL.md` 在 `.agent` `.claude` `.codex` `.gemini` `.qwen` **各存一份**
-（实测 5×4），命令文件另有 `.md` + `.toml` + `.toml.backup` 三种形态混在 `.qwen/commands/`。
-后果不是磁盘：agent 的技能发现会看到重复条目，而新克隆仓库后这些目录一个都不存在——
-**任何流程都不许依赖它们存在**。
+ROADMAP 开放项 #14 收在「停用」这条。移除的是 **50 个文件**，横跨 **6 个** agent 目录
+（不是当时记的 5 个，`.github/` 也各存了一份）：`.agent/` `.codex/` `.gemini/` `openspec/`
+整目录，加上 `.claude/{commands,skills/openspec-*}` `.github/{prompts,skills}`
+`.qwen/{commands,skills/openspec-*}`。**git 里一个都没有**（全部 gitignore），
+所以这次清理在提交里只体现为 `.gitignore` 与本文的改动。
 
-☠️ **`openspec/` 整体被 gitignore，所以它的产物不落库**：本地 `openspec/specs/` 是空目录，
-`openspec/changes/` 只剩一个空 `archive/`。本仓库的设计产物只有一条路——
-`docs/plans/`（带日期的方案，写完即冻结）与 `docs/decisions/`（ADR），由 R1 与
-`check-docs.py` 强制。用 opsx 产生的提案如果不手工落到 `docs/plans/`，就等于没发生过。
-是否继续装 opsx 见 [ROADMAP.md](../ROADMAP.md) 的开放项；两种收法都成立（停用，或只保留
-一个 agent 目录并把 `openspec/changes/` 纳入 git），但**不许**维持「装了、产出不进 git」。
+**为什么停用**（判据不是"占地方"）：
+
+- ☠️ **产物不落库**：`openspec/` 整体被 gitignore，本地 `specs/` 是空目录、`changes/`
+  只剩一个空 `archive/` —— 提案写完即丢。而本仓库的设计产物只有一条路：
+  `docs/plans/`（带日期的方案，写完即冻结）与 `docs/decisions/`（ADR），
+  由 R1 与 `check-docs.py` 强制。**装了、产出不进 git，等于没发生过。**
+- 同一批 4 个 `SKILL.md` × 6 个目录 = 24 份副本，agent 的技能发现会看到重复条目；
+  命令文件还混着 `.md` + `.toml` + `.toml.backup` 三种形态（`.qwen/commands/` 实测）。
+- 新克隆仓库后这些目录一个都不存在 —— **任何流程都不许依赖它们**，
+  所以删除不影响任何可重复流程。
+
+⚠️ **别照着旧提交把它们加回来**，`.gitignore` 里留了同样的提醒。要重新引入这类工具，
+前提是先解决「产出进 git」那一条，否则重蹈同一个坑。
+
+⚠️ **`.agent/`（已删）与 `.agents/`（保留）是两个不同目录**，差一个 s：后者是 vendored
+第三方技能的落点（`humanizer` + `skills-lock.json`），**进 git**，与 opsx 无关。
 
 ## 新增一个项目自有技能
 

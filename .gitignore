@@ -69,19 +69,15 @@ variables.auto.pkrvars.hcl
 .worktrees/
 **/vault_values.md
 
-# OpenSpec / opsx AI-agent tooling — installed per-agent, not project content
-.agent/
-.codex/
-.gemini/
-openspec/
-.claude/commands/
-.claude/skills/openspec-*/
-.qwen/commands/
+# per-agent 安装的工具 — 本机各装一份，不是仓库内容
+# ⚠️ opsx / OpenSpec 已于 2026-09-08 整套移除（ROADMAP 开放项 #14 收在「停用」这条），
+#    连带删掉的规则：`.agent/` `.codex/` `.gemini/` `openspec/` `.claude/commands/`
+#    `.claude/skills/openspec-*/` `.qwen/commands/` `.github/{prompts,skills}/`
+#    —— 那些目录当时 100% 是 opsx 独占。别照着旧提交把它们加回来。
+#    ⚠️ 注意 `.agent/`（已删，opsx）与 `.agents/`（vendored 第三方技能，**进 git**）是两个目录。
 .qwen/skills/
 .qwen/tmp/
 .qwen/skill-curator.json
-.github/prompts/
-.github/skills/
 proxmox/ansible/.vault_pass
 .gstack/
 
