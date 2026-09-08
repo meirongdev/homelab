@@ -31,7 +31,7 @@ Network note: both clusters now use Cilium for the local data plane and Gateway 
 ## 本地检查
 
 ```bash
-just              # 看全部配方（根 justfile 用 mod 引入 12 个子 justfile）
+just              # 看全部配方（根 justfile 用 mod 引入全部子 justfile）
 just check        # 跑 CI 同款的全部本地检查
 just check-render # 渲染全部 ArgoCD App 并过 schema（要联网，约 2 分钟）
 git config core.hooksPath .githooks   # 一次性：让 just check 在 push 前自动跑
