@@ -43,14 +43,10 @@ resources:
   # 2026-08-02 起本集群不再只是「轻量采集端」：Loki(日志)+Tempo(追踪) 已从 homelab 迁入
   # （工作负载由独立的 loki / tempo Helm App 部署，同 falco 模式；此处只放 NodePort 入口）。
   # Prometheus/Grafana/Alertmanager 仍在 homelab——它们要贴着抓取目标，不搬。
+  # 工作负载已于 2026-09-08 拆给 `oracle-monitoring` App（kustomize 源，
+  # cloud/oracle/manifests/monitoring/kustomization.yaml —— configMapGenerator 也搬过去了）。
+  # ☠️ namespace.yaml 留在本树（ns 被 prune 会级联删光）。
   - monitoring/namespace.yaml
-  - monitoring/otel-collector.yaml
-  - monitoring/exporters.yaml
-  - monitoring/monitoring-external.yaml
-  # Loki ruler 的 LogQL 告警规则（ruler 跑在 loki-0 单体里，不是独立 Deployment）
-  - monitoring/loki-rules.yaml
-  # KRR 右尺寸推荐周报（查中枢 Prometheus，结果推 Telegram）
-  - monitoring/krr.yaml
   # OpenCost 成本归因：仅 namespace（工作负载由独立 opencost-oracle Helm App 部署，同 falco 模式）
   # 见 docs/plans/observability/2026-07-30-opencost-multicluster.md
   - opencost/namespace.yaml
@@ -109,16 +105,7 @@ resources:
   # 但 kustomize 不按列表顺序 apply，真正的依赖是那两个 PVC 存在（已存在）。
   - personal-services/readlist.yaml
 
-# ⚠️ otel-collector 的配置必须走 configMapGenerator，不能写成普通 ConfigMap 资源。
-# 2026-08-02 实测踩坑：把配置改成写 oracle 本地 Loki 后，ConfigMap 更新了、
-# DaemonSet spec 没变 → **Pod 根本不重启**（实测 age 2d5h / 0 restart），
-# 而 OTel Collector 只在启动时读一次配置文件 → 改动静默不生效，日志仍旧发往老地址。
-# （homelab 侧没这个问题：Helm chart 会在 pod template 上打 configmap checksum 注解。）
-# configMapGenerator 给生成的 ConfigMap 名字加内容哈希后缀，并自动重写 DaemonSet 的
-# volume 引用 → 配置一变，名字就变，DaemonSet 随之滚动。改配置只需改
-# monitoring/otel-collector-config.yaml。
-configMapGenerator:
-  - name: otel-collector-config
-    namespace: monitoring
-    files:
-      - config.yaml=monitoring/otel-collector-config.yaml
+# ⚠️ otel-collector 的 configMapGenerator 已随 monitoring 组搬到
+# cloud/oracle/manifests/monitoring/kustomization.yaml（2026-09-08，开放项 #13）。
+# 那里的文件头写着为什么它不能退化成普通 ConfigMap、也不能改成 ArgoCD 目录源。
+# ⚠️ 实测搬家前后生成名一致（otel-collector-config-5989tb9bmm），故 DaemonSet 不滚动。
