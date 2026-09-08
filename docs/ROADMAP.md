@@ -1,6 +1,6 @@
 # Homelab Roadmap
 
-> Last updated: 2026-09-06
+> Last updated: 2026-09-08
 > 本文只回答两件事：**还剩什么没做**，和**为什么不做**。做过什么在
 > [CHANGELOG.md](CHANGELOG.md)（2026-09-02 拆出，原因见那里）。
 > **实施细节不写在这里**：每条压到一句话，展开看链接指向的 `reference/`（事实）、
@@ -87,10 +87,9 @@
 | Cert-Manager (Let's Encrypt + DNS-01) | TLS 在 Cloudflare 边缘终结、集群内 HTTP，无内网直连 TLS 需求 → 纯负担 |
 | Vault HA / auto-unseal | 单节点无 HA 意义；sealed 已被 ESO 告警覆盖 + 恢复路径已文档化，transit auto-unseal 要再养一个 Vault |
 | Crossplane | 2026-07-07 否决：CF provider 已死 2 年、问题规模不匹配（单人静态云面）、控制面鸡生蛋、单节点内存开销。重评条件见 [ADR](decisions/crossplane-not-adopted.md) |
-| Talos 迁移 | 2026-03 刚重建 Ubuntu 24.04 且流程已顺，单节点收益不抵成本。加第二台 worker 时重评（[演进路线 §五](plans/architecture/2026-07-07-tech-debt-and-evolution.md)） |
 | Cilium External Workloads（NAS 入网） | 2026-03-19 取消：CRD 与 CLI 已从 Cilium 1.15+ 移除。若要限制 NFS 访问改用 `CiliumNetworkPolicy` + `fromCIDR`（[原方案](plans/archive/2026-03-15-cilium-external-workload-nas.md)） |
 | 集群级网络默认拒绝 | **刻意延后**（非取消）：单用户威胁模型下横向移动收益边际低、debug 成本高。Hubble 已开做可见性，作为日后单 ns 灰度的前置。见 [security.md](reference/security.md) |
-| homelab 多节点 HA / etcd 三节点 | 2026-07-04 否决：硬件不支持、单用户收益为零。正确形态是单节点 + 快速重建（`just homelab-recover` + restic）。加第二台 worker 时与 Talos 一并重评 |
+| homelab 多节点 HA / etcd 三节点 | 2026-07-04 否决：硬件不支持、单用户收益为零。正确形态是单节点 + 快速重建（`just homelab-recover` + restic）。加第二台 worker 时重评 |
 | Thanos / Mimir / 指标对象存储长期化 | 2026-07-04 否决：双写复杂、搬迁窗口长，`retention` + `retentionSize` 够用。⚠️ 同批"LGTM 整体不搬"那半条**已被推翻**：Loki/Tempo 于 2026-08-02 迁 oracle，Prometheus/Grafana/Alertmanager 仍在 homelab |
 | storage-106 并入 homelab 集群 | ⛔ 2026-08-13 已推翻并实施：106 上的 VM 以 `k8s-worker-106` 入编（**入编的是 VM 不是宿主**，原「计算压上 NFS 后端」的理由已不适用）。代价是 106 与 prod 的解耦被主动放弃（[ADR](decisions/storage106-as-homelab-worker.md) · [复盘](records/2026-08-13-k3s-worker-join-106.md)） |
 
@@ -98,13 +97,12 @@
 
 ☠️ **否决不是永久的，但没人盯着触发条件就等于永久。**2026-09-02 首次汇总时发现：
 「加第二台 worker 时重评」这条触发条件早在 **2026-08-13 就满足了**（`k8s-worker-106` 入编），
-而 Talos 与多节点 HA 两条结论从那天起再没被看过一眼，ADR 与复盘里也都没提。
+而多节点 HA 那条结论从那天起再没被看过一眼，ADR 与复盘里也都没提。
 新写否决类结论时把触发条件同时登记到这张表，否则它只活在正文里没人读。
 
 | 条目 | 触发条件 | 何时满足 | 现状 |
 |------|---------|---------|------|
-| [Talos 迁移](plans/architecture/2026-07-07-tech-debt-and-evolution.md) | 加第二台 worker | 2026-08-13 | ⏳ 未重评。⚠️ 重评时注意前提已变：worker 是 106 上的 VM、跨网段、多一条 ip rule，"重装成本低"这条对它不成立 |
-| homelab 多节点 HA / etcd 三节点 | 加第二台 worker（与 Talos 一并） | 2026-08-13 | ⏳ 未重评。硬件那条理由仍然成立（worker 只有 2c/4G），但"单节点"这个前提本身已经不对了 |
+| homelab 多节点 HA / etcd 三节点 | 加第二台 worker | 2026-08-13 | ⏳ 未重评。硬件那条理由仍然成立（worker 只有 2c/4G），但"单节点"这个前提本身已经不对了 |
 | [Crossplane](decisions/crossplane-not-adopted.md) | ADR 文末四条，满足其一 | 未满足 | ✅ 结论有效 |
 | [cf-analytics 自写 exporter](decisions/cf-analytics-custom-exporter.md) | zone 升 Pro/Business，或上游 exporter 支持 Free zone | 未满足 | ✅ 结论有效 |
 | [DGX 不接 ClusterMesh](decisions/dgx-clustermesh-not-adopted.md) | ADR 文末条件 | 未满足 | ✅ 结论有效 |

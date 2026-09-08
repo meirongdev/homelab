@@ -69,7 +69,6 @@ GitOps 覆盖与安全纵深已成熟。剩余债务集中三处：
 | ArgoCD | 本仓库已在 v3.3.9（当前线）✅ | 无动作 |
 | ESO | 本仓库已在 v2.6.0 ✅（pin 已对齐） | 无动作 |
 | [Crossplane](https://docs.crossplane.io/latest/whats-new/) | [v2.0 2025-08 GA](https://www.infoq.com/news/2025/08/crossplane-applications-v2/)，现 v2.3：MR/XR 全面 namespaced、composition functions、去 claim、cluster-scoped MR 转 legacy | **不引入**（§三） |
-| Talos Linux | homelab 圈 2026 主流趋势（不可变、纯声明、分钟级重建） | 现在不迁（§五） |
 
 ---
 
@@ -152,7 +151,6 @@ pg_dump/restore 迁移(逐表行数核对) + OIDC/console 实测验证 + 旧 `zi
 ## 五、明确不做（延续母文档"防过度工程"）
 
 - **Crossplane** — §三。
-- **Talos 迁移** — 2026-03 刚在 Ubuntu 24.04 重建完且流程已顺，单节点下收益不抵重建成本。重评条件：新增第二台 worker（届时不可变 OS + 分钟级重建的收益才成立）。
 - **cert-manager / Vault HA** — 母文档已否，维持（TLS 边缘终结；单节点 HA 无意义）。
 
 ---
