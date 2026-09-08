@@ -42,7 +42,13 @@
   `.agents/skills/humanizer` 的软链；`.agents/skills/<name>/` 是跨 agent 通用的落点，
   `skills-lock.json`（进 git）记来源与 hash。复制一份到每个 agent 目录 = 各自漂移。
 - **一个流程只允许一份实现**。`.claude/skills/sync-ebooks/scripts/sync_ebooks.py` 与
-  `scripts/sync-ebooks.sh` 曾同时存在，见开放项（[ROADMAP.md](../ROADMAP.md)）。
+  `scripts/sync-ebooks.sh` 曾并存 8 个月，**2026-09-08 已合一**（python 删除，能力并入
+  bash，技能壳只留指针）。☠️ 那次合并的教训值得记住：并存期间"两份都还能用"这个前提
+  **是错的** —— bash 那份有三个先前就存在的缺陷（缺 conf 文件即静默 exit 1、epub 校验
+  恒假、循环变量泄漏改写调用方的文件路径），实际一直跑不通，只有 python 那份在用。
+  **一个流程两份实现时，"另一份也能用"必须实测，不能假定**；否则删错那一份，或者像这次
+  一样，坏了 8 个月没人发现（四条 `just sync-ebooks*` 配方全程空转）。
+  → [guides/ebook-sync.md](../guides/ebook-sync.md)
 - `.claude/settings.local.json` / `.qwen/settings.local.json` 刻意 gitignore：允许列表里可能
   内联真实凭据（例如 `wrangler` 命令带着 `CLOUDFLARE_API_TOKEN`）。以前只靠
   `~/.config/git/ignore` 兜，换台机器就没保护了，所以规则固化在仓库的 `.gitignore` 里。
