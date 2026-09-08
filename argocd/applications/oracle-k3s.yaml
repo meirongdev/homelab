@@ -25,7 +25,14 @@ spec:
 
   syncPolicy:
     automated:
-      prune: true
+      # ⚠️ 临时改成 false（2026-09-08，开放项 #13 的拆分窗口内）——拆完立刻改回 true。
+      # 为什么需要这个窗口：ArgoCD **不会**把已被本 App 拥有的对象让给新 App
+      # （新 App 报 SharedResourceWarning 并永久 OutOfSync）。所以交接只能发生在
+      # 「本 App 不再渲染这些对象」的那一刻，而那一刻若 prune 开着，它们会先被删掉
+      # 再由新 App 重建 —— 无状态对象也有几十秒到几分钟不可用。
+      # 关掉 prune 后：本 App 只是不再管它们，对象原地不动，新 App 直接接管（改写
+      # tracking 注解），**零停机、pod 不重启**。
+      prune: false
       selfHeal: true
     syncOptions:
       - ServerSideApply=true
