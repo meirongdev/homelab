@@ -123,6 +123,11 @@ Grafana 用**只读角色** `blogstats_ro` 连（`SELECT` + 未来新表的 DEFA
   唯一的判据是真跑一轮。ConfigMap 的内容不经过那层展开。同类只影响 `args`：
   仓库里另两处 `$$`（calibre 的两个脚本）在 ConfigMap 里，不受影响。
 
+- ☠️ **`optional: true` 的 `secretKeyRef` 换来的可用性，代价是「激活后必须重启消费方」**：
+  apps-pg（两个租户口令）与 Grafana（数据源口令）都是这个形状。Secret 后来出现时
+  **env 不会刷新**，而 `optional` 让它安静地整个缺失 —— 于是「ExternalSecret 全绿 +
+  表里有行 + pod Running」三个信号同时为真，面板却连不上库。收口只能看面板出数。
+
 - ⚠️ `apps-pg` 的 Deployment 多了两个 `optional: true` 的 env → **ArgoCD 同步时 Postgres
   会滚动重启一次**（`strategy: Recreate` + 单 RWO PVC，秒级），litellm / multica / nakama
   会短暂断连重连。`optional` 是必须的：Vault 里还没写口令时非 optional 的 `secretKeyRef`
@@ -204,6 +209,30 @@ UPSERT 3345 行、`2026-08-31..2026-09-06`；`blogstats_ro` 实测 `SELECT` 通�
    错在那之后就只可能是 SQL 本身。
    ⚠️ 预验证不要 `kubectl apply` 覆盖 ArgoCD 跟踪的对象；用 ArgoCD 不跟踪的**新名字**
    （当时是 `blog-stats-rollup-sql-verify` + `blog-stats-verify`），验完删掉再 push。
+
+4. ☠️ **重启 Grafana** —— 少了这步「表里有行」但「面板无数」，且不报任何错：
+
+   ```bash
+   kubectl --context k3s-homelab rollout restart deployment/kube-prometheus-stack-grafana -n monitoring
+   ```
+
+   数据源口令走 `BLOGSTATS_PG_PASSWORD`（`optional: true` 的 `secretKeyRef`，见
+   `values/kube-prometheus-stack.yaml`）。`optional` 的 env 在 Secret 还不存在时**不是
+   空串，而是整个变量不存在**，且**env 不会随 Secret 出现而刷新**（挂载的卷才会）——
+   与第 2 步 apps-pg 那个坑同一个机制。2026-09-08 实测：Grafana pod 起于 09-07 16:01Z、
+   Secret 建于 09-08 01:26Z，重启前容器里 `BLOGSTATS_PG_PASSWORD` 未设置。
+   判据（不是「pod Running」）：
+
+   ```bash
+   POD=$(kubectl --context k3s-homelab get pod -n monitoring \
+           -l app.kubernetes.io/name=grafana -o jsonpath='{.items[0].metadata.name}')
+   kubectl --context k3s-homelab exec -n monitoring "$POD" -c grafana -- \
+     sh -c 'echo "len=${#BLOGSTATS_PG_PASSWORD}"'   # 期望 32，不是 0
+   ```
+
+   收口判据是**面板真出数**（2026-09-08 实测 `/api/ds/query` 对 `uid: blogstats` 返回
+   200 + 3345 行 / 2026-08-31..09-06），不是「三个 ExternalSecret 全绿」——
+   后者绿了 Grafana 仍可能拿着不存在的口令。
 
 ## 相关
 
