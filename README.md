@@ -6,7 +6,8 @@ Network note: both clusters now use Cilium for the local data plane and Gateway 
 
 ## Documentation Index
 
-- **[Docs Portal](docs/README.md)**: start here — 分层说明与全部入口。
+- **[Docs Portal](docs/README.md)**: start here — 分层说明、全部入口与**分阶段学习路径**。
+- **[Tech Stack](docs/reference/tech-stack.md)**: 技术栈全景 —— 用了哪些技术、各自解决什么问题、为什么是它、配置与版本钉在哪。不熟悉这套栈就从这里开始。
 - **[Project Conventions & AI Guide](docs/AGENTS.md)**: 唯一的 AI 助手上下文文件（命令、约定、硬约束）；各组件细节在 [docs/reference/](docs/reference/README.md)。
 - **[New machine bootstrap](docs/guides/dev-machine-bootstrap.md)**: 换机器后把本机配到能 clone/改/验这个 repo。
 - **[Project Roadmap](docs/ROADMAP.md)**: 还剩什么没做 · 明确不做 · 待重评。
