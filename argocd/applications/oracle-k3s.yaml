@@ -25,8 +25,7 @@ spec:
 
   syncPolicy:
     automated:
-      # ⚠️ 2026-09-08 拆分窗口：临时 false，拆完剩余 4 组后改回 true。理由见下方注释。
-      prune: false
+      prune: true
       selfHeal: true
       # ☠️ **从本树往外拆 App 时，必须先把 prune 临时改成 false**（2026-09-08 实测出来的
       # 唯一零停机路径，开放项 #13 就是这么拆的）：
