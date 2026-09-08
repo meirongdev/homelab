@@ -60,12 +60,9 @@ resources:
   # ZITADEL (SSO): 迁自 homelab 2026-07-06。auth.meirong.dev 已切 oracle tunnel。
   # ⚠️ bootstrap 依赖（不入 git）: Secret `login-client`(zitadel ns，Login V2 PAT，从 homelab 拷入，
   #   因 setup job 在已恢复的 DB 上跳过创建它)；masterkey/db-password 经 ESO 读 secret/homelab/zitadel。
+  # 工作负载（ZITADEL 本体 + CNPG Cluster 与凭据）已于 2026-09-08 拆给
+  # `oracle-zitadel` App。☠️ namespace.yaml 留在本树。
   - zitadel/namespace.yaml
-  - zitadel/zitadel.yaml
-  # ZITADEL DB 迁 CloudNativePG（Phase 0，并行部署验证；cutover 是单独一步，见
-  # decisions/ 记录）。cnpg-operator 本身是独立 ArgoCD App（argocd/applications/cnpg-operator.yaml）。
-  - zitadel/zitadel-pg-secrets.yaml
-  - zitadel/zitadel-pg-cluster.yaml
   # ArgoCD 控制面（2026-08-02 从 homelab 迁入）。这里只放 ns 与两个 ESO 凭据；
   # ArgoCD 工作负载本身是 manual-helm（`cd k8s/helm && just deploy-argocd`），
   # 刻意不让 GitOps 控制器自管自己。
@@ -81,29 +78,17 @@ resources:
   # 最大的单一数据集）。open-notebook-ingest 跟着**书**走 —— 它挂载书库 PVC，而
   # open-notebook 应用本身留在 homelab，故改成经公网 API 推送。
   # 护栏必须与 ebook-sync-monitor 同在（它当年泄漏 92 个 Job pod 打爆过节点）
-  - personal-services/personal-services-limits.yaml
-  - personal-services/calibre-web.yaml
-  - personal-services/calibre-ebook-sync.yaml
-  - personal-services/open-notebook-ingest.yaml
   # 入口路由。2026-08-03 按顺序挂上：先摘 homelab 侧路由 → 删 CF 的 CNAME(book) 与
   # owner TXT(cname-book) → 才挂这一行。顺序反了会建出重复 CNAME。
-  - personal-services/route-calibre-web.yaml
   # ⚠️ calibre-metadata/ 目录也**不在**这棵 kustomize 树里 —— 它是独立的 ArgoCD App
   # （argocd/applications/calibre-metadata.yaml），因为一次性 enrich Job 需要专门的
   # ignoreDifferences（job-controller 会注入 suspend/selector/labels，否则永久 OutOfSync）。
-  - personal-services/it-tools.yaml
   # bentopdf 2026-08-11 取代 stirling-pdf（同域名 pdf.meirong.dev）。
   # 纯客户端 WASM 应用：无 PVC / 无 ExternalSecret / 无 OIDC。
-  - personal-services/bentopdf.yaml
-  - personal-services/squoosh.yaml
-  - personal-services/timeslot.yaml
-  - personal-services/trends.yaml
-  - personal-services/excalidraw.yaml
   # readlist（技术书评分/书单站，2026-08-05 上线）。它是本 ns 里**唯一跨应用读别人卷**的
   # 工作负载：snapshot CronJob 挂 calibre-books-local(RW，WAL 要写 -shm) 与
   # calibre-web-automated-config-local(只读)，故必须排在 calibre-web.yaml 之后理解——
   # 但 kustomize 不按列表顺序 apply，真正的依赖是那两个 PVC 存在（已存在）。
-  - personal-services/readlist.yaml
 
 # ⚠️ otel-collector 的 configMapGenerator 已随 monitoring 组搬到
 # cloud/oracle/manifests/monitoring/kustomization.yaml（2026-09-08，开放项 #13）。
