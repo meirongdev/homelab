@@ -1,6 +1,6 @@
 # ArgoCD Application Patterns
 
-> Last updated: 2026-09-05
+> Last updated: 2026-09-08
 > Status: 生效事实
 >
 > 当前 ArgoCD 管理模式分析、可选 pattern 对比与取舍建议。
@@ -35,7 +35,8 @@ root (Application)
 | 子模式 | 代表 | 说明 |
 |--------|------|------|
 | Helm Chart + 本地 values | `loki.yaml`, `kyverno.yaml` | 多源：remote chart repo + `$values/k8s/helm/values/<app>.yaml`（oracle 应用引用 `$values/cloud/oracle/values/<app>.yaml`，一棵集群一棵 values 树）。⚠️ chart 也可以来自 **OCI registry**（`multica` 与 `cnpg-operator`）：那时 `repoURL` 写不带 `https://` 的 `ghcr.io/<org>/charts` |
-| Kustomize 目录 | `oracle-k3s.yaml` | `cloud/oracle/manifests/` 整棵 kustomize 树 |
+| Kustomize 目录 | `oracle-k3s.yaml` · `oracle-monitoring.yaml` | `cloud/oracle/manifests/`（现只剩地基）、`monitoring/`（必须留 kustomize：configMapGenerator）|
+| 目录即清单（oracle 侧，2026-09-08 起）| `oracle-rss` · `oracle-uptime-kuma` · `oracle-personal-services` · `oracle-zitadel` | 各自一个子目录，`directory.exclude: namespace.yaml` |
 | 目录源（目录即清单） | `personal-services.yaml`, `monitoring-dashboards.yaml` | 一个 App ↔ `k8s/helm/manifests/` 下一个子目录，目录内文件全部纳管；2026-07-31 起取代 `directory.include` glob（所有权地图见 `k8s/helm/manifests/README.md`） |
 
 **怎么选**：第 1 种只用于上游第三方 chart；**自研应用一律用后两种，不打 chart**，
@@ -91,8 +92,18 @@ homelab 负载必须显式写 `https://100.94.186.7:6443`，写错会把整套 h
 `multica`（2026-08-18 上线，本仓库唯一的 OCI chart 源，见下）
 
 **project `oracle-k3s`（destination in-cluster `kubernetes.default.svc`）**:
-`oracle-k3s` · `calibre-metadata` · `cnpg-operator` · `external-dns-oracle` ·
-`falco` · `loki` · `tempo` · `trivy-operator-oracle` · `opencost-oracle`
+`oracle-k3s` · `oracle-rss` · `oracle-uptime-kuma` · `oracle-personal-services` ·
+`oracle-monitoring` · `oracle-zitadel` · `calibre-metadata` · `cnpg-operator` ·
+`external-dns-oracle` · `falco` · `loki` · `tempo` · `trivy-operator-oracle` ·
+`opencost-oracle`
+
+⚠️ 前面那五个 `oracle-*` 是 **2026-09-08 从单体 `oracle-k3s` App 拆出来的**
+（开放项 #13 收口）。拆完 `oracle-k3s` 从 141 个对象降到 45 个，只剩 `base/`、
+**12 个 Namespace**、`databases/`、`homepage/`、falco 凭据与 backup overlay。
+☠️ **全部 Namespace 刻意留在 `oracle-k3s`**，五个新 App 用
+`directory.exclude: namespace.yaml` 排除它们（`personal-services/` 目录本就没有）：
+Namespace 被 prune 会级联删光 ns 下一切，`Prune=false` 拦不住。
+拆分手法与实测数字见 [runbooks/oracle-manifests-split-to-apps.md](../runbooks/oracle-manifests-split-to-apps.md)。
 
 **project `default`（元 App，只写 argocd ns）**: `root`（App-of-Apps）· `projects`（托管 `argocd/projects/`）
 
