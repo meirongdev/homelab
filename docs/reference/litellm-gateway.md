@@ -194,19 +194,43 @@ kubectl --context k3s-homelab logs -n litellm deploy/litellm | grep codex_compat
 空转 —— 于是「这层没在干活」和「今天没有多 agent 流量」两种情况看起来一模一样。要看全部
 改写记录（每请求一条）就给 Deployment 加 `LITELLM_LOG=INFO`。
 
-⚠️ **客户端侧还有一半**：`~/.codex/litellm.config.toml` 要指到一份带
-`"multi_agent_version": "v2"` 的 catalog。实测三种组合只有一种能用：
+☠️ **但修掉 400 并不等于 v2 能用**：本 hook 解决的只是「请求体被上游拒收」这一类失败。
+codex 的 v2 通路在自托管上游上还有**另一个、与网关无关的**毛病 —— 派任务时那条
+NEW_TASK 的 `agent_message` **payload 是空的**：
 
-| catalog | collab 工具 | 子 agent 回话 |
+```
+Message Type: NEW_TASK
+Task name: /root/alpha
+Sender: /root
+Payload:            ← 就到这里，父 agent 传的 message 没了
+```
+
+判据是它出现在**子 agent 自己的本地 rollout 里**（`~/.codex/sessions/…jsonl`），
+而 rollout 是 codex 发 HTTP 之前从自身状态写的 —— 所以不可能是网关或本 hook 造成的。
+父 agent 的 `spawn_agent` 参数里 message 明明在（实测 85 字符）。三种组合都复现：
+你自己的 dgx catalog、新建的 litellm catalog、传不传 `fork_turns` 都一样。合理推断是
+v2 的任务投递依赖 OpenAI 后端那边的线程状态，自建 vLLM 没有那个能力。
+（`use_responses_lite: true` 不是出路：实测 vLLM 服务不了那套 wire format，连接直接重试
+5 次失败。）
+
+**所以客户端侧的结论是反的：别给自托管的模型写 catalog 条目。**
+没有条目时 codex 用 fallback metadata，协作走**客户端侧**投递 —— 任务作为普通
+`role=user` message 进子 agent，`wait_agent` 的 `function_call_output` 带回答案，
+压根不产生 `agent_message`。实测这条路是唯一真能干活的：
+
+| catalog 条目 | collab 工具 | 任务能否到子 agent |
 |---|---|---|
-| `v2` | 有 | 走 `agent_message` → **需要本 hook** |
-| `v1` | **没有**（模型只能去摸 `exec_command`）| 派不了 |
-| 不写这个键 / 没有 catalog 条目 | 有 | 走 `wait_agent` 的 `function_call_output` |
+| 没有条目（fallback metadata）| 有 | ✅ 走普通 message，实测 ALPHA/BETA/GAMMA 全回来 |
+| `multi_agent_version: "v2"` | 有 | ❌ NEW_TASK payload 为空（本 hook 只挡住了 400）|
+| `"v1"` 或不写这个键 | **没有**（模型只能去摸 `exec_command`）| — 派不了 |
 
-第三种（fallback metadata）能用但会丢窗口元数据 —— codex 启动就警告
-`Model metadata … not found`，而 `model_context_window` 不驱动自动压缩阈值（只有 catalog
-的 `context_window` 才行），长会话跑到中途会被服务端拒收。所以正解是 catalog 写 v2 + 本
-hook，而不是靠"没有 catalog"这个巧合。
+代价照单接受：codex 启动会警告 `Model metadata … not found`，且 `model_context_window`
+不驱动自动压缩阈值（只有 catalog 的 `context_window` 才行），长会话有跑到中途被服务端
+拒收的风险。**在 v2 的空 payload 修好之前，这个代价换的是「subagent 真能干活」。**
+
+那本 hook 还留着干什么：① 它把这类失败从「整轮报错」降级成「正常跑」，codex 以后改默认、
+或谁手动开了 v2，都不会再撞 400；② `encrypted_function_args` 等另三种类型同样会撞，
+不限于多 agent 场景。
 
 ## ☠️ 上游 `nvidia/*` 打不通：是 `model` 字段的双前缀，不是 key 的问题
 
