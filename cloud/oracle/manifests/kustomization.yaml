@@ -23,11 +23,14 @@ resources:
   - databases/namespace.yaml
   - databases/apps-pg-secrets.yaml
   - databases/apps-pg-cluster.yaml
-  # RSS system
+  # RSS system —— 工作负载已于 2026-09-08 拆给独立 App `oracle-rss`
+  # （argocd/applications/oracle-rss.yaml，目录源 cloud/oracle/manifests/rss-system）。
+  # ☠️ `namespace.yaml` 刻意**留在本树**：Namespace 被 prune 会级联删光 ns 下一切，
+  #    `Prune=false` 拦不住（2026-08-03 的事故）。新 App 用 directory.exclude 排除它。
+  #    别"顺手"把这行也搬走。
+  # ⚠️ rss 的 HTTPRoute 与 ReferenceGrant 不在 rss-system/ 目录里，而在 base/gateway.yaml，
+  #    因此也仍归本树 —— 拆分不影响对外路由。
   - rss-system/namespace.yaml
-  - rss-system/secrets.yaml
-  - rss-system/miniflux.yaml
-  - rss-system/rsshub.yaml
   # Homepage
   - homepage/namespace.yaml
   - homepage/homepage.yaml
