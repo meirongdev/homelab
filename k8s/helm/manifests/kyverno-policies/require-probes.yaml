@@ -29,6 +29,26 @@ spec:
         any:
           - resources:
               kinds: ["Pod"]
+      # 2026-09-08：把 Job 产生的 Pod 排除掉，补齐 2026-08-13 那次只做了一半的收窄。
+      # 那次改的是 autogen（`autogen-controllers` 注解），它只影响 Kyverno 为控制器
+      # 扩写出来的规则，**不影响上面这条直接 match `kinds: ["Pod"]` 的基规则** ——
+      # 于是后台扫描的噪音没了，但每个批处理 Pod 在**准入那一刻**照旧刷一条恒定误报的
+      # PolicyViolation event（2026-09-08 在 blog-stats-rollup 的 pod 上实测到）。
+      # 理由与那次相同：readiness 只对「有流量要接」的长驻负载成立，run-to-completion
+      # 的批处理没有 ready 概念，恒定误报会把 events 面变成噪音、掩盖真信号。
+      # 判据用 Job 控制器自动打的标签（k8s ≥1.27 稳定，本集群 v1.35.8 实测 26 个 pod
+      # 全带）；不用 ownerReferences 的 precondition 是因为标签选择器读起来更直白。
+      # ⚠️ 只排除 Job 的 Pod：Deployment/StatefulSet/DaemonSet 两条路径（autogen 规则
+      #    + 基规则）都照旧审计。改完双向验证过：批处理 Pod 无 event、无 probe 的
+      #    Deployment 仍报违规（下面 exclude 写错会静默放过全部负载，这是本仓库最怕的
+      #    那种失效，别只验「噪音没了」就收工）。
+      exclude:
+        any:
+          - resources:
+              selector:
+                matchExpressions:
+                  - key: batch.kubernetes.io/job-name
+                    operator: Exists
       validate:
         failureAction: Audit
         message: "每个容器应配置 readinessProbe。"

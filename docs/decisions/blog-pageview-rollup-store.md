@@ -85,10 +85,21 @@ Grafana 用**只读角色** `blogstats_ro` 连（`SELECT` + 未来新表的 DEFA
   而按 path 在免费版就拿得到。
 - **⏸️ Cloudflare Web Analytics（RUM 数据集）**：`rumPageloadEventsAdaptiveGroups` 带
   `requestPath` / `refererHost` / `deviceType`，且只有真浏览器会执行 beacon —— 是比
-  `userAgentBrowser` 干净得多的真人信号，Pages 侧还能一键注入。**没做的原因是权限未验证**：
-  RUM 在 GraphQL 里是 **account 作用域**，而本仓库这把 token 是 Zone > Analytics > Read
-  （复用 external-dns 那份），大概率读不到，要另发 account-scoped token。`[need manual confirm]`
-  ——先测能不能读，能读就是下一步，届时本管道只换数据集，rollup 与面板不用动。
+  `userAgentBrowser` 干净得多的真人信号，Pages 侧还能一键注入。
+  **2026-09-08 实测：现有 token 读不到，已确认（原来的 `[need manual confirm]` 结清）。**
+  RUM 在 GraphQL 里是 **account 作用域**，而本仓库这把 token（复用
+  `secret/homelab/external-dns` 那份）是 zone 级：
+  `/user/tokens/verify` 返回 `active`（token 本身有效），但
+  `{ viewer { accounts { accountTag } } }` 返回 **0 个 account** +
+  `not authorized for that account`（code `authz`）。所以不是查询写错，是作用域不够。
+  ⚠️ 判据要用 `viewer.accounts` 这一问：直接查 RUM 数据集报的错会长得像「数据集不存在」，
+  容易误判成免费版没有这个数据集。
+  **要推进就得在 Cloudflare 控制台另发一把 account-scoped token（Account > Account
+  Analytics > Read），写进 Vault 新路径**——不要覆盖 `homelab/external-dns`，那把是
+  external-dns + cf-analytics-exporter 在用的生产凭据。
+  届时本管道只换数据集，rollup 与面板不用动。
+  ⚠️ 它和边缘数据**量的不是一回事**（beacon 会被 adblock 吃掉一部分，读者是开发者，
+  损耗不小），所以真要上是**并存加一列**对比，不是替换掉现在这条。
 - **⏸️ 自建 beacon（浏览器侧打点）**：能拿到阅读时长、滚动深度、referrer，但代价是
   博客要挂一段 JS（本仓库改不到那个 repo）、多一个公网端点、且被 adblock 吃掉一部分
   （读者是开发者，这个损耗不小）。**它和本方案量的不是一回事**（边缘数完整但含爬虫，

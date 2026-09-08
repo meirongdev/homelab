@@ -203,9 +203,18 @@ spec:
                 - { name: tmp, mountPath: /tmp }
                 - { name: sql, mountPath: /sql, readOnly: true }
               resources:
-                # psql 一次性作业，估值（新对象无实测）：首轮跑完按 rssBytes 复核。
-                requests: { cpu: 10m, memory: 32Mi }
-                limits: { memory: 128Mi }
+                # 2026-09-08 实测（真实载荷 3345 行，非空载）：cgroup v2 `memory.peak`
+                # = 4255744B ≈ 4.1Mi，`memory.current` 收尾 0.83Mi。
+                # ☠️ 判据是 `memory.events` 全 0（尤其 `max 0` / `oom_kill 0`）——证明这个
+                #    peak **没有被 limit 截断**；测量时刻意把 limit 抬到 512Mi 就是为此，
+                #    否则「peak == max」只说明撞顶、不是真峰值。
+                # ⚠️ 别用 `kubectl top` 或 kubelet summary 的 rssBytes 复核这个作业：它只跑
+                #    ~2s，远短于那两者 10–15s 的采样周期，压根采不到（会得到"0/无数据"
+                #    这种看起来像已验证的假结果）。要重测就读 cgroup 的 memory.peak。
+                # 峰值不随行数涨：`\copy` 是流式，TEMP 表在服务端，客户端只有 wget + psql
+                # 的固定开销，所以 path 数翻倍也不用调这里。
+                requests: { cpu: 10m, memory: 16Mi }   # ~4x 实测峰值
+                limits: { memory: 64Mi }               # ~15x，留给镜像/客户端版本变动
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
