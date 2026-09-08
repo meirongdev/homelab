@@ -1,6 +1,6 @@
 # Homelab Changelog
 
-> Last updated: 2026-09-07
+> Last updated: 2026-09-08
 > 已经做完的事，一条一行，按阶段/时间倒着找。**这里只回答「做过什么」**——
 > 还剩什么没做看 [ROADMAP.md](ROADMAP.md)，现在是什么样看 [reference/](reference/README.md)。
 > 2026-09-02 从 ROADMAP 拆出：那份文件长到 23.8KB，9 条开放项被 65 条历史淹没，
@@ -91,6 +91,7 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-09-03 | **DGX 主力模型全线换引用**：上游 nv-dgx-spark 2026-09-02 把 :8000 从 `deepseek-v4-flash` 换成 `qwen38-flash-next`（NVFP4，ctx 1M→262k，冷启动 8–11min），旧名已从 `/v1/models` 消失。跟着改的是网关别名 + jobs-sg 直连 + Open Notebook 接线 + oracle calibre 作业，另把 `DgxSparkVllmDown` 的 `for` 10m→15m（新栈加载 8–11min，10m 会被正常重启烧掉）。☠️ 爆炸半径实测：**8 把虚拟 key 的白名单**要同步改 ([网关事实](reference/litellm-gateway.md) · [决策修订](decisions/litellm-llm-gateway.md)) |
 | 2026-09-04 | **jobs-sg enrich 稳态给推理封顶**（`LLM_EXTRA_BODY={"reasoning_effort":"medium"}`）：qwen38-flash-next 在长岗位上把推理写飞，超时从 1.2%（3/242）一夜变 7.8%（21/269），而引擎读数与前夜一致——不是 DGX 慢，是生成长度没有上界（跑飞那条 16754 completion token，16448 是推理）。跑飞率随正文长度上升（<1500 字符 0/54，>3500 字符 15.9%）。☠️ `chat_template_kwargs` 的三个推理预算键全部静默无效，生效的是顶层 `reasoning_effort`，本文早前先写反了（判据错选成"能不能关掉推理"），且它的失效形态是 HTTP 400 整轮全挂。实测封顶后：前夜超时的 5 条全部 8–22s 完成、抽词更全，8 条正常岗位 244s→82s ([jobs-sg.md](reference/jobs-sg.md)) |
 | 2026-09-07 | **博客按文章的访问量**：cf-analytics-exporter 加 `clientRequestPath` 维度（html+200 过滤后 962 行/天，不过滤直接撞 1000 行截断）+ `/pages.csv`；`blog-stats-rollup` CronJob 每天 UPSERT 进 `apps-pg` 第四个租户 `blogstats`，把 Cloudflare 的 8 天窗口变成长期表。☠️「浏览器请求」是真人近似不是真人数（免费版无 `botScore`）([决策](decisions/blog-pageview-rollup-store.md) · [口径](reference/public-traffic-analysis.md)) |
+| 2026-09-08 | **博客访问量管道激活 + 修一个只在运行时才现形的缺陷**：三步激活跑完（Vault 口令 → `apps-pg` 建 `blogstats`/`blogstats_ro` 租户 → 首轮验证），表里 3345 行 / 2026-08-31..09-06，CronJob 转 `suspend: false`。☠️ 首轮直接失败：内联进 `args` 的 `DO $$` 被 **kubelet 的 `$(VAR)` 展开**吃掉一个 `$`（`$$` 是「字面 `$`」的转义），psql 报 `syntax error at or near "$"` —— **git 与 CronJob 对象里存的都是对的，只有运行时那一刻是坏的**，所以 `kubectl get -o yaml` 比对与 `check-render` 都查不出，唯一判据是真跑一轮；修法是把 SQL 逐字挪进 ConfigMap。☠️ 另一个静默坑：Grafana 的数据源口令是 `optional: true` 的 env，**Secret 后到不会刷新 env**（`optional` 下变量是整个缺失而非空串），于是「三个 ExternalSecret 全绿 + 表里有行 + pod Running」同时为真而面板连不上库，收口判据必须是面板真出数。resources 按 cgroup `memory.peak` 实测收到 requests 16Mi / limits 64Mi（峰值 4.1Mi，`memory.events` 全 0 证明未被截断）([决策](decisions/blog-pageview-rollup-store.md)) |
 
 ### 审计与清理（历史）
 
