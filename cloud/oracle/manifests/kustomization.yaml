@@ -34,11 +34,11 @@ resources:
   # Homepage
   - homepage/namespace.yaml
   - homepage/homepage.yaml
-  # Uptime Kuma
+  # Uptime Kuma —— 工作负载已于 2026-09-08 拆给 `oracle-uptime-kuma` App。
+  # ☠️ 这一行 namespace.yaml 声明的是 **personal-services**（不是 uptime-kuma），
+  #    而且是**整个 personal-services ns 的唯一来源** —— calibre-web / readlist /
+  #    excalidraw 和 5 个 PVC 全在那个 ns 里。被 prune 会级联删光，别动它。
   - uptime-kuma/namespace.yaml
-  - uptime-kuma/uptime-kuma.yaml
-  - uptime-kuma/secrets.yaml
-  - uptime-kuma/provisioner.yaml
   # Observability
   # 2026-08-02 起本集群不再只是「轻量采集端」：Loki(日志)+Tempo(追踪) 已从 homelab 迁入
   # （工作负载由独立的 loki / tempo Helm App 部署，同 falco 模式；此处只放 NodePort 入口）。
