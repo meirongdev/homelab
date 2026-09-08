@@ -87,6 +87,15 @@ data:
           model: "openai/nvidia/*"
           api_base: https://integrate.api.nvidia.com/v1
           api_key: os.environ/NVIDIA_API_KEY
+    # ── Codex 多 agent 兼容层（2026-09-08）──
+    # codex 的 `multi_agent_version: "v2"` 会把 agent 间消息作为私有的 `agent_message`
+    # item 发进 `input`；自托管上游（vLLM / OMLX）拿 openai-python 的 union 校验请求体，
+    # 不认这个类型 → HTTP 400「N validation errors」，表现为「一派 subagent 就报错」。
+    # 这个 hook 在转发前把它降级成普通 message。详见 codex_compat.py 的文件头。
+    # ⚠️ 模块是按 **config 文件所在目录 + 模块名** 找的（get_instance_fn），所以
+    #    codex_compat.py 必须 subPath 挂到 /app/ 下，与本文件同目录。
+    litellm_settings:
+      callbacks: ["codex_compat.codex_compat_handler"]
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -108,7 +117,10 @@ spec:
         #    ⇒ ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按**旧路由表**继续跑。
         #    2026-08-25 实际踩过一次（改了 mac/ornith 后必须手动 rollout restart 才生效）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py 的 STAMP_ONLY），别手改。
-        checksum/config: "235883358d522dc8"
+        checksum/config: "300626dcf6dc8d85"
+        # 同理，但盯的是 codex_compat.py（litellm-codex-compat ConfigMap）：
+        # 也是 subPath 挂载 + 只在启动时 import，改了不重启就是静默跑旧代码。
+        checksum/codex-compat-py: "f2c08822eb6a5ae1"
       labels:
         app: litellm
     spec:
@@ -154,6 +166,11 @@ spec:
               mountPath: /app/config.yaml
               subPath: config.yaml
               readOnly: true
+            # 必须落在 /app/（= config.yaml 所在目录），否则 callbacks 那行 import 不到。
+            - name: codex-compat
+              mountPath: /app/codex_compat.py
+              subPath: codex_compat.py
+              readOnly: true
           resources:
             requests: { cpu: 200m, memory: 512Mi }
             # ⚠️ limit 1Gi 实测 OOMKilled（Python proxy 首启 Prisma migration + 依赖载入峰值高，
@@ -176,6 +193,9 @@ spec:
         - name: config
           configMap:
             name: litellm-config
+        - name: codex-compat
+          configMap:
+            name: litellm-codex-compat
 ---
 apiVersion: v1
 kind: Service

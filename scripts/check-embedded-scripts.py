@@ -57,6 +57,15 @@ TARGETS = [
         "stamp": ("k8s/helm/manifests/monitoring/cf-analytics-exporter/cf-analytics-exporter.yaml",
                   "checksum/exporter-py"),
     },
+    {
+        # LiteLLM 的 codex 多 agent 兼容 hook。跑在 LiteLLM 官方镜像里（不自建镜像），
+        # 所以和 cf-analytics-exporter 同一个套路：真源文件 + ConfigMap 内嵌副本。
+        "src": "k8s/helm/manifests/litellm/codex_compat.py",
+        "cm": "k8s/helm/manifests/litellm/litellm-codex-compat-cm.yaml",
+        "key": "codex_compat.py",
+        "stamp": ("k8s/helm/manifests/litellm/litellm.yaml",
+                  "checksum/codex-compat-py"),
+    },
 ]
 
 # 只做 (b)：哈希 ConfigMap 里的内嵌块 → 写进 pod 模板注解。无外部源文件、块不必在文件末尾。

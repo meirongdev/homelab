@@ -1,6 +1,6 @@
 # LiteLLM 网关（运维事实与坑）
 
-> Last updated: 2026-09-03
+> Last updated: 2026-09-08
 > Status: 生效事实
 > Scope: `llm.meirong.dev` 这个 LLM 网关的配置生效路径、鉴权分层、上游可用性边界，
 > 本文是 source of truth。为什么选 LiteLLM、上游怎么选、Mac 兜底为何换 Ornith，见
@@ -145,6 +145,62 @@ master key 也看不到 = 配置还没进容器，往坑 C 查。
 
 ⚠️ 所以**不要手改那个注解**，改完 config 在 `k8s/helm/` 跑 `just gen-embedded-scripts`。
 注解一旦被摘掉，上面那个静默失效会原样回来。
+
+## ☠️ 坑 D：codex 一派 subagent 就 400 —— 上游不认 `agent_message`
+
+**症状**：`codex --profile litellm`（或 `--profile dgx` 直连）跑任何会派 subagent 的
+skill（`understand` / `understand-knowledge` 这类），第一批 dispatch 就
+
+```
+Agent errored: {"error":{"message":"216 validation errors:
+  {'type': 'string_type', 'loc': ('body','input','str'), …
+  … 'msg': "Input should be 'shell_call'" …
+```
+
+**这段报错文本是误导的**：跟 shell 工具、跟 tool schema 都没关系。pydantic 校验
+`input` 里的 item 时把整个 union 挨个试了一遍，把每个分支的失败都列了出来，所以随便
+哪条错误行都不指向真因。真因只有一个：**多了一个上游不认识的 item type**。
+
+**机制**：codex 的多 agent 协议（模型 catalog 里 `multi_agent_version: "v2"`）把 agent
+之间的消息作为 `{"type": "agent_message", author, recipient, content}` item 追加进会话
+历史 —— 父给子的 NEW_TASK、子回父的 FINAL_ANSWER 都走这一种（所以父子两边会同时报错）。
+它是 codex 私有的 ResponseItem 变体，**不在 openai-python 的 `ResponseInputItemParam`
+union 里**；而 vLLM / OMLX 的 `/v1/responses` 正是拿那套 pydantic 模型校验请求体的。
+LiteLLM 只是原样透传，所以经网关和直连上游的表现完全一样（只是网关会包一层
+`litellm.BadRequestError: OpenAIException`）。
+
+**已修**：网关侧的 `async_pre_call_hook` 在转发前把这些 item 降级掉
+（`k8s/helm/manifests/litellm/codex_compat.py`，2026-09-08）。拿 DGX vLLM 的
+`/openapi.json` 数过：`input` 只接受 30 种 `type` 字面量，codex 会发而它不认的就 4 种 ——
+
+| item type | 处理 |
+|---|---|
+| `agent_message` | 降级成 `role=user` 的 message（正文本身带 `Message Type: … / Sender: …` 信封，模型侧读法不变）|
+| `context_compaction` | 有正文降级成 message，否则丢弃 |
+| `encrypted_function_args` | 丢弃（OpenAI 后端专用的不透明产物）|
+| `internal_chat_message_metadata_passthrough` | 丢弃（同上）|
+
+其余 codex 变体（`reasoning` / `function_call` / `tool_search_call` / `compaction` /
+`compaction_trigger` …）都在 union 里，不用动。白名单式改写：只碰这 4 种。
+
+```bash
+# hook 是否在干活（有多 agent 流量时才有日志）
+kubectl --context k3s-homelab logs -n litellm deploy/litellm | grep codex_compat
+```
+
+⚠️ **客户端侧还有一半**：`~/.codex/litellm.config.toml` 要指到一份带
+`"multi_agent_version": "v2"` 的 catalog。实测三种组合只有一种能用：
+
+| catalog | collab 工具 | 子 agent 回话 |
+|---|---|---|
+| `v2` | 有 | 走 `agent_message` → **需要本 hook** |
+| `v1` | **没有**（模型只能去摸 `exec_command`）| 派不了 |
+| 不写这个键 / 没有 catalog 条目 | 有 | 走 `wait_agent` 的 `function_call_output` |
+
+第三种（fallback metadata）能用但会丢窗口元数据 —— codex 启动就警告
+`Model metadata … not found`，而 `model_context_window` 不驱动自动压缩阈值（只有 catalog
+的 `context_window` 才行），长会话跑到中途会被服务端拒收。所以正解是 catalog 写 v2 + 本
+hook，而不是靠"没有 catalog"这个巧合。
 
 ## ☠️ 上游 `nvidia/*` 打不通：是 `model` 字段的双前缀，不是 key 的问题
 
