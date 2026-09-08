@@ -1,0 +1,47 @@
+---
+# oracle-rss —— RSS 管道（miniflux + rsshub 三个 Deployment/Service + 两个 ExternalSecret）。
+#
+# 2026-09-08 从单体 `oracle-k3s` App 拆出，是 ROADMAP 开放项 #13 的第一组（最小、
+# 纯无状态、无 PVC，拿它练手）。拆分动机与四步流程见
+# docs/runbooks/oracle-manifests-split-to-apps.md。
+#
+# ☠️ **`directory.exclude: namespace.yaml` 必须留着**，这是整条拆分流程的安全底线：
+# `rss-system/namespace.yaml` 要继续归 `oracle-k3s` App 管。ArgoCD 的 prune 只删
+# 「带我的 tracking-id 但已不在我渲染结果里」的对象，而被 prune 的若是 **Namespace**，
+# 会级联删光该 ns 下的一切，`Prune=false` 也拦不住（被删的是 ns 本身）——
+# 2026-08-03 真这样删过一次（records/2026-08-03-namespace-prune-cascade.md）。
+# 把 ns 排除在外，最坏情况退化成「无状态服务几十秒不可用」，级联那条路根本不存在。
+#
+# ⚠️ 目录即清单（`recurse` 不开，本目录无子目录）：新增 yaml 自动纳入，
+# 不用再维护 `resources:` 列表 —— 那正是拆分要摆脱的坑
+# （decisions/manifests-directory-per-app.md）。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: oracle-rss
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: oracle-k3s
+
+  source:
+    repoURL: https://github.com/meirongdev/homelab
+    targetRevision: main
+    path: cloud/oracle/manifests/rss-system
+    directory:
+      exclude: "namespace.yaml"
+
+  destination:
+    # ArgoCD 控制面 2026-08-02 起就在 oracle-k3s 上，故 in-cluster
+    server: https://kubernetes.default.svc
+    namespace: rss-system
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # ⚠️ false：ns 由 oracle-k3s App 管（见文件头）
+      - CreateNamespace=false
+      - ServerSideApply=true
