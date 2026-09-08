@@ -1,6 +1,6 @@
 # 把 oracle 的单体 kustomize 树拆成一目录一个 ArgoCD App
 
-> Last updated: 2026-09-03
+> Last updated: 2026-09-08
 > **触发条件**：想让 oracle 侧的清单布局与 homelab 对齐（一目录 ↔ 一个 App）。
 > 不是故障处置，**需要一个维护窗口 + 有人盯着**，不要随手合并触发。
 > **成功判定**：每个新 App `Synced/Healthy`；`oracle-k3s` App 的资源树只剩 `base/` 与
@@ -48,7 +48,7 @@ CoreDNS 扩展、PriorityClass —— 它们是集群级地基，且 `base/` 里
 |---|---|---|---|---|
 | `oracle-personal-services` | `personal-services/` | `personal-services` | 52 | 最大的一组，含 5 个 PVC（均 `Prune=false`）|
 | `oracle-monitoring` | `monitoring/` | `monitoring` | 22 | 含 otel-collector 的 `configMapGenerator`，**必须留 kustomize**（见下）|
-| `oracle-rss` | `rss-system/` | `rss-system` | 11 | 纯无状态，库在 `apps-pg` |
+| `oracle-rss` | `rss-system/` | `rss-system` | 10（+ns） | ✅ **2026-09-08 已拆完**。⚠️ 它的 HTTPRoute 与 ReferenceGrant 不在本目录里、而在 `base/gateway.yaml`，所以仍归 `oracle-k3s`，拆分不影响 `rss.meirong.dev` |
 | `oracle-uptime-kuma` | `uptime-kuma/` | `personal-services` | 7 | ⚠️ 它的 `namespace.yaml` 声明的是 **personal-services**，不是同名 ns |
 | `oracle-zitadel` | `zitadel/` | `zitadel` | 7 | 身份面，单独放到最后做 |
 
@@ -59,8 +59,9 @@ pod 根本不重启」，那正是 2026-08-02 踩过的坑。它的新 App 要�
 
 ## 执行
 
-每组**独立走一遍**下面四步，一次只做一组，做完观察 10 分钟再做下一组。
-先拿 `oracle-rss`（最小、纯无状态、有 Deployment 但无 PVC 无路由）练手。
+每组**独立走一遍**下面五步（第 2 与第 4 步是同一个 prune 窗口的两端，连着拆多组时
+可以只开一次）。先拿 `oracle-rss`（最小、纯无状态、无 PVC）练手 —— 2026-09-08 已完成，
+本文的实测数字都出自那一轮。
 
 ### 1. 建新 App，但**先不动旧树**
 
@@ -85,29 +86,54 @@ kubectl --context oracle-k3s -n argocd get app oracle-rss \
 kubectl --context oracle-k3s -n rss-system get pod                     # 无新增重启
 ```
 
-### 2. 让新 App 抢到 tracking
+### 2. 临时关掉 `oracle-k3s` 的 prune
 
-新 App 同步一次就会把 `tracking-id` 改写成自己的。**这一步是第 3 步安全的前提** ——
-旧 App 之后看到的就是「不是我的对象」，不会 prune。
+> ☠️ **本节 2026-09-08 重写。原来写的是「新 App 同步一次就会抢到 tracking，
+> 这是第 3 步安全的前提」——那是错的，照着做会死锁。** 实测（ArgoCD v3.4.5）：
+> ArgoCD **不会**把已被别的 App 拥有的对象让出去，新 App 只会挂
+> `SharedResourceWarning: Deployment/miniflux is part of applications
+> argocd/oracle-rss and oracle-k3s` 并**永久 OutOfSync**。
+> 判据：`generation` 全程不变（本次 10 个对象均如此），说明两边**没有**互相改写，
+> 是新 App 在拒绝接管 —— 不是「还没同步」，手动 Sync 多少次都不会翻。
+>
+> 所以交接只可能发生在「旧 App 不再渲染这些对象」的那一刻，也就是第 3 步。
+> 而那一刻若 prune 开着，旧 App 看到的是「我的对象没了」→ **先删除**，
+> 再由新 App 重建：无状态对象也会有几十秒到几分钟不可用（两个 App 的轮询不同步）。
 
 ```bash
-kubectl --context oracle-k3s -n argocd annotate app oracle-rss \
-  argocd.argoproj.io/refresh=hard --overwrite
-# 等同步完成后核对归属（应打印 oracle-rss:...，不再是 oracle-k3s:...）
-kubectl --context oracle-k3s -n rss-system get deploy miniflux \
-  -o jsonpath='{.metadata.annotations.argocd\.argoproj\.io/tracking-id}{"\n"}'
+# 把 argocd/applications/oracle-k3s.yaml 的 automated.prune 改成 false，push
+git commit && git push
+# 确认已生效（root App 同步后）
+kubectl --context oracle-k3s -n argocd get app oracle-k3s \
+  -o jsonpath='{.spec.syncPolicy.automated}{"\n"}'      # 期望 {"prune":false,"selfHeal":true}
 ```
 
-☠️ **归属没翻过来就不要做第 3 步**。翻不过来通常是新 App 还没真正同步过
-（Synced 也可能是「没有差异所以什么都没做」），先手动 Sync 一次。
+关掉之后第 3 步变成**零停机**：旧 App 只是不再管这些对象，对象原地不动，
+新 App 接管注解。2026-09-08 拆 rss 实测：4 个 pod 的名字/重启数/age 全部不变。
+
+⚠️ `prune: false` 期间旧 App 的误删护栏是关着的，窗口越短越好；
+拆完立刻改回 `true`（第 5 步）。⚠️ 别顺手连 `selfHeal` 一起关，没必要。
 
 ### 3. 从旧树摘掉
 
 ```bash
-# 编辑 cloud/oracle/manifests/kustomization.yaml，删掉 rss-system/ 那几行
+# 编辑 cloud/oracle/manifests/kustomization.yaml，删掉该组的工作负载那几行
+# ☠️ **保留 `<组>/namespace.yaml` 那一行**
 just check          # kustomize build 仍要通过
 just check-render   # 两个 App 都要渲染成功；oracle-k3s 的 objects 数应下降
 git commit && git push
+```
+
+⏱ **交接不是一瞬间的**（2026-09-08 实测，从 push 到稳定约 1.5 分钟）：
+旧 App 要先轮询到新 revision，两个 App 各自 sync 一轮，`tracking-id` 会**分批**翻转
+（观察到 2/8 → 4/8 → 8/8）。中途两个 App 都短暂 `OutOfSync`，是预期。
+判据是**全部**对象都翻完 + 两个 App 都回到 `Synced`：
+
+```bash
+for t in deploy/miniflux svc/miniflux ...; do
+  kubectl --context oracle-k3s -n <ns> get $t \
+    -o jsonpath='{.metadata.annotations.argocd\.argoproj\.io/tracking-id}{"\n"}'
+done | cut -d: -f1 | sort | uniq -c      # 期望全是新 App 名
 ```
 
 **判据**：
@@ -119,7 +145,18 @@ kubectl --context oracle-k3s -n rss-system get pod                      # 无重
 curl -sS -o /dev/null -w '%{http_code}\n' https://rss.meirong.dev       # 有对外路由的组才查
 ```
 
-### 4. 更新文档
+### 4. 恢复 `oracle-k3s` 的 prune
+
+```bash
+# 把 automated.prune 改回 true，push，确认生效
+kubectl --context oracle-k3s -n argocd get app oracle-k3s \
+  -o jsonpath='{.spec.syncPolicy.automated.prune}{"\n"}'    # 期望 true
+```
+
+⚠️ 连着拆多组时可以只开一次窗口（关一次、拆几组、再开回来），但**每组仍各自一个
+commit**，这样任一组出问题可以单独 revert；窗口期内旧 App 的误删护栏是关着的。
+
+### 5. 更新文档
 
 - `cloud/oracle/manifests/README.md`（若还没有就照 `k8s/helm/manifests/README.md` 建一份所有权地图）
 - [reference/argocd-app-patterns.md](../reference/argocd-app-patterns.md) 的 Application 清单
