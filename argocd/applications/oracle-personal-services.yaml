@@ -1,0 +1,43 @@
+---
+# oracle-personal-services —— 个人服务群（calibre-web + readlist + excalidraw +
+# it-tools + bentopdf + squoosh + timeslot + trends + open-notebook-ingest +
+# ebook-sync 监控 + ns 级 LimitRange + calibre-web 的 HTTPRoute）。最大的一组。
+#
+# 2026-09-08 从单体 `oracle-k3s` App 拆出（ROADMAP 开放项 #13）。
+# 流程见 docs/runbooks/oracle-manifests-split-to-apps.md。
+#
+# ⚠️ 本目录**没有** namespace.yaml —— `personal-services` ns 由
+#    `uptime-kuma/namespace.yaml` 声明（目录名与 ns 不同名，见那一侧的注释），
+#    并且继续归 `oracle-k3s` 管。所以这里不需要 directory.exclude，
+#    但 `CreateNamespace=false` 仍然必须有。
+#
+# ⚠️ 含 5 个 PVC（calibre-web-automated-config-local / calibre-books-local /
+#    readlist-data / timeslot-pvc / trends-data），**全部已带 `Prune=false` 护栏**
+#    （2026-09-08 逐个核对）。它们是这组里唯一不可重建的东西。
+#
+# ☠️ `calibre-metadata/` 目录**不属于本 App**：它自己是独立 App
+#    （argocd/applications/calibre-metadata.yaml），因为一次性 enrich Job 需要
+#    专门的 ignoreDifferences。别把它并进来。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: oracle-personal-services
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: oracle-k3s
+  source:
+    repoURL: https://github.com/meirongdev/homelab
+    targetRevision: main
+    path: cloud/oracle/manifests/personal-services
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: personal-services
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true

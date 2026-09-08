@@ -1,0 +1,42 @@
+---
+# oracle-zitadel —— 身份面（ZITADEL 本体 + 它的 CNPG Postgres 与两份凭据）。
+#
+# 2026-09-08 从单体 `oracle-k3s` App 拆出（ROADMAP 开放项 #13 的最后一组）。
+# 流程见 docs/runbooks/oracle-manifests-split-to-apps.md。
+#
+# ☠️ **这是整个舰队的 SSO**：auth.meirong.dev 挂了，Grafana/ArgoCD/Jellyfin 等
+# 一批服务的登录一起挂。所以它刻意放在最后拆，且拆分必须走「先关 oracle-k3s 的
+# prune」那条零停机路径 —— 让对象原地不动、只换 tracking 注解，pod 不重启。
+#
+# ⚠️ bootstrap 依赖**不在 git 里**，重建集群时要单独处理：
+#    Secret `login-client`（zitadel ns，Login V2 的 PAT，从 homelab 拷入 ——
+#    setup job 在已恢复的 DB 上会跳过创建它）。masterkey / db-password 经 ESO
+#    读 Vault 的 secret/homelab/zitadel。
+#
+# ⚠️ ZITADEL 的 DB 迁 CloudNativePG 尚未 cutover（zitadel-pg-* 是并行部署的验证），
+#    cnpg-operator 本身是另一个独立 App。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: oracle-zitadel
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: oracle-k3s
+  source:
+    repoURL: https://github.com/meirongdev/homelab
+    targetRevision: main
+    path: cloud/oracle/manifests/zitadel
+    directory:
+      exclude: "namespace.yaml"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: zitadel
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true

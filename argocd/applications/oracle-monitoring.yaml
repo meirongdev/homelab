@@ -1,0 +1,42 @@
+---
+# oracle-monitoring —— 本集群的采集侧（otel-collector DaemonSet、各 exporter、
+# 对外暴露 Loki/Tempo 的 NodePort 入口、Loki ruler 规则、KRR 周报）。
+#
+# 2026-09-08 从单体 `oracle-k3s` App 拆出（ROADMAP 开放项 #13）。
+# 流程见 docs/runbooks/oracle-manifests-split-to-apps.md。
+#
+# ☠️ **本 App 必须是 kustomize 源，不能改成 `directory:` 目录源** ——
+# 理由写在 cloud/oracle/manifests/monitoring/kustomization.yaml 的文件头：
+# otel-collector 靠 `configMapGenerator` 的内容哈希驱动 DaemonSet 滚动，
+# 而 `otel-collector-config.yaml` 是裸配置、没有 apiVersion/kind，
+# 目录源会把它当清单 apply 并失败。
+# ⚠️ 拆分时实测过生成名不变（otel-collector-config-5989tb9bmm 新旧一致），
+#    所以搬家本身不会让 DaemonSet 滚动。
+#
+# ⚠️ Prometheus/Grafana/Alertmanager **不在这里**，它们仍在 homelab（要贴着抓取目标）。
+#    Loki/Tempo 的工作负载是各自独立的 Helm App，本 App 只管入口与采集端。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: oracle-monitoring
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: oracle-k3s
+  source:
+    repoURL: https://github.com/meirongdev/homelab
+    targetRevision: main
+    # kustomize 源（目录内有 kustomization.yaml，ArgoCD 自动识别）
+    path: cloud/oracle/manifests/monitoring
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # ns 由 oracle-k3s App 管（monitoring/namespace.yaml 未进本组 kustomization）
+      - CreateNamespace=false
+      - ServerSideApply=true

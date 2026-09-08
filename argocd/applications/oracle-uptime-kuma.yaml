@@ -1,0 +1,41 @@
+---
+# oracle-uptime-kuma —— Uptime Kuma（外部探测）+ 它的 provisioner PostSync hook。
+#
+# 2026-09-08 从单体 `oracle-k3s` App 拆出（ROADMAP 开放项 #13）。
+# 流程见 docs/runbooks/oracle-manifests-split-to-apps.md。
+#
+# ⚠️ **目标 ns 是 `personal-services`，不是 `uptime-kuma`** —— 目录名与 ns 不同名。
+#    `uptime-kuma/namespace.yaml` 声明的就是 `personal-services`，而且它是**整个
+#    personal-services ns 的唯一来源**（personal-services/ 目录里没有 namespace.yaml）。
+#
+# ☠️ 因此 `directory.exclude: namespace.yaml` 在这里尤其要命：那一行若被本 App 接管、
+#    日后又从本 App 移走，被 prune 的就是承载 calibre-web / readlist / excalidraw
+#    等一整批服务（含 5 个 PVC）的 ns —— 级联删光，`Prune=false` 拦不住
+#    （records/2026-08-03-namespace-prune-cascade.md）。ns 一律留给 oracle-k3s。
+#
+# ⚠️ PVC `uptime-kuma-data-v2` 带 `Prune=false` 护栏（已核对），拆分不会动它。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: oracle-uptime-kuma
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: oracle-k3s
+  source:
+    repoURL: https://github.com/meirongdev/homelab
+    targetRevision: main
+    path: cloud/oracle/manifests/uptime-kuma
+    directory:
+      exclude: "namespace.yaml"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: personal-services
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
