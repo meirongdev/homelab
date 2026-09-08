@@ -184,9 +184,15 @@ LiteLLM 只是原样透传，所以经网关和直连上游的表现完全一样
 `compaction_trigger` …）都在 union 里，不用动。白名单式改写：只碰这 4 种。
 
 ```bash
-# hook 是否在干活（有多 agent 流量时才有日志）
+# hook 是否在干活。每个 pod 生命周期里**只有一条**：首次改写打 WARNING
+# （`本层已生效（首次改写…）`），后续降到 INFO。
 kubectl --context k3s-homelab logs -n litellm deploy/litellm | grep codex_compat
 ```
+
+☠️ 为什么首次要打到 WARNING：本部署没设 `LITELLM_LOG`，`verbose_proxy_logger` 的
+**生效级别是 WARNING**（实测 `getEffectiveLevel()`），全用 INFO 的话上面那条 grep 永远
+空转 —— 于是「这层没在干活」和「今天没有多 agent 流量」两种情况看起来一模一样。要看全部
+改写记录（每请求一条）就给 Deployment 加 `LITELLM_LOG=INFO`。
 
 ⚠️ **客户端侧还有一半**：`~/.codex/litellm.config.toml` 要指到一份带
 `"multi_agent_version": "v2"` 的 catalog。实测三种组合只有一种能用：

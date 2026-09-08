@@ -132,6 +132,18 @@ def normalize_input(value: Any) -> Tuple[Any, Dict[str, int]]:
 
 
 class CodexCompat(CustomLogger):
+    """`litellm_settings.callbacks` 里注册的那个实例。
+
+    ⚠️ 首次改写刻意打 WARNING（之后才降到 INFO）：`verbose_proxy_logger` 在本部署里
+    没设 `LITELLM_LOG`，**生效级别是 WARNING**，INFO 一律被丢掉。全用 INFO 的话
+    「这层到底有没有在干活」就完全不可观测 —— 而它的失效形态本来就是安静的。
+    一个 pod 一条，不刷屏。
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._announced = False
+
     async def async_pre_call_hook(
         self,
         user_api_key_dict: Any,
@@ -149,11 +161,15 @@ class CodexCompat(CustomLogger):
         if not stats:
             return None  # 返回 None = 不改动，省掉一次 data 覆写
         data["input"] = new_input
-        verbose_proxy_logger.info(
-            "codex_compat: 归一化 %s 的 responses input: %s",
-            data.get("model", "?"),
-            ", ".join(f"{k}={v}" for k, v in sorted(stats.items())),
-        )
+        summary = ", ".join(f"{k}={v}" for k, v in sorted(stats.items()))
+        model = data.get("model", "?")
+        if not self._announced:
+            self._announced = True
+            verbose_proxy_logger.warning(
+                "codex_compat: 本层已生效（首次改写，后续降为 INFO）—— %s: %s", model, summary
+            )
+        else:
+            verbose_proxy_logger.info("codex_compat: 归一化 %s 的 responses input: %s", model, summary)
         return data
 
 
