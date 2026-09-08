@@ -1,0 +1,28 @@
+# monitoring 组的 kustomization —— 2026-09-08 随 ROADMAP 开放项 #13 从根树搬到这里。
+#
+# ☠️ **这一组不能改成 ArgoCD 的目录源**，必须保留 kustomize：
+# otel-collector 的配置走 `configMapGenerator`，生成的 ConfigMap 名字带内容哈希，
+# 配置一变名字就变 → kustomize 自动重写 DaemonSet 的 volume 引用 → pod 随之滚动。
+# 换成目录源就退回「ConfigMap 变了 pod 根本不重启」那个坑（2026-08-02 实测踩过：
+# ConfigMap 已更新、DaemonSet spec 未变、pod age 2d5h / 0 restart，配置静默不生效）。
+# ⚠️ 而且 `otel-collector-config.yaml` 是**裸 OTel 配置、没有 apiVersion/kind**，
+# 目录源会把它当清单去 apply 并失败 —— 它是 generator 的输入文件，不是资源。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - otel-collector.yaml
+  - exporters.yaml
+  - monitoring-external.yaml
+  # Loki ruler 的 LogQL 告警规则（ruler 跑在 loki-0 单体里，不是独立 Deployment）
+  - loki-rules.yaml
+  # KRR 右尺寸推荐周报（查中枢 Prometheus，结果推 Telegram）
+  - krr.yaml
+  # ⚠️ namespace.yaml 刻意**不在这里**：ns 继续归 oracle-k3s App
+  #    （被 prune 的若是 Namespace 会级联删光 ns 下一切）。
+
+configMapGenerator:
+  - name: otel-collector-config
+    namespace: monitoring
+    files:
+      - config.yaml=otel-collector-config.yaml
