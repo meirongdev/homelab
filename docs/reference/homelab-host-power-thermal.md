@@ -1,6 +1,6 @@
 # Homelab 宿主机功耗与散热 (Homelab Host Power & Thermal)
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-09
 > Status: 生效事实
 > Scope: homelab 的物理宿主（Proxmox `pve`，Ryzen 5600H 笔记本）。homelab 温度/功耗/内存容量约束的
 > **唯一真相源**，AGENTS/ARCHITECTURE/security 里的硬约束从这里引用，别在别处再写一份数字。
@@ -19,8 +19,8 @@
 |----|----|-----------|
 | 物理 | 16GB（2×8GB SO-DIMM） | `dmidecode -t 17`。⚠️ `dmidecode -t 16` 报 `Maximum Capacity: 16 GB` 且两槽插满。**"5600H 通常能上 32GB"是未针对本机型验证的泛化说法**，下单前必须先核实 Lenovo 该型号规格（BIOS `GZCN14WW`, 2021-02-03） |
 | OS 可见 | 15.0GB（`MemTotal` 15717940 kB） | 差额是核显（Cezanne/Vega）UMA 显存。已从 2GB 收到 512MB（BIOS 改，2026-07-12 做、2026-08-13 复测确认生效）。这台是无头服务器，核显显存纯属浪费 |
-| k8s-node VM | 13312MB 硬分配，`balloon: 0` | `proxmox/terraform/terraform.tfvars`。无 balloon = 宿主拿不回来 |
-| 宿主余量 | 薄，别再挤 | ⚠️ **以 `free -m` 的 available 为准**，别写死数字也别信 `kubectl top node`（那是 requests 视角）。历史参考：UMA 回收前 available 曾低到 ~987Mi |
+| k8s-node VM | 13312MB 硬分配，`balloon: 0` | `proxmox/terraform/variables.tf` 的默认值（2026-09-09 起是真值，此前只在 gitignored 的 tfvars 里）。无 balloon = 宿主拿不回来，也**不该开**：kubelet 按 MemTotal 算 allocatable，balloon 收走的它看不见 |
+| 宿主余量 | 薄，别再挤 | ⚠️ **以 `free -m` 的 available 为准**，别写死数字也别信 `kubectl top node`（那是 requests 视角）。历史参考：UMA 回收前 available 曾低到 ~987Mi。⚠️ swap 有 1G 左右常驻使用**不是抖动**：2026-09-09 实测 `/proc/pressure/memory` 全零、`vmstat` 无换入换出，是 pve 守护进程的冷页 |
 
 > 加组件前的判据不是"VM 里还有多少 requests 没分配"，而是**宿主还剩多少 available**，
 > 这两个数能差好几百 Mi。requests/limits 的原则见
