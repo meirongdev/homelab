@@ -152,11 +152,24 @@ applicationSet:
 # 显著改善驱逐排序，又不像 KRR 建议的 1515Mi 那样一口吃掉 12% 的节点内存预算。
 # CPU request 维持 100m：实测 p95 82m 尚在其下，且 limit 1000m 足够 burst，
 # 不跟 KRR 抬到 128m（oracle 的 CPU request 才是真正稀缺的那个）。
+# 2026-09-09：request 896Mi → 1300Mi，**收掉 08-10 那次刻意留的缺口**。
+# 上面那段把 896Mi 说成「折中」，理由是不想像 KRR 建议的 1515Mi 那样吃掉 12% 节点预算。
+# 那个顾虑当时成立，但它比较错了对象 —— KRR 的 1515Mi（今年这轮是 1465Mi）建立在
+# working_set 上，含页缓存；本次按 **RSS** 重算：7d RSS 峰 1127Mi、页缓存仅 4%
+# （WS 峰 1170Mi），逐日峰值 987/1127/943/1024/1013/959/1060 平稳震荡、非泄漏。
+# RSS 峰 ×1.15 = 1296 → 取 1300Mi。比 KRR 的数低 165Mi，缺口却补齐了。
+# 为什么值得补：稳态 RSS 1127Mi 而只申报 896Mi，仍然长期「超 request」231Mi ——
+# 在最紧的集群上，这条 Burstable 排在 kubelet 驱逐序列前段，而它是**两个集群**的
+# GitOps 控制面，被驱逐等于全站停止同步。
+# 预算代价已核：oracle allocatable 8869Mi、requests 6689Mi(75%) → 7089Mi(80%)，
+# 仍留 1780Mi 调度余量；且 MemAvailable 实测 4.92Gi（7d 最低 4.14Gi），
+# **抬 request 不多占一分内存**，只动调度账面。
+# CPU request 维持 100m 的判断不变（见上）。
 controller:
   resources:
     requests:
       cpu: 100m
-      memory: 896Mi
+      memory: 1300Mi
     limits:
       cpu: 1000m
       memory: 2Gi

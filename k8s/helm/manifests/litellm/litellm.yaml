@@ -172,10 +172,20 @@ spec:
               subPath: codex_compat.py
               readOnly: true
           resources:
-            requests: { cpu: 200m, memory: 512Mi }
+            # memory 512Mi → 1400Mi（2026-09-09）：**这不是为了防它自己 OOM**（limit 2Gi、
+            # 零重启），是因为 512Mi 让调度器把它低估了 2.4 倍。
+            # 实测 7d：RSS 峰 1231Mi、稳态基线 1060Mi，而页缓存只占 6%（WS 峰 1305Mi）——
+            # 也就是说这 1.2G 是**真的匿名内存**，不是缓存虚高。逐日峰值 1060/1060/1060/
+            # 1060/1060/1133/1231 平稳，非泄漏。取 RSS 峰 ×1.15 ≈ 1415，圆到 1400Mi。
+            # 后果不在它自己身上：Burstable 容器长期超 request 900Mi，kubelet 驱逐排序里
+            # 它和被挤到同节点的邻居一起危险。抬 request **不多占一分内存**（那 1.2G 本来
+            # 就在用），只是让调度器不再自欺。k8s-node requests 60%→67%，余量充足。
+            # ⚠️ 别顺手照 KRR 把 limit 从 2Gi 降到 1425Mi：WS 峰已 1305Mi，只剩 9% 余量，
+            #    而下面那条 1Gi OOM 的教训正是首启 migration 尖峰顶爆的。
+            requests: { cpu: 200m, memory: 1400Mi }
             # ⚠️ limit 1Gi 实测 OOMKilled（Python proxy 首启 Prisma migration + 依赖载入峰值高，
             #    2026-08-16 在 worker-106 上 exit 137）。抬到 2Gi 给 migration/burst 余量；
-            #    控制面有 ~6GB available，2Gi limit 占得起。稳定后可下探（见 KRR）。
+            #    控制面有 ~6GB available，2Gi limit 占得起。
             limits: { cpu: "1", memory: 2Gi }
           livenessProbe:
             httpGet:
