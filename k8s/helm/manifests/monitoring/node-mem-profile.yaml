@@ -1,0 +1,150 @@
+# node-mem-profile — 按容器导出 PSS / USS（cAdvisor 没有这两个口径）
+#
+# 产出 container_memory_{pss,uss}_bytes，供 KRR 周报的内存构成附表使用
+# （krr-mem-profile.py 会自动带上这两列；采集器没装时那两列显示 `—`）。
+# 脚本与逐条设计理由见同目录 node-mem-profile.py 的文件头。
+#
+# 出口是 node-exporter 的 textfile collector：写 hostPath
+# /var/lib/node_exporter/textfile/*.prom，由 node-exporter 顺带吐出去。
+# ⚠️ 两集群的 node-exporter **都已经**开着 `--collector.textfile.directory`
+#    （2026-09-09 逐个核对过），所以本组件**不需要改 node-exporter 任何配置**。
+#    这样零新增 Service / ServiceMonitor / 抓取目标，指标还自动继承 `cluster` 标签。
+#
+# ☠️ 为什么是独立 DaemonSet 而不是 node-exporter 的 sidecar：
+#    读别的进程的 smaps_rollup 要 CAP_SYS_PTRACE（root 都不够，2026-09-09 实测：
+#    非 root 19/383、root 无 cap 仍 19/383、root+CAP_SYS_PTRACE 84/383）。
+#    做成 sidecar 就等于把这个 capability 加到 node-exporter 头上 —— 而它已经是
+#    hostPID + hostNetwork + 挂宿主根文件系统的组件，不该再往上叠。
+#    独立部署还有一个好处：它挂了不影响节点指标本身。
+#    另外 homelab 的 node-exporter 是 `automountServiceAccountToken: false`、
+#    oracle 那个根本没有 SA，做 sidecar 还得先动它们的 SA 配置。
+#
+# 成本实测（k8s-node，热笔记本控制面）：一轮全扫 237ms CPU。
+# 5 分钟一轮 = 一个核的 0.079%，故 INTERVAL 就取 300，别为省这点拉长到看不出峰值。
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: node-mem-profile
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: node-mem-profile
+rules:
+  # 只读 pods：用来把 cgroup 里的容器 ID 翻译成 namespace/pod/container 标签。
+  # 请求带 fieldSelector 只取本节点，但 RBAC 层面挡不住跨节点读 —— 与同 ns 的
+  # krr ClusterRole 同一档（它也是 pods get/list/watch 全集群），不是新权限类别。
+  # ⚠️ list pods 能读到内联在 pod spec 里的 env 明文。本仓库密钥一律走 ESO/secretKeyRef，
+  #    所以这里读不到什么；将来若有人内联写密钥，这条权限的分量就变了。
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: node-mem-profile
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: node-mem-profile
+subjects:
+  - kind: ServiceAccount
+    name: node-mem-profile
+    namespace: monitoring
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-mem-profile
+  namespace: monitoring
+  labels: { app: node-mem-profile }
+spec:
+  selector:
+    matchLabels: { app: node-mem-profile }
+  template:
+    metadata:
+      labels: { app: node-mem-profile }
+      annotations:
+        # 由 `just gen-embedded-scripts` 写入 node-mem-profile.py 的 sha256 前 16 位。
+        # 这里**确实需要**（与 krr 的 CronJob 不同）：DaemonSet 是长驻的，ConfigMap 变了
+        # pod 不会重启，进程还跑着启动时读进内存的旧脚本。CI 的 E1 校验它。
+        checksum/node-mem-profile-py: "310e15de75868c60"
+    spec:
+      serviceAccountName: node-mem-profile
+      # 非核心旁路 exporter：节点内存吃紧时优先被挤掉（少两列 ≪ 业务被 OOM）。
+      priorityClassName: bulk
+      # 看得见宿主机全部进程 —— 没有它 /host/proc 里只有本容器自己那几个。
+      hostPID: true
+      # 控制面有污点时也要跑（node-exporter 同款），否则控制面这台恰恰采不到。
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: collector
+          # 通用镜像 + ConfigMap 挂脚本（脚本零第三方依赖，只用标准库）。
+          # 不 pin digest：与同目录 cf-analytics-exporter、personal-services/
+          # open-notebook-provision 的同款用法保持一致，且 Kyverno 的
+          # disallow-latest-tag / restrict-image-registries 都已满足。
+          # 官方 python 镜像是多架构 index，homelab(amd64) 与 oracle(arm64) 通用。
+          image: docker.io/library/python:3.12-alpine
+          command: ["python", "/scripts/node-mem-profile.py"]
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef: { fieldPath: spec.nodeName }
+            - { name: PROC_ROOT, value: /host/proc }
+            - { name: TEXTFILE_DIR, value: /host/textfile }
+            - { name: INTERVAL, value: "300" }
+          securityContext:
+            # ☠️ 这两条缺一不可，且 root 单独不够 —— 见文件头的逐档实测。
+            runAsUser: 0
+            capabilities:
+              # 先全丢再只加回 SYS_PTRACE：默认 root 会带一大把用不到的 capability。
+              drop: ["ALL"]
+              add: ["SYS_PTRACE"]
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            # ☠️ 少了这条会**静默漏采 privileged 容器**（cilium-agent / tetragon / falco 这类）。
+            # 机制：它们跑在 AppArmor unconfined 下，而受限 profile 的进程 ptrace 不了
+            # unconfined 进程 —— 表现是 cgroup 能匹配上、`smaps_rollup` 却 EACCES，
+            # 于是那几行在报告里显示 `—`，不报错、不告警。
+            # 2026-09-09 在 k8s-node 上实测：加这条之前采到 43/47 个容器，加之后 46/47
+            #（差的那 1 个是采集器自己）。
+            # ⚠️ 这会违反 baseline PSA —— monitoring ns 两集群都是 enforce=privileged，
+            #    所以放得下；若将来把 monitoring 收紧到 baseline，本组件要一并重新安置。
+            appArmorProfile: { type: Unconfined }
+          # 探针即产物新鲜度检查：本组件不监听端口，最典型的失效是「进程还在、
+          # 文件停更」（textfile 里的旧值会被 node-exporter 一直吐出去，看着一切正常）。
+          # 检查文件在 2 个采集周期内被动过，比检查进程活着有意义得多。
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - test -n "$(find /host/textfile/node-mem-profile.prom -mmin -11 2>/dev/null)"
+            # 首轮采集要等一次 K8s API 调用 + 全盘扫描，20s 有时赶不上（实测要两个周期
+            # 才 Ready）。放宽首延、缩短周期，最坏 60s 内收敛。
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+          volumeMounts:
+            - { name: proc, mountPath: /host/proc, readOnly: true }
+            - { name: textfile, mountPath: /host/textfile }
+            - { name: scripts, mountPath: /scripts, readOnly: true }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            # 不设 cpu limit：扫描是亚秒级突发，CFS 100ms 周期内会瞬间要很多
+            # （同 node-exporter 的实测结论，见 values/kube-prometheus-stack.yaml）。
+            limits: { memory: 96Mi }
+      volumes:
+        - name: proc
+          hostPath: { path: /proc }
+        - name: textfile
+          # 与两集群 node-exporter 的 --collector.textfile.directory 指的是同一个目录
+          # （它那边是 /host/root/var/lib/node_exporter/textfile，宿主视角同一个路径）。
+          # DirectoryOrCreate：worker 节点上这个目录可能还不存在。
+          hostPath: { path: /var/lib/node_exporter/textfile, type: DirectoryOrCreate }
+        - name: scripts
+          configMap: { name: node-mem-profile, defaultMode: 0755 }

@@ -1,6 +1,6 @@
 # KRR 报告分诊与采纳
 
-> Last updated: 2026-09-05
+> Last updated: 2026-09-09
 > Status: 生效 SOP
 > 触发条件：周一收到 KRR 推送到 Telegram 的两份报告（homelab 09:00 / oracle-k3s 09:15）；
 > 或改 shape、加服务、扩容之后主动跑一次核对。
@@ -30,13 +30,14 @@ KRR 部署拓扑、依赖指标、命令行参数见
 
 ---
 
-## 1. 三条读数前提
+## 1. 四条读数前提
 
 | 前提 | 数值 | 后果 |
 |---|---|---|
 | CPU 推荐 = **p95** | — | 对批处理 CronJob 无意义（见分类 E） |
 | 内存推荐 = 窗口内 **max + 15%** | — | 可反推峰值：`峰值 ≈ 推荐值 ÷ 1.15` |
 | **内存有 100Mi 地板、CPU 有 10m 地板** | 100Mi / 10m | 任何恰好等于地板的推荐都不是测量结果 |
+| 内存基准是 **working_set，含页缓存** | — | 定 **request** 时会系统性高报，见下 |
 
 地板值这条最容易骗人。2026-08-10 实测对照：
 
@@ -55,6 +56,31 @@ kubectl --context k3s-homelab -n monitoring port-forward svc/kube-prometheus-sta
 curl -s --data-urlencode 'query=max by (namespace,container) (max_over_time(container_memory_working_set_bytes{cluster="oracle-k3s",container!=""}[7d]))' \
   http://localhost:19090/api/v1/query | jq -r '.data.result[] | "\((.value[1]|tonumber/1048576)|floor)Mi \(.metric.namespace)/\(.metric.container)"' | sort -rn | head -20
 ```
+
+### ☠️ 第四条最贵：working_set 含页缓存，定 request 时会骗你
+
+**分开看两件事**（2026-09-09 补，此前本文全程用 working_set，是个盲点）：
+
+- 定 **limit** → 看 `working_set`。撞 limit 就 OOM，这个基准是对的（分类 C 的查询不用改）。
+- 定 **request** → 看 `container_memory_rss`（cgroup anon）。request 是调度与驱逐的账面，
+  页缓存可回收、不该记进去。
+
+差距有多大（对齐 KRR 同窗口实测）：
+
+| 容器 | KRR 建议 | RSS 峰 | 页缓存 |
+|---|---|---|---|
+| homelab `monitoring/prometheus` | 1593Mi | 734Mi | **58%** |
+| homelab `vault/vault` | 269Mi | 70Mi | **70%** |
+| oracle `monitoring/otel-collector` | 471Mi | 130Mi | **70%** |
+| homelab `litellm/litellm` | 1425Mi | 1133Mi | 9%（**这条是真的**）|
+
+前三行和第四行在 KRR 表里长得**完全一样**。机械照抄整份报告 = homelab 内存 requests
+净 +2345Mi、oracle 净 +3468Mi，而 oracle allocatable 8869Mi 已用 75% —— **直接排不下**。
+
+**不用自己算**：报告尾部已经附了一张构成表（WS / RSS / PSS / USS / 页缓存占比 /
+按 RSS 重算的建议值 / Δ），按「要改动的绝对量」降序。机制见
+[reference/cost-and-rightsizing.md § 内存构成附表](../reference/cost-and-rightsizing.md#内存构成附表rss--pss--uss)。
+排容量（「这台还塞不塞得下」）时看 **USS** 那列 —— 它才是删掉 pod 能真正还回来的量。
 
 ---
 

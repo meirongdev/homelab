@@ -1,0 +1,281 @@
+---
+# ⚠️ 生成文件 —— 不要手改这里的 Python。
+# 源: k8s/helm/manifests/monitoring/krr-mem-profile.py
+# 重新生成: just gen-embedded-scripts        （在 k8s/helm/）
+# CI 拦漂移: scripts/check-embedded-scripts.py 的 E1（static-checks.yml 里跑）
+#
+# ☠️ **同一份源文件有两个内嵌副本**：本文件（homelab）与
+#    cloud/oracle/manifests/monitoring/krr-mem-profile-cm.yaml（oracle）。
+#    E1 的 TARGETS 里登记了两条、都指向同一个 `src`，所以两边一起被校验、一起被重写 ——
+#    别只改一边。之所以不共享一份：两个集群的清单树由不同的 ArgoCD App 同步，
+#    homelab 是目录递归、oracle 是 kustomize，跨树引用文件两边都做不到。
+#
+# 之所以用「KRR 自己的镜像 + ConfigMap 挂脚本」而不是自建镜像：脚本只用标准库，
+# 而 KRR 镜像本身就是 python 镜像 —— 复用它等于零新镜像、零新 registry 拉取、
+# 零新 digest 要跟。副本漂移的风险由 E1 兜住。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: krr-mem-profile
+  namespace: monitoring
+  labels: { app: krr }
+data:
+  krr-mem-profile.py: |
+    #!/usr/bin/env python3
+    """KRR 报告的内存构成附表 —— 把 RSS / PSS / USS 摆到 KRR 建议值旁边。
+
+    为什么需要它（2026-09-09）：
+        KRR 的内存推荐是 `max(container_memory_working_set_bytes) + 15%`，而 working_set
+        **含页缓存**。本仓库自己记过这个坑（ContainerMemoryNearLimit 假阳性、cgroup v2 上
+        failcnt 是废指标），但每周一那份 KRR 附件仍然在按 WS 报数，于是它系统性地**诱导上调**。
+
+        实测（2026-09-09，对齐 KRR 周一 09:00 的同一 168h 窗口）：
+          monitoring/prometheus      KRR 建议 1593Mi，RSS 峰仅 734Mi —— 58% 是页缓存
+          vault/vault                KRR 建议  269Mi，RSS 峰仅  70Mi —— 70% 是页缓存
+          oracle monitoring/otel-collector  KRR 建议 471Mi，RSS 峰 130Mi —— 70% 是页缓存
+        而同一份报告里 litellm 的 +913Mi 是**真的**（RSS 峰 1133Mi，页缓存仅 9%）。
+        两者在 KRR 的表里长得一模一样，肉眼分不出来 —— 这张附表就是为了分出来。
+
+        机械照抄的代价已经算过：homelab 内存 requests 净 +2345Mi、oracle 净 +3468Mi，
+        而 oracle 只有 8869Mi allocatable、已用 6689Mi(75%) —— 照抄直接排不下。
+
+    三个指标各自回答什么（都取窗口内峰值，与 KRR 同口径）：
+        WS   working_set = 匿名内存 + 页缓存 - inactive_file。KRR 用的就是它。
+        RSS  cgroup memory.stat 的 anon。**这是真正会 OOM 的那部分**，也是 request 该对齐的量。
+             注意它是 cgroup 级计数（不是各进程 RSS 相加），本身不重复计数。
+        PSS  按共享份额摊分后的常驻集。与 RSS 的差 = 与**别的容器**共享的页（镜像层的
+             只读代码段、共享 tmpfs）。PSS ≪ RSS 说明这个容器的账面里有一大块是蹭的。
+        USS  独占集（private_clean + private_dirty）。回答「删掉这个 pod 能真正还回多少内存」，
+             也就是排容量时唯一算数的那个数。
+
+        ⚠️ PSS/USS **不是 cAdvisor 导出的**（它只有 rss/cache/working_set/usage）。
+        它们来自节点侧读 /proc/<pid>/smaps_rollup 的采集器，经 node-exporter 的 textfile
+        collector 上报为 container_memory_{pss,uss}_bytes。采集器没装时本表这两列显示
+        `—` 并在表尾说明，**不会因此让整个报告发不出去**（见下面的 fail-open）。
+
+    设计约束：
+        · 只用标准库（跑在 KRR 自己的镜像里，不引入新镜像、不新增 registry 拉取）。
+        · **fail-open**：任何查询失败都只在报告里留一行说明，绝不让 Job 失败 ——
+          报告发不出去比报告少一张附表严重得多。
+        · 不解析 KRR 的表格输出。耦合 KRR 的渲染格式会在下次升版本时静默错位，
+          本表独立成段、自带口径说明，读者自己对照。
+
+    用法（由 manifests/monitoring/krr.yaml 的 mem-profile initContainer 调用）：
+        PROM_URL=... CLUSTER=homelab WINDOW=168h OUT=/out/krr.txt python krr-mem-profile.py
+    """
+
+    import json
+    import os
+    import sys
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    PROM_URL = os.environ.get("PROM_URL", "").rstrip("/")
+    CLUSTER = os.environ.get("CLUSTER", "")
+    WINDOW = os.environ.get("WINDOW", "168h")
+    OUT = os.environ.get("OUT", "/out/krr.txt")
+    TIMEOUT = int(os.environ.get("TIMEOUT", "60"))
+
+    MIB = 1024.0 * 1024.0
+
+
+    def query(expr):
+        """返回 {(namespace, container): value}；查询失败抛异常交给上层 fail-open。"""
+        url = f"{PROM_URL}/api/v1/query?query=" + urllib.parse.quote(expr)
+        with urllib.request.urlopen(url, timeout=TIMEOUT) as resp:
+            payload = json.load(resp)
+        if payload.get("status") != "success":
+            raise RuntimeError(f"prometheus 返回 status={payload.get('status')}")
+        out = {}
+        for series in payload["data"]["result"]:
+            metric = series["metric"]
+            key = (metric.get("namespace", ""), metric.get("container", ""))
+            if not key[0] or not key[1]:
+                continue
+            out[key] = float(series["value"][1])
+        return out
+
+
+    def peak(metric):
+        """窗口内峰值，按 (namespace, container) across pods 取 max —— 与 KRR 的工作负载粒度对齐。"""
+        sel = f'cluster="{CLUSTER}", container!="", container!="POD"'
+        return query(f"max by (namespace, container) (max_over_time({metric}{{{sel}}}[{WINDOW}]))")
+
+
+    def peak_k8s_labels(metric):
+        """同 peak()，但读 k8s_* 标签 —— PSS/USS 专用。
+
+        ☠️ node-mem-profile 导出的是 `k8s_namespace` / `k8s_container_name` 而**不是**
+        `namespace` / `container`：后者会与 Prometheus 抓取 node-exporter 时注入的目标标签
+        撞名，被改写成 `exported_*`（2026-09-09 实测栽过一次 —— 指标在、series 数正确、
+        表里却全是 `—`，且不报任何错）。这里用 label_replace 把它们改回统一的键名，
+        上层就不必知道这段历史。
+        """
+        sel = f'cluster="{CLUSTER}", k8s_container_name!=""'
+        inner = f"max_over_time({metric}{{{sel}}}[{WINDOW}])"
+        relabeled = (
+            f'label_replace(label_replace({inner},'
+            f' "namespace", "$1", "k8s_namespace", "(.*)"),'
+            f' "container", "$1", "k8s_container_name", "(.*)")'
+        )
+        return query(f"max by (namespace, container) ({relabeled})")
+
+
+    def requested():
+        sel = f'cluster="{CLUSTER}", resource="memory", container!=""'
+        return query(f"max by (namespace, container) (kube_pod_container_resource_requests{{{sel}}})")
+
+
+    def live_containers():
+        """当前**存在**的容器集合。
+
+        ☠️ 没有这道过滤，表会被已消亡的 Job pod 淹掉：`max_over_time(...[7d])` 会把窗口内
+        死掉的 pod 一起算进来，而 Trivy 的每个扫描 Job 的容器名**取自被扫的工作负载**
+        （`trivy-system/jellyfin`、`trivy-system/vault`…）。2026-09-09 首版实测：homelab
+        113 行里有 60 行是这种 2–3Mi 的扫描残影，而 trivy-system 现存容器只有 2 个。
+        它们既不可调（pod 早没了）又把真正该看的行挤到屏幕外。
+        """
+        sel = f'cluster="{CLUSTER}", container!=""'
+        return query(f"max by (namespace, container) (kube_pod_container_info{{{sel}}})")
+
+
+    def fmt(value):
+        return "—" if value is None else f"{value / MIB:.0f}Mi"
+
+
+    def build_table():
+        ws = peak("container_memory_working_set_bytes")
+        rss = peak("container_memory_rss")
+        req = requested()
+
+        # PSS/USS 是可选的：采集器没装就整段缺失，不能因此让本表失败。
+        optional_missing = []
+        try:
+            pss = peak_k8s_labels("container_memory_pss_bytes")
+        except Exception:
+            pss = {}
+        if not pss:
+            optional_missing.append("PSS")
+        try:
+            uss = peak_k8s_labels("container_memory_uss_bytes")
+        except Exception:
+            uss = {}
+        if not uss:
+            optional_missing.append("USS")
+
+        live = live_containers()
+
+        rows = []
+        for key, ws_v in ws.items():
+            if ws_v <= 0 or key not in live:
+                continue
+            rss_v = rss.get(key)
+            # 页缓存占比只有 RSS 拿得到时才有意义；拿不到就不参与排序（沉到表尾）。
+            cache_share = (ws_v - rss_v) / ws_v if rss_v is not None else -1.0
+            # RSS 口径的建议值，与 KRR 的 max+15% 同公式、只换基准指标
+            suggest = rss_v * 1.15 if rss_v is not None else None
+            req_v = req.get(key)
+            delta = suggest - req_v if (suggest is not None and req_v is not None) else None
+            rows.append(
+                {
+                    "ns": key[0],
+                    "container": key[1],
+                    "req": req_v,
+                    "ws": ws_v,
+                    "rss": rss_v,
+                    "pss": pss.get(key),
+                    "uss": uss.get(key),
+                    "share": cache_share,
+                    "suggest": suggest,
+                    "delta": delta,
+                }
+            )
+
+        # 按「实际要改动多少 Mi」降序 —— 不按页缓存占比。
+        # 占比排序会把 2Mi 的容器（96% 是缓存，但改了也没意义）顶到最前面；
+        # 真正要人动手的是绝对量最大的那几行（prometheus/litellm/jellyfin…）。
+        rows.sort(key=lambda r: (-abs(r["delta"] or 0), -r["ws"]))
+        return rows, optional_missing
+
+
+    def render(rows, optional_missing):
+        lines = []
+        lines.append("")
+        lines.append("=" * 108)
+        lines.append(f"内存构成附表 · cluster={CLUSTER} · 窗口 {WINDOW}（与上表同窗口）")
+        lines.append("=" * 108)
+        lines.append(
+            "KRR 上表的内存列基于 working_set（含页缓存），会系统性高报。"
+            "本表给出构成，按『要改动的绝对量』降序 ——"
+        )
+        lines.append(
+            "  『建议(RSS)』才是 request 该对齐的量（RSS 峰 × 1.15，与 KRR 同公式、只换基准指标）；"
+        )
+        lines.append(
+            "  页缓存占比越高，说明 KRR 那一行的建议值里水分越大，越不能照抄。"
+        )
+        lines.append("")
+        header = (
+            f"{'NAMESPACE/CONTAINER':<42}{'现request':>10}{'WS峰':>9}"
+            f"{'RSS峰':>9}{'PSS峰':>9}{'USS峰':>9}{'页缓存':>8}{'建议(RSS)':>11}{'Δ':>9}"
+        )
+        lines.append(header)
+        lines.append("-" * len(header))
+        for r in rows:
+            share = f"{100 * r['share']:.0f}%" if r["share"] >= 0 else "—"
+            delta = "—" if r["delta"] is None else f"{r['delta'] / MIB:+.0f}Mi"
+            name = f"{r['ns']}/{r['container']}"
+            if len(name) > 41:
+                name = name[:40] + "…"
+            lines.append(
+                f"{name:<42}{fmt(r['req']):>10}{fmt(r['ws']):>9}"
+                f"{fmt(r['rss']):>9}{fmt(r['pss']):>9}{fmt(r['uss']):>9}"
+                f"{share:>8}{fmt(r['suggest']):>11}{delta:>9}"
+            )
+        lines.append("")
+        lines.append("口径：WS=KRR 用的指标(含页缓存) · RSS=cgroup anon，真正会 OOM 的部分")
+        lines.append(
+            "      PSS=按共享摊分后的常驻集（PSS≪RSS = 账面里有一块是与别的容器共享的）"
+        )
+        lines.append("      USS=独占集，删掉这个 pod 能真正还回来的内存 —— 排容量时只有它算数")
+        lines.append("      Δ = 建议(RSS) − 现 request，正=该上调、负=可回收；只列**当前存在**的容器")
+        lines.append("      多个 pod 的工作负载按 (namespace, container) 取 max，与上表粒度一致")
+        if optional_missing:
+            lines.append("")
+            lines.append(
+                f"⚠️ {' / '.join(optional_missing)} 列为空：cAdvisor 不导出这两个指标，"
+                "需要节点侧 smaps_rollup 采集器"
+            )
+            lines.append(
+                "   （经 node-exporter textfile collector 上报 "
+                "container_memory_{pss,uss}_bytes）。"
+            )
+        return "\n".join(lines) + "\n"
+
+
+    def main():
+        if not PROM_URL or not CLUSTER:
+            print("PROM_URL / CLUSTER 未设置，跳过内存构成附表", file=sys.stderr)
+            return 0
+        try:
+            rows, optional_missing = build_table()
+            block = render(rows, optional_missing)
+        except Exception as exc:  # fail-open：报告必须能发出去
+            block = (
+                "\n" + "=" * 108 + "\n"
+                f"内存构成附表生成失败：{exc}\n"
+                "上表的内存列基于 working_set（含页缓存），本周请勿直接照抄内存建议值。\n"
+            )
+            print(f"内存构成附表生成失败（不影响报告发送）: {exc}", file=sys.stderr)
+        try:
+            with open(OUT, "a", encoding="utf-8") as handle:
+                handle.write(block)
+        except Exception as exc:
+            print(f"追加到 {OUT} 失败: {exc}", file=sys.stderr)
+            return 0
+        return 0
+
+
+    if __name__ == "__main__":
+        sys.exit(main())

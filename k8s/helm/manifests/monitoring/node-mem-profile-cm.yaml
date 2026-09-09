@@ -1,0 +1,269 @@
+---
+# ⚠️ 生成文件 —— 不要手改这里的 Python。
+# 源: k8s/helm/manifests/monitoring/node-mem-profile.py
+# 重新生成: just gen-embedded-scripts        （在 k8s/helm/）
+# CI 拦漂移: scripts/check-embedded-scripts.py 的 E1（static-checks.yml 里跑）
+#
+# ☠️ 同一份源文件有两个内嵌副本：本文件（homelab）与
+#    cloud/oracle/manifests/monitoring/node-mem-profile-cm.yaml（oracle）。
+#    理由与 krr-mem-profile-cm.yaml 相同：两集群清单树由不同 ArgoCD App 同步，
+#    跨树引用同一个文件两边都做不到。E1 登记了两条、都指向同一个 src。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: node-mem-profile
+  namespace: monitoring
+  labels: { app: node-mem-profile }
+data:
+  node-mem-profile.py: |
+    #!/usr/bin/env python3
+    """node-mem-profile — 按容器导出 PSS / USS，补上 cAdvisor 没有的那两个口径。
+
+    为什么需要它（2026-09-09）：
+        cAdvisor 只给 rss / cache / working_set / usage 四个口径，**没有 PSS/USS**。
+        而 KRR 周报要回答的两个问题里，第二个只有 USS 答得了：
+          ① 「request 该设多少」 → cgroup RSS 就够（krr-mem-profile.py 已经用它做了修正表）
+          ② 「这台机器还塞不塞得下」 → 要的是 USS（删掉这个 pod 能真正**还回来**多少），
+             而不是 RSS ——后者把与别的容器共享的页也算在自己头上。
+        oracle 长期在 75% requests 水位、homelab 是热笔记本，②是本仓库反复要回答的问题。
+
+        PSS 的用处则是**识破账面虚高**：cgroup 按「谁先碰谁记账」收费，所以同一批共享页
+        （镜像层只读代码段、共享 tmpfs）会整块记在最先启动的那个容器上。PSS ≪ RSS 就是
+        这种情况 —— 那个容器看着占得多，实际删了也还不回来。
+
+    ☠️ 权限：读别的进程的 `/proc/<pid>/smaps_rollup` 需要 `PTRACE_MODE_READ`。
+        2026-09-09 在 k8s-node 上逐档实测（383 个进程）：
+          非 root              → 只读到 19 个
+          root，无 capability  → 仍只读到 19 个   ← **root 不够，这是最容易想当然的一步**
+          root + CAP_SYS_PTRACE → 读到 84 个（其余 301 个是内核线程，本来就没有 smaps_rollup）
+        所以本采集器必须 root + CAP_SYS_PTRACE，也因此**刻意不做成 node-exporter 的 sidecar**：
+        独立 DaemonSet 才能把这个 capability 关在自己身上，不去拓宽 node-exporter 的权限面，
+        且它挂了不影响节点指标（blast radius 收敛）。
+
+        CPU 成本实测：一轮全扫 237ms（含 cgroup 解析）。5 分钟一轮 = 一个核的 0.079%，
+        热笔记本上无感 —— 别为了省这点把间隔拉长到看不出峰值。
+
+    出口选择：写 node-exporter 的 textfile collector，不自己起 HTTP 服务。
+        两集群的 node-exporter **都已经**开着 `--collector.textfile.directory=
+        /host/root/var/lib/node_exporter/textfile`（2026-09-09 逐个核对过，无需改动），
+        且已有先例（tailscale ip-rule 断言器）。这样零新增 Service / ServiceMonitor /
+        抓取目标，指标还自动带上 `cluster` 标签（实测 tailscale_iprule_present 两集群都带）。
+
+    标签为什么要查 K8s API 而不是在 PromQL 里 join：
+        cAdvisor 的 `id` 标签就是 cgroup 路径、含容器 ID，理论上可以 `on(id) group_left`
+        关联。但容器一重启就是新 ID，7 天窗口上两边的 series 生命周期对不齐，join 会**静默
+        丢行**。直接把身份解析进指标，查询端就是普通的 max by。
+        ⚠️ 但标签名不能叫 namespace/pod/container —— 会与抓取时的目标标签撞名，见下面
+           LABEL_* 那段的复盘；实际用的是 k8s_namespace / k8s_pod_name / k8s_container_name。
+        代价是要 `list pods` 的 RBAC —— 与同 ns 的 krr ClusterRole 同一档（它也是 pods
+        get/list/watch 全集群），不是本仓库的新权限类别。
+
+    用法（由 node-mem-profile.yaml 的 DaemonSet 调用）：
+        NODE_NAME=<node> PROC_ROOT=/host/proc TEXTFILE_DIR=/host/textfile INTERVAL=300 \
+            python node-mem-profile.py
+    """
+
+    import json
+    import os
+    import re
+    import signal
+    import ssl
+    import sys
+    import time
+    import urllib.request
+
+    NODE_NAME = os.environ.get("NODE_NAME", "")
+    PROC_ROOT = os.environ.get("PROC_ROOT", "/host/proc")
+    TEXTFILE_DIR = os.environ.get("TEXTFILE_DIR", "/host/textfile")
+    INTERVAL = int(os.environ.get("INTERVAL", "300"))
+    OUT_NAME = os.environ.get("OUT_NAME", "node-mem-profile.prom")
+
+    SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount"
+    KIB = 1024
+
+    # cgroup 行里的容器 ID。三种运行时前缀都认（本仓库两集群都是 containerd，
+    # 但写全是为了将来换运行时时不至于静默返回空表）。
+    CONTAINER_ID_RE = re.compile(r"(?:cri-containerd-|docker[-/]|crio-)([0-9a-f]{64})")
+
+    _stop = False
+
+
+    def _handle_term(signum, frame):
+        global _stop
+        _stop = True
+
+
+    def k8s_containers():
+        """{container_id: (namespace, pod, container)} —— 只取本节点的 pod。
+
+        fieldSelector 把数据量压到本节点（RBAC 层面挡不住跨节点读，但没必要拉全集群）。
+        initContainers 也收进来：跑完的 init 容器没有进程、自然不会出现在扫描结果里，
+        但正在跑的 sidecar 式 init（restartPolicy: Always）有。
+        """
+        host = os.environ.get("KUBERNETES_SERVICE_HOST")
+        port = os.environ.get("KUBERNETES_SERVICE_PORT_HTTPS", "443")
+        if not host:
+            raise RuntimeError("KUBERNETES_SERVICE_HOST 未注入")
+        with open(f"{SA_DIR}/token", encoding="utf-8") as handle:
+            token = handle.read().strip()
+        ctx = ssl.create_default_context(cafile=f"{SA_DIR}/ca.crt")
+        url = (
+            f"https://{host}:{port}/api/v1/pods"
+            f"?fieldSelector=spec.nodeName={NODE_NAME}"
+        )
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+        with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
+            payload = json.load(resp)
+
+        out = {}
+        for pod in payload.get("items", []):
+            meta = pod.get("metadata", {})
+            ns, name = meta.get("namespace", ""), meta.get("name", "")
+            status = pod.get("status", {})
+            for field in ("containerStatuses", "initContainerStatuses", "ephemeralContainerStatuses"):
+                for cs in status.get(field) or []:
+                    cid = cs.get("containerID") or ""
+                    # 形如 containerd://<64hex>
+                    match = re.search(r"([0-9a-f]{64})$", cid)
+                    if match:
+                        out[match.group(1)] = (ns, name, cs.get("name", ""))
+        return out
+
+
+    def scan(containers):
+        """按容器汇总 PSS / USS（字节）。返回 ({(ns,pod,container): (pss,uss)}, 统计)。"""
+        totals = {}
+        seen_pids = 0
+        read_pids = 0
+        for entry in os.listdir(PROC_ROOT):
+            if not entry.isdigit():
+                continue
+            seen_pids += 1
+            base = f"{PROC_ROOT}/{entry}"
+            try:
+                with open(f"{base}/cgroup", encoding="utf-8") as handle:
+                    cgroup = handle.read()
+            except OSError:
+                continue
+            match = CONTAINER_ID_RE.search(cgroup)
+            if not match:
+                continue
+            key = containers.get(match.group(1))
+            if key is None:
+                continue
+            pss = uss = 0
+            try:
+                with open(f"{base}/smaps_rollup", encoding="utf-8") as handle:
+                    for line in handle:
+                        field, _, value = line.partition(":")
+                        if field == "Pss":
+                            pss += int(value.split()[0])
+                        elif field in ("Private_Clean", "Private_Dirty"):
+                            uss += int(value.split()[0])
+            except OSError:
+                # 进程可能在两次读之间退出；也可能确实没权限（那是配置问题，由
+                # node_mem_profile_containers 恒为 0 暴露出来，不在这里刷日志）。
+                continue
+            read_pids += 1
+            prev = totals.get(key, (0, 0))
+            totals[key] = (prev[0] + pss * KIB, prev[1] + uss * KIB)
+        return totals, (seen_pids, read_pids)
+
+
+    # ☠️ 标签名**刻意不叫** namespace/pod/container：那三个会与 Prometheus 抓取时注入的
+    # 目标标签**撞名**。2026-09-09 首版就是这么栽的 —— 撞名时 `honor_labels: false`（默认）
+    # 让目标标签获胜，我们自己的值被改写成 `exported_namespace` / `exported_pod` /
+    # `exported_container`，而 `namespace` 变成 "monitoring"、`pod` 变成 node-exporter 自己。
+    # 后果是**查询恒为空但一个错都不报**：指标在、series 数正确、join 却永远匹配不上。
+    # 用 k8s_* 前缀绕开（与本仓库 Loki 侧 k8s_pod_name / k8s_container_name 的命名一致），
+    # 比去改 ServiceMonitor 的 honorLabels 安全 —— 后者会一并改掉 node-exporter 所有指标。
+    LABEL_NS = "k8s_namespace"
+    LABEL_POD = "k8s_pod_name"
+    LABEL_CONTAINER = "k8s_container_name"
+
+
+    def escape(value):
+        return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "")
+
+
+    def write_prom(totals, stats, duration):
+        seen_pids, read_pids = stats
+        lines = [
+            "# HELP container_memory_pss_bytes 容器内全部进程的 PSS 之和"
+            "（按共享份额摊分后的常驻集）。",
+            "# TYPE container_memory_pss_bytes gauge",
+        ]
+        for (ns, pod, container), (pss, _) in sorted(totals.items()):
+            labels = (
+                f'{LABEL_NS}="{escape(ns)}",{LABEL_POD}="{escape(pod)}",'
+                f'{LABEL_CONTAINER}="{escape(container)}"'
+            )
+            lines.append(f"container_memory_pss_bytes{{{labels}}} {pss}")
+        lines += [
+            "# HELP container_memory_uss_bytes 容器内全部进程的 USS 之和"
+            "（private_clean + private_dirty，删掉它能真正还回来的量）。",
+            "# TYPE container_memory_uss_bytes gauge",
+        ]
+        for (ns, pod, container), (_, uss) in sorted(totals.items()):
+            labels = (
+                f'{LABEL_NS}="{escape(ns)}",{LABEL_POD}="{escape(pod)}",'
+                f'{LABEL_CONTAINER}="{escape(container)}"'
+            )
+            lines.append(f"container_memory_uss_bytes{{{labels}}} {uss}")
+        # 自身健康：采集器悄悄不干活是这类旁路 exporter 最典型的失效方式
+        # （指标不是变错，而是**停在最后一次成功的值上**，因为 textfile 文件还在）。
+        # 有了下面三个，「多久没成功过」「扫到几个容器」在 PromQL 里可判。
+        lines += [
+            "# HELP node_mem_profile_last_success_timestamp_seconds 上一次成功采集的时间戳。",
+            "# TYPE node_mem_profile_last_success_timestamp_seconds gauge",
+            f"node_mem_profile_last_success_timestamp_seconds {time.time():.0f}",
+            "# HELP node_mem_profile_containers 本轮成功归属到容器的数量。",
+            "# TYPE node_mem_profile_containers gauge",
+            f"node_mem_profile_containers {len(totals)}",
+            "# HELP node_mem_profile_scan_duration_seconds 本轮扫描耗时。",
+            "# TYPE node_mem_profile_scan_duration_seconds gauge",
+            f"node_mem_profile_scan_duration_seconds {duration:.3f}",
+            "# HELP node_mem_profile_procs 本轮遍历/成功读取 smaps_rollup 的进程数。",
+            "# TYPE node_mem_profile_procs gauge",
+            f'node_mem_profile_procs{{phase="seen"}} {seen_pids}',
+            f'node_mem_profile_procs{{phase="read"}} {read_pids}',
+        ]
+        body = "\n".join(lines) + "\n"
+        # 原子替换：node-exporter 随时可能在读，写一半的文件会让它整轮抓取报错。
+        path = os.path.join(TEXTFILE_DIR, OUT_NAME)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as handle:
+            handle.write(body)
+        os.replace(tmp, path)
+
+
+    def main():
+        signal.signal(signal.SIGTERM, _handle_term)
+        signal.signal(signal.SIGINT, _handle_term)
+        if not NODE_NAME:
+            sys.exit("NODE_NAME 未设置（应由 fieldRef spec.nodeName 注入）")
+        os.makedirs(TEXTFILE_DIR, exist_ok=True)
+        while not _stop:
+            started = time.time()
+            try:
+                containers = k8s_containers()
+                totals, stats = scan(containers)
+                write_prom(totals, stats, time.time() - started)
+                print(
+                    f"[node-mem-profile] {len(totals)} 个容器 · "
+                    f"进程 {stats[1]}/{stats[0]} · {time.time() - started:.2f}s",
+                    flush=True,
+                )
+            except Exception as exc:
+                # 不写文件 —— 保留上一轮的结果，让 last_success 时间戳自己变旧，
+                # 由告警去发现，而不是把表刷成空的。
+                print(f"[node-mem-profile] 本轮失败（保留上轮结果）: {exc}", file=sys.stderr, flush=True)
+            for _ in range(INTERVAL):
+                if _stop:
+                    break
+                time.sleep(1)
+        return 0
+
+
+    if __name__ == "__main__":
+        sys.exit(main())
