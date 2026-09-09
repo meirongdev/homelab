@@ -4,7 +4,7 @@
 > ⚠️ **落点与存储都已变更，下文路径全部过期**：书库 2026-07-11 从 NFS 迁 `local-path`；
 > 整套 calibre 2026-08-03 迁至 **oracle-k3s**，manifest 现在是
 > `cloud/oracle/manifests/personal-services/calibre-web.yaml`。
-> 当前事实见 [reference/services.md](../../reference/services.md)。
+> 当前事实见 [reference/services.md](../reference/services.md)。
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
@@ -294,6 +294,18 @@ kubectl delete pvc calibre-web-config -n personal-services
 Note: The `Prune=false` annotation means ArgoCD won't recreate it. This is a one-time manual deletion.
 
 ---
+
+## 原设计的取舍（2026-02-21，原独立设计文档，已并入本页）
+
+选定 **Approach A：原地升级**——保留全部 K8s 资源名（Deployment/Service/label），
+所以 gateway、ArgoCD、homepage、Cloudflare 一处都不用改。
+
+- **配置全新起**：新建 `calibre-web-automated-config` PVC，不复用旧 app DB。
+  旧 `calibre-web-config` PVC 因 `Prune=false` 会留下来，稳定后手工删。
+- **URL 不变**：继续 `book.meirong.dev`，不动 Cloudflare 与 gateway。
+- **ingest 目录复用现有 PVC**：`calibre-books` 的 `subPath: ingest`，省掉一个新 NFS export。
+- **NFS 必需的环境变量**：`NETWORK_SHARE_MODE=true` + `CWA_WATCH_MODE=poll`——
+  NFS 上的库缺这两个不工作。⚠️ 此约束随 2026-07-11 迁 `local-path` 已失效。
 
 ## Rollback
 

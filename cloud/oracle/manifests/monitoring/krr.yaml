@@ -9,7 +9,7 @@
 # 前置：otel-collector 的 prometheus/cadvisor receiver 必须已在跑，否则中枢 Prometheus 里
 # 没有 oracle 的 container_cpu_usage_seconds_total / container_memory_working_set_bytes，
 # KRR 只能看当前运行的 Pod、没有历史，推荐值无意义。
-# 见 docs/plans/observability/2026-07-30-krr-rightsizing.md
+# 见 docs/plans/2026-07-30-krr-rightsizing.md
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret

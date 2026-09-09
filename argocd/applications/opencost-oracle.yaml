@@ -4,7 +4,7 @@
 # Values: cloud/oracle/values/opencost.yaml
 # 数据源为 collector（oracle 本地无 Prometheus，也不跨 Tailscale 查 homelab）。
 # 成本指标由 oracle otel-collector 抓 :9003 后 remote-write 到中枢 Prometheus。
-# 见 docs/plans/observability/2026-07-30-opencost-multicluster.md
+# 见 docs/plans/2026-07-30-opencost-multicluster.md
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

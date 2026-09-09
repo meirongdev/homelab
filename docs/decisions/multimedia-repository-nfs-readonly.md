@@ -2,7 +2,7 @@
 
 > 日期: 2026-08-16（本文补写于 2026-08-20，见文末「为什么补写」）
 > 状态: ✅ 已实施
-> 关联：[plans/apps/2026-08-16-multimedia-repository.md](../plans/apps/2026-08-16-multimedia-repository.md)（执行快照，本决策出自其 §3 决策 1–2）·
+> 关联：[plans/2026-08-16-multimedia-repository.md](../plans/2026-08-16-multimedia-repository.md)（执行快照，本决策出自其 §3 决策 1–2）·
 > [reference/storage.md](../reference/storage.md)（存储布局与 PVC 清单的**唯一真相源**）·
 > [cluster-placement-for-new-services](cluster-placement-for-new-services.md)
 

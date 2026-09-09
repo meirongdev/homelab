@@ -37,8 +37,7 @@
 
 ### 可观测
 
-- [observability-multicluster.md](observability-multicluster.md) — 日志/指标/链路追踪统一架构（含 dgx-spark/macbook 外部主机与 SMART 采集）
-- [observability-otel-logging.md](observability-otel-logging.md) — OTel 日志管道细节 + 4 种应用接入模式
+- [observability-multicluster.md](observability-multicluster.md) — 采集侧唯一真相源：日志/指标/追踪三条跨集群管线 + 应用接日志的 4 种模式 + 排障（含 dgx-spark/macbook 外部主机与 SMART 采集）
 - [observability-alerting-slo.md](observability-alerting-slo.md) — 告警路由（Telegram）与覆盖盲区、Dashboards 组织约定、SLI/SLO（Sloth）
 - [omlx-inference-metrics.md](omlx-inference-metrics.md) — Mac OMLX 推理指标：**无原生 `/metrics`**，靠
   json-exporter + node_exporter textfile 两条互补链路。☠️ 累计平均 TPS 不是当前速度；两套计数器同名不同义
@@ -73,4 +72,4 @@
 ---
 
 > **本目录只放常青事实。** 带日期的诊断/建议（架构优化、技术债盘点、资源右尺寸建议）
-> 属于快照，一律放 [`plans/architecture/`](../plans/architecture/README.md)。2026-07-31 已把 4 篇迁出。
+> 属于快照，一律放 [`plans/`](../plans/README.md)。2026-07-31 已把 4 篇迁出。

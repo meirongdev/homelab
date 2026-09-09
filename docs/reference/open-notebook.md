@@ -1,11 +1,11 @@
 # Open Notebook — AI 研读知识库（架构事实）
 
-> Last updated: 2026-09-03
+> Last updated: 2026-09-09
 > Status: 生效事实
 > Scope: Open Notebook（NotebookLM 自托管替代）在 homelab 集群的部署形态、模型接线、
 > 配置真相源地图、备份口径，本文是 source of truth。
 > 批量摄取操作见 [../runbooks/open-notebook-ingest.md](../runbooks/open-notebook-ingest.md)；
-> 部署过程与踩坑见 [../plans/apps/2026-08-01-open-notebook-homelab.md](../plans/apps/2026-08-01-open-notebook-homelab.md)（冻结快照）。
+> 部署过程与踩坑见 [../plans/2026-08-01-open-notebook-homelab.md](../plans/2026-08-01-open-notebook-homelab.md)（冻结快照）。
 
 ## 部署形态
 

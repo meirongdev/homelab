@@ -1,8 +1,8 @@
 # Open Notebook 部署（homelab k3s）
 
 > 状态: ✅ **已完成**（2026-08-01：部署 + 模型接线 GitOps 化 + 摄取管线首跑打通）。
-> **本文是冻结的过程快照**——现状事实看 [reference/open-notebook.md](../../reference/open-notebook.md)，
-> 批量摄取操作看 [runbooks/open-notebook-ingest.md](../../runbooks/open-notebook-ingest.md)。
+> **本文是冻结的过程快照**——现状事实看 [reference/open-notebook.md](../reference/open-notebook.md)，
+> 批量摄取操作看 [runbooks/open-notebook-ingest.md](../runbooks/open-notebook-ingest.md)。
 > 日期: 2026-08-01
 > 范围: 把 Open Notebook 跑起来、接上现有推理算力（DGX + Mac OMLX），并把它纳入既有的备份/门户/探测体系。
 
@@ -46,7 +46,7 @@ homelab k8s-node → 100.97.87.120:8000/v1/models → 200（TCP connect 66ms）
 | `open-notebook` | 100m / 640Mi | 1000m / 1536Mi |
 | `open-notebook-surrealdb` | 50m / 256Mi | 500m / 768Mi |
 
-档位按 [reference/k8s-qos-resource-management.md](../../reference/k8s-qos-resource-management.md)：
+档位按 [reference/k8s-qos-resource-management.md](../reference/k8s-qos-resource-management.md)：
 用户 Web 服务 500m–1000m、数据库 500m，全部 Burstable。
 后台任务并发压到 2（`OPEN_NOTEBOOK_WORKER_MAX_TASKS`，默认 5），避免和 LGTM/Vault 抢这台
 idle ~74°C 的 5600H。

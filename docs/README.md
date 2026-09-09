@@ -27,7 +27,7 @@
 | [runbooks/](runbooks/README.md) | 可执行运维 SOP |
 | [guides/](guides/README.md) | 跨领域任务流程 |
 | [records/](records/README.md) | 故障复盘 |
-| [plans/](plans/README.md) | 带日期的方案档案（6 个类别） |
+| [plans/](plans/README.md) | 带日期的方案档案（扁平，死方案在 `archive/`） |
 
 ## 学习路径
 
@@ -65,6 +65,6 @@
 
 ## 新增 / 修改文档
 
-写文档前先读 [RULES.md](RULES.md) 的 R1–R8（目录归属、命名、文首字段、状态枚举、索引维护、
-唯一真相源、长度预算），CI 的 `check-docs.py` 强制（`python3 scripts/check-docs.py`）。
-放错目录、漏建索引都算违规。
+规则在 [RULES.md](RULES.md)（R1–R8：目录归属、命名、文首字段、状态标记、索引维护、
+唯一真相源、命令上下文、长度预算），CI 的 `check-docs.py` 强制。写之前读一遍，
+提交之后跑一遍 `python3 scripts/check-docs.py`。

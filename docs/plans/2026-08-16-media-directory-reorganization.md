@@ -87,6 +87,6 @@ Disney S03E01-EDITH、We Bare Bears S01E26，按 **SxxExx 集号 + size + sha** 
 
 ## 关联
 
-- 多媒体仓库设计：[../apps/2026-08-16-multimedia-repository.md](../apps/2026-08-16-multimedia-repository.md)
-- 存储现状（唯一真相源）：[../../reference/storage.md](../../reference/storage.md)
+- 多媒体仓库设计：[2026-08-16-multimedia-repository.md](2026-08-16-multimedia-repository.md)
+- 存储现状（唯一真相源）：[../reference/storage.md](../reference/storage.md)
 - 目标系统：NAS 106 ZFS 池 `mrstorage`，LAN `192.168.50.106` / TS `100.110.27.111`

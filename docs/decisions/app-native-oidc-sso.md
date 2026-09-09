@@ -2,7 +2,7 @@
 
 > 日期: 2026-03-08（决策）· 2026-09-02 补写本 ADR
 > 状态: ✅ 已实施（现役接入清单以 [reference/identity.md](../reference/identity.md) 为准）
-> 关联：[当时的方案与分期](../plans/security/2026-03-08-cilium-zitadel-sso-plan.md)（快照，
+> 关联：[当时的方案与分期](../plans/2026-03-08-cilium-zitadel-sso-plan.md)（快照，
 > 里面列的接入方**已全部过期**）· [gateway-controller-evaluation](gateway-controller-evaluation.md)
 
 > ⚠️ **本文是 2026-09-02 补写的**：此前身份架构的唯一记录是上面那份 plan。

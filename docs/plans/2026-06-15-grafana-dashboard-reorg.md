@@ -87,5 +87,5 @@
 - folder / 多集群 / Home 在 values（Helm 管理，**非 ArgoCD**），改后必须 `just deploy-prometheus`。
 - 新增 dashboard 的约定见 ~~`docs/CONVENTIONS.md` › Conventions › **Grafana dashboards**~~
   **Deprecated（2026-08-20）**：`docs/CONVENTIONS.md` 已按域拆入 `reference/`，看板约定现在在
-  [reference/observability-alerting-slo.md](../../reference/observability-alerting-slo.md)
+  [reference/observability-alerting-slo.md](../reference/observability-alerting-slo.md)
   「新增/修改 dashboard 的约定」一节。

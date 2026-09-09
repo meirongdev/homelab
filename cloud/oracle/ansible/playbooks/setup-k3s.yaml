@@ -474,7 +474,7 @@
     # k3s 内置 traefik 被 disable（见上面的 config），不再提供 Gateway API CRD。
     # 切勿改回让 traefik 托管这些 CRD —— disable traefik 会触发 helm-delete-traefik-crd
     # 把 CRD 一起删掉，导致 Gateway/HTTPRoute 级联回收、路由全断。
-    # 见 docs/plans/networking/2026-06-04-oracle-k3s-argocd-gitops.md 事故复盘。
+    # 见 docs/plans/2026-06-04-oracle-k3s-argocd-gitops.md 事故复盘。
     #
     # 装法照抄 k8s/helm/justfile 的 deploy-gateway-api-crds：逐 CRD **server-side** apply
     # （整包 standard-install.yaml 走 client-side 会撞 last-applied 注解大小上限）。

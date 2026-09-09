@@ -103,7 +103,7 @@ tracking 注解，所以真实 prune 风险可能低于此，但按最坏情况�
 `just deploy-otel-collector` + `values/opentelemetry-collector.yaml` 看着像个活着的
 manual-helm 组件，实测 homelab **既无 release 也无 pod**。连带发现两处失效断言：
 
-- `docs/reference/observability-otel-logging.md` 声称 "homelab: App → OTel Collector → Tempo"
+- `docs/reference/observability-multicluster.md` 声称 "homelab: App → OTel Collector → Tempo"
 - Loki 里**只有 `cluster="oracle-k3s"`** 的日志（oracle 那份是 kustomize 管的裸 DaemonSet，
   经 Tailscale otlphttp 推到 homelab Loki）
 

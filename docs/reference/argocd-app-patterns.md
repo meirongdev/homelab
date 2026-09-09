@@ -1,6 +1,6 @@
 # ArgoCD Application Patterns
 
-> Last updated: 2026-09-08
+> Last updated: 2026-09-09
 > Status: 生效事实
 >
 > 当前 ArgoCD 管理模式分析、可选 pattern 对比与取舍建议。
@@ -155,7 +155,7 @@ Namespace 被 prune 会级联删光 ns 下一切，`Prune=false` 拦不住。
 - **不入 git 的 bootstrap 依赖**: `argocd-manager` SA + cluster-admin 在
   `cloud/oracle/bootstrap/argocd-manager.yaml`，手工 apply 一次、刻意留在 kustomize 树外；
   `vault-token` Secret（`rss-system`）同为手工前置（不被 prune，见 `base/vault-store.yaml`）。
-- 记录: [首次纳管](../plans/networking/2026-06-04-oracle-k3s-argocd-gitops.md) ·
+- 记录: [首次纳管](../plans/2026-06-04-oracle-k3s-argocd-gitops.md) ·
   [控制面迁移/重装](../runbooks/argocd-control-plane-on-oracle.md) ·
   [整节点重建](../runbooks/oracle-k3s-rebuild.md)。
 

@@ -4,7 +4,7 @@
 > ⚠️ **本文列举的接入方已过期**：当年的 KaraKeep（2026-08-14 退役）、Stirling-PDF
 > （2026-08-11 由无认证的 BentoPDF 取代）、旧 LLM 网关管理面（2026-08-08 退役）都已不在；
 > per-app oauth2-proxy 当前**无实例**。现役名单与 ZITADEL 落点（2026-07-06 迁 oracle-k3s）
-> 一律以 [reference/identity.md](../../reference/identity.md) 为准。
+> 一律以 [reference/identity.md](../reference/identity.md) 为准。
 
 ## Goal
 

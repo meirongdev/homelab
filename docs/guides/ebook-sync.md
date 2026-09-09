@@ -1,6 +1,6 @@
 # calibre-web 电子书同步
 
-> Last updated: 2026-09-08
+> Last updated: 2026-09-09
 >
 > ☠️ **calibre 全家在 oracle-k3s**（2026-08-03 迁走），脚本默认 `--context oracle-k3s`；
 > 别按「homelab 的书库」去规划。本文是这个流程的真相源，`scripts/README.md` 不再复制它。
@@ -109,6 +109,6 @@ just cleanup-logs                 # 历史清理记录
 补全走 [calibre-metadata-enrichment.md](calibre-metadata-enrichment.md)：
 四层手段、各自实测产出率、以及什么时候该停。
 
-> ⚠️ 此前这里指向 `plans/archive/2026-07-05-calibre-metadata-enrichment.md`（2026-08-13 归档前在 `plans/apps/`）。
+> ⚠️ 此前这里指向 `plans/archive/2026-07-05-calibre-metadata-enrichment.md`（2026-08-13 归档前在 `plans/`）。
 > 那是**写完即冻结的历史快照**，且其「环境」一节已过期（书库早已不在 NFS 上），
 > 更重要的是它描述的做法（查不到就拿文件 mtime 当出版日期）**已被证明有害**并弃用。

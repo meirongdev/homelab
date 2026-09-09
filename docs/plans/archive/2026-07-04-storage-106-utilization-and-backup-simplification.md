@@ -6,8 +6,8 @@
 >   ⚠️ **ARC 上限已于 2026-08-13 由 4G 降到 2G**（给同机 `k3s-exp` 实验 VM 腾内存，
 >   `storage-playbook.yaml` 已持久化）——本文的 4GB 是历史值，当前事实见
 >   [reference/storage.md](../../reference/storage.md) 与 [decisions/storage106-experiment-vm.md](../../decisions/storage106-experiment-vm.md)。
-> - ➡️ **Task 4-6（备份路线/离站/恢复演练）由 [2026-07-06 存储本地化迁移 + 备份体系重建](2026-07-06-storage-local-migration-and-backup-redesign.md) 取代** —— Kopia 已于 2026-07-05 移除，新方案定为 serverless **restic → 106 ZFS 仓库，离站 later**。本文档保留作 ARC/sanoid 与决策依据的历史记录。
-> 关联: `../architecture/2026-07-04-fleet-architecture-optimization.md`（战略母文档）、`../../runbooks/backup-recovery.md`（现有 Kopia 备份运维）
+> - ➡️ **Task 4-6（备份路线/离站/恢复演练）由 [2026-07-06 存储本地化迁移 + 备份体系重建](../2026-07-06-storage-local-migration-and-backup-redesign.md) 取代** —— Kopia 已于 2026-07-05 移除，新方案定为 serverless **restic → 106 ZFS 仓库，离站 later**。本文档保留作 ARC/sanoid 与决策依据的历史记录。
+> 关联: `../2026-07-04-fleet-architecture-optimization.md`（战略母文档）、`../../runbooks/backup-recovery.md`（现有 Kopia 备份运维）
 > 结论: 把 106 从"单点裸盘"升级为**带 ARC 读缓存 + ZFS 快照 + 云端离站**的三层受保护存储；**不加计算**。备份层默认**保留 Kopia + 用 rclone 只做离站**（最小改动）；若要根治 Kopia server 复杂度则迁 **restic**（需用户确认）。
 
 ---
@@ -258,7 +258,7 @@ Task 3 (ARC 落盘+重启) ──(G1 维护窗口)──► 可与其他需重�
 7. 回滚: 并行期内直接切回 Kopia(未删除前零风险)。
 
 ## 6. 关联文档
-- 战略母文档: `../architecture/2026-07-04-fleet-architecture-optimization.md`
+- 战略母文档: `../2026-07-04-fleet-architecture-optimization.md`
 - 现有备份运维: `../../runbooks/backup-recovery.md`
 - 存储/NFS 约定: `CLAUDE.md` › Storage / Backup & Recovery
 - 相关经验: 记忆 `storage-106-host-specs` / `nfs-hang-wedges-node` / `force-delete-nfs-pod-orphans-lock` / `vault-pod-token-empty`

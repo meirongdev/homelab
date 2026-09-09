@@ -6,7 +6,7 @@
 # 刻意只用 OpenCost 自身导出的指标（node_*_hourly_cost / container_*_allocation），
 # 不掺 kube-state-metrics —— homelab 的 KSM 指标没有 cluster 标签，掺进来会算错。
 # Auto-loaded via kube-prometheus-stack grafana-sc-dashboard sidecar
-# 见 docs/plans/observability/2026-07-30-opencost-multicluster.md
+# 见 docs/plans/2026-07-30-opencost-multicluster.md
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -23,7 +23,7 @@ data:
       "annotations": {
         "list": []
       },
-      "description": "双集群 Kubernetes 成本归因：homelab（裸金属实测功耗+摊销）与 oracle-k3s（OCI Ampere A1 牌价影子定价）。数据源 OpenCost，见 docs/plans/observability/2026-07-30-opencost-multicluster.md",
+      "description": "双集群 Kubernetes 成本归因：homelab（裸金属实测功耗+摊销）与 oracle-k3s（OCI Ampere A1 牌价影子定价）。数据源 OpenCost，见 docs/plans/2026-07-30-opencost-multicluster.md",
       "editable": true,
       "graphTooltip": 1,
       "links": [

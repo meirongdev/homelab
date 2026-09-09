@@ -1,12 +1,12 @@
 # Observability — 告警、看板组织与 SLO
 
-> Last updated: 2026-09-07
+> Last updated: 2026-09-09
 > Status: 生效事实
 >
 > 遥测的消费侧：告警路由与覆盖盲区、Grafana 看板组织约定、SLI/SLO 体系。
 > 采集侧（日志/指标/追踪怎么跨集群汇聚）见
 > [observability-multicluster.md](observability-multicluster.md) 与
-> [observability-otel-logging.md](observability-otel-logging.md)。
+> [observability-multicluster.md](observability-multicluster.md)。
 
 ## 告警（Alertmanager → Telegram）
 

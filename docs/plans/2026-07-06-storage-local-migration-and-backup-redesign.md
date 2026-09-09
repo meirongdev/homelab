@@ -1,13 +1,13 @@
 # 存储本地化迁移 + 备份体系重建 — 完整执行计划（Agent 可执行）
 
 > 日期: 2026-07-06
-> 状态: ✅ **Phase 0-4 全部完成**；只剩 **Phase 5（离站备份）** 未做 —— 见 [ROADMAP 开放项 #1](../../ROADMAP.md)。
+> 状态: ✅ **Phase 0-4 全部完成**；只剩 **Phase 5（离站备份）** 未做 —— 见 [ROADMAP 开放项 #1](../ROADMAP.md)。
 >
 > | Phase | 状态 |
 > |-------|------|
 > | 0-1 restic 备份 | ✅ 2026-07-06 双集群上线，恢复演练通过。仓库 `881fb124bf` @ 106 `mrstorage/restic` |
 > | 2 sqlite/fsync PVC → local-path | ✅ 2026-07-06 Vault raft / 旧网关 / calibre-config 迁完 |
-> | 3a Gotify → oracle-k3s | ✅ 2026-07-06（⚠️ Gotify 已于 2026-07 整体退役，见 [决策](../../decisions/alerting-telegram-migration.md)） |
+> | 3a Gotify → oracle-k3s | ✅ 2026-07-06（⚠️ Gotify 已于 2026-07 整体退役，见 [决策](../decisions/alerting-telegram-migration.md)） |
 > | 3b ZITADEL → oracle-k3s | ✅ 2026-07-06 数据迁移 + masterkey 同源 + `auth.meirong.dev` 切换 + console gRPC 修复 + homelab 退役 |
 > | 4 dead-man's switch + SMART/zpool 告警 | ✅ 2026-07 |
 > | 5 离站备份 | ❌ **未做** |
@@ -19,7 +19,7 @@
 >    实际落地形态是 Watchdog → AlertmanagerConfig webhook → Uptime Kuma push monitor → **Telegram**。
 >
 > 结论: 把 homelab 上所有 **fsync/sqlite/PG 类** 有状态 PVC 从 `nfs-client` 迁到 `local-path`（性能 + 脱离 NFS 启动依赖）。因 `local-path` 无冗余无快照，**先重建一套 serverless restic 备份**（逻辑 dump → 106 ZFS 上的加密仓库）再做迁移。同步把 **Gotify + ZITADEL 迁到 oracle-k3s**（脱离 homelab 故障域），并补上 **dead-man's switch** 与 **zpool/SMART 告警**。
-> 关联: `../architecture/2026-07-04-fleet-architecture-optimization.md`（战略母文档）、`2026-07-04-storage-106-utilization-and-backup-simplification.md`（本计划取代其 Task 4-6 备份部分）、`../apps/2026-07-04-zitadel-to-oracle-k3s.md`（本计划纳入并执行）、`../../runbooks/backup-recovery.md`（运维手册，随本计划回写）
+> 关联: `2026-07-04-fleet-architecture-optimization.md`（战略母文档）、`archive/2026-07-04-storage-106-utilization-and-backup-simplification.md`（本计划取代其 Task 4-6 备份部分）、`2026-07-04-zitadel-to-oracle-k3s.md`（本计划纳入并执行）、`../../runbooks/backup-recovery.md`（运维手册，随本计划回写）
 
 ---
 
@@ -289,7 +289,7 @@ Phase 5(离站) / Phase 6(演练自动化) 随后，Phase 5 需 G3 云凭据
 - [ ] 结论回写 `backup-recovery.md`、`TODO.md`、CLAUDE.md。
 
 ## 6. 关联文档
-- 战略母文档: `../architecture/2026-07-04-fleet-architecture-optimization.md`
-- 被取代/纳入: `2026-07-04-storage-106-utilization-and-backup-simplification.md`（T4-6）、`../apps/2026-07-04-zitadel-to-oracle-k3s.md`
+- 战略母文档: `2026-07-04-fleet-architecture-optimization.md`
+- 被取代/纳入: `archive/2026-07-04-storage-106-utilization-and-backup-simplification.md`（T4-6）、`2026-07-04-zitadel-to-oracle-k3s.md`
 - 运维手册: `../../runbooks/backup-recovery.md`（随本计划回写为 restic 版）
 - 相关记忆: `nfs-hang-wedges-node` / `force-delete-nfs-pod-orphans-lock` / `nfs-tailscale-route-hijack` / `vault-pod-token-empty` / `storage-106-host-specs`

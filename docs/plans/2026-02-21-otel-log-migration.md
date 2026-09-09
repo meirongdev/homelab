@@ -2,7 +2,7 @@
 
 > 状态: ✅ **已完成（2026-02）** —— Promtail 早已移除，OTel Collector DaemonSet 是标准日志管道。
 > ⚠️ 文中 `nfs-subdir-external-provisioner` 的 Helm repo 引用已失效（NFS 于 2026-07-11 退役）。
-> 当前架构见 [reference/observability-otel-logging.md](../../reference/observability-otel-logging.md)。
+> 当前架构见 [reference/observability-multicluster.md](../reference/observability-multicluster.md)。
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
@@ -363,6 +363,20 @@ git commit -m "feat: complete OTel log pipeline migration (Promtail → OTel Col
 ```
 
 ---
+
+## 原设计的选型（2026-02-21，原独立设计文档，已并入本页）
+
+**选定：单层 OTel Collector DaemonSet**——与 Promtail 一对一替换，Loki 和 Grafana 都不用动，
+每节点约 64–128Mi，与 Promtail 相当。理由是当时 homelab 是单节点 K3s，不需要聚合层，
+改动最小、风险最低。
+
+被否决的两个：
+
+- **两层架构（Agent DaemonSet + Gateway Deployment）** —— Gateway 层能做 filter/transform/fan-out，
+  扩展性最好，但单节点场景是过度设计，多一个 Deployment 和一跳网络故障点。
+  ⚠️ 留了后路：扩到多节点时迁到这个方案。
+- **Promtail + OTel 并存** —— 渐进、风险低，但两套系统资源翻倍、配置双份维护，
+  且不符合"迁移"的目标。
 
 ## 回滚方案
 

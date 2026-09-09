@@ -1,10 +1,10 @@
 # Identity — ZITADEL / OIDC 接入
 
-> Last updated: 2026-09-05
+> Last updated: 2026-09-09
 > Status: 生效事实
 >
 > 身份面的部署形态与各应用接入细节。安全视角的摘要在 [security.md §3](security.md)；
-> 入口层共享 SSO 为何被移除见 [../plans/security/2026-03-08-cilium-zitadel-sso-plan.md](../plans/security/2026-03-08-cilium-zitadel-sso-plan.md)。
+> 入口层共享 SSO 为何被移除见 [../plans/2026-03-08-cilium-zitadel-sso-plan.md](../plans/2026-03-08-cilium-zitadel-sso-plan.md)。
 
 ## 当前模型
 

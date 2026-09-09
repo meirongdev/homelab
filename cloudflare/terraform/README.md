@@ -44,7 +44,7 @@ just apply  # Apply changes
 ```
 
 > **LLM gateway**: served by **LiteLLM** (`llm.meirong.dev`, homelab) with its own
-> authenticated admin UI at `/ui`. Migration: `docs/plans/apps/2026-08-01-litellm-gateway-migration.md`
+> authenticated admin UI at `/ui`. Migration: `docs/plans/2026-08-01-litellm-gateway-migration.md`
 > (implemented 2026-08-16); current state: `docs/reference/services.md`. The consumers
 > (jobs-sg enrichment, Open Notebook, calibre metadata) go through the gateway or talk to the
 > DGX vLLM endpoints directly over the tailnet. A Cloudflare AI Gateway is still not an option

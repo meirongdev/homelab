@@ -1,6 +1,6 @@
 # DGX 换了主力模型：homelab 侧跟进 SOP
 
-> Last updated: 2026-09-03
+> Last updated: 2026-09-09
 > Status: 生效事实 + 切换 SOP
 > 触发条件：`100.97.87.120:8000/v1/models` 返回的 served name 与仓库里的引用不一致
 > —— 上游（`~/projects/meirongdev/nv-dgx-spark`）换栈、改 served name、或从换栈中
@@ -177,7 +177,7 @@ Open Notebook 的接线只能在应用里看（值存的是模型 id，不是名
 | 2026-09-02/03 | DGX 换 Flash-Next，本文全流程 | 8/16 把 key 受影响；两条阈值要重估；`{"thinking":false}` 变静默空操作 |
 
 下一次想省事的完整方案（含实测成本、优先级、被否决的选项）已展开成
-[plans/apps/2026-09-03-dgx-model-swap-optimizations.md](../plans/apps/2026-09-03-dgx-model-swap-optimizations.md)，
+[plans/2026-09-03-dgx-model-swap-optimizations.md](../plans/2026-09-03-dgx-model-swap-optimizations.md)，
 本节只留结论与指针，实施细节**以那份为准**，两边不各存一份：
 
 1. **§1 与 §3 脚本化**（采集 + 列待改 key），并把散在 5 个文件里的 **16 处模型名字面值**

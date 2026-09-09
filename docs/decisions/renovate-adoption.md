@@ -19,7 +19,7 @@
 3. **同日扫全仓**又发现 `node_exporter` 在三套 ansible 里是 1.11.1 / 1.10.0 / 1.11.1。
 
 规模已经过了人肉能管住的线：28 个 ArgoCD App、两套 ansible、四个 justfile。
-[技术债盘点](../plans/architecture/2026-07-07-tech-debt-and-evolution.md) 早就写明
+[技术债盘点](../plans/2026-07-07-tech-debt-and-evolution.md) 早就写明
 "这类漂移必然复发"，2026-07-07 的实测也确认过（照 pin 重跑会降级）。
 
 ## Decision

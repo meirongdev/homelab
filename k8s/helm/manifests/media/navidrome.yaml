@@ -111,7 +111,7 @@ spec:
       name: http
 ---
 # Vault → media-secrets：Navidrome 初始 admin。共享 secret/homelab/media（Jellyfin 无凭据，
-# podcast 无凭据，只有这个）。路径在 Vault 里预建（见 docs/plans/apps/multimedia-repository Task 2）。
+# podcast 无凭据，只有这个）。路径在 Vault 里预建（见 docs/plans/2026-08-16-multimedia-repository.md Task 2）。
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:

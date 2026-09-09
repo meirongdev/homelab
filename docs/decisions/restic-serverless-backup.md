@@ -2,7 +2,7 @@
 
 > 日期: 2026-07-05 移除 Kopia / 2026-07-06 restic 上线 · 2026-09-02 补写本 ADR
 > 状态: ✅ 已实施，双集群 + worker 共三个 Job
-> 关联：[执行过程与迁移分期](../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md)（历史快照）·
+> 关联：[执行过程与迁移分期](../plans/2026-07-06-storage-local-migration-and-backup-redesign.md)（历史快照）·
 > [reference/storage.md](../reference/storage.md)（备份设计与 PVC 清单的**唯一真相源**）·
 > [runbooks/backup-recovery.md](../runbooks/backup-recovery.md)（恢复 SOP）
 

@@ -3,8 +3,8 @@
 > Date: 2026-03-01
 > Status: ✅ 已完成 — 双集群 OTLP traces → Tempo 已生产运行。
 > ⚠️ 此后 collector 形态又变过：2026-07-31 homelab 首次真正部署 collector、oracle 侧现代化，
-> 当前架构见 [reference/observability-otel-logging.md](../../reference/observability-otel-logging.md)
-> 与 [decisions/otel-2026-alignment.md](../../decisions/otel-2026-alignment.md)。
+> 当前架构见 [reference/observability-multicluster.md](../reference/observability-multicluster.md)
+> 与 [decisions/otel-2026-alignment.md](../decisions/otel-2026-alignment.md)。
 > ⚠️ 文中出现的 `docs/architecture/*` 路径已不存在——该目录 2026-06 重组进 `reference/`+`decisions/`。
 
 ## Background
@@ -143,6 +143,6 @@ Language-specific guidance:
 | `k8s/helm/manifests/monitoring-external.yaml` | Add Tempo gRPC NodePort (31317) |
 | `k8s/helm/values/tempo.yaml` | Bump storage 2Gi → 5Gi |
 | `k8s/helm/values/kube-prometheus-stack.yaml` | Improve Tempo datasource config |
-| `docs/architecture/observability-otel-logging.md` | Update with tracing section |
+| `docs/architecture/observability-multicluster.md` | Update with tracing section |
 | `docs/architecture/observability-multicluster.md` | Add traces pipeline docs |
 | `docs/CONVENTIONS.md` | Add tracing instrumentation guide |

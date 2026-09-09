@@ -1,7 +1,7 @@
 # Backup & Recovery Runbook
 
-> Last updated: 2026-09-01
-> 设计与执行: [../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md](../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md)
+> Last updated: 2026-09-09
+> 设计与执行: [../plans/2026-07-06-storage-local-migration-and-backup-redesign.md](../plans/2026-07-06-storage-local-migration-and-backup-redesign.md)
 >
 > **触发条件**：备份/恢复运维（含月度恢复演练）、或数据丢失/损坏后需要从 restic 恢复。
 > **成功判定**：恢复后数据可用（按 § 恢复逐类验证）；演练则 8 条判据全过（见「演练失败怎么办」）。
@@ -139,6 +139,6 @@ restic unlock --remove-all
 4. **离站（later）** — 抗屋内灾难（106 磁盘全损/失窃/火灾）。
 
 ## 相关文档
-- 主计划: `docs/plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md`
-- 战略母文档: `../plans/architecture/2026-07-04-fleet-architecture-optimization.md`（P0-1 离站备份）
-- 存储 106 收尾: `docs/plans/storage/2026-07-04-storage-106-utilization-and-backup-simplification.md`（ARC/sanoid）
+- 主计划: `docs/plans/2026-07-06-storage-local-migration-and-backup-redesign.md`
+- 战略母文档: `../plans/2026-07-04-fleet-architecture-optimization.md`（P0-1 离站备份）
+- 存储 106 收尾: `docs/plans/archive/2026-07-04-storage-106-utilization-and-backup-simplification.md`（ARC/sanoid）

@@ -2,7 +2,7 @@
 
 > **状态: ✅ 已完成（2026-03-06）** —— 双集群现统一 Cilium（eBPF + VXLAN），homelab pin v1.19.1，
 > 经 `just deploy-cilium` 以 Helm 管理（非 ArgoCD）。这是 CNI 决策的事实来源，无独立 ADR。
-> 当前网络模型见 [reference/tailscale-network.md](../../reference/tailscale-network.md)。
+> 当前网络模型见 [reference/tailscale-network.md](../reference/tailscale-network.md)。
 
 ## 背景
 

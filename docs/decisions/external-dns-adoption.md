@@ -2,7 +2,7 @@
 
 > 日期: 2026-07-19（2026-07-20 补：homelab 收尾 + observability + oracle-k3s 全量落地 + 双集群隧道通配）
 > 状态: ✅ 已实施（两集群全量完成）。homelab + oracle-k3s 均已：既有记录零停机迁移给 external-dns、terraform DNS 解耦收缩、隧道改单条 `*.meirong.dev` 通配路由。homelab 另配 ServiceMonitor+告警。加子域名从此**只写一个 HTTPRoute**（两集群均已端到端验证）。
-> 关联：[演进路线 Phase D](../plans/architecture/2026-07-07-tech-debt-and-evolution.md) · [gateway-controller-evaluation](gateway-controller-evaluation.md)
+> 关联：[演进路线 Phase D](../plans/2026-07-07-tech-debt-and-evolution.md) · [gateway-controller-evaluation](gateway-controller-evaluation.md)
 
 ## Context（痛点）
 
