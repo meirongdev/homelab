@@ -18,6 +18,17 @@ resources:
   - loki-rules.yaml
   # KRR 右尺寸推荐周报（查中枢 Prometheus，结果推 Telegram）
   - krr.yaml
+  # KRR 报告的内存构成附表脚本（RSS/PSS/USS）。
+  # ⚠️ 走 `resources` 而不是 configMapGenerator：generator 会给名字加内容哈希，
+  #    而 krr.yaml 里的 volume 是按固定名 `krr-mem-profile` 引用的。CronJob 每轮
+  #    新建 pod、必然读到当前 ConfigMap，所以这里不需要 generator 那套「改名触发滚动」。
+  #    内容与 homelab 那份的一致性由 CI 的 E1 保证（两份内嵌副本、同一个源文件）。
+  - krr-mem-profile-cm.yaml
+  # PSS/USS 采集器（DaemonSet，写 node-exporter 的 textfile 目录）。
+  # 同样走 resources 而非 configMapGenerator：DaemonSet 的 volume 按固定名引用，
+  # 而「ConfigMap 变了 pod 不重启」那半由 pod 模板上的 checksum 注解 + E1 兜住。
+  - node-mem-profile-cm.yaml
+  - node-mem-profile.yaml
   # ⚠️ namespace.yaml 刻意**不在这里**：ns 继续归 oracle-k3s App
   #    （被 prune 的若是 Namespace 会级联删光 ns 下一切）。
 

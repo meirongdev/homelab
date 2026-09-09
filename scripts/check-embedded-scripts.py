@@ -66,6 +66,44 @@ TARGETS = [
         "stamp": ("k8s/helm/manifests/litellm/litellm.yaml",
                   "checksum/codex-compat-py"),
     },
+    # ── KRR 内存构成附表 ──────────────────────────────────────────────────────
+    # ☠️ 下面两条是**同一个 `src` 的两份内嵌副本**（homelab 与 oracle 各一份）。
+    # 这是本列表里第一次出现一对多，登记两条就够了：每条各自校验/重写自己那份 ConfigMap，
+    # 而它们读的是同一个源文件 → 两边不可能漂移出分歧。
+    # 之所以必须有两份副本：两个集群的清单树由不同 ArgoCD App 同步（homelab 目录递归、
+    # oracle kustomize），跨树引用同一个文件两边都做不到。
+    # ⚠️ 加/改任何一份时，另一份会被 `--write` 一起改 —— 别只提交一边。
+    {
+        "src": "k8s/helm/manifests/monitoring/krr-mem-profile.py",
+        "cm": "k8s/helm/manifests/monitoring/krr-mem-profile-cm.yaml",
+        "key": "krr-mem-profile.py",
+        "stamp": ("k8s/helm/manifests/monitoring/krr.yaml",
+                  "checksum/krr-mem-profile-py"),
+    },
+    {
+        "src": "k8s/helm/manifests/monitoring/krr-mem-profile.py",
+        "cm": "cloud/oracle/manifests/monitoring/krr-mem-profile-cm.yaml",
+        "key": "krr-mem-profile.py",
+        "stamp": ("cloud/oracle/manifests/monitoring/krr.yaml",
+                  "checksum/krr-mem-profile-py"),
+    },
+    # ── PSS/USS 采集器 ────────────────────────────────────────────────────────
+    # 同样是「一个 src、两份内嵌副本」。与上面 krr 那对不同的是：这两个消费者是
+    # **DaemonSet**（长驻），所以 stamp 那半是真需要的 —— ConfigMap 变了 pod 不会重启。
+    {
+        "src": "k8s/helm/manifests/monitoring/node-mem-profile.py",
+        "cm": "k8s/helm/manifests/monitoring/node-mem-profile-cm.yaml",
+        "key": "node-mem-profile.py",
+        "stamp": ("k8s/helm/manifests/monitoring/node-mem-profile.yaml",
+                  "checksum/node-mem-profile-py"),
+    },
+    {
+        "src": "k8s/helm/manifests/monitoring/node-mem-profile.py",
+        "cm": "cloud/oracle/manifests/monitoring/node-mem-profile-cm.yaml",
+        "key": "node-mem-profile.py",
+        "stamp": ("cloud/oracle/manifests/monitoring/node-mem-profile.yaml",
+                  "checksum/node-mem-profile-py"),
+    },
 ]
 
 # 只做 (b)：哈希 ConfigMap 里的内嵌块 → 写进 pod 模板注解。无外部源文件、块不必在文件末尾。

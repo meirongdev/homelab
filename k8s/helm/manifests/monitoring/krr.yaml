@@ -68,6 +68,12 @@ spec:
       template:
         metadata:
           labels: { app: krr }
+          annotations:
+            # 由 `just gen-embedded-scripts` 写入 krr-mem-profile.py 的 sha256 前 16 位。
+            # CronJob 每轮都新建 pod、必然读到当前 ConfigMap，所以这里**不是**为了触发重启
+            # （那是 Deployment 才有的问题）；留着是为了让「脚本改了」在 git diff 与 ArgoCD
+            # 上可见，且与 E1 的另一半规则保持同一个形状。
+            checksum/krr-mem-profile-py: "e9cf9040fa96348d"
         spec:
           restartPolicy: Never
           serviceAccountName: krr
@@ -104,6 +110,29 @@ spec:
               resources:
                 requests: { cpu: "100m", memory: "256Mi" }
                 limits: { memory: "1Gi" }
+            # 内存构成附表：把 RSS/PSS/USS 追加到 KRR 报告尾部。
+            # 为什么必须有它：KRR 的内存推荐是 max(working_set)+15%，而 working_set **含页缓存** ——
+            # 它系统性地诱导上调。实测（2026-09-09）prometheus 的建议值 58% 是页缓存、vault 70%，
+            # 而同一份报告里 litellm 的 +913Mi 是真的（页缓存仅 9%），两者在 KRR 表里长得一样。
+            # 机械照抄的代价算过：homelab 净 +2345Mi、oracle 净 +3468Mi，而 oracle 只剩 2180Mi 余量。
+            # 复用 KRR 自己的镜像（它就是 python 镜像）→ 零新镜像、零新 registry 拉取。
+            # ⚠️ 脚本 fail-open：查不到指标只在报告里留一行说明，绝不让 Job 失败 ——
+            #    报告发不出去比报告少一张附表严重得多。
+            - name: mem-profile
+              image: docker.io/robustadev/krr:v1.29.0
+              command: ["python", "/scripts/krr-mem-profile.py"]
+              env:
+                - { name: PROM_URL, value: "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090" }
+                - { name: CLUSTER, value: homelab }
+                # 与上面 KRR 的 --history-duration=168 同窗口，否则两张表不可比
+                - { name: WINDOW, value: 168h }
+                - { name: OUT, value: /out/krr.txt }
+              volumeMounts:
+                - { name: out, mountPath: /out }
+                - { name: mem-profile, mountPath: /scripts, readOnly: true }
+              resources:
+                requests: { cpu: "50m", memory: "64Mi" }
+                limits: { memory: "256Mi" }
           containers:
             - name: notify
               # 8.21.0：8.11.1 的 alpine libssl3/libcrypto3 停在 3.3.2-r4，
@@ -147,3 +176,7 @@ spec:
           volumes:
             - name: out
               emptyDir: {}
+            - name: mem-profile
+              configMap:
+                name: krr-mem-profile
+                defaultMode: 0755

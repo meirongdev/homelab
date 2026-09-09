@@ -1,6 +1,6 @@
 # 成本归因与资源右尺寸
 
-> Last updated: 2026-09-05
+> Last updated: 2026-09-09
 > Status: 生效事实
 
 两套互补的工具：**OpenCost** 回答「钱花在哪」（常驻，出指标 → Grafana），
@@ -144,6 +144,46 @@ oracle 的这两个指标由 otel `prometheus/cadvisor` receiver 提供（见
 | `--cluster` / `-c` | kubeconfig context | 集群内跑时用不上 |
 | `--history-duration` | 小时数 | 默认 336(14d) > Prometheus retention 7d，**不传不会报错、只会静默用不足的数据**，故显式传 `168` |
 | `--width` | 输出宽度 | 180 会把 namespace 截断成 `personal…`；附件不是终端，用 300 |
+
+### 内存构成附表（RSS / PSS / USS）
+
+KRR 的内存基准 `working_set` **含页缓存**，定 request 时会系统性高报。
+`krr.yaml` 的 `mem-profile` initContainer 因此在报告尾部追加一张构成表
+（源 `k8s/helm/manifests/monitoring/krr-mem-profile.py`，两集群共用、E1 管一致性）。
+
+> **怎么读、什么时候该采纳** → [runbooks/krr-report-triage.md § 1](../runbooks/krr-report-triage.md)
+> （含实测的高报幅度对照表）。本节只讲它怎么产生的。
+
+- 列：WS / RSS / PSS / USS / 页缓存占比 / 按 RSS 重算的建议值 / Δ
+- 排序按「要改动的绝对量」，**不按页缓存占比** —— 后者会把 2Mi 的容器顶到最前
+- 只列**当前存在**的容器（与 `kube_pod_container_info` 取交集）：不过滤的话
+  `max_over_time[7d]` 会把已消亡的 Trivy 扫描 Job 算进来，而它们的容器名取自
+  被扫的工作负载（`trivy-system/jellyfin`…）。首版实测 113 行里 60 行是这种残影
+- **fail-open**：查不到指标只留一行说明，绝不让周报发不出去
+- 跑在 KRR 自己的镜像里（它本来就是 python 镜像）→ 零新镜像、零新 registry 拉取
+
+### PSS/USS 采集器
+
+cAdvisor **不导出 PSS/USS**，由 `node-mem-profile` DaemonSet 补
+（两集群 `manifests/monitoring/node-mem-profile.yaml`，读 `/proc/<pid>/smaps_rollup`
+→ 写 node-exporter 的 textfile 目录）。两集群 node-exporter 都已开着
+`--collector.textfile.directory`，**不需要改它**。
+
+☠️ 三个必须的条件，缺任何一个都是**静默漏采**（表里显示 `—`，不报错不告警）：
+
+| 条件 | 缺了会怎样（k8s-node 实测，共 47 个容器） |
+|---|---|
+| `hostPID: true` | 只看得见采集器自己那几个进程 |
+| `runAsUser: 0` + `CAP_SYS_PTRACE` | 383 个进程只读到 19 个。**root 单独不够** —— 容器 root 默认不带这个 capability |
+| `appArmorProfile: Unconfined` | 采到 43/47；privileged 容器（cilium-agent / tetragon / falco）跑在 unconfined 下，受限 profile 的进程 ptrace 不了它们。加上后 46/47（差的是采集器自己）|
+
+⚠️ 指标标签是 `k8s_namespace` / `k8s_pod_name` / `k8s_container_name`，
+**刻意不叫** `namespace`/`pod`/`container`：后者会与抓取 node-exporter 时注入的目标标签
+撞名，被改写成 `exported_*`（首版就这么栽过 —— series 数正确、表里却全是 `—`）。
+
+成本实测：一轮全扫 237ms CPU，5 分钟一轮 = 一个核的 0.079%。
+自身健康看 `node_mem_profile_last_success_timestamp_seconds` /
+`node_mem_profile_containers`（textfile 的旧值会一直被吐出去，进程活着 ≠ 在采）。
 
 ## 运维操作
 
