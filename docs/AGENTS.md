@@ -85,7 +85,7 @@ docs/                          # 见下方「Documentation Rules」
 「清单正确 + ArgoCD Synced + 调用全挂」，且用虚拟 key 查 `/v1/models` 会误判成配置没生效 ·
 GitOps/App `argocd-app-patterns.md` · 入口/DNS `networking-ingress.md` · 跨集群 `tailscale-network.md` ·
 存储/备份 `storage.md` · 身份/OIDC `identity.md` · 安全逐层 `security.md` · 可观测
-`observability-multicluster.md` + `observability-otel-logging.md` · 告警/SLO
+`observability-multicluster.md` · 告警/SLO
 `observability-alerting-slo.md` · 公网访问分析（谁在访问、真人/爬虫/自建监控）
 `public-traffic-analysis.md` · 成本 `cost-and-rightsizing.md` · 资源/QoS
 `k8s-qos-resource-management.md`。
@@ -111,13 +111,13 @@ GitOps/App `argocd-app-patterns.md` · 入口/DNS `networking-ingress.md` · 跨
 
 ## Documentation Rules
 
-写文档前读 [docs/RULES.md](RULES.md) 的 R1–R8（目录归属/命名/文首字段/状态枚举/索引维护/
-唯一真相源/长度预算），CI 的 `check-docs.py` 强制。放错目录、漏建索引都算违规。最常踩的三条：
+写文档前读 [docs/RULES.md](RULES.md) 的 R1–R8（目录归属/命名/文首字段/状态标记/索引维护/
+唯一真相源/命令上下文/长度预算），CI 的 `check-docs.py` 强制。最常踩的三条：
 
 - **架构事实**进 `reference/`（唯一真相源），别在 plan 里留唯一副本；
   **决策**进 `decisions/`；**可重复 SOP** 进 `runbooks/`；**故障复盘**进 `records/`。
-- `plans/` 是**写完即冻结的历史快照，不代表现状**，查现状永远看 `reference/`。
-  被取代时不删文件，标状态 + 链到取代者。
+- `plans/` 是**写完即冻结的历史快照，不代表现状**（扁平目录，不分类别；东西已不存在的
+  在 `plans/archive/`），查现状永远看 `reference/`。被取代时不删文件，标状态 + 链到取代者。
 - 命令步骤必须可执行，避免思路型描述；过期内容标 `Deprecated` 并链到替代文档。
 
 ## Manifest Safety (CI 强制)

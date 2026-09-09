@@ -6,8 +6,8 @@
 >       + 7 项现场采集**，且全靠人肉记忆串联。做完 P0 三件（CI 字面值门禁 / 契约回归脚本 /
 >       key 卫生）后，下一次的成本应降到「改 1 个声明值 + 跑 2 条命令 + 核 5 条验收」，
 >       漏改由 CI 红灯与一条新告警分别兜住。
-> 关联: [换栈 SOP](../../runbooks/dgx-model-swap-homelab-followup.md)（本文是它 §8「后续优化」的展开）·
-> [ROADMAP 开放项](../../ROADMAP.md)· [litellm-gateway.md](../../reference/litellm-gateway.md) 坑 A/B
+> 关联: [换栈 SOP](../runbooks/dgx-model-swap-homelab-followup.md)（本文是它 §8「后续优化」的展开）·
+> [ROADMAP 开放项](../ROADMAP.md)· [litellm-gateway.md](../reference/litellm-gateway.md) 坑 A/B
 
 ---
 
@@ -163,7 +163,7 @@ dgx_served_model := "qwen38-flash-next"
 
 1. **不把网关别名改成"与模型无关的稳定名"**。它确实最省事，但代价是让"清单写 deepseek、
    实际给 Qwen"这种谎话进网关，结论与代价已记在
-   [decisions/litellm-llm-gateway.md](../../decisions/litellm-llm-gateway.md) 的 2026-09-03 修订。
+   [decisions/litellm-llm-gateway.md](../decisions/litellm-llm-gateway.md) 的 2026-09-03 修订。
    省下的手工量正是靠隐瞒"现在到底是谁在服务"换来的，不划算。
 2. **不擅自放宽 key 白名单换省事**（§5 的通配那条）。ACL 从"哪把 key 能调哪个模型"
    降级成"哪把 key 能调 DGX"，动的是「越权不了」这个既有口径，是要人拍板的取舍，
@@ -185,7 +185,7 @@ dgx_served_model := "qwen38-flash-next"
 
 ## 8. 与现有文档的关系
 
-- [runbooks/dgx-model-swap-homelab-followup.md](../../runbooks/dgx-model-swap-homelab-followup.md)
+- [runbooks/dgx-model-swap-homelab-followup.md](../runbooks/dgx-model-swap-homelab-followup.md)
   仍是**唯一 SOP**（怎么做、验收、回滚）。本文只回答"下次怎么更省"，实施细节以本文为准。
 - 本文 P1-1 取代 SOP §8 第 2 条设想的 json-exporter 形态；SOP 已加指针，两处不再各存一份。
 - 实施完成后：稳定结论回 `reference/litellm-gateway.md`（新增的告警/门禁/recipe 是**事实**），

@@ -2,7 +2,7 @@
 
 > 状态: ✅ 已部署（2026-06 起；`tetragon` ns 运行中、`falco` App Synced/Healthy）。Falco→Telegram 已于 2026-07 随 Gotify 下线改为 Falcosidekick 原生 Telegram output（不再经 Gotify）。
 > 结论: 按集群硬件分别选型——homelab 用内核态过滤省 CPU 的 Tetragon，oracle 用规则开箱即用的 Falco+Falcosidekick→Telegram（原生 output，2026-07 起）。
-> 架构总览见 [../../reference/security.md](../../reference/security.md) §8.5。
+> 架构总览见 [../reference/security.md](../reference/security.md) §8.5。
 
 ## Context
 

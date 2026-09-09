@@ -137,7 +137,7 @@ Cilium / Vault / ESO / ArgoCD 本体。理由是它们要么是 ArgoCD 自己的
 | **Alertmanager** | 告警去重/路由/静默 | 投递到 Telegram（原生 `telegramConfigs`，Gotify 已退役）→ [alerting-telegram-migration.md](../decisions/alerting-telegram-migration.md) |
 | **Loki** | 日志存储（按标签索引，不做全文索引） | ☠️ 在 **oracle**，不在 Prometheus 旁边 |
 | **Tempo** | 分布式追踪存储 | 在 oracle；⚠️ 写入口与查询口是**两个端口** |
-| **OpenTelemetry Collector** | 统一采集日志/指标/追踪并转发 | DaemonSet，取代 Promtail；应用接入有 4 种模式（含 linuxserver.io 那类只写文件不写 stdout 的）→ [observability-otel-logging.md](observability-otel-logging.md) |
+| **OpenTelemetry Collector** | 统一采集日志/指标/追踪并转发 | DaemonSet，取代 Promtail；应用接入有 4 种模式（含 linuxserver.io 那类只写文件不写 stdout 的）→ [observability-multicluster.md](observability-multicluster.md) |
 | **Sloth** | 用 CR 生成 SLO 的 PromQL 与告警规则 | ☠️ `errorQuery` 必须 `OR on() vector(0)`，否则空集会让 SLO 变 NaN → [2026-08-12-slo-nan-poisoning.md](../records/2026-08-12-slo-nan-poisoning.md) |
 | **OpenCost / KRR** | 成本归因 / 资源右尺寸建议 | 两者都因同一个 cAdvisor 缺口需要旁路采集 → [opencost-krr-data-sources.md](../decisions/opencost-krr-data-sources.md) |
 | **Uptime Kuma** | 外部视角的可用性探测 | 兼任 dead man's switch 的接收端 —— 唯一不与被监控方共命运的告警 → [dead-mans-switch.md](dead-mans-switch.md) |

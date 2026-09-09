@@ -3,7 +3,7 @@
 > **状态: ✅ 已完成（2026-02-21）** —— 面板由 ArgoCD `monitoring-dashboards` App 同步。
 > ⚠️ 面板组织已于 2026-06-15 整改（按 `grafana_folder` 分文件夹 + 多集群选择器），
 > 且 manifest 已移到 `k8s/helm/manifests/monitoring/dashboards/`。
-> 当前约定见 [reference/observability-alerting-slo.md › Dashboards 组织](../../reference/observability-alerting-slo.md)。
+> 当前约定见 [reference/observability-alerting-slo.md › Dashboards 组织](../reference/observability-alerting-slo.md)。
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
@@ -671,6 +671,23 @@ kubectl logs -n monitoring deploy/kube-prometheus-stack-grafana \
 ```
 
 ---
+
+## 原设计的选型（2026-02-21，原独立设计文档，已并入本页）
+
+**选定：Grafana Labs 官方 k8s-monitoring Dashboard**（`grafana/k8s-monitoring-helm`, Apache 2.0）。
+它按 OTel 语义标签（`service_name` / `service_namespace`）设计，与当时 Loki 的 label 集完全兼容，
+不用手写 JSON。代价是升级要手动同步 GitHub 上的最新 JSON，且部分面板是为多节点集群设计的。
+
+被否决的两个：
+
+- **自定义 Dashboard**（手写 JSON）—— 官方面板已解决 OTel label 兼容问题，重复造轮子不划算；
+  个别面板不适用直接删减更快。
+- **Grafana Logs App plugin** —— 交互确实更好，但要 ConfigMap 注册 plugin、持久化配置麻烦；
+  homelab 规模下静态 Dashboard 够用，临时查询用 Explore。
+
+两条实施约束（当时踩点确认的）：Dashboard ConfigMap 必须与 Grafana Pod 同在 `monitoring` ns，
+sidecar 才发现得了；不能复用 `personal-services` App（它的目标 ns 不对），所以另建了
+`monitoring-dashboards` App。
 
 ## 回滚方案
 

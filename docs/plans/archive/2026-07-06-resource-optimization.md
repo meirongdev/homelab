@@ -13,7 +13,7 @@
 > 保留本文只为记录"当时按什么推导削的"这一套方法与风险分级。
 > 日期: 2026-07-06
 > 范围: homelab 集群（5600H, 12GB VM）常驻服务资源 requests/limits 调整
-> 前置: [2026-07-04 舰队架构优化](../architecture/2026-07-04-fleet-architecture-optimization.md)（物理层）、
+> 前置: [2026-07-04 舰队架构优化](../2026-07-04-fleet-architecture-optimization.md)（物理层）、
 > [reference/k8s-qos-resource-management.md](../../reference/k8s-qos-resource-management.md)（QoS 策略基准）
 
 ---

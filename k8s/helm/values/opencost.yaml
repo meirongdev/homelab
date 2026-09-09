@@ -3,7 +3,7 @@
 # 由 ArgoCD Helm App 部署到 **homelab 集群**（argocd/applications/opencost.yaml），dest ns: opencost
 #
 # 数据源选型：collector（**不查 Prometheus**）。理由见
-# docs/plans/observability/2026-07-30-opencost-multicluster.md
+# docs/plans/2026-07-30-opencost-multicluster.md
 #   - oracle 侧 otel 未采 OpenCost 需要的 cAdvisor 指标（后来为 KRR 加的 cadvisor job
 #     只 keep 了 2 个指标，不含 container_fs_* / container_network_*），
 #     中枢 Prometheus 无法支撑 oracle 的 Prometheus 数据源

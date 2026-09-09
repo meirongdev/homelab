@@ -1,10 +1,10 @@
 # K3s 集群安全架构 (Security Architecture)
 
-> Last updated: 2026-09-05
+> Last updated: 2026-09-09
 > Status: 生效事实
 > Scope: 双集群（homelab + oracle-k3s）的纵深防御模型，本文是 source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
-> 实施决策与权衡见 [../plans/security/2026-06-16-k3s-security-hardening.md](../plans/security/2026-06-16-k3s-security-hardening.md)。
+> 实施决策与权衡见 [../plans/2026-06-16-k3s-security-hardening.md](../plans/2026-06-16-k3s-security-hardening.md)。
 
 ## 速览
 
@@ -27,7 +27,7 @@
 | # | 层 | 组件 | 状态 | 配置位置 | 集群 |
 |---|----|------|------|----------|------|
 | 1 | 边缘 | Cloudflare WAF + Tunnel + 限流 | ✅ 生产 | `cloudflare/terraform/waf.tf` | 双（zone 级） |
-| 2 | 身份 | ZITADEL OIDC + GitHub 联邦 | ✅ 生产 | `zitadel/`, 各 app values | oracle-k3s(IdP，2026-07-06 迁自 homelab，见 [zitadel-to-oracle-k3s.md](../plans/apps/2026-07-04-zitadel-to-oracle-k3s.md)) |
+| 2 | 身份 | ZITADEL OIDC + GitHub 联邦 | ✅ 生产 | `zitadel/`, 各 app values | oracle-k3s(IdP，2026-07-06 迁自 homelab，见 [zitadel-to-oracle-k3s.md](../plans/2026-07-04-zitadel-to-oracle-k3s.md)) |
 | 3 | 密钥 | Vault + ESO + 健康告警 | ✅ 生产 | `k8s/helm/values/vault-*`, `manifests/monitoring/alerts/eso-alerts.yaml` | 双 |
 | 4 | 准入：Pod 基线 | Pod Security Admission | ✅ 生产 | `just harden-psa` / oracle ns 清单 | 双 |
 | 5 | 准入：策略即代码 | Kyverno（3 条 Audit + `disallow-latest-tag` Enforce，见 §5.2）| ✅ 生产 | `values/kyverno.yaml`, `manifests/kyverno-policies/` | homelab |
@@ -296,7 +296,7 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 | 需求 | 入口 |
 |------|------|
 | 部署/验证/回滚（Phase 0+1） | [../runbooks/security-hardening.md](../runbooks/security-hardening.md) |
-| 实施决策与权衡 | [../plans/security/2026-06-16-k3s-security-hardening.md](../plans/security/2026-06-16-k3s-security-hardening.md) |
+| 实施决策与权衡 | [../plans/2026-06-16-k3s-security-hardening.md](../plans/2026-06-16-k3s-security-hardening.md) |
 | 身份/OIDC 接入细节 | [identity.md](identity.md) |
 | 备份恢复 | [../runbooks/backup-recovery.md](../runbooks/backup-recovery.md) |
 | 重启后恢复 | `just homelab-recover`（k8s/helm） |

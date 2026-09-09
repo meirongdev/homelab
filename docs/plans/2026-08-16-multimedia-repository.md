@@ -25,7 +25,7 @@
 
 ### 1.2 为何「数据在 106、serving 在 k8s」是低成本正解
 
-双集群余量（[cluster-placement](../../decisions/cluster-placement-for-new-services.md)）与其存储本质：
+双集群余量（[cluster-placement](../decisions/cluster-placement-for-new-services.md)）与其存储本质：
 
 | 落点 | 结论 |
 |------|------|
@@ -34,11 +34,11 @@
 | **NAS 106（ZFS `mrstorage`）** | **为海量数据而造**：raidz1 + sanoid 快照。视频 500GB 吃 ZFS 保护，restic 不必备份它 → 备份不爆炸。这是数据唯一真相源的合理落点 |
 
 106 恰是 NAS 本体（`192.168.50.106` / TS `100.110.27.111`，ZFS pool `mrstorage` 挂 `/storage`）。
-媒体放 106 是符合现有存储架构（[storage.md](../../reference/storage.md)）的延伸，而非新引入的故障面。
+媒体放 106 是符合现有存储架构（[storage.md](../reference/storage.md)）的延伸，而非新引入的故障面。
 
 ### 1.3 只读 NFS 是路线 A 的代价，但有据可依
 
-- [storage.md](../../reference/storage.md) 明言：**「大顺序读对 NFS 耐受度高得多，NFS 的坑在 sqlite 的
+- [storage.md](../reference/storage.md) 明言：**「大顺序读对 NFS 耐受度高得多，NFS 的坑在 sqlite 的
   lock+fsync」**。媒体是**顺序读 + 只读 + 非关键路径**，恰是 NFS 能安全兜住的那类；
   不做运行时 sqlite/PG（那才是当初退役 NFS 的根因）。
 - 重开 106 **一个只读 export**（`ro,sync,all_squash`，只暴露 `media/`），k8s 侧以 NFS volume
@@ -86,7 +86,7 @@
 | HTTPRoute ×3 | 子域名入口 | 新增 | 新建子域名不需动 Cloudflare（external-dns）|
 
 落点理由：三服务都 amd64-only/或需 NFS 到 106/或走 k8s，故全放 homelab；轻量但需要本集群
-数据与 NFS，符合 [cluster-placement](../../decisions/cluster-placement-for-new-services.md) 判据。
+数据与 NFS，符合 [cluster-placement](../decisions/cluster-placement-for-new-services.md) 判据。
 
 ## 3. 关键决策
 
@@ -100,7 +100,7 @@
    否决 Funkwhale（联邦/公开是它的重价值，个人私藏仓库用不上，纯付复杂度）。
 4. **podcast 用静态 RSS**，不上 Castopod（见 §1.4）。
 5. **新子域名走现有隧道**：写 HTTPRoute 即可（external-dns 建记录 + 隧道通配路由），
-   **不改 `cloudflare/terraform`**（[networking-ingress.md](../../reference/networking-ingress.md)）。
+   **不改 `cloudflare/terraform`**（[networking-ingress.md](../reference/networking-ingress.md)）。
 6. **镜像按 digest 钉死**（仓库惯例）；Jellyfin/Navidrome 需确认 amd64 digest（均 amd64-only 无 arm64 顾虑）。
 
 ## 4. 不做的事（YAGNI）
@@ -209,7 +209,7 @@ mount -t nfs 100.110.27.111:/storage/media /mnt/media-test -o ro && \
 
 **Files（新建）：** `argocd/applications/{jellyfin,navidrome,podcast}.yaml`
 （destination `https://100.94.186.7:6443` = homelab，见
-[argocd-app-patterns.md](../../reference/argocd-app-patterns.md)）。git push → 3 分钟轮询同步。
+[argocd-app-patterns.md](../reference/argocd-app-patterns.md)）。git push → 3 分钟轮询同步。
 
 ---
 
@@ -239,12 +239,12 @@ mount -t nfs 100.110.27.111:/storage/media /mnt/media-test -o ro && \
 > **2026-08-20 补记**：本 Task 的 ADR 那一条当时**漏做了**，后果是四篇活文档
 > （`AGENTS.md` / `ARCHITECTURE.md` / `reference/storage.md` / `reference/terminology.md`）
 > 在四天里继续声称"NFS 已退役、106 非运行时依赖"，与已上线的只读 NFS 直接矛盾。
-> 已于当日补齐，见 [decisions/multimedia-repository-nfs-readonly.md](../../decisions/multimedia-repository-nfs-readonly.md)。
+> 已于当日补齐，见 [decisions/multimedia-repository-nfs-readonly.md](../decisions/multimedia-repository-nfs-readonly.md)。
 
 - [x] 新增 `docs/decisions/multimedia-repository-nfs-readonly.md`（决策 1–2 的 ADR，R3 字段）
       —— **2026-08-20 补做**
 - 更新 `docs/reference/services.md`（服务清单唯一真相源）、`docs/ROADMAP.md`（如适用）
-- 更新 `docs/plans/apps/README.md` 索引 + `docs/plans/README.md` 份数（apps 8→9）
+- 更新 `docs/plans/README.md` 索引 + `docs/plans/README.md` 份数（apps 8→9）
 - `python3 scripts/check-docs.py` 期望 exit 0
 
 ---

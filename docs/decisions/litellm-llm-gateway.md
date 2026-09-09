@@ -2,7 +2,7 @@
 
 > 日期: 2026-08-01（2026-08-16 实施，纳入 Mac OMLX 第二上游）
 > 状态: ✅ 已实施
-> 关联: `docs/plans/apps/2026-08-01-litellm-gateway-migration.md`
+> 关联: `docs/plans/2026-08-01-litellm-gateway-migration.md`
 > 生效事实与运维坑（虚拟 key 白名单 / 配置生效路径 / 上游可用性）:
 >   [reference/litellm-gateway.md](../reference/litellm-gateway.md)
 > 修订: 2026-08-25：Mac 兜底模型由 `Qwen3.6-35B` 换为 `Ornith-1.5-35B-A3B`，
@@ -60,7 +60,7 @@ homelab LLM 网关（llm.meirong.dev）原为一个自托管的 LLM 网关。其
 - [cluster-placement-for-new-services](cluster-placement-for-new-services.md)（落点判据）
 - [dgx-clustermesh-not-adopted](dgx-clustermesh-not-adopted.md)（DGX 网络边界）
 - `/docs/reference/open-notebook.md`（双上游接线唯一真相源）
-- `/docs/plans/apps/2026-08-01-litellm-gateway-migration.md`（实施计划，冻结快照）
+- `/docs/plans/2026-08-01-litellm-gateway-migration.md`（实施计划，冻结快照）
 
 ## 2026-08-25 修订：Mac 兜底模型换成 Ornith-1.5-35B-A3B
 

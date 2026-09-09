@@ -1,6 +1,6 @@
 # Storage & Backup — 存储与备份
 
-> Last updated: 2026-09-07
+> Last updated: 2026-09-09
 > Status: 生效事实
 >
 > 双集群存储布局（可写卷全 `local-path` + 媒体只读 NFS）、NFS 退役的确切范围、
@@ -14,7 +14,7 @@
   PVE 节点，`proxmox/ansible/inventory.yaml` 的 `storage` 组。
 - 数据在 **ZFS pool `mrstorage`，挂载 `/storage`**（与 OS 盘分离），由
   `proxmox/ansible/storage-playbook.yaml` 预配。**ARC 读缓存上限 2GiB** + sanoid hourly/daily 快照
-  （见 [../plans/storage/2026-07-04-storage-106-utilization-and-backup-simplification.md](../plans/storage/2026-07-04-storage-106-utilization-and-backup-simplification.md)）。
+  （见 [../plans/archive/2026-07-04-storage-106-utilization-and-backup-simplification.md](../plans/archive/2026-07-04-storage-106-utilization-and-backup-simplification.md)）。
   ⚠️ ARC 于 2026-08-13 由 4G 降到 2G、2026-08-16 再降到 1G，给同机那台 VM 腾内存
   （106 只有 8G，现在的三方分配 = ARC 1G / 宿主 ~2.6G / VM 4G）。106 是备份目标，
   写入是顺序 pack 文件，ARC 主要服务夜间 restic prune/check 的元数据；媒体只读 NFS 是大文件
@@ -45,7 +45,7 @@
   **不经 provisioner、无 StorageClass**）挂 106 的 ZFS。退役结论仍然成立的部分：
   没有任何应用把可写数据放 NFS，provisioner 也没有回来。
   这个例外为什么成立、边界在哪、否决了什么 → [decisions/multimedia-repository-nfs-readonly.md](../decisions/multimedia-repository-nfs-readonly.md)（唯一解释处）；
-  执行过程见 [../plans/apps/2026-08-16-multimedia-repository.md](../plans/apps/2026-08-16-multimedia-repository.md)（冻结快照）。
+  执行过程见 [../plans/2026-08-16-multimedia-repository.md](../plans/2026-08-16-multimedia-repository.md)（冻结快照）。
 - NFS export 现有 7 个（全由 `proxmox/ansible/storage-playbook.yaml` 的 `nfs_exports` 管）：
   `/storage`、`/storage/calibre` 两个是迁移前的遗留、运行时无人挂载；
   `/storage/{movie,tv,anime,music,podcast}` 五个是媒体的只读（`ro` + `all_squash`）export，
@@ -211,7 +211,7 @@ restic（`restic ls … | head` 会 SIGPIPE 杀掉 restic，2026-08-13 实测踩
 ## PVC 迁移程序（改 claim 指向）
 
 历史背景：2026-07-06 的分层设计（sqlite/PG 迁 local-path、追加日志型留 NFS）已不存在，
-07-08 宕机后全量迁移（[当时的计划](../plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md)里的分层理由当历史读）。
+07-08 宕机后全量迁移（[当时的计划](../plans/2026-07-06-storage-local-migration-and-backup-redesign.md)里的分层理由当历史读）。
 
 要再迁一个 claim（StatefulSet 模板与 Deployment claim 都适用）：
 
@@ -230,7 +230,7 @@ restic（`restic ls … | head` 会 SIGPIPE 杀掉 restic，2026-08-13 实测踩
 
 - **状态**: 🟢 2026-07-06 上线，双集群每夜 → 106 ZFS 加密仓库 `881fb124bf`，恢复演练通过
   （2026-07-06：Vault raft + 2 PG + sqlite）。**离站副本仍待做**
-  （[../plans/storage/2026-08-03-offsite-backup.md](../plans/storage/2026-08-03-offsite-backup.md)）。
+  （[../plans/2026-08-03-offsite-backup.md](../plans/2026-08-03-offsite-backup.md)）。
   Kopia 已于 2026-07-05 移除。
 - **设计**: 无 server；**每集群一个 CronJob 直推** 106 的单一加密仓库 `mrstorage/restic`
   （`sftp:root@…:/storage/restic`；homelab 走 LAN `192.168.50.106`，oracle 走 Tailscale

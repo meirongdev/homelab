@@ -1,9 +1,9 @@
 # Homelab 文档组织规则 (R1–R8)
 
-> Last updated: 2026-09-06
+> Last updated: 2026-09-09
 > 2026-08-14 从 [docs/README.md](README.md)（门户）拆出：门户只做导航，写文档的规则集中在本页。
 >
-> 以下 7 条是强制的。新增或改动文档前先对照，违反的按下面的处理方式修。
+> 以下 8 条是强制的。新增或改动文档前先对照，违反的按下面的处理方式修。
 
 ## 怎么检查
 
@@ -21,8 +21,8 @@ CI 在每次 PR 与 push to main 时跑（`.github/workflows/docs-check.yml`）�
 |---|------|--------|
 | R2 | 命名 | ✅ 脚本 |
 | R3 | H1 位置 + 文首必填字段 | ✅ 脚本 |
-| R4 | 状态枚举标记 | ✅ 脚本 |
-| R5 | 目录索引双向完整 + `plans/README.md` 份数与实际一致 | ✅ 脚本 |
+| R4 | 状态标记 | ✅ 脚本 |
+| R5 | 目录索引双向完整 | ✅ 脚本 |
 | R8 | 索引行长度上限 + `AGENTS.md` 字节预算 | ✅ 脚本 |
 | — | 相对链接 + 非 docs 文件对 `docs/` 的引用 | ✅ 脚本 |
 | — | 非 docs README 的目录树只画真实存在的子目录 | ✅ 脚本 |
@@ -49,12 +49,13 @@ CI 在每次 PR 与 push to main 时跑（`.github/workflows/docs-check.yml`）�
 | `runbooks/` | 出事了怎么办？ | 针对本基础设施、可照抄执行的 SOP | 一次性迁移记录、非基础设施的工具说明 |
 | `guides/` | 这个跨领域任务怎么走？ | 非故障处置的流程（含本地工具） | 单组件故障 SOP |
 | `records/` | 那次到底怎么回事？ | 已发生的故障/排障复盘 | 计划、建议 |
-| `plans/<类别>/` | 当时打算怎么做？ | 带日期的方案，**写完即冻结** | 需要长期维护的事实 |
+| `plans/` | 当时打算怎么做？ | 带日期的方案，**写完即冻结** | 需要长期维护的事实 |
 | `plans/archive/` | 当初为什么考虑过 X，后来为什么没做？ | 不存在于当前系统的方案 | 已完成的方案（见下） |
 | `ROADMAP.md` | 还剩什么没做？为什么不做？ | 唯一的开放项清单 + 不做的结论 + 待重评表 | 实施细节（链到 decisions/plans）· **已完成的条目**（进 `CHANGELOG.md`） |
 | `CHANGELOG.md` | 做过什么？ | 已完成条目，一条一行 | 开放项 · 展开的实施细节 |
 
-类别：`apps` / `architecture` / `networking` / `observability` / `security` / `storage`。
+`plans/` 自 2026-09-09 起**不分类别子目录**：按类别归档的收益抵不上六份索引的维护成本，
+且多数方案本来就横跨两三个类别。
 
 什么时候移进 `archive/`：一份方案记录的东西从未存在，或者已被整体移除，
 状态是 `❌ 未实施` / `❌ 已取消` / `⚠️ 已被取代` / 前提已消失。判据只有一句：
@@ -73,7 +74,7 @@ CI 在每次 PR 与 push to main 时跑（`.github/workflows/docs-check.yml`）�
 
 | 位置 | 格式 | 例 |
 |------|------|-----|
-| `plans/*/`、`records/` | `YYYY-MM-DD-<topic>.md` | `2026-07-06-resource-optimization.md` |
+| `plans/`、`plans/archive/`、`records/` | `YYYY-MM-DD-<topic>.md` | `2026-07-06-resource-optimization.md` |
 | `reference/`、`decisions/`、`runbooks/`、`guides/` | `<topic>.md`，文件名不带日期 | `tailscale-network.md` |
 
 全部小写 kebab-case。常青文档的文件名带日期是 R1 违规的信号，说明它其实是快照。
@@ -100,17 +101,23 @@ CI 在每次 PR 与 push to main 时跑（`.github/workflows/docs-check.yml`）�
 （2026-08-24 真这么红过一次）。要么改内容时顺手把 `Last updated` 改成今天，
 要么 `git commit` 之后再跑一次 `check-docs.py`，红了就 `--amend`。
 
-## R4 状态枚举
+## R4 状态标记
 
-`plans/` 与 `decisions/` 的状态只用这几个值，便于扫读：
+`plans/` 与 `decisions/` 的状态行必须以这五个标记之一开头，便于扫读——**脚本查的就是这个**：
 
-`✅ 已完成` · `🚧 执行中` · `📐 设计` · `⚠️ 部分完成` · `⚠️ 已被取代` · `❌ 未实施` · `❌ 已取消`
+`✅` 做完了 · `🚧` 在做 · `📐` 只有设计 · `⚠️` 部分完成 / 已被取代 · `❌` 没做 / 已取消 / 已退役
 
-`⚠️ 已被取代` 和 `❌` 必须链到取代它的文档，或者说明原因。
+标记后面的措辞不限（`✅ 已完成` / `✅ 已部署` / `✅ 已实施` 都行）——真正决定读者判断的是
+那个 emoji 和后面括号里的日期与限定语。
+
+> 2026-09-09 更正：本条原先写死七个枚举值，而脚本从头到尾只查 emoji，实际在用的措辞有十几种。
+> 规则文本与执行不一致时，规则要么是摆设要么在误伤——这里选择让规则说实话。
+
+`⚠️` 和 `❌` 必须链到取代它的文档，或者说明原因。
 
 ## R5 每个目录的 README 是完整索引
 
-`reference/` `decisions/` `runbooks/` `guides/` `records/` 和 `plans/<类别>/` 都必须有 README，
+`reference/` `decisions/` `runbooks/` `guides/` `records/` `plans/` `plans/archive/` 都必须有 README，
 **列出该目录的全部文档**，且只列自己目录的（不跨目录索引）。加文档就更新索引。
 
 ## R8 索引行有长度上限，AGENTS.md 有字节预算

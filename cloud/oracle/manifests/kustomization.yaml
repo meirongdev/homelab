@@ -48,7 +48,7 @@ resources:
   # ☠️ namespace.yaml 留在本树（ns 被 prune 会级联删光）。
   - monitoring/namespace.yaml
   # OpenCost 成本归因：仅 namespace（工作负载由独立 opencost-oracle Helm App 部署，同 falco 模式）
-  # 见 docs/plans/observability/2026-07-30-opencost-multicluster.md
+  # 见 docs/plans/2026-07-30-opencost-multicluster.md
   - opencost/namespace.yaml
   # Falco 运行时检测：namespace + falcosidekick→Telegram token（Falco 工作负载由独立 falco Helm App 部署）
   - falco/namespace.yaml

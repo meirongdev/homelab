@@ -4,7 +4,7 @@
 > 状态: 📐 设计（未执行，等开云桶）
 > 结论: 在现有 106 本地 restic 仓库之上，用 `restic copy` 把每晚快照增量复刻到一块云仓库
 >       （OCI always-free 对象存储 或 Backblaze B2），火灾/失窃不再全损。
-> 关联: [ROADMAP 开放项 #1](../../ROADMAP.md)（母文档 P0-1）、[2026-07-06 计划 Phase 5](2026-07-06-storage-local-migration-and-backup-redesign.md)、[runbooks/backup-recovery.md](../../runbooks/backup-recovery.md)
+> 关联: [ROADMAP 开放项 #1](../ROADMAP.md)（母文档 P0-1）、[2026-07-06 计划 Phase 5](2026-07-06-storage-local-migration-and-backup-redesign.md)、[runbooks/backup-recovery.md](../runbooks/backup-recovery.md)
 
 ---
 

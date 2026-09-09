@@ -15,7 +15,7 @@ allowed-tools: Read, Edit, Write, Glob, Grep, Bash(kubectl *), Bash(dig *), Bash
 `docs/RULES.md` 的 R1/R3/R5/R8 与 `scripts/check-docs.py` 约束（runbook 必须有触发条件、
 成功判定、回滚，且进 `docs/runbooks/README.md` 索引）。2026-08-01 就是因为流程只存在于本文件、
 没有任何检查覆盖它，两条错误指令（HTTPRoute 追加进 `gateway.yaml`、parentRef 用 port 8000）
-静默存在了一段时间，见 `docs/plans/apps/2026-08-01-open-notebook-homelab.md`。
+静默存在了一段时间，见 `docs/plans/2026-08-01-open-notebook-homelab.md`。
 
 执行时最容易漏的四条（runbook 里有完整版，别跳过它）：
 

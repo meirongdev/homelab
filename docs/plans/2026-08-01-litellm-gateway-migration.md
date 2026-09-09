@@ -44,7 +44,7 @@
 ### 1.3 双自托管来源的接线可行性（2026-08 补全，Open Notebook 实证）
 
 两个推理源对 **homelab 控制面（k8s-node）都直连可达**，且已被 Open Notebook 生产使用——
-[open-notebook.md](../../reference/open-notebook.md) 是接线事实的唯一真相源：
+[open-notebook.md](../reference/open-notebook.md) 是接线事实的唯一真相源：
 
 | 来源 | 端点 | 模型 | ctx | 备注 |
 |------|------|------|-----|------|
@@ -885,7 +885,7 @@ git push
 
 > 日期: 2026-08-01
 > 状态: ✅ 已实施
-> 关联: `docs/plans/apps/2026-08-01-litellm-gateway-migration.md`
+> 关联: `docs/plans/2026-08-01-litellm-gateway-migration.md`
 
 ## Context
 homelab LLM 网关（llm.meirong.dev）原为旧网关。其配置（enforce 开关/路由/虚拟 key）存 PVC SQLite、
@@ -924,13 +924,13 @@ homelab LLM 网关（llm.meirong.dev）原为旧网关。其配置（enforce 开
 - [x] **Step 5: 归档旧网关 plan** —— **旧网关 plan 已于 2026-08-13 先期归档，2026-08-20 起该文件已彻底删除**。
   因为旧网关节是 2026-08-08 **独立退役**的（不等本计划落地），plan 却一直挂着
   「✅ 已上线、生产运行」的假状态，故提前按 R1 归档；随后按清理要求把归档文件整体删除，
-  `archive/README.md` 的对应行一并移除。接替者见本计划与 [decisions/litellm-llm-gateway.md](../../decisions/litellm-llm-gateway.md)。
+  `archive/README.md` 的对应行一并移除。接替者见本计划与 [decisions/litellm-llm-gateway.md](../decisions/litellm-llm-gateway.md)。
 
 - [ ] **Step 6: `cloudflare/terraform/README.md`**：`LLM gateway` 段把旧网关描述改为 LiteLLM（hostname 与
   "tailnet 直连 100.x"的论证不变），链接指到本计划/决策
 
 - [ ] **Step 7: 更新 plans 索引与计数**
-  - `docs/plans/apps/README.md`：旧网关行**已于 2026-08-13 随 Step 5 删除**；
+  - `docs/plans/README.md`：旧网关行**已于 2026-08-13 随 Step 5 删除**；
     本计划行已先期加入索引，执行完成后把该行状态从 📐 设计 改成 ✅ 已完成
   - `docs/plans/README.md`：apps 份数按实际改（2026-08-13 归档三份后为 9；`check-docs.py` 会核）
 
@@ -961,7 +961,7 @@ git push
 - [ ] SLO 规则 `litellm-availability` 生成；PSA `litellm` ns = baseline
 - [ ] external-dns 记录 owner：`cname-llm.meirong.dev` → `…/resource=httproute/litellm/litellm`
 - [ ] `python3 scripts/check-docs.py` exit 0；旧网关 plan 已清理、ZITADEL client/Vault secret/脚本已清
-- [ ] 更新本计划文首状态为 `✅ 已完成`（完成即冻结，不再改）并同步 `docs/plans/apps/README.md` 状态
+- [ ] 更新本计划文首状态为 `✅ 已完成`（完成即冻结，不再改）并同步 `docs/plans/README.md` 状态
 
 ## 附：相关文件地图
 

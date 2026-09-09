@@ -1,6 +1,6 @@
 # Agent 工具链与仓库边界 (Agent Tooling)
 
-> Last updated: 2026-09-08
+> Last updated: 2026-09-09
 > Status: 生效事实
 > 本文回答三件事：**AI 助手的上下文从哪里进来**、**哪些 agent 文件是仓库内容（进 git）**、
 > **哪些是本机每套 agent 各装一份的工具（不进 git）**，以及这两条边界上已知的重复与代价。
@@ -36,7 +36,7 @@
 - **流程的真相源必须在 `docs/`**。技能壳只负责被 agent 发现，正文放 `docs/` 才能受
   R1（归属）/ R3（触发条件·成功判定·回滚）/ R5（进索引）/ R8 与 `check-docs.py` 约束。
   反面教材：`add-service` 的流程曾只存在于 `.claude/skills/` 里，两条错误指令静默存在
-  （见 [../plans/apps/2026-08-01-open-notebook-homelab.md](../plans/apps/2026-08-01-open-notebook-homelab.md)），
+  （见 [../plans/2026-08-01-open-notebook-homelab.md](../plans/2026-08-01-open-notebook-homelab.md)），
   2026-09-05 移到 [runbooks/add-service.md](../runbooks/add-service.md)。
 - **技能壳与 vendored 技能用软链复用，不复制**。`.claude/skills/humanizer` 是指向
   `.agents/skills/humanizer` 的软链；`.agents/skills/<name>/` 是跨 agent 通用的落点，

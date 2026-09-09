@@ -9,7 +9,7 @@
 #   ③ 无 ServiceMonitor —— oracle 没有 Prometheus Operator，改由 otel-collector 抓 :9003
 #      （cloud/oracle/manifests/monitoring/otel-collector.yaml › prometheus/opencost）
 #
-# 方案见 docs/plans/observability/2026-07-30-opencost-multicluster.md
+# 方案见 docs/plans/2026-07-30-opencost-multicluster.md
 
 # ArgoCD 用 Application 名当 Helm release 名，而两个 App 同处 argocd ns 必须重名不冲突，
 # 于是这边 release 叫 opencost-oracle，资源会被渲染成 opencost-oracle/opencost-oracle-pvc。

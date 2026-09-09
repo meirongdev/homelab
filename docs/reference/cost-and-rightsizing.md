@@ -263,5 +263,5 @@ oracle 检查 otel `prometheus/opencost` receiver 的 `static_configs[].labels`�
 - [decisions/opencost-krr-data-sources.md](../decisions/opencost-krr-data-sources.md) — 数据源选型取舍
 - [k8s-qos-resource-management.md](k8s-qos-resource-management.md) — QoS 类别与 CPU limit 档位约定
 - [observability-multicluster.md](observability-multicluster.md) — 指标管道与 cluster 标签策略
-- plans: [OpenCost](../plans/observability/2026-07-30-opencost-multicluster.md) ·
-  [KRR](../plans/observability/2026-07-30-krr-rightsizing.md)
+- plans: [OpenCost](../plans/2026-07-30-opencost-multicluster.md) ·
+  [KRR](../plans/2026-07-30-krr-rightsizing.md)

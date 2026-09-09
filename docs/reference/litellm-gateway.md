@@ -1,6 +1,6 @@
 # LiteLLM 网关（运维事实与坑）
 
-> Last updated: 2026-09-08
+> Last updated: 2026-09-09
 > Status: 生效事实
 > Scope: `llm.meirong.dev` 这个 LLM 网关的配置生效路径、鉴权分层、上游可用性边界，
 > 本文是 source of truth。为什么选 LiteLLM、上游怎么选、Mac 兜底为何换 Ornith，见
@@ -34,7 +34,7 @@
 ——它把"改哪四处、为什么必须动 key、哪三条阈值要重估、怎么验收"写成了可照抄的 SOP。
 想**减少下一次的工作量**（CI 字面值门禁 / 契约回归 probe / 虚拟 key 卫生 / served name 漂移
 哨兵，含被否决的选项）→
-[plans/apps/2026-09-03-dgx-model-swap-optimizations.md](../plans/apps/2026-09-03-dgx-model-swap-optimizations.md)
+[plans/2026-09-03-dgx-model-swap-optimizations.md](../plans/2026-09-03-dgx-model-swap-optimizations.md)
 （📐 未实施，所以本页的机制描述仍是现状，别照着它以为门禁已经存在）。
 
 | | |

@@ -5,7 +5,7 @@
 #   服务器 = storage-106 (192.168.50.106)，对应 Ansible 的只读 export
 #   /storage/{movie,tv,anime,music,podcast}（ro,all_squash,anonuid=1000）。
 #   k8s-node 无 LAN 接口 → 经 pve NAT 源 IP 落在 192.168.50.0/24 内、worker=192.168.50.107，
-#   都覆盖 read-only export 授权。媒体是顺序读，NFS 安全兜住（见 docs/plans/apps/
+#   都覆盖 read-only export 授权。媒体是顺序读，NFS 安全兜住（见 docs/plans/
 #   2026-08-16-multimedia-repository.md 决策 2）。
 #
 # 只读 + all_squash：serving 层永远没有 106 写权（所有写路径走非 k8s 侧）。

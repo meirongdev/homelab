@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""文档组织规则检查器 —— 强制 docs/RULES.md 里的 R1-R7。
+"""文档组织规则检查器 —— 强制 docs/RULES.md 里的 R1-R8。
 
 用法:
     python3 scripts/check-docs.py          # 检查，有违规则 exit 1
@@ -27,8 +27,9 @@ VENDORED = ROOT / ".agents"
 # 带日期前缀的目录（R2）；其余为常青目录，文件名不得带日期
 DATED_DIRS = {"plans", "records"}
 # 需要 README 完整索引的目录（R5）
-INDEXED = ["reference", "decisions", "runbooks", "guides", "records"]
-# R4 状态标记：状态行必须带其中之一，否则无法扫读
+# plans 自 2026-09-09 起不分类别子目录，只剩 plans/ 与 plans/archive/ 两个索引。
+INDEXED = ["reference", "decisions", "runbooks", "guides", "records", "plans", "plans/archive"]
+# R4 状态标记：状态行必须以其中之一开头，否则无法扫读（后面的措辞不限）
 STATUS_MARKERS = ["✅", "🚧", "📐", "⚠️", "❌"]
 
 # ── R8 ────────────────────────────────────────────────────────────────────
@@ -135,7 +136,11 @@ def check_frontmatter(md, rel, text):
 
 
 def check_status_enum(md, rel, text):
-    """R4 — plans/decisions 的状态行必须带枚举标记，便于扫读。"""
+    """R4 — plans/decisions 的状态行必须带状态标记 emoji，便于扫读。
+
+    只查 emoji，不查后面的措辞：`✅ 已完成`/`✅ 已部署`/`✅ 已实施` 一律放行。
+    RULES.md 的 R4 曾写死七个枚举值而这里从头到尾只查 emoji，2026-09-09 已让规则说实话。
+    """
     top = rel.parts[0] if len(rel.parts) > 1 else ""
     if top not in ("plans", "decisions") or md.name == "README.md":
         return
@@ -143,7 +148,7 @@ def check_status_enum(md, rel, text):
     if line is None:
         return  # 缺状态由 R3 报，不重复
     if not any(m in line for m in STATUS_MARKERS):
-        fail("R4", md, f"状态行缺枚举标记（{'/'.join(STATUS_MARKERS)}）: {line.strip()[:60]}", ln)
+        fail("R4", md, f"状态行缺状态标记（{'/'.join(STATUS_MARKERS)}）: {line.strip()[:60]}", ln)
 
 
 def check_index_rows():
@@ -196,7 +201,7 @@ def check_agents_budget():
 
 def check_indexes():
     """R5 — 每个目录的 README 列出本目录全部文档，且不含已不存在的条目。"""
-    dirs = [DOCS / d for d in INDEXED] + sorted(p for p in (DOCS / "plans").glob("*") if p.is_dir())
+    dirs = [DOCS / d for d in INDEXED]
     for d in dirs:
         if not d.is_dir():
             continue
@@ -217,29 +222,6 @@ def check_indexes():
             if t.endswith(".md") and t not in present and t != "README.md":
                 fail("R5", idx, f"索引指向已不存在的 {t}")
 
-
-def check_plan_counts():
-    """R5 — plans/README.md 的「份数」列必须与各类别实际文件数一致。
-
-    这一列纯手工维护，每加一份 plan 就会漂（2026-08-03 architecture/storage 两行都漂了）。
-    check_indexes 已经算过每个目录的实际份数，顺手比一下就行。
-    """
-    idx = DOCS / "plans" / "README.md"
-    if not idx.exists():
-        return
-    row = re.compile(r"^\|\s*\[(\w[\w-]*)/\]\([^)]*\)\s*\|.*\|\s*(\d+)\s*\|\s*$")
-    for i, line in enumerate(idx.read_text().splitlines(), 1):
-        m = row.match(line)
-        if not m:
-            continue
-        name, claimed = m.group(1), int(m.group(2))
-        d = DOCS / "plans" / name
-        if not d.is_dir():
-            fail("R5", idx, f"份数表里的 {name}/ 不存在", i)
-            continue
-        actual = len({f.name for f in d.glob("*.md")} - {"README.md"})
-        if actual != claimed:
-            fail("R5", idx, f"{name}/ 份数写 {claimed}，实际 {actual}", i)
 
 
 def check_readme_trees():
@@ -405,7 +387,6 @@ def main():
     check_indexes()
     check_index_rows()
     check_agents_budget()
-    check_plan_counts()
     check_readme_trees()
     check_external_refs()
     check_last_updated()

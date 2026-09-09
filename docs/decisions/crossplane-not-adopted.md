@@ -1,9 +1,9 @@
 # Crossplane 不引入：单人静态云面用不上控制面，且最大那块云面没有活的 provider
 
-> 日期: 2026-07-07（2026-08-13 从[技术债盘点与演进路线 §三](../plans/architecture/2026-07-07-tech-debt-and-evolution.md)拆出为独立 ADR，结论未变）
+> 日期: 2026-07-07（2026-08-13 从[技术债盘点与演进路线 §三](../plans/2026-07-07-tech-debt-and-evolution.md)拆出为独立 ADR，结论未变）
 > 状态: ❌ 否决（**结论仍然有效**）：重评条件见文末，满足其一再议
 > 关联：[external-dns-adoption](external-dns-adoption.md)（子域名 toil 的实际解法）·
-> [演进路线](../plans/architecture/2026-07-07-tech-debt-and-evolution.md)（2026-07-07 原始评估与当时的市场快照）
+> [演进路线](../plans/2026-07-07-tech-debt-and-evolution.md)（2026-07-07 原始评估与当时的市场快照）
 
 ## Context
 
@@ -52,7 +52,7 @@ Crossplane v2（2025-08 GA，评估时 v2.3：MR/XR 全面 namespaced、composit
 | 痛点 | Crossplane 路线 | 实际采用的更轻解 | 落地 |
 |---|---|---|---|
 | 子域名两步走 | CF provider（已死） | **external-dns**（~20MB 控制器） | ✅ 2026-07-19/20 两集群全量，见 [ADR](external-dns-adoption.md) |
-| Terraform 缺 GitOps 感 | provider-terraform 套娃 | **R2 state backend + `use_lockfile`** | 🚧 未做，ROADMAP 开放项 #2 · [方案](../plans/architecture/2026-08-03-tf-state-r2.md) |
+| Terraform 缺 GitOps 感 | provider-terraform 套娃 | **R2 state backend + `use_lockfile`** | 🚧 未做，ROADMAP 开放项 #2 · [方案](../plans/2026-08-03-tf-state-r2.md) |
 | 学习/履历动机 | — | 在 oracle-k3s 装官方 OCI provider 管一个非关键 bucket 当沙箱，**不迁生产路径** | 未做 |
 
 ## Consequences

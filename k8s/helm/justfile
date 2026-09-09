@@ -38,7 +38,7 @@ add-repos:
 personal_ns := "personal-services"
 
 # ⬇️ 备份 (serverless restic → storage-106 ZFS 仓库) ⬇️
-# 设计/运维见 docs/plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md + docs/runbooks/backup-recovery.md
+# 设计/运维见 docs/plans/2026-07-06-storage-local-migration-and-backup-redesign.md + docs/runbooks/backup-recovery.md
 # 前置(一次性 bootstrap，不在 git): 106 建 mrstorage/restic dataset + restic init + 授权 restic SSH key；
 #   Vault 写 secret/homelab/restic (repo_password / ssh_private_key_b64 / vault_token) + backup policy。
 # CronJob 由 ArgoCD `backup` App 管理（backup/overlays/homelab）：改配置 → git push → 自动同步。

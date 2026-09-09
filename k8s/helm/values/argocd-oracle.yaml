@@ -11,7 +11,7 @@
 # 代价：application-controller 到 homelab apiserver 多一跳 WAN（实测 RTT ~175ms），
 #   每次 reconcile 都要付。被管对象规模不变，故沿用 argocd.yaml 里的并发限流参数。
 #
-# 通盘取舍见 docs/plans/architecture/2026-08-02-homelab-to-oracle-workload-migration.md
+# 通盘取舍见 docs/plans/2026-08-02-homelab-to-oracle-workload-migration.md
 
 # ⚠️ 唯一必须覆盖的键。homelab 那份写的是 crds.install=false —— 因为它的 CRD 是
 # 早年 stock manifest 装的，收编进 Helm 时刻意不让 chart 接管、避免对正在被 CR 使用的

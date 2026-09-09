@@ -50,6 +50,6 @@ just helm backup-run     # 手动触发一次（从仓库根；≡ cd k8s/helm &
 
 - 运维 SOP: [docs/runbooks/backup-recovery.md](../docs/runbooks/backup-recovery.md)
 - 设计/保留策略: [docs/reference/storage.md](../docs/reference/storage.md)（历史设计过程见
-  [docs/plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md](../docs/plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md)）
+  [docs/plans/2026-07-06-storage-local-migration-and-backup-redesign.md](../docs/plans/2026-07-06-storage-local-migration-and-backup-redesign.md)）
 - 离站备份（仍是开放项，仓库目前只有 106 一份）:
-  [docs/plans/storage/2026-08-03-offsite-backup.md](../docs/plans/storage/2026-08-03-offsite-backup.md)
+  [docs/plans/2026-08-03-offsite-backup.md](../docs/plans/2026-08-03-offsite-backup.md)

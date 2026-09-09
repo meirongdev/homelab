@@ -3,7 +3,7 @@
 > 日期: 2026-08-02
 > 状态: ✅ Phase 2(Loki/Tempo) + Phase 3(ArgoCD) + calibre **全部完成**；剩余候选见 §5
 > ⚠️ calibre 退役步骤引发过一次事故（Namespace 内嵌在应用清单里→prune 级联删数据），
->   数据已完整恢复，复盘见 [records/2026-08-03-namespace-prune-cascade.md](../../records/2026-08-03-namespace-prune-cascade.md)
+>   数据已完整恢复，复盘见 [records/2026-08-03-namespace-prune-cascade.md](../records/2026-08-03-namespace-prune-cascade.md)
 > 范围: 盘点 homelab 上还有哪些负载能搬到 oracle-k3s，并执行其中两项
 > 定位: 承接 [2026-07-04 舰队架构优化](2026-07-04-fleet-architecture-optimization.md)
 >   的「算力倒挂 / 故障域集中」问题陈述，但**推翻了它的两条结论**（见 §4）
@@ -34,7 +34,7 @@
 - **open-notebook + surrealdb（717 Mi，homelab 上最肥的一块）** —— 两台 DGX Spark 与
   Mac OMLX 是**跨 tailnet 按「人」共享**的节点，`meirongdev@` 的设备可达，
   oracle 的 tagged-device **在 netmap 里根本没有它们**。搬过去 = 模型后端全断。
-  已记录在 [../../reference/open-notebook.md](../../reference/open-notebook.md)。
+  已记录在 [../reference/open-notebook.md](../reference/open-notebook.md)。
 - **旧 LLM 网关（及设计中替换它的 LiteLLM）** —— 同一原因，旧网关清单里的注释就是为此写的。
 - **集群本地基础设施** —— 概念上不是「搬」，只能各集群一份：cilium / coredns /
   local-path / metrics-server / kyverno（准入 webhook）/ tetragon / kube-bench /
@@ -49,7 +49,7 @@
 ### Phase 2 —— Loki + Tempo 迁 oracle
 
 数据流反转：**日志/追踪汇聚在 oracle，指标仍汇聚在 homelab**。
-架构事实见 [../../reference/observability-multicluster.md](../../reference/observability-multicluster.md)。
+架构事实见 [../reference/observability-multicluster.md](../reference/observability-multicluster.md)。
 
 验证：oracle Loki 中 `cluster` 标签同时可见 `homelab` 与 `oracle-k3s`；
 Grafana 两个 datasource 健康检查均 OK（跨 Tailscale RTT ~175ms）。
@@ -68,7 +68,7 @@ Grafana 两个 datasource 健康检查均 OK（跨 Tailscale RTT ~175ms）。
 ### Phase 3 —— ArgoCD 控制面迁 oracle
 
 操作 SOP、回滚路径、退役地雷全部收进
-[../../runbooks/argocd-control-plane-on-oracle.md](../../runbooks/argocd-control-plane-on-oracle.md)。
+[../runbooks/argocd-control-plane-on-oracle.md](../runbooks/argocd-control-plane-on-oracle.md)。
 
 核心风险点是 **`https://kubernetes.default.svc` 的所指会跟着控制面变**：
 不重写 destination 就推送，旧控制面会把整棵 oracle kustomize 树部署到 homelab。
@@ -150,6 +150,6 @@ oracle Tailscale IP、29 个 Application 全 Synced+Healthy、`secret/oracle-k3s
 ## 相关
 
 - [2026-07-04 舰队架构优化](2026-07-04-fleet-architecture-optimization.md)（本文推翻其两条结论）
-- [ArgoCD 控制面 runbook](../../runbooks/argocd-control-plane-on-oracle.md)
-- [多集群可观测性架构事实](../../reference/observability-multicluster.md)
-- [2026-06-04 oracle-k3s 纳入 ArgoCD](../networking/2026-06-04-oracle-k3s-argocd-gitops.md)（反方向的原始设计）
+- [ArgoCD 控制面 runbook](../runbooks/argocd-control-plane-on-oracle.md)
+- [多集群可观测性架构事实](../reference/observability-multicluster.md)
+- [2026-06-04 oracle-k3s 纳入 ArgoCD](2026-06-04-oracle-k3s-argocd-gitops.md)（反方向的原始设计）

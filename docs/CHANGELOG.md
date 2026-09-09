@@ -1,6 +1,6 @@
 # Homelab Changelog
 
-> Last updated: 2026-09-08
+> Last updated: 2026-09-09
 > 已经做完的事，一条一行，按阶段/时间倒着找。**这里只回答「做过什么」**——
 > 还剩什么没做看 [ROADMAP.md](ROADMAP.md)，现在是什么样看 [reference/](reference/README.md)。
 > 2026-09-02 从 ROADMAP 拆出：那份文件长到 23.8KB，9 条开放项被 65 条历史淹没，
@@ -34,9 +34,9 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-03-08 | homelab Ubuntu 24.04 重建（K3s v1.34.5+k3s1 + Cilium 1.19.1）+ Cilium Gateway 恢复 |
 | 2026-03-08 | Cilium ClusterMesh 双集群 connected + failover 验证 |
 | 2026-03-19 | Loki compactor + retention 168h |
-| 2026-06-04 | oracle-k3s 纳入 GitOps（hub-and-spoke，经 Tailscale）([计划](plans/networking/2026-06-04-oracle-k3s-argocd-gitops.md)) |
+| 2026-06-04 | oracle-k3s 纳入 GitOps（hub-and-spoke，经 Tailscale）([计划](plans/2026-06-04-oracle-k3s-argocd-gitops.md)) |
 | 2026-07-05 | Kopia 整体移除（server + CronJob + PVC + Vault secret） |
-| 2026-07-06 | **restic 备份上线**：双集群 CronJob 逻辑 dump → 106 ZFS 加密仓库；恢复演练同日通过 ([计划](plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md)) |
+| 2026-07-06 | **restic 备份上线**：双集群 CronJob 逻辑 dump → 106 ZFS 加密仓库；恢复演练同日通过 ([计划](plans/2026-07-06-storage-local-migration-and-backup-redesign.md)) |
 | 2026-07-06 | zpool/SMART 告警上线（`storage-alerts.yaml` 5 条） |
 | 2026-07-11 | **存储本地化完成**：106 宕机 3 天后，剩余 PVC + 书库 24G 全迁 `local-path`，nfs-client 卸载 ([storage.md](reference/storage.md)) |
 | 2026-07-18 | Alertmanager → 原生 `telegramConfigs`，gotify-bridge 下线 ([决策](decisions/alerting-telegram-migration.md)) |
@@ -47,25 +47,25 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 
 | 时间 | 项目 |
 |------|------|
-| 2026-06 | **集群内部安全加固**：PSA + Kyverno(Audit) + Trivy + kube-bench + 节点 CIS ([计划](plans/security/2026-06-16-k3s-security-hardening.md) · [security.md](reference/security.md)) |
-| 2026-06 | **运行时检测**：Tetragon(homelab) + Falco(oracle) ([计划](plans/security/2026-06-18-runtime-detection.md)) |
-| 2026-06-15 | Grafana 面板整改：按 folder 分组、多集群选择器、稳定 datasource uid ([计划](plans/observability/2026-06-15-grafana-dashboard-reorg.md)) |
-| 2026-07-06 | **服务重定位脱离 homelab 故障域**：Gotify + ZITADEL → oracle-k3s ([计划](plans/apps/2026-07-04-zitadel-to-oracle-k3s.md)) |
+| 2026-06 | **集群内部安全加固**：PSA + Kyverno(Audit) + Trivy + kube-bench + 节点 CIS ([计划](plans/2026-06-16-k3s-security-hardening.md) · [security.md](reference/security.md)) |
+| 2026-06 | **运行时检测**：Tetragon(homelab) + Falco(oracle) ([计划](plans/2026-06-18-runtime-detection.md)) |
+| 2026-06-15 | Grafana 面板整改：按 folder 分组、多集群选择器、稳定 datasource uid ([计划](plans/2026-06-15-grafana-dashboard-reorg.md)) |
+| 2026-07-06 | **服务重定位脱离 homelab 故障域**：Gotify + ZITADEL → oracle-k3s ([计划](plans/2026-07-04-zitadel-to-oracle-k3s.md)) |
 | 2026-07-18 | **ZITADEL DB → CloudNativePG**：PG 15.4 → CNPG 1.30.0 + PG 17.6，停机 ~4.5 分钟 ([identity.md](reference/identity.md)) |
 | 2026-07-19/20 | **external-dns 双集群全量** + 隧道改 `*.meirong.dev` 通配 → **新增子域名从此只写一个 HTTPRoute** ([决策](decisions/external-dns-adoption.md)) |
-| 2026-07-30 | OpenCost 双集群成本归因 + KRR 周报右尺寸 ([OpenCost](plans/observability/2026-07-30-opencost-multicluster.md) · [KRR](plans/observability/2026-07-30-krr-rightsizing.md) · [决策](decisions/opencost-krr-data-sources.md)) |
+| 2026-07-30 | OpenCost 双集群成本归因 + KRR 周报右尺寸 ([OpenCost](plans/2026-07-30-opencost-multicluster.md) · [KRR](plans/2026-07-30-krr-rightsizing.md) · [决策](decisions/opencost-krr-data-sources.md)) |
 | 2026-07-31 | **manual-helm → ArgoCD 采纳**：`kube-prometheus-stack` + `external-dns` ×2；chart 版本唯一真源改为 Application 的 `targetRevision` ([决策](decisions/manual-helm-to-argocd-adoption.md)) |
 | 2026-07-31 | **OTel 2026 对齐**：homelab collector 首次落地（此前根本没部署，容器日志从未进 Loki）([决策](decisions/otel-2026-alignment.md)) |
 | 2026-07-31 | `manifests/` 目录化（一目录一 App）+ `gateway.yaml` 按路由拆 5 文件 ([决策](decisions/manifests-directory-per-app.md)) |
-| 2026-08-02 | **负载迁 oracle-k3s**：Loki+Tempo + ArgoCD 控制面（打破「homelab 死了 ArgoCD 也死了」的鸡生蛋）；途中修掉 tempo 跑在 emptyDir、oracle otel-collector 改 ConfigMap 不重启两个静默 bug ([方案](plans/architecture/2026-08-02-homelab-to-oracle-workload-migration.md) · [runbook](runbooks/argocd-control-plane-on-oracle.md)) |
+| 2026-08-02 | **负载迁 oracle-k3s**：Loki+Tempo + ArgoCD 控制面（打破「homelab 死了 ArgoCD 也死了」的鸡生蛋）；途中修掉 tempo 跑在 emptyDir、oracle otel-collector 改 ConfigMap 不重启两个静默 bug ([方案](plans/2026-08-02-homelab-to-oracle-workload-migration.md) · [runbook](runbooks/argocd-control-plane-on-oracle.md)) |
 | 2026-08-02 | **OOM 盲区闭环**（起因：ArgoCD controller 静默 OOMKilled 无告警）：抬 limit + 新增 `ContainerOOMKilled` + `metal-nodes-resources` 组补齐 pve/106/DGX ([告警](reference/observability-alerting-slo.md) · [QoS](reference/k8s-qos-resource-management.md)) |
 | 2026-08-03 | **calibre 迁 oracle-k3s**：书库 23G，homelab 磁盘 65%→32%。⚠️ 退役步骤触发级联删除事故，已从 restic 完整恢复并把 4 处内嵌 Namespace 拆成专职文件 ([复盘](records/2026-08-03-namespace-prune-cascade.md)) |
 | 2026-08-03 | **PSA `backup` ns 定级闭环**：双集群均 `enforce: privileged`（走特权/豁免路径），从开放项移除（原 #7） |
 | 2026-08-03 | **DGX vLLM metrics 探明**（供 #5 入编用）：DGX1 `:8000/metrics` live，DGX2 引擎未起；实测端口与 `vllm.env` 声明不符（详见开放项 #5） |
 | 2026-08-06 | **共享 PostgreSQL 平台**：手搓 `rss-postgres` → CNPG `apps-pg`（PG17），逐表对账。刻意不并入 `zitadel-pg`（SSO 库带 `critical`，合库=让 RSS 抢同一个 limit）([决策](decisions/shared-postgres-platform.md)) |
 | 2026-08-06 | **PriorityClass 去个人前缀**：`meirong-*` → `critical`/`high`/`bulk`，33 处引用，三步走（PriorityClass 与工作负载分属不同 App，同步无先后保证）([QoS](reference/k8s-qos-resource-management.md)) |
-| 2026-08-08 | **jobs-sg 缺陷收口**：修掉 `JobsSgReconcileStale`/`JobsSgIngestStale` 结构性哑火、`work_mode` 拿排班冒充办公地点、写事务撞锁重跑 ([诊断](plans/apps/2026-08-08-jobs-sg-three-defect-diagnosis.md)) |
-| 2026-08-08 | **旧 LLM 网关注册退役**：整个 ArgoCD App（网关 + oauth2-proxy + dgx-proxy）删除，由 LiteLLM 接替 ([计划](plans/apps/2026-08-01-litellm-gateway-migration.md)) |
+| 2026-08-08 | **jobs-sg 缺陷收口**：修掉 `JobsSgReconcileStale`/`JobsSgIngestStale` 结构性哑火、`work_mode` 拿排班冒充办公地点、写事务撞锁重跑 ([诊断](plans/2026-08-08-jobs-sg-three-defect-diagnosis.md)) |
+| 2026-08-08 | **旧 LLM 网关注册退役**：整个 ArgoCD App（网关 + oauth2-proxy + dgx-proxy）删除，由 LiteLLM 接替 ([计划](plans/2026-08-01-litellm-gateway-migration.md)) |
 | 2026-08-09 | **探针误杀修复 ×2**：Uptime Kuma（4 天 11 次重启）与 ZITADEL login（27 次）补 `startupProbe` |
 | 2026-08-09 | **readlist v0.5.0**：修掉 C/F 两个「静默为 0」结构性缺陷；补 2 条判别力告警（7→9 条） |
 | 2026-08-09 | **Cilium identity-mark 撞 Tailscale fwmark**：位段冲突（单 pod 到 `100.64/10` 全超时的 1/256 抽签）([tailscale-network.md](reference/tailscale-network.md)) |
@@ -116,3 +116,4 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-08-13 | **月度恢复演练自动化**（原 #6）：`restic-restore-drill` CronJob 每月真恢复 + 8 条判据，配 3 条告警。☠️ 判据敏感度用损坏数据逐条实测，7 种坏法全判出 ([storage.md](reference/storage.md)) |
 | 2026-08-13 | **Renovate + 版本配对 CI**（原 #12 之一）：`renovate.json5` + `check-version-pairs.py` 的 V1-V3，六个破坏场景实测全判红。⚠️ **仍待人工装一次 GitHub App** 才会真正开 PR ([决策](decisions/renovate-adoption.md)) |
 | 2026-08-14 | **信息管道（Miniflux→KaraKeep）退役**：两个 Deployment + 路由 + 监控 + 备份白名单全删，Miniflux/RSSHub 保留；释放 oracle ~1Gi requests ([原方案](plans/archive/2026-02-28-info-pipeline-miniflux-karakeep-gotify.md)) |
+| 2026-09-09 | **文档结构简化**：`plans/` 六个类别子目录扁平化（省掉 6 份索引 + CI 校验的份数表）· 4 篇自述「非现状」的方案移进 `archive/` · 5 组 design/实现双份文档合并（backstage、CF AI Gateway 两组死方案各压成一篇）· `observability-otel-logging.md` 并入 `observability-multicluster.md`（同一条管线两个视角，拓扑图各维护一份必然分头漂）· R4 的七值枚举改成与脚本一致的五个 emoji 标记。173 → 161 篇，34,119 → 32,309 行 ([规则](RULES.md)) |

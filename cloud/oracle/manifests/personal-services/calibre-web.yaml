@@ -15,7 +15,7 @@
 # 全库重读），详见下方 permission-fixer 容器的注释。poll 才是真·可清理遗产
 # （local-path 上 inotify 可用），动不动均可。
 #
-# 迁移过程与取舍见 docs/plans/architecture/2026-08-02-homelab-to-oracle-workload-migration.md
+# 迁移过程与取舍见 docs/plans/2026-08-02-homelab-to-oracle-workload-migration.md
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -226,7 +226,7 @@ spec:
         # 且它的前提也早已不成立 —— 引入时的理由是「linuxserver.io 镜像不输出 stdout」，
         # 但本镜像现在把应用日志（cps.py / cwa-* 服务）全打到 stdout，OTel 直接采得到。
         # ⚠️ 想给别的服务照搬「文件日志 + sidecar」模式前，先按
-        # docs/reference/observability-otel-logging.md 模式 B 的「先验证再加」跑一遍：
+        # docs/reference/observability-multicluster.md 模式 B 的「先验证再加」跑一遍：
         # 这个 sidecar 的坑就是加了之后没人验证过它真的在产日志。
         # Fixes permissions on files created by the cwa-ingest pipeline, which runs
         # as root and produces files that the web process (uid 1000) cannot edit.

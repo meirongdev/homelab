@@ -1,9 +1,9 @@
 # 技术债盘点与演进路线（含 Crossplane 评估）
 
 > 状态: ⚠️ **部分落地** —— 盘点快照，非现状。Phase C（ZITADEL DB → CNPG）、Phase D（external-dns）、
-> Phase E（存储本地化）已完成；Phase A（Terraform state → R2）仍开放，见 [ROADMAP](../../ROADMAP.md)。
+> Phase E（存储本地化）已完成；Phase A（Terraform state → R2）仍开放，见 [ROADMAP](../ROADMAP.md)。
 > **Crossplane 不引入的结论仍然有效，但已于 2026-08-13 拆成独立 ADR**：
-> [decisions/crossplane-not-adopted.md](../../decisions/crossplane-not-adopted.md)——引用指那里，
+> [decisions/crossplane-not-adopted.md](../decisions/crossplane-not-adopted.md)——引用指那里，
 > §三 只留原始评估证据。
 > 日期: 2026-07-07
 > 范围: 仓库技术债 + IaC/GitOps 工具链 2026 选型（软件/工具链层）
@@ -74,7 +74,7 @@ GitOps 覆盖与安全纵深已成熟。剩余债务集中三处：
 
 ## 三、Crossplane 评估（结论：不引入）
 
-> ➡️ **结论已于 2026-08-13 抽出为独立 ADR：[decisions/crossplane-not-adopted.md](../../decisions/crossplane-not-adopted.md)——引用请指向那里。**
+> ➡️ **结论已于 2026-08-13 抽出为独立 ADR：[decisions/crossplane-not-adopted.md](../decisions/crossplane-not-adopted.md)——引用请指向那里。**
 > 抽出的原因：这是本文里**唯一仍在生效**的结论，却住在一份"写完即冻结"的快照里，
 > ROADMAP 与 external-dns ADR 都在跨目录引它（R1：需要长期维护的结论属于 `decisions/`）。
 > 下文保留 2026-07-07 的原始评估作证据链（provider 逐条核查、当时的版本现状），**不再更新**。
@@ -121,7 +121,7 @@ GitOps 覆盖与安全纵深已成熟。剩余债务集中三处：
 
 ### Phase B — 既有 P0 收尾（下个周末；顺序维持母文档）
 
-离站备份（restic 仓库 → OCI always-free 20GB / B2）→ dead-man's switch（Watchdog → oracle Uptime Kuma push）→ zpool/SMART PrometheusRule。见 [2026-07-06 计划](../storage/2026-07-06-storage-local-migration-and-backup-redesign.md)。
+离站备份（restic 仓库 → OCI always-free 20GB / B2）→ dead-man's switch（Watchdog → oracle Uptime Kuma push）→ zpool/SMART PrometheusRule。见 [2026-07-06 计划](2026-07-06-storage-local-migration-and-backup-redesign.md)。
 
 ### Phase C — ZITADEL DB → CloudNativePG ✅ 2026-07-18 完成（实际停机 ~4.5 分钟）
 

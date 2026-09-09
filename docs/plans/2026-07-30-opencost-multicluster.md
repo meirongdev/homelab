@@ -196,7 +196,7 @@ Ampere A1 牌价 **$0.01/OCPU-hr、$0.0015/GB-hr**（A1 无 SMT，1 OCPU = 1 vCP
 
 ```yaml
 # OpenCost — homelab 成本归因
-# 数据源: collector (不查 Prometheus, 见 docs/plans/observability/2026-07-30-opencost-multicluster.md)
+# 数据源: collector (不查 Prometheus, 见 docs/plans/2026-07-30-opencost-multicluster.md)
 opencost:
   exporter:
     defaultClusterId: homelab
@@ -293,7 +293,7 @@ opencost:
 # OpenCost — homelab 集群成本归因
 # Chart: opencost/opencost
 # Values: k8s/helm/values/opencost.yaml
-# 见 docs/plans/observability/2026-07-30-opencost-multicluster.md
+# 见 docs/plans/2026-07-30-opencost-multicluster.md
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

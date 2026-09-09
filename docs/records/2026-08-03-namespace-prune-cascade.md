@@ -154,6 +154,6 @@ grep "^kind:" <要删的文件>
 
 ## 相关
 
-- [calibre 迁移方案](../plans/architecture/2026-08-02-homelab-to-oracle-workload-migration.md)
+- [calibre 迁移方案](../plans/2026-08-02-homelab-to-oracle-workload-migration.md)
 - [备份与恢复 runbook](../runbooks/backup-recovery.md)（本次用的 SurrealDB 恢复命令就在里面）
 - [Open Notebook 架构事实](../reference/open-notebook.md)

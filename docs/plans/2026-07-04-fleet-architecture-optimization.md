@@ -1,7 +1,7 @@
 # Homelab 机器与集群架构优化建议
 
 > 状态: ⚠️ **部分落地** —— 建议快照，非现状。ZITADEL 迁 oracle、dead-man's switch、restic 备份、核显 UMA 显存调整（2GB→512MB）已做；
-> 离站备份、DGX Spark 入编仍开放，见 [ROADMAP](../../ROADMAP.md)。
+> 离站备份、DGX Spark 入编仍开放，见 [ROADMAP](../ROADMAP.md)。
 > 日期: 2026-07-04
 
 > **2026-08-13 拆分导航——仍生效的部分已全部回写到常青文档，本文只剩证据链。**
@@ -11,19 +11,19 @@
 >
 > | 本文内容 | 现在去哪读 |
 > |---|---|
-> | P0-1 离站备份 · P1-5 DGX 入编 · P2-8 恢复演练自动化 · P2-7/9 Renovate/告警噪声 | [ROADMAP](../../ROADMAP.md) 开放项 #1 / #5 / #6 / #12（**唯一开放项清单**） |
-> | §4 pve 内存实测（UMA、MemTotal、VM 分配） | [reference/homelab-host-power-thermal.md](../../reference/homelab-host-power-thermal.md)「内存容量」——UMA 已收回，本文数值是收回**前**的 |
-> | 「明确不建议做的」里仍生效的：多节点 HA · Thanos/Mimir · 106 并入集群 · cert-manager · Vault auto-unseal | [ROADMAP](../../ROADMAP.md)「不做 / 已取消」表 |
-> | §附 106 入集群评估 | 结论仍成立，但**做法已细化**：106 上开独立单节点 `k3s-exp`（非 homelab worker），见 [ADR](../../decisions/storage106-experiment-vm.md) |
+> | P0-1 离站备份 · P1-5 DGX 入编 · P2-8 恢复演练自动化 · P2-7/9 Renovate/告警噪声 | [ROADMAP](../ROADMAP.md) 开放项 #1 / #5 / #6 / #12（**唯一开放项清单**） |
+> | §4 pve 内存实测（UMA、MemTotal、VM 分配） | [reference/homelab-host-power-thermal.md](../reference/homelab-host-power-thermal.md)「内存容量」——UMA 已收回，本文数值是收回**前**的 |
+> | 「明确不建议做的」里仍生效的：多节点 HA · Thanos/Mimir · 106 并入集群 · cert-manager · Vault auto-unseal | [ROADMAP](../ROADMAP.md)「不做 / 已取消」表 |
+> | §附 106 入集群评估 | 结论仍成立，但**做法已细化**：106 上开独立单节点 `k3s-exp`（非 homelab worker），见 [ADR](../decisions/storage106-experiment-vm.md) |
 >
 > **❌ 已被后续推翻的四条**（读正文时请忽略）：
 > ① 「不引入 CNPG 之类 Postgres operator」—— 2026-07-18 起 ZITADEL DB 用 CNPG，2026-08-06 又加共享 `apps-pg`
-> （[ADR](../../decisions/shared-postgres-platform.md)）；② 「LGTM 整体不搬」—— Loki/Tempo 已迁 oracle
+> （[ADR](../decisions/shared-postgres-platform.md)）；② 「LGTM 整体不搬」—— Loki/Tempo 已迁 oracle
 > （[迁移计划](2026-08-02-homelab-to-oracle-workload-migration.md)）；③ 「Gotify 迁 oracle」—— Gotify 整体退役，
-> 告警改 Alertmanager 原生 Telegram（[ADR](../../decisions/alerting-telegram-migration.md)）；
+> 告警改 Alertmanager 原生 Telegram（[ADR](../decisions/alerting-telegram-migration.md)）；
 > ④ 「旧 LLM 网关配双 DGX fallback」—— 旧 LLM 网关 2026-08-08 退役。
 > 范围: 全舰队（homelab / oracle-k3s / storage-106 / DGX Spark ×2 / MacBook）机器角色与集群架构
-> 定位: 承接 `docs/plans/networking/2026-03-07-homelab-oracle-architecture-optimization.md` 与 `docs/plans/archive/../archive/2026-03-07-simplification-recommendations.md`，聚焦**物理层错配**而非新增组件
+> 定位: 承接 `docs/plans/archive/2026-03-07-homelab-oracle-architecture-optimization.md` 与 `docs/plans/archive/2026-03-07-simplification-recommendations.md`，聚焦**物理层错配**而非新增组件
 
 ---
 
@@ -47,7 +47,7 @@
 
 唯一能造成**永久损失**的场景是 storage-106 磁盘 + 屋内事故。
 
-> ✅ **已定方案（2026-07-06）**：serverless **restic**，每集群 CronJob 逻辑 dump（Vault raft snapshot / pg_dump / sqlite `.backup`）→ **106 ZFS 加密仓库**（`mrstorage/restic`，raidz1 + sanoid 保护）。**先本地仓库、离站 later**（后续 rclone/`restic copy` → OCI always-free 20GB 或 B2）。完整执行计划见 **`docs/plans/storage/2026-07-06-storage-local-migration-and-backup-redesign.md`**。
+> ✅ **已定方案（2026-07-06）**：serverless **restic**，每集群 CronJob 逻辑 dump（Vault raft snapshot / pg_dump / sqlite `.backup`）→ **106 ZFS 加密仓库**（`mrstorage/restic`，raidz1 + sanoid 保护）。**先本地仓库、离站 later**（后续 rclone/`restic copy` → OCI always-free 20GB 或 B2）。完整执行计划见 **`docs/plans/2026-07-06-storage-local-migration-and-backup-redesign.md`**。
 
 - 分层：**P0 小数据（Vault + 各 PG + sqlite，总量 <2GB）** 进 restic；**Calibre 书库（100Gi）** 不进 restic，靠 ZFS raidz1 + sanoid（书可再下载，用户已确认不离站）。
 - 凭据：restic repo 密码 + 专用 SSH key 入 Vault `secret/homelab/restic` → ESO。
@@ -116,7 +116,7 @@
 
 个人服务很轻，24GB 用不满。除接收 Gotify（P0）外：
 
-- ✅ **ZITADEL 迁 oracle 已决（2026-07-06）**：不再只是预案——全家 SSO 可用性 > 家里笔记本；`auth.meirong.dev` 走 tunnel、在哪个集群对外无感；PG 迁 oracle local-path，用现成 pg_dump/restore SOP。执行见 2026-07-06 计划 Phase 3 Task 8（纳入 `docs/plans/apps/2026-07-04-zitadel-to-oracle-k3s.md`）。
+- ✅ **ZITADEL 迁 oracle 已决（2026-07-06）**：不再只是预案——全家 SSO 可用性 > 家里笔记本；`auth.meirong.dev` 走 tunnel、在哪个集群对外无感；PG 迁 oracle local-path，用现成 pg_dump/restore SOP。执行见 2026-07-06 计划 Phase 3 Task 8（纳入 `docs/plans/2026-07-04-zitadel-to-oracle-k3s.md`）。
 
 ---
 
@@ -171,4 +171,4 @@
 
 **对症方案**：想增内存 → 给 pve 加内存条（P1-4）；想要真·第二计算节点 → 加一台 N100 级迷你 PC 当 worker，勿复用存储机。
 
-**106 的正确用法（不是加计算，而是升级存储层）**：抬 ARC 读缓存 + ZFS 快照 + 云端离站,把它从"单点裸盘"变成三层受保护存储——同时落地本文档 P0-1 的离站备份。执行细节（备份方案待重新设计）见 **`docs/plans/storage/2026-07-04-storage-106-utilization-and-backup-simplification.md`**。
+**106 的正确用法（不是加计算，而是升级存储层）**：抬 ARC 读缓存 + ZFS 快照 + 云端离站,把它从"单点裸盘"变成三层受保护存储——同时落地本文档 P0-1 的离站备份。执行细节（备份方案待重新设计）见 **`docs/plans/archive/2026-07-04-storage-106-utilization-and-backup-simplification.md`**。
