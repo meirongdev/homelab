@@ -170,4 +170,6 @@
           - "Temperatures: {{ sensors_after.stdout_lines }}"
           - ""
           - "NOTE: ASPM powersupersave requires reboot to take effect"
-          - "RECOMMENDATION: Reduce VM k8s-node memory from 15GB to 10-11GB to eliminate swap pressure"
+          # 曾经这里建议把 k8s-node 从 15GB 降到 10-11GB；VM 已是 13312MB 且宿主 PSI 为 0，
+          # 内存分配链以 docs/reference/homelab-host-power-thermal.md 为准，别在这里给数字。
+          - "Memory sizing: see docs/reference/homelab-host-power-thermal.md (host `free -m` available is the criterion)"
