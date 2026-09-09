@@ -30,11 +30,11 @@ console-screen-check:
 power-tune-pve1:
     ansible-playbook playbooks/power-tune-pve1.yaml
 
-# 部署 node_exporter (+ smartctl_exporter on storage) 到所有裸金属节点（106 + pve-1）
+# 部署 node_exporter (+ smartctl_exporter on storage) + vzdump 周备 textfile 采集器到两台宿主（106 + pve-1）
 node-exporter:
     ansible-playbook playbooks/node-exporter-deploy.yaml
 
-# 仅更新 storage 节点（106）的 exporter
+# 仅更新 storage 节点（106）的 exporter（含 vzdump 采集器那一 play）
 node-exporter-storage:
     ansible-playbook playbooks/node-exporter-deploy.yaml --limit storage
 

@@ -365,7 +365,16 @@
         - udevadm trigger --subsystem-match=powercap --action=add --settle
       changed_when: rapl_udev_rule is changed
 
-    - name: Create node_exporter systemd service (with RAPL)
+    # textfile 目录必须先于 node_exporter 存在（同 Play 1）。pve 上它给 vzdump-textfile 用（Play 3）。
+    - name: Create node_exporter textfile collector directory
+      ansible.builtin.file:
+        path: /var/lib/node_exporter/textfile
+        state: directory
+        owner: root
+        group: node_exporter
+        mode: "0755"
+
+    - name: Create node_exporter systemd service (with RAPL + textfile)
       ansible.builtin.copy:
         dest: /etc/systemd/system/node_exporter.service
         mode: "0644"
@@ -380,7 +389,9 @@
             --web.listen-address=:{{ node_exporter_port }} \
             --collector.rapl \
             --collector.systemd \
-            --collector.processes
+            --collector.processes \
+            --collector.textfile \
+            --collector.textfile.directory=/var/lib/node_exporter/textfile
           Restart=always
           RestartSec=5
 
@@ -502,3 +513,80 @@
         msg:
           - "node_exporter    → http://192.168.50.4:{{ node_exporter_port }}/metrics"
           - "smartctl_exporter → http://192.168.50.4:{{ smartctl_exporter_port }}/metrics"
+
+# Play 3: 两台 PVE 宿主 — vzdump 周备结果 → node_exporter textfile 指标（2026-09-09 新增）
+# ☠️ 为什么需要它：两台的 vzdump 周备此前没有任何监控面 —— /etc/pve/notifications.cfg 不存在、
+#    宿主没有邮件出口、Prometheus 里没有 vzdump 指标。作业失败或 timer 被停，与「备份很正常」
+#    外观完全一致。restic 有死人开关、zpool scrub 有 textfile 采集器，唯独 vzdump 是盲区。
+#    告警在 k8s/helm/manifests/monitoring/alerts/storage-alerts.yaml 的 vzdump-backups 组。
+- name: Deploy vzdump textfile collector on both PVE hosts
+  hosts: proxmox
+  gather_facts: false
+  tasks:
+    - name: Install vzdump textfile collector
+      ansible.builtin.copy:
+        src: ../files/vzdump-textfile
+        dest: /usr/local/sbin/vzdump-textfile
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Create vzdump-textfile service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/vzdump-textfile.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Write PVE vzdump results as node_exporter textfile metrics
+          # pvesh 要 pve-cluster（/etc/pve）与 pvedaemon 起来才能查任务历史
+          After=pve-cluster.service pvedaemon.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/vzdump-textfile
+
+    - name: Create vzdump-textfile timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/vzdump-textfile.timer
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Refresh vzdump textfile metrics hourly
+
+          [Timer]
+          # 周备以「天」为尺度变化，每小时绰绰有余；开机后多等几分钟让 PVE 服务就位
+          OnBootSec=5min
+          OnUnitActiveSec=1h
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+
+    - name: Enable and start vzdump-textfile timer
+      ansible.builtin.systemd:
+        name: vzdump-textfile.timer
+        daemon_reload: true
+        enabled: true
+        state: started
+
+    - name: Run the collector once now (so metrics exist without waiting for the timer)
+      ansible.builtin.command:
+        cmd: /usr/local/sbin/vzdump-textfile
+      changed_when: false
+
+    # 与 RAPL 那条断言同一口径：exit 0 不代表产出对了，读回文件核对
+    - name: Read back the textfile
+      ansible.builtin.command:
+        cmd: cat /var/lib/node_exporter/textfile/vzdump.prom
+      register: vzdump_prom
+      changed_when: false
+
+    - name: Assert the collector produced a healthy file
+      ansible.builtin.assert:
+        that:
+          - "'vzdump_collector_success 1' in vzdump_prom.stdout"
+          - "'vzdump_last_success_timestamp_seconds{vmid=' in vzdump_prom.stdout"
+        fail_msg: >-
+          vzdump-textfile 没有产出健康数据。手工跑 `/usr/local/sbin/vzdump-textfile --print; echo $?`，
+          并核对 `pvesh get /nodes/$(hostname)/tasks --typefilter vzdump --limit 3`。
+        success_msg: "vzdump textfile OK — vzdump_* series present"
