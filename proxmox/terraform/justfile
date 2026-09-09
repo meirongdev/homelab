@@ -1,48 +1,39 @@
-# Proxmox Terraform tasks
+# pve（Ryzen 5600H 笔记本）terraform tasks —— 控制面 VM k8s-node（VMID 100）
+# ⚠️ 本机直连两台 PVE 的 :8006 均不通（SSH 22 正常）—— plan/apply 依赖 _tunnel，
+#    与 ../terraform-storage 同一套办法（那边 18006，这边 18007）。
 
 # Show help
 help:
     @just --list --unsorted
 
+# SSH 隧道 → pve 的 PVE API（幂等：已有隧道就复用；15 分钟自动退出）
+# 后台 ssh 的 stdio 全部指向 /dev/null：它若继承了当前 stdout，`just plan | tee` 这类管道
+# 要等它退出才收到 EOF（2026-09-09 实测 plan 卡满 10 分钟）。
+_tunnel:
+    @pgrep -f "ssh.*-L 18007:127.0.0.1:8006" >/dev/null || \
+      ssh -f -o ExitOnForwardFailure=yes -o ConnectTimeout=8 -i ~/.ssh/vgio \
+        -L 18007:127.0.0.1:8006 root@192.168.50.4 sleep 900 >/dev/null 2>&1 </dev/null
+    # 等端口真的在监听再返回（`ssh -f` 返回 ≠ 转发就绪，否则 terraform 首个 API 调用会被拒）
+    @for i in $(seq 1 20); do nc -z 127.0.0.1 18007 2>/dev/null && break; sleep 0.5; done
+
 # Initialize Terraform and create tfvars if it doesn't exist
 init:
-	@if [ ! -f terraform.tfvars ]; then \
-		echo "Creating terraform.tfvars from example..."; \
-		cp terraform.tfvars.example terraform.tfvars; \
-	else \
-		echo "terraform.tfvars already exists."; \
-	fi
-	terraform init
+    @if [ ! -f terraform.tfvars ]; then \
+      echo "Creating terraform.tfvars from example (记得填 root 密码与公钥)..."; \
+      cp terraform.tfvars.example terraform.tfvars; \
+    fi
+    terraform init
 
-# Plan all changes
-plan:
-    terraform plan -out=terraform.plan
+# Plan all changes（看到 `-/+` 就停：那是 replace，等于删 prod 数据）
+plan: _tunnel
+    terraform plan -var proxmox_endpoint=https://127.0.0.1:18007 -out=terraform.plan
 
-# Apply all changes
-apply: plan
-    terraform apply "terraform.plan"
+# Apply the plan
+apply: _tunnel
+    terraform apply terraform.plan
 
-# Destroy all resources
-destroy:
-    terraform destroy -auto-approve
-
-# Clean - remove local terraform files
-clean:
-    rm -rf .terraform/
-    rm -f .terraform.lock.hcl
-    rm -f *.tfstate*
-    rm -f *.plan
-
-# --- Granular Commands ---
-
-# Plan: VM creation
-plan-vm:
-    terraform plan -out=vm.plan -target=proxmox_virtual_environment_vm.k8s
-
-# Apply: VM creation
-apply-vm: plan-vm
-    terraform apply "vm.plan"
-
-# Destroy VM only
-destroy-vm:
-    terraform destroy -target=proxmox_virtual_environment_vm.k8s
+# ☠️ 这是 homelab 控制面 VM，destroy = 删全部 local-path PVC。VM 已设 protection=1，PVE API 会
+#    直接拒绝；真要拆先 `qm set 100 --protection 0`，并先读 docs/runbooks/backup-recovery.md。
+#    （2026-09-09 之前这里是 `destroy -auto-approve`，且另有一条会 rm 掉本地 state 的 clean 配方，均已删。）
+destroy: _tunnel
+    terraform destroy -var proxmox_endpoint=https://127.0.0.1:18007

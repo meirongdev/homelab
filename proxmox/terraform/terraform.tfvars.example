@@ -1,19 +1,5 @@
-vm_name      = "k8s-node"
-vm_cores     = 11       # 11 vCPUs
-vm_memory    = 15360    # 15GB
-vm_disk_size = 120      # GB
-
-vm_ip       = "10.10.10.10/24"
-vm_gateway  = "10.10.10.1"
-
-cloud_image_id = "local:iso/ubuntu-24.04-cloudimg-amd64.img"
-
-proxmox_node = "pve"
-
-# Replace with your actual SSH public key
-ssh_public_key = "ssh-rsa AAAA..."
-
-# --- Proxmox Provider Configuration ---
-proxmox_endpoint = "https://192.168.1.100:8006"
-proxmox_username = "root@pam"
-proxmox_password = "YourProxmoxPassword!"
+# cp terraform.tfvars.example terraform.tfvars 后填真值（terraform.tfvars 已 gitignore）。
+# VM 尺寸/地址/镜像都在 variables.tf 的默认值里（那才是真值，带推导注释），这里只放密钥。
+# endpoint 不用写：justfile 的 plan/apply 走 SSH 隧道并用 -var 指定。
+proxmox_password = "YourProxmoxRootPassword"
+ssh_public_key   = "ssh-rsa AAAA... vg-gitlab"

@@ -34,10 +34,13 @@ just join-worker
 从而 SSH 不可达（要从 tailnet 抢救）。取证见
 [records/2026-08-13-k3s-worker-join-106.md](../../docs/records/2026-08-13-k3s-worker-join-106.md)。
 
-## ⚠️ 两个坑
+## ⚠️ 三个坑
 
 - **本机直连 PVE :8006 不通**（SSH 22 正常，`../terraform` README 里那个
   terraform "no route to host" 是同一件事）。`just plan/apply` 会自动起 SSH 隧道
   （`_tunnel`，10 分钟自动收），endpoint 默认即隧道地址，无需手工处理。
 - **与 `../terraform`（pve 那个 root）刻意分离**：state 各管各的 API，
   任一台 PVE 失联不影响另一个 root 可操作。别合并。
+- ☠️ **provider 0.85.1 送不出既有盘的 discard/ssd/iothread 改动**：apply 报成功、下次 plan 同样的 diff 又回来。
+  这几项要在宿主上用 `qm set <vmid> --scsi0 "<整串>"` 手动写进 pending（命令模板在 `main.tf` 注释里），
+  写完 plan 才会 No changes。
