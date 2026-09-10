@@ -334,7 +334,19 @@ spec:
       serviceAccountName: homepage
       containers:
         - name: homepage
-          image: ghcr.io/gethomepage/homepage@sha256:a0b71c8e757298d02560186bab9fbe3fc2d375c523a62cc1019177b37e48aa28  # 当前运行 digest 固定（原 :latest）
+          # v2.3.0（2026-09-10 从 v1.13.2 的 digest a0b71c8e… 升上来；原先是 :latest 钉的）。
+          # ⚠️ 钉的是**多架构 index digest**（oci image index，含 linux/amd64 + linux/arm64）——
+          #    oracle 是 arm64，钉成单架构那个会 ImagePullBackOff。
+          # 升级动机是 Next.js 的两条 Critical（CVE-2026-75604 / GHSA-2xp9-vwfh-vxw4，
+          # 2026-08-25 上游安全发布）：v1.13.2 内置 next 16.2.6，v2.3.0 是 **16.3.3**（已修）。
+          # 两集群共 4 个受影响的 Next.js 镜像里**只有它有已修上游**，另三个
+          # （zitadel-login / multica-web / open_notebook）见两份 trivy-operator values 的豁免。
+          # ⚠️ v2.0.0 唯一的破坏性变更是新增的 homepage auth，**默认关**（要
+          #    HOMEPAGE_AUTH_ENABLED=true 才启用），配置文件布局与 v1 相同，无需迁移。
+          #    2026-09-10 升级前拿**本 ConfigMap 的六个文件**在本地跑过 v2.3.0 验证：
+          #    / 返回 200、/api/services 解析出 4 组 29 条、bookmarks/widgets 均正常、
+          #    容器日志无配置解析错误（"▲ Next.js 16.3.3 / ✓ Ready"）。
+          image: ghcr.io/gethomepage/homepage@sha256:f820276654539cdc2cf0169f28188d135919a7984fad76d83d8d5ff1383f3705
           ports:
             - containerPort: 3000
               name: http

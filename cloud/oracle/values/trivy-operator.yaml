@@ -227,6 +227,50 @@ trivy:
       # 复审触发条件比日期更有用：上游镜像 bump 到 x/crypto ≥0.55.0 就删本条。
       - id: CVE-2026-56854
         statement: "x/crypto/ssh 源地址限制未强制(GO-2026-6303); 触发需本进程作 SSH 服务端且在非公钥认证回调里设 source-address, 17 个受影响镜像无一跑 SSH 服务端(argocd 只作 git 客户端); CVE 2026-08-28 发布, 各上游最新版均早于该日无已修镜像, 2026-10 复审"
+      # --- Next.js 16.x 两条 Critical（2026-09-10 新增，两集群同批）---
+      # 2026-09-10 两集群的 TrivyImageCriticalVulnerabilities 同时烧起来，各 2 条
+      # Critical —— 逐条核过，**4 条全是同两个 advisory**，横跨 4 个 Next.js 镜像
+      # （homelab: multica-web v0.4.28 / open_notebook 1.14.0；
+      #   oracle: zitadel-login v4.13.1 / homepage v1.13.2）。来源是 Next.js
+      # 2026-08-25 的安全发布，修复版 **16.3.3**（16.x 线）/ 15.5.24（15.x 线）。
+      #
+      # ☠️ **升级只救得了四个里的一个，别照着「有新 tag 就升」办**。2026-09-10 逐个
+      #    把候选镜像拉下来读 `node_modules/.pnpm` 实测（不是看 release notes）：
+      #      homepage      v1.13.2 → v2.3.0   next 16.2.6 → **16.3.3** ✅ 已升
+      #      zitadel-login v4.13.1 → v4.17.3  next 16.1.6 → 16.2.11   ❌ 仍带洞
+      #      multica-web   v0.4.28 → v0.4.42  next 16.2.6 → 16.2.6    ❌ 一模一样
+      #      open_notebook 1.14.0 已是最新 stable（v1-dev 不钉生产）   ❌ 无可升
+      #    即另三个**跨 14 个版本追新也不会让它消失**，只有 homepage 真修得掉
+      #    （已在 cloud/oracle/manifests/homepage/homepage.yaml 钉到 v2.3.0 的
+      #    多架构 index digest）。
+      #
+      # CVE-2026-75604（Windows 路径穿越 RCE，CVSS 9.0）——**架构上不适用**：
+      #   Vercel 公告原文 "Linux and macOS are not affected"，触发靠 percent-encoded
+      #   反斜杠在 Windows 文件系统上被当成目录分隔符。两集群全是 Linux 容器。
+      #   同 CVE-2026-31789 那条的 NVD 过度评分模式。
+      #
+      # GHSA-2xp9-vwfh-vxw4（图片优化经 sharp→libheif 解 AVIF 的 RCE，CVSS 9.5，
+      #   无 CVE 号，故 id 必须写 GHSA——见上面 2026-08-13 那条格式坑）——这条是真的，
+      #   触发条件是 **Next.js 优化一张攻击者可控的 AVIF**。2026-09-10 逐个探测过
+      #   /_next/image：
+      #     · 远程源全被挡：multica / notebook / auth 三个域拿 example.com 试，全部
+      #       400 `"url" parameter is not allowed`（images.remotePatterns 为空）——
+      #       「把优化器指向我的 AVIF」这个经典向量是关的。
+      #     · home.meirong.dev 连 /_next/image 路由都没有（404，优化器未启用），
+      #       本地跑 v2.3.0 实测同样 404，升级没有引入新面。
+      #   于是只剩「把 AVIF 写进应用自己的源」这一条路，而三者都要先有账号：
+      #     multica `allowSignup: false` + allowedEmails 单地址（values/multica.yaml）、
+      #     open-notebook 有 OPEN_NOTEBOOK_PASSWORD、zitadel-login 的品牌图要 org 管理员传。
+      #   ⚠️ 判据是「能不能**写入**本源」，不是「页面要不要登录」：/_next/image 本身
+      #     **不经应用鉴权**，notebook 实测未登录就能优化本地图（HTTP 200）。
+      # ⚠️ 覆盖范围：按 ID 全集群生效。当下只命中上述 Next.js 镜像；将来若新增别的
+      #   Next.js 服务、**尤其是开放注册或允许匿名上传的**，这两条必须立刻重估，
+      #   别当成它们的正常覆盖范围。
+      # 复审触发条件比日期更有用：对应上游镜像 bump 到 next ≥16.3.3 就删掉它那条。
+      - id: CVE-2026-75604
+        statement: "Next.js Windows 路径穿越 RCE(修复 16.3.3/15.5.24); Vercel 公告原文 Linux and macOS are not affected, 两集群全 Linux 容器故架构上不适用, 2026-11 复审"
+      - id: GHSA-2xp9-vwfh-vxw4
+        statement: "Next.js 图片优化经 sharp/libheif 解 AVIF 的 RCE(修复 16.3.3); 触发需优化攻击者可控 AVIF, 受影响服务 remotePatterns 为空(远程源实测 400 url not allowed), 写入本源需已有账号(multica 关注册/notebook 有口令/zitadel 品牌图要 org 管理员); zitadel-login v4.17.3 仍 16.2.11 / multica-web v0.4.42 仍 16.2.6 / open_notebook 1.14.0 为最新 stable, 均无已修镜像, 2026-11 复审"
 
     # ---- 暴露密钥（exposed secrets）的既知假阳性（2026-08-30 新增）----
     # 背景：`TrivyExposedSecretFound` 自上线起引用的指标名 `trivy_exposedsecrets_findings`
