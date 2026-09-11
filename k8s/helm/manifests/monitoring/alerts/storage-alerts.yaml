@@ -157,3 +157,71 @@ spec:
                 `cat /var/lib/node_exporter/textfile/zpool_scrub.prom`
                 node_exporter 的 ExecStart 是否还带 --collector.textfile
               整个 106 宕机时本条也会响（absent 分支），那种情况另有 BackupTargetNodeDown。
+
+    # ── PVE vzdump 周备（2026-09-09 新增）─────────────────────────────────────────
+    # 数据源：两台宿主上的 vzdump-textfile 采集器（proxmox/ansible/playbooks/node-exporter-deploy.yaml
+    # Play 3），读 PVE 任务历史写 vzdump_* 指标。此前 vzdump 没有任何监控面：
+    # /etc/pve/notifications.cfg 不存在、宿主无邮件出口、Prometheus 无指标 —— 作业失败或 timer
+    # 被停，与「备份很正常」外观完全一致。作业表：pve 的 VM 100 周日 03:30、106 的 VM 200 周日 05:00
+    # （docs/runbooks/proxmox-host-upgrade.md §3）。四条的分工与 zfs-scrub-overdue 那组同构。
+    - name: vzdump-backups
+      rules:
+        - record: vzdump_last_success_age_days
+          expr: (time() - vzdump_last_success_timestamp_seconds) / 86400
+        # 周备：正常间隔 7 天，8 天 = 漏跑一次仍有 1 天余量就能报出来
+        - alert: VzdumpBackupOverdue
+          expr: (time() - vzdump_last_success_timestamp_seconds) / 86400 > 8
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "PVE 周备 VM {{ $labels.vmid }} 已 {{ $value | humanize }} 天没有成功 @ {{ $labels.nodename }}"
+            description: |
+              该 VM 最近一次成功的 vzdump 距今 >8 天（作业每周日跑一次）。在对应宿主上查：
+                `pvesh get /nodes/$(hostname)/tasks --typefilter vzdump --limit 3`（status 不是 OK 就看该任务日志）
+                `cat /etc/pve/jobs.cfg`（作业还在、enabled 1、storage 还指向 106 的存储）
+                `pvesm status`（pve 的 `backups` 是 106 的 NFS 导出，106 宕机它先挂）
+              整机重建靠的就是这份，restic 只兜 PVC 里的数据。
+
+        # 上一次运行本身失败了 —— 不用等 8 天，失败当天就该知道
+        - alert: VzdumpBackupFailed
+          expr: vzdump_last_run_ok == 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PVE 周备 VM {{ $labels.vmid }} 最近一次运行失败 @ {{ $labels.nodename }}"
+            description: |
+              最近一次 vzdump 任务 status 不是 OK。看任务日志：
+                `pvesh get /nodes/$(hostname)/tasks --typefilter vzdump --limit 1`
+                `/var/log/vzdump/qemu-{{ $labels.vmid }}.log`（只留最后一次运行）
+              常见原因：106 的 NFS 导出不可达（pve 侧）、目标存储满、VM 的 guest agent 无响应导致 fs-freeze 超时。
+
+        # ☠️ 上面几条的来源守卫（同 ZpoolNeverScrubbed / ZpoolScrubCollectorFailed 的口径）
+        - alert: VzdumpNeverSucceeded
+          expr: vzdump_known == 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "VM {{ $labels.vmid }} 没有任何成功的 vzdump 记录 @ {{ $labels.nodename }}"
+            description: |
+              采集器在本机看到了这个 VM，但任务历史里没有一次成功的 vzdump —— 新建的 VM 没进作业，
+              或作业从未成功过。VzdumpBackupOverdue 对这种情况**恒不触发**（分子无 series），由本条覆盖。
+              处置：给它建作业（参考 proxmox/ansible/playbooks/vzdump-worker-vm.yaml），或确认该 VM 刻意不备。
+
+        - alert: VzdumpCollectorFailed
+          expr: vzdump_collector_success == 0 or absent(vzdump_collector_success)
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "vzdump 采集器未产出数据 —— VzdumpBackupOverdue 正在静默失效"
+            description: |
+              vzdump_collector_success 为 0 或整个消失，上面几条因此没有判据可用，而这与
+              「周备一切正常」外观完全一致（这正是本组 2026-09-09 之前的状态）。在宿主上依次查：
+                `systemctl status vzdump-textfile.timer`
+                `/usr/local/sbin/vzdump-textfile --print; echo $?`（脚本会把失败写成 success 0）
+                `cat /var/lib/node_exporter/textfile/vzdump.prom`
+                node_exporter 的 ExecStart 是否还带 --collector.textfile
+              两台宿主同时宕机时本条也会响（absent 分支），那种情况另有 ProxmoxHostDown / BackupTargetNodeDown。

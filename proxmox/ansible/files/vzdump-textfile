@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""把 PVE vzdump 作业的最近结果写成 node_exporter textfile 指标。
+
+由 ansible 管理（proxmox/ansible/playbooks/node-exporter-deploy.yaml），别在节点上手改。
+vzdump-textfile.timer 每小时执行一次；`--print` 只打印不写文件（排障用）。
+
+☠️ 存在的理由：两台 PVE 的 vzdump 周备（pve 的 VM 100、106 的 VM 200）此前没有任何监控面——
+   /etc/pve/notifications.cfg 不存在、宿主没有邮件出口、Prometheus 里没有 vzdump 指标。作业失败
+   或 timer 被停，与「备份很正常」外观完全一致。restic 有死人开关、zpool scrub 有 textfile
+   采集器，唯独 vzdump 是盲区（2026-09-09 补）。
+
+数据源：`pvesh get /nodes/<node>/tasks --typefilter vzdump`（PVE 任务历史，带 status/endtime）。
+刻意不解析 /var/log/vzdump/qemu-<id>.log：那文件只留最后一次运行，一旦失败就丢了「上次成功时间」。
+单 VM 作业的 UPID 里 id 就是 vmid；多 VM 作业 id 为空，此时读任务日志按
+"Finished Backup of VM <id>"（只在该 VM 成功时出现）/ "Backup of VM <id> failed" 归属。
+
+指标（前缀 vzdump_，刻意不用 node_ / pve_：前者是 node_exporter 的命名空间，后者是
+prometheus-pve-exporter 的，混用会让人以为是它们产出的）：
+  vzdump_last_success_timestamp_seconds{vmid}  上次成功备份的结束时间
+  vzdump_last_run_timestamp_seconds{vmid}      上次运行（不论成败）的结束时间
+  vzdump_last_run_ok{vmid}                     上次运行是否成功（1/0）
+  vzdump_known{vmid}                           本机每个 VM 是否有成功备份记录（0 = 从未成功或从未被备份）
+  vzdump_collector_success                     采集器本身是否跑通（0 = pvesh 失败/解析异常）
+"""
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+import tempfile
+
+TEXTFILE_DIR = "/var/lib/node_exporter/textfile"
+PROM_FILE = os.path.join(TEXTFILE_DIR, "vzdump.prom")
+TASK_LIMIT = 200  # 周备一年 52 条，200 足够回看；任务历史本身也就几千条
+
+FINISHED_RE = re.compile(r"Finished Backup of VM (\d+)")
+FAILED_RE = re.compile(r"Backup of VM (\d+) failed")
+
+
+def pvesh(path, *args):
+    out = subprocess.run(
+        ["pvesh", "get", path, *args, "--output-format", "json"],
+        capture_output=True, text=True, timeout=60, check=True,
+    ).stdout
+    return json.loads(out) if out.strip() else []
+
+
+def task_vmids(node, task):
+    """返回 (成功的 vmid 集合, 失败的 vmid 集合)。"""
+    tid = str(task.get("id") or "")
+    ok = task.get("status") == "OK"
+    if tid.isdigit():
+        return ({tid}, set()) if ok else (set(), {tid})
+    # 多 VM 作业：只能从日志里按 VM 归属
+    log = pvesh("/nodes/%s/tasks/%s/log" % (node, task["upid"]), "--limit", "5000")
+    text = "\n".join(line.get("t", "") for line in log)
+    finished = set(FINISHED_RE.findall(text))
+    failed = set(FAILED_RE.findall(text))
+    return finished, failed - finished
+
+
+def collect():
+    node = socket.gethostname()  # PVE 节点名 == hostname
+    vms = pvesh("/nodes/%s/qemu" % node)
+    expected = sorted({str(v["vmid"]) for v in vms}, key=int)
+    tasks = pvesh("/nodes/%s/tasks" % node, "--typefilter", "vzdump", "--limit", str(TASK_LIMIT))
+    # 新在前；只看已结束的任务（进行中的没有 endtime）
+    tasks = sorted((t for t in tasks if t.get("endtime")), key=lambda t: t["endtime"], reverse=True)
+
+    last_run = {}      # vmid -> (endtime, ok)
+    last_success = {}  # vmid -> endtime
+    for t in tasks:
+        finished, failed = task_vmids(node, t)
+        for vmid in finished | failed:
+            if vmid not in last_run:
+                last_run[vmid] = (int(t["endtime"]), vmid in finished)
+        for vmid in finished:
+            if vmid not in last_success:
+                last_success[vmid] = int(t["endtime"])
+        if expected and all(v in last_success for v in expected):
+            break  # 每个 VM 都找到了上次成功，不必再往回翻
+
+    # 历史里出现过、但已不在本机的 vmid 也报出来（迁走/删掉的 VM，方便看到残留作业）
+    vmids = sorted(set(expected) | set(last_run), key=int)
+    return vmids, last_run, last_success
+
+
+def render(vmids, last_run, last_success, ok):
+    L = [
+        "# HELP vzdump_last_success_timestamp_seconds 该 VM 上次 vzdump 成功的结束时间（unix）",
+        "# TYPE vzdump_last_success_timestamp_seconds gauge",
+    ]
+    for v in vmids:
+        if v in last_success:
+            L.append('vzdump_last_success_timestamp_seconds{vmid="%s"} %d' % (v, last_success[v]))
+    L += [
+        "# HELP vzdump_last_run_timestamp_seconds 该 VM 上次 vzdump 运行（不论成败）的结束时间（unix）",
+        "# TYPE vzdump_last_run_timestamp_seconds gauge",
+    ]
+    for v in vmids:
+        if v in last_run:
+            L.append('vzdump_last_run_timestamp_seconds{vmid="%s"} %d' % (v, last_run[v][0]))
+    L += [
+        "# HELP vzdump_last_run_ok 该 VM 上次 vzdump 是否成功（1/0）",
+        "# TYPE vzdump_last_run_ok gauge",
+    ]
+    for v in vmids:
+        if v in last_run:
+            L.append('vzdump_last_run_ok{vmid="%s"} %d' % (v, 1 if last_run[v][1] else 0))
+    L += [
+        "# HELP vzdump_known 该 VM 是否有过成功的 vzdump 记录（0 = 从未成功或从未被备份）",
+        "# TYPE vzdump_known gauge",
+    ]
+    for v in vmids:
+        L.append('vzdump_known{vmid="%s"} %d' % (v, 1 if v in last_success else 0))
+    L += [
+        "# HELP vzdump_collector_success 本采集器上次是否完整跑通（0 = pvesh 失败/解析异常）",
+        "# TYPE vzdump_collector_success gauge",
+        "vzdump_collector_success %d" % ok,
+        "",
+    ]
+    return "\n".join(L)
+
+
+def main():
+    ok = 1
+    vmids, last_run, last_success = [], {}, {}
+    try:
+        vmids, last_run, last_success = collect()
+    except Exception as exc:  # noqa: BLE001 —— 任何失败都要落成 success=0 而不是空文件
+        ok = 0
+        print("vzdump-textfile: %s" % exc, file=sys.stderr)
+    body = render(vmids, last_run, last_success, ok)
+
+    if "--print" in sys.argv[1:]:
+        sys.stdout.write(body)
+        return 0 if ok else 1
+
+    os.makedirs(TEXTFILE_DIR, exist_ok=True)
+    # node_exporter 要求原子替换，否则会读到写了一半的文件
+    fd, tmp = tempfile.mkstemp(dir=TEXTFILE_DIR, prefix=".vzdump.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(body)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, PROM_FILE)
+    except Exception:
+        os.path.exists(tmp) and os.unlink(tmp)
+        raise
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
