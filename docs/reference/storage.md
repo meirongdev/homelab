@@ -262,6 +262,19 @@ restic（`restic ls … | head` 会 SIGPIPE 杀掉 restic，2026-08-13 实测踩
   PVE 每周 vzdump：pve-1 的 VM 100 → 106（keep-last=3）不变；**106 自己的 VM 200
   （worker）2026-08-16 新增** → `mrstorage/vzdump`（keep-last=2）。
   ⚠️ worker VM 的盘不在 `mrstorage` 里，sanoid 那层对它是**缺的**，只有 restic + vzdump 两层。
+  ⚠️ **VM 100 的 vzdump 目标 `/storage/backups` 落在 `mrstorage` 根数据集**，被 sanoid 递归快照一起拍：
+  `keep-last=3` 名义上留 3 份，快照里实际留着 9 份（2026-09-09 实测，根数据集 USEDSNAP 544G，
+  仅 08-01 月快照就钉着 3 份 69–77GB 的旧归档）。池只用了 13%，不是危机，但保留策略名不副实；
+  要不要像 `mrstorage/vzdump` 那样单独建数据集并从 sanoid 排除，是策略决定（快照也在保护备份本身），
+  开放项在 [ROADMAP](../ROADMAP.md)。
+  ⚠️ **归档虚胖的根因是 VM 盘 `discard=ignore`**（两台都是，2026-09-09 查明）：客户机 fstrim 每周自报
+  "trimmed 32 GiB" 但 QEMU 全部丢弃，thin LV 实占 98%（118G）而客户机只用 40G，周备因此全读 120G、
+  归档 48GB 且零块仅 4%。terraform 已改 `discard=on`（pending 到 VM 下次重启，`qm pending <id>` 可查），
+  重启后客户机跑一次 `sudo fstrim -av`，宿主 `lvs` 的 Data% 应掉到 ~35%，归档随之缩小。
 - **告警**: `BackupTargetNodeDown`（106 失联 >15m，severity=warning）。2026-07-12 由
   `NFSStorageNodeDown`(critical/2m) 改名降级：106 已无运行时依赖，宕机只影响备份窗口。
   规则在 `manifests/monitoring/alerts/prometheus-rules.yaml`。
+  **vzdump 周备自 2026-09-09 起有监控面**：两台宿主的 `vzdump-textfile` 采集器（随
+  `just node-exporter` 部署）读 PVE 任务历史写 `vzdump_*` 指标，`storage-alerts.yaml` 的
+  `vzdump-backups` 组四条告警（Overdue >8 天 / Failed / NeverSucceeded / CollectorFailed）。
+  此前 vzdump 失败无人知道：`notifications.cfg` 不存在、宿主无邮件出口。

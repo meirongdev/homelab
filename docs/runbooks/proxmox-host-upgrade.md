@@ -1,6 +1,6 @@
 # Proxmox 宿主升级（内核 + PVE 本体）
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-09
 > Status: SOP：两台宿主均已按本文执行完毕（2026-08-29 / 08-30，见 §8）。
 > 触发条件：要升 `pve` / `storage-106` 的内核或 PVE 本体；或发现这两台**长期收不到任何
 > Proxmox 更新**（`apt list --upgradable` 里一条 `proxmox-*` 都没有）。
@@ -190,6 +190,13 @@ dpkg -l | grep proxmox-kernel      # 确认新旧系列并存后再谈清理
 
 ### 4.5 重启并验证
 
+重启前先看 VM 有哪些 **pending 配置**会随这次重启落地（terraform 写进去、但 PVE 要 VM 重启才生效的
+那类：磁盘 discard/ssd/iothread、scsihw、vga，2026-09-09 起两台都有）：
+
+```bash
+qm pending 100        # pve；106 上是 qm pending 200。有 pending 行就说明这次重启会应用它们
+```
+
 ```bash
 reboot
 ```
@@ -219,6 +226,17 @@ exportfs -s | head             # 仅 106：导出还在
 kubectl --context k3s-homelab get nodes
 kubectl --context k3s-homelab get pods -A --no-headers \
   | awk '$4!="Completed"{split($3,a,"/"); if(a[1]!=a[2]) print}'   # 应为空
+```
+
+若重启前 `qm pending` 有磁盘相关改动（首次是 2026-09-09 写入的 `discard=on`），VM 起来后在**客户机**里
+补一次 trim，并在宿主上确认 thin LV 真的瘦下来（此前 `discard=ignore`，客户机 fstrim 全被 QEMU 丢弃）：
+
+```bash
+# 客户机（k8s-node 用 TS 100.94.186.7，worker 用 100.74.162.97）
+ssh -i ~/.ssh/vgio ubuntu@<节点> 'sudo fstrim -av; lsblk -d -o NAME,ROTA /dev/sda'   # ROTA 应为 0（ssd=1 生效）
+# 宿主
+lvs -o lv_name,data_percent pve                # vm-100-disk-0 应从 ~98% 掉到客户机 df 的量级（~35%）
+qm pending 100 | grep -v '^cur ' ; echo "(空 = 全部落地)"
 ```
 
 升 `storage-106` 后还要确认媒体服务能读到数据（NFS 挂载是否恢复）：
@@ -308,6 +326,8 @@ kubectl --context k3s-homelab uncordon k8s-worker-106
 
 # 控制面：双节点集群 drain 无处可去（且 vault PDB maxUnavailable=0），直接重启
 ```
+
+⚠️ 只重启 VM（不重启宿主）同样会应用 `qm pending` 里的改动，且同样要补 §4.5 那段 `fstrim -av` 验证。
 
 ⚠️ **`k8s-node` 重启会让 `protect-kernel-defaults` 真正生效**，届时
 `/etc/sysctl.d/31-k8s-protect-kernel.conf` 里那四个值必须已落盘，否则 kubelet 拒绝启动。

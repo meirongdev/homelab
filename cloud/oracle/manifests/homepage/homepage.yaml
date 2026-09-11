@@ -334,7 +334,28 @@ spec:
       serviceAccountName: homepage
       containers:
         - name: homepage
-          image: ghcr.io/gethomepage/homepage@sha256:a0b71c8e757298d02560186bab9fbe3fc2d375c523a62cc1019177b37e48aa28  # 当前运行 digest 固定（原 :latest）
+          # v2.3.0（2026-09-10 从 v1.13.2 的 digest a0b71c8e… 升上来；原先是 :latest 钉的）。
+          # ⚠️ 钉的是**多架构 index digest**（oci image index，含 linux/amd64 + linux/arm64）——
+          #    oracle 是 arm64，钉成单架构那个会 ImagePullBackOff。
+          # 升级动机是 Next.js 的两条 Critical（CVE-2026-75604 / GHSA-2xp9-vwfh-vxw4，
+          # 2026-08-25 上游安全发布）：v1.13.2 内置 next 16.2.6，v2.3.0 是 **16.3.3**（已修）。
+          # 两集群共 4 个受影响的 Next.js 镜像里**只有它有已修上游**，另三个
+          # （zitadel-login / multica-web / open_notebook）见两份 trivy-operator values 的豁免。
+          # v2.0.0 的 release notes 只标了一个破坏性变更（新增 homepage auth，**默认关**，
+          # 要 HOMEPAGE_AUTH_ENABLED=true 才启用），配置文件布局与 v1 相同、无需迁移。
+          # ☠️ **但它还有第二个没写进 release notes 的破坏性变更**：v2 开始严格强制
+          #    HOMEPAGE_ALLOWED_HOSTS，Host 头不在白名单里一律 400。kubelet 的 httpGet
+          #    探针发的是 `Host: <podIP>:3000` —— v1 放行、v2 判 400 → liveness 连挂
+          #    → CrashLoopBackOff。2026-09-10 升级时真踩了，同一份 env 本地并排复现：
+          #      v1.13.2  Host: 10.52.0.7:3000 → 200
+          #      v2.3.0   Host: 10.52.0.7:3000 → **400**（home.meirong.dev / 127.0.0.1:3000 均 200）
+          #    修法是下面两个探针显式带 Host 头，**不要**往白名单里加通配 ——
+          #    那个变量存在的意义就是挡 Host 头攻击，加 `*` 等于把它关掉。
+          #    ⚠️ 升级前的本地验证之所以没抓到：curl 用的是被放行的 Host，
+          #    而探针用的是 pod IP。「本地跑得起来」不覆盖「kubelet 探得通」。
+          #    本地验证到的部分仍然有效：/ 200、/api/services 解析出 4 组 29 条、
+          #    bookmarks/widgets 正常、日志无配置解析错误（"▲ Next.js 16.3.3 / ✓ Ready"）。
+          image: ghcr.io/gethomepage/homepage@sha256:f820276654539cdc2cf0169f28188d135919a7984fad76d83d8d5ff1383f3705
           ports:
             - containerPort: 3000
               name: http
@@ -369,16 +390,25 @@ spec:
             - name: config
               mountPath: /app/config/docker.yaml
               subPath: docker.yaml
+          # ⚠️ 两个探针都必须带 Host 头：v2 起 HOMEPAGE_ALLOWED_HOSTS 被严格强制，
+          #    kubelet 默认发的 `Host: <podIP>:3000` 会被判 400（详见上面镜像那段）。
+          #    值必须是 HOMEPAGE_ALLOWED_HOSTS 里的某一项，改白名单时别把它漏掉。
           livenessProbe:
             httpGet:
               path: /
               port: 3000
+              httpHeaders:
+                - name: Host
+                  value: home.meirong.dev
             initialDelaySeconds: 10
             periodSeconds: 10
           readinessProbe:
             httpGet:
               path: /
               port: 3000
+              httpHeaders:
+                - name: Host
+                  value: home.meirong.dev
             initialDelaySeconds: 5
             periodSeconds: 5
       volumes:
