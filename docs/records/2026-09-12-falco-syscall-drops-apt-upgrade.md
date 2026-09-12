@@ -30,6 +30,11 @@
 序列连续、无 gap、无 reset，所以**不是采集伪影**。Falco 进程自 09-01 13:06 起未重启
 （`falco_duration_seconds_total` = 939,208s ≈ 10.87 天），计数器是同一条命的累计值。
 
+⚠️ **别被 Loki 里的启动 banner 骗了**：`falco-6xgd8` 在 09-10 21:25 又完整打了一遍
+version / plugins / rules / buffer dimension，看着像重启过。那是 falcoctl 拉到新规则后的
+**热重载** —— 进程没重启（duration 计数器连续、pod `RESTARTS` 未动），scap 计数器也没归零。
+判据用 `falco_duration_seconds_total`，不是日志里有没有 banner。
+
 占比：402,586 / `n_evts_total` 2,067,162,917 = **0.019%**。
 
 ⚠️ **别拿分类明细去核对总数**，两者差三个数量级：
@@ -119,9 +124,11 @@ driver:
 
   ```bash
   kubectl --context oracle-k3s logs -n falco -l app.kubernetes.io/name=falco -c falco \
-    | grep 'syscall buffer dimension'
+    | grep 'syscall buffer dimension' | tail -1
   # 期望：The chosen syscall buffer dimension is: 33554432 bytes (32 MBs)
   ```
+
+  ⚠️ `tail -1` 不能省：热重载会把这行重打一遍，不加就可能读到同一个 pod 里的历史值。
 
 告警侧：`FalcoKernelEventDrops` 的 description 重写，把第一顺位从「查 CPU limit」改成
 「查宿主 `apt-daily-upgrade` 与 `/var/log/apt/history.log`」，并写明 open/close 占多数
