@@ -14,6 +14,21 @@
 # CO-RE modern eBPF 驱动：无需内核模块/头文件，适配托管 VM（recent kernel）。
 driver:
   kind: modern_ebpf
+  modernEbpf:
+    # 8MB → 32MB，2026-09-12 加。⚠️ 这不是调优，是补一个真实盲区。
+    # 当天 06:48–06:49 unattended-upgrades 升了 glibc + locales + python3.12（连带重启
+    # fail2ban/firewalld、locale-gen 重生成、py3compile 重编译全套字节码）：fork 从
+    # 1.5/s 冲到 21/s，system CPU 翻倍 —— 一分钟内打掉 **402,586 个 syscall**，
+    # Falco 在那扇窗口里什么都没看见（复盘 docs/records/2026-09-12-falco-syscall-drops-apt-upgrade.md）。
+    # ☠️ 别去查 CPU limit：实测 Falco 全程 0.024/1 核、零 throttle，它不是被卡住的，
+    #   是缓冲区太小接不住。默认 preset 4 = 8MB，而 cpusForEachBuffer: 2 在这台
+    #   2 OCPU 机器上意味着**全机共用这一个 8MB**（Falco 启动日志原话：
+    #   `The chosen syscall buffer dimension is: 8388608 bytes (8 MBs)` —— 升级后
+    #   复看这行就是验收判据）。
+    # 代价：锁定的内核内存 +24MB（不计入容器 512Mi limit），节点 12GB 现用 7.3GB。
+    # ⚠️ 这是减少丢弃概率，不是消灭：真正无上限的突发照样能灌满 32MB。所以告警仍保持 >0，
+    #   再响就该往上加档而不是抬阈值。
+    bufSizePreset: 6
 
 # bulk(-10)：镜像 homelab 侧 tetragon=bulk 的决定——安全传感器 fail-open，掉了不挡
 # 业务，内存紧张时先让位。⚠️ 键名是 podPriorityClassName 不是 priorityClassName
