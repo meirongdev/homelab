@@ -4,6 +4,7 @@
 
 | 日期 | 记录 | 内容 |
 |------|------|------|
+| 2026-09-12 | [falco-syscall-drops-apt-upgrade](2026-09-12-falco-syscall-drops-apt-upgrade.md) | Falco 一分钟丢 **402,586 个 syscall**（检测盲区）。☠️ 别查 CPU limit——全程 0.024/1 核零 throttle；真因是 `unattended-upgrades` 升 glibc+locales+python3.12 打出 fork 21/s，灌满**全机共用的那一个 8MB** 缓冲区。已改 32MB，阈值仍 `>0` |
 | 2026-09-01 | [oracle-apparmor-af-unix-panic](2026-09-01-oracle-apparmor-af-unix-panic.md) | oracle 三个月的「宿主层硬重置」实为**内核 AppArmor 空指针**。☠️ 客场查不到是因为 `panic_on_oops=1` 让 journald 来不及落盘——「日志戛然而止」恰是 guest panic 的标准形态，不是宿主层证据。触发方是 uptime-kuma 容器内默认自启的 nscd，关掉后该函数调用 69→**0** |
 | 2026-08-31 | [trivy-stale-replicaset-reports](2026-08-31-trivy-stale-replicaset-reports.md) | `TrivyExposedSecretFound` 烧 25h／42 条 Telegram，**没有任何真泄漏**：报告挂在 `replicas=0` 的 ReplicaSet 上，**24h TTL 只重扫有副本的**，指标衰减到 20 就平台化，永不自愈 |
 | 2026-08-30 | [memory-alert-page-cache-false-alarm](2026-08-30-memory-alert-page-cache-false-alarm.md) | `ContainerMemoryNearLimit` 报 99.45%，峰值 87% 是页缓存（RSS 口径 26.4%），顶死 limit 却没有 OOM。☠️ 对照实验：同容器同 limit 重启三次，峰值 99.45%/70.1%/23.7%——读数由**节点页缓存冷热**决定 |
