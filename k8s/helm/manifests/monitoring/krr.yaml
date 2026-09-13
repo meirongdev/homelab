@@ -89,7 +89,19 @@ spec:
           # （同 Pod 的多个 containers 是并行的，不能用来做流水线）
           initContainers:
             - name: krr
-              image: docker.io/robustadev/krr:v1.29.0
+              # 2026-09-13 v1.29.0 → v1.30.0：v1.29.0 的 Debian 13 基底带 perl-base
+              # 5.40.1-6，含 3 条 Critical（CVE-2026-13221 正则处理 / CVE-2026-42496
+              # Archive::Tar 符号链接路径穿越 / CVE-2026-8376 正则编译堆溢出，均修在
+              # 5.40.1-6+deb13u1），两集群各 2 份报告 → 合计 6 条，把
+              # TrivyImageCriticalVulnerabilities 顶成 firing。
+              # ☠️ 这里**不是**「升到已修版本」：v1.30.0 干脆不装 perl —— 实测 arm64 与
+              #    amd64 两个变体都既无 perl-base 包、也无 /usr/bin/perl，漏洞包不复存在。
+              #    （照本仓惯例实测镜像内容，不看 release notes。）
+              # CLI 逐项验过无变化：krr.py 仍在 /app，--prometheus-url/--prometheus-label/
+              # --history-duration/--max-workers/--width/--formatter=table/--fileoutput/
+              # --quiet 全在，-l 仍是 --prometheus-cluster-label 的短选项。
+              # 钉的是**多架构 index digest**（含 linux/arm64 + linux/amd64），不是单架构的。
+              image: docker.io/robustadev/krr:v1.30.0@sha256:b8d782e568c7d23aac6460e69dd136e44eca67e8cbfce19915197a48dc28e23f
               command: ["python", "krr.py", "simple"]
               args:
                 - --prometheus-url=http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
@@ -119,7 +131,7 @@ spec:
             # ⚠️ 脚本 fail-open：查不到指标只在报告里留一行说明，绝不让 Job 失败 ——
             #    报告发不出去比报告少一张附表严重得多。
             - name: mem-profile
-              image: docker.io/robustadev/krr:v1.29.0
+              image: docker.io/robustadev/krr:v1.30.0@sha256:b8d782e568c7d23aac6460e69dd136e44eca67e8cbfce19915197a48dc28e23f
               command: ["python", "/scripts/krr-mem-profile.py"]
               env:
                 - { name: PROM_URL, value: "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090" }
