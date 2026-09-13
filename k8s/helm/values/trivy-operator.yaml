@@ -190,6 +190,52 @@ trivy:
         statement: "Next.js Windows 路径穿越 RCE(修复 16.3.3/15.5.24); Vercel 公告原文 Linux and macOS are not affected, 两集群全 Linux 容器故架构上不适用, 2026-11 复审"
       - id: GHSA-2xp9-vwfh-vxw4
         statement: "Next.js 图片优化经 sharp/libheif 解 AVIF 的 RCE(修复 16.3.3); 触发需优化攻击者可控 AVIF, 受影响服务 remotePatterns 为空(远程源实测 400 url not allowed), 写入本源需已有账号(multica 关注册/notebook 有口令/zitadel 品牌图要 org 管理员); zitadel-login v4.17.3 仍 16.2.11 / multica-web v0.4.42 仍 16.2.6 / open_notebook 1.14.0 为最新 stable, 均无已修镜像, 2026-11 复审"
+      # --- open_notebook 的 Debian 13 基底三连（2026-09-13 新增，**只 homelab**）---
+      # 2026-09-13 14:18 homelab 烧 6 条 Critical —— 逐条核过，**6 条全在同一个镜像**
+      # lfnovo/open_notebook:1.14.0（personal-services，全集群唯一命中；oracle 对这 6 个
+      # ID 零命中，故刻意不往 cloud/oracle/values/trivy-operator.yaml 抄）。
+      # 全是 Debian 13 基底包、与应用代码无关：perl-base 5.40.1-6 ×3、
+      # libmbedcrypto16 3.6.5-0.1~deb13u1 ×2、libglib2.0-0t64 2.84.4-3~deb13u3 ×1。
+      #
+      # ☠️ **没有可升的镜像，连追 dev 都没用**（2026-09-13 实测镜像内容，不看 release notes）：
+      #   1.14.0(2026-07-21) 仍是最新 stable；唯一更新的 tag 是 v1-dev(2026-09-12 构建)，
+      #   拉下来 dpkg-query 一看**三个包版本一模一样**。即上游 Dockerfile 不做 apt upgrade，
+      #   重建带不来修好的 Debian 包 —— 所以「等 1.15.0」也不一定管用，
+      #   复审要看的是**上游有没有 bump 基底层**，不是有没有发新版本。
+      #
+      # 三组都不可达，判据是实测不是推断：
+      # · perl-base —— /usr/bin/perl 在，但**从不执行**：`apt-cache rdepends --installed
+      #   perl-base` 无任何反向依赖（它只是 Debian essential 集的残留），应用是纯 Python，
+      #   全镜像 grep 不到 subprocess 调 perl；仅有的 "perl" 字面量是 pygments 的 lexer
+      #   名表和 langchain text-splitter 的语言名常量 `PERL = "perl"` —— 是数据不是调用。
+      # · libmbedcrypto16 —— **不是 ffmpeg 的 TLS 后端**：`ffmpeg -buildconf` 显示
+      #   `--enable-gnutls`，mbedtls 只经 `--enable-librist` 的 librist4 间接进来，
+      #   也就是只有 `rist://` 能到达它。而本应用**从不把 URL 交给 ffmpeg**：
+      #   content_core 的 media 处理器一律 `["ffmpeg","-y","-i",input_file]` 传本地文件路径，
+      #   远程内容由 Python 侧 httpx 先下载（processors/url/*）。ffprobe 同理。
+      # · libglib2.0-0t64 —— 洞在 gio/gdbusintrospection.c 解析 D-Bus introspection XML
+      #   的整数下溢；容器里根本没有 D-Bus（无 /run/dbus、无 dbus-daemon），glib 是被
+      #   ffmpeg/pango/gdk-pixbuf 拖进来做媒体与渲染的，没有任何路径去解析那种 XML。
+      #
+      # ⚠️ 覆盖范围：按 ID 全集群生效，当下只命中这一个镜像。**若 homelab 将来新增了真的会
+      #   执行 perl 的镜像，或有服务把用户可控 URL 直接喂给 ffmpeg，这几条必须立刻重估**，
+      #   别当成它们的正常覆盖范围。
+      # ⚠️ perl 那三条与 2026-09-13 上午 krr 修掉的是同一组 CVE（那次是真升级：v1.30.0
+      #   整个不装 perl）。加了本豁免后，**krr 若被回退到 v1.29.0 将不再告警** —— 改 krr
+      #   镜像时别忘了这层静默。
+      # 复审触发条件比日期更有用：三个包任一在上游镜像里出现已修版本，就删掉对应条目。
+      - id: CVE-2026-13221
+        statement: "open_notebook 基底 perl-base 5.40.1-6 正则处理(修复 5.40.1-6+deb13u1); 镜像内 perl 从不执行(无反向依赖/纯 Python 应用/无 subprocess 调用), 1.14.0 为最新 stable 且 v1-dev 实测同版本无已修镜像, 2026-11 复审"
+      - id: CVE-2026-42496
+        statement: "open_notebook 基底 perl-archive-tar 符号链接路径穿越(修复 perl-base 5.40.1-6+deb13u1); 触发需用 perl Archive::Tar 解不可信归档, 镜像内 perl 从不执行, 无已修镜像(v1-dev 实测同版本), 2026-11 复审"
+      - id: CVE-2026-8376
+        statement: "open_notebook 基底 perl-base 5.40.1-6 正则编译堆溢出(修复 5.40.1-6+deb13u1); 镜像内 perl 从不执行, 无已修镜像(v1-dev 实测同版本), 2026-11 复审"
+      - id: CVE-2026-34873
+        statement: "open_notebook 基底 libmbedcrypto16 TLS1.3 会话恢复客户端冒充(修复 3.6.6-0.1~deb13u1); mbedtls 非 ffmpeg 的 TLS 后端(实测 --enable-gnutls), 只经 librist4 即 rist:// 可达, 而应用只把本地文件路径传给 ffmpeg(远程内容由 httpx 下载), 无已修镜像(v1-dev 实测同版本), 2026-11 复审"
+      - id: CVE-2026-34875
+        statement: "open_notebook 基底 libmbedcrypto16 任意代码执行(修复 3.6.6-0.1~deb13u1); 同上, mbedtls 仅经 librist4 的 rist:// 可达而应用从不把 URL 交给 ffmpeg, 无已修镜像(v1-dev 实测同版本), 2026-11 复审"
+      - id: CVE-2026-58016
+        statement: "open_notebook 基底 libglib2.0-0t64 gio/gdbusintrospection.c 整数下溢(修复 2.84.4-3~deb13u4); 触发需解析 D-Bus introspection XML, 容器内无 D-Bus(无 /run/dbus 无 dbus-daemon), glib 仅被 ffmpeg/pango/gdk-pixbuf 用于媒体与渲染, 无已修镜像(v1-dev 实测同版本), 2026-11 复审"
   # 扫描 Job（client）资源
   resources:
     requests:
