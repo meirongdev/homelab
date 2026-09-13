@@ -98,8 +98,20 @@ spec:
           serviceAccountName: krr
           initContainers:
             - name: krr
-              # v1.29.0 提供 linux/arm64（oracle 是 Ampere A1）；:latest 是单架构，别用
-              image: docker.io/robustadev/krr:v1.29.0
+              # v1.30.0 提供 linux/arm64（oracle 是 Ampere A1）；:latest 是单架构，别用
+              # 2026-09-13 v1.29.0 → v1.30.0：v1.29.0 的 Debian 13 基底带 perl-base
+              # 5.40.1-6，含 3 条 Critical（CVE-2026-13221 正则处理 / CVE-2026-42496
+              # Archive::Tar 符号链接路径穿越 / CVE-2026-8376 正则编译堆溢出，均修在
+              # 5.40.1-6+deb13u1），两集群各 2 份报告 → 合计 6 条，把
+              # TrivyImageCriticalVulnerabilities 顶成 firing。
+              # ☠️ 这里**不是**「升到已修版本」：v1.30.0 干脆不装 perl —— 实测 arm64 与
+              #    amd64 两个变体都既无 perl-base 包、也无 /usr/bin/perl，漏洞包不复存在。
+              #    （照本仓惯例实测镜像内容，不看 release notes。）
+              # CLI 逐项验过无变化：krr.py 仍在 /app，--prometheus-url/--prometheus-label/
+              # --history-duration/--max-workers/--width/--formatter=table/--fileoutput/
+              # --quiet 全在，-l 仍是 --prometheus-cluster-label 的短选项。
+              # 钉的是**多架构 index digest**（含 linux/arm64 + linux/amd64），不是单架构的。
+              image: docker.io/robustadev/krr:v1.30.0@sha256:b8d782e568c7d23aac6460e69dd136e44eca67e8cbfce19915197a48dc28e23f
               command: ["python", "krr.py", "simple"]
               args:
                 # 中枢 Prometheus 的 Tailscale NodePort（与 otel remote-write 同一入口，
@@ -130,7 +142,7 @@ spec:
             # ⚠️ PROM_URL 与上面 KRR 用的是同一个中枢 Prometheus（homelab 的 Tailscale NodePort），
             #    否则两张表的数据源不同、不可比。
             - name: mem-profile
-              image: docker.io/robustadev/krr:v1.29.0
+              image: docker.io/robustadev/krr:v1.30.0@sha256:b8d782e568c7d23aac6460e69dd136e44eca67e8cbfce19915197a48dc28e23f
               command: ["python", "/scripts/krr-mem-profile.py"]
               env:
                 - { name: PROM_URL, value: "http://100.94.186.7:31090" }

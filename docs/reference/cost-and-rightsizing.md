@@ -1,6 +1,6 @@
 # 成本归因与资源右尺寸
 
-> Last updated: 2026-09-09
+> Last updated: 2026-09-13
 > Status: 生效事实
 
 两套互补的工具：**OpenCost** 回答「钱花在哪」（常驻，出指标 → Grafana），
@@ -11,7 +11,7 @@
 | 形态 | 常驻 Deployment（每集群一份） | CronJob（每集群一份，周一 09:00 / 09:15） |
 | 数据源 | 自带 collector，直读 kubelet stats/summary，不查 Prometheus | 查中枢 Prometheus（cAdvisor 指标） |
 | 产物 | Prometheus 指标 → Grafana 面板 `opencost-multicluster-overview` | 文本表格 → Telegram 附件 |
-| 版本 | chart `opencost-2.5.28` | `robustadev/krr:v1.29.0` |
+| 版本 | chart `opencost-2.5.28` | `robustadev/krr:v1.30.0` |
 | 是否改集群 | 否 | 否（ClusterRole 全 get/list/watch） |
 
 数据源选型的取舍见 [decisions/opencost-krr-data-sources.md](../decisions/opencost-krr-data-sources.md)。
