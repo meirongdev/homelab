@@ -1,6 +1,6 @@
 # ArgoCD Application Patterns
 
-> Last updated: 2026-09-09
+> Last updated: 2026-09-13
 > Status: 生效事实
 >
 > 当前 ArgoCD 管理模式分析、可选 pattern 对比与取舍建议。
@@ -41,6 +41,18 @@ root (Application)
 
 **怎么选**：第 1 种只用于上游第三方 chart；**自研应用一律用后两种，不打 chart**，
 理由与推翻条件见 [decisions/no-helm-chart-for-in-house-apps](../decisions/no-helm-chart-for-in-house-apps.md)。
+
+☠️ **查多源 App 的同步进度别读 `.status.sync.revision`**：多源（`spec.sources`）
+Application 的该字段**恒为空字符串**，git sha 在 `.status.sync.revisions[]` 数组里
+（顺序同 `sources`，如 trivy-operator 为 `["0.33.1", "<git sha>"]`）。
+坑在于它不报错、只是返回空——`until ... | grep -q '^<sha>'` 这类等待循环会**永远
+空转**，看起来像「ArgoCD 卡住了」，实际早已 Synced（2026-09-13 这样空等了 10 分钟）。
+单源 App 不受影响，所以照着单源经验写的检查在多源上静默失效。正确写法：
+
+```bash
+# 多源：取数组；单源：取 .status.sync.revision
+kubectl -n argocd get app <name> -o jsonpath='{.status.sync.revisions}'
+```
 
 ### 跨集群
 
