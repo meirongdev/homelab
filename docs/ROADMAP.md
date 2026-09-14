@@ -1,6 +1,6 @@
 # Homelab Roadmap
 
-> Last updated: 2026-09-09
+> Last updated: 2026-09-14
 > 本文只回答两件事：**还剩什么没做**，和**为什么不做**。做过什么在
 > [CHANGELOG.md](CHANGELOG.md)（2026-09-02 拆出，原因见那里）。
 > **实施细节不写在这里**：每条压到一句话，展开看链接指向的 `reference/`（事实）、
@@ -75,6 +75,17 @@
   ⚠️ 在此之前 `TrivyImageCriticalVulnerabilities` 读到的 0 不覆盖这个镜像（告警只数现存
   报告，缺报告按 0 计入）。根治办法（给扫描 Job 配 Docker Hub 认证）已评估但刻意没做。
   → [reference/trivy-cve-ops.md](reference/trivy-cve-ops.md)
+
+- **trivy-operator 的报告 TTL 删除器只对 `VulnerabilityReport` 生效，成因未查**。
+  0 副本 ReplicaSet 上的三类报告都永不重扫，但只有漏洞报告会被 TTL 删掉（实测 oracle：VR 最老一份
+  恰好压在 24h 边界；CA 带 `report-ttl: 24h0m0s` 注解却过期 43 天照挂，111 份里含最老
+  `2026-08-02T23:29`；ES **连注解都没有**，79 份空注解）。后果是 `TrivyConfigAuditCritical` /
+  `TrivyExposedSecretFound` 一旦被这类冻结快照点燃就**不会自愈**，只能删 rs（08-31 为此烧了
+  25 小时 42 条 Telegram）。同一条 reconcile 路径时好时坏也解释不了：2026-09-13 那晚 rsshub 旧 rs
+  三类报告全被清走、calibre-web 旧 rs 一份没清走，operator 日志零报错。要么 upstream 有 bug，
+  要么依赖某个没找到的条件。
+  判据与处置见 [reference/trivy-cve-ops.md](reference/trivy-cve-ops.md)；
+  若确认 upstream bug，改走「普遍写 `revisionHistoryLimit` + 加僵尸报告巡检指标」绕过。
 
 ---
 
