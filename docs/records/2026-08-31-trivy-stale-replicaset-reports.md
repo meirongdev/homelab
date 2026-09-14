@@ -98,6 +98,19 @@ python-ldap 的 `slapdtest` 模块自带的测试夹具证书，上游仓库里�
    会清掉缩容 ReplicaSet 的漏洞报告、**却把暴露密钥与配置审计报告留下**。本次没有深挖
    这个不对称的成因，只记录实测结论 —— 它意味着 `TrivyImageCriticalVulnerabilities`
    不受此坑影响，`TrivyExposedSecretFound` 与 `TrivyConfigAuditCritical` 受。
+   - ☠️ **本条于 2026-09-14 修正：结论对，成因归错，别再照它的机制描述行事**。
+     同一负载（calibre-web）换镜像后，0 副本 rs 上**是有 `VulnerabilityReport` 的**，而且继续计数
+     21h+，`TrivyImageCriticalVulnerabilities` 因此卡在「3 个 Critical」—— 与本报告描述的坑同形，
+     只是要真去改那个镜像才暴露。所以"0 副本 rs 一份漏洞报告都不挂"是**观测时点造成的**：
+     漏洞报告在 24h 内就被 TTL 删掉了，而 08-31 清点的是陈旧僵尸（最老 43 天），早已全落在窗口外。
+     真正的分界在**删除器**：`VulnerabilityReport` 的 TTL 删除真的跑（全集群最老一份恰好压在 24h 边界），
+     `ExposedSecretReport` **根本没有 `report-ttl` 注解**、`ConfigAuditReport` 带着 `24h0m0s` 却过期
+     43 天照挂 —— 这才是这三类报告能陈旧 43 天的原因。另外，同一天同一种变更下 rsshub 的旧 rs
+     **三类报告全被清走**、calibre-web 的旧 rs **三类全留着**（3 份漏洞 + 4 份密钥 + 1 份配置审计，
+     冻结在 `2026-09-13T15:41`），说明 ReplicaSet reconcile 时那条 marking old reports for immediate
+     deletion 的路径**并不总成功**，为什么两次结局不同仍未查（operator 只在出错时打日志，
+     calibre-web 一条都没有）。现行事实与处置口径见
+     [trivy-cve-ops.md](../reference/trivy-cve-ops.md)。
 
 ## 四、这次栽的到底是哪个坑
 
