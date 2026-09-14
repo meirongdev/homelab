@@ -272,22 +272,26 @@ trivy:
       - id: GHSA-2xp9-vwfh-vxw4
         statement: "Next.js 图片优化经 sharp/libheif 解 AVIF 的 RCE(修复 16.3.3); 触发需优化攻击者可控 AVIF, 受影响服务 remotePatterns 为空(远程源实测 400 url not allowed), 写入本源需已有账号(multica 关注册/notebook 有口令/zitadel 品牌图要 org 管理员); zitadel-login v4.17.3 仍 16.2.11 / multica-web v0.4.42 仍 16.2.6 / open_notebook 1.14.0 为最新 stable, 均无已修镜像, 2026-11 复审"
       #
-      # --- Debian perl 5.40.1-6 三条 Critical（2026-09-14 新增，只本集群）---
-      # 本告警自 2026-09-13 16:12 UTC 起 firing，15 条 Critical —— 逐条核过，
+      # --- Debian perl 5.40.1-6 三条 Critical（2026-09-14 分诊；**已根除，本集群不留条目**）---
+      # 本告警曾自 2026-09-13 16:12 UTC 起 firing，报 15 条 Critical —— 逐条核过，
       # **15 条只对应 3 个 CVE**，放大倍数来自 perl 源码包拆出的 4 个二进制包：
       #   rsshub 12 条 = 3 CVE × perl / perl-base / libperl5.40 / perl-modules-5.40
       #   calibre-web 的 disable-auto-convert init 容器 3 条 = 3 CVE × perl-base
       # 修复版 5.40.1-6+deb13u1 **已在 trixie/main**（`apt-cache policy perl-base` 的
-      # Candidate 实测就是它；Debian tracker 三条在 trixie 均标 fixed），但镜像赶不上，
-      # 而且两个镜像的情况**不一样，别当成同一条处理**：
-      #   · rsshub → 上游 :latest 已重建到 +deb13u1，**这 12 条走真升级**，见
+      # Candidate 实测就是它；Debian tracker 三条在 trixie 均标 fixed），但两个镜像**情况
+      # 不一样、修法也不同，别当成同一条处理**：
+      #   · rsshub → 上游 :latest 已重建到 +deb13u1 → **升 digest**（sha256:2580aabb…），
+      #     部署后实测新报告 `criticalCount=0`。见
       #     cloud/oracle/manifests/rss-system/rsshub.yaml 的 2026-09-14 注释。
-      #     本组豁免不打算覆盖它，验收见下面「⚠️ 覆盖范围」。
-      #   · python:3.11-slim → **无已修镜像可升**（2026-09-14 实测）：该 init 容器用的
-      #     python:3.11-slim，其 :latest 指向的正是报告里那个 digest（9534e5a8…，
-      #     built 2026-09-01），且 3.11/3.12/3.13/3.14-slim 出自同一 base（abc9cb88…）、
-      #     同一晚构建 —— 官方 python 镜像整体落后于 perl 这次更新，追 tag 不会让它消失。
-      # 实际暴露面（这个 init 容器只装了 perl-base；逐条读公告原文 + 进镜像实测）：
+      #   · calibre-web 的 init 容器 → **无已修镜像可升**：当时 `python:3.11-slim` 的
+      #     :latest 指的正是报告里那个 digest（9534e5a8…，built 2026-09-01），且
+      #     3.11/3.12/3.13/3.14-slim 出自同一 base（abc9cb88…）、同一晚构建 —— 官方 python
+      #     镜像整体落后于 perl 这次更新，追 tag 不会让它消失。→ 换 `python:3.11-alpine`
+      #     **让漏洞包不复存在**（同 2026-09-13 krr 升 v1.30.0 那次，commit 38d84d2）：
+      #     alpine 基底不带 perl，amd64 与 arm64 两变体各自实测无 perl 包、无 /usr/bin/perl；
+      #     脚本只用标准库 sqlite3，两架构实测 `import sqlite3` 正常（sqlite 3.53.4）。
+      # 换基底之前的实际暴露面（当时那容器只装了 perl-base；逐条读公告原文 + 进镜像实测。
+      #   这段是**判定依据的唯一副本**，条目删了但它得留着，下次再出现照它判）：
       #   · CVE-2026-42496：Archive::Tar 解符号链接时不校验目标路径 → 任意文件读写。
       #     **该模块在本镜像里根本不存在**：perl-base 不打包 Archive::Tar（实测
       #     `dpkg -L perl-base` 无 Archive/Tar.pm，amd64 与 arm64 两个变体各自验过），
@@ -300,34 +304,24 @@ trivy:
       #     才会静默误匹配（CVSS 5.9），即得有 perl 程序编译攻击者可控的正则。本容器跑的是
       #     15 行 python3（把 cwa.db 的 auto_convert 置 0），整个镜像没有任何东西调用 perl；
       #     perl-base 只是 Debian 基底给 dpkg / maintainer script 用的脚手架。
-      # ⚠️ 覆盖范围：ignoreFile 按 CVE ID **全集群**生效，挡不住 rsshub 那一份。所以
-      #   本组三条会连带掩盖 rsshub —— **代价是「digest 没滚动起来」也会显示成已修**。
-      #   验收别只看告警灭：
-      #     kubectl -n rss-system get vulnerabilityreport replicaset-rsshub-<新 rs> -o json \
-      #       | jq '{digest:.report.artifact.digest, crit:.report.summary.criticalCount}'
-      #   digest 必须是 sha256:2580aabb…（新 rs 名会变，先 ls 一下）且 crit=0，
-      #   两者缺一说明升级没落地、是豁免在兜着。**若这三条日后出现在任何装了
-      #   perl-modules-5.40（即真带 Archive::Tar）的镜像上，那是真暴露面**，
-      #   别当成本豁免的正常覆盖范围（同上面 protobufjs / jsonata 几段的口径）。
-      # ⚠️ 反向配对：homelab 那份 values 自 2026-09-13 起为 open_notebook 豁免了**同三个
-      #   ID**。两边都加上之后，perl 5.40.1-6 在**全舰队不再报警** —— 将来新增任何真的会
-      #   执行 perl 的镜像（跑 perl 脚本、或用 Archive::Tar 解不可信归档），这两份豁免都
-      #   不会给你任何信号，只能靠人工重估。
-      # 比豁免更彻底的修法是让漏洞包不复存在（2026-09-13 的 krr 就是这么办的：v1.30.0
-      #   整个不装 perl，见 commit 38d84d2）。这个 init 容器只用 python 标准库 sqlite3，
-      #   换 `python:3.11-alpine` 即可根除而非豁免——实测 arm64 变体既无 perl 包也无
-      #   /usr/bin/perl，且 `import sqlite3` 正常（sqlite 3.53.4）。代价是基底从 Debian
-      #   换成 Alpine，而该容器与旧 pod 抢 cwa.db 锁的行为有专门注释
-      #   （cloud/oracle/manifests/personal-services/calibre-web.yaml 里 `strategy: Recreate`
-      #   上方那段），属独立改动，没跟这次告警收口混做。
-      # 复审触发条件比日期更有用：python:3.11-slim 的 :latest 重新指向带 +deb13u1 的
-      #   digest 后，把 init 容器镜像刷过去并删掉这三条（或直接换上面那条 alpine 路线）。
-      - id: CVE-2026-42496
-        statement: "Archive::Tar 符号链接穿越(修复 perl 5.40.1-6+deb13u1); 本镜像只装 perl-base, 实测 dpkg -L 无 Archive/Tar.pm(带它的是未安装的 perl-modules-5.40), trivy 按源码包归类的误判; python:3.11-slim 各 tag 均无已修版可升, 2026-11 复审"
-      - id: CVE-2026-8376
-        statement: "perl 正则编译期堆溢出, 公告原文限定 on 32-bit builds(修复 5.40.1-6+deb13u1); 本集群 arm64 且 trivy 默认扫的 amd64 亦 64 位, 架构上不可触发; python:3.11-slim 各 tag 均无已修版可升, 2026-11 复审"
-      - id: CVE-2026-13221
-        statement: "perl 正则 trie 16-bit 溢出需编译 >65535 固定串分支的 alternation(CVSS 5.9, 修复 5.40.1-6+deb13u1); 容器内无任何东西调用 perl(perl-base 仅是 dpkg 脚手架), init 容器是 15 行 python3; python:3.11-slim 各 tag 均无已修版可升, 2026-11 复审"
+      # 两条都是**真修**而非豁免，故本集群**不留这三条豁免**（与上面 cve-2026-43923
+      # 「按镜像回退保险保留」刻意相反，别照它补回来）：留着的代价不是"多一道保险"，而是
+      # **把信号删掉** —— 本集群已经没有任何镜像该带 perl 了，这三条再出现只可能是新引入
+      # 了真会执行 perl 的工作负载，那正是需要人看的时刻，不是静默吞掉的时刻。
+      # ⚠️ homelab 那份 values 仍为 open_notebook 留着同三个 ID（那边 perl 确实还在镜像里
+      #   且无已修 base 可升，情况不同）。所以 **grep 这三个 ID：homelab 有、本集群没有
+      #   才是当前正确状态**；哪天本集群又有了，先按下面判一遍再决定要不要留。
+      # 若这三条再出现，判定依据就在上面那三条分诊原文里（同一件事不在一个文件里抄两份），
+      #   先照它判完再决定要不要留条目。快速判法：
+      #   · CVE-2026-42496 先 `docker run --rm <镜像> sh -c 'ls /usr/share/perl*/Archive/Tar.pm'`
+      #     —— 不在就是 trivy 按**源码包**归类造成的误判（它把 perl-modules 的洞记到
+      #     perl-base 头上），该修的是归属而不是加豁免。
+      #   · CVE-2026-8376 看架构（只在 32 位发生），CVE-2026-13221 看有没有东西真的调用 perl。
+      # 方法论（这次真正花时间的地方）：判"升到哪"必须**逐架构进镜像 `dpkg -l` / `apk info`**，
+      #   不能看 release notes，也不能只核一个架构。节点是 arm64、真正在跑的是 arm64 变体，
+      #   而扫描 Job 的 `trivy image` 不带 `--platform`、默认只解析 amd64（见
+      #   docs/reference/trivy-cve-ops.md「它扫的是哪个架构」）—— 两个变体一边修好一边没修
+      #   完全可能，只核 amd64 等于没核。
 
     # ---- 暴露密钥（exposed secrets）的既知假阳性（2026-08-30 新增）----
     # 背景：`TrivyExposedSecretFound` 自上线起引用的指标名 `trivy_exposedsecrets_findings`
