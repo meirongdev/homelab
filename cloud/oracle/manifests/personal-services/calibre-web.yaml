@@ -106,7 +106,18 @@ spec:
         fsGroupChangePolicy: "OnRootMismatch"
       initContainers:
         - name: disable-auto-convert
-          image: python:3.11-slim
+          # 2026-09-14：`python:3.11-slim` → alpine，并钉多架构 index digest。动因：slim 系
+          # 基底带的 perl-base 5.40.1-6 挂着 CVE-2026-13221/42496/8376 三条 Critical，而
+          # Debian 的修复版 5.40.1-6+deb13u1 官方 python 镜像还没赶上（当时 :latest 仍指向
+          # 9534e5a8…，built 09-01；3.11–3.14-slim 同 base、同晚构建），追 tag 等不来。
+          # 这里选**根除而不是豁免**：alpine 基底不带 perl，包不存在了才叫修完
+          # （同 2026-09-13 krr 升 v1.30.0 那次）。amd64 与 arm64 两变体各自实测无 perl 包、
+          # 无 /usr/bin/perl；下面这段脚本只用标准库 sqlite3、不含 shell 也不起子进程，
+          # 两架构实测 `import sqlite3` 正常（sqlite 3.53.4），musl 无从插手。
+          # ☠️ pin 的是 **index digest**（OCI image index，含 linux/amd64 与 linux/arm64 v8），
+          #    不是单架构 digest —— oracle 是 Ampere A1，pin 单架构会拉不起来。
+          #    升级跑 `docker buildx imagetools inspect python:3.11-alpine` 取顶层 Digest。
+          image: python:3.11-alpine@sha256:0d55920083f1ce1e38ac292e2772f924b4f8bb4188d336c79bf66963039e6146  # = 3.11-alpine @ 2026-09-14
           command:
             - python3
             - -c
