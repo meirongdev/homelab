@@ -26,6 +26,7 @@ Network note: both clusters now use Cilium for the local data plane and Gateway 
 | [zitadel/](zitadel/README.md) | 身份 / SSO（`auth.meirong.dev`） |
 | [backup/](backup/README.md) | restic 夜备（双集群 → 106） |
 | [macbook/](macbook/README.md) | 远程无头 M2 MacBook 的 Ansible 配置 |
+| [aiven/](aiven/README.md) | Aiven free-tier PostgreSQL（外部托管的**额外**库，与集群内 `apps-pg` 无关） |
 | [images/](images/README.md) | 自建容器镜像（Dockerfile 源） |
 | [scripts/](scripts/README.md) | CI 的 6 个检查器（`just check` 跑的就是这些）+ oracle 节点巡检 |
 

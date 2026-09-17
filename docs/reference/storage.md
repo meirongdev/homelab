@@ -1,6 +1,6 @@
 # Storage & Backup — 存储与备份
 
-> Last updated: 2026-09-09
+> Last updated: 2026-09-17
 > Status: 生效事实
 >
 > 双集群存储布局（可写卷全 `local-path` + 媒体只读 NFS）、NFS 退役的确切范围、
@@ -152,6 +152,13 @@ keep-last=2。**dump 必须落 ZFS，不能用默认的 `local`**：那和 VM �
 | （homelab `apps-pg` 的 `litellm`/`multica`/`nakama`/`blogstats` 四个库） | 清单里的 `apps-pg-data-local`，H4 看得见、走 `BACKUP_EXEMPT` | `backup/overlays/homelab/backup-script.yaml` 的 2c)–2f) 四段逐库 `pg_dump`（都打同一个实例）。⚠️ **实例里加一个库，H4 一样看不见**，必须手工加一行 `pg_dump`，同 oracle 的 CNPG。`nakama` 与 `blogstats` 尤其要紧：这两个服务都没有 PVC，那两行是它们唯一的备份，而 `blogstats` 丢了还**不能重算**（上游 Cloudflare 按 path 只留 8 天）|
 
 没有任何检查会提醒你，**加这类应用时必须手工确认备份归属**。
+
+☠️ 同一条盲区还有第三种形态，且比上面两组更彻底：**数据根本不在 PVC 上**。
+`aiven/terraform` 那个 free-tier PostgreSQL 就是——它不在任何集群里，没有 PVC、
+没有 CNPG、也就没有任何一段 `pg_dump` 覆盖它；H4 只能解析清单里的
+`kind: PersistentVolumeClaim`，对外部库完全不可见。所以它的默认定位是
+**可丢弃**，真要存东西之前必须先在这里给它登记一段备份归属（同 CNPG 那条的做法）。
+→ [aiven/README.md](../../aiven/README.md)（仓库根，不在 docs 下）
 
 ⚠️ 这份清单天然会漂移（docs-check 只查结构，查不出内容与集群不符：2026-07-31 那次 NFS
 描述就是格式完美而内容全错）。改集群存储后重新生成：`kubectl --context <ctx> get pvc -A`。

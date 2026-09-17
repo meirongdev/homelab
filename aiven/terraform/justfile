@@ -1,0 +1,40 @@
+set dotenv-load
+
+export AIVEN_API_TOKEN := env_var_or_default("AIVEN_API_TOKEN", "")
+
+init:
+    terraform init
+
+plan:
+    terraform plan -var="aiven_api_token=${AIVEN_API_TOKEN}"
+
+# Interactive on purpose — the only recipe here without -auto-approve.
+#
+# ☠️ The other roots auto-approve, and the reason does NOT transfer: their
+#    immutable names (a tunnel id, a VCN) have no path to data loss. Here
+#    pg_service_name is immutable and owned by this root, so renaming it is
+#    destroy-and-create whose payload is the only copy of the data — this
+#    database is in no backup set. A typo'd plan name (free-1-1gb -> hobbyist / startup-4)
+#    likewise only becomes money at apply. Both are worth one keypress.
+#
+#    (The project used to be a second such name. It is a data source now, so it
+#    cannot be destroyed from here at all — see aiven/README.md.)
+apply:
+    terraform apply -var="aiven_api_token=${AIVEN_API_TOKEN}"
+
+# Requires pg_termination_protection = false first (an apply of that change, not
+# an edit), otherwise this fails — on purpose. Free-tier data has no backup here.
+destroy:
+    terraform destroy -var="aiven_api_token=${AIVEN_API_TOKEN}"
+
+# Connection details for wiring a consumer. ⚠️ Paste into Vault, never into a
+# manifest: this repo is public, and docs/RULES + the security model both assume
+# secrets live in Vault and reach clusters via ESO.
+conn-uri:
+    terraform output -raw pg_service_uri
+
+# Non-secret endpoint info, safe to read anywhere.
+endpoints:
+    terraform output -json pg_host
+    terraform output -json pg_port
+    terraform output -json pg_state

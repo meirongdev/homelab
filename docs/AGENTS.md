@@ -43,6 +43,10 @@ docs/                          # 见下方「Documentation Rules」
   Cilium / Vault / ESO / ArgoCD 本体。
 - ⚠️ **新加子域名不需要动 DNS**：写一个 HTTPRoute 即可（external-dns 建记录 + 隧道通配路由）。
   不要改 `cloudflare/terraform`。机制见 [networking-ingress.md](reference/networking-ingress.md)。
+- ⚠️ **`aiven/` 是外部托管的额外库，不是数据面**：不在集群里、无 ArgoCD App、
+  **不在 restic 备份面内**（H4 只查清单 PVC，看不见外部库）。应用数据仍然只有集群内
+  `apps-pg` 一个家（[shared-postgres-platform.md](decisions/shared-postgres-platform.md)）；
+  往那边挪负载要先立 ADR。→ [aiven/README.md](../aiven/README.md)
 
 ## Architecture Quick Reference
 
