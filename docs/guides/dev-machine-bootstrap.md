@@ -1,6 +1,6 @@
 # 新机器开发环境 bootstrap（配到能改 homelab repo）
 
-> Last updated: 2026-09-06
+> Last updated: 2026-09-17
 > 面向「换了一台 Mac，要把本机环境配到能 clone、改、验证这个 repo」的流程。
 > 排障/恢复类走 [runbooks/](../runbooks/README.md)；AI 助手上下文见 [../AGENTS.md](../AGENTS.md)（唯一上下文文件，细节按域在 [reference/](../reference/README.md)）。
 
@@ -21,11 +21,14 @@ uv tool install ansible        # 提供 ansible-playbook（justfile 直接调它
 
 - `just`：repo 的主任务运行器（全部 root 都用它，含 `cloud/oracle/terraform/`——那里 2026-09-06 前是 Makefile）。
 - `uv`：`check-manifests.py` 用 `uv run --with pyyaml`；ansible 建议 `uv tool install` 隔离。
-- `terraform`：7 个 root 都用它：`proxmox/terraform`、`proxmox/terraform-storage`
+- `terraform`：8 个 root 都用它：`proxmox/terraform`、`proxmox/terraform-storage`
   （106 上的 worker VM，2026-08-15 新增）、`cloudflare/terraform`、`tailscale/terraform`、
-  `zitadel/terraform`、`cloud/oracle/terraform`、`cloud/oracle/cloudflare`。
-  （⚠️ `2026-08-03-tf-state-r2.md` 的迁移表只列了其中 5 个：它写在
-  `proxmox/terraform-storage` 存在之前，也没覆盖 `zitadel/terraform`。）
+  `zitadel/terraform`、`cloud/oracle/terraform`、`cloud/oracle/cloudflare`、
+  `aiven/terraform`（Aiven free-tier PostgreSQL，2026-09-17 新增——唯一不在自己 VPC
+  里的一个，见 `aiven/README.md`）。
+  （⚠️ `2026-08-03-tf-state-r2.md` 的迁移表只列了当时存在的 5 个 root：写在
+  `proxmox/terraform-storage` 存在之前，也没覆盖 `zitadel/terraform`；`aiven/terraform`
+  更不在里面。迁 R2 时按上面这条 `find` 现算清单，别照那张表抄。）
 - `kubectl`：context 名固定为 `k3s-homelab` 与 `oracle-k3s`。
 
 ☠️ **macOS 本地网络授权（TCC）会让 terraform/kubectl 连内网 100% `no route to host`**。
@@ -86,12 +89,22 @@ git config core.hooksPath .githooks
 
 - `cloudflare/terraform/.env`：Cloudflare token（justfile `dotenv-load` 注入；裸跑
   `terraform plan` 会读到 tfvars 里的失效值而报错）。
-- **有本地 state 的 5 个 root 的 `terraform.tfstate*`**：`proxmox/terraform`、
-  `cloudflare/terraform`、`tailscale/terraform`、`cloud/oracle/terraform`、
-  `cloud/oracle/cloudflare`。**state 只在本地**（ROADMAP 开放项 #2，未离站）：漏拷哪个，
-  那个 root 就只能 `terraform import` 重建（见 `cloud/oracle/terraform/IMPORT.md`）。
-  另两个 root（`zitadel/terraform`、`proxmox/terraform-storage`）**当前没有 state 文件**，
-  拷不到不是漏了；判据是 `find . -name terraform.tfstate -not -path '*/.terraform/*'`。
+- `aiven/terraform/.env`：Aiven **个人账号** API key（同样 `dotenv-load` 注入，
+  `just aiven plan` 从根跑也会读到 —— `mod` 会切到该目录再找 `.env`）。☠️ 换机时
+  **别顺手拷 `~/.config/aiven/`**：那是**公司**账号的 CLI 凭据，与本仓库无关，
+  混用的后果是在公司账号上建资源。→ `aiven/README.md`
+- **本机 `terraform.tfstate*`**：判据永远是这条 `find`，不是下面这份名单 ——
+  名单会随 apply/destroy 变，而"有 state"跟"root 存在"是两件事：
+  `find . -name terraform.tfstate -not -path '*/.terraform/*'`。
+  2026-09-17 实测 8 个：`proxmox/terraform`、`proxmox/terraform-storage`、
+  `cloudflare/terraform`、`tailscale/terraform`、`zitadel/terraform`、
+  `cloud/oracle/terraform`、`cloud/oracle/cloudflare`、`aiven/terraform`。
+  ⚠️ `aiven/terraform` 这份 state 是 **`terraform import` 出来的**，不是 apply 建的
+  （服务本身在 Console 早于本 root 存在）。换机时若没拷到，恢复动作也是重新 import
+  而不是 apply —— 判据：`just aiven plan` 若报 "1 to add" 就说明 state 丢了，此时
+  apply 会去建**第二个**服务。
+  **state 只在本地**（ROADMAP 开放项 #2，未离站）：漏拷哪个，那个 root 就只能
+  `terraform import` 重建（见 `cloud/oracle/terraform/IMPORT.md`）。
 - 各 terraform root 的 `terraform.tfvars`（含明文密钥，勿提交）：对着
   `terraform.tfvars.example` 重建或直接拷。
 

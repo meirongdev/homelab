@@ -1,0 +1,51 @@
+# Copy to terraform.tfvars (gitignored) and fill in what you need.
+#
+# The API key does NOT go here — it lives in ./.env (see .env.example), which the
+# justfile loads automatically. Declaring aiven_api_token below would put a second
+# plaintext copy of it in a different gitignored file, and those two drift.
+
+# The project is READ, not created — point this at a project that already exists
+# on the account. A wrong name fails the plan with "project ... not found"
+# (verified 2026-09-17); it cannot create or delete a project.
+aiven_project_name = "meirongdev-homelab"
+
+# ☠️ pg_service_name is DELIBERATELY ABSENT from this example, and adding it back
+#    is the single most destructive edit available in this root. The service is
+#    `pg-3cb9cb09` (console-generated, already the default in variables.tf), and
+#    `service_name` is IMMUTABLE — so any other value is not a rename, it is
+#    destroy-and-create with the only copy of the data inside, and nothing here
+#    is backed up. This file used to ship `pg_service_name = "homelab-free-pg"`,
+#    which is not the service's name; copying this example and applying it would
+#    have replaced the database. Measured 2026-09-17:
+#      ~ service_name = "pg-3cb9cb09" -> "homelab-free-pg" # forces replacement
+#    and `termination_protection` is false in the cloud right now, so the destroy
+#    would have succeeded.
+#
+#    Leave it out. The variable default is the live service, and there is no
+#    legitimate reason to override it from tfvars.
+
+# Who may connect. The service is useless with an empty list and dangerous with
+# 0.0.0.0/0 — which is what the console quick-create left behind and what the
+# service still carries today. Both clusters' egress addresses change when a host
+# is rebuilt, so treat this as a file you re-apply, not a one-time setting.
+#
+# ⚠️ A literal public address must NOT be committed here; terraform.tfvars is
+#    gitignored, but scripts/check-public-ips.py checks tracked files only, so an
+#    IP written into a tracked .tf or docs file would be caught there instead.
+pg_ip_filter = [
+  # "192.0.2.9/32",   # RFC5737 TEST-NET-1 placeholder. Real egress addresses
+  #                    # belong ONLY in this untracked file: check-public-ips.py
+  #                    # treats 192.0.2.0/24 as documentation space, so even a
+  #                    # pasted real IP here must never be moved into a .tf.
+]
+
+# Opt-in tenants. Each entry is a database / user pair per consumer.
+#
+# ⚠️ Removing a name here is NOT free: for_each destroys that instance, which
+#    drops the real database. See tenants.tf — the databases carry
+#    termination_protection so that mistake fails the apply instead of running.
+pg_databases = []
+pg_users     = []
+
+# Leave true unless tearing the service down on purpose.
+pg_termination_protection = true

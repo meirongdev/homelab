@@ -1,6 +1,6 @@
 # 清单安全规则 (Manifest Safety Checks)
 
-> Last updated: 2026-09-06
+> Last updated: 2026-09-17
 > Status: 生效事实
 > Scope: CI 强制的仓库规则，本文是 source of truth。四个检查器：
 > `scripts/check-manifests.py` 的 **H1-H5**（清单结构）、
@@ -396,8 +396,12 @@ uv run --with pyyaml python scripts/render-manifests.py --out /tmp/r     # 渲�
 
 ### 同批加的 `terraform validate`
 
-7 个 terraform root 此前只有 `fmt`（缩进），没有任何语义校验，引用了不存在的变量要到
+terraform root 此前只有 `fmt`（缩进），没有任何语义校验，引用了不存在的变量要到
 `plan` 时才炸。CI 现在逐 root 跑 `init -backend=false` + `validate`（不碰 state）。
+
+> 逐 root 的数量随 root 增减而变（2026-09-17 起 8 个，含 `aiven/terraform`），判据是
+> `find . -name '*.tf' -not -path '*/.terraform/*' -exec dirname {} \; | sort -u`；
+> 这里不写死数字，写死就会漂。
 
 ☠️ **lock 文件必须覆盖 CI 的平台**：`.terraform.lock.hcl` 里的 `h1:` 只是**本机那个平台**的
 哈希，跨平台校验靠 registry 签名的 `zh:` 一组。`proxmox/terraform-storage` 的 lock 当初只

@@ -23,6 +23,7 @@ mod proxmox 'proxmox/terraform/justfile'              # pve 上的 VM 预配
 mod proxmox-storage 'proxmox/terraform-storage/justfile'  # 106 上的 worker VM 预配
 mod proxmox-ansible 'proxmox/ansible/justfile'        # pve / 106 宿主机配置
 mod macbook 'macbook/ansible/justfile'                # 远程无头 M2 MacBook
+mod aiven 'aiven/terraform/justfile'                  # Aiven free-tier PostgreSQL（外部库，与集群内 apps-pg 无关）
 
 
 # 渲染检查不在这里：它要联网拉 16 个 chart、约 2 分钟，单独跑 `just check-render`。

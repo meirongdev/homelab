@@ -1,6 +1,6 @@
 # Tech Stack — 技术栈全景
 
-> Last updated: 2026-09-09
+> Last updated: 2026-09-17
 > Status: 生效事实
 >
 > 这套系统由哪些技术组成、每个是干什么的、为什么是它、配置和版本钉在哪。
@@ -125,6 +125,7 @@ Cilium / Vault / ESO / ArgoCD 本体。理由是它们要么是 ArgoCD 自己的
 | **local-path** | K3s 自带的本地盘 PV | **可写卷一律用它**。☠️ sqlite 应用尤其不能放 NFS（fcntl 锁极慢） |
 | **NFS（只读）** | 挂 106 的 ZFS 媒体库 | 2026-07-11 退役后的**唯一例外**：只读 + 只媒体 + 不装 provisioner → [multimedia-repository-nfs-readonly.md](../decisions/multimedia-repository-nfs-readonly.md) |
 | **CloudNativePG (CNPG)** | 用 CR 声明式管理 PostgreSQL 集群 | 只在 oracle 装；homelab 那个同名的共享 Postgres 是裸 Deployment，**刻意不装 operator**（operator 本身比省下的开销贵）→ [shared-postgres-platform.md](../decisions/shared-postgres-platform.md) |
+| **Aiven free tier** | 外部托管的 PostgreSQL（`aiven/terraform`） | 2026-09-17 起的**额外**小库，不在任何集群里：free 计划名是 **`free-1-1gb`**（不是 `hobbyist`——那是 $12/月的付费档，写错就是一条账单）、1GB 存储不可扩、无 SLA、**不在 restic 备份面内**（H4 只查清单里的 PVC，外部库对它不可见）。服务是 Console 早于本 root 建的，root 靠 `import` 接管而非创建。不是 `apps-pg` 的替代品 → [aiven/README.md](../../aiven/README.md) |
 | **restic** | 去重加密备份 | 无 server，CronJob 直推 106 的 sftp 仓库；⚠️ 是**三个 Job**不是两个，且备份是**显式白名单**（新应用不加进去就静默不备份，CI 的 H4 查的就是这个）→ [storage.md](storage.md) |
 | **ZFS + sanoid** | 备份目标端的快照与完整性 | 备份的备份：restic 仓库本身也在快照里 |
 
