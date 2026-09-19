@@ -111,8 +111,12 @@ data:
     # 语义是严格的「主 → 兜底」，不是轮询：只有主上游**失败**时才打 Mac。
     # ✅ 2026-09-19 用线上同一 digest 的镜像在本地实测（主上游指向死端口）：
     #    · 连接级失败 → 200，内容来自兜底 ✅
-    #    · 参数级失败（400，如 reasoning_effort）→ **不兜底**，原样回 400。
-    #      这是对的：拿 Mac 去重试一个本来就非法的请求只会白烧它，还会盖掉真实原因。
+    #    · 参数级失败（400，如 reasoning_effort）→ 调用方拿到的是原样的 400 + 真实原因。
+    #      ☠️ 但机制不是"LiteLLM 识别 4xx 所以跳过兜底"——上线后看生产日志订正过：
+    #      它照样进 run_async_fallback 去试 Mac，只是那一跳在**参数映射层**就抛了同一个
+    #      UnsupportedParamsError，**没有 HTTP 请求真的发到 Mac**，最后把真实 400 抛回。
+    #      换一种"主上游 4xx 而兜底能接受该参数"的组合，兜底就会真的被打出去。
+    #      判据是日志里的 `run_async_fallback` / `Error doing the fallback`，不是返回码。
     # ⚠️ 只给裸别名配兜底，`custom_dgx/` 前缀那条**刻意不配** —— 它是给"我就是要打 DGX"
     #    的消费方用的，被静默换成 Mac 反而是坏事。
     # ☠️ 换模型时这里的键名要跟着换（它是别名的字面量），漏改 = 兜底静默失效。
@@ -142,7 +146,7 @@ spec:
         #    ⇒ ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按**旧路由表**继续跑。
         #    2026-08-25 实际踩过一次（改了 mac/ornith 后必须手动 rollout restart 才生效）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py 的 STAMP_ONLY），别手改。
-        checksum/config: "304d5ab4097de710"
+        checksum/config: "7abd8d2386d43036"
         # 同理，但盯的是 codex_compat.py（litellm-codex-compat ConfigMap）：
         # 也是 subPath 挂载 + 只在启动时 import，改了不重启就是静默跑旧代码。
         checksum/codex-compat-py: "e5da4a39d90243d4"
