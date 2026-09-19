@@ -1,6 +1,6 @@
 # jobs-sg — 新加坡 SWE 岗位趋势周报（架构事实）
 
-> Last updated: 2026-09-04
+> Last updated: 2026-09-19
 > Status: 生效事实
 > Scope: jobs-sg 在 homelab 集群的部署形态、镜像固定方式、备份口径、首次上线依赖顺序
 > 本文是 source of truth。应用代码在 [meirongdev/jobs-sg](https://github.com/meirongdev/jobs-sg)。
@@ -73,24 +73,33 @@ ingest 约 02:20 SGT 落地，数字必须当场就是最新的。周报仍是�
 
 ## LLM 富化：直连 DGX，不经 LLM 网关
 
-`enrich` 的 `LLM_BASE_URL` 指向 **DGX Spark vLLM `http://100.97.87.120:8000`**
+`enrich` 的 `LLM_BASE_URL` 指向 **DGX Spark 推理引擎 `http://100.97.87.120:8888`**
 （Tailscale IP，pod 直连；同一台机器也在给 Open Notebook 供模型）。这样**完全不需要
 LLM 网关的 virtual key**，也就少了一条 Vault 依赖。
 
 ⚠️ **模型 id 是后端相关的**：LLM 网关路由用带 provider 前缀的名字
-（`custom_dgx/qwen38-flash-next`），裸 vLLM 提供的是 `qwen38-flash-next`，写前缀名
+（`custom_dgx/qwen3.8-27b-sglang`），裸引擎提供的是 `qwen3.8-27b-sglang`，写前缀名
 会 404。上游原先把模型链**硬编码**成网关形式，2026-08-03（`d833623`）才改成读
 `LLM_MODELS` / `LLM_CONCURRENCY` 环境变量（默认仍是网关链，不破兼容）。
 
 实测（2026-08-03，`jobs-sg` ns 内的 pod）：DGX 可达、**无需认证**、`x-bf-vk` 头被
 vLLM 忽略；当时的模型 `deepseek-v4-flash`（1M ctx）返回的正是 enrich 要的严格 JSON。
 
-☠️ **2026-09-02 DGX 换了主力模型**（`deepseek-v4-flash` → `qwen38-flash-next`，
-ctx 1M → 262144，旧名已从 `/v1/models` 消失 → 旧配置是 404）。因为本作业**直连** DGX，
-git 里那份网关清单帮不上忙，只有 `LLM_MODELS` 跟着改才有效。模型事实见
-[litellm-gateway.md](litellm-gateway.md) 的「DGX 主力模型」。
-⚠️ 新模型**尚未按 enrich 的提示词复测严格 JSON**（只验过 tool call 与补全可用），
-换栈后第一轮跑完要看有多少条目 fail-open 退回规则结果。
+☠️ **2026-09-19 DGX 又换了主力栈**（`qwen38-flash-next` → `qwen3.8-27b-sglang`，
+引擎 vLLM → SGLang）。因为本作业**直连** DGX，git 里那份网关清单帮不上忙，只有
+`LLM_BASE_URL` + `LLM_MODELS` 跟着改才有效。模型事实见
+[litellm-gateway.md](litellm-gateway.md) 的「DGX 主力栈」。
+☠️ **这次连端点一起变了**：`:8000`（k3s/vLLM）→ `:8888`（docker/SGLang），旧端口已完全
+不监听。只改模型名等于把作业指向一个空端口。
+☠️ **而且新引擎不会再用 404 提醒你**：SGLang **接受任意 model 名并原样回显**（vLLM 才
+会 404），所以模型名写错在这条路径上是**完全静默**的 —— 唯一判据是
+`curl -s http://100.97.87.120:8888/v1/models` 报的 served name。
+☠️ **`reasoning_tokens` 判据在新栈上失效**：`usage.completion_tokens_details.reasoning_tokens`
+恒为 `null`（vLLM 才导出）。下面那套"用 reasoning_tokens 判断推理有没有被关掉"的方法
+在这里会读到 `None`，**与"确实关掉了"完全同形**。改看 `message.reasoning_content` 的长度。
+✅ 2026-09-19 已在新栈复验（直打 `:8888`）：`{"enable_thinking":false}` 生效
+（reasoning_content 0 字符 / completion 7 token），旧键 `{"thinking":false}` 仍是静默空操作
+（417 字符推理照出）—— 即 `LLM_THINKING_KWARG` 保持默认值 `enable_thinking` 就对。
 ✅ 严格 JSON 这条契约已在新模型上复验（2026-09-03，直接打网关、用仓库里那份
 `ExtractPrompt`）：三种参数（默认 / `{"thinking":false}` / `{"enable_thinking":false}`）
 都回合法 JSON 且六个 key 齐全，reasoning 分别是 142 / 134 / 0。
@@ -191,7 +200,7 @@ reasoning 占了这个模型 **约 95%** 的 output token。上游 `472aaf5` 加
 无效。☠️ 本文早先写反了（原话是「`reasoning_effort` 该模型静默忽略，只有
 `chat_template_kwargs` 有效」），错在判据选成了"能不能把推理关掉"：`reasoning_effort`
 确实关不掉推理，`low` 仍有约 461 token，但它能封顶。2026-09-04 在 qwen38-flash-next
-上实测：
+上实测（下表是**旧栈**的数据，保留作对照）：
 
 | 请求 | 结果 |
 |---|---|
@@ -205,12 +214,27 @@ reasoning 占了这个模型 **约 95%** 的 output token。上游 `472aaf5` 加
 那个 400 就是服务端在校验这个字段的证据。⚠️ 它的失效形态因此和 `chat_template_kwargs`
 相反：换模型后该值若不被支持，是整轮 400 全挂，而不是悄悄不生效。
 
+✅ **2026-09-19 在新栈 `qwen3.8-27b-sglang` 上复验**，结论是「机制成立，但枚举换了一套」：
+
+| 请求 | 结果 |
+|---|---|
+| 不带参数（默认档） | 200，**默认档是 `xhigh`** —— 比旧栈的默认更费 |
+| 顶层 `reasoning_effort: "medium"` | 200、推理被压住（真实提示词 6000 字：769→409 completion token、2816→1160 字推理）|
+| 顶层 `reasoning_effort: "low"` | 200、367 token / 1012 字推理 |
+| 顶层 `reasoning_effort: "minimal"` | **HTTP 400**，报文原话 `Unexpected reasoning effort minimal. Supported types are xhigh (default), medium, and low.` |
+
+也就是说清单里那个 `{"reasoning_effort":"medium"}` **原样有效、不用改**；但旧栈可用的
+`minimal` 现在会让整轮 400 全挂。默认档从常规推理变成 `xhigh`，这个封顶键比在旧栈上
+**更不能省**。
+
 **用法定位**：`LLM_THINKING=false` 只用来啃积压，不用于稳态；清单里因此不设它
 （= 默认开启），啃积压走一次性 Job（不进 git，见下节）。稳态用下一节的封顶。
 
 ## 稳态旋钮：给推理封顶（`LLM_EXTRA_BODY` + `reasoning_effort`）
 
-qwen38-flash-next 会在个别岗位上把推理写飞，这是 enrich 记 partial 的常态成因。
+这一类推理模型会在个别岗位上把推理写飞，这是 enrich 记 partial 的常态成因
+（下面的实测数字来自 `qwen38-flash-next`；新栈 `qwen3.8-27b-sglang` 的封顶键沿用同一个，
+跑飞的分布尚未在新栈上重测）。
 ☠️ 起手别去查"DGX 是不是慢了"：2026-09-04 那轮 `errors=21`，而引擎读数与前夜一致
 （每输出 token 0.043s、排队 0.06s、无抢占）。实测到的形态：
 

@@ -1,6 +1,6 @@
 # Homelab Roadmap
 
-> Last updated: 2026-09-14
+> Last updated: 2026-09-19
 > 本文只回答两件事：**还剩什么没做**，和**为什么不做**。做过什么在
 > [CHANGELOG.md](CHANGELOG.md)（2026-09-02 拆出，原因见那里）。
 > **实施细节不写在这里**：每条压到一句话，展开看链接指向的 `reference/`（事实）、
@@ -52,14 +52,18 @@
   只需覆盖 calibre 的提示词与网关别名；③ 虚拟 key 卫生
   —— 顺带修一个**当下就坏**的缺陷：16 把 key 只有 1 把有 alias，且 4 把的白名单里还挂着
   已死的 `mac/qwen3.6-35b`，那几条 fallback 现在就是断的；④ served name 漂移哨兵 ——
-  ☠️ 形态已从"json-exporter 抓 `/v1/models`"改成**一条 PromQL**（vLLM 指标自带 `model_name`
-  且已被 `vllm-dgx-spark` 抓取）。展开方案与否决项 →
+  ☠️ 形态已从"json-exporter 抓 `/v1/models`"改成**一条 PromQL**（引擎指标自带 `model_name`
+  且已被 `dgx-inference` job 抓取；SGLang 上 2026-09-19 复验仍成立）。☠️ 但 09-19 暴露了
+  它的盲区：**只认名字漂移，认不出端点/前缀漂移**（那次 `vllm:*` 整族消失，哨兵表达式
+  反而恒空 = 不报），要配一条"指标族整个消失"的伴生规则。展开方案与否决项 →
   [plans/2026-09-03-dgx-model-swap-optimizations.md](plans/2026-09-03-dgx-model-swap-optimizations.md)；
   SOP 与七项采集清单见
   [runbooks/dgx-model-swap-homelab-followup.md](runbooks/dgx-model-swap-homelab-followup.md)。
 
-- **DGX 新主力栈的质量闸门没跑**。2026-09-02 换栈只过了速度闸门：NVFP4 是无校准 RTN
-  量化，公开分数由量化方自报，本仓库未独立验证（aider-polyglot 在 nv-dgx-spark 侧待跑）。
+- **DGX 新主力栈的质量闸门没跑**。2026-09-02 与 2026-09-19 两次换栈都只过了速度与契约
+  闸门（严格 JSON、关思考、封顶键均已实测）：NVFP4 是无校准 RTN 量化，公开分数由量化方
+  自报，本仓库未独立验证（aider-polyglot 在 nv-dgx-spark 侧待跑）。⚠️ 09-19 这一栈还是
+  **uncensored 微调**，对齐行为与上游原版不同，别假设一致。
   跑挂就 `make qwen38fn-rollback` 回 V4-Flash —— ☠️ 那要把网关别名 + jobs-sg +
   Open Notebook + oracle calibre **四处一起回退**，外加虚拟 key 白名单，见
   [litellm-gateway.md](reference/litellm-gateway.md) 坑 A。

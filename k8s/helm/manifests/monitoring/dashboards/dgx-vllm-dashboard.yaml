@@ -1,15 +1,30 @@
 ---
-# Grafana Dashboard: DGX Spark / vLLM Inference
-# vLLM server metrics for the 2× NVIDIA DGX Spark (GB10) inference service
-# (served model qwen38-flash-next since 2026-09-02, was deepseek-v4-flash), scraped over
-# Tailscale by homelab Prometheus
-# (job vllm-dgx-spark, target dgx-spark-1 :8000/metrics).
+# Grafana Dashboard: DGX Spark 推理引擎
+# 2× NVIDIA DGX Spark (GB10) 推理服务的引擎指标，homelab Prometheus 经 Tailscale 抓取
+# (job `dgx-inference`, target dgx-spark-1 :8888/metrics)。
+#
+# ☠️ **引擎会换，指标前缀与端口跟着换** —— 本面板最容易静默失效的地方：
+#      ~2026-09-19   vLLM   :8000  `vllm:*`
+#      2026-09-19 起 SGLang :8888  `sglang:*`   ← 当前
+#   过期的前缀**不报错**：面板只是全部空白，与"最近没有流量"长得一模一样。
+#   换栈后先 `curl -s http://<head>:<port>/metrics | head -1` 确认前缀，再改这里。
+#
+# ⚠️ uid 仍是 `dgx-vllm`（与当前引擎名实不符）**是刻意的**：uid 是 Grafana 的链接身份，
+#   改了会打断已有书签与外链。标题/标签/查询都已改，只有 uid 与文件名不动。
+#
+# ⚠️ 从 vLLM 迁过来时有三个指标**没有等价物**（不是漏改，是换了口径，各面板 description 里写了）：
+#   - vllm:engine_sleep_state             → SGLang 无 sleep 概念，改用 up
+#   - vllm:num_requests_waiting_by_reason → 改成四个独立队列/状态计数
+#   - vllm:prefix_cache_hits/queries      → SGLang 统计 **token 数**不是请求数，
+#                                           口径按指标 HELP 原文的公式算，与旧栈数值不可比
+# ☠️ 两个标签陷阱（踩了就是恒空，不报错）：
+#   - `sglang:*_tokens_total` 带 is_streaming 维度、**不带** tp_rank 那组标签 → 必须 sum
+#   - `sglang:http_responses_total` **没有 model_name** → 不能用 $model 过滤
+#
 # Follows the dgx-spark-node-dashboard pattern: sidecar auto-load via
 # grafana_dashboard:"1" + grafana_folder annotation, synced by ArgoCD
-# monitoring-dashboards App. Metrics carry engine/model_name labels from vLLM;
-# cluster/nodename are added by the scrape config, so panels filter on
-# job + nodename + model_name template vars. model_name is a template var resolved by
-# label_values() at render time — a model swap on the engine needs no dashboard edit.
+# monitoring-dashboards App. cluster/nodename 由 scrape config 注入，model_name 由引擎自带
+# 并经 label_values() 解析成模板变量 —— **只换模型名不用改本文件**，换引擎才要改。
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -23,13 +38,13 @@ data:
   dgx-vllm.json: |-
     {
       "annotations": {"list": []},
-      "description": "DGX Spark vLLM 推理指标：KV 缓存、请求状态、token 吞吐、TTFT/端到端/逐 token 延迟、prefix cache 命中率",
+      "description": "DGX Spark 推理指标（当前引擎 SGLang）：KV/token 占用、请求队列、token 吞吐、TTFT/端到端/逐 token/排队延迟、prefix cache、投机解码接受率",
       "editable": true,
       "graphTooltip": 1,
       "links": [],
       "schemaVersion": 39,
-      "tags": ["curated", "inference", "vllm", "dgx-spark"],
-      "title": "Hardware / DGX vLLM 推理",
+      "tags": ["curated", "inference", "sglang", "dgx-spark"],
+      "title": "Hardware / DGX 推理",
       "uid": "dgx-vllm",
       "templating": {
         "list": [
@@ -44,7 +59,7 @@ data:
             "name": "nodename",
             "type": "query",
             "datasource": {"type": "prometheus", "uid": "${datasource}"},
-            "query": "label_values(up{job=\"vllm-dgx-spark\"}, nodename)",
+            "query": "label_values(up{job=\"dgx-inference\"}, nodename)",
             "refresh": 2,
             "includeAll": true,
             "multi": true,
@@ -54,7 +69,7 @@ data:
             "name": "model",
             "type": "query",
             "datasource": {"type": "prometheus", "uid": "${datasource}"},
-            "query": "label_values(vllm:num_requests_running{job=\"vllm-dgx-spark\"}, model_name)",
+            "query": "label_values(sglang:num_running_reqs{job=\"dgx-inference\"}, model_name)",
             "refresh": 2,
             "includeAll": true,
             "multi": true,
@@ -100,7 +115,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "vllm:kv_cache_usage_perc{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\"} * 100",
+              "expr": "sglang:token_usage{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"} * 100",
               "legendFormat": "{{model_name}}",
               "refId": "A"
             }
@@ -127,7 +142,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "vllm:num_requests_running{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\"}",
+              "expr": "sglang:num_running_reqs{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}",
               "legendFormat": "{{model_name}}",
               "refId": "A"
             }
@@ -154,12 +169,12 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "vllm:num_requests_waiting{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\"}",
+              "expr": "sglang:num_queue_reqs{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}",
               "legendFormat": "{{model_name}}",
               "refId": "A"
             }
           ],
-          "title": "排队中 / Waiting",
+          "title": "排队中 / Queued",
           "type": "stat"
         },
         {
@@ -171,7 +186,7 @@ data:
                 {"color": "red", "value": 0},
                 {"color": "green", "value": 1}
               ]},
-              "mappings": [{"type": "value", "options": {"0": {"text": "休眠/卸载", "color": "red"}, "1": {"text": "唤醒中", "color": "green"}}}],
+              "mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}],
               "unit": "none"
             },
             "overrides": []
@@ -189,11 +204,12 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "max(vllm:engine_sleep_state{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\", sleep_state=\"awake\"})",
-              "legendFormat": "{{model_name}}",
+              "expr": "max(up{job=\"dgx-inference\", nodename=~\"$nodename\"})",
+              "legendFormat": "up",
               "refId": "A"
             }
           ],
+          "description": "up == 1 只代表 :8888 的 /metrics 抓得到。☠️ 它看不见「引擎活着但零进度」那一类故障（旧栈的僵尸 TP 组就是这样），那一类由 DgxSparkInferenceStuck 告警负责；SGLang 另有 /health_generate 会真跑一次生成，那个才有判别力。",
           "title": "引擎状态 / Engine",
           "type": "stat"
         },
@@ -225,11 +241,18 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "vllm:kv_cache_usage_perc{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\"} * 100",
-              "legendFormat": "{{model_name}}",
+              "expr": "sglang:token_usage{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"} * 100",
+              "legendFormat": "{{model_name}} 全池",
               "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sglang:full_token_usage{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"} * 100",
+              "legendFormat": "{{model_name}} full-attn",
+              "refId": "B"
             }
           ],
+          "description": "SGLang 的 token_usage 与 vLLM 的 kv_cache_usage_perc 同形（0–1 占比）。⚠️ 但绝对值不可与旧栈比：新栈 KV 池 1,220,951 token（mem-fraction 0.80），对 262k 上下文约 4.6 路满窗并发 —— 打满已不再意味着饱和，饱和看队列（见告警 DgxSparkRequestsQueued 上方的墓碑注释）。",
           "title": "KV Cache 使用率 %",
           "type": "timeseries"
         },
@@ -251,12 +274,31 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum by (reason) (vllm:num_requests_waiting_by_reason{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\"})",
-              "legendFormat": "{{reason}}",
+              "expr": "sglang:num_queue_reqs{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}",
+              "legendFormat": "queued",
               "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sglang:num_grammar_queue_reqs{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}",
+              "legendFormat": "grammar queue",
+              "refId": "B"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (nodename) (sglang:num_paused_reqs{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"})",
+              "legendFormat": "paused",
+              "refId": "C"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (nodename) (sglang:num_retracted_reqs{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"})",
+              "legendFormat": "retracted",
+              "refId": "D"
             }
           ],
-          "title": "排队原因 / Waiting by reason",
+          "description": "SGLang 没有 vLLM 的 waiting_by_reason。这里拆的是四个独立队列/状态计数：retracted（被回退重排）与 paused 长期非 0 = KV 压力；grammar 高 = 结构化输出的消费方（严格 JSON 那几个作业）在等语法编译。⚠️ paused/retracted 带 pid 标签，必须 sum 掉。",
+          "title": "队列构成 / Queue breakdown",
           "type": "timeseries"
         },
 
@@ -285,17 +327,18 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "rate(vllm:generation_tokens_total{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])",
+              "expr": "sum by (nodename) (rate(sglang:generation_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]))",
               "legendFormat": "generation",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "rate(vllm:prompt_tokens_total{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])",
+              "expr": "sum by (nodename) (rate(sglang:prompt_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]))",
               "legendFormat": "prompt",
               "refId": "B"
             }
           ],
+          "description": "☠️ sglang:*_tokens_total 带 is_streaming 维度、且**不带** tp_rank 那组标签 —— 不 sum 掉的话曲线会按流式/非流式劈成两条，看起来像吞吐掉了一半。",
           "title": "Token 吞吐 (tokens/s)",
           "type": "timeseries"
         },
@@ -317,12 +360,19 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum by (finished_reason) (rate(vllm:request_success_total{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]))",
-              "legendFormat": "{{finished_reason}}",
+              "expr": "sum by (status_code) (rate(sglang:http_responses_total{job=\"dgx-inference\", nodename=~\"$nodename\", endpoint=~\"/v1/.*\"}[$__rate_interval]))",
+              "legendFormat": "{{status_code}}",
               "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (nodename) (rate(sglang:num_aborted_requests_total{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval]))",
+              "legendFormat": "aborted",
+              "refId": "B"
             }
           ],
-          "title": "请求完成率 (by reason)",
+          "description": "SGLang 没有 vLLM 的 request_success_total{finished_reason}，状态码是最接近的等价物。☠️ sglang:http_responses_total **不带 model_name**，硬加 $model 过滤会恒为空，所以本面板只按 job+nodename 过滤、不受 $model 影响。另附 aborted：客户端断开/超时放弃的请求，它在状态码里看不见（jobs-sg 那 300s 超时就落在这里）。",
+          "title": "请求结果 / HTTP responses",
           "type": "timeseries"
         },
 
@@ -350,19 +400,19 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.50, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(sglang:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
               "legendFormat": "p50",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(sglang:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
               "legendFormat": "p95",
               "refId": "B"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(sglang:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
               "legendFormat": "p99",
               "refId": "C"
             }
@@ -387,19 +437,19 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.50, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(sglang:e2e_request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
               "legendFormat": "p50",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(sglang:e2e_request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
               "legendFormat": "p95",
               "refId": "B"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(sglang:e2e_request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
               "legendFormat": "p99",
               "refId": "C"
             }
@@ -424,13 +474,13 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.50, sum by (le) (rate(vllm:inter_token_latency_seconds_bucket{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(sglang:inter_token_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
               "legendFormat": "p50",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:inter_token_latency_seconds_bucket{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(sglang:inter_token_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
               "legendFormat": "p95",
               "refId": "B"
             }
@@ -455,13 +505,13 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.50, sum by (le) (rate(vllm:request_queue_time_seconds_bucket{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(sglang:queue_time_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
               "legendFormat": "p50",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:request_queue_time_seconds_bucket{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(sglang:queue_time_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
               "legendFormat": "p95",
               "refId": "B"
             }
@@ -496,11 +546,12 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "rate(vllm:prefix_cache_hits_total{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) / clamp_min(rate(vllm:prefix_cache_queries_total{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]), 0.0001) * 100",
+              "expr": "sum by (nodename) (rate(sglang:prefill_effective_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\", mode=~\".*_hit\"}[$__rate_interval])) / clamp_min(sum by (nodename) (rate(sglang:prefill_effective_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])), 0.0001) * 100",
               "legendFormat": "{{model_name}}",
               "refId": "A"
             }
           ],
+          "description": "按 SGLang 指标 HELP 的官方公式算：rate(各 *_hit 模式之和) / rate(全部模式之和)。⚠️ 与 vLLM 的 hits/queries **口径不同** —— SGLang 统计的是 token 数、vLLM 是请求数，两栈的数值不可直接比。引擎另有自算的 sglang:cache_hit_rate 瞬时 gauge，但它按日志间隔更新、窗口不受 $__rate_interval 控制，故这里不用它。",
           "title": "Prefix Cache 命中率 %",
           "type": "timeseries"
         },
@@ -522,18 +573,68 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "rate(vllm:prefix_cache_hits_total{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])",
-              "legendFormat": "hits",
+              "expr": "sum by (mode) (rate(sglang:prefill_effective_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]))",
+              "legendFormat": "{{mode}}",
+              "refId": "A"
+            }
+          ],
+          "description": "input = 真正要算的 prefill token；device/host/storage_hit = 各层前缀缓存命中省下的。上面那块命中率就是由这几条算出来的。",
+          "title": "Prefill tokens by mode (tokens/s)",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 49},
+          "id": 105,
+          "title": "🔮 投机解码 / Speculative decoding (DFlash2)",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 0, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "unit": "percentunit", "min": 0, "max": 1, "mappings": []},
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 50},
+          "id": 15,
+          "options": {"legend": {"calcs": ["lastNotNull", "min"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sglang:spec_accept_rate{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}",
+              "legendFormat": "accept rate",
+              "refId": "A"
+            }
+          ],
+          "description": "☠️ 本行是新栈（SGLang + DFlash2）独有的，旧栈没有投机解码。草稿 token 被主模型接受的比例塌到接近 0 = 投机解码在做无用功，**吞吐会静默掉回非投机水平，而 up / 延迟分位 / 错误率全部照常正常** —— 没有任何告警看得见这一格，只能靠这张图。换草稿模型或改 speculative 参数后先来这里看。",
+          "title": "接受率 / Accept rate",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 0, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "unit": "none", "min": 0, "mappings": []},
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 50},
+          "id": 16,
+          "options": {"legend": {"calcs": ["lastNotNull", "mean"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sglang:spec_accept_length{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}",
+              "legendFormat": "accept length",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "rate(vllm:prefix_cache_queries_total{job=\"vllm-dgx-spark\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])",
-              "legendFormat": "queries",
+              "expr": "sglang:spec_num_draft_tokens{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}",
+              "legendFormat": "draft tokens/step",
               "refId": "B"
             }
           ],
-          "title": "Prefix Cache hits / queries 速率",
+          "description": "每步平均被接受的 token 数 ≈ 投机解码带来的加速倍数。**1.0 = 完全没有加速**（每步只接受了主模型自己那一个）。accept length 贴着 draft tokens/step 走 = 草稿几乎全中；贴着 1 走 = 草稿基本全废。",
+          "title": "接受长度 / Accept length",
           "type": "timeseries"
         }
       ],

@@ -1,6 +1,6 @@
 # Open Notebook — AI 研读知识库（架构事实）
 
-> Last updated: 2026-09-09
+> Last updated: 2026-09-19
 > Status: 生效事实
 > Scope: Open Notebook（NotebookLM 自托管替代）在 homelab 集群的部署形态、模型接线、
 > 配置真相源地图、备份口径，本文是 source of truth。
@@ -35,24 +35,32 @@
 
 | 角色 | 后端 | 模型 |
 |---|---|---|
-| 对话/转换/长上下文/工具（默认） | DGX vLLM `100.97.87.120:8000` | `qwen38-flash-next`（262k ctx；2026-09-02 由 `deepseek-v4-flash`/1M 换入）|
+| 对话/转换/长上下文/工具（默认） | DGX SGLang `100.97.87.120:8888` | `qwen3.8-27b-sglang`（262k ctx；2026-09-19 由 `qwen38-flash-next` 换入，☠️ 端点同时从 `:8000` 换到 `:8888`）|
 | 对话兜底（非默认，UI 手动切） | Mac OMLX `100.89.15.120:8000` | `ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit`（262k ctx；2026-08-25 由 Qwen3.6-35B 换入） |
 | Embedding | Mac OMLX | Qwen3-Embedding-4B（2560 维） |
 | STT | Mac OMLX | `Qwen3-ASR-1.7B-8bit` |
 | TTS | Mac OMLX | `Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit`（9 个具名音色）|
 
-☠️ **2026-09-02 DGX 换主力模型带来两条本仓库控制不了的后果**：
+☠️ **DGX 换主力栈带来三条本仓库控制不了的后果**（2026-09-02 两条 + 2026-09-19 一条）：
 
-1. **长上下文角色从此有硬上限**：`large_context_model` 与三个播客 profile 的
-   "整本书塞得进去"是靠旧栈 1M ctx 成立的，新栈是 262144。兜底的 Mac Ornith 也是 262k，
+1. **长上下文角色有硬上限**：`large_context_model` 与三个播客 profile 的
+   "整本书塞得进去"是靠更早那个栈的 1M ctx 成立的，此后一直是 262144
+   （2026-09-19 换栈后**仍是** 262144，这一条没有恶化）。兜底的 Mac Ornith 也是 262k，
    **切过去拿不到更多窗口**。长书开始截断或报超窗时先按这条判，别先怀疑上游挂了。
 2. **改名不会带走旧条目**：provisioner 只增不删（unmanaged models 只打 note），
    旧条目必须手删。✅ 2026-09-03 已删掉 UI 里的 `deepseek-v4-flash`——删前先扫过
    3 个 notebook 与全部 profile，确认没有任何一处引用那个 model id（有一个 endpoint
    路径 `/podcasts`、`/search-templates` 在本版本是 404，扫不到不代表没有，别照着抄）。
+   ⏳ **2026-09-19 换栈后 `qwen38-flash-next` 这条又变成死选项了，同样要手删**
+   （先扫引用，再 `DELETE /models/<id>`）。
+3. ☠️ **2026-09-19 换栈同时换了端点**（`:8000` → `:8888`），所以这次改的不只是模型名，
+   还有凭据 `dgx-vllm` 的 `base_url`。凭据名仍叫 `dgx-vllm`（引擎其实已是 SGLang）是
+   **刻意保留**的：provisioner 只增不删，改名只会多出一条新凭据、旧那条变死条目。
+   ⚠️ 新引擎**接受任意 model 名并原样回显**（vLLM 才 404），所以模型名写错在这条
+   直连路径上是完全静默的 —— 只能靠 `curl :8888/v1/models` 核对。
 
-上游模型的事实（served name / ctx / 冷启动 / 回滚）以
-[litellm-gateway.md](litellm-gateway.md) 的「DGX 主力模型」为准，这里不重复。
+上游模型的事实（served name / 端点 / ctx / 冷启动 / 回滚）以
+[litellm-gateway.md](litellm-gateway.md) 的「DGX 主力栈」为准，这里不重复。
 
 ### 语音模型换不动：调用口径把选择锁死了
 

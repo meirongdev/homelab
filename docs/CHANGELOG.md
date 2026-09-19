@@ -1,6 +1,6 @@
 # Homelab Changelog
 
-> Last updated: 2026-09-17
+> Last updated: 2026-09-19
 > 已经做完的事，一条一行，按阶段/时间倒着找。**这里只回答「做过什么」**——
 > 还剩什么没做看 [ROADMAP.md](ROADMAP.md)，现在是什么样看 [reference/](reference/README.md)。
 > 2026-09-02 从 ROADMAP 拆出：那份文件长到 23.8KB，9 条开放项被 65 条历史淹没，
@@ -124,3 +124,4 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-08-13 | **Renovate + 版本配对 CI**（原 #12 之一）：`renovate.json5` + `check-version-pairs.py` 的 V1-V3，六个破坏场景实测全判红。⚠️ **仍待人工装一次 GitHub App** 才会真正开 PR ([决策](decisions/renovate-adoption.md)) |
 | 2026-08-14 | **信息管道（Miniflux→KaraKeep）退役**：两个 Deployment + 路由 + 监控 + 备份白名单全删，Miniflux/RSSHub 保留；释放 oracle ~1Gi requests ([原方案](plans/archive/2026-02-28-info-pipeline-miniflux-karakeep-gotify.md)) |
 | 2026-09-09 | **文档结构简化**：`plans/` 六个类别子目录扁平化（省掉 6 份索引 + CI 校验的份数表）· 4 篇自述「非现状」的方案移进 `archive/` · 5 组 design/实现双份文档合并（backstage、CF AI Gateway 两组死方案各压成一篇）· `observability-otel-logging.md` 并入 `observability-multicluster.md`（同一条管线两个视角，拓扑图各维护一份必然分头漂）· R4 的七值枚举改成与脚本一致的五个 emoji 标记。173 → 161 篇，34,119 → 32,309 行 ([规则](RULES.md)) |
+| 2026-09-19 | **DGX 换栈全线跟进——这次换的不只是模型名**：上游 nv-dgx-spark 把主力从 `qwen38-flash-next`（k3s + vLLM + TP=2）换成 `qwen3.8-27b-sglang`（docker + **SGLang** + DFlash2，**单节点**）。跟着改的三类东西里，只有第一类是上次做过的：① 四处模型名引用（网关别名 + jobs-sg 直连 + Open Notebook 接线 + oracle calibre 作业）+ **8/16 把虚拟 key 白名单**；② ☠️ **端点 `:8000` → `:8888`**，旧端口已完全不监听（connection refused，不是 404）——网关 `api_base`、jobs-sg 的 `LLM_BASE_URL`、Open Notebook 凭据的 `base_url`、Prometheus scrape target 四处都要改，上一次换栈端点没动，于是「端点是常量」这个假设进了多处注释；③ ☠️ **指标前缀 `vllm:` → `sglang:`**，四条告警 + 整张面板重写（3 个指标无等价物：`engine_sleep_state`/`num_requests_waiting_by_reason` 没了、`prefix_cache` 从请求数变 token 数、`process_start_time_seconds` 不存在改用 `resets()`）。⚠️ 前缀过期是**双重静默**：过期表达式求值为空 = 永不触发且规则页显示 ok，面板则全部空白；换栈当天唯一响过的信号是 `DgxSparkVllmDown` 误报 critical，而它报的原因是错的。☠️ 两条老判据同时失效：`usage.…reasoning_tokens` 在 SGLang **恒为 null**（与「推理确实被关掉了」完全同形，改看 `reasoning_content` 字符数），且 **SGLang 接受任意 model 名并原样回显**（vLLM 才 404），所以「请求成功了」不再能证明模型名写对。阈值按新事实重估：`for` 15m→10m（冷启动 8–11min→约 3min）· Stuck 窗口收紧到 `increase[3m]+for2m`（新栈**无 liveness 探针、无 `--restart`**，它从兜底变成唯一检测）· 排队阈值**第三次不动**（有效并发 5.34→16，但这条量的是「有人在挨饿」不是「用了几成容量」）· `DgxSparkNodeDown` 只盯 S1（S2 已空闲）。另把引擎名从命名里去掉：job `vllm-dgx-spark`→`dgx-inference`、`DgxSparkVllm*`→`DgxSparkInference*`。全部 PromQL 用一次性 Prometheus 回放线上 `/metrics` 做过正反用例验证——**朴素的逐字移植版因标签集不同返回 0 series，会永不触发** ([SOP](runbooks/dgx-model-swap-homelab-followup.md) · [网关事实](reference/litellm-gateway.md) · [决策修订](decisions/litellm-llm-gateway.md)) |

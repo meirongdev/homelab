@@ -1,6 +1,6 @@
 # Tailscale Cross-Cluster Networking
 
-> Last updated: 2026-09-05
+> Last updated: 2026-09-19
 > Status: 生效事实
 >
 > Rewritten 2026-07-07 after the topology review. The original design (each K3s node
@@ -291,8 +291,9 @@ destination (`*:*`).
 
 ### ☠️ Tagged devices cannot reach *shared* nodes — this is not an ACL problem
 
-The two **DGX Spark** boxes (`100.97.87.120` = inference head, `100.67.164.92` = TP
-worker) live in **someone else's tailnet** (`*.tailf63175.ts.net`, owner
+The two **DGX Spark** boxes (`100.97.87.120` = inference head, `100.67.164.92` = was
+the TP worker, idle since the 2026-09-19 swap to a single-node stack) live in
+**someone else's tailnet** (`*.tailf63175.ts.net`, owner
 `kaixinhuang3307@`) and enter ours via **Tailscale node sharing**.
 
 **Node sharing is granted to a *person*, not to a tailnet.** Devices owned by
@@ -304,7 +305,7 @@ Measured twice (2026-08-01 open-notebook, 2026-08-07 calibre metadata):
 ```
 oracle node0 → tailscale ping 100.97.87.120 → "no matching peer"
 oracle node0 → tailscale status → 6 peers, 0 of them shared
-homelab k8s-node → curl 100.97.87.120:8000/v1/models → 200
+homelab k8s-node → curl 100.97.87.120:8888/v1/models → 200   # :8888 自 2026-09-19 起（曾是 :8000）
 ```
 
 The ACL already allows `tag:oracle` to `*:*`, so **widening the ACL changes
