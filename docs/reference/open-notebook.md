@@ -51,8 +51,15 @@
    旧条目必须手删。✅ 2026-09-03 已删掉 UI 里的 `deepseek-v4-flash`——删前先扫过
    3 个 notebook 与全部 profile，确认没有任何一处引用那个 model id（有一个 endpoint
    路径 `/podcasts`、`/search-templates` 在本版本是 404，扫不到不代表没有，别照着抄）。
-   ⏳ **2026-09-19 换栈后 `qwen38-flash-next` 这条又变成死选项了，同样要手删**
-   （先扫引用，再 `DELETE /models/<id>`）。
+   ✅ **2026-09-19 已删掉 `qwen38-flash-next`**（外部引用 0）。
+   ☠️ **这次的扫法和上次不同，别再只扫 API**：本版本有 404 的端点，"扫不到"不等于"没有"。
+   改成**直查 SurrealDB 的全部 19 张表**（`ws://open-notebook-surrealdb…` 的 HTTP `/sql`，
+   `INFO FOR DB` 取表名后逐表 `SELECT *` 再 grep model id），这才是没有盲区的判据。
+   ☠️ **而且死条目的危害在换成 SGLang 后变大了**：vLLM 时代选中它当场 404，而 SGLang
+   **接受任意 model 名并原样回显** —— 实测回 200、`model` 字段照抄那个不存在的名字，
+   实际跑的是当前加载的模型。清理从"卫生"变成"必须"。
+   ⚠️ **`mlx-community__Qwen3.6-35B-A3B-nvfp4` 看着像遗留但不要删**：OMLX 仍在提供它
+   （2026-09-19 实测），是可用备选。
 3. ☠️ **2026-09-19 换栈同时换了端点**（`:8000` → `:8888`），所以这次改的不只是模型名，
    还有凭据 `dgx-vllm` 的 `base_url`。凭据名仍叫 `dgx-vllm`（引擎其实已是 SGLang）是
    **刻意保留**的：provisioner 只增不删，改名只会多出一条新凭据、旧那条变死条目。

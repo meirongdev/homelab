@@ -64,9 +64,18 @@ data:
         # ☠️ 而且 SGLang **接受任意 model 名并原样回显**（上游 gotcha #10），不像 vLLM 会 404：
         #    名字写错在这条路径上是**静默**的，只能靠 `curl :8888/v1/models` 核对。
         # ⚠️ 本 provisioner 只增不删（unmanaged models 只打 note）：改模型名之后**旧条目会
-        #    留在 UI 里**当死模型（选中即报错），git push 带不走它，得手动删。
-        #    2026-09-03 那次删的是 deepseek-v4-flash，删前扫过全部 notebook/profile 无引用；
-        #    这次要删的是 qwen38-flash-next，同样先扫引用再 DELETE /models/<id>。
+        #    留在 UI 里**，git push 带不走它，得手动删。
+        # ☠️ **旧条目的危害在 2026-09-19 换成 SGLang 之后变大了**：vLLM 时代选中死条目会当场
+        #    404（"选中即报错"，本注释的旧说法），而 **SGLang 接受任意 model 名并原样回显** ——
+        #    实测选中 `qwen38-flash-next` 回 **200**，`model` 字段照抄那个不存在的名字，
+        #    实际跑的是当前加载的模型。即它不再报错，而是**静默给出挂着错名字的结果**。
+        #    所以换栈后清理旧条目从"卫生"升级成"必须"。
+        #    ✅ 2026-09-19 已删掉 qwen38-flash-next（2026-09-03 那次删的是 deepseek-v4-flash）。
+        #    删前的扫法：**直接查 SurrealDB 全部 19 张表**，别只扫 API
+        #    （`SELECT * FROM <table>` 逐表 grep model id；API 有 404 的端点，扫不到不等于没有）。
+        #    两次扫下来外部引用都是 0。
+        # ⚠️ **别顺手删 `mlx-community__Qwen3.6-35B-A3B-nvfp4`**：它看着也像遗留，但 OMLX
+        #    仍在提供（2026-09-19 实测 `/v1/models` 有它），是可用备选而非死条目。
         {"name": "qwen3.8-27b-sglang", "type": "language", "credential": "dgx-vllm"},
         # 备用对话模型（非默认）：DGX 是跨境共享机器且暂无告警（ROADMAP #4），
         # 它不可达时在 UI 里一键切到这个本地 35B（262k ctx）兜底。
