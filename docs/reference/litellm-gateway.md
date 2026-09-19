@@ -51,6 +51,21 @@
 | CoT 字段 | `reasoning_content`（不是 `reasoning`；GLM 那栈才是后者）|
 | 回滚 | 上游 `make switch TO=<stack-id>`（`make stack-check` 列出可选）。☠️ 回滚要把网关别名 + jobs-sg + open-notebook + oracle calibre 四处一起回退，**外加坑 A 的 key 白名单** |
 
+☠️ **网关这条路传不了 `reasoning_effort`**（2026-09-19 实测，与栈无关，是 LiteLLM 的行为）：
+`openai/` 自定义端点上这个参数被判为不支持，回
+`litellm.UnsupportedParamsError: openai does not support parameters: ['reasoning_effort']`；
+裸别名上还会再掉进 `fallbacks` 然后回 500。**同一个参数直连 DGX 的 `:8888` 是 200。**
+所以「给推理封顶」这件事只有**直连**的消费方（jobs-sg enrich）做得到，**经网关的做不到**
+（calibre 元数据作业）。要在网关侧放行，得开 `litellm_settings.drop_params` 或按请求传
+`allowed_openai_params=['reasoning_effort']` —— 两者都还没做，别假设它能用。
+
+⚠️ 顺带观测到的一件事，**证据不足以下结论但值得记**：上面那次 400 触发 fallback 时，
+到 `mac/ornith` 的这一跳报的是 `LLM Provider NOT provided ... You passed model=mac/ornith`，
+即 fallback 没有把别名解析回 `model_list`。这只覆盖「主上游抛参数校验错误」这一种失败，
+连接级失败会不会也这样**没有测过**，所以它既不能证明 fallback 是坏的，也不能拿来
+安心。本页下面那条「在验证之前别把『有 fallbacks 就有兜底』当事实」仍然成立，
+而且现在多了一条待查线索。
+
 ☠️ **`usage.completion_tokens_details.reasoning_tokens` 在这一栈恒为 `null`**（vLLM 才导出它）。
 运行簿里"用 reasoning_tokens 判断思考有没有被关掉"的老办法在这里会读到 `None`，**与"推理确实
 被关掉了"完全同形**。新判据是 `choices[0].message.reasoning_content` 的长度（关掉时 0 字符）。
