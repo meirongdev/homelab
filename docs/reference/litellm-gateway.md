@@ -178,8 +178,18 @@ router_settings:
 | 主上游 **400**（`reasoning_effort` 不支持） | 500 `LLM Provider NOT provided` | **400，原样回真实原因** ✅ |
 | 直接指名 `mac/ornith` | 200 | 200 |
 
-第二行的"不兜底"是**对的**：拿兜底去重试一个本来就非法的请求只会白烧 Mac，还会把真实
-原因盖掉。修完之后那条误导性的 500 也一并消失了。
+☠️ **第二行的机制别记错**（这条是 2026-09-19 上线后看生产日志才订正的，本页先前写的
+"400 不兜底"是错的）：LiteLLM **并不**按错误类型决定要不要兜底 —— 它照样进
+`run_async_fallback` 去试 `mac/ornith`，只是那一跳**在参数映射层就抛了同一个
+`UnsupportedParamsError`**（`for model=ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit`），
+**没有任何 HTTP 请求真的发到 Mac**，最后 `raise error_from_fallbacks` 把真实的 400 抛回来。
+
+净效果是我们想要的（调用方看到真实原因、Mac 没被打扰），但**不能据此以为 LiteLLM 会
+识别 4xx 并跳过兜底**。换一种"主上游返回 4xx 而兜底模型能接受该参数"的组合，兜底就会
+真的被打出去 —— 判据永远是日志里的 `run_async_fallback` / `Error doing the fallback`，
+不是返回码。
+
+修完之后那条误导性的 500 一并消失了（现在直接回 400 + 真实原因）。
 
 ⚠️ **只有裸别名配了兜底，`custom_dgx/` 前缀那条刻意不配**：它是给"我就是要打 DGX"的
 消费方用的，被静默换成 Mac 反而有害（实测它现在会老老实实报连接错误）。
