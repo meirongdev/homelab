@@ -12,8 +12,13 @@
 >   别名 `custom_dgx/deepseek-v4-flash` / `deepseek-v4-flash` →
 >   `custom_dgx/qwen38-flash-next` / `qwen38-flash-next`。换栈由上游 nv-dgx-spark 单方面做出，
 >   本仓库只是跟着改引用；生效事实见
->   [reference/litellm-gateway.md](../reference/litellm-gateway.md) 的「DGX 主力模型」，
+>   [reference/litellm-gateway.md](../reference/litellm-gateway.md) 的「DGX 主力栈」，
 >   换栈理由与压测在 nv-dgx-spark 仓库。本文件的 Decision 仍不改写，见末尾「2026-09-03 修订」。
+> 修订: 2026-09-19：DGX 主力栈由 `Qwen3.8-Flash-Next` 换为 `Qwen3.8-27B-Uncensored`
+>   （NVFP4 + **SGLang** + DFlash2，单节点），别名 → `custom_dgx/qwen3.8-27b-sglang` /
+>   `qwen3.8-27b-sglang`。☠️ **这次连 `api_base` 一起变**（`:8000` → `:8888`）—— 上一次
+>   换栈端点没动，于是"端点是常量"这个隐含假设进了本仓库的多处注释与运行簿，这次被打脸。
+>   命名约定（下方 2026-09-03 修订）经受住了第二次检验，**不改**。
 
 ## Context
 

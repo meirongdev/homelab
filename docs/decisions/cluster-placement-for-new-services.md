@@ -84,7 +84,9 @@
   [runbooks/stateful-service-cross-cluster-migration.md](../runbooks/stateful-service-cross-cluster-migration.md)
   的节点内变体先搬数据，光加 `nodeSelector` 只会让 Pod 因卷节点亲和冲突永远 Pending。
 - **放不了要直连 DGX 的**：worker 是 tagged 设备，netmap 里没有 DGX 这个 shared peer
-  （实测 pod `100.97.87.120:8000` 超时）；而控制面的用户所有身份能到。像 jobs-sg 的 `enrich`
+  （实测 pod 连 DGX 超时）；而控制面的用户所有身份能到。
+  ⚠️ 这条与端口无关，别因为 DGX 换栈改了端口（`:8000` → 2026-09-19 起 `:8888`）就以为
+  新端口可能通——不通的原因是那个 peer 根本不在 netmap 里。像 jobs-sg 的 `enrich`
   这类直连 DGX 的负载必须留控制面（jobs-sg 另有共享 `jobs-sg-data` PVC，本就整体锁死控制面）。
 - **放不了控制面/宿主依赖负载**：kube-bench 钉死 control-plane + 依赖控制面宿主 hostPath。
 

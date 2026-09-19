@@ -7,7 +7,7 @@
 #   - admin UI (/ui): LiteLLM 自带登录 (UI_USERNAME/UI_PASSWORD, Vault→ESO)
 # Config: config.yaml in git (model_list); keys/spend live in Postgres —— 2026-08-25 起
 #   是共享实例 `databases/apps-pg` 的 litellm 租户，不再是本 ns 自带的 litellm-pg。
-# 双自托管上游: DGX (qwen38-flash-next, 主) + MacPro M2 OMLX (Ornith-1.5-35B, 兜底),
+# 双自托管上游: DGX (qwen3.8-27b-sglang, 主) + MacPro M2 OMLX (Ornith-1.5-35B, 兜底),
 #   fallbacks 键 = 严格的"主→兜底"链（见 docs/plans/2026-08-01-litellm-gateway-migration.md §3 决策 6）。
 # 升版：改 image digest + 注释 tag → git push。不要追 main-stable。
 apiVersion: v1
@@ -17,28 +17,36 @@ metadata:
   namespace: litellm
 data:
   # ⚠️ api_base 必须带 /v1 后缀 —— LiteLLM 不会自动补。
-  # api_key: dummy 不是机密（DGX vLLM 与 Mac OMLX 都忽略鉴权，"any token works"），因此可留在 git。
+  # api_key: dummy 不是机密（DGX SGLang 与 Mac OMLX 都忽略鉴权，"any token works"），因此可留在 git。
+  # ☠️ SGLang 与 vLLM 在这里有个要命的差别：**SGLang 接受任意 model 名并原样回显**
+  #    （上游 gotcha #10），vLLM 才会 404。所以「请求成功了」不能证明别名指对了栈，
+  #    判据只能是 `/v1/models` 报的 served name。
   # 强制 key 鉴权由 env LITELLM_MASTER_KEY 实现（general_settings.master_key 语义=require a key for all calls）。
   config.yaml: |
     model_list:
       # ── DGX（主；custom_dgx/ 前缀是历史约定，保留）──
-      # 2026-09-02 DGX 换栈：DeepSeek-V4-Flash → Qwen3.8-Flash-Next NVFP4（RadixArk 权重、
-      # 双节点 TP=2、官方 vllm/vllm-openai 镜像，不再吊在个人 fork 上）。api_base 不变，
-      # 只有 served name 变，而旧名已从 /v1/models 消失 —— 旧别名一律 404，那不是"配置没生效"。
-      # ☠️ max_model_len 从 1M 掉到 262144：按 1M 做过长上下文规划的下游要重算
-      #    （已知受影响：open-notebook 的 large_context_model，见 docs/reference/open-notebook.md）。
-      - model_name: custom_dgx/qwen38-flash-next
+      # 2026-09-19 DGX 换栈：Qwen3.8-Flash-Next → Qwen3.8-27B-Uncensored NVFP4 + SGLang
+      # + DFlash2 投机解码，**单节点**（只用 S1，S2 完全空闲）。
+      # ☠️ 这次**端点也变了**：k3s 的 :8000 → docker 的 :8888，且 :8000 已经完全不监听
+      #    （实测 connection refused，不是 404）。上游仓库的
+      #    nv-dgx-spark/docs/stack-switch-cn.md §3.1 记着同一个坑：只改模型名、
+      #    不改 base_url，等于把消费方指向一个空端口。
+      # ⚠️ 端口区分不了后端（:8888 被三个栈轮流用过），改之前先
+      #    `curl -s http://100.97.87.120:8888/v1/models` 看 served name 再动手。
+      # max_model_len 仍是 262144（与上一栈相同，这次长上下文规划不用重算）。
+      - model_name: custom_dgx/qwen3.8-27b-sglang
         litellm_params:
-          model: openai/qwen38-flash-next
-          api_base: http://100.97.87.120:8000/v1
+          model: openai/qwen3.8-27b-sglang
+          api_base: http://100.97.87.120:8888/v1
           api_key: dummy
-      # ── 无前缀别名 qwen38-flash-next：DGX 主 + Mac 兜底（fallbacks 键 = 严格的"主→兜底"，非轮询）──
-      # 与裸 vLLM 同名是刻意的（下游改 base_url 即可绕过网关），代价是换模型时两边都得动。
+      # ── 无前缀别名 qwen3.8-27b-sglang：DGX 主 + Mac 兜底（fallbacks 键 = 严格的"主→兜底"，非轮询）──
+      # 与裸引擎同名是刻意的（下游改 base_url 即可绕过网关），代价是换模型时两边都得动。
       # ☠️ 改别名必须同步改 Postgres 里各虚拟 key 的 models 白名单，否则「清单正确 + Synced + 调用全 403」。
-      - model_name: qwen38-flash-next
+      #    2026-09-19 实测受影响的是 **16 把里的 8 把**（与 09-03 那次同一数量级）。
+      - model_name: qwen3.8-27b-sglang
         litellm_params:
-          model: openai/qwen38-flash-next
-          api_base: http://100.97.87.120:8000/v1
+          model: openai/qwen3.8-27b-sglang
+          api_base: http://100.97.87.120:8888/v1
           api_key: dummy
           fallbacks: ["mac/ornith"]
       # ── Mac 兜底（也是独立可用的实际模型）──
@@ -117,7 +125,7 @@ spec:
         #    ⇒ ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按**旧路由表**继续跑。
         #    2026-08-25 实际踩过一次（改了 mac/ornith 后必须手动 rollout restart 才生效）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py 的 STAMP_ONLY），别手改。
-        checksum/config: "300626dcf6dc8d85"
+        checksum/config: "6c5f2593d2432316"
         # 同理，但盯的是 codex_compat.py（litellm-codex-compat ConfigMap）：
         # 也是 subPath 挂载 + 只在启动时 import，改了不重启就是静默跑旧代码。
         checksum/codex-compat-py: "e5da4a39d90243d4"

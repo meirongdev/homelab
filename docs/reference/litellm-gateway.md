@@ -1,6 +1,6 @@
 # LiteLLM 网关（运维事实与坑）
 
-> Last updated: 2026-09-09
+> Last updated: 2026-09-19
 > Status: 生效事实
 > Scope: `llm.meirong.dev` 这个 LLM 网关的配置生效路径、鉴权分层、上游可用性边界，
 > 本文是 source of truth。为什么选 LiteLLM、上游怎么选、Mac 兜底为何换 Ornith，见
@@ -25,7 +25,7 @@
 | **虚拟 key 能访问哪些模型** | Postgres | 只能调 API（坑 A）|
 | 花费账本 / key 有效期 | Postgres | `/ui` 或 API |
 
-## DGX 主力模型：2026-09-02 换成 Qwen3.8-Flash-Next
+## DGX 主力栈：2026-09-19 换成 Qwen3.8-27B-Uncensored (SGLang)
 
 上游（`~/projects/meirongdev/nv-dgx-spark`）单方面换栈，本仓库只是跟着改引用。**这一节是本
 仓库关于该上游的唯一真相源**；换栈的技术理由与压测数据在 nv-dgx-spark 仓库，不在这里复制。
@@ -39,18 +39,24 @@
 
 | | |
 |---|---|
-| served name | `qwen38-flash-next`（root `Qwen3.8-Flash-Next-NVFP4`，NVFP4 权重 126 GiB）|
-| 端点 | **不变**：`100.97.87.120:8000/v1`。旧名 `deepseek-v4-flash` 已从 `/v1/models` 消失，所以旧引用是 **404**（不是 401，也不是"配置没生效"）|
-| `max_model_len` | **262144**（旧栈 1000000）。按 1M 做过长上下文规划的下游全要重算 —— 已知受害者 [open-notebook.md](open-notebook.md) 的 `large_context_model` 与播客 profiles |
-| 拓扑 / 冷启动 | 双节点 TP=2，两台都必须在；加载 **8–11 分钟**（旧栈 5m29s）。`DgxSparkVllmDown` 的 `for` 因此从 10m 抬到 15m，否则一次正常重启就烧 critical |
-| 并发 | `--max-num-seqs 8`，但线上 `cache_config` 实测 `kv_cache_max_concurrency=5.34`（gmu 0.75）—— 真瓶颈是 KV 池，不是条数，所以排队告警阈值**没有**按 8 等比抬 |
-| 工具调用 | ✅ 实测 `finish_reason=tool_calls`、arguments 是合法 JSON（calibre/jobs-sg 那批 JSON 消费方的前提）|
-| 回滚 | `make qwen38fn-rollback` → `make v4flash-run`（旧权重/镜像保留）。☠️ 回滚要把网关别名 + jobs-sg + open-notebook + oracle calibre 四处一起回退，**外加坑 A 的 key 白名单** |
+| 上游栈 id | `qwen38un`（Qwen3.8-27B-Uncensored NVFP4 + SGLang + DFlash2 投机解码）|
+| served name | `qwen3.8-27b-sglang` |
+| 端点 | ☠️ **变了**：`100.97.87.120:8888/v1`（docker/SGLang）。上一栈的 `:8000`（k3s/vLLM）**已完全不监听** —— 旧引用拿到的是 connection refused，不是 404 |
+| 引擎 | **SGLang**（前两栈都是 vLLM）。☠️ 它**接受任意 model 名并原样回显**，vLLM 才会 404 —— 所以"请求成功了"**不能**证明模型名写对了，唯一判据是 `/v1/models` 报的 served name |
+| `max_model_len` | **262144**（与上一栈相同）。这次长上下文规划不用重算 |
+| 拓扑 / 冷启动 | **单节点**（`tp_size=1`，只用 S1；S2 完全空闲）。加载**约 3 分钟**（权重只有 23 GiB，上一栈 126 GiB）。`DgxSparkInferenceDown` 的 `for` 因此从 15m 收回 10m |
+| 自愈 | ☠️ **没有**：docker + tmux，既无 liveness 探针也无 `--restart`（上游刻意如此）。引擎挂了会一直挂着，直到有人动手 |
+| 并发 | `max_running_requests=16`；KV 池 1,220,951 token（`mem-fraction-static 0.80`）≈ 4.6 路满窗并发 —— 这次**条数才是瓶颈**，KV 不是。排队告警阈值仍**不**按 16 等比抬（理由见告警注释）|
+| 关思考 | `chat_template_kwargs {"enable_thinking": false}`（✅ 实测有效）；顶层 `reasoning_effort` 枚举换成 `xhigh`(默认)/`medium`/`low`，旧栈的 `minimal` 现在回 **400** |
+| CoT 字段 | `reasoning_content`（不是 `reasoning`；GLM 那栈才是后者）|
+| 回滚 | 上游 `make switch TO=<stack-id>`（`make stack-check` 列出可选）。☠️ 回滚要把网关别名 + jobs-sg + open-notebook + oracle calibre 四处一起回退，**外加坑 A 的 key 白名单** |
 
-⚠️ **质量闸门还没跑**（nv-dgx-spark 侧的 aider-polyglot）：RadixArk 的 NVFP4 是无校准 RTN
-量化，公开分数由量化方自报。速度闸门已过（decode 均值 58.6 tok/s，比旧栈 −12.8%，但并发
-c4/c6 +25%/+29%、prefill +82%/+100%，真实代码任务 62.1 vs 63.8 基本打平）。也就是说
-**「换模型」目前只有速度与工具调用被验证过，输出质量没有**。
+☠️ **`usage.completion_tokens_details.reasoning_tokens` 在这一栈恒为 `null`**（vLLM 才导出它）。
+运行簿里"用 reasoning_tokens 判断思考有没有被关掉"的老办法在这里会读到 `None`，**与"推理确实
+被关掉了"完全同形**。新判据是 `choices[0].message.reasoning_content` 的长度（关掉时 0 字符）。
+
+⚠️ **质量闸门仍未跑**：与上一栈同样的情况 —— 速度与契约（严格 JSON、关思考）已实测，
+**输出质量没有**。另外这是一个 uncensored 微调，对齐行为与上游原版不同，别假设一致。
 
 ## ☠️ 坑 A：虚拟 key 的模型白名单在 Postgres 里，git 完全管不到
 
@@ -81,7 +87,7 @@ curl -s -H "Authorization: Bearer $MK" "https://llm.meirong.dev/key/info?key=$VK
 
 # 覆盖白名单（整个列表替换，不是增量）
 curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
-  -d '{"key":"'"$VK"'","models":["custom_dgx/qwen38-flash-next","qwen38-flash-next",
+  -d '{"key":"'"$VK"'","models":["custom_dgx/qwen3.8-27b-sglang","qwen3.8-27b-sglang",
        "mac/ornith","mac/ornith-fast","openrouter/*","nvidia/*"]}' \
   https://llm.meirong.dev/key/update
 ```
@@ -109,7 +115,7 @@ curl -s -H "Authorization: Bearer $MK" "$GW/key/info?key=<那个 sha256>"      #
 ⚠️ **未验证但要当真的推论**：`fallbacks` 的目标也是别名。如果兜底别名不在 key 的白名单里，
 DGX 不可达时该 key 大概率拿不到兜底（拿到的是 `key_model_access_denied` 而不是 Mac 的回答）。
 本仓库当前两个别名都已在白名单里，所以没有实测过。真要确认：临时建一个只含
-`qwen38-flash-next` 的 key，制造 DGX 不可达再调它。**在验证之前，别把「有 fallbacks 就有兜底」
+`qwen3.8-27b-sglang` 的 key，制造 DGX 不可达再调它。**在验证之前，别把「有 fallbacks 就有兜底」
 当成结论**：兜底链是否真的通，取决于 key 而不只是 config。
 
 ## ☠️ 坑 B：`/v1/models` 返回的是「这个 key 能访问什么」，不是 live config
@@ -436,7 +442,7 @@ reranker / nemoguard / 视觉 / riva-translate / palmyra 垂类）全部早于�
 `reasoning_content` 的切分依赖 `</think>` 闭合标签；token 用完标签不出现，parser 就失去切分
 依据、把整段思考原样放进 `content`（不报错、不告警，只是答案变成一坨思考过程）。
 
-- 受影响的是所有自托管上游（DGX 的 `qwen38-flash-next`、Mac 的 Ornith 都是思维链模型），
+- 受影响的是所有自托管上游（DGX 的 `qwen3.8-27b-sglang`、Mac 的 Ornith 都是思维链模型），
   不是某个模型的缺陷；
 - DGX 侧的开关与 Mac 不同：`--reasoning-parser qwen3` 已开，单请求可发
   `chat_template_kwargs: {"enable_thinking": false}` **真关掉思考**（实测 2026-09-03：
@@ -462,11 +468,11 @@ reranker / nemoguard / 视觉 / riva-translate / palmyra 垂类）全部早于�
 
 | 消费方 | 用哪个别名 | 配置在哪 |
 |---|---|---|
-| `codex --profile litellm` | `custom_dgx/qwen38-flash-next` | `~/.codex/litellm.config.toml`（本机）|
+| `codex --profile litellm` | `custom_dgx/qwen3.8-27b-sglang` | `~/.codex/litellm.config.toml`（本机）|
 | `codex --profile mac` | `mac/ornith` | `~/.codex/mac.config.toml`（本机）|
-| k8sgpt（`--backend openai`）| `qwen38-flash-next` | `~/Library/Application Support/k8sgpt/k8sgpt.yaml`（本机）|
+| k8sgpt（`--backend openai`）| `qwen3.8-27b-sglang` | `~/Library/Application Support/k8sgpt/k8sgpt.yaml`（本机）|
 | k8sgpt（`--backend localai`）| `mac/ornith-fast` | 同上 |
-| oracle 上的 calibre 元数据作业 | `qwen38-flash-next`（经 `litellm-external` NodePort）| [清单内嵌脚本](../../cloud/oracle/manifests/calibre-metadata/metadata-llm.yaml) |
+| oracle 上的 calibre 元数据作业 | `qwen3.8-27b-sglang`（经 `litellm-external` NodePort）| [清单内嵌脚本](../../cloud/oracle/manifests/calibre-metadata/metadata-llm.yaml) |
 | Open Notebook | **不走网关**，直连 DGX 与 OMLX | [open-notebook.md](open-notebook.md) |
 
 ⚠️ 本机消费方全部读同一个 `LITELLM_VK`（`~/.zshrc`），所以坑 A 一旦发生是全体受影响。

@@ -3,12 +3,15 @@
 # （baseline 全量扫描实测 29 分钟 / 884 页，所以 19:10 开始不会撞上）。
 # fail-open：LLM 出错时保留规则结果并 exit 0；积压由 JobsSgEnrichBacklog 告警兜底。
 #
-# ⚠️ **直连 DGX vLLM，不经 LLM 网关**：省掉 virtual key 这条 Vault 依赖。
+# ⚠️ **直连 DGX 推理引擎，不经 LLM 网关**：省掉 virtual key 这条 Vault 依赖。
 # 模型 id 是后端相关的 —— 网关路由用带 provider 前缀的名字
-# （`custom_dgx/qwen38-flash-next`），裸 vLLM 提供的是 `qwen38-flash-next`，
+# （`custom_dgx/qwen3.8-27b-sglang`），裸引擎提供的是 `qwen3.8-27b-sglang`，
 # 写前缀名会 404。上游 2026-08-03 (d833623) 把模型链改成读 LLM_MODELS 后才可配。
-# ⚠️ 2026-09-02 DGX 换过主力模型（DeepSeek-V4-Flash → Qwen3.8-Flash-Next，ctx 1M→262k）。
-#    本作业**直连** DGX，模型名不在 git 的网关清单里，只能靠改这里跟着换。
+# ⚠️ 2026-09-19 DGX 又换了主力栈（Qwen3.8-Flash-Next → Qwen3.8-27B-Uncensored + SGLang），
+#    ☠️ **这次连端点一起变**：:8000(k3s/vLLM) → :8888(docker/SGLang)，旧端口已不监听。
+#    本作业**直连** DGX，端点与模型名都不在 git 的网关清单里，只能靠改这里跟着换。
+# ☠️ SGLang **接受任意 model 名并原样回显**（上游 gotcha #10），不像 vLLM 会 404：
+#    模型名写错在这里是**静默**的，判据只能是 `/v1/models` 报的 served name。
 # 实测（2026-08-03，jobs-sg ns 内的 pod）：DGX 可达、无需认证、`x-bf-vk` 头被忽略。
 #
 # 代价：没有网关的 custom_m2 回退，也没有用量计量；DGX 是跨 tailnet 共享的
@@ -70,22 +73,25 @@ spec:
               command: ["/usr/local/bin/jobs-sg-enrich"]
               args: ["--data-dir", "/data"]
               env:
-                # DGX Spark vLLM（Tailscale IP，pod 直连；不是集群内 Service）。
+                # DGX Spark 推理引擎（Tailscale IP，pod 直连；不是集群内 Service）。
                 # 同一台机器也在给 Open Notebook 供模型，见 reference/open-notebook.md。
+                # ⚠️ :8888 是 docker/SGLang 栈；上一栈的 :8000(k3s/vLLM) 已经不监听了。
                 - name: LLM_BASE_URL
-                  value: http://100.97.87.120:8000
-                # 裸 vLLM 的模型 id，不带网关的 provider 前缀。
-                # ⚠️ 必须与 DGX 当前 serve 的模型同名，写错回 404（不是 401）。
-                # 2026-09-02 由 deepseek-v4-flash 换为 qwen38-flash-next。
+                  value: http://100.97.87.120:8888
+                # 裸引擎的模型 id，不带网关的 provider 前缀。
+                # ⚠️ 必须与 DGX 当前 serve 的模型逐字同名。
+                # ☠️ 判据变了：旧栈(vLLM)写错回 404，**新栈(SGLang)回 200 并原样回显**，
+                #    写错完全静默 —— 核对方式只有 `curl :8888/v1/models`。
+                # 2026-09-19 由 qwen38-flash-next 换为 qwen3.8-27b-sglang。
                 # ☠️ 上游 0632049 起，换模型**只改这一行**（模型相关参数全部下沉成 LLM_*）：
                 #    若新栈关思考的键名不是 enable_thinking，还要一起改 LLM_THINKING_KWARG。
                 #    验收不用手写请求，上游带了一条默认跳过、不进 CI 的实测用例：
-                #      LLM_LIVE_URL=http://100.97.87.120:8000 LLM_LIVE_MODEL=<新模型> \
+                #      LLM_LIVE_URL=http://100.97.87.120:8888 LLM_LIVE_MODEL=<新模型> \
                 #        go test ./internal/llm -run Live -v
                 #    它会真调一次并断言推理确实被关掉；挂了就换 LLM_LIVE_KWARG 试，
                 #    试通的值就是要写进清单的那个。
                 - name: LLM_MODELS
-                  value: qwen38-flash-next
+                  value: qwen3.8-27b-sglang
                 - name: LLM_CONCURRENCY
                   value: "8"
                 # 单次调用预算（= 上游 llm.DefaultTimeout，可配，不必重构镜像）。
@@ -116,7 +122,7 @@ spec:
                 # 一次慢成功变成硬失败。所以这里**不设** LLM_MAX_TOKENS。
                 - name: LLM_RETRIES
                   value: "0"
-                # 给推理封顶。qwen38-flash-next 会在个别岗位上把推理写飞，而 300s 换算成
+                # 给推理封顶。这一类推理模型会在个别岗位上把推理写飞，而 300s 换算成
                 # token 只有约 7000：实测那条 OCBC 岗位不封顶要 16754 completion token
                 # （16448 是推理，占 98.2%）、独占 GPU 跑 324s，夜里 8 并发折算约 720s。
                 # 它的答案是对的，只是贵到 300s 内拿不到。
@@ -136,17 +142,31 @@ spec:
                 #   · 8 条正常岗位 → 总耗时 244s→82s、推理 9763→3487 token，抽词几乎不变。
                 # ⚠️ 换模型必须重验这个键。它的失效形态和别的键相反：值不被支持时回
                 # HTTP 400（实测 minimal 就是），整轮全挂，而不是悄悄不生效。
+                # ✅ 2026-09-19 已在新栈(SGLang)上实测复验：`medium` 回 200 且确实压住推理
+                #    （真实提示词 6000 字：默认 769 completion token / 2816 字推理 →
+                #     medium 409 / 1160 字）。但**枚举换了一套**：新栈是
+                #    `xhigh(默认) / medium / low`，旧栈那个 `minimal` 现在回 400
+                #    （报文原话：Unexpected reasoning effort minimal）。
+                # ☠️ **判据也换了**：新栈的 `usage.completion_tokens_details.reasoning_tokens`
+                #    恒为 **null**（旧栈 vLLM 才有）。再按老办法比对 reasoning_tokens 会看到
+                #    "None"，与"推理被关掉了"完全同形 —— 实际判据改成
+                #    `choices[0].message.reasoning_content` 的长度（关掉时是 0 字符）。
+                # ⚠️ 默认档从旧栈的常规推理变成了 **xhigh**，即不封顶时比以前更贵，
+                #    这个键现在比在旧栈上更不能省。
                 # 验收：`LLM_LIVE_URL=… LLM_LIVE_MODEL=… go test ./internal/llm -run Live -v`
-                # 通过后，再对一条真实长岗位确认 reasoning_tokens 掉到几百量级。
+                # 通过后，再对一条真实长岗位确认 reasoning_content 掉到千字量级。
                 - name: LLM_EXTRA_BODY
                   value: '{"reasoning_effort":"medium"}'
                 # 刻意**没有** LLM_THINKING —— 它是应急旋钮，不是常态配置：
                 #  · 上游实测开推理 15 条/分钟，LLM_THINKING=false 是 154 条/分钟，
                 #    代价是抽取略松（词仍过 tech_taxonomy 白名单，杂词落进 unmapped_tech）。
                 #  · 现在没有积压要排（jobs_sg_enrich_backlog = 3），拿质量换速度不划算。
-                #  · 键名旋钮是 LLM_THINKING_KWARG（默认 enable_thinking）。☠️ 换栈后旧键名
+                #  · 键名旋钮是 LLM_THINKING_KWARG（默认 enable_thinking）。☠️ 旧键名
                 #    `{"thinking":false}` 会回 200 但完全不生效；现在代码自己会打
                 #    `reasoning was not disabled` 的 WARN，不再只能人肉比对 usage。
+                #    ✅ 2026-09-19 在新栈上复验：`enable_thinking=false` 仍生效
+                #    （reasoning_content 0 字符 / completion 7 token），默认值不用改；
+                #    `thinking=false` 仍是静默空操作（417 字符推理照出）。
                 # 真要应急排空：临时加 LLM_THINKING=false，排空后删掉（历史实测见
                 # docs/reference/jobs-sg.md「真正的提速杠杆」）。
                 # 这里**没有**网关的 virtual key：直连 DGX 不需要，
