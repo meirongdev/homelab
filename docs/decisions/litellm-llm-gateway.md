@@ -19,6 +19,13 @@
 >   `qwen3.8-27b-sglang`。☠️ **这次连 `api_base` 一起变**（`:8000` → `:8888`）—— 上一次
 >   换栈端点没动，于是"端点是常量"这个隐含假设进了本仓库的多处注释与运行簿，这次被打脸。
 >   命名约定（下方 2026-09-03 修订）经受住了第二次检验，**不改**。
+> 修订: 2026-09-19（二）：☠️ **本决策的"双自托管来源 fallback"从落地起就没有真正生效**。
+>   兜底一直声明在模型条目的 `litellm_params.fallbacks` 里，而 LiteLLM 只认顶层
+>   `router_settings.fallbacks`；放错位置时它被当成 SDK 级 fallback，拿裸别名去找 provider，
+>   主上游一挂就回 `LLM Provider NOT provided ... You passed model=mac/ornith`。
+>   已用线上同 digest 镜像 + 真实渲染配置实测并修复，**Decision 本身（DGX 主 + Mac 兜底、
+>   严格主→兜底、不做双向均衡）不变**，变的只是声明位置。复现、对照表与"400 不该兜底"
+>   的理由见 [reference/litellm-gateway.md](../reference/litellm-gateway.md) 坑 A2。
 
 ## Context
 

@@ -59,13 +59,6 @@
 （calibre 元数据作业）。要在网关侧放行，得开 `litellm_settings.drop_params` 或按请求传
 `allowed_openai_params=['reasoning_effort']` —— 两者都还没做，别假设它能用。
 
-⚠️ 顺带观测到的一件事，**证据不足以下结论但值得记**：上面那次 400 触发 fallback 时，
-到 `mac/ornith` 的这一跳报的是 `LLM Provider NOT provided ... You passed model=mac/ornith`，
-即 fallback 没有把别名解析回 `model_list`。这只覆盖「主上游抛参数校验错误」这一种失败，
-连接级失败会不会也这样**没有测过**，所以它既不能证明 fallback 是坏的，也不能拿来
-安心。本页下面那条「在验证之前别把『有 fallbacks 就有兜底』当事实」仍然成立，
-而且现在多了一条待查线索。
-
 ☠️ **`usage.completion_tokens_details.reasoning_tokens` 在这一栈恒为 `null`**（vLLM 才导出它）。
 运行簿里"用 reasoning_tokens 判断思考有没有被关掉"的老办法在这里会读到 `None`，**与"推理确实
 被关掉了"完全同形**。新判据是 `choices[0].message.reasoning_content` 的长度（关掉时 0 字符）。
@@ -123,15 +116,76 @@ curl -s -H "Authorization: Bearer $MK" "$GW/key/info?key=<那个 sha256>"      #
 
 想知道哪把是本机的 `LITELLM_VK`：`printf %s "$LITELLM_VK" | sha256sum` 去匹配列表即可。
 
-⚠️ **爆炸半径实测（2026-09-03）**：16 把 key 里 **8 把**的白名单写着 DGX 别名，另有 4 把
-还挂着早已不存在的 `mac/qwen3.6-35b`。一次改名的正确预期是"改 8 把"，不是"改 1 把"。
+⚠️ **爆炸半径实测（2026-09-03 与 2026-09-19 两次都是）**：16 把 key 里 **8 把**的白名单
+写着 DGX 别名。一次改名的正确预期是"改 8 把"，不是"改 1 把"。
 `/key/update` 是**整表替换**，所以脚本要先把原列表读出来、只映射要改的那两项、其余原样带回。
 
-⚠️ **未验证但要当真的推论**：`fallbacks` 的目标也是别名。如果兜底别名不在 key 的白名单里，
-DGX 不可达时该 key 大概率拿不到兜底（拿到的是 `key_model_access_denied` 而不是 Mac 的回答）。
-本仓库当前两个别名都已在白名单里，所以没有实测过。真要确认：临时建一个只含
-`qwen3.8-27b-sglang` 的 key，制造 DGX 不可达再调它。**在验证之前，别把「有 fallbacks 就有兜底」
-当成结论**：兜底链是否真的通，取决于 key 而不只是 config。
+✅ **「兜底会不会被 key 白名单挡住」已实测，答案是不会**（2026-09-19）。本页早先写的是
+「未验证但要当真的推论：兜底别名不在白名单里就拿不到兜底」—— **实测推翻了它**。
+用线上同 digest 的镜像 + Postgres + 线上那份渲染后的 config（主上游指死端口）建三把 key：
+
+| key 的白名单 | 打裸别名（必然要走兜底） |
+|---|---|
+| 只有 `qwen3.8-27b-sglang` | **200，内容来自兜底** |
+| `qwen3.8-27b-sglang` + `mac/ornith` | 200，来自兜底 |
+| `qwen3.8-27b-sglang` + 已死的 `mac/qwen3.6-35b` | 200，来自兜底 |
+
+即**白名单只约束「你能指名什么」，不约束路由内部的兜底跳转**。同一把窄 key 直接指名
+`mac/ornith` 仍然 **403**（`key not allowed to access model`）—— 所以最小权限与兜底可以并存，
+窄 key（如 `calibre-metadata-llm`）不需要为了兜底而放宽。
+
+## ☠️ 坑 A2：`fallbacks` 写在 `litellm_params` 里 —— 声明了但**从来没生效过**
+
+**2026-09-19 实测确认并已修复。** 兜底链从 2026-08-01 落地起就一直声明在模型条目的
+`litellm_params.fallbacks` 里：
+
+```yaml
+- model_name: <裸别名>
+  litellm_params:
+    model: openai/<served name>
+    api_base: http://…
+    fallbacks: ["mac/ornith"]      # ❌ 放在这里 = SDK 级 fallback，不解析 model_list
+```
+
+LiteLLM 把这里的 `fallbacks` 当作**透传给 SDK 的 kwarg**，于是主上游一失败，它拿裸字符串
+`mac/ornith` 去找 provider，报：
+
+```
+litellm.BadRequestError: LLM Provider NOT provided. ... You passed model=mac/ornith
+```
+
+**正确位置是顶层 `router_settings.fallbacks`**，值是 `[{"<主>": ["<兜底>"]}]`：
+
+```yaml
+router_settings:
+  fallbacks: [{"qwen3.8-27b-sglang": ["mac/ornith"]}]
+```
+
+☠️ **为什么拖了这么久没被发现**（三条叠加）：
+
+1. **它只在主上游失败时才暴露**，而 DGX 平时是通的 —— 日常没有任何症状。
+2. **报错长得像别的问题**。`LLM Provider NOT provided ... model=mac/ornith` 读起来像
+   "Mac 那边配错了/睡着了"，而真正的错在**主上游那条**的声明位置。
+3. **连接级失败与参数级失败的报错完全相同**，所以第一次撞见时（本页上方 `reasoning_effort`
+   那条）没法据此判断是"只有参数错误才这样"还是"一直都这样"。
+
+✅ **实测方法与结论**（不碰生产，全部在本地跑）：用线上同一 digest 的 `litellm/litellm`
+镜像 + 从**真实清单渲染**出的 config（只把两个 `api_base` 换成"死端口"和"假 Mac"）：
+
+| 场景 | 旧形态（`litellm_params.fallbacks`） | 修法（`router_settings.fallbacks`） |
+|---|---|---|
+| 主上游**连接失败**（死端口） | 500 `LLM Provider NOT provided` | **200，内容来自兜底** ✅ |
+| 主上游 **400**（`reasoning_effort` 不支持） | 500 `LLM Provider NOT provided` | **400，原样回真实原因** ✅ |
+| 直接指名 `mac/ornith` | 200 | 200 |
+
+第二行的"不兜底"是**对的**：拿兜底去重试一个本来就非法的请求只会白烧 Mac，还会把真实
+原因盖掉。修完之后那条误导性的 500 也一并消失了。
+
+⚠️ **只有裸别名配了兜底，`custom_dgx/` 前缀那条刻意不配**：它是给"我就是要打 DGX"的
+消费方用的，被静默换成 Mac 反而有害（实测它现在会老老实实报连接错误）。
+
+⚠️ **换模型时 `router_settings` 里的键名要跟着换**（它是别名字面量），漏改 = 兜底静默失效 ——
+和坑 A 是同一类问题的两个位置。
 
 ## ☠️ 坑 B：`/v1/models` 返回的是「这个 key 能访问什么」，不是 live config
 
