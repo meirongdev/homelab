@@ -46,9 +46,16 @@
 #     `finish_reason=stop` 且 JSON 解析出 title/authors/description/tags：
 #     默认(xhigh) 769 token、medium 409、low 367。**没有复现 `content=null` 那条崩溃。**
 #     ⚠️ 但余量比上一栈薄了：旧栈 389–512（≈4 倍冗余），新栈默认档 769（≈2.6 倍）。
-#     原因是新栈的默认推理强度是 `xhigh`。若日后摘录变长或提示词变复杂，
-#     先动的应该是显式加 `"reasoning_effort": "medium"`，而不是抬 max_tokens
-#     （抬 max_tokens 只会让模型把推理写得更满，见下面那条注释）。
+#     原因是新栈的默认推理强度是 `xhigh`。
+#   · ☠️ **本作业没法用 `reasoning_effort` 封顶** —— 它走网关，而 **LiteLLM 会拒掉这个参数**：
+#     2026-09-19 实测经网关传 `"reasoning_effort":"medium"` → `litellm.UnsupportedParamsError:
+#     openai does not support parameters: ['reasoning_effort']`（裸别名上还会再掉进 fallback
+#     然后 500）。**同一个参数直连 DGX 是 200**，所以 jobs-sg 那条直连链路能用、本作业不能，
+#     别看着它有效就照搬过来。真要在这里封顶，得先在网关侧开
+#     `litellm_settings.drop_params` 或按请求传 `allowed_openai_params=['reasoning_effort']`，
+#     那是改网关不是改本文件。
+#     余量真的不够时，本作业能动的只有 MAX_CHARS（缩短摘录）——**别抬 max_tokens**，
+#     那只会让模型把推理写得更满（见下面那条注释）。
 #   · ✅ 2026-09-03 对上一栈的同款复验（n=4，completion 389–512）也是这么做的，
 #     两次结论一致：这条护栏对"换成另一个推理模型"是稳的，但每次都得重跑。
 #   · ⚠️ 复验走的是合成摘录，**不等于真书库的 DRY-RUN 通过**：真实扉页/版权页更脏

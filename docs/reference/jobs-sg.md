@@ -227,6 +227,11 @@ reasoning 占了这个模型 **约 95%** 的 output token。上游 `472aaf5` 加
 `minimal` 现在会让整轮 400 全挂。默认档从常规推理变成 `xhigh`，这个封顶键比在旧栈上
 **更不能省**。
 
+⚠️ **这个键能用，靠的是本作业直连 DGX**。经 LLM 网关传同一个参数会被 LiteLLM 判为
+不支持（`UnsupportedParamsError`，2026-09-19 实测）—— 所以别把本节的做法照搬给
+走网关的消费方（oracle 的 calibre 元数据作业就是），详见
+[litellm-gateway.md](litellm-gateway.md)。这也是「改走网关」这个选项的一项隐藏成本。
+
 **用法定位**：`LLM_THINKING=false` 只用来啃积压，不用于稳态；清单里因此不设它
 （= 默认开启），啃积压走一次性 Job（不进 git，见下节）。稳态用下一节的封顶。
 
