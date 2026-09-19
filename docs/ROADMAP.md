@@ -50,8 +50,11 @@
   jobs-sg 那条链路上游 2026-09-03 自带了实测用例
   （`LLM_LIVE_URL=… LLM_LIVE_MODEL=… go test ./internal/llm -run Live -v`），本仓库的脚本
   只需覆盖 calibre 的提示词与网关别名；③ 虚拟 key 卫生
-  —— 顺带修一个**当下就坏**的缺陷：16 把 key 只有 1 把有 alias，且 4 把的白名单里还挂着
-  已死的 `mac/qwen3.6-35b`，那几条 fallback 现在就是断的；④ served name 漂移哨兵 ——
+  —— 16 把 key 只有 1 把有 alias；4 把的白名单里还挂着已死的 `mac/qwen3.6-35b`
+  （2026-09-19 已清掉）。☠️ **本条早先写的「那几条 fallback 现在就是断的」是错的**：
+  实测证明 key 白名单**不约束**路由内部的兜底跳转，窄 key 照样拿得到兜底
+  （[坑 A](reference/litellm-gateway.md)）。当时兜底确实是断的，但成因完全无关 ——
+  是 `fallbacks` 声明在了 `litellm_params` 而不是 `router_settings`（同日已修，坑 A2）；④ served name 漂移哨兵 ——
   ☠️ 形态已从"json-exporter 抓 `/v1/models`"改成**一条 PromQL**（引擎指标自带 `model_name`
   且已被 `dgx-inference` job 抓取；SGLang 上 2026-09-19 复验仍成立）。☠️ 但 09-19 暴露了
   它的盲区：**只认名字漂移，认不出端点/前缀漂移**（那次 `vllm:*` 整族消失，哨兵表达式

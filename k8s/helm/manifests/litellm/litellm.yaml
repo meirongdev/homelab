@@ -39,7 +39,13 @@ data:
           model: openai/qwen3.8-27b-sglang
           api_base: http://100.97.87.120:8888/v1
           api_key: dummy
-      # ── 无前缀别名 qwen3.8-27b-sglang：DGX 主 + Mac 兜底（fallbacks 键 = 严格的"主→兜底"，非轮询）──
+      # ── 无前缀别名 qwen3.8-27b-sglang：DGX 主 + Mac 兜底 ──
+      # ☠️ 兜底声明在**文件末尾的 `router_settings.fallbacks`**，不在这条的 litellm_params 里。
+      #    2026-09-19 实测：写在 litellm_params 里 **从来没有生效过** —— 它会被当成 SDK 级
+      #    fallback，拿裸字符串 `mac/ornith` 去找 provider，于是主上游一挂就回
+      #    `LLM Provider NOT provided ... You passed model=mac/ornith` 的 500，
+      #    而不是切到 Mac。**连接级失败与参数级失败表现完全一样**，所以过去看到这条报错
+      #    很容易误判成"Mac 睡着了"。复现与对照见 decisions/litellm-llm-gateway.md 的 2026-09-19 修订。
       # 与裸引擎同名是刻意的（下游改 base_url 即可绕过网关），代价是换模型时两边都得动。
       # ☠️ 改别名必须同步改 Postgres 里各虚拟 key 的 models 白名单，否则「清单正确 + Synced + 调用全 403」。
       #    2026-09-19 实测受影响的是 **16 把里的 8 把**（与 09-03 那次同一数量级）。
@@ -48,7 +54,6 @@ data:
           model: openai/qwen3.8-27b-sglang
           api_base: http://100.97.87.120:8888/v1
           api_key: dummy
-          fallbacks: ["mac/ornith"]
       # ── Mac 兜底（也是独立可用的实际模型）──
       # 2026-08-25 由 Qwen3.6-35B 换为 Ornith-1.5-35B-A3B（OMLX 的 is_default 同日已指向它）。
       # ☠️ 只暴露一个 Mac 35B：OMLX 池天花板 30GB 装不下两个（19.95 + 19.08GB），
@@ -102,6 +107,18 @@ data:
     # 这个 hook 在转发前把它降级成普通 message。详见 codex_compat.py 的文件头。
     # ⚠️ 模块是按 **config 文件所在目录 + 模块名** 找的（get_instance_fn），所以
     #    codex_compat.py 必须 subPath 挂到 /app/ 下，与本文件同目录。
+    # ── 兜底链（唯一生效的声明位置）──────────────────────────────────────
+    # 语义是严格的「主 → 兜底」，不是轮询：只有主上游**失败**时才打 Mac。
+    # ✅ 2026-09-19 用线上同一 digest 的镜像在本地实测（主上游指向死端口）：
+    #    · 连接级失败 → 200，内容来自兜底 ✅
+    #    · 参数级失败（400，如 reasoning_effort）→ **不兜底**，原样回 400。
+    #      这是对的：拿 Mac 去重试一个本来就非法的请求只会白烧它，还会盖掉真实原因。
+    # ⚠️ 只给裸别名配兜底，`custom_dgx/` 前缀那条**刻意不配** —— 它是给"我就是要打 DGX"
+    #    的消费方用的，被静默换成 Mac 反而是坏事。
+    # ☠️ 换模型时这里的键名要跟着换（它是别名的字面量），漏改 = 兜底静默失效。
+    router_settings:
+      fallbacks: [{"qwen3.8-27b-sglang": ["mac/ornith"]}]
+
     litellm_settings:
       callbacks: ["codex_compat.codex_compat_handler"]
 ---
@@ -125,7 +142,7 @@ spec:
         #    ⇒ ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按**旧路由表**继续跑。
         #    2026-08-25 实际踩过一次（改了 mac/ornith 后必须手动 rollout restart 才生效）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py 的 STAMP_ONLY），别手改。
-        checksum/config: "6c5f2593d2432316"
+        checksum/config: "304d5ab4097de710"
         # 同理，但盯的是 codex_compat.py（litellm-codex-compat ConfigMap）：
         # 也是 subPath 挂载 + 只在启动时 import，改了不重启就是静默跑旧代码。
         checksum/codex-compat-py: "e5da4a39d90243d4"
