@@ -533,7 +533,7 @@ prometheus:
               cluster: dgx-spark
               nodename: dgx-spark-1
           - targets:
-              - 100.67.164.92:9100   # dgx-spark-2 (idle since 2026-09-19: stack went single-node)
+              - 100.67.164.92:9100   # dgx-spark-2 (serves fndgx vLLM stack since 2026-09-20; k3s removed from both nodes)
             labels:
               cluster: dgx-spark
               nodename: dgx-spark-2
@@ -559,22 +559,26 @@ prometheus:
 
       # DGX Spark inference engine metrics, scraped over Tailscale. Exposes engine
       # run-state, KV-cache occupancy, TTFT / e2e / inter-token latency buckets.
-      # Only dgx-spark-1 (the head) serves; dgx-spark-2 has been completely idle since
-      # the 2026-09-19 swap to a single-node stack (it was the TP=2 rank before that,
-      # and even then it exposed no engine port — 2026-08-03 probe).
+      # Both nodes serve since 2026-09-20 (k3s removed from both, docker-only runtime):
+      #   S1: qwen38un (docker, SGLang, :8888, `sglang:*`) — primary
+      #   S2: fndgx    (docker, vLLM,   :18300, `vllm:*`)  — resident secondary
       #
       # ☠️ BOTH the port AND the metric prefix are stack-dependent — re-check both on
       #    every upstream stack swap:
-      #      qwen38fn (k3s, vLLM)      :8000/metrics   `vllm:*`
-      #      qwen38un (docker, SGLang) :8888/metrics   `sglang:*`   ← current
-      #    The 2026-09-19 swap moved both at once. Nothing errors when this is stale:
-      #    the target simply goes down, every `vllm:*` alert expression evaluates empty
-      #    (= never fires), and the dashboard goes blank. Verify with
+      #      qwen38fn (k3s, vLLM)      :8000/metrics   `vllm:*`     retired 2026-09-20
+      #      qwen38un (docker, SGLang) :8888/metrics   `sglang:*`   ← S1 primary
+      #      fndgx   (docker, vLLM)    :18300/metrics  `vllm:*`     ← S2, since 2026-09-20
+      #    Nothing errors when this is stale: the target simply goes down, every
+      #    `vllm:*` or `sglang:*` alert expression evaluates empty (= never fires), and
+      #    the dashboard goes blank. Verify with
       #    `curl -s http://<head>:<port>/metrics | head -1`.
       #
       # ⚠️ job name is deliberately engine-NEUTRAL (`dgx-inference`, was `vllm-dgx-spark`):
       #    it survives the next engine swap, and a job called "vllm" scraping SGLang is
       #    exactly the kind of quiet lie that costs an afternoon. Renamed 2026-09-19.
+      #    Now BOTH engines coexist in the same job (sglang:* on S1, vllm:* on S2), so
+      #    this neutrality is load-bearing: prefix-specific rules/dashboards must union
+      #    both prefixes or they silently ignore one node.
       # Served model name is an engine-supplied label (model_name), not part of the target,
       # so a pure model rename needs no change here — a port/engine change does.
       - job_name: 'dgx-inference'
@@ -585,6 +589,11 @@ prometheus:
             labels:
               cluster: dgx-spark
               nodename: dgx-spark-1
+          - targets:
+              - 100.67.164.92:18300  # dgx-spark-2, vLLM (fndgx / qwen3.8-flash-next) since 2026-09-20
+            labels:
+              cluster: dgx-spark
+              nodename: dgx-spark-2
 
       # MacBook Pro (Apple Silicon) — personal laptop host metrics via node_exporter,
       # installed as a LaunchAgent (~/Library/LaunchAgents/com.prometheus.node_exporter.plist,

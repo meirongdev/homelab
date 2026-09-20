@@ -1,6 +1,6 @@
 # DGX 换了主力模型：homelab 侧跟进 SOP
 
-> Last updated: 2026-09-19
+> Last updated: 2026-09-21
 > Status: 生效事实 + 切换 SOP
 > 触发条件：`100.97.87.120:<port>/v1/models` 返回的 served name 与仓库里的引用不一致
 > —— 上游（`~/projects/meirongdev/nv-dgx-spark`）换栈、改 served name、或从换栈中
@@ -46,7 +46,7 @@ d=json.load(sys.stdin)["data"]
 | 200，但 served name 不是仓库里那个 | **换栈**，走本文 | 本文 |
 | 新端口 200、旧端口 refused | **换栈且换了端点**，走本文（端点也要改，见 §2）| 本文 |
 | 连不上 / 非 200，而 node-exporter 在线 | 引擎挂了 | 告警 `DgxSparkInferenceDown` 的 description |
-| 两个 target 都抓不到 | 整机或整条出网没了 | 告警 `DgxSparkNodeDown`（☠️ 2026-09-19 起只盯 S1）|
+| 两个 target 都抓不到 | 整机或整条出网没了 | 告警 `DgxSparkNodeDown`（2026-09-21 起恢复盯两台，S2 常驻 `fndgx` 栈）|
 | 200、name 也没变，但生成超时 | 引擎卡死 | `DgxSparkInferenceStuck` |
 
 ☠️ 别用 `/health` 或 `/v1/models` 判活：卡死时它们照样 200。SGLang 另有
@@ -213,7 +213,7 @@ curl -s -H "Authorization: Bearer $MK" "$GW/key/info?key=<sha256>" | python3 -c 
 | `DgxSparkInferenceStuck` 的窗口 | 看上游栈**有没有 liveness 探针**：有 → 本条只是兜底，可松；无 → 它是唯一检测，要紧 | `increase[5m]+for5m` → **`increase[3m]+for2m`**。新栈是 docker + tmux，**无探针、无 `--restart`**，兑现了上一版注释里"若哪天探针被移除就收紧"那句预留 |
 | 告警 description 里的 runbook 指针 | `make <旧栈>-*`、`-n <旧ns> logs deploy/<旧deploy>` 全量替换 | 上游 2026-09-19 起改成**栈无关**的 `make status/restart/logs/test`（读 `stacks/PRIMARY`），所以这些指针从此不用再跟着换栈改 |
 | **告警与 job 的命名** | — | 2026-09-19 一次性去掉引擎名：job `vllm-dgx-spark`→`dgx-inference`，`DgxSparkVllm*`→`DgxSparkInference*`。下次换引擎不用再改名 |
-| **`DgxSparkNodeDown` 的范围** | 看主力栈是不是多节点 | 单节点栈下**只盯 S1**（S2 空闲，为它半夜发 🆘 是纯误报）。⚠️ 若换回 TP=2 的栈，**必须把 nodename 过滤去掉**，否则对端节点死了一声不吭 —— 那正是 2026-08-13 事故的成因 |
+| **`DgxSparkNodeDown` 的范围** | 看是否有第二台承载推理的节点 | 2026-09-19 主力切单节点（qwen38un）后曾只盯 S1；2026-09-20 上游在 S2 新落常驻栈 `fndgx`（vLLM `:18300`），故**恢复盯两台**。若以后某台再次变为纯备用，需重新评估是否收窄范围，避免为闲置机器半夜发 🆘 —— 只盯单节点那版正是 2026-08-13 事故的成因 |
 
 面板在**只换模型名**时不用改：`model_name` 是 `label_values()` 的模板变量，换模型自适应
 （scrape target 也不含模型名）。⚠️ 但**换引擎时整张面板都要改**（见 §4.0），
@@ -268,8 +268,7 @@ Open Notebook 的接线只能在应用里看（值存的是模型 id，不是名
 最省事的做法是把旧栈当"下一个新栈"处理，照本文从头执行。
 
 ⚠️ 回滚到一个**不同引擎**的栈（例如从 SGLang 退回 vLLM 的 `qwen38fn`）时，§4.0 的
-指标前缀映射要**反向**做一遍，并且 `DgxSparkNodeDown` 的 nodename 过滤要去掉
-（那是 TP=2 的栈）。这两条都是静默的，回滚后照 §4.0 的一次性 Prometheus 复验一遍。
+指标前缀映射要**反向**做一遍。⚠️ 2026-09-20 起 S2 常驻 `fndgx`（vLLM），`DgxSparkNodeDown` 已恢复盯两台，不再需要按单节点收窄；若回滚到仅 S1 跑推理的栈，再评估是否收窄。这两条都是静默的，回滚后照 §4.0 的一次性 Prometheus 复验一遍。
 
 ## 8. 历史与后续优化（本节的目的是让下一次更快）
 
@@ -306,7 +305,7 @@ Open Notebook 的接线只能在应用里看（值存的是模型 id，不是名
 
 | 依赖 | 在哪 | 换栈时的角色 | 坏了是响的还是哑的 |
 |---|---|---|---|
-| DGX 两台 GB10（`100.97.87.120` head / `100.67.164.92`，2026-09-19 起闲置） | **别人 tailnet 的共享节点**，经 Tailscale node sharing 进来 | served name / **端点** / **引擎** / ctx / 冷启动 / 并发上限 / **拓扑**全部由它单方面决定 | 引擎死 = 响（定向告警）；**换栈 = 哑**（只有第一个 404 或第一张空面板才发现，见 §8 哨兵那条） |
+| DGX 两台 GB10（`100.97.87.120` head / `100.67.164.92`，2026-09-20 起常驻 `fndgx` vLLM 栈） | **别人 tailnet 的共享节点**，经 Tailscale node sharing 进来 | served name / **端点** / **引擎** / ctx / 冷启动 / 并发上限 / **拓扑**全部由它单方面决定 | 引擎死 = 响（定向告警）；**换栈 = 哑**（只有第一个 404 或第一张空面板才发现，见 §8 哨兵那条） |
 | `nv-dgx-spark` 仓库 | 本机 `~/projects/meirongdev/nv-dgx-spark` | `stacks/PRIMARY` + `stacks/<id>/stack.env` = **"谁是主力"的唯一事实源**（2026-09-19 起）；memwatch、**权重与镜像保留期 = 我们的回滚窗口** | 那边换栈而我们没跟上，表现是哑的（见上一行）。✅ 好消息：make 动词已收敛成栈无关的 `status/restart/logs/test`，我们的 runbook 指针从此不会因换栈而过期 |
 | Mac 上的 OMLX（`100.89.15.120:8000`） | 另一台机器（笔记本） | 兜底上游 + embedding / TTS / STT 全在这；`fast` profile 的开关名也在它那边 | 兜底拿不拿得到是哑的（且受 key 白名单影响，见 §3） |
 | OpenRouter / NVIDIA build.nvidia.com | 第三方 SaaS | 第三、第四来源；**目录与限额在对方手里**（NVIDIA 点数制 + 40 RPM，OpenRouter 以接口的 pricing 为准） | 免费档 429/503 是响的；目录漂移是哑的 |
