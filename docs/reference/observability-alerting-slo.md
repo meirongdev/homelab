@@ -1,6 +1,6 @@
 # Observability — 告警、看板组织与 SLO
 
-> Last updated: 2026-09-09
+> Last updated: 2026-09-20
 > Status: 生效事实
 >
 > 遥测的消费侧：告警路由与覆盖盲区、Grafana 看板组织约定、SLI/SLO 体系。
@@ -24,6 +24,8 @@
   [dead-mans-switch.md](dead-mans-switch.md)（唯一真相源，此处不留副本）。
   ⚠️ 别按"告警链路死了就会在状态页变红"这一句去理解它：**接收方和发送方一起挂时
   它静默失明**，2026-08-14 实测 580s 缺口零翻转。
+- **⚠️ AM 日志静默 ≠ 投递停**（2026-09-20 实测）：Alertmanager 0.33 默认 `info` 级别下，**首次投递成功只打 DEBUG**（`notify/retry_stage.go`：`i<=1` → `l.Debug`；重试成功才 `l.Info`，失败打 WARN）。所以 `--tail` 连续数天零新行，只说明**期间没有投递失败**，不是链路卡了。
+  ☠️ 判投递健康只看指标：`alertmanager_notifications_total{integration="telegram"}` 随告警递增、`alertmanager_notifications_failed_total{integration="telegram"}` 恒 0。09-20 曾因「日志两天空白」误判管道卡滞、重启了 AM pod（StatefulSet，silences/去重状态在 PVC，无损）——实为正常静默，重启系多余。
 - **⚠️ 新增 `PrometheusRule`/`ServiceMonitor` 必须带 label `release: kube-prometheus-stack`**，
   否则 operator 的 `ruleSelector`/`serviceMonitorSelector` 静默忽略。
 - oracle 侧 Falco 告警走独立的 Falcosidekick 原生 Telegram output（同 bot 同话题、代码路径
