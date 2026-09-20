@@ -236,6 +236,27 @@ trivy:
         statement: "open_notebook 基底 libmbedcrypto16 任意代码执行(修复 3.6.6-0.1~deb13u1); 同上, mbedtls 仅经 librist4 的 rist:// 可达而应用从不把 URL 交给 ffmpeg, 无已修镜像(v1-dev 实测同版本), 2026-11 复审"
       - id: CVE-2026-58016
         statement: "open_notebook 基底 libglib2.0-0t64 gio/gdbusintrospection.c 整数下溢(修复 2.84.4-3~deb13u4); 触发需解析 D-Bus introspection XML, 容器内无 D-Bus(无 /run/dbus 无 dbus-daemon), glib 仅被 ffmpeg/pango/gdk-pixbuf 用于媒体与渲染, 无已修镜像(v1-dev 实测同版本), 2026-11 复审"
+      # --- anyio IDNA 2003 主机名编码(2026-09-20 新增) ---
+      # 2026-09-18/19 两集群 TrivyImageCriticalVulnerabilities 再度 firing(oracle 18 条、
+      # homelab 4 条), 逐条核过: homelab 的 4 条 = anyio 1 条(litellm v1.94.1, anyio 4.13.0
+      # + open_notebook 1.14.0, anyio 4.12.1, 两个序列) + alpine openssl 2 条(一次性
+      # on-check 检查 pod, curlimages/curl:8.11.1, 21h 前已 Completed, 报告 24h TTL 自然过期)。
+      # GHSA-82r6-8w77-94w6(CVE-2026-63374, 修复版 4.14.2 于 2026-07-12 发布): 唯一触发
+      # 条件是对**国际化(非 ASCII)域名**发起 TLS 连接且连接被劫持——恶意服务器出示
+      # IDNA-2003 编码版本域名的证书。litellm 与 open_notebook 的全部出向连接均为 ASCII
+      # 域名/tailscale IP(postgres、meirong.dev、api.telegram.org、100.x 等), 架构上不可达。
+      # ☠️ 复审触发比日期有用: 受影响镜像上游 bump anyio >=4.14.2 就删本条。
+      - id: CVE-2026-63374
+        statement: "anyio IDNA 2003 主机名编码可致 TLS 证书冒充(修复 4.14.2, 2026-07-12 发布); 触发需对非 ASCII 域名建 TLS 连接, litellm v1.94.1 与 open_notebook 1.14.0 出向连接全为 ASCII 域名/IP, 无已修镜像, 2026-11 复审"
+      # --- alpine openssl libcrypto3/libssl3(2026-09-20 新增, 与 oracle 侧同 ID 同口径) ---
+      # 当前仅命中一次性 on-check 检查 pod(curlimages/curl:8.11.1, alpine 3.21/openssl
+      # 3.3.2-r4, 该 pod 不在仓库里、21h 前已 Completed, 其报告 24h TTL 内自然消失)。
+      # 加此豁免防同类一次性 pod 再触发(对照: krr-notify 用 curlimages/curl:8.21.0 无此
+      # finding)。口径同 oracle 侧: OpenSSL 官方公告(openssl-library.org 2026-04-07)
+      # "only 32 bit platforms are affected" 且需 >1GB 证书被打印/记录, 官方定级 Low;
+      # NVD 9.8 过度评分。本集群两节点均为 x86_64 64 位(5600H / J4105 VM), 不可触发。
+      - id: CVE-2026-31789
+        statement: "alpine openssl 3.3.2-r4(修复 3.3.7-r0); OpenSSL 官方 only 32 bit platforms affected 且需 >1GB 证书, homelab 两节点均 x86_64, NVD 9.8 过度评分, 与 oracle 同口径, 2026-11 复审"
   # 扫描 Job（client）资源
   resources:
     requests:

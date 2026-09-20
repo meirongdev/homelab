@@ -271,6 +271,39 @@ trivy:
         statement: "Next.js Windows 路径穿越 RCE(修复 16.3.3/15.5.24); Vercel 公告原文 Linux and macOS are not affected, 两集群全 Linux 容器故架构上不适用, 2026-11 复审"
       - id: GHSA-2xp9-vwfh-vxw4
         statement: "Next.js 图片优化经 sharp/libheif 解 AVIF 的 RCE(修复 16.3.3); 触发需优化攻击者可控 AVIF, 受影响服务 remotePatterns 为空(远程源实测 400 url not allowed), 写入本源需已有账号(multica 关注册/notebook 有口令/zitadel 品牌图要 org 管理员); zitadel-login v4.17.3 仍 16.2.11 / multica-web v0.4.42 仍 16.2.6 / open_notebook 1.14.0 为最新 stable, 均无已修镜像, 2026-11 复审"
+      # --- anyio IDNA 2003 主机名编码(2026-09-20 新增, 与 homelab 同批) ---
+      # 本 ID 在 oracle 只命中 calibre-web-automated(anyio 4.14.1, 修复 4.14.2)一个镜像,
+      # 9 个共享该镜像的 workload(calibre-web + calibre-metadata-* ×7 + ebook-sync-monitor
+      # + zoom-probe)各计 1 条 = 9 条 Critical。
+      # GHSA-82r6-8w77-94w6(同 homelab 注释): 唯一触发条件是对非 ASCII 域名的 TLS 连接。
+      # CWA 出向连接为 postgres(apps-pg)/tailscale 内网/meirong.dev, 全 ASCII, 不可达。
+      # ☠️ 无已修镜像: Docker Hub latest tag 最后推送 2026-02-04, 早于 anyio 4.14.2
+      #   (2026-07-12), 追 tag 不会让它消失。复审触发: 上游镜像 bump anyio >=4.14.2 删本条。
+      - id: CVE-2026-63374
+        statement: "anyio IDNA 2003 主机名编码可致 TLS 证书冒充(修复 4.14.2, 2026-07-12 发布); 触发需对非 ASCII 域名建 TLS 连接, CWA 出向连接全为 ASCII 域名/内网 IP, latest tag 2026-02-04 早于修复版无已修镜像, 2026-11 复审"
+      # --- amqp091-go 三条 Critical(2026-09-20 新增) ---
+      # 三条同库同修复版(<1.13.0), 全部要求进程是 AMQP 客户端(连 RabbitMQ broker):
+      #   · CVE-2026-77405: tlsConfigFromURI 未设 MinVersion=TLS12, amqps URI 可协商到
+      #     TLS 1.0/1.1, 削弱传输保护(需出向 amqps 连接)
+      #   · CVE-2026-77408: writeShortstr 对 >255 字节属性值截断且不报错, 元数据损坏
+      #     (需应用实际收发 AMQP 消息)
+      #   · CVE-2026-77411: readLongstr 遇 broker 提供 >0x7FFFFFFF 的 longstr 时解析
+      #     失步(需与恶意/受损 broker 交互)
+      # 本集群 3 个命中镜像均未启用任何 RabbitMQ/AMQP 路径(2026-09-20 逐项核配置):
+      #   · otel-collector 0.156.0(amqp091-go 1.12.0): otel 配置 extensions 仅
+      #     health_check/file_storage, 无 rabbitmq 扩展, 全文件无 rabbit/amqp 字样
+      #   · falcosidekick 2.34.1(amqp091-go 1.10.0): 配置仅启用 telegram output
+      #     (cloud/oracle/values/falco.yaml), 无 rabbitmq
+      #   · wait4x 3.6(amqp091-go 1.10.0): zitadel-login 的 wait-for-zitadel init 容器,
+      #     只做服务就绪等待, 无消息队列
+      # ⚠️ 覆盖范围: 按 ID 全集群生效。若将来有组件开始用 RabbitMQ/AMQP(加 otel 的
+      #   rabbitmq 扩展、启用 falcosidekick 的 rabbitmq output 等), 这三条必须重估。
+      - id: CVE-2026-77405
+        statement: "amqp091-go <1.13.0 amqps URI 可协商 TLS1.0/1.1(未设 MinVersion); 触发需进程为 AMQP 客户端, otel-collector(extensions 仅 health_check/file_storage)/falcosidekick(仅 telegram)/wait4x(就绪等待容器)均未启用 RabbitMQ/AMQP, 2026-11 复审"
+      - id: CVE-2026-77408
+        statement: "amqp091-go <1.13.0 >255 字节属性值截断不报错(writeShortstr); 触发需进程收发 AMQP 消息, 上述 3 镜像均未启用 RabbitMQ/AMQP, 2026-11 复审"
+      - id: CVE-2026-77411
+        statement: "amqp091-go <1.13.0 broker 提供超长 longstr 致解析失步(readLongstr); 触发需与 broker 交互, 上述 3 镜像均未启用 RabbitMQ/AMQP, 2026-11 复审"
       #
       # --- Debian perl 5.40.1-6 三条 Critical（2026-09-14 分诊；**已根除，本集群不留条目**）---
       # 本告警曾自 2026-09-13 16:12 UTC 起 firing，报 15 条 Critical —— 逐条核过，
