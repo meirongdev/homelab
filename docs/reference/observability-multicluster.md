@@ -1,6 +1,6 @@
 # Multi-Cluster Observability Architecture
 
-> Last updated: 2026-09-19
+> Last updated: 2026-09-21
 > Status: 生效事实
 >
 > 遥测的**采集与汇聚侧**：三条管线怎么跨集群流动、应用怎么接日志/追踪、坏了怎么查。
@@ -337,7 +337,7 @@ scrapeClasses 不会给它们 relabel，`cluster`/`nodename` 必须逐 target �
 | `node-exporter-dgx-spark` | `100.97.87.120:9100` / `100.67.164.92:9100`（经 Tailscale） | `cluster=dgx-spark` |
 | `node-exporter-macbook` | `100.89.15.120:9100`（经 Tailscale） | `cluster=macbook` / `nodename=macbook-pro`；⚠️ 唯一带 `metric_relabel_configs` 的 job（OMLX 那批 `omlx_*` → `omlx_alltime_*`，见下）|
 | `smartctl-storage-106` / `smartctl-proxmox-pve` / `smartctl-dgx-spark` | `:9633`，120s | `nodename` 与 node-exporter job 对齐 |
-| `dgx-inference` | `100.97.87.120:8888`（经 Tailscale） | `cluster=dgx-spark` / `nodename=dgx-spark-1`；☠️ **端口与指标前缀都随上游换栈而变**（2026-09-19 起 SGLang `:8888` `sglang:*`，之前是 vLLM `:8000` `vllm:*`），job 名刻意取中性的 `dgx-inference`（原 `vllm-dgx-spark`）以免下次换引擎又要改一圈 |
+| `dgx-inference` | `100.97.87.120:8888`（S1，SGLang）/ `100.67.164.92:18300`（S2，vLLM `fndgx` 栈，2026-09-20 起）（均经 Tailscale） | `cluster=dgx-spark` / `nodename=dgx-spark-{1,2}`；☠️ **端口与指标前缀都随上游换栈而变**（2026-09-19 起 S1 为 SGLang `:8888` `sglang:*`，之前是 vLLM `:8000` `vllm:*`；2026-09-20 起 **同一 job 内 `sglang:*`（S1）与 `vllm:*`（S2）两前缀共存**，两节点 series 按 nodename 不相交，告警/面板一律 `or` 并集而非 `and`），job 名刻意取中性的 `dgx-inference`（原 `vllm-dgx-spark`）以免下次换引擎又要改一圈 |
 
 ### 外部主机（非 K8s，metrics-only）
 

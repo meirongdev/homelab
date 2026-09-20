@@ -1,6 +1,6 @@
 # LiteLLM 网关（运维事实与坑）
 
-> Last updated: 2026-09-19
+> Last updated: 2026-09-21
 > Status: 生效事实
 > Scope: `llm.meirong.dev` 这个 LLM 网关的配置生效路径、鉴权分层、上游可用性边界，
 > 本文是 source of truth。为什么选 LiteLLM、上游怎么选、Mac 兜底为何换 Ornith，见
@@ -44,7 +44,7 @@
 | 端点 | ☠️ **变了**：`100.97.87.120:8888/v1`（docker/SGLang）。上一栈的 `:8000`（k3s/vLLM）**已完全不监听** —— 旧引用拿到的是 connection refused，不是 404 |
 | 引擎 | **SGLang**（前两栈都是 vLLM）。☠️ 它**接受任意 model 名并原样回显**，vLLM 才会 404 —— 所以"请求成功了"**不能**证明模型名写对了，唯一判据是 `/v1/models` 报的 served name |
 | `max_model_len` | **262144**（与上一栈相同）。这次长上下文规划不用重算 |
-| 拓扑 / 冷启动 | **单节点**（`tp_size=1`，只用 S1；S2 完全空闲）。加载**约 3 分钟**（权重只有 23 GiB，上一栈 126 GiB）。`DgxSparkInferenceDown` 的 `for` 因此从 15m 收回 10m |
+| 拓扑 / 冷启动 | **网关单节点**（`tp_size=1`，只路由 S1；⚠️ 2026-09-20 起 S2 不再空闲 —— 上游在其上常驻新栈 `fndgx`（vLLM 单节点 `qwen3.8-flash-next`，`100.67.164.92:18300`），但**未入本网关**：无别名、无虚拟 key 白名单，与主力栈并跑仅供直连消费方）。加载**约 3 分钟**（权重只有 23 GiB，上一栈 126 GiB）。`DgxSparkInferenceDown` 的 `for` 因此从 15m 收回 10m |
 | 自愈 | ☠️ **没有**：docker + tmux，既无 liveness 探针也无 `--restart`（上游刻意如此）。引擎挂了会一直挂着，直到有人动手 |
 | 并发 | `max_running_requests=16`；KV 池 1,220,951 token（`mem-fraction-static 0.80`）≈ 4.6 路满窗并发 —— 这次**条数才是瓶颈**，KV 不是。排队告警阈值仍**不**按 16 等比抬（理由见告警注释）|
 | 关思考 | `chat_template_kwargs {"enable_thinking": false}`（✅ 实测有效）；顶层 `reasoning_effort` 枚举换成 `xhigh`(默认)/`medium`/`low`，旧栈的 `minimal` 现在回 **400** |
