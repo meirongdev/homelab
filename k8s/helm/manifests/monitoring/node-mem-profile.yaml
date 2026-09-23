@@ -118,14 +118,18 @@ spec:
           # 探针即产物新鲜度检查：本组件不监听端口，最典型的失效是「进程还在、
           # 文件停更」（textfile 里的旧值会被 node-exporter 一直吐出去，看着一切正常）。
           # 检查文件在 2 个采集周期内被动过，比检查进程活着有意义得多。
-          # ⚠️ 必须写绝对路径 `/bin/sh`：Tetragon 的 health_check 过滤只认绝对路径的探针
-          #    命令，写 `sh` 时每 30s 往 Loki 漏 4 条 exec/exit 事件（见 values/tetragon.yaml）。
+          # ⚠️ 两条都是为了让 Tetragon 的 health_check 过滤认出这是探针（认不出就每 30s
+          #    往 Loki 漏 4 条 exec/exit 事件，见 values/tetragon.yaml）：
+          #    ① 写绝对路径 `/bin/sh`，它只认绝对路径；
+          #    ② 命令里**不许有内层引号**：它把 args 拼回字符串再 shellquote 切分，
+          #       `"$(find …)"` 这种嵌套引号切出来与原命令对不上（2026-09-24 实测只改 ① 仍漏）。
+          #    `find | grep -q .` 与原先 `test -n "$(find …)"` 语义相同（新鲜 0 / 缺失 1 / 过期 1，已在 pod 内实测）。
           readinessProbe:
             exec:
               command:
                 - /bin/sh
                 - -c
-                - test -n "$(find /host/textfile/node-mem-profile.prom -mmin -11 2>/dev/null)"
+                - find /host/textfile/node-mem-profile.prom -mmin -11 2>/dev/null | grep -q .
             # 首轮采集要等一次 K8s API 调用 + 全盘扫描，20s 有时赶不上（实测要两个周期
             # 才 Ready）。放宽首延、缩短周期，最坏 60s 内收敛。
             initialDelaySeconds: 30
