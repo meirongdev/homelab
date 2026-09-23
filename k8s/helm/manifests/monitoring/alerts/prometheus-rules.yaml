@@ -1070,20 +1070,48 @@ spec:
             (
               (sglang:num_running_reqs{job="dgx-inference"} + sglang:num_queue_reqs{job="dgx-inference"}) > 0
                 and on(nodename)
-              sum by (nodename) (increase(sglang:generation_tokens_total{job="dgx-inference"}[3m])) == 0
+              sum by (nodename) (increase(sglang:generation_tokens_total{job="dgx-inference"}[20m])) == 0
             )
             or
             (
               (sum by (nodename) (vllm:num_requests_running{job="dgx-inference"})
                  + sum by (nodename) (vllm:num_requests_waiting{job="dgx-inference"})) > 0
                 and on(nodename)
-              sum by (nodename) (increase(vllm:generation_tokens_total{job="dgx-inference"}[3m])) == 0
+              sum by (nodename) (increase(vllm:generation_tokens_total{job="dgx-inference"}[20m])) == 0
             )
-          # ⚠️ 窗口从 increase[5m]+for5m 收紧到 increase[3m]+for2m（≈停滞 5 分钟才报）。
-          # 这不是临时起意：上一版注释里写着「若哪天探针被移除，把窗口收到 increase[3m]
-          # + for 2m」—— 2026-09-19 换栈后探针**确实没了**（docker 栈无探针、无 --restart），
-          # 这条从"兜底"变成了这类故障的**唯一**自动检测，那句预留条件到期兑现。
-          for: 2m
+          # ⚠️ 窗口史：increase[5m]+for5m →（2026-09-19）increase[3m]+for2m → 现在
+          # increase[20m]+for5m。09-19 那次收紧兑现的是上一版注释里"若哪天探针被移除，
+          # 把窗口收到 increase[3m] + for 2m"的预留条件（换栈后探针确实没了：docker 栈
+          # 无探针、无 --restart，这条成了这类故障的**唯一**自动检测）。方向对，
+          # **幅度错了** —— 3 分钟空窗在这个栈上是正常形态，不是故障。
+          #
+          # ☠️ 2026-09-24 实测推翻 3m 这个阈值。S1 在 09-19~09-24 的 5780 分钟里，
+          # "有请求在场 + generation 计数器不动"的空窗共 869 段：
+          #     p50=2m  p90=4m  p95=6m  p99=11m  max=17m
+          #     >=5m 76 段 / >=10m 18 段 / >=15m 2 段 / >=20m **0 段**
+          # 于是 increase[3m]+for2m 的判据在 09-23 那 24h 里有 **23.8%（343/1440 分钟）**
+          # 为真，实际后果是 7 天 **110 次**独立触发、全在 dgx-spark-1、全是误报（同期
+          # cache_hit_rate 0.9986、7 天生成 695 万 token、PSI memory 全 0、oom_kill 0）。
+          # critical 的 repeatInterval 30m + sendResolved=true ⇒ 每次 🆘+✅ 两条，
+          # 约 **31 条 Telegram/天**，占该期投递量（92-106 条/天）的绝大部分。
+          #
+          # 良性空窗的成因是现场取证的，不是推测：单条请求"在跑但不吐 token"是这个栈的
+          # 常态 —— 262K 上下文的长 prefill；以及**客户端不排空 socket**（09-23 实测
+          # :8888 上 established 连接 `Send-Q 8286` → SGLang 被反压，num_running_reqs
+          # 恒为 1 而 generation_tokens_total 不动）。判据必须能跨过这两种形态。
+          #
+          # 取 [20m]：实测**没有任何一段**良性空窗达到 20 分钟（最长 17m，留 3m 余量）；
+          # 叠 for 5m ⇒ 真正零进度约 **25 分钟**才报，比观测到的最长良性空窗多 8 分钟。
+          # ✅ 把新旧两版判据回放到同一份 14 天历史数据上（按 series 独立计时，与 Prometheus
+          #    的 for 语义一致）：旧 increase[3m]+for2m = **117 次**触发，新 increase[20m]
+          #    +for5m = **0 次**。两版都只在 dgx-spark-1 上触发过，S2 两版均为 0。
+          # ⚖️ 代价明说：检测延迟 ≈5m → ≈25m。可接受，因为这条**没有任何自动处置**
+          # （无探针、无 --restart、无 BMC），响了也是等人跑 `make restart`；而一条 7 天
+          # 错 110 次的 critical，真实代价是**下次真响时没人看** —— 那才是它的失效模式。
+          # 📌 severity 保持 critical：噪音来自判据，不是来自严重度，阈值修好后误报率实测
+          #    为 0，降级只会把这类故障唯一的自动检测一并降噪。首月按实测回校：若出现
+          #    >=20m 的良性空窗，**先抬窗口**（[30m]），不要先动 severity。
+          for: 5m
           labels:
             severity: critical
             component: inference
@@ -1214,11 +1242,29 @@ spec:
           # ✅ 2026-09-20：上游拆掉两台机器的 k3s，S2 起常驻 fndgx 栈（vLLM，:18300），
           #   不再是闲置机器 —— 那条预留兑现，恢复盯两台（nodename 过滤已去掉）。
           #   若 S2 日后再次闲置，可恢复 `nodename="dgx-spark-1"` 过滤以减少误报。
-          # for 取 3m 而非规格建议的 1m：node_exporter 经 flaky 的 Tailscale DERP relay 抓取，
-          # 1m 会被一次中继抖动误报 critical；3m 仍远短于 S2 那种小时级中断，且比 TargetDown
-          # （repeat 4h）早得多叫醒人。
+          # for 取值史：规格建议 1m → 3m（DERP 抖动）→ 现在 15m（2026-09-24，实测定标）。
+          # node_exporter 经 flaky 的 Tailscale DERP relay 抓取，而中继抖动比 3m 预想的长。
+          # ☠️ 2026-09-24 实测 14 天的连续 up==0 段（dgx-spark-1，dgx-spark-2 最长仅 3m）：
+          #     共 67 段，最长 **13m**；跨度 >=10m 的 1 段，>=15m 的 **0 段**
+          #   ⚠️ 段数不等于触发次数（`for` 要求跨度真的撑满，3 个采样点只跨 2 分钟）——
+          #   以 Prometheus 语义回放才是准的：for:3m = **13 次/14 天**，全在 dgx-spark-1，
+          #   与告警侧独立统计的"7 天 8 次"吻合。这些触发时宿主全程在线，纯误报。
+          # ⚠️ 根因是**抓取超时**，不是宿主掉线：本文件对应的 job 在 kube-prometheus-stack.yaml
+          #   里是 `scrape_interval: 15s` 且**未设 scrape_timeout** → 取默认 10s；而 S1 的
+          #   scrape_duration 平均 0.26-0.42s、**最大值精确等于 10.00s**（打满超时），
+          #   0.3-0.4% 的抓取踩线。smartctl-dgx-spark 同机同路径却不掉，因为它的 payload 小。
+          # for:15m ⇒ 回放同一份 14 天历史：旧 for:3m = **13 次**触发（全在 dgx-spark-1），
+          # 新 for:15m = **0 次**。而这条要抓的故障类（08-15 S2 断电级死亡）是**小时级**的，
+          # 15m 仍比它短一个数量级，也远早于 TargetDown 的 repeat 4h 叫醒人。
+          # ⚠️ 回放脚本踩过一个坑，记下来：按 step=60 切分"连续成立段"时，分隔阈值必须是
+          #    `>60s` 而非 `>120s` —— 用 120 会把中间恰好恢复 1 分钟的两段并成一段，
+          #    从而虚报 3 次本不存在的触发。Prometheus 的 for 计时器只要有一次评估为假
+          #    就归零，所以分段必须严格到单个 step。
+          # 📌 另一条路是把该 job 改成 scrape_interval: 30s + scrape_timeout: 25s
+          #    （timeout 必须 <= interval，两者必须一起改）。没走这条：它会把**所有** dgx
+          #    规则的时间分辨率减半，代价比调一个 for 大得多。
           expr: up{job="node-exporter-dgx-spark"} == 0
-          for: 3m
+          for: 15m
           labels:
             severity: critical
             component: inference
