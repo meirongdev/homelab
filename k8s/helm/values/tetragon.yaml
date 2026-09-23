@@ -33,6 +33,25 @@ priorityClassName: bulk
 
 # 进程事件已默认开启；保持精简，先不开 enableProcessCred/enableProcessNs（额外开销）。
 tetragon:
+  # --- 导出降噪（2026-09-24）---
+  # 实测 10 分钟 660 条事件（~2.6KB/条，k8s-node 容器日志总量的 91%）**100% 是噪声**，
+  # otel-collector 每节点 ~55m CPU 基本都花在把它们搬进 Loki：
+  #   ① runc 的 `init` 自我重执行（binary=/proc/self/fd/N，每次 exec 探针/容器启动一对）
+  #      —— 任何 health_check 过滤都盖不到，因为它不是探针命令本身；
+  #   ② 探针漏网：chart 默认的 {"health_check":true} 只认**绝对路径**的探针命令
+  #      （v1.7.0 pkg/filters/health_check.go MaybeExecProbe：args 带 argv0，相对路径时
+  #      不剥离 → 长度对不上 → 恒 false）。node-mem-profile 的探针已改绝对路径根治；
+  #      apps-pg 的 `pg_isready` 为不重启共享库改在这里拦；
+  #   ③ postgres 每条连接 fork 一个 backend，退出时报 PROCESS_EXIT（不 exec，只有 exit）。
+  # ☠️ ① 必须三条件同时收窄（AND）：`/proc/self/fd/N` 本身就是 memfd 无文件执行的特征，
+  #    单按 binary 拦会把真攻击一起静音。父进程是 runc 且 args 恰为 `init` 才算。
+  # 下面前两行是 chart 默认值原样照抄（列表覆盖=整体替换，漏抄就丢默认过滤）。
+  exportDenyList: |-
+    {"health_check":true}
+    {"namespace":["", "cilium", "kube-system"]}
+    {"binary_regex":["^/proc/self/fd/[0-9]+$"],"parent_binary_regex":["/runc$"],"arguments_regex":["^init$"]}
+    {"namespace":["databases"],"binary_regex":["^/usr/bin/pg_isready$"],"arguments_regex":["^/usr/bin/pg_isready -U postgres$"]}
+    {"namespace":["databases"],"event_set":["PROCESS_EXIT"],"binary_regex":["^/usr/lib/postgresql/[0-9]+/bin/postgres$"],"parent_binary_regex":["^/usr/lib/postgresql/[0-9]+/bin/postgres$"]}
   # --- agent DaemonSet 资源（热节点严格受限）---
   # 实测 7d 峰值 181Mi（超过原先想给的 128Mi request），故 request 给到 224Mi、
   # limit 384Mi。CPU 维持 50m/500m：沿用上面那条注释的原意，这次是真的生效了。

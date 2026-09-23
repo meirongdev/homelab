@@ -118,10 +118,12 @@ spec:
           # 探针即产物新鲜度检查：本组件不监听端口，最典型的失效是「进程还在、
           # 文件停更」（textfile 里的旧值会被 node-exporter 一直吐出去，看着一切正常）。
           # 检查文件在 2 个采集周期内被动过，比检查进程活着有意义得多。
+          # ⚠️ 必须写绝对路径 `/bin/sh`：Tetragon 的 health_check 过滤只认绝对路径的探针
+          #    命令，写 `sh` 时每 30s 往 Loki 漏 4 条 exec/exit 事件（见 values/tetragon.yaml）。
           readinessProbe:
             exec:
               command:
-                - sh
+                - /bin/sh
                 - -c
                 - test -n "$(find /host/textfile/node-mem-profile.prom -mmin -11 2>/dev/null)"
             # 首轮采集要等一次 K8s API 调用 + 全盘扫描，20s 有时赶不上（实测要两个周期
