@@ -1,0 +1,181 @@
+# Scalar API Reference（apidocs.meirong.dev）：自研服务的 OpenAPI 文档站，2026-09-26 上线。
+#
+# 镜像是 Caddy + 预编译的 scalar.js（CDN_URL 默认就是本地的 `scalar.js`，不从 CDN 拉）。
+# 无状态、无 PVC、无密钥：页面只是浏览器端渲染器，文档由各服务**自己伺服**。
+#
+# 文档怎么来：不挂 /docs、不跑抓取 CronJob，而是由本文件的 HTTPRoute 把
+# `/specs/<app>.yaml` 就地转发给同 ns 的服务（URLRewrite 到它自己的 openapi 路径）。
+# 于是①文档和页面同源，浏览器取文档不涉及 CORS；②文档与代码同仓库、同镜像发版，
+# 不会与线上漂移。加一个服务 = 在 sources 加一条 + 在下面 HTTPRoute 加一条规则。
+# ⚠️ 只能用于 personal-services 里的服务（跨 ns 要 ReferenceGrant）；目标服务的
+#    openapi 路由上线前，那一项在页面上是「加载失败」，不影响其它项。
+#
+# ☠️ 上游默认会外连，下面的配置逐项关掉（2026-09-26 从 0.6.8 的 scalar.js 核实默认值）：
+#   - telemetry 默认 true → false
+#   - proxyUrl 未设置时 web 端默认把 "Try it" 请求经 https://proxy.scalar.com 转发 → ""（浏览器直连，
+#     目标 API 需自带 CORS）
+#   - withDefaultFonts 默认 true，会从 fonts.scalar.com 取字体 → false
+#   - agent（Agent Scalar，AI 对话，走 scalar.com）→ disabled
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scalar
+  namespace: personal-services
+  labels:
+    app: scalar
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: scalar
+  template:
+    metadata:
+      labels:
+        app: scalar
+    spec:
+      # 无状态文档站，被驱逐后秒起、零数据损失（同 bentopdf 的取舍）。
+      priorityClassName: bulk
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: scalar
+          # 0.6.8 的**多架构 index digest**（linux/amd64 + linux/arm64），不是单架构 digest。
+          image: scalarapi/api-reference:0.6.8@sha256:0033530e42398a746096e9b9317fcd168973148292e9900b519cf22d5a2ca3a4
+          ports:
+            - containerPort: 8080
+          env:
+            # 键名与默认值见文件头。这是一个 JS 字面量（被 Caddy 模板原样插进 index.html），
+            # 必须是合法 JSON。
+            - name: API_REFERENCE_CONFIG
+              value: >-
+                {"sources":[
+                {"title":"Readlist","slug":"readlist","url":"/specs/readlist.yaml","default":true},
+                {"title":"Timeslot","slug":"timeslot","url":"/specs/timeslot.yaml"}
+                ],
+                "telemetry":false,"proxyUrl":"","withDefaultFonts":false,"agent":{"disabled":true}}
+          # 镜像以 caddy(1000) 运行。☠️ caddy 二进制带文件 capability cap_net_bind_service：
+          # drop ALL 而不加回它，exec 直接 `Operation not permitted`（本地实测），
+          # 哪怕只监听 8080。NET_BIND_SERVICE 是 PSA restricted 唯一允许加回的能力。
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["NET_BIND_SERVICE"]
+            seccompProfile:
+              type: RuntimeDefault
+          # 启动脚本把生成的 configuration.json 写 /tmp；Caddy 写 XDG 的 /config 与 /data。
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: caddy-config
+              mountPath: /config
+            - name: caddy-data
+              mountPath: /data
+          # 本地实测空闲 ~55Mi（Caddy 本体）。
+          resources:
+            requests:
+              cpu: 10m
+              memory: 48Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 3
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
+        - name: caddy-config
+          emptyDir:
+            sizeLimit: 16Mi
+        - name: caddy-data
+          emptyDir:
+            sizeLimit: 16Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: scalar
+  namespace: personal-services
+spec:
+  selector:
+    app: scalar
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+---
+# HTTPRoute: apidocs.meirong.dev -> scalar，另把 /specs/<app>.yaml 同源转发给各服务。
+# 后端全在 personal-services，与路由同 ns，不需要 ReferenceGrant。
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: scalar
+  namespace: personal-services
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: oracle-gateway
+      namespace: kube-system
+      port: 80
+  hostnames:
+    - "apidocs.meirong.dev"
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /specs/readlist.yaml
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplaceFullPath
+              replaceFullPath: /api/v1/openapi.yaml
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: readlist
+          port: 8080
+          weight: 1
+    - matches:
+        - path:
+            type: Exact
+            value: /specs/timeslot.yaml
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplaceFullPath
+              replaceFullPath: /api/openapi.yaml
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: timeslot
+          port: 8080
+          weight: 1
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: scalar
+          port: 8080
+          weight: 1
