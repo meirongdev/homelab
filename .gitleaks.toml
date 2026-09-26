@@ -1,0 +1,23 @@
+# gitleaks 配置 —— 在默认规则集上只加一条放行：文档里的 `<占位符>`。
+#
+# 为什么引入（2026-09-26）：这是**公开仓库**，此前 CI 只拦公网 IP（check-public-ips.py），
+# 对 token / 私钥 / 口令没有任何机器检查，全靠「Vault + ESO，Git 里不放明文」这条约定自觉。
+# 约定会被一次手滑击穿：粘一段带 `-H "Authorization: Bearer …"` 的 curl 排障记录、
+# 把 `terraform.tfvars` 误加进 git——而公开仓库里的密钥一推上去就只能轮换，改文件删不掉。
+#
+# 放行规则的来由：2026-09-26 首次全量扫描（1034 个提交）唯一命中是
+# docs/runbooks/backup-recovery.md 的 `curl -u "root:<pw>"`——占位符，不是密钥。
+# 本仓库的写法约定本来就是「文档写 <NAME> 占位、真值现取」（同 <ORACLE_PUBLIC_IP>），
+# 所以按「密钥里含 <小写/大写标识符> 即占位符」放行，而不是用 .gitleaksignore 记指纹：
+# 指纹带行号，文档一改行号就漂，历史扫描和工作区扫描还各是一套指纹。
+#
+# 本地：`just check`（pre-push 钩子也跑它）；CI：.github/workflows/secret-scan.yml。
+# ⚠️ 本地那一道才是真正的防线：CI 在 push **之后**才跑，那时密钥已经公开了。
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "文档里的 <占位符>（如 root:<pw>、<ORACLE_PUBLIC_IP>），不是真值"
+regexTarget = "secret"
+regexes = ['''<[A-Za-z][A-Za-z0-9_-]*>''']

@@ -1,6 +1,6 @@
 # K3s 集群安全架构 (Security Architecture)
 
-> Last updated: 2026-09-09
+> Last updated: 2026-09-26
 > Status: 生效事实
 > Scope: 双集群（homelab + oracle-k3s）的纵深防御模型，本文是 source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
@@ -241,7 +241,7 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 |--------------|----------|------|
 | 外部漏洞利用 / 扫描 | Cloudflare WAF + 应用流量零暴露 + 限流；oracle 节点公网入站收到 3 条（22/41641/ICMP，见 §2） | ✅ |
 | 凭据窃取 / 未授权访问 | ZITADEL OIDC（锁定注册）+ 各 app 认证 | ✅ |
-| 密钥泄漏（静态） | Vault + ESO；镜像内密钥由 Trivy exposed-secret 扫描 | ✅ |
+| 密钥泄漏（静态） | Vault + ESO；镜像内密钥由 Trivy exposed-secret 扫描；**公开仓库**的提交由 gitleaks 扫（本地 `just check`/pre-push 拦在推送前，CI `secret-scan.yml` 兜底扫全历史；2026-09-26 起） | ✅ |
 | 密钥静默陈旧 | ESO 健康告警 → Telegram | ✅ |
 | 不安全 Pod（特权/逃逸） | PSA baseline（双集群） | ✅ |
 | 镜像用 :latest（不可复现） | Kyverno disallow-latest-tag（digest-aware） | ✅ Enforce |
