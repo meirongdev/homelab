@@ -1,7 +1,11 @@
 # readlist —— 技术书多维评分 + 公开书单站（单 Go 二进制:只读 API + 内嵌 SPA + SQLite/WAL）
 #
 # 需求/评分标准/源码的真相源在 meirongdev/readlist；**部署清单的真相源是本文件**。
-# 当前部署版本：**v0.5.0**（2026-08-09 升级）。上游修三个结构性缺陷（snapshot 覆写
+# 当前部署版本：**v0.6.0**（2026-09-26 升级）。只加了 `GET /api/v1/openapi.yaml`（内嵌 OpenAPI
+# 3.1 契约，供 apidocs.meirong.dev 的 Scalar 经 scalar.yaml 的 HTTPRoute 同源取用）与 /api/ 的
+# 只读 CORS（`*`）。部署侧改动 = 4 处 image tag；无 schema 迁移、无配置变更。
+#
+# ── 以下 v0.5.0 段落保留作历史口径（2026-08-09 升级）。上游修三个结构性缺陷（snapshot 覆写
 # ingest 写回的外部 pubdate / HN 拿含副标题的整名匹配 / mentions 被 editions 烧光预算），
 # 它们共同让 timeless 与 fresh-releases 两个旗舰榜恒为空。部署侧改动 = 4 处 image tag
 # + `TITLE_WHITELIST_FILE` env + `readlist-title-whitelist` ConfigMap 挂进 ingest
@@ -215,7 +219,7 @@ spec:
           # 版本化不可变 tag（多架构 index，含 linux/arm64——本集群是 ARM，每次升级
           # 都要核对 registry 确有 arm64 变体）。用 tag 而非 `:main`，故**不需要**
           # imagePullPolicy: Always。
-          image: ghcr.io/meirongdev/readlist:v0.5.0
+          image: ghcr.io/meirongdev/readlist:v0.6.0
           command: ["readlist", "serve"]
           envFrom:
             - configMapRef:
@@ -386,7 +390,7 @@ spec:
             fsGroup: 65532
           containers:
             - name: snapshot
-              image: ghcr.io/meirongdev/readlist:v0.5.0
+              image: ghcr.io/meirongdev/readlist:v0.6.0
               command: ["readlist", "snapshot"]
               envFrom:
                 - configMapRef:
@@ -485,7 +489,7 @@ spec:
             fsGroup: 65532
           containers:
             - name: ingest
-              image: ghcr.io/meirongdev/readlist:v0.5.0
+              image: ghcr.io/meirongdev/readlist:v0.6.0
               command: ["readlist", "ingest"]
               envFrom:
                 - configMapRef:
@@ -568,7 +572,7 @@ spec:
             fsGroup: 65532
           containers:
             - name: score
-              image: ghcr.io/meirongdev/readlist:v0.5.0
+              image: ghcr.io/meirongdev/readlist:v0.6.0
               command: ["readlist", "score"]
               envFrom:
                 - configMapRef:
