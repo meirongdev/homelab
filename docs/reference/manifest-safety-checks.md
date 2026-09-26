@@ -1,10 +1,10 @@
 # 清单安全规则 (Manifest Safety Checks)
 
-> Last updated: 2026-09-17
+> Last updated: 2026-09-26
 > Status: 生效事实
 > Scope: CI 强制的仓库规则，本文是 source of truth。四个检查器：
 > `scripts/check-manifests.py` 的 **H1-H5**（清单结构）、
-> `scripts/check-version-pairs.py` 的 **V1-V4**（版本配对，2026-08-13 加，V4 于 2026-09-02 加）、
+> `scripts/check-version-pairs.py` 的 **V1-V5**（版本配对，2026-08-13 加，V4 于 2026-09-02、V5 于 2026-09-26 加）、
 > `scripts/check-embedded-scripts.py` 的 **E1**（内嵌脚本一致性，2026-08-15 加）与
 > `scripts/render-manifests.py` 的**渲染检查**（2026-09-02 加，见下方专节）。
 > 每条规则都对应一次**真实发生过的事故或静默失效**，不是风格偏好。
@@ -283,6 +283,28 @@ Gateway API CRD 两集群装同一批），此前各写一份，靠注释说「�
 `gateway_api_version` 在 oracle 的 ansible 剧本里还有第三份（YAML 变量，`import` 不进来），
 而它正是 2026-08-13 被抓到钉着旧值、注释却写「与 homelab 一致」的那份。
 
+### V5：每条 renovate 版本注释都必须被某个 customManager 实际捕获
+
+版本旁那行 `# renovate: datasource=… depName=…` 有两个作用：让改版本的人当场看到它从哪来，
+以及让 Renovate 开 PR。后一个只在 `.github/renovate.json5` 的某个 customManager **既
+fileMatch 到这个文件、matchStrings 又匹配到这段文本**时才成立；任一边对不上，Renovate
+不报错、不开 PR，只是安静跳过。
+
+2026-09-26 用配置里的真实正则逐条核对全仓 24 条注释，3 条从没被管过：
+`versions.just` 的 `cilium_version` / `gateway_api_version`（09-02 收敛进 `versions.just`
+之后，justfile manager 的 fileMatch `(^|/)justfile$` 就看不到它们了，而它们恰恰是
+「cilium + gateway-api 配对升级」分组最想管的那一对），以及 `static-checks.yml` 的
+kubeconform（写成 `KUBECONFORM_VERSION=v0.8.0`，大写 + `=` + v 前缀，形状不匹配）。
+
+所以 V5 **直接读 `renovate.json5`**（需要 `json5`），用其中每个 customManager 的
+`fileMatch`/`managerFilePatterns` 与 `matchStrings` 去扫全部已跟踪 + 未跟踪未忽略的文件，
+不另写一份规则（另写的会和配置漂开，查的就不是 Renovate 实际会做的事了）。
+跳过 `ignorePaths`（`docs/**` 等）与 `renovate.json5` 自身。行尾写 `version-pair-ok: <理由>` 可豁免。
+⚠️ 它只证明「会被捕获」，证明不了 datasource/depName 写得对——那要等 Renovate 真跑起来看
+Dependency Dashboard 里有没有 lookup 失败。
+编号说明：[2026-09-03 DGX 换模型](../plans/2026-09-03-dgx-model-swap-optimizations.md) 的设计里
+也叫过一个「V5」（模型字面值断言），那份设计至今未实施；若将来落地请编为 V6。
+
 ### E1：ConfigMap 内嵌的脚本必须与同目录的源文件一致，且 pod 模板带它的 checksum
 
 **适用对象**：跑「通用镜像 + ConfigMap 挂脚本」的负载。目前只有
@@ -354,7 +376,7 @@ kubectl --context oracle-k3s -n homepage get cm homepage-config -o json \
 
 ## 渲染检查（`scripts/render-manifests.py`，2026-09-02 加）
 
-H1-H5 / V1-V3 / E1 查的都是**文件与归属**：谁独占文件、版本副本一不一致、内嵌脚本有没有漂。
+H1-H5 / V1-V5 / E1 查的都是**文件与归属**：谁独占文件、版本副本一不一致、内嵌脚本有没有漂。
 它们全都读不到「ArgoCD 最终会 apply 出什么对象」。而本仓库有三类静默失效恰好只活在渲染层：
 
 | 失效 | 表现 | 本仓库实例 |
@@ -438,13 +460,13 @@ terraform -chdir=<root> providers lock -platform=linux_amd64 -platform=darwin_ar
 uv run --with pyyaml python scripts/check-manifests.py             # H1-H5
 uv run --with pyyaml python scripts/check-manifests.py --list      # 只看规则与出处
 uv run --with pyyaml python scripts/render-manifests.py            # 渲染检查（需 kubectl/helm/kubeconform + 联网）
-uv run --with pyyaml python scripts/check-version-pairs.py         # V1-V3
-uv run --with pyyaml python scripts/check-version-pairs.py --list
+uv run --with pyyaml --with json5 python scripts/check-version-pairs.py   # V1-V5（V5 要 json5）
+uv run --with pyyaml --with json5 python scripts/check-version-pairs.py --list
 uv run --with pyyaml python scripts/check-embedded-scripts.py      # E1
 uv run --with pyyaml python scripts/check-embedded-scripts.py --write   # E1 修复 = just gen-embedded-scripts
 ```
 
-CI 里由 `.github/workflows/static-checks.yml` 在改动 `*.yaml` / `justfile` /
+CI 里由 `.github/workflows/static-checks.yml` 在改动 `*.yaml` / `justfile` / `*.just` / `renovate.json5` /
 `k8s/helm/manifests/**/*.py` / 检查器自身时自动运行。
 
 ⚠️ **改规则必须同步改这份文档**（两边不一致的话，要么规则是摆设，要么检查器在误伤）。
@@ -452,3 +474,5 @@ V1-V3 的敏感度在上线当天逐条实测过：故意把 oracle 剧本改回
 拆开、把 Cilium 升到表外的 minor、把变量改名，六个场景全部按预期判红，行内豁免按预期转绿。
 `k3s_version` 组加入时同样实测过：把 oracle 那处改成 v1.35.8 判红、补上行内
 `version-pair-ok:` 转绿。
+V5 上线时同样双向验过：修复前报出上述 3 条；修复后转绿；把 kubeconform 恢复成旧写法
+判红并指出行号；不带 `json5` 运行时明确报错而不是静默跳过。

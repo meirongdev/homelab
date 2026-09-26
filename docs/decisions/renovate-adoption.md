@@ -3,7 +3,7 @@
 > 日期: 2026-08-13
 > 状态: 🚧 执行中（配置已合入并通过官方 validator；**待人工装一次 GitHub App**，见下）
 > 关联: [ROADMAP 开放项 #12](../ROADMAP.md)（原列在"低优先/可选"里）·
-> [manifest-safety-checks.md](../reference/manifest-safety-checks.md)（V1-V3 规则全文）·
+> [manifest-safety-checks.md](../reference/manifest-safety-checks.md)（V1-V5 规则全文；V5 = renovate 注释必须真被捕获）·
 > [records/2026-08-11-gateway-api-crd-stall.md](../records/2026-08-11-gateway-api-crd-stall.md)
 
 ## Context

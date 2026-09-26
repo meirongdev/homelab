@@ -68,7 +68,11 @@
   customManagers: [
     {
       customType: "regex",
-      fileMatch: ["(^|/)justfile$"],
+      // ☠️ 第二条不能省：cilium_version / gateway_api_version 自 2026-09-02 起住在根目录的
+      // versions.just（被两个 justfile import），只写 `justfile$` 时 Renovate 看不到它们——
+      // 下面那个「cilium + gateway-api 配对升级」分组因此从来不会为 Cilium 开 PR。
+      // 2026-09-26 发现并补上；同日起 check-version-pairs.py 的 V5 会拦住这类漏管。
+      fileMatch: ["(^|/)justfile$", "(^|/)[^/]+\\.just$"],
       matchStrings: [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+?)(?: registryUrl=(?<registryUrl>\\S+))?\\s*\\n[a-z0-9_]+\\s*:=\\s*\"(?<currentValue>[^\"]+)\"",
       ],

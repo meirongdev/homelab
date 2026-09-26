@@ -1,6 +1,6 @@
 # k3s 集群版本升级（两集群）
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-26
 > Status: SOP：已按本文完整执行过一次（三节点 v1.34.5+k3s1 → v1.35.8+k3s1，
 > 顺序 oracle → homelab 控制面 → worker，验收 24/24 通过）。本文的每条命令都是实跑验证过的。
 > 触发条件：要把 `k3s-homelab`（`k8s-node` + `k8s-worker-106`）或 `oracle-k3s` 升到新的
@@ -518,7 +518,7 @@ ssh -i ~/.ssh/vgio ubuntu@100.107.166.37 '
    重建出来的节点和集群其余部分不是一个 minor。
 
    ```bash
-   uv run --with pyyaml python scripts/check-version-pairs.py   # V2 组 k3s_version 强制三处一致
+   uv run --with pyyaml --with json5 python scripts/check-version-pairs.py   # V2 组 k3s_version 强制三处一致
    ```
 
    跨了周末的分阶段升级（一侧已升、另一侧还没）在**先行那侧**行尾写豁免，别让 CI 长期挂红：

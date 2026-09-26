@@ -1,6 +1,6 @@
 # Tech Stack — 技术栈全景
 
-> Last updated: 2026-09-17
+> Last updated: 2026-09-26
 > Status: 生效事实
 >
 > 这套系统由哪些技术组成、每个是干什么的、为什么是它、配置和版本钉在哪。
@@ -169,7 +169,7 @@ Cilium / Vault / ESO / ArgoCD 本体。理由是它们要么是 ArgoCD 自己的
 | `scripts/check-docs.py` | R1–R8：目录归属、命名、文首字段、索引完整性、长度预算 |
 | `scripts/check-terminology.py` | T1–T4：不存在的集群名、拼写正典、过期的「单节点」表述 |
 | `scripts/check-public-ips.py` | 禁止提交公网 IP |
-| `scripts/check-version-pairs.py` | V1–V3：必须同步升级的版本对（如 Cilium ↔ Gateway API CRD） |
+| `scripts/check-version-pairs.py` | V1–V5：必须同步升级的版本对（如 Cilium ↔ Gateway API CRD）、共享版本不被遮蔽、renovate 注释真被 Renovate 捕获 |
 | `scripts/check-embedded-scripts.py` | E1：ConfigMap 内嵌脚本与 `.py` 源一致 + Pod 模板带 checksum 注解 |
 
 本地一次跑完：`just check`（与 CI 同款）。规则全文 → [manifest-safety-checks.md](manifest-safety-checks.md)。
