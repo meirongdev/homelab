@@ -1,0 +1,104 @@
+---
+# ArgoCD / GitOps 健康告警。2026-09-26 新增。
+#
+# 堵的盲区：GitOps 失效此前**没有任何信号**。ArgoCD chart 的 notifications 关着、
+# 控制器指标没人抓，于是「git push 了但现网没变」只有碰巧打开 UI 才会发现。
+# 仓库里记着的两次：kube-prometheus-stack 因 env 重复键卡在 ComparisonError(sync=Unknown)、
+# rollout 不发生（values/kube-prometheus-stack.yaml 的 GOMEMLIMIT 注释）；jobs-sg 因
+# ExternalSecret 指向不存在的 Vault path 常驻 Degraded 约 40 分钟
+# （manifests/jobs-sg/kustomization.yaml 头注）。
+# 对照：Flux 的做法是 notification-controller 的 Alert 监听 HelmRelease/Kustomization 错误；
+# 这里走指标而不是 argocd-notifications，为的是复用现成的 Alertmanager → Telegram 链路、
+# 静默与死人开关，而不是再养一条独立的投递路径。
+#
+# 指标来源：ArgoCD 控制面在 oracle-k3s，由 oracle otel-collector 的 `prometheus/argocd`
+# receiver 按 pod 服务发现抓 application-controller 的 :8082，只 keep 两族
+# （argocd_app_info / argocd_cluster_connection_status），remote-write 进来带 cluster=oracle-k3s。
+# 那一侧的取舍（为什么不开 chart 的 metrics Service）写在
+# cloud/oracle/manifests/monitoring/otel-collector-config.yaml。
+#
+# argocd_app_info 的 `name` 是 App 名，`dest_server` 区分部署到哪个集群
+# （https://100.94.186.7:6443 = homelab，https://kubernetes.default.svc = oracle 自身）。
+# 标签 `cluster` 恒为 oracle-k3s——那是**控制面**所在的集群，不是 App 部署到的集群。
+#
+# 验证（上线前在 live 端点与 promtool 上都做过）：
+#   · 2026-09-26 现网 38 个 App 全部 autosync_enabled="true"、Synced、Healthy → 0 条应触发
+#   · 规则语义用 promtool test rules（v3.13.0，与现网同版本）喂合成序列验证过：
+#     sync=Unknown 30m 触发、29m 不触发；5 分钟就恢复的 OutOfSync、autosync=false 的
+#     OutOfSync、Suspended 都不触发；Degraded / 连接 0 / 控制器在跑但无 app_info 各自触发
+#
+# Deployed via the ArgoCD `monitoring-dashboards` Application (git push → 3-min sync).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: argocd-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: argocd
+      rules:
+        # 正常 git push 后 3 分钟轮询 + 同步即回到 Synced，30 分钟还不是 Synced 就是卡住了：
+        # 同步失败（hook 失败、准入 webhook 拒绝、immutable 字段）、ComparisonError
+        # （渲染失败，sync_status="Unknown"）、或两个 App 争同一对象的 selfHeal 拉锯。
+        # 只看 autosync 的 App：将来若给 manual-helm 组件建「只对账不同步」的 App，
+        # 它们的 OutOfSync 是预期状态（= git 比现网新），不该按故障报。
+        - alert: ArgoCDAppOutOfSync
+          expr: argocd_app_info{autosync_enabled="true", sync_status!="Synced"} == 1
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ArgoCD App {{ $labels.name }} 已 30 分钟未同步（{{ $labels.sync_status }}）"
+            description: "App {{ $labels.name }}（dest {{ $labels.dest_server }}, ns {{ $labels.dest_namespace }}）sync_status={{ $labels.sync_status }} 持续 >30m：git 里的改动没有到达现网。Unknown = 渲染/比对失败（ComparisonError），OutOfSync = 同步失败或被反复改回。查：`kubectl --context oracle-k3s -n argocd get application {{ $labels.name }} -o jsonpath='{.status.conditions[*].message} {.status.operationState.message}'`"
+
+        # 清单已下发但工作负载没起来：Degraded（CrashLoop、Job 失败、ExternalSecret 不 Ready）、
+        # Missing（对象被删或从未建出）、Unknown（健康检查本身出错）；Progressing 超过 30 分钟
+        # 通常是 rollout 卡住（新 pod Pending 在资源不足上）。
+        # Suspended 刻意排除：挂着 suspend CronJob 的 App 会长期是这个状态，属正常。
+        # ⚠️ 已知会响的良性情形：local-path 是 WaitForFirstConsumer，**只被 CronJob 挂的新 PVC**
+        #   在首次运行前一直 Pending，ArgoCD 把它算 Progressing → 新服务上线后若首跑在 30m 之后，
+        #   这条会响一次。判别：`kubectl get pvc -n <ns>` 是 Pending 且事件是 WaitForFirstConsumer。
+        #   （2026-09-26 现网 38 个 App 全 Healthy，即目前没有这种 PVC。）
+        # 与 KubePodCrashLooping 等 pod 级规则有重叠，但这条多覆盖了「对象根本没建出来」
+        # 和 CR 级别的不健康（ExternalSecret、Certificate、CNPG Cluster），pod 级规则看不见这些。
+        - alert: ArgoCDAppUnhealthy
+          expr: argocd_app_info{health_status!~"Healthy|Suspended"} == 1
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ArgoCD App {{ $labels.name }} 健康状态 {{ $labels.health_status }} 已 30 分钟"
+            description: "App {{ $labels.name }}（dest {{ $labels.dest_server }}, ns {{ $labels.dest_namespace }}）health_status={{ $labels.health_status }} 持续 >30m。在 UI 或 `kubectl --context oracle-k3s -n argocd get application {{ $labels.name }} -o jsonpath='{.status.resources}'` 里找 health 不是 Healthy 的那个对象。"
+
+        # oracle 上的 ArgoCD 连不上某个被纳管集群的 API → 该集群全部 App 停止同步，
+        # 但各 App 会停在最后一次已知状态，前两条**不会**因此触发。
+        # 覆盖的是「Tailscale 通、但 API 不可用」：homelab k3s API 挂了、argocd-manager
+        # 凭据失效、TLS 证书问题。整条 Tailscale 链路断时 remote-write 也一起断，
+        # 那种情况由 OracleTelemetryAbsent（prometheus-rules.yaml）接管。
+        - alert: ArgoCDClusterUnreachable
+          expr: argocd_cluster_connection_status == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ArgoCD 连不上集群 {{ $labels.server }}"
+            description: "argocd_cluster_connection_status=0 持续 >10m：部署到 {{ $labels.server }} 的全部 App 已停止同步，UI 上它们仍显示最后一次已知状态。先查 `kubectl --context oracle-k3s -n argocd logs argocd-application-controller-0 | grep -i {{ $labels.server }}`，再查被纳管集群的 API 与 kube-system/argocd-manager 凭据。"
+
+        # 元告警：指标断流时上面三条全部静默（没有数据 = 没有告警）。
+        # 写法同 ExternalDNSMetricsAbsent：控制器 StatefulSet 在跑、却没有 argocd_app_info
+        # = 采集路径坏了（otel receiver 配置、pod 端口名/标签被 chart 改了、keep 正则失配）。
+        # 控制器本身挂掉是另一种故障，由 KubeStatefulSetReplicasMismatch 等负责。
+        # oracle 遥测整体断流时参照序列也会消失、本条随之静默，那归 OracleTelemetryAbsent。
+        - alert: ArgoCDMetricsAbsent
+          expr: |
+            count by (cluster) (kube_statefulset_status_replicas_ready{namespace="argocd", statefulset="argocd-application-controller"} > 0)
+              unless
+            count by (cluster) (argocd_app_info)
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ArgoCD 指标在 {{ $labels.cluster }} 上断流"
+            description: "argocd-application-controller 在运行，但 >15m 没有 argocd_app_info 序列到达 Prometheus——oracle otel-collector 的 prometheus/argocd receiver 抓不到了。这会让 ArgoCDAppOutOfSync / ArgoCDAppUnhealthy / ArgoCDClusterUnreachable 全部失明。"
