@@ -74,6 +74,9 @@ data:
         # 照样绿（用最后一次发布的 run 服务）。数据新鲜度只有指标能看见，见
         # k8s/helm/manifests/monitoring/alerts/readlist-alerts.yaml。
         {"name": "Readlist",       "url": "http://readlist.personal-services.svc:8080/healthz"},
+        # Scalar API 文档站：/health 是 Caddyfile 里的静态 200，只证明 Caddy 活着；
+        # 各服务的 openapi 文档由各自服务伺服，不在这条的覆盖面内。
+        {"name": "API Docs",       "url": "http://scalar.personal-services.svc:8080/health"},
         # Jobs SG: 在 homelab，故走公网 URL（与上面 Grafana/Vault 同理）。
         # 探 /healthz 而不是 / —— / 服务的是 report/latest.html，第一份周报出来前是 404，
         # 拿它当探针会让监控在首周一直红。/healthz 只验 DB 能打开。
