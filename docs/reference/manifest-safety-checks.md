@@ -403,6 +403,14 @@ H1-H5 / V1-V5 / E1 查的都是**文件与归属**：谁独占文件、版本副
   仓库 DNS 超时，整个检查因此变红 —— 而「偶尔红」的检查很快会被无视，比没有检查更糟。
   脚本现在只对**网络形状**的错误重试 3 次（5s/10s 退避）并把每次重试打印出来：
   仓库真坏掉仍然响亮失败，版本不存在这类真错误**不重试、立即失败**（两种都实测过）。
+- ☠️ **2026-09-08 → 09-26 它在 main 上一直是红的，且没人发现**：去掉 kube-prometheus-stack 的
+  `skipCrds` 后，prometheus-operator CRD 里的 enum `- =` 进了渲染结果，PyYAML 按 YAML 1.1 把裸 `=`
+  当成 `value` 类型、SafeLoader 无构造器，整个 App 渲染失败。修法是渲染结果改用 `RenderedLoader`
+  （把该类型当字符串，与 K8s/kubeconform 的 YAML 1.2 语义对齐）。
+  教训两条：① 本地复现要用**干净的 helm 环境**（`HELM_CONFIG_HOME`/`HELM_CACHE_HOME`/
+  `HELM_DATA_HOME` 指向空目录）——本机 `repositories.yaml` 里有条目但缓存缺失时，**每个** chart
+  都会报 `no cached repo found`，把真错误淹掉；② CI 红了没人看 = 没有这道检查，
+  Actions 的 step 日志要登录才能读，未登录只能从 run 页面看出是哪一步挂的。
 
 ⚠️ **它证明的是「渲染得出来 + 每个对象结构合法」，证明不了值是对的**：resources 填 1Mi
 一样合法。与下一节的「查不出来的那些」并不重叠——那些是连渲染都看不出的。
