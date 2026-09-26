@@ -1,6 +1,6 @@
 # Observability — 告警、看板组织与 SLO
 
-> Last updated: 2026-09-20
+> Last updated: 2026-09-26
 > Status: 生效事实
 >
 > 遥测的消费侧：告警路由与覆盖盲区、Grafana 看板组织约定、SLI/SLO 体系。
@@ -131,6 +131,22 @@
   📌 **覆盖范围有限**：它只抓量的回退。ADR 复核触发条件里另外两条（重新启用
   `kubeApiserverBurnrate`/`Slos`/`Availability`、新增消费原始 bucket 的看板）表现为
   规则哑掉或面板空白而非 series 变多，这条告警看不见，仍得靠人核。
+
+- **ArgoCD / GitOps 健康告警**（`manifests/monitoring/alerts/argocd-alerts.yaml`，2026-09-26 新增，4 条）:
+  此前 GitOps 失效**零信号**：chart 的 `notifications` 关着、控制器指标没人抓，
+  「git push 了但现网没变」只有打开 UI 才知道（kube-prometheus-stack 卡 ComparisonError、
+  jobs-sg 常驻 Degraded 都是这样被人碰巧发现的）。指标经 oracle otel `prometheus/argocd`
+  按 **pod 服务发现**抓 application-controller 的 `metrics`(8082) 端口，只 keep
+  `argocd_app_info` 与 `argocd_cluster_connection_status` → remote-write。
+  `ArgoCDAppOutOfSync`（**仅 autosync 的 App**，非 Synced 30m；`Unknown` = ComparisonError）·
+  `ArgoCDAppUnhealthy`（非 Healthy/Suspended 30m，含 Progressing 卡住）·
+  `ArgoCDClusterUnreachable`（连接状态 0 达 10m：Tailscale 通但 API/凭据坏；整条链路断时
+  remote-write 一起断，归 `OracleTelemetryAbsent`）· `ArgoCDMetricsAbsent`（控制器在跑却无
+  `argocd_app_info`，写法同 `ExternalDNSMetricsAbsent`）。
+  ⚠️ 两处特意为之：① **不开 chart 的 `controller.metrics.enabled`**：ArgoCD 本体是
+  manual-helm，开它要 `helm upgrade`；按端口名做 pod 发现不在 argocd ns 放任何 chart 外对象；
+  ② 序列上的 `cluster` 恒为 `oracle-k3s`，是**控制面**所在集群，App 部署到哪看 `dest_server`。
+  上线前 promtool（与现网同为 v3.13.0）喂合成序列验过每条的触发/不触发边界。
 
 - **homelab 调度容量饱和**（`prometheus-rules.yaml` 的 `capacity` 组，2026-08-13 新增，2 条）:
   `ClusterCpuRequestsSaturated` / `ClusterMemoryRequestsSaturated`：requests 占总

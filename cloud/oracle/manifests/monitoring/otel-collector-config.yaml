@@ -248,6 +248,44 @@ receivers:
               labels:
                 cluster: oracle-k3s
 
+  # ArgoCD application-controller → homelab Prometheus。2026-09-26 新增。
+  #
+  # 为什么必须抓：此前 GitOps 失效**没有任何信号**——chart 的 notifications 关着、
+  # 没有 metrics Service、也没有规则。App 卡在 ComparisonError(sync=Unknown)、
+  # Degraded、或 oracle 连不上 homelab API 时，只有碰巧打开 UI 才知道
+  # （仓库注释里记着 kube-prometheus-stack 的 sync=Unknown、jobs-sg 常驻 Degraded 两次）。
+  # 消费方 k8s/helm/manifests/monitoring/alerts/argocd-alerts.yaml。
+  #
+  # 用 pod 服务发现而不是 Service：ArgoCD 是 manual-helm，chart 的
+  # `controller.metrics.enabled` 默认关、不渲染 metrics Service；开它要 helm upgrade
+  # ArgoCD 本体。容器端口本来就声明了 `metrics`(8082)，按端口名挑目标即可，
+  # 不在 argocd ns 里放任何 chart 之外的对象（将来开了 chart 的 Service 也不撞名）。
+  # RBAC 复用本文件顶部 ClusterRole 已有的 pods list/watch。
+  #
+  # 该端点 ~1100 条 series，keep 只留两族（38 个 App 时共 ~40 条）：
+  #   argocd_app_info                    → 每个 App 的 sync_status / health_status
+  #   argocd_cluster_connection_status   → oracle 上的 ArgoCD 能否连到 homelab API
+  # 两者都是 gauge，不受 oracle 侧 counter 补 `_total` 后缀那条的影响。
+  prometheus/argocd:
+    config:
+      scrape_configs:
+        - job_name: 'argocd-application-controller'
+          scrape_interval: 60s
+          kubernetes_sd_configs:
+            - role: pod
+              namespaces:
+                names: [argocd]
+          relabel_configs:
+            - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name, __meta_kubernetes_pod_container_port_name]
+              regex: 'argocd-application-controller;metrics'
+              action: keep
+            - target_label: cluster
+              replacement: oracle-k3s
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: 'argocd_app_info|argocd_cluster_connection_status'
+              action: keep
+
   # kubelet cAdvisor 容器用量 → homelab Prometheus (cluster=oracle-k3s)。
   # 消费者与 keep 正则里的八个指标一一对应（正则旁的注释写了各自的理由）：
   #   container_cpu_usage_seconds_total / container_memory_working_set_bytes  → KRR 右尺寸
@@ -446,5 +484,9 @@ service:
       exporters: [prometheusremotewrite]
     metrics/falcosidekick:
       receivers: [prometheus/falcosidekick]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheusremotewrite]
+    metrics/argocd:
+      receivers: [prometheus/argocd]
       processors: [memory_limiter, resource, batch]
       exporters: [prometheusremotewrite]

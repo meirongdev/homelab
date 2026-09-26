@@ -1,6 +1,6 @@
 # Multi-Cluster Observability Architecture
 
-> Last updated: 2026-09-21
+> Last updated: 2026-09-26
 > Status: 生效事实
 >
 > 遥测的**采集与汇聚侧**：三条管线怎么跨集群流动、应用怎么接日志/追踪、坏了怎么查。
@@ -289,6 +289,12 @@ ENV JAVA_TOOL_OPTIONS="-javaagent:/otel/opentelemetry-javaagent.jar"
 | `prometheus/cilium-envoy` | `cilium-envoy.kube-system.svc:9964` | 30s | keep 正则只留 RED SLI 指标 |
 | `prometheus/opencost` | `opencost.opencost.svc:9003` | 60s | `honor_labels: true`；成本指标 |
 | `prometheus/cadvisor` | `10.0.0.26:10250/metrics/cadvisor` | 60s | https + SA token；见下 |
+| `prometheus/clustermesh` | `clustermesh-apiserver-metrics.kube-system.svc:9964` | 60s | 只 keep `cilium_kvstoremesh_remote_cluster*` |
+| `prometheus/trivy-operator` | `trivy-operator.trivy-system.svc:8080` | 60s | |
+| `prometheus/readlist` | `readlist.personal-services.svc:8080` | 300s | 数据一天才变一次 |
+| `prometheus/falco` | `falco-metrics.falco.svc:8765` | 60s | 需 values 里两个开关同时开 |
+| `prometheus/falcosidekick` | `falco-falcosidekick.falco.svc:2801` | 60s | 投递链路（Telegram ok/error） |
+| `prometheus/argocd` | pod 发现：`argocd` ns 里 application-controller 的 `metrics`(8082) 端口 | 60s | 只 keep `argocd_app_info` / `argocd_cluster_connection_status`；不开 chart 的 metrics Service（ArgoCD 是 manual-helm） |
 
 All metrics pass through `resource` processor (adds `cluster: oracle-k3s`) → `batch` → `prometheusremotewrite` exporter → `http://100.94.186.7:31090/api/v1/write`
 
