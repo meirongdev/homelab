@@ -1,9 +1,16 @@
 # readlist —— 技术书多维评分 + 公开书单站（单 Go 二进制:只读 API + 内嵌 SPA + SQLite/WAL）
 #
 # 需求/评分标准/源码的真相源在 meirongdev/readlist；**部署清单的真相源是本文件**。
-# 当前部署版本：**v0.6.0**（2026-09-26 升级）。只加了 `GET /api/v1/openapi.yaml`（内嵌 OpenAPI
-# 3.1 契约，供 apidocs.meirong.dev 的 Scalar 经 scalar.yaml 的 HTTPRoute 同源取用）与 /api/ 的
-# 只读 CORS（`*`）。部署侧改动 = 4 处 image tag；无 schema 迁移、无配置变更。
+# 当前部署版本：**v0.7.0**（2026-09-26 升级）。上游评审修复：阅读队列不再混入已读书、
+# Google Books key 改走请求头不再进日志、「弃读」服务端过滤、重算逐位一致、ingest 每本书单事务。
+# 部署侧改动 = 4 处 image tag；无 schema 迁移、无配置变更。
+# ⚠️ 上游标的运维侧 BREAKING：`/healthz` 不再返回 `works`（全库书量只在 /metrics 的
+# readlist_works_total），`version` 改报镜像 tag（此前恒为 "readlist-mvp"）。本仓库无消费者：
+# 就绪探针与 Uptime Kuma 只看状态码，告警本来就读指标。
+#
+# ── 以下 v0.6.0 段落保留作历史口径（2026-09-26 升级）。只加了 `GET /api/v1/openapi.yaml`（内嵌
+# OpenAPI 3.1 契约，供 apidocs.meirong.dev 的 Scalar 经 scalar.yaml 的 HTTPRoute 同源取用）与
+# /api/ 的只读 CORS（`*`）。部署侧改动 = 4 处 image tag；无 schema 迁移、无配置变更。
 #
 # ── 以下 v0.5.0 段落保留作历史口径（2026-08-09 升级）。上游修三个结构性缺陷（snapshot 覆写
 # ingest 写回的外部 pubdate / HN 拿含副标题的整名匹配 / mentions 被 editions 烧光预算），
@@ -219,7 +226,7 @@ spec:
           # 版本化不可变 tag（多架构 index，含 linux/arm64——本集群是 ARM，每次升级
           # 都要核对 registry 确有 arm64 变体）。用 tag 而非 `:main`，故**不需要**
           # imagePullPolicy: Always。
-          image: ghcr.io/meirongdev/readlist:v0.6.0
+          image: ghcr.io/meirongdev/readlist:v0.7.0
           command: ["readlist", "serve"]
           envFrom:
             - configMapRef:
@@ -390,7 +397,7 @@ spec:
             fsGroup: 65532
           containers:
             - name: snapshot
-              image: ghcr.io/meirongdev/readlist:v0.6.0
+              image: ghcr.io/meirongdev/readlist:v0.7.0
               command: ["readlist", "snapshot"]
               envFrom:
                 - configMapRef:
@@ -489,7 +496,7 @@ spec:
             fsGroup: 65532
           containers:
             - name: ingest
-              image: ghcr.io/meirongdev/readlist:v0.6.0
+              image: ghcr.io/meirongdev/readlist:v0.7.0
               command: ["readlist", "ingest"]
               envFrom:
                 - configMapRef:
@@ -572,7 +579,7 @@ spec:
             fsGroup: 65532
           containers:
             - name: score
-              image: ghcr.io/meirongdev/readlist:v0.6.0
+              image: ghcr.io/meirongdev/readlist:v0.7.0
               command: ["readlist", "score"]
               envFrom:
                 - configMapRef:
