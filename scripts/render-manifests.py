@@ -192,9 +192,26 @@ def render_app(name, spec, tmpdir):
     return "\n---\n".join(out)
 
 
+class RenderedLoader(yaml.SafeLoader):
+    """渲染结果专用：把 YAML 1.1 的 `value` 类型（裸 `=`）当普通字符串。
+
+    ☠️ 不加这个，kube-prometheus-stack 会整个 App 渲染失败：2026-09-08 去掉 skipCrds 后
+    prometheus-operator 的 CRD 进了渲染结果，其 schema 里有 PromQL 匹配运算符的 enum
+    `- =`，PyYAML 按 YAML 1.1 把裸 `=` 解析成 `tag:yaml.org,2002:value`，SafeLoader
+    没有它的构造器 → "could not determine a constructor"。CI 的 render job 因此从那天起
+    在 main 上一直红（2026-09-26 才发现，日志要登录才能看）。
+    Kubernetes 与 kubeconform 用的是 YAML 1.2 的 Go 解析器，那里 `=` 本来就是字符串，
+    所以这里只是对齐它们的语义，不是放宽校验。
+    """
+
+
+RenderedLoader.add_constructor("tag:yaml.org,2002:value",
+                               lambda loader, node: loader.construct_scalar(node))
+
+
 def count_objects(text):
     n = 0
-    for d in yaml.safe_load_all(text):
+    for d in yaml.load_all(text, Loader=RenderedLoader):
         if isinstance(d, dict) and d.get("kind"):
             n += 1
     return n
