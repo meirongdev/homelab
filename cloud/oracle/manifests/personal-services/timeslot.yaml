@@ -127,8 +127,9 @@ spec:
               mountPath: /config
       containers:
         - name: timeslot
-          # 与现网运行中的 imageID 一致（2026-09-02 核对）；换版本改这一行
-          image: ghcr.io/meirongdev/timeslot/timeslot@sha256:27c17dace6f713015f2f9df451a647e9c971daee7a22a444db6e0512e57f5230
+          # 上游 commit 652c6b4（2026-09-26，新增 GET /api/openapi.yaml 供 apidocs 站点取用）的
+          # **多架构 index digest**（amd64+arm64 已核对）。换版本改这一行
+          image: ghcr.io/meirongdev/timeslot/timeslot@sha256:8cc7b16876503cf884fb5a9ed7fac279488ae525f25a4a4d8a29cab4dff49f5d
           args: ["-config", "/config/config.json"]
           ports:
             - name: http
