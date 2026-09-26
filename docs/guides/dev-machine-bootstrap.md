@@ -1,6 +1,6 @@
 # 新机器开发环境 bootstrap（配到能改 homelab repo）
 
-> Last updated: 2026-09-17
+> Last updated: 2026-09-26
 > 面向「换了一台 Mac，要把本机环境配到能 clone、改、验证这个 repo」的流程。
 > 排障/恢复类走 [runbooks/](../runbooks/README.md)；AI 助手上下文见 [../AGENTS.md](../AGENTS.md)（唯一上下文文件，细节按域在 [reference/](../reference/README.md)）。
 
@@ -8,19 +8,21 @@
 
 - **SSH key**：所有节点（homelab/oracle/pve/106/DGX）共用 `~/.ssh/vgio`。没有就把
   现有机器的 `~/.ssh/vgio` + `~/.ssh/vgio.pub` 拷过来，权限 `600`/`644`。
-- **GitHub**：`meirongdev` 账号、能访问私有 `homelab` repo 的 key。
+- **GitHub**：`meirongdev` 账号、能 push `homelab` repo 的 key（⚠️ 这是**公开仓库**，所以下面的 gitleaks 必须装）。
 - **Tailscale**：加入 tailnet（设备归属 `meirongdev@`），否则跨集群路由/裸机抓取不通。
 - **Cloudflare / OCI / Proxmox** 账号（按需，改对应 terraform 时才要）。
 
 ## 2. 工具链
 
 ```bash
-brew install just uv terraform helm kubectl git python3
+brew install just uv terraform helm kubectl git python3 gitleaks
 uv tool install ansible        # 提供 ansible-playbook（justfile 直接调它）
 ```
 
 - `just`：repo 的主任务运行器（全部 root 都用它，含 `cloud/oracle/terraform/`——那里 2026-09-06 前是 Makefile）。
 - `uv`：`check-manifests.py` 用 `uv run --with pyyaml`；ansible 建议 `uv tool install` 隔离。
+- `gitleaks`：`just check`（即 pre-push 钩子）的密钥扫描。没装只会打一行警告然后跳过，
+  而 CI 的 `secret-scan.yml` 在 push **之后**才跑——公开仓库里那时密钥已经泄露，只能轮换。
 - `terraform`：8 个 root 都用它：`proxmox/terraform`、`proxmox/terraform-storage`
   （106 上的 worker VM，2026-08-15 新增）、`cloudflare/terraform`、`tailscale/terraform`、
   `zitadel/terraform`、`cloud/oracle/terraform`、`cloud/oracle/cloudflare`、

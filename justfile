@@ -38,6 +38,15 @@ check:
     done
     echo "── justfile 冒烟（just --list，含全部子模块）"
     just --list >/dev/null || fail=1
+    # 密钥扫描：公开仓库里这一道必须在 push 前拦（CI 的 secret-scan.yml 跑在 push 之后，
+    # 命中时已经公开了）。扫的是 git 历史而不是工作区：`dir` 模式不认 .gitignore，
+    # 会把本地 .env 里的真 token 报出来；pre-push 时要推的内容都已是提交。
+    echo "── gitleaks（git 历史，含尚未 push 的提交）"
+    if command -v gitleaks >/dev/null 2>&1; then
+        gitleaks git --config .gitleaks.toml --redact --no-banner --log-level warn . || fail=1
+    else
+        echo "   ⚠️ 未装 gitleaks，跳过（brew install gitleaks）。CI 仍会扫，但那时已经推到公开仓库了"
+    fi
     if [ "$fail" -ne 0 ]; then
         echo ""
         echo "❌ 有检查未通过。规则背景：docs/RULES.md（文档）· docs/reference/manifest-safety-checks.md（清单）"
