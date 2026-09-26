@@ -25,7 +25,7 @@
 | [dgx-clustermesh-not-adopted](dgx-clustermesh-not-adopted.md) | ❌ DGX 双机**不接 ClusterMesh**（共享节点不带 subnet route，VXLAN 节点 IP 不可达）；改 homelab Service + 手写 Endpoints |
 | [shared-postgres-platform](shared-postgres-platform.md) | 每集群一个共享实例：oracle 手搓 `rss-postgres` → CNPG `apps-pg`（**不**并入 `zitadel-pg`）；homelab 2026-08-25 合并 `litellm-pg`+`multica-postgres`，但**刻意不装 CNPG**；备份都改逐库 `pg_dump` |
 | [slo-availability-targets](slo-availability-targets.md) | 99% 推导 + 两维判据；☠️ 实测揭穿分母（vault/argocd 真实流量≈0）；预算只做信号不做闸门 |
-| [renovate-adoption](renovate-adoption.md) | 采纳 Renovate 管版本钉扎（🚧 待装 GitHub App）；与 V1-V3 分工；三条自我约束（不 automerge · 不开 pinDigests · 不管 docs/） |
+| [renovate-adoption](renovate-adoption.md) | 采纳 Renovate 管版本钉扎（🚧 待装 GitHub App）；与 V1-V5 分工；三条自我约束（不 automerge · 不开 pinDigests · 不管 docs/） |
 | [cf-analytics-custom-exporter](cf-analytics-custom-exporter.md) | 按域名访问 IP 数自写 exporter：官方/lablabs 实测在 Free zone 全废（`httpRequests1mGroups` 403），且**都只有 zone 级 uniques** |
 | [cronjob-and-job-hygiene](cronjob-and-job-hygiene.md) | CronJob 只强制两个 deadline（`activeDeadlineSeconds` 断卡死 + `startingDeadlineSeconds` 防 100-missed 永久停摆）；配额改用 `pods` 而非 `count/pods`；**否决**强制 TTL（与 history limit 重复）与 Kyverno `require-job-ttl`（Enforce 会炸 5 个 Helm hook、Audit 无告警消费） |
 | [litellm-llm-gateway](litellm-llm-gateway.md) | 旧 LLM 网关 → **LiteLLM**：配置进 git + 自带认证 + Postgres；双自托管来源 DGX 主 + Mac 兜底 fallback |

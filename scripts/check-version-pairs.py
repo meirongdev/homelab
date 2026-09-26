@@ -5,6 +5,7 @@
     V2  声明为「同一事实」的版本变量组 → 取值必须一致
     V3  cilium_version 与 gateway_api_version 必须符合兼容表
     V4  versions.just 里的共享变量不得被 import 方重新定义（会静默覆盖）
+    V5  每条 renovate 版本注释（`# renovate:` 后跟 datasource）都必须真被 renovate.json5 的某个 customManager 捕获
 
 每条都对应真实故障：
 
@@ -16,6 +17,12 @@
           一处漏改，且漏的那处只在**重建集群时**才会爆。注释挡不住这个，CI 可以。
   V1    ← 跨集群镜像部署的 App 对（external-dns / opencost / trivy-operator 各两份）：
           升级时只改一侧，另一侧就静默留在旧版本，直到某天行为不一致才被发现。
+  V5    ← 2026-09-26 用 renovate.json5 里的真实正则逐条核对全仓注释，24 条里 3 条
+          **从没被管过**：versions.just 的 cilium_version / gateway_api_version（2026-09-02
+          收敛进 versions.just 后，justfile manager 的 fileMatch `(^|/)justfile$` 就看不到
+          它们了——恰恰是配对分组最想管的那一对）、static-checks.yml 的 kubeconform
+          （写成 `KUBECONFORM_VERSION=v0.8.0`，形状不匹配）。注释在、版本在、Renovate
+          不报错，只是永远不开 PR —— 典型的静默失效。
 
 设计原则（与 check-manifests.py / check-docs.py 同）：**本脚本能查的，和
 docs/reference/manifest-safety-checks.md 写的规则必须一一对应**，改一边就要改另一边。
@@ -24,19 +31,21 @@ docs/reference/manifest-safety-checks.md 写的规则必须一一对应**，改�
 
 豁免：在版本所在行写行内注释 `version-pair-ok: <理由>`（如刻意的灰度/单侧先行）。
 
-用法:
-    uv run --with pyyaml python scripts/check-version-pairs.py
-    uv run --with pyyaml python scripts/check-version-pairs.py --list
+用法（V5 要解析 renovate.json5，所以多一个 json5）:
+    uv run --with pyyaml --with json5 python scripts/check-version-pairs.py
+    uv run --with pyyaml --with json5 python scripts/check-version-pairs.py --list
 """
+import fnmatch
 import pathlib
 import re
+import subprocess
 import sys
 from collections import defaultdict
 
 try:
     import yaml
 except ImportError:
-    sys.exit("需要 pyyaml —— 用 `uv run --with pyyaml python scripts/check-version-pairs.py`")
+    sys.exit("需要 pyyaml —— 用 `uv run --with pyyaml --with json5 python scripts/check-version-pairs.py`")
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 EXEMPT = "version-pair-ok:"
@@ -92,6 +101,15 @@ CILIUM_GATEWAY_API = {
 # 消灭的漂移，且比原来更隐蔽：文件里明明写着 import，读的人会以为值来自共享文件。
 SHARED_VERSIONS = "versions.just"
 IMPORTERS = ["k8s/helm/justfile", "cloud/oracle/justfile"]
+
+# ── V5：renovate 注释必须真被 Renovate 捕获 ─────────────────────────────────────
+# 注释的作用是「让改版本的人当场看到它从哪来 + 让 Renovate 开 PR」。后一半只有在
+# renovate.json5 的某个 customManager **既 fileMatch 到这个文件、matchStrings 又
+# 匹配到这段文本**时才成立；任何一边对不上，Renovate 都只是安静地跳过。
+# 这里直接读 renovate.json5 的真实正则去匹配，而不是另写一份规则 —— 另写的那份会和
+# 配置本身漂开，查的就不是 Renovate 实际会做的事了。
+RENOVATE_CFG = ".github/renovate.json5"
+ANNOTATION_RE = re.compile(r"#\s*renovate:\s*datasource=")
 
 VAR_RE = {
     # justfile: name := "1.2.3"
@@ -245,11 +263,75 @@ def check_v3():
         )
 
 
+def js_regex(p):
+    """Renovate 的正则是 JS 语法；这里用到的只差命名组写法（`(?<n>` → `(?P<n>`）。"""
+    return re.compile(re.sub(r"\(\?<(?![=!])", "(?P<", p))
+
+
+def file_matchers(manager):
+    """fileMatch（正则）与新版 managerFilePatterns（`/正则/` 或 glob）都认。"""
+    out = [js_regex(p).search for p in manager.get("fileMatch", [])]
+    for p in manager.get("managerFilePatterns", []):
+        if len(p) > 1 and p.startswith("/") and p.endswith("/"):
+            out.append(js_regex(p[1:-1]).search)
+        else:
+            out.append(lambda rel, g=p: fnmatch.fnmatch(rel, g))
+    return out
+
+
+def check_v5():
+    """每条 renovate 注释都必须被某个 customManager 捕获。"""
+    try:
+        import json5
+    except ImportError:
+        violations["V5"].append(
+            "需要 json5 来解析 renovate.json5 —— 用 "
+            "`uv run --with pyyaml --with json5 python scripts/check-version-pairs.py`"
+        )
+        return
+    cfg = json5.loads((ROOT / RENOVATE_CFG).read_text(encoding="utf-8"))
+    ignore = cfg.get("ignorePaths", [])
+    managers = [
+        (file_matchers(m), [js_regex(s) for s in m.get("matchStrings", [])])
+        for m in cfg.get("customManagers", [])
+    ]
+    # 含未跟踪（但未被 .gitignore 排除）的文件：新加的 workflow 在提交前就能查到
+    listed = subprocess.run(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+        cwd=ROOT, capture_output=True, text=True, check=True,
+    ).stdout.splitlines()
+    for rel in sorted(set(listed)):
+        # renovate.json5 自己的注释在讲这个约定，docs/ 等是 ignorePaths（Renovate 本来就不看）
+        if rel == RENOVATE_CFG or any(fnmatch.fnmatch(rel, g) for g in ignore):
+            continue
+        try:
+            text = (ROOT / rel).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if not ANNOTATION_RE.search(text):
+            continue
+        captured = set()
+        for matchers, strings in managers:
+            if any(match(rel) for match in matchers):
+                for rx in strings:
+                    for m in rx.finditer(text):
+                        # matchStrings 都以注释本身开头，m.start() 就在注释那一行
+                        captured.add(text.count("\n", 0, m.start()) + 1)
+        for i, line in enumerate(text.splitlines(), 1):
+            if ANNOTATION_RE.search(line) and i not in captured and EXEMPT not in line:
+                violations["V5"].append(
+                    f"{rel}:{i}: 这条 renovate 注释没有被任何 customManager 捕获 —— "
+                    f"Renovate 会静默跳过它、永远不开 PR。要么把文件加进 {RENOVATE_CFG} "
+                    "对应 manager 的 fileMatch，要么把下一行改成那条 matchStrings 认的形状"
+                )
+
+
 RULES = {
     "V1": "同一 chart 在多个 Application 里必须同版本",
     "V2": "声明为同一事实的版本变量组必须取值一致",
     "V3": "cilium_version 与 gateway_api_version 必须符合兼容表",
     "V4": "versions.just 的共享变量不得被 import 方重新定义",
+    "V5": "renovate 注释必须被 renovate.json5 的某个 customManager 实际捕获",
 }
 
 
@@ -264,10 +346,11 @@ def main():
     check_v2()
     check_v3()
     check_v4()
+    check_v5()
 
     total = sum(len(v) for v in violations.values())
     if not total:
-        print("✅ 版本配对检查通过（V1-V4）")
+        print("✅ 版本配对检查通过（V1-V5）")
         print("   注意：本检查只保证「多处副本互相一致」与「配对符合表」，")
         print("   保证不了这些值与**现网实际跑的版本**一致 —— 那只能实测。")
         return 0

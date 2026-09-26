@@ -63,7 +63,7 @@
 ### GitOps
 
 - [argocd-app-patterns.md](argocd-app-patterns.md) — 控制面部署形态、Application 清单（按 project 分组）与备注、pattern 对比、新增 Application 的 4 个坑
-- [manifest-safety-checks.md](manifest-safety-checks.md) — CI 强制的清单规则 H1-H5 / V1-V3 / E1 + 渲染检查 + 「静态查不出、只能靠人」的那几类
+- [manifest-safety-checks.md](manifest-safety-checks.md) — CI 强制的清单规则 H1-H5 / V1-V5 / E1 + 渲染检查 + 「静态查不出、只能靠人」的那几类
 
 ### 仓库工程与 agent 工具链
 

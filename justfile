@@ -34,7 +34,7 @@ check:
     fail=0
     for s in check-docs check-terminology check-manifests check-version-pairs check-public-ips check-embedded-scripts; do
         echo "── $s"
-        uv run --with pyyaml python scripts/$s.py || fail=1
+        uv run --with pyyaml --with json5 python scripts/$s.py || fail=1
     done
     echo "── justfile 冒烟（just --list，含全部子模块）"
     just --list >/dev/null || fail=1
