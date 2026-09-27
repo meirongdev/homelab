@@ -16,6 +16,10 @@ just omlx-metrics    # 装/升级 OMLX 指标采集 LaunchAgent（无需 sudo，
 just power           # headless 电源策略（pmset disablesleep，需 sudo 密码 -K）
 just multica-daemon  # 装/升级 Multica daemon LaunchAgent（认证全自动，从 Vault 取 PAT）
 just site            # 上面几个一起跑（会问 sudo 密码）
+
+just os-updates      # 只读：列出待装的 macOS 更新 + 本次会装什么（不要密码）
+just os-update       # 装系统小版本/安全更新 + Safari/CLT，需要时自动重启并验收
+just os-upgrade-major  # 大版本升级（如 26 → 27），见下文风险
 ```
 
 ## Ansible 自动化的部分（幂等）
@@ -28,6 +32,7 @@ just site            # 上面几个一起跑（会问 sudo 密码）
 | `omlx-metrics.yaml` | OMLX 推理指标的**生产端**：LaunchAgent `com.meirongdev.omlx-textfile-collector` 每 60s 把 `~/.omlx/stats.json` 渲染成 `omlx.prom`，投进上面那个 textfile 目录。☠️ **StartInterval 不是 KeepAlive**（渲染器跑 0.03s 就退，KeepAlive 会变重启风暴）。☠️ 渲染器是 **`mlx-learning` 仓 venv 里的 console script**（跨仓依赖），缺了会明确失败并给出 `uv sync` 的修法。验收会一路查到 node_exporter 那端 | 否 |
 | `multica-daemon.yaml` | 装 `multica` CLI（**`darwin-arm64` 预编译包**，固定版本 + sha256，不走 Homebrew）→ 指向自建 service → 用 Vault 里的 PAT 认证 → LaunchAgent `ai.multica.daemon`。⚠️ 未认证时**刻意不 bootstrap**（否则 KeepAlive 会把必然失败的进程反复拉起）。这是 Multica「执行任务的那一半」，整体安装见 [docs/runbooks/multica-install.md](../../docs/runbooks/multica-install.md) | 否 |
 | `power.yaml` | `pmset -c disablesleep 1`——插电时保持**系统**唤醒，合盖也不睡，从而 Tailscale 远程常在线（让"保持唤醒"不依赖 Amphetamine GUI） | 是 |
+| `os-update.yaml` | macOS 软件更新，需要重启时无人值守地重启并验收。**不在 `site` 里**（它会重启机器），见下节 | 是（自己问密码） |
 
 升级 node_exporter：改 `node-exporter.yaml` 里的 `node_exporter_version` + `node_exporter_sha256`，再 `just node-exporter`。
 
@@ -36,6 +41,30 @@ just site            # 上面几个一起跑（会问 sudo 密码）
 指标静默不出现 —— 所以两个 playbook 都会跨过自己那一半去验收整条链路，并在缺另一半时
 直接告诉你该跑哪条命令。`just site` 已按正确顺序（先读取端后生产端）包含两者。
 口径/陷阱/单段排查 → [docs/reference/omlx-inference-metrics.md](../../docs/reference/omlx-inference-metrics.md)。
+
+## 系统更新（`os-update.yaml`）
+
+系统设置里的自动更新开关全开着，但在这台无头机上不生效（2026-09-26：26.7 挂着没装，
+已 96 天没重启），所以改由 Ansible 触发。先 `just os-updates` 看计划，再 `just os-update`。
+
+- **装什么**：不需要重启的（Safari、CLT…）全装，同一产品线只装最新版；需要重启的
+  **一次只装一个**（版本最高的那个），其余下次再跑。大版本默认跳过；需要**关机**才能完成的
+  一律不装（远程关了机没人按电源键）。
+- **密码**：确认计划后问一次登录密码。sudo 和 Apple Silicon 的 volume owner 认证
+  （`softwareupdate --user --stdinpass`）共用它，所以没用 `--ask-become-pass`（`-K` 拿到的
+  密码不暴露给任务）。密码不进命令行参数。
+- **重启前拒绝继续的情况**：FileVault 开着、自动登录用户不是 `matthew`、没插电、空闲空间
+  不够（小版本 20 GiB、大版本 40 GiB）、已有 `softwareupdate` 在跑。前两条不满足时重启后
+  这台机就回不来了（停在解锁界面或登录窗口）。Tailscale「Run when logged out」
+  （下面手动步骤 5）CLI 查不了，没法断言，靠你自己保证。
+- **重启后验收**：版本到位、控制台用户是 `matthew`（自动登录生效）、node_exporter
+  `/metrics` 200、重启前**在运行的** LaunchAgent 全部重新跑起来（按运行时快照比对，
+  没写死清单，hermes/vllm 这些非本 repo 管的也覆盖）、`SleepDisabled` 仍为 1
+  （丢了就跑 `just power`）。
+- **日志**：`/var/log/macbook-os-update.log`（root）。安装失败时 playbook 会直接把末尾打出来；
+  重启前就失败的（认证、找不到该更新）会立刻报错，不用等超时。
+- ☠️ **`os-upgrade-major`**：大版本升级后可能要重新批准 Tailscale 系统扩展，或停在升级后的
+  设置助手。任何一个都会让它失联，只能去现场处理。确认有人能碰到机器再跑。
 
 ## 手动 / 仅 GUI 的步骤（Ansible 做不了，列在此处归档）
 
