@@ -1,0 +1,370 @@
+---
+# macOS 软件更新（系统小版本/安全补丁 + Safari/CLT 这类不需重启的），需要重启时
+# **无人值守地重启并等它回来验收**。
+#
+#   just os-updates         只读：列出待装更新 + 本次会装什么 + 前置检查（--check，不要密码）
+#   just os-update          真装：先确认计划并问一次登录密码，然后装、重启、验收
+#   just os-upgrade-major   同上，但允许大版本升级（如 26 → 27），默认一律跳过
+#
+# 为什么需要它：系统设置里的自动更新开关全开着，但这台无头机上并不生效
+# （2026-09-26 实测：26.7 挂着没装，已 96 天没重启）。
+#
+# ☠️ 能远程重启的前提（缺一个，重启后就再也连不上，只能去现场）：
+#   - FileVault **关**：开着的话重启后停在预启动解锁界面，Tailscale 都没起来
+#   - 自动登录 = 登录用户：否则停在登录窗口，LaunchAgent（node_exporter/multica…）不会起
+#   - Tailscale「Run when logged out」：见 README 手动步骤 5（CLI 查不了，没法在这里断言）
+#   前两条下面的前置检查会断言，不满足直接拒绝重启。
+#
+# 密码为什么不用 --ask-become-pass：Apple Silicon 上装系统更新要 volume owner 认证
+# （softwareupdate --user/--stdinpass），和 sudo 是同一个登录密码；而 -K 拿到的密码
+# 不以变量形式暴露给任务，只能自己 pause 问一次，两处共用。密码不进命令行参数：
+# 装免重启更新时走 command 模块的 stdin，装系统更新时写成 root 0600 文件、
+# 启动脚本打开后立刻删掉。
+#
+# 一次只装**一个**需重启的更新（取版本最高的；小版本会覆盖更早的安全补丁），
+# 其余下次再跑。需要「关机」才能完成的更新一律不装（远程关了机没人按电源键）。
+- name: macOS software update (unattended restart)
+  hosts: macbook
+  gather_facts: true            # 需要 ansible_facts.user_id
+  vars:
+    # 大版本升级默认跳过：升级后可能要重新批准 Tailscale 系统扩展、或停在
+    # 升级后的设置助手，任何一个都会让这台远程机失联。只经 os-upgrade-major 放行。
+    allow_major: false
+    su_user: "{{ ansible_facts.user_id }}"
+    # 覆盖「下载 + 准备 + 重启后安装 + 开机」全程；到点前一旦 boot time 变了就立即往下走，
+    # 给大了只影响失败时的等待时长。
+    su_timeout: "{{ 14400 if allow_major | bool else 7200 }}"
+    su_min_free_gib: "{{ 40 if allow_major | bool else 20 }}"
+    su_log: /var/log/macbook-os-update.log
+    su_pass_file: /var/root/.macbook-os-update.pass
+    su_launcher: /var/root/macbook-os-update.sh
+    # 列出 ~/Library/LaunchAgents 里**正在运行**的 label。重启前后各跑一次，
+    # 之前在跑的之后必须也在跑（不写死清单：hermes/vllm 这些非本 repo 管的也一并覆盖）。
+    su_agents_script: |
+      uid=$(id -u)
+      for p in "$HOME"/Library/LaunchAgents/*.plist; do
+        label=$(/usr/libexec/PlistBuddy -c 'Print :Label' "$p" 2>/dev/null) || continue
+        launchctl print "gui/$uid/$label" 2>/dev/null \
+          | grep -Eq '^[[:space:]]*state = running' && echo "$label"
+      done
+      exit 0
+
+  tasks:
+    # ── 只读阶段（--check 下也照跑）───────────────────────────────────────────
+    - name: Read current macOS version
+      ansible.builtin.command: sw_vers -productVersion
+      register: su_os_before
+      changed_when: false
+      check_mode: false
+
+    - name: List available updates (takes ~1 min, hits Apple's servers)
+      ansible.builtin.command: softwareupdate --list
+      register: su_list
+      changed_when: false
+      check_mode: false
+
+    - name: Reset parse state
+      ansible.builtin.set_fact:
+        su_items: []
+        su_major_now: "{{ su_os_before.stdout.split('.') | first | int }}"
+
+    # softwareupdate -l 的每条长这样（2026-09-26 实测）：
+    #   * Label: macOS Tahoe 26.7-25G229
+    #   	Title: macOS Tahoe 26.7, Version: 26.7, Size: 3850649KiB, Recommended: YES, Action: restart,
+    # vkey 是版本号的整数列表，用来按数值排序（字符串排序会把 26.10 排在 26.9 前面）。
+    - name: Parse the update list
+      ansible.builtin.set_fact:
+        su_items: "{{ su_items + [su_item] }}"
+      vars:
+        su_label: "{{ item.splitlines() | first | trim }}"
+        su_title: "{{ item | regex_search('Title: ([^,]+),', '\\1') | default([''], true) | first | trim }}"
+        su_ver: "{{ item | regex_search('Version: ([^,]+),', '\\1') | default([''], true) | first | trim }}"
+        su_vkey: "{{ (su_ver | regex_replace('[^0-9.].*$', '')).split('.') | map('int') | list }}"
+        su_item:
+          label: "{{ su_label }}"
+          title: "{{ su_title }}"
+          version: "{{ su_ver }}"
+          vkey: "{{ su_vkey }}"
+          # 同一产品线的多个版本（CLT 常同时挂 26.5 和 26.6）只装最新的那个
+          family: "{{ su_title | regex_replace('\\s+[0-9][0-9.]*$', '') }}"
+          restart: "{{ 'Action: restart' in item }}"
+          shutdown: "{{ 'Action: shut down' in item }}"
+          major: "{{ su_label is match('macOS') and (su_vkey | first) > su_major_now | int }}"
+      loop: "{{ (su_list.stdout ~ '\n' ~ su_list.stderr).split('* Label: ')[1:] }}"
+      loop_control:
+        label: "{{ item.splitlines() | first }}"
+
+    - name: Decide what this run installs
+      ansible.builtin.set_fact:
+        su_norestart: >-
+          {{ su_items | rejectattr('restart') | rejectattr('shutdown')
+             | sort(attribute='vkey') | groupby('family') | map('last') | map('last') | list }}
+        su_majors: "{{ su_items | selectattr('major') | rejectattr('shutdown') | list }}"
+        su_minors: "{{ su_items | selectattr('restart') | rejectattr('major') | rejectattr('shutdown') | list }}"
+        su_shutdown: "{{ su_items | selectattr('shutdown') | list }}"
+
+    - name: Pick the single restart-requiring update
+      ansible.builtin.set_fact:
+        su_restart_pick: >-
+          {{ ((su_majors if (allow_major | bool and su_majors | length > 0) else su_minors)
+              | sort(attribute='vkey'))[-1:] }}
+
+    - name: Read preflight state (FileVault / auto-login / power / disk / load)
+      ansible.builtin.shell: |
+        printf 'filevault\t%s\n' "$(fdesetup status | head -1)"
+        printf 'autologin\t%s\n' "$(sysadminctl -autologin status 2>&1 | sed -n 's/.*Automatic login user: //p')"
+        printf 'power\t%s\n'     "$(pmset -g batt | sed -n "1s/.*'\(.*\)'.*/\1/p")"
+        printf 'free_gib\t%s\n'  "$(df -g /System/Volumes/Data | awk 'NR==2{print $4}')"
+        printf 'running\t%s\n'   "$(pgrep -x softwareupdate | xargs)"
+        printf 'load\t%s\n'      "$(sysctl -n vm.loadavg | tr -d '{}' | xargs)"
+      register: su_pre_raw
+      changed_when: false
+      check_mode: false
+
+    - name: Collect preflight state
+      ansible.builtin.set_fact:
+        su_pre: "{{ dict(su_pre_raw.stdout_lines | map('split', '\t')) }}"
+
+    - name: Show the plan
+      ansible.builtin.debug:
+        msg: >-
+          {{ ['macOS ' ~ su_os_before.stdout ~ ' · 负载 ' ~ su_pre.load ~ ' · 空闲 ' ~ su_pre.free_gib ~ ' GiB']
+             + (su_norestart | map(attribute='title') | map('regex_replace', '^', '装（免重启）: ') | list)
+             + (su_restart_pick | map(attribute='title') | map('regex_replace', '^', '装并【自动重启】: ') | list)
+             + ((su_majors | map(attribute='title') | map('regex_replace', '^', '跳过大版本（just os-upgrade-major）: ') | list)
+                if not (allow_major | bool) else [])
+             + (su_shutdown | map(attribute='title') | map('regex_replace', '^', '跳过（需关机，远程装不了）: ') | list)
+             + ([] if (su_norestart + su_restart_pick) else ['没有要装的，已是最新']) }}
+
+    - name: Refuse when the Mac would not come back unattended
+      when: su_restart_pick | length > 0
+      ansible.builtin.assert:
+        that:
+          - "'Off' in su_pre.filevault"
+          - su_pre.autologin == su_user
+          - su_pre.power == 'AC Power'
+        fail_msg: >-
+          重启后无法无人值守地回来，拒绝继续 —— FileVault「{{ su_pre.filevault }}」（必须 Off）·
+          自动登录用户「{{ su_pre.autologin }}」（必须是 {{ su_user }}）·
+          电源「{{ su_pre.power }}」（必须 AC Power）。见 macbook/ansible/README.md 手动步骤。
+        quiet: true
+
+    - name: Refuse when disk is short or another softwareupdate is running
+      when: (su_norestart + su_restart_pick) | length > 0
+      ansible.builtin.assert:
+        that:
+          - su_pre.free_gib | int >= su_min_free_gib | int
+          - su_pre.running == ''
+        fail_msg: >-
+          空闲 {{ su_pre.free_gib }} GiB（至少要 {{ su_min_free_gib }}）·
+          正在运行的 softwareupdate pid「{{ su_pre.running }}」（必须为空，
+          上次的还没跑完就等它，日志在 {{ su_log }}）
+        quiet: true
+
+    - name: Stop here in dry-run (just os-updates) or when nothing to install
+      when: ansible_check_mode or (su_norestart + su_restart_pick) | length == 0
+      ansible.builtin.meta: end_host
+
+    # ── 真装 ─────────────────────────────────────────────────────────────────
+    # 这一步同时是确认闸门：看过上面的计划再输密码，Ctrl-C 再按 A 中止。
+    - name: Confirm the plan and read the login password
+      ansible.builtin.pause:
+        prompt: >-
+          上面的计划{{ '会【重启】这台 Mac，正在跑的 multica 任务 / OMLX 推理会被中断' if su_restart_pick else '不需要重启' }}。
+          输入 {{ su_user }} 的登录密码继续（sudo 与 volume owner 认证共用），Ctrl-C 再按 A 中止
+        echo: false
+      register: su_pw
+      no_log: true
+
+    - name: Use it as the become password
+      ansible.builtin.set_fact:
+        ansible_become_password: "{{ su_pw.user_input | default('') }}"
+      no_log: true
+
+    - name: Refuse to continue without a password
+      ansible.builtin.assert:
+        that: ansible_become_password | length > 0
+        fail_msg: 没拿到密码（stdin 不是交互终端？）—— 请在终端里直接跑 just os-update。
+        quiet: true
+
+    - name: Verify the password with sudo (fail fast before anything is installed)
+      become: true
+      ansible.builtin.command: /usr/bin/true
+      changed_when: false
+
+    - name: Install updates that need no restart
+      when: su_norestart | length > 0
+      become: true
+      ansible.builtin.command:
+        argv: "{{ ['/usr/sbin/softwareupdate', '--install'] + (su_norestart | map(attribute='label') | list)
+                  + ['--user', su_user, '--stdinpass'] }}"
+        stdin: "{{ ansible_become_password }}"
+      async: 3600
+      poll: 15
+      register: su_nr
+      changed_when: true
+      failed_when: false
+      no_log: true            # 模块参数里有密码；结果在下一步单独打印
+
+    - name: Report the no-restart install
+      when: su_norestart | length > 0
+      ansible.builtin.assert:
+        that: su_nr.rc | default(-1) == 0
+        fail_msg: "softwareupdate rc={{ su_nr.rc | default('?') }}: {{ su_nr.msg | default('') }} {{ su_nr.stdout | default('') }} {{ su_nr.stderr | default('') }}"
+        success_msg: "{{ su_nr.stdout_lines[-5:] }}"
+
+    - name: Install the restart-requiring update and wait for the Mac to come back
+      when: su_restart_pick | length > 0
+      vars:
+        su_target: "{{ su_restart_pick | first }}"
+      block:
+        - name: Snapshot running LaunchAgents
+          ansible.builtin.shell: "{{ su_agents_script }}"
+          register: su_agents_before
+          changed_when: false
+
+        - name: Stage the password for --stdinpass (root 0600; the launcher deletes it on open)
+          become: true
+          ansible.builtin.copy:
+            content: "{{ ansible_become_password }}\n"
+            dest: "{{ su_pass_file }}"
+            owner: root
+            group: wheel
+            mode: "0600"
+          no_log: true
+
+        # 由 reboot 模块当 reboot_command 调用，**同步**跑 softwareupdate：
+        #   - 下载/准备失败 → 非 0 退出，reboot 模块立刻报错并带上日志末尾，不用干等超时
+        #   - 顺利 → softwareupdate 自己触发重启，连接断开被 reboot 模块当成「已重启」，
+        #     随后它轮询 boot time 直到变化
+        # nohup：下载要几十分钟，期间 SSH 断了也不能把它带走（输出全进日志，不依赖 pty）。
+        - name: Write the launcher
+          become: true
+          ansible.builtin.copy:
+            dest: "{{ su_launcher }}"
+            owner: root
+            group: wheel
+            mode: "0700"
+            content: |
+              #!/bin/sh
+              # 由 macbook/ansible/playbooks/os-update.yaml 生成，每次运行覆盖，结束后删除。
+              log={{ su_log | quote }}
+              touch "$log"
+              exec 3<{{ su_pass_file | quote }} || exit 1
+              rm -f {{ su_pass_file | quote }}
+              start=$(($(wc -l <"$log") + 1))
+              echo "=== $(date '+%F %T') install "{{ su_target.label | quote }} >>"$log"
+              nohup /usr/sbin/softwareupdate --install {{ su_target.label | quote }} --restart \
+                --user {{ su_user | quote }} --stdinpass{{ ' --agree-to-license' if su_target.major else '' }} \
+                <&3 >>"$log" 2>&1
+              rc=$?
+              if [ "$rc" -ne 0 ] || tail -n +"$start" "$log" | grep -Eq 'No such update|No updates are available'; then
+                echo "softwareupdate 没有进入重启流程（rc=${rc}），日志 ${log} 末尾："
+                tail -n +"$start" "$log" | tail -n 30
+                exit 1
+              fi
+
+        - name: Install {{ su_target.title }} and restart
+          become: true
+          ansible.builtin.reboot:
+            reboot_command: "/bin/sh {{ su_launcher }}"
+            boot_time_command: sysctl -n kern.boottime
+            reboot_timeout: "{{ su_timeout | int }}"
+          timeout: "{{ su_timeout | int * 2 }}"   # 下载/准备阶段挂死时的兜底
+          register: su_reboot
+
+      rescue:
+        - name: Read the install log
+          become: true
+          ansible.builtin.command: "tail -n 40 {{ su_log }}"
+          register: su_log_tail
+          changed_when: false
+          failed_when: false
+
+        - name: Fail with the log
+          ansible.builtin.fail:
+            msg: >-
+              系统更新没完成：{{ ansible_failed_result.msg | default('') }}
+              —— {{ su_log }} 末尾：{{ su_log_tail.stdout_lines | default([]) }}
+
+      always:
+        - name: Remove the launcher and any leftover password file
+          become: true
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "{{ su_pass_file }}"
+            - "{{ su_launcher }}"
+
+    # ── 重启后验收：更新本身成功不等于这台机恢复到了原样 ─────────────────────
+    - name: Post-restart checks
+      when: su_restart_pick | length > 0
+      vars:
+        su_target: "{{ su_restart_pick | first }}"
+      block:
+        - name: Read macOS version after restart
+          ansible.builtin.command: sw_vers -productVersion
+          register: su_os_after
+          changed_when: false
+
+        # root = 停在登录窗口（自动登录没生效），用户态的一切都不会起来
+        - name: Wait for auto-login to reach a GUI session
+          ansible.builtin.command: stat -f %Su /dev/console
+          register: su_console
+          changed_when: false
+          retries: 40
+          delay: 15
+          until: su_console.stdout == su_user
+          ignore_errors: true
+
+        - name: Wait for node_exporter (monitoring back)
+          ansible.builtin.uri:
+            url: http://127.0.0.1:9100/metrics
+            return_content: false
+          register: su_ne
+          retries: 20
+          delay: 15
+          until: su_ne.status == 200
+          ignore_errors: true
+
+        - name: Wait for the LaunchAgents that were running before
+          ansible.builtin.shell: "{{ su_agents_script }}"
+          register: su_agents_after
+          changed_when: false
+          retries: 20
+          delay: 15
+          until: su_agents_before.stdout_lines | difference(su_agents_after.stdout_lines) | length == 0
+          ignore_errors: true
+
+        # 大版本升级可能把 pmset 重置掉；丢了它合盖就会睡，远程又断
+        - name: Read SleepDisabled
+          ansible.builtin.shell: "pmset -g | awk '/SleepDisabled/{print $2}'"
+          register: su_sleep
+          changed_when: false
+
+        - name: Show the install log
+          become: true
+          ansible.builtin.command: "tail -n 15 {{ su_log }}"
+          register: su_log_tail
+          changed_when: false
+          failed_when: false
+
+        - name: Verdict
+          ansible.builtin.assert:
+            that:
+              - su_os_after.stdout is version(su_target.version | regex_replace(' .*$', ''), '>=')
+              - su_console.stdout | default('') == su_user
+              - su_ne.status | default(0) == 200
+              - su_agents_before.stdout_lines | difference(su_agents_after.stdout_lines | default([])) | length == 0
+              - su_sleep.stdout | trim == '1'
+            fail_msg: >-
+              重启后没恢复原样（{{ su_os_before.stdout }} → {{ su_os_after.stdout }}，目标 {{ su_target.version }}）：
+              控制台用户「{{ su_console.stdout | default('?') }}」（应为 {{ su_user }}，root = 停在登录窗口）·
+              node_exporter {{ su_ne.status | default('不可达') }} ·
+              没起来的 LaunchAgent {{ su_agents_before.stdout_lines | difference(su_agents_after.stdout_lines | default([])) }} ·
+              SleepDisabled「{{ su_sleep.stdout | trim }}」（不是 1 就跑 just power）·
+              日志 {{ su_log_tail.stdout_lines | default([]) }}
+            success_msg: >-
+              macOS {{ su_os_before.stdout }} → {{ su_os_after.stdout }}，重启耗时 {{ su_reboot.elapsed | default('?') }}s；
+              自动登录、node_exporter、{{ su_agents_before.stdout_lines | length }} 个 LaunchAgent、SleepDisabled 均已恢复

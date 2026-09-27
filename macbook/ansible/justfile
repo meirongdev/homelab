@@ -57,3 +57,21 @@ power:
 # 一次跑全部 Ansible 能做的（包/AI CLI/multica daemon/node_exporter/OMLX 指标/电源）
 site:
     ansible-playbook playbooks/site.yaml --ask-become-pass
+
+# 系统更新三个配方共用 playbooks/os-update.yaml，刻意不进 site：site 是可反复跑的配置，
+# 这个会重启机器。前置条件与验收内容见 README「系统更新」。
+# 只读：列出待装的 macOS 更新、本次会装什么、前置检查是否满足（不要密码，不改任何东西）
+os-updates:
+    ansible-playbook playbooks/os-update.yaml --check
+
+# ⚠️ 需要重启时会**自动重启**并等它回来验收，正在跑的 multica 任务 / OMLX 推理会被中断。
+# 大版本（如 macOS 27）一律跳过。确认计划并输入登录密码后才动手。
+# 装 macOS 小版本/安全更新 + Safari/CLT 等（交互输入登录密码）
+os-update:
+    ansible-playbook playbooks/os-update.yaml
+
+# ☠️ 大版本升级后可能要重新批准 Tailscale 系统扩展、或停在升级后的设置助手 ——
+#    任何一个都会让这台远程机失联，只能去现场处理。确认有人能碰到机器再跑。
+# 大版本升级（如 macOS 26 → 27），其余同 os-update
+os-upgrade-major:
+    ansible-playbook playbooks/os-update.yaml -e allow_major=true
