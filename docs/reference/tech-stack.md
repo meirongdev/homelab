@@ -1,6 +1,6 @@
 # Tech Stack — 技术栈全景
 
-> Last updated: 2026-09-26
+> Last updated: 2026-09-27
 > Status: 生效事实
 >
 > 这套系统由哪些技术组成、每个是干什么的、为什么是它、配置和版本钉在哪。
@@ -104,7 +104,6 @@ Cilium/ArgoCD/指标那层叫 `homelab`）→ 命名正典见 [terminology.md](t
 | **AppProject** | ArgoCD 的权限边界 | 每集群一个（`homelab` / `oracle-k3s`），写错 destination 由服务端拒绝 → [argocd-project-per-cluster.md](../decisions/argocd-project-per-cluster.md) |
 | **Helm** | 消费上游 chart（values 覆盖默认值） | 只用来消费上游；**自研应用不打 chart** → [no-helm-chart-for-in-house-apps.md](../decisions/no-helm-chart-for-in-house-apps.md) |
 | **Kustomize / 目录源** | 不模板化地组织自己的 YAML | 一个 App 一个目录，目录即清单，放进去就纳入同步 → [manifests-directory-per-app.md](../decisions/manifests-directory-per-app.md) |
-| **Renovate** | 自动开 PR 升级钉住的版本 | 🚧 配置与 CI 已合入，**GitHub App 还没装**，当前无任何自动升级 → [renovate-adoption.md](../decisions/renovate-adoption.md) |
 
 ⚠️ **四个例外不走 ArgoCD**（改 values 后必须手动 `helm upgrade`，**提交 ≠ 部署**）：
 Cilium / Vault / ESO / ArgoCD 本体。理由是它们要么是 ArgoCD 自己的依赖，要么改坏了会让 GitOps 失去自愈能力。
@@ -169,7 +168,7 @@ Cilium / Vault / ESO / ArgoCD 本体。理由是它们要么是 ArgoCD 自己的
 | `scripts/check-docs.py` | R1–R8：目录归属、命名、文首字段、索引完整性、长度预算 |
 | `scripts/check-terminology.py` | T1–T4：不存在的集群名、拼写正典、过期的「单节点」表述 |
 | `scripts/check-public-ips.py` | 禁止提交公网 IP |
-| `scripts/check-version-pairs.py` | V1–V5：必须同步升级的版本对（如 Cilium ↔ Gateway API CRD）、共享版本不被遮蔽、renovate 注释真被 Renovate 捕获 |
+| `scripts/check-version-pairs.py` | V1–V4：必须同步升级的版本对（如 Cilium ↔ Gateway API CRD）、共享版本不被 import 方遮蔽 |
 | `scripts/check-embedded-scripts.py` | E1：ConfigMap 内嵌脚本与 `.py` 源一致 + Pod 模板带 checksum 注解 |
 
 本地一次跑完：`just check`（与 CI 同款）。规则全文 → [manifest-safety-checks.md](manifest-safety-checks.md)。

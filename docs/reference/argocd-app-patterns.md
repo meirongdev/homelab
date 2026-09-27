@@ -1,6 +1,6 @@
 # ArgoCD Application Patterns
 
-> Last updated: 2026-09-13
+> Last updated: 2026-09-27
 > Status: 生效事实
 >
 > 当前 ArgoCD 管理模式分析、可选 pattern 对比与取舍建议。
@@ -151,8 +151,7 @@ Namespace 被 prune 会级联删光 ns 下一切，`Prune=false` 拦不住。
   ② 服务是两半的，执行任务的 daemon 在 M2 MacBook 上，daemon 离线时集群侧一切正常。
   安装/重建见 [../runbooks/multica-install.md](../runbooks/multica-install.md)。
 - ~~`argocd-image-updater`~~ ❌ 2026-08-03 退役（0 个 CR 空转数月）；机制存档
-  [../decisions/argocd-image-updater.md](../decisions/argocd-image-updater.md)，替代方向
-  Renovate（ROADMAP #12）。
+  [../decisions/argocd-image-updater.md](../decisions/argocd-image-updater.md)；当前没有任何镜像自动升级。
 
 ### oracle-k3s App（kustomize 树）的专有事实
 

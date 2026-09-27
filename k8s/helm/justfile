@@ -12,9 +12,7 @@ import '../../versions.just'
 # `argocd_chart_version`，就在 deploy-argocd 上方，跟着那条配方走）。
 # LGTM/otel/external-dns 已全部迁 ArgoCD（2026-07-31）：chart 版本唯一真源是
 # argocd/applications/<app>.yaml 的 targetRevision——不要在这里重复维护（此前双 pin 漂移过：loki 7.0.0 vs 7.1.0）。
-# renovate: datasource=helm depName=vault registryUrl=https://helm.releases.hashicorp.com
 vault_version            := "0.33.0"
-# renovate: datasource=helm depName=external-secrets registryUrl=https://charts.external-secrets.io
 eso_version              := "2.6.0"
 
 # ⚠️ 紧急回滚 / 手动重部署（仅 ArgoCD 不可用时；配置真源仍是 values/<app>.yaml）：
@@ -381,7 +379,6 @@ calibre_ctx := "oracle-k3s"
 #   已用 --force-conflicts 把所有权收回 helm；kubectl-patch 仍残留 requests.memory
 #   的共享所有权，下次改 request 若再冲突，同样加 --force-conflicts。
 #   教训：手工 kubectl patch 过的字段会永久劫持 helm 的声明，改完记得 helm 收回。
-# renovate: datasource=helm depName=argo-cd registryUrl=https://argoproj.github.io/argo-helm
 argocd_chart_version := "10.1.4"
 
 # 一键安装 ArgoCD + 应用配置（幂等，可重复执行）
