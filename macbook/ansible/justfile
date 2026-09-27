@@ -58,7 +58,7 @@ power:
 site:
     ansible-playbook playbooks/site.yaml --ask-become-pass
 
-# 系统更新三个配方共用 playbooks/os-update.yaml，刻意不进 site：site 是可反复跑的配置，
+# 系统更新四个配方共用 playbooks/os-update.yaml，刻意不进 site：site 是可反复跑的配置，
 # 这个会重启机器。前置条件与验收内容见 README「系统更新」。
 # 只读：列出待装的 macOS 更新、本次会装什么、前置检查是否满足（不要密码，不改任何东西）
 os-updates:
@@ -69,6 +69,10 @@ os-updates:
 # 装 macOS 小版本/安全更新 + Safari/CLT 等（交互输入登录密码）
 os-update:
     ansible-playbook playbooks/os-update.yaml
+
+# 只装免重启的更新（Safari/CLT 等），需重启的一次性留给 just os-update
+os-update-no-restart:
+    ansible-playbook playbooks/os-update.yaml -e allow_restart=false
 
 # ☠️ 大版本升级后可能要重新批准 Tailscale 系统扩展、或停在升级后的设置助手 ——
 #    任何一个都会让这台远程机失联，只能去现场处理。确认有人能碰到机器再跑。

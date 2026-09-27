@@ -11,6 +11,7 @@
 cd macbook/ansible && just ping     # 连通性
 just site                           # 全量（packages + ai-clis + node-exporter + power）
 just os-updates                     # 系统更新：先看计划（只读），再 just os-update
+just os-update-no-restart           # 系统更新：只装免重启的
 ```
 
 ## 详见

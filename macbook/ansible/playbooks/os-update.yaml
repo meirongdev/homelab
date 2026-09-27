@@ -2,9 +2,10 @@
 # macOS 软件更新（系统小版本/安全补丁 + Safari/CLT 这类不需重启的），需要重启时
 # **无人值守地重启并等它回来验收**。
 #
-#   just os-updates         只读：列出待装更新 + 本次会装什么 + 前置检查（--check，不要密码）
-#   just os-update          真装：先确认计划并问一次登录密码，然后装、重启、验收
-#   just os-upgrade-major   同上，但允许大版本升级（如 26 → 27），默认一律跳过
+#   just os-updates             只读：列出待装更新 + 本次会装什么 + 前置检查（--check，不要密码）
+#   just os-update              真装：先确认计划并问一次登录密码，然后装、重启、验收
+#   just os-update-no-restart   只装免重启的更新（Safari/CLT 等），需重启的留给下次
+#   just os-upgrade-major       同上，但允许大版本升级（如 26 → 27），默认一律跳过
 #
 # 为什么需要它：系统设置里的自动更新开关全开着，但这台无头机上并不生效
 # （2026-09-26 实测：26.7 挂着没装，已 96 天没重启）。
@@ -30,6 +31,9 @@
     # 大版本升级默认跳过：升级后可能要重新批准 Tailscale 系统扩展、或停在
     # 升级后的设置助手，任何一个都会让这台远程机失联。只经 os-upgrade-major 放行。
     allow_major: false
+    # 默认装「需重启」更新并自动重启；os-update-no-restart 传 allow_restart=false，
+    # 只装免重启的，需重启的一次都不装、留给下次。
+    allow_restart: true
     su_user: "{{ ansible_facts.user_id }}"
     # 覆盖「下载 + 准备 + 重启后安装 + 开机」全程；到点前一旦 boot time 变了就立即往下走，
     # 给大了只影响失败时的等待时长。
@@ -106,7 +110,8 @@
     - name: Pick the single restart-requiring update
       ansible.builtin.set_fact:
         su_restart_pick: >-
-          {{ ((su_majors if (allow_major | bool and su_majors | length > 0) else su_minors)
+          {{ [] if not (allow_restart | bool) else
+             ((su_majors if (allow_major | bool and su_majors | length > 0) else su_minors)
               | sort(attribute='vkey'))[-1:] }}
 
     - name: Read preflight state (FileVault / auto-login / power / disk / load)
@@ -133,8 +138,13 @@
              + (su_restart_pick | map(attribute='title') | map('regex_replace', '^', '装并【自动重启】: ') | list)
              + ((su_majors | map(attribute='title') | map('regex_replace', '^', '跳过大版本（just os-upgrade-major）: ') | list)
                 if not (allow_major | bool) else [])
+             + ((su_minors | map(attribute='title') | map('regex_replace', '^', '跳过（本次不装需重启的，留给 just os-update）: ') | list)
+                if not (allow_restart | bool) else [])
              + (su_shutdown | map(attribute='title') | map('regex_replace', '^', '跳过（需关机，远程装不了）: ') | list)
-             + ([] if (su_norestart + su_restart_pick) else ['没有要装的，已是最新']) }}
+             + (['没有要装的，已是最新']
+                if (su_norestart + su_restart_pick + su_majors + su_minors + su_shutdown) | length == 0
+                else (['没有要装的（见上面的跳过项，留给下次）'] if (su_norestart + su_restart_pick) | length == 0
+                      else [])) }}
 
     - name: Refuse when the Mac would not come back unattended
       when: su_restart_pick | length > 0
