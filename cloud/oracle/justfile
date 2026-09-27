@@ -13,7 +13,6 @@ vault_token := env_var_or_default("VAULT_TOKEN", "")
 import '../../versions.just'
 
 # 与 k8s/helm/justfile 的 eso_version 一致（两集群同版本，实测 helm list 均为 2.6.0）。
-# renovate: datasource=helm depName=external-secrets registryUrl=https://charts.external-secrets.io
 eso_version    := "2.6.0"
 
 # ─── Node Setup ────────────────────────────────────────────────

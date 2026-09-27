@@ -19,9 +19,9 @@ GitOps 覆盖与安全纵深已成熟。剩余债务集中三处：
 
 1. ~~**一个安全债**：ZITADEL 的数据库是 Bitnami 冻结镜像（§一 A）——全仓库唯一"不修会持续变糟"的项。~~ ✅ 2026-07-18 已清偿（Phase C 完成，迁 CNPG PG17）。
 2. **一个结构性缺口**：5 个 Terraform root 的 state 全在笔记本本地（§一 B）——笔记本即全部 IaC 的单点。
-3. **一个自动化缺口**：无 Renovate，版本 pin 靠手（§一 C）——2026-07-07 发现的 vault/ESO pin 漂移即此后果，会复发。
+3. **一个自动化缺口**：版本 pin 靠手（§一 C）——2026-07-07 发现的 vault/ESO pin 漂移即此后果，会复发。
 
-演进**不需要引入新平台**（Crossplane 属于此类），需要的是把既有工具链补完：CNPG、R2 state backend、Renovate、external-dns——每个都是"一个周末、马上兑现"的量级。
+演进**不需要引入新平台**（Crossplane 属于此类），需要的是把既有工具链补完：CNPG、R2 state backend、external-dns——每个都是"一个周末、马上兑现"的量级。
 
 ---
 
@@ -46,7 +46,7 @@ GitOps 覆盖与安全纵深已成熟。剩余债务集中三处：
 
 ### C. 自动化缺口
 
-**Renovate 缺位**（ROADMAP P2 已列未做）。当前靠手维护的版本面：`k8s/helm/justfile` chart pins、ArgoCD Application `targetRevision`、oracle manifests 镜像 tag/digest。2026-07-07 实测漂移：vault 0.33.0 vs pin 0.32.0、ESO 2.6.0 vs pin 2.1.0——照 pin 重跑会**降级**。没有 Renovate 这类漂移必然复发。
+**版本 pin 全靠人工维护**。当前靠手维护的版本面：`k8s/helm/justfile` chart pins、ArgoCD Application `targetRevision`、oracle manifests 镜像 tag/digest。2026-07-07 实测漂移：vault 0.33.0 vs pin 0.32.0、ESO 2.6.0 vs pin 2.1.0——照 pin 重跑会**降级**。这类漂移必然复发。
 
 ### D. 既列未做（ROADMAP 已跟踪，此处不展开）
 
@@ -139,8 +139,7 @@ pg_dump/restore 迁移(逐表行数核对) + OIDC/console 实测验证 + 旧 `zi
 
 ### Phase D — 自动化补课
 
-1. **Renovate**（ROADMAP P2 既有项）：管 `justfile` pins、Application `targetRevision`、oracle manifests 镜像 digest。直接防 §一 C 漂移复发。
-2. **external-dns**：`--source=gateway-httproute` + Gateway 上 `external-dns.alpha.kubernetes.io/target: <tunnel-id>.cfargotunnel.com` + HTTPRoute 注解 `cloudflare-proxied`。此后加子域名只写 HTTPRoute 一个文件；Terraform 收缩为 zone/WAF/tunnel 骨架。
+1. **external-dns**：`--source=gateway-httproute` + Gateway 上 `external-dns.alpha.kubernetes.io/target: <tunnel-id>.cfargotunnel.com` + HTTPRoute 注解 `cloudflare-proxied`。此后加子域名只写 HTTPRoute 一个文件；Terraform 收缩为 zone/WAF/tunnel 骨架。
 
 ### Phase E — 大项（按 ROADMAP 原样，不改优先级）
 

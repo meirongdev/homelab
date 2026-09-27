@@ -31,7 +31,6 @@
 #   operator 日志里那句 "Required GatewayAPI resources are not found" 是**故障信号**
 #   （有输出=坏了），健康集群什么都不打，所以 grep 不到不等于健康。
 #   完整复盘 docs/records/2026-08-11-gateway-api-crd-stall.md
-# renovate: datasource=helm depName=cilium registryUrl=https://helm.cilium.io
 cilium_version := "1.20.0"
 
 # Cilium 1.20 要求的 Gateway API CRD 版本（装它的配方是 `just deploy-gateway-api-crds`，
@@ -39,5 +38,4 @@ cilium_version := "1.20.0"
 # 升级前先读 Cilium 对应版本文档的 Gateway API 前置条件，别假设旧 CRD 还能用。
 # ⚠️ 还有第三份副本在 cloud/oracle/ansible/playbooks/setup-k3s.yaml（YAML 变量，import 不进来），
 #    由 CI 的 V2 断言与本文件一致。
-# renovate: datasource=github-releases depName=kubernetes-sigs/gateway-api
 gateway_api_version := "1.6.1"

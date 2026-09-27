@@ -1,6 +1,6 @@
 # Homelab Roadmap
 
-> Last updated: 2026-09-26
+> Last updated: 2026-09-27
 > 本文只回答两件事：**还剩什么没做**，和**为什么不做**。做过什么在
 > [CHANGELOG.md](CHANGELOG.md)（2026-09-02 拆出，原因见那里）。
 > **实施细节不写在这里**：每条压到一句话，展开看链接指向的 `reference/`（事实）、
@@ -19,7 +19,7 @@
 
 > ⚠️ **编号是稳定标识，不是序号**。`reference/`、`decisions/`、runbook 都按 `开放项 #N`
 > 引用它们，所以关闭一条时不重新编号，也不把号让给新条目，留下的空档表示这号已经关掉了。
-> 曾经因为挪过号，三处文档的 `Renovate #10` 与一处 `#13` 全指错了地方（2026-08-13 修）。
+> 曾经因为挪过号，四处文档引用的开放项编号全指错了地方（2026-08-13 修）。
 
 | # | 项目 | 说明 |
 |---|------|------|
@@ -30,11 +30,11 @@
 | 9 | **jobs-sg 收尾** | 均不阻塞服务：① 周报 Telegram 已接好，只差端到端实测一次推送；② Grafana 面板未做（`jobs_sg_*` 已在采，可用 Explore）；③ `closed` 寿命口径 A/B 待观察 2–3 周再定；④ 推理封顶后两个旋钮待实测：`LLM_CONCURRENCY=8` 高于引擎 KV 上限 5.34（降到 5 是省排队还是把同一批活拉得更长，未测不改），以及封顶后若仍有残留超时则 `LLM_RETRIES` 0→1（那时一次重试只值约 20s）。（[jobs-sg.md](reference/jobs-sg.md)） |
 | 10 | **readlist 公开面缺准入过滤** | 公开面已多轮收窄（v0.3.0 catalog 收敛、v0.4.0 公开榜三份、v0.5.0 修两个「静默为 0」缺陷）。**仍未做修法①**：`internal/calibre` 读 tags 但不据此筛选，非书文档照样参与打分，碰巧上榜则 title+author 上公网，判据只有人眼。⚠️ 做 catalog SSR/sitemap 前应先补①，否则偶发泄漏会被搜索引擎收录固化。 |
 | 11 | **readlist 边缘限流（Cloudflare Free 限制）** | Free 只允许 1 条 rate limiting 规则，已被 auth 端点 + Excalidraw collab relay 占用且共享计数器（见 [`waf.tf`](../cloudflare/terraform/waf.tf) 注释），"分档"做不到。**当前选择：先不做**，v0.2.0 已在应用侧堵掉自伤路径（published_run 缓存、ETag/304、不碰库的 `/livez`、读写超时），站点只读且单副本 500m 上限，剩余风险可接受。 |
-| 12 | **低优先 / 可选** | **Renovate 只做完一半**：配置与 CI 已合入，但 GitHub App 仍未安装，至今一个 PR 都没开过（判据：`git ls-remote --heads origin` 无 `renovate/*`）。装 App 是纯人工一步（[决策](decisions/renovate-adoption.md)，状态 🚧）· MacBook `TargetDown` 静默规则 · Vault Dynamic Secrets（规模不需要）· Cloudflare Pro WAF。（母文档 P2） |
-| 16 | **Proxmox 宿主层收尾**（2026-09-09 体检留下的） | 六件互不阻塞、都要人拍板或动凭据：① pve 的 terraform root 从 root 密码换专属 API token（三步写在 `proxmox/terraform/provider.tf` 注释里，涉及新建凭据刻意没自动化）；② 两台 `root@pam` 都没开 TFA、PVE 防火墙为空而 Web UI 在 LAN 上，先 TOTP 再考虑 datacenter 级只放行 LAN 与 tailnet；③ **sanoid 配置不在 IaC**（106 上的手工文件）+ VM 100 的 vzdump 目标落在 `mrstorage` 根数据集、被递归快照钉着 9 份归档而 keep-last 写的是 3（[storage.md](reference/storage.md)）：要么单独建数据集并从 sanoid 排除，要么明确接受「快照也在保护备份本身」，是策略决定不是 bug；④ pve 宿主的网桥、`10.10.10.1/24` 第二地址、MASQUERADE、apt 源、token 全是手工配置，重建靠记忆，该有一份 `pve-baseline.yaml`（顺带删掉 `/etc/network/interfaces` 注释里的 Wi-Fi 明文密码）；⑤ bpg provider 0.85.1 → 0.112.x（Renovate 装了 App 才会开 PR，见 #12），单独升、别混进配置改动，升完拿「既有盘的 discard/ssd/iothread 改动能否送达 PVE」做回归（0.85.1 送不出去，2026-09-09 实测，见 `proxmox/terraform/main.tf`）；⑥ 106 的 CPU governor 是 `performance`（`power-optimize.yaml` 从未在它上面生效），J4105 空闲封装才 3.8W，收益小，顺手改 `schedutil` 即可 |
+| 12 | **低优先 / 可选** | MacBook `TargetDown` 静默规则 · Vault Dynamic Secrets（规模不需要）· Cloudflare Pro WAF。（母文档 P2） |
+| 16 | **Proxmox 宿主层收尾**（2026-09-09 体检留下的） | 六件互不阻塞、都要人拍板或动凭据：① pve 的 terraform root 从 root 密码换专属 API token（三步写在 `proxmox/terraform/provider.tf` 注释里，涉及新建凭据刻意没自动化）；② 两台 `root@pam` 都没开 TFA、PVE 防火墙为空而 Web UI 在 LAN 上，先 TOTP 再考虑 datacenter 级只放行 LAN 与 tailnet；③ **sanoid 配置不在 IaC**（106 上的手工文件）+ VM 100 的 vzdump 目标落在 `mrstorage` 根数据集、被递归快照钉着 9 份归档而 keep-last 写的是 3（[storage.md](reference/storage.md)）：要么单独建数据集并从 sanoid 排除，要么明确接受「快照也在保护备份本身」，是策略决定不是 bug；④ pve 宿主的网桥、`10.10.10.1/24` 第二地址、MASQUERADE、apt 源、token 全是手工配置，重建靠记忆，该有一份 `pve-baseline.yaml`（顺带删掉 `/etc/network/interfaces` 注释里的 Wi-Fi 明文密码）；⑤ bpg provider 0.85.1 → 0.112.x，单独升、别混进配置改动，升完拿「既有盘的 discard/ssd/iothread 改动能否送达 PVE」做回归（0.85.1 送不出去，2026-09-09 实测，见 `proxmox/terraform/main.tf`）；⑥ 106 的 CPU governor 是 `performance`（`power-optimize.yaml` 从未在它上面生效），J4105 空闲封装才 3.8W，收益小，顺手改 `schedutil` 即可 |
 | 17 | **k8s-node 挪到 LAN，退役 pve 的 NAT 子网** | 控制面躲在 pve 的 `10.10.10.0/24` NAT 后面而 worker 直挂 LAN，是 ip rule 5240、经 pve 转发的静态路由、pve→k8s-node 单向 TCP 不通等一整类复杂度的根源（[tailscale-network.md](reference/tailscale-network.md)）。要动 tls-san、Cilium 的 `k8sServiceHost`、worker 的 `K3S_URL`、oracle 借道 pve 的 10.10.10.0/24 路由通告，是停机变更，先立 ADR 再做 |
 | 18 | **Aiven 库的收尾（root 已 init+import，从未 apply）** | 2026-09-17 review 后重排，剩下的都是"用之前"的判断题：① `termination_protection` 云上仍是 **false**（服务现在可被删），config 要 true，未 apply；② 证书链是自签的 `Project CA`，默认校验直接失败，接之前要么 `ca_model = "letsencrypt"`（free 计划能不能用未测，且要 apply）要么带 `sslrootcert`；③ 数据**不在任何备份面内**（H4 只查清单 PVC），要存东西先在 storage.md 登记归属；④ 服务已自行进入 **POWEROFF**（free 计划的空闲关机），Terraform 开不回来，要用就得先去 Console 开机。☠️ **首次 apply 会把库关严**：`pg_ip_filter` 默认 `[]`，而 root 现在驱动的是真正生效的 `ip_filter` 字段，所以那条 plan 是 `- "0.0.0.0/0"` / `- "::/0"`——先把调用方出口地址填进 `terraform.tfvars` 再 apply，且 apply 后回读 API 验收（从前那份配置写的是 `ip_filter_string`，与云上对不上，plan 恒不报这条差异，2026-09-17 已修）。当前待 apply：0 add / 1 change / 0 destroy（`termination_protection`、`service_log`、`ip_filter` 清空、`public_access.pg=true`，外加一个只在本地的 `timeouts` 块） ([README](../aiven/README.md)) |
-| 19 | **对标 Mafyuh/iac 余下的三件（2026-09-26 评估，需拍板）** | 同批已落地 ArgoCD 告警 / gitleaks / Renovate V5（见 CHANGELOG 同日条）。剩下的都改变既有边界：① **manual-helm 四件套建「只对账不同步」的 ArgoCD App**（无 `automated`）：「提交≠部署」从靠记忆变成 UI 上的 OutOfSync，部署变成点一次 Sync；`ArgoCDAppOutOfSync` 已按 autosync 过滤，不会因此误报。先按 [采纳方法](decisions/manual-helm-to-argocd-adoption.md) 做渲染等价性核对（justfile 里的 `--set` 要搬进 values），顺序 ESO → ArgoCD 自管 → Vault → Cilium 最后（oracle 的 Cilium 同步出错会切断 ArgoCD 自己的网络）；② **k3s 升级交 system-upgrade-controller**（Plan CR + Renovate 已有的 `k3s-io/k3s` 规则），先试 oracle 与 worker，控制面单节点仍有 API 停机；③ **PR 贴渲染 diff**（`render-manifests.py --out` 跑 base/head 两遍再 diff，同 Mafyuh 的 flux-diff）：等 #12 装上 Renovate App、真有 PR 再做，否则没有读者。 |
+| 19 | **对标 Mafyuh/iac 余下的三件（2026-09-26 评估，需拍板）** | 同批已落地 ArgoCD 告警 / gitleaks（见 CHANGELOG 同日条）。剩下的都改变既有边界：① **manual-helm 四件套建「只对账不同步」的 ArgoCD App**（无 `automated`）：「提交≠部署」从靠记忆变成 UI 上的 OutOfSync，部署变成点一次 Sync；`ArgoCDAppOutOfSync` 已按 autosync 过滤，不会因此误报。先按 [采纳方法](decisions/manual-helm-to-argocd-adoption.md) 做渲染等价性核对（justfile 里的 `--set` 要搬进 values），顺序 ESO → ArgoCD 自管 → Vault → Cilium 最后（oracle 的 Cilium 同步出错会切断 ArgoCD 自己的网络）；② **k3s 升级交 system-upgrade-controller**（Plan CR：版本改一处，执行交给控制器），先试 oracle 与 worker，控制面单节点仍有 API 停机；③ **PR 贴渲染 diff**（`render-manifests.py --out` 跑 base/head 两遍再 diff，同 Mafyuh 的 flux-diff）：当前直接推 main、几乎没有 PR，等改走 PR 流程再做，否则没有读者。 |
 
 ### 已知问题（不阻塞，无人认领）
 

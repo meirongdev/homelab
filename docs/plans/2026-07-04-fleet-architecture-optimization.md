@@ -11,7 +11,7 @@
 >
 > | 本文内容 | 现在去哪读 |
 > |---|---|
-> | P0-1 离站备份 · P1-5 DGX 入编 · P2-8 恢复演练自动化 · P2-7/9 Renovate/告警噪声 | [ROADMAP](../ROADMAP.md) 开放项 #1 / #5 / #6 / #12（**唯一开放项清单**） |
+> | P0-1 离站备份 · P1-5 DGX 入编 · P2-8 恢复演练自动化 · P2-9 告警噪声 | [ROADMAP](../ROADMAP.md) 开放项 #1 / #5 / #6 / #12（**唯一开放项清单**） |
 > | §4 pve 内存实测（UMA、MemTotal、VM 分配） | [reference/homelab-host-power-thermal.md](../reference/homelab-host-power-thermal.md)「内存容量」——UMA 已收回，本文数值是收回**前**的 |
 > | 「明确不建议做的」里仍生效的：多节点 HA · Thanos/Mimir · 106 并入集群 · cert-manager · Vault auto-unseal | [ROADMAP](../ROADMAP.md)「不做 / 已取消」表 |
 > | §附 106 入集群评估 | 结论仍成立，但**做法已细化**：106 上开独立单节点 `k3s-exp`（非 homelab worker），见 [ADR](../decisions/storage106-experiment-vm.md) |
@@ -122,8 +122,6 @@
 
 ## P2 — 平台工程质量（顺手做，低成本高回报）
 
-7. **Renovate**（GitHub App，免费）：仓库在 GitHub，接上后自动 PR chart/image 版本 bump。直接消灭 CLAUDE.md 里"chart 版本 pin 部署前须 `helm search repo` 人肉核对"这一环，regex manager 可覆盖 `argocd/applications/*.yaml` 的 `targetRevision`。
-
 8. **恢复演练自动化**：每月 CronJob 从 restic restore 最新 Vault/PG 快照到临时目录做校验（`pg_restore --list`、文件 checksum），失败告警。把一次性"演练"变成持续验证。
 
 9. **告警噪声治理**：MacBook 睡眠导致的 `TargetDown` 已知会烦人，提前加 Alertmanager 静默/inhibit 规则（CLAUDE.md 里自己标了 "if it bites"）。
@@ -146,7 +144,7 @@
 
 1. **本周末**：离站备份（P0-1）+ dead-man's switch（P0-2 前半）——消掉仅有的"不可逆损失"和"静默死亡"风险。
 2. **下个迭代**：Gotify 迁 oracle、zpool 冗余确认、恢复演练跑通一次。
-3. **一个月内**：pve 内存升级（下单即可）、Renovate 接入。
+3. **一个月内**：pve 内存升级（下单即可）。
 4. **随后**：DGX 入编三件套（IaC + GPU 指标 + LLM 网关 fallback/SLO）。
 
 其中第 1、2、8 项本质是把 `docs/ROADMAP.md` 里躺了三个月的 unchecked 项提到最前——方向早已判断正确，缺的只是排期。
