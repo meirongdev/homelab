@@ -19,6 +19,7 @@ just site            # 上面几个一起跑（会问 sudo 密码）
 
 just os-updates      # 只读：列出待装的 macOS 更新 + 本次会装什么（不要密码）
 just os-update       # 装系统小版本/安全更新 + Safari/CLT，需要时自动重启并验收
+just os-update-no-restart  # 只装免重启的更新（Safari/CLT 等），需重启的留给下次
 just os-upgrade-major  # 大版本升级（如 26 → 27），见下文风险
 ```
 
@@ -49,7 +50,8 @@ just os-upgrade-major  # 大版本升级（如 26 → 27），见下文风险
 
 - **装什么**：不需要重启的（Safari、CLT…）全装，同一产品线只装最新版；需要重启的
   **一次只装一个**（版本最高的那个），其余下次再跑。大版本默认跳过；需要**关机**才能完成的
-  一律不装（远程关了机没人按电源键）。
+  一律不装（远程关了机没人按电源键）。`just os-update-no-restart` 只装免重启的，
+  需重启的留给下次 `os-update`。
 - **密码**：确认计划后问一次登录密码。sudo 和 Apple Silicon 的 volume owner 认证
   （`softwareupdate --user --stdinpass`）共用它，所以没用 `--ask-become-pass`（`-K` 拿到的
   密码不暴露给任务）。密码不进命令行参数。
