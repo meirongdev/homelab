@@ -138,8 +138,23 @@ spec:
             # Oracle Cloud VMs have no IPv6 internet. Cloudflare domains return AAAA
             # records which Node.js/curl prefers by default, causing 48s timeouts.
             # Force DNS to resolve to IPv4 so monitors reach homelab services reliably.
+            #
+            # ☠️ 只有 ipv4first 不够，而且在 Node ≥20 上**它本身就是 Telegram 通知时灵时不灵的根因**
+            #    （2026-09-30 定位）。Node 20 起默认开 Happy Eyeballs（autoSelectFamily），
+            #    除最后一个地址外，每个地址只给 250ms 建连；ipv4first 恰好把 IPv4 排在
+            #    **第一个**（带计时器），超时后转去试 IPv6，这里没有 IPv6 路由，立即 ENETUNREACH，
+            #    整体报 `AggregateError [ETIMEDOUT, ENETUNREACH]`。本 pod 到 api.telegram.org 的
+            #    TCP 建连实测 252–268ms（20/20 次超过 250ms），而 Cloudflare 边缘就在附近，
+            #    所以**监控全绿、只有通知失败**：9 月 118 次状态变化里 61 次通知没发出去，
+            #    死人开关那条也在里面。能发出去的，都是延迟恰好掉到 250ms 以下的那几天。
+            #    关掉 autoselection = 只走 IPv4、用内核的建连超时，这才是上面「强制 IPv4」的本意
+            #    （没有 IPv6 出口，fallback 一点用都没有）。pod 内 Node v22.22.3 实测，每组 10 次全新建连：
+            #    现值 10/10 失败、本值 10/10 成功，Cloudflare 双栈目标 5/5 正常。
+            #    ⚠️ 别改回只剩 ipv4first。调大 `--network-family-autoselection-attempt-timeout`
+            #    也能好（2000ms 实测 10/10），但 IPv4 仍挂着计时器，只是把阈值挪远了；
+            #    这里没有 IPv6，保留 autoselection 没有任何收益。
             - name: NODE_OPTIONS
-              value: "--dns-result-order=ipv4first"
+              value: "--dns-result-order=ipv4first --no-network-family-autoselection"
           volumeMounts:
             - name: data
               mountPath: /app/data

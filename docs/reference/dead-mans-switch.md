@@ -1,6 +1,6 @@
 # Dead-man's switch — 目的、链路与覆盖边界
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-30
 > Status: 生效事实
 >
 > 本文是死人开关的**唯一真相源**：它为什么存在、链路每一跳长什么样、
@@ -41,7 +41,7 @@ homelab 只要还活着就必须每隔几十秒证明一次；一旦停止证明
 | 3 | 出网 | webhook GET `https://status.meirong.dev/api/push/alertmanager-watchdog-homelab?status=up&msg=OK&ping=` | homelab 出网/Cloudflare/隧道断 → 正确触发，但归因会指向 homelab（见覆盖矩阵注） |
 | 4 | 入口 | Cloudflare DNS → 隧道 → oracle `oracle-gateway`:80 → HTTPRoute `uptime-kuma`（PathPrefix `/`）→ Service `uptime-kuma:3001`。⚠️ v2 起 `/api/push` 不再需要专用 rule 与 nginx 边车（v1 的端点只收 GET，v2 是 `router.all`） | oracle 网关/入口断 → ☠️ **失明**，见覆盖矩阵 |
 | 5 | 判定 | Uptime Kuma push monitor `id=1` "Alertmanager Watchdog"：`interval=60`、`retry_interval=60`、`maxretries=1`、`resend_interval=0`、`active=1` | uptime-kuma 自己下线 → ☠️ **失明且不留痕迹** |
-| 6 | 通知 | notification `id=50` "Telegram (dead-man)"（`active=1 is_default=1`，已挂到 monitor 1）→ oracle 直连 `api.telegram.org`，不回经 homelab | 发送失败 → ☠️ **静默**，无任何指标或告警（开放项 2）|
+| 6 | 通知 | notification "Telegram (dead-man)"（`active=1 is_default=1`，挂到全部监控；⚠️ id 不固定，provisioner 每次运行都删了重建，按名字查）→ oracle 直连 `api.telegram.org`，不回经 homelab | 发送失败 → ☠️ **静默**，无任何指标或告警（开放项 2）。2026-09 实测**一半发不出去**，成因见覆盖矩阵 |
 
 推送 token 与 URL 的对应关系由 `cloud/oracle/manifests/uptime-kuma/provisioner.yaml`
 里的常量保证（库不在 `add_monitor` 上暴露 `pushToken`，靠 monkeypatch 注入；
@@ -82,7 +82,7 @@ homelab 只要还活着就必须每隔几十秒证明一次；一旦停止证明
 | 盲区 | 证据 | 现状 |
 |---|---|---|
 | **接收方与发送方一起挂**（oracle 重启 / uptime-kuma 下线）| 2026-08-13 三次节点重启造成心跳缺口 561s / 546s / 580s，全部远超 120s 阈值，而当天 `important` 翻转数是 0：没转 DOWN、没报警、库里不留痕迹 | 由 `DeadMansSwitchReceiverDown` 从发送侧捞（2026-08-14 加），但只是让失明可见，没有消除它 |
-| **uptime-kuma 自己的通知发不出去** | 实测 `/metrics` 返回 401（需 API key），且没有任何采集方在抓它，Prometheus 里查不到任何 uptime-kuma 指标 | ☠️ 开放（2026-08-01 就提出，至今未闭）|
+| **uptime-kuma 自己的通知发不出去** | 实测 `/metrics` 返回 401（需 API key），且没有任何采集方在抓它，Prometheus 里查不到任何 uptime-kuma 指标。☠️ **2026-09-30 证实不是假设**：9 月 118 次状态变化里 61 次报 `Cannot send notification … AggregateError [ETIMEDOUT, ENETUNREACH]`，其中就有死人开关自己那条（09-21、09-29）。成因是 Node 22 的 Happy Eyeballs：非末位地址只给 250ms，而本 pod 到 Telegram 建连要 252–268ms（Cloudflare 边缘近，所以监控全绿） | **成因已修**（2026-09-30，`uptime-kuma.yaml` 的 `NODE_OPTIONS` 加 `--no-network-family-autoselection`，pod 内 A/B：10/10 失败 → 10/10 成功）。「发送失败没有告警」这件事本身仍开放 |
 | **oracle 侧 DNS 坏** | 通知配置无自定义 server URL → 走 `api.telegram.org`，发通知也要解析域名 | 2026-08-01 真发生过；当时靠 homelab Alertmanager 的独立 Telegram 链路救场 |
 
 **为什么"失明"比"误报"更难发现**：push monitor 的检查跑在 uptime-kuma 进程内，
@@ -155,5 +155,10 @@ curl -s localhost:19093/api/v2/silences | \
    Alertmanager 侧有 `AlertmanagerFailedToSendAlerts`，uptime-kuma 侧没有对等物，
    且它的指标根本没被采集。可行路径：给 `/metrics` 配 API key 并让 oracle 的
    otel-collector 抓取，再对 monitor 状态做规则。**未实施。**
+   这条的代价 2026-09-30 才看清：通知**一半**发不出去这件事持续了至少一个月，
+   唯一的痕迹是 pod 日志里的 `Cannot send notification`（Loki 里也有，但没有规则在看）。
+   成因（Node 250ms 计时器）已修，但下一种让它发不出去的原因出现时，依然没人会知道。
+   在补上这条告警之前，排查用
+   `kubectl --context oracle-k3s -n personal-services logs deploy/uptime-kuma | grep -c 'Cannot send notification'`。
 3. **演练从未真正做过**（第六节的程序尚未实测）。按第六节自己的论证，
    在做完一次之前，"这条链路有效"仍属未经验证的断言。
