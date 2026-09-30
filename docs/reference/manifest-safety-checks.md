@@ -1,6 +1,6 @@
 # 清单安全规则 (Manifest Safety Checks)
 
-> Last updated: 2026-09-27
+> Last updated: 2026-09-30
 > Status: 生效事实
 > Scope: CI 强制的仓库规则，本文是 source of truth。四个检查器：
 > `scripts/check-manifests.py` 的 **H1-H5**（清单结构）、
@@ -333,6 +333,7 @@ Kubernetes 实际看到的值。不像 `TARGETS` 那样按缩进硬读（那条�
 |---|---|---|---|
 | `litellm.yaml` | `config.yaml` | `checksum/config` | 2026-08-25：改完 `mac/ornith` 后 ConfigMap 同步成功、ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按旧路由表继续跑，必须手动 `rollout restart` |
 | `homepage/homepage.yaml` | 6 个（settings/bookmarks/services/widgets/kubernetes/docker）| `checksum/config` | 同款机制：改配置后仪表盘静默不变 |
+| `json-exporter/json-exporter-cm.yaml` → `json-exporter.yaml` | `config.yml` | `checksum/config` | 2026-09-30 加。⚠️ 这条是**整目录挂载**，文件会刷新，只中了后一半：json_exporter 只在启动时读 `--config.file`、没有 reload（v0.8.0 `--help` 核过）。所以「不用 subPath」不等于免疫 |
 
 **验哈希对不对**，别只看 CI 绿：拿集群里 ConfigMap 的真实 data 反算一遍，应与注解相等：
 ```bash

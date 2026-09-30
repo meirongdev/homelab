@@ -6,7 +6,8 @@
 ## 速览
 
 - **OMLX 自己没有 `/metrics`**（0.6.3rc2 实测）。指标靠两条互补链路拼出来，
-  都不需要鉴权、都不改 OMLX 本身：
+  都不改 OMLX 本身。⚠️ 链路 A 自 OMLX 0.7（2026-09-30）起**要 API key**，链路 B 读文件、不涉及鉴权，
+  见下方[鉴权](#鉴权omlx-07-起)：
 
 | | 链路 A：json-exporter（拉） | 链路 B：textfile（推） |
 |---|---|---|
@@ -31,6 +32,7 @@
 |---|---|
 | **A** exporter 清单（Deployment/Service） | `k8s/helm/manifests/monitoring/json-exporter/json-exporter.yaml` |
 | **A** 模块配置（JSON→指标的映射） | `k8s/helm/manifests/monitoring/json-exporter/json-exporter-cm.yaml` |
+| **A** OMLX API key（Vault `secret/homelab/omlx` → ESO） | `k8s/helm/manifests/monitoring/json-exporter/json-exporter-external-secret.yaml`；Mac 侧同一个 key 在 `~/.omlx/settings.json`（见[鉴权](#鉴权omlx-07-起)）|
 | **B** 生产端（Mac LaunchAgent，写 `.prom`） | `macbook/ansible/playbooks/omlx-metrics.yaml` + `templates/com.meirongdev.omlx-textfile-collector.plist.j2` |
 | **B** 读取端（给 node_exporter 加 textfile flag） | `macbook/ansible/playbooks/node-exporter.yaml` + `templates/com.prometheus.node_exporter.plist.j2` |
 | B 渲染器（☠️ **不在本仓**） | `mlx-learning` 仓的 `src/mlx_learning/omlx_textfile_collector.py`，装在 Mac 的 `~/projects/meirongdev/mlx-learning/.venv/` 里 |
@@ -60,8 +62,8 @@ netmap 里没有 Mac 这个源（与 litellm 同一约束）。调度到 worker 
 
 | 来源 | 鉴权 | 内容 | 用在 |
 |---|---|---|---|
-| `GET /api/status` | 无 | 全局累计：请求数/token 数/累计平均 TPS/缓存命中/uptime/自定义内核可用性 | 链路 A |
-| `GET /v1/models/status` | 无 | per-model：是否驻留/装载中/体积（估算+实际）/`last_access`/context 长度 + pool 天花板 | 链路 A |
+| `GET /api/status` | **API key**（0.7 起，管理端点） | 全局累计：请求数/token 数/累计平均 TPS/缓存命中/uptime/自定义内核可用性 | 链路 A |
+| `GET /v1/models/status` | **API key**（0.7 起，管理端点） | per-model：是否驻留/装载中/体积（估算+实际）/`last_access`/context 长度 + pool 天花板 | 链路 A |
 | 文件 `~/.omlx/stats.json` | 无 | 原始累计和：token / 请求 / prefill 与 generate 秒数，全局 + per-model | 链路 B |
 | `GET /admin/api/stats` | ❌ **admin 会话 cookie** | 更细：内存压力档位、队列深度 | 未采集 |
 
@@ -74,6 +76,62 @@ netmap 里没有 Mac 这个源（与 litellm 同一约束）。调度到 worker 
 `cors_origins` 是 `["*"]`，那等于把「改设置、下载/删除模型、清缓存、重启服务」整个
 admin 面板开放给 LAN 和整个 tailnet。原本唯一卡在 admin API 后面的 **per-model token 账本，
 现在链路 B 免鉴权就能拿到**；仍然拿不到的只剩内存压力档位与队列深度（都不值得为它登录）。
+（0.7 起这条路本身也堵死了：非回环监听下开 `skip_api_key_verification` 会被启动校验直接拒绝。）
+
+## 鉴权（OMLX 0.7 起）
+
+**为什么有这一节**：2026-09-26 OMLX 被升到 0.7.0rc1，这版**不再允许无 API key 监听非回环地址**。
+旧进程一直跑到 09-29 重启；重启后新版启动时打出「will be changed to 127.0.0.1…
+Press Enter to continue」，launchd 下 stdin 是 EOF，于是退出码 1，KeepAlive 每 10s 拉起一次，
+34h 里崩了 1.1 万次。OMLX 没有「跳过校验」的开关（`network_auth_error` 硬拒），只能配 key。
+告警侧是 `TargetDown @ macbook`（omlx-*）每 4h 一条，node-exporter 那个 job 是活的。
+
+**现行配法**（Mac 上 `~/.omlx/settings.json` 的 `auth`，0600，**不归 Ansible 管**）：
+
+| 键 | 值 | 效果 |
+|---|---|---|
+| `api_key` | Vault `secret/homelab/omlx` 的 `api_key` | 满足非回环监听的启动校验；管理端点只认它 |
+| `allow_unauthenticated_inference` | `true` | **推理**端点（`verify_inference_api_key`）免鉴权 |
+
+两类端点的实测边界（2026-09-30，经 Tailscale）：
+
+| 端点 | 无认证 / `Bearer dummy` | `Bearer <key>` | 谁在用 |
+|---|---|---|---|
+| `/v1/models`、`/v1/chat/completions`、`/v1/embeddings`、audio | 200 | 200 | LiteLLM `mac/*`、Open Notebook（都填 `api_key: dummy`，**不用改**）|
+| `/api/status`、`/v1/models/status`（管理端点，`verify_api_key`）| 401 | 200 | 链路 A 的 json-exporter |
+
+☠️ **LiteLLM / Open Notebook 能继续用 `dummy`，全靠 `allow_unauthenticated_inference: true` 这一个开关**。
+重装 OMLX、在 admin 面板里重置设置、或有人觉得「开了 key 还放行推理不对」把它关掉，
+`mac/*` 两个别名和 Open Notebook 的对话/嵌入/TTS/STT 会一起 401。那时要么把开关开回来，
+要么给这两处换真 key（网关另见 [litellm-gateway.md](litellm-gateway.md)）。
+
+⚠️ **对不存在的模型名，chat 会回退到默认模型并把它装进来**（35B，实占 18.5GB）。
+测鉴权别用 chat 端点，用 `/v1/models` 或 `/v1/embeddings`（后者对未知模型直接 404）。
+
+**json-exporter 那半边**：Vault → ESO（`json-exporter-external-secret.yaml`）→ Secret
+`monitoring/json-exporter-omlx` → 挂到 `/secrets/omlx/api-key` → 两个模块的
+`http_client_config.authorization.credentials_file`。这个文件**每次请求都重读**
+（v0.8.0 本地实测：换成错 key 立即 503，换回立即 200，进程不重启），所以轮换 key 不需要重启 pod。
+
+**轮换 key**（两边必须一致；中间有几分钟 `up{job="omlx-*"}=0`，没超过 TargetDown 的 `for: 10m` 就不会告警）：
+
+```bash
+export VAULT_ADDR=https://vault.meirong.dev
+vault kv put secret/homelab/omlx api_key="$(openssl rand -hex 32)"
+# ESO 默认 1h 才刷新，打注解立即同步
+kubectl --context k3s-homelab -n monitoring annotate externalsecret json-exporter-omlx force-sync="$(date +%s)" --overwrite
+# key 走 stdin 写进 Mac 的 settings.json（不上命令行），再重启 OMLX
+vault kv get -field=api_key secret/homelab/omlx | ssh -i ~/.ssh/vgio matthew@100.89.15.120 \
+  '/usr/bin/python3 -c "import json,os,sys; p=os.path.expanduser(\"~/.omlx/settings.json\"); d=json.load(open(p)); d.setdefault(\"auth\",{}).update(api_key=sys.stdin.read().strip(), allow_unauthenticated_inference=True); json.dump(d,open(p,\"w\"),indent=2)" && chmod 600 ~/.omlx/settings.json && launchctl kickstart -k gui/$(id -u)/sh.brew.omlx'
+```
+
+**症状对照**：
+
+| 看到的 | 意味着 |
+|---|---|
+| `launchctl print gui/501/sh.brew.omlx` 的 `runs` 飞涨、`last exit code = 1`，日志反复「Startup canceled」| settings.json 里没 key（或被重置），OMLX 起不来 |
+| OMLX 日志刷 `GET /api/status → 401`，推理正常 | json-exporter 的 key 与 Mac 上的不一致（或 Secret 没同步）|
+| LiteLLM `mac/*` / Open Notebook 报 401 | `allow_unauthenticated_inference` 丢了 |
 
 ## 指标清单
 

@@ -1,6 +1,6 @@
 # LiteLLM 网关（运维事实与坑）
 
-> Last updated: 2026-09-21
+> Last updated: 2026-09-30
 > Status: 生效事实
 > Scope: `llm.meirong.dev` 这个 LLM 网关的配置生效路径、鉴权分层、上游可用性边界，
 > 本文是 source of truth。为什么选 LiteLLM、上游怎么选、Mac 兜底为何换 Ornith，见
@@ -542,6 +542,11 @@ reranker / nemoguard / 视觉 / riva-translate / palmyra 垂类）全部早于�
 
 ⚠️ **只暴露一个 Mac 35B**：OMLX 池天花板 30GB 装不下两个（19.95 + 19.08GB）。两个别名并存
 = 交替调用持续换入换出（~18s/次，期间回 `is busy`）。
+
+☠️ **`mac/*` 的 `api_key: dummy` 能用，是 Mac 上一个开关的结果**（2026-09-30 起）：OMLX 0.7 起
+非回环监听必须配 key，现行配法是 key + `allow_unauthenticated_inference: true`，推理端点因此仍免鉴权。
+那个开关一丢，`mac/*` 全部 401，而网关这边清单正确、ArgoCD Synced。
+→ [omlx-inference-metrics.md 的「鉴权」](omlx-inference-metrics.md#鉴权omlx-07-起)
 
 ## 消费方
 

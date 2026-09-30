@@ -1,6 +1,6 @@
 # Open Notebook — AI 研读知识库（架构事实）
 
-> Last updated: 2026-09-19
+> Last updated: 2026-09-30
 > Status: 生效事实
 > Scope: Open Notebook（NotebookLM 自托管替代）在 homelab 集群的部署形态、模型接线、
 > 配置真相源地图、备份口径，本文是 source of truth。
@@ -40,6 +40,10 @@
 | Embedding | Mac OMLX | Qwen3-Embedding-4B（2560 维） |
 | STT | Mac OMLX | `Qwen3-ASR-1.7B-8bit` |
 | TTS | Mac OMLX | `Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit`（9 个具名音色）|
+
+⚠️ Mac 那四行的凭据 `mac-omlx` 填的是 `api_key: "dummy"`。OMLX 0.7 起这能用，**只是因为** Mac 上开着
+`allow_unauthenticated_inference: true`。它一丢，这四个角色一起 401（2026-09-30 起，
+见 [omlx-inference-metrics.md 的「鉴权」](omlx-inference-metrics.md#鉴权omlx-07-起)）。
 
 ☠️ **DGX 换主力栈带来三条本仓库控制不了的后果**（2026-09-02 两条 + 2026-09-19 一条）：
 

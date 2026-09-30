@@ -6,8 +6,9 @@
 # 面板 → dashboards/omlx-dashboard.yaml
 #
 # 抓取形态是 blackbox 那一套：Prometheus 抓 **本 Service 的 /probe?module=…&target=…**，
-# 由本 Pod 去打 Mac。因此 `up{job="omlx-*"}` = 「exporter 活着 **且** OMLX 应答」，
-# 两者分不开（本 Pod 挂了和 Mac 合盖了看起来一样）。
+# 由本 Pod 去打 Mac。因此 `up{job="omlx-*"}` = 「exporter 活着 **且** OMLX 应答 **且** key 对」，
+# 三者分不开（本 Pod 挂了、Mac 挂了、key 两边不一致，看起来都一样）。
+# key 不对时 OMLX 日志刷 `GET /api/status → 401`，那是最快的判别点。
 #
 # ☠️ **必须钉控制面**：worker-106 是 tagged-device，netmap 里没有 Mac 这个源
 #    （同 litellm 的约束，见 manifests/litellm/litellm.yaml 的 nodeSelector 注释）。
@@ -25,6 +26,10 @@ spec:
   template:
     metadata:
       labels: { app: json-exporter }
+      annotations:
+        # json_exporter 只在启动时读 --config.file（没有 reload），ConfigMap 改了不重启 pod
+        # 就是静默跑旧模块配置。值由 `just gen-embedded-scripts` 写入（STAMP_ONLY），别手改。
+        checksum/config: "35d425075844dd99"
     spec:
       # 非核心：控制面内存吃紧时优先被挤掉（面板缺一格 ≪ 业务被 OOM）。
       priorityClassName: bulk
@@ -53,6 +58,9 @@ spec:
             periodSeconds: 60
           volumeMounts:
             - { name: config, mountPath: /config, readOnly: true }
+            # OMLX API key（json-exporter-external-secret.yaml），被两个 omlx_* 模块的
+            # credentials_file 引用。不能用 subPath：那样 Secret 轮换后文件不会刷新。
+            - { name: omlx-auth, mountPath: /secrets/omlx, readOnly: true }
           resources:
             requests: { cpu: "10m", memory: "24Mi" }
             limits: { cpu: "100m", memory: "64Mi" }
@@ -63,6 +71,8 @@ spec:
       volumes:
         - name: config
           configMap: { name: json-exporter-config }
+        - name: omlx-auth
+          secret: { secretName: json-exporter-omlx }
 ---
 apiVersion: v1
 kind: Service

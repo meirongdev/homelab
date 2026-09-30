@@ -2,9 +2,19 @@
 #
 # 为什么需要它：**OMLX 自己没有 /metrics**（0.6.3rc2 实测 `/metrics` 与 `/v1/metrics` 都是
 # 404，整个 site-packages 里没有 prometheus/openmetrics 依赖）。它把运行状态放在两个
-# **免鉴权**的 JSON 端点上，而更细的 `/admin/api/stats`（含 per-model token 账本）只认
+# JSON 端点上，而更细的 `/admin/api/stats`（含 per-model token 账本）只认
 # admin **会话 cookie**（`omlx/admin/auth.py::require_admin`，没有 Bearer 通路），
 # 只能靠登录流程拿——不做。
+#
+# ☠️ **OMLX ≥0.7 这两个端点要 API key**（2026-09-30 起）。0.7.0rc1 不再允许无 key 监听
+#    0.0.0.0（launchd 下直接退出，09-29 重启后崩了 34h）。Mac 上的配法是 `auth.api_key`
+#    + `auth.allow_unauthenticated_inference: true`：**推理**端点（/v1/models、chat、
+#    embeddings、audio）照旧免鉴权，LiteLLM / Open Notebook 不用改；而 /api/status 与
+#    /v1/models/status 属于**管理**端点（`verify_api_key`），不受那个开关影响，必须带 key。
+#    key：Vault `secret/homelab/omlx` → ESO（json-exporter-external-secret.yaml）→
+#    挂到 /secrets/omlx/api-key → 下面两个模块的 `http_client_config.authorization`。
+#    漏了 key 的症状是 OMLX 日志刷 `GET /api/status → 401`，这边 up{job="omlx-*"}=0，
+#    和「Mac 挂了」长得一样。
 #
 # 为什么不自己写 exporter：现成的 prometheus-community/json_exporter 实测能覆盖这两个端点
 # 的全部有用字段（含数组展开成 per-model 标签）。踩过的坑与口径 →
@@ -27,6 +37,11 @@ data:
     modules:
       # ── /api/status：流量与吞吐（全局累计，进程重启归零）──
       omlx_status:
+        # 管理端点，OMLX ≥0.7 要 key（见文件头）。文件每次请求重读，轮换 key 不用重启。
+        http_client_config:
+          authorization:
+            type: Bearer
+            credentials_file: /secrets/omlx/api-key
         metrics:
           - name: omlx_uptime_seconds
             help: OMLX server uptime in seconds (labels carry version + default model)
@@ -89,6 +104,10 @@ data:
 
       # ── /v1/models/status：驻留与内存（engine pool 的换入换出真相）──
       omlx_models:
+        http_client_config:
+          authorization:
+            type: Bearer
+            credentials_file: /secrets/omlx/api-key
         metrics:
           - name: omlx_model
             type: object
