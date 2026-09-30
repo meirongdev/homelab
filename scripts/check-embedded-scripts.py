@@ -127,6 +127,15 @@ STAMP_ONLY = [
         # 文件不会刷新、进程也不会重启，表现就是"我改了但仪表盘没变"。
         "why": "homepage 仪表盘配置",
     },
+    {
+        "cm": "k8s/helm/manifests/monitoring/json-exporter/json-exporter-cm.yaml",
+        "key": "config.yml",
+        "stamp": ("k8s/helm/manifests/monitoring/json-exporter/json-exporter.yaml", "checksum/config"),
+        # 为什么需要：这里是整目录挂载（不是 subPath），文件会刷新，但 json_exporter
+        # 只在启动时读 --config.file、没有 reload（v0.8.0 --help 核过）。
+        # 2026-09-30 给 OMLX 两个模块加鉴权时补上。
+        "why": "json-exporter 模块配置（OMLX 探测）",
+    },
 ]
 
 
