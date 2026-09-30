@@ -599,7 +599,8 @@ prometheus:
       # installed as a LaunchAgent (~/Library/LaunchAgents/com.prometheus.node_exporter.plist,
       # binary ~/.local/bin/node_exporter, :9100), scraped over Tailscale. Same verbatim-inject
       # pattern as dgx-spark, so cluster/nodename are set per target here.
-      # NOTE: it's a laptop — the target (and a TargetDown warning) is expected to flap on sleep/logout.
+      # NOTE: it's a laptop, but runs headless with sleep disabled (macbook/ansible `just power`),
+      # so a TargetDown here is a real outage, not sleep flap (see the omlx-* note below).
       - job_name: 'node-exporter-macbook'
         scrape_interval: 15s
         static_configs:
@@ -638,8 +639,11 @@ prometheus:
       # 形态同 blackbox：抓的是 exporter 的 /probe，target 参数写死在这里。
       #   omlx-status  ← /api/status        流量/吞吐（累计值，OMLX 重启归零）
       #   omlx-models  ← /v1/models/status  驻留/内存（engine pool 换入换出）
-      # ⚠️ up{job="omlx-*"} = 「exporter 活着 **且** Mac 应答」，两者分不开；笔记本合盖
-      #    即 down，与 node-exporter-macbook 一样属于预期抖动（未纳入 TargetDown 告警）。
+      # ⚠️ up{job="omlx-*"} = 「exporter 活着 **且** Mac 应答」，两者分不开。
+      # ⚠️ 这两个 job 与 node-exporter-macbook **都在**内置 TargetDown 的覆盖面里（它按 job
+      #    统计全部 target，没有排除项；此处旧注释写的"未纳入"是错的）。这是有意保留的：
+      #    Mac 已 `pmset disablesleep` 常开，30 天内 macbook 的 TargetDown 全是真故障、没有
+      #    一次是睡眠抖动 —— 2026-09-29 重启后 OMLX 0.7 起不来 34h，报出来的就是这条。
       # ⚠️ 30s/20s 而不是 15s：OMLX 是单进程 Python，大 prefill 期间事件循环会卡住，
       #    抓超时正好发生在最该看数据的时候。宁可分辨率低一点。
       # 见: k8s/helm/manifests/monitoring/json-exporter/
