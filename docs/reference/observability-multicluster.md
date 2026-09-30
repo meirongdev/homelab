@@ -1,6 +1,6 @@
 # Multi-Cluster Observability Architecture
 
-> Last updated: 2026-09-26
+> Last updated: 2026-09-30
 > Status: 生效事实
 >
 > 遥测的**采集与汇聚侧**：三条管线怎么跨集群流动、应用怎么接日志/追踪、坏了怎么查。
@@ -356,8 +356,10 @@ scrapeClasses 不会给它们 relabel，`cluster`/`nodename` 必须逐 target �
   由 LaunchAgent 拉起（`com.prometheus.node_exporter.plist`，`:9100`，无 sudo）。
   SSH: `ssh -i ~/.ssh/vgio matthew@100.89.15.120`。主机配置已固化为 Ansible
   （`macbook/ansible/`，`just node-exporter` / `just power`）；GUI-only 步骤在其 README。
-  ⚠️ 笔记本会睡眠/登出，target 抖动导致间歇 `TargetDown`(warning) → Telegram 噪音，
-  烦了就在 Alertmanager silence 掉 `node-exporter-macbook` job。
+  ⚠️ 它现在无头常开（`pmset disablesleep`，`just power`），**`TargetDown`(warning) 响了就是真故障**，
+  别再按「笔记本睡眠抖动」去 silence：2026-09 整月 macbook 的 TargetDown 全是真故障，其中
+  09-29 重启后 OMLX 起不来 34h 就是靠它报出来的。`omlx-*` 挂而 `node-exporter-macbook` 活 =
+  Mac 在、OMLX 不在（排查见 [omlx-inference-metrics.md](omlx-inference-metrics.md) 第 4 条）。
   - **它同时驮着 OMLX 的推理计数器**（2026-08-23 起）：Mac 上另一个 LaunchAgent
     每 60s 把 `~/.omlx/stats.json` 渲染成 `.prom`，node_exporter 用
     `--collector.textfile.directory` 一起吐出来，抓取时改名为 `omlx_alltime_*`。

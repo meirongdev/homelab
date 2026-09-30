@@ -1,6 +1,6 @@
 # Mac OMLX 推理指标（采集口径与陷阱）
 
-> Last updated: 2026-09-01
+> Last updated: 2026-09-30
 > Status: 生效事实
 
 ## 速览
@@ -160,8 +160,13 @@ rate(omlx_alltime_cached_prompt_tokens_total[30m])
    json_exporter 遇到 `null` 会**丢弃该指标并每次抓取刷一条 ERROR 日志**，
    所以这两个字段单独放在 `omlx_model_resident` 里、用 jsonpath `?(@.loaded == true)` 过滤。
    ⚠️ 谁要是把它们合并回 `omlx_model`，就会得到 11 模型 × 2 字段 × 每 30s 的稳定日志噪音。
-4. **`up{job="omlx-*"}` 分不清是 exporter 挂了还是 Mac 合盖了**（probe 形态的固有代价）。
-   笔记本本来就会睡，与 `node-exporter-macbook` 一样属预期抖动，未纳入 TargetDown 告警。
+4. **`up{job="omlx-*"}` 分不清是 exporter 挂了还是 Mac/OMLX 挂了**（probe 形态的固有代价）。
+   ⚠️ 这两个 job 与 `node-exporter-macbook` **都在**内置 `TargetDown` 的覆盖面里（它对全部 job
+   生效，没有排除项）。旧版本这里写的「未纳入 TargetDown」是错的，而且前提也已失效：Mac 已
+   `pmset disablesleep` 常开，2026-09 整月 macbook 的 TargetDown 全是真故障，一次睡眠抖动都没有。
+   所以**别为降噪去排除它们**：2026-09-29 重启后 OMLX 起不来 34h，报出来的就是这条
+   （`omlx-*` 挂、`node-exporter-macbook` 活 = Mac 在、OMLX 不在，先看
+   `launchctl print gui/501/sh.brew.omlx` 的 `runs` / `last exit code` 与 `/opt/homebrew/var/log/omlx.log`）。
 5. **两套计数器的重启行为相反**：链路 A 的 `omlx_*_total` 取自 `/api/status`，
    **随 OMLX 进程重启归零**；链路 B 的 `omlx_alltime_*_total` 取自落盘的 `alltime`，
    **跨重启累加**。`rate()`/`increase()` 两边都能跨过重置，但「总量」类面板

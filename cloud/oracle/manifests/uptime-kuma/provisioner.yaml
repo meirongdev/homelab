@@ -20,7 +20,13 @@ data:
     # This keeps cross-cluster networking off the critical path for status monitoring.
     MONITORS = [
         # --- oracle-k3s local services ---
-        {"name": "Homepage",       "url": "http://homepage.homepage.svc:3000"},
+        # ☠️ Homepage 必须带 Host 头：v2 起 HOMEPAGE_ALLOWED_HOSTS 被严格强制，探 svc 名时
+        #    Host 是 `homepage.homepage.svc:3000`，不在白名单里 → 400。2026-09-10 升 v2 时
+        #    只修了 kubelet 探针，这条漏了，于是**红了 20 天**：DOWN 通知只在 09-10 发过一次，
+        #    之后状态不再变化，真宕机也不会再报。值必须是 HOMEPAGE_ALLOWED_HOSTS 里的一项
+        #    （cloud/oracle/manifests/homepage/homepage.yaml），同样**不要**往白名单里加通配。
+        #    实测（Kuma pod 内用它自带的 axios）：不带头 400、带 `Host: home.meirong.dev` 200。
+        {"name": "Homepage",       "url": "http://homepage.homepage.svc:3000", "headers": '{"Host": "home.meirong.dev"}'},
         {"name": "Miniflux",       "url": "http://miniflux.rss-system.svc:8080"},
         {"name": "IT-Tools",       "url": "http://it-tools.personal-services.svc:80"},
         {"name": "Squoosh",        "url": "http://squoosh.personal-services.svc:8080"},
@@ -198,39 +204,6 @@ data:
     STATUS_PAGE_TITLE  = "Homelab Status"
     STATUS_PAGE_DOMAIN = "status.meirong.dev"
 
-    # --- Notification (Telegram) = dead-man's switch ---
-    # oracle Uptime Kuma pings homelab public services (Grafana/Vault/Open Notebook) + oracle
-    # services. Attaching a Telegram notification to ALL monitors means: homelab down → its services
-    # unreachable → Uptime Kuma → Telegram Bot API (oracle → internet direct), with NO dependency
-    # on homelab. oracle直连 api.telegram.org，无需中间层。
-    # ⚠️ 2026-08-03：ArgoCD/Calibre 迁 oracle 后**不再是 homelab 的存活信号**（它们挂了说明
-    # oracle 挂了）。homelab 侧的探针只剩上面那三个，别再往 homelab 搬服务而不补探针。
-    # Same bot/group/topic as homelab Alertmanager's telegramConfigs — 「🚨 Homelab 告警」话题。
-    TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-    TELEGRAM_CHAT_ID = -1003981213530
-    TELEGRAM_MESSAGE_THREAD_ID = 2
-    NOTIF_NAME = "Telegram (dead-man)"
-    if TELEGRAM_BOT_TOKEN:
-        # delete+recreate so the token always reflects the current secret (idempotent refresh);
-        # delete+recreate so the token always reflects the current secret (idempotent refresh).
-        # otherwise it stays isDefault+attached and keeps firing (and failing) against monitors.
-        for n in api.get_notifications():
-            if n["name"] == NOTIF_NAME:
-                api.delete_notification(n["id"])
-                print(f"Removed stale notification '{n['name']}'.")
-        api.add_notification(
-            name=NOTIF_NAME,
-            type=NotificationType.TELEGRAM,
-            isDefault=True,        # auto-attach to future monitors
-            applyExisting=True,    # attach to all existing monitors now
-            telegramBotToken=TELEGRAM_BOT_TOKEN,
-            telegramChatID=str(TELEGRAM_CHAT_ID),
-            telegramMessageThreadID=str(TELEGRAM_MESSAGE_THREAD_ID),
-        )
-        print(f"Telegram notification '{NOTIF_NAME}' created + applied to all monitors.")
-    else:
-        print("WARNING: TELEGRAM_BOT_TOKEN not set — no notification channel (dead-man's switch inactive).")
-
     # --- Push monitor for homelab Alertmanager Watchdog (dead-man's switch) ---
     # Homelab Alertmanager fires Watchdog → webhook → status.meirong.dev/api/push/... → Uptime Kuma.
     # If homelab goes down, pushes stop → Uptime Kuma marks DOWN → Telegram notification fires.
@@ -273,7 +246,8 @@ data:
           extra["accepted_statuscodes"] = ["200-299"]
 
         # Pass through optional monitor parameters used by Uptime Kuma HTTP checks.
-        for field in ("ignoreTls", "maxredirects", "timeout", "method"):
+        # headers 是 JSON **字符串**（Kuma 在请求时 JSON.parse 后并入 axios headers）。
+        for field in ("ignoreTls", "maxredirects", "timeout", "method", "headers"):
           if field in m:
             extra[field] = m[field]
         if m["name"] in existing:
@@ -294,6 +268,45 @@ data:
         if name not in keep_names:
             api.delete_monitor(mon["id"])
             print(f"  removed stale monitor '{name}' (id={mon['id']}, no longer declared)")
+
+    # --- Notification (Telegram) = dead-man's switch ---
+    # oracle Uptime Kuma pings homelab public services (Grafana/Vault/Open Notebook) + oracle
+    # services. Attaching a Telegram notification to ALL monitors means: homelab down → its services
+    # unreachable → Uptime Kuma → Telegram Bot API (oracle → internet direct), with NO dependency
+    # on homelab. oracle直连 api.telegram.org，无需中间层。
+    # ⚠️ 2026-08-03：ArgoCD/Calibre 迁 oracle 后**不再是 homelab 的存活信号**（它们挂了说明
+    # oracle 挂了）。homelab 侧的探针只剩上面那三个，别再往 homelab 搬服务而不补探针。
+    # Same bot/group/topic as homelab Alertmanager's telegramConfigs — 「🚨 Homelab 告警」话题。
+    #
+    # ☠️ **这段必须排在建监控之后**（2026-09-30 从上面挪下来）。`applyExisting` 只挂到
+    #    **那一刻已在库里**的监控上；`isDefault` 只在 web UI 的新建表单里预先勾上，
+    #    经 API 建的监控服务端**不会**自动挂。原先这段在前，于是每次新增的监控都
+    #    **一次运行内没有任何通知**，要等下一次 sync 才补上 —— 而 PostSync 只在 App 有变更时才跑。
+    #    实测：API Docs 09-26 06:48 建出来，当时的通知（id 93）挂在其余 23 个监控上，
+    #    唯独它是 0，挂掉也不会有任何 Telegram。
+    TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+    TELEGRAM_CHAT_ID = -1003981213530
+    TELEGRAM_MESSAGE_THREAD_ID = 2
+    NOTIF_NAME = "Telegram (dead-man)"
+    if TELEGRAM_BOT_TOKEN:
+        # delete+recreate so the token always reflects the current secret (idempotent refresh);
+        # otherwise it stays isDefault+attached and keeps firing (and failing) against monitors.
+        for n in api.get_notifications():
+            if n["name"] == NOTIF_NAME:
+                api.delete_notification(n["id"])
+                print(f"Removed stale notification '{n['name']}'.")
+        api.add_notification(
+            name=NOTIF_NAME,
+            type=NotificationType.TELEGRAM,
+            isDefault=True,        # pre-ticked in the web UI's new-monitor form (NOT applied server-side)
+            applyExisting=True,    # attach to every monitor in the DB right now — hence placed last
+            telegramBotToken=TELEGRAM_BOT_TOKEN,
+            telegramChatID=str(TELEGRAM_CHAT_ID),
+            telegramMessageThreadID=str(TELEGRAM_MESSAGE_THREAD_ID),
+        )
+        print(f"Telegram notification '{NOTIF_NAME}' created + applied to all monitors.")
+    else:
+        print("WARNING: TELEGRAM_BOT_TOKEN not set — no notification channel (dead-man's switch inactive).")
 
     # --- Public status page ---
     # ☠️ **不能直接拿 add 之后的 get_monitors() 去拼状态页。** 客户端那份监控列表由
