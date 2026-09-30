@@ -566,8 +566,8 @@ prometheus:
       # ☠️ BOTH the port AND the metric prefix are stack-dependent — re-check both on
       #    every upstream stack swap:
       #      qwen38fn (k3s, vLLM)      :8000/metrics   `vllm:*`     retired 2026-09-20
-      #      qwen38un (docker, SGLang) :8888/metrics   `sglang:*`   ← S1 primary
-      #      fndgx   (docker, vLLM)    :18300/metrics  `vllm:*`     ← S2, since 2026-09-20
+      #      qwen38un (docker, SGLang) :8888/metrics   `sglang:*`   retired 2026-09-30
+      #      hibrid48tp2 (docker, vLLM):8000/metrics   `vllm:*`     ← S1 head (TP=2) since 2026-09-30
       #    Nothing errors when this is stale: the target simply goes down, every
       #    `vllm:*` or `sglang:*` alert expression evaluates empty (= never fires), and
       #    the dashboard goes blank. Verify with
@@ -585,15 +585,15 @@ prometheus:
         scrape_interval: 15s
         static_configs:
           - targets:
-              - 100.97.87.120:8888   # dgx-spark-1, SGLang (qwen3.8-27b-sglang) since 2026-09-19
+              - 100.97.87.120:8000   # dgx-spark-1, head node for TP=2 since 2026-09-30
             labels:
               cluster: dgx-spark
               nodename: dgx-spark-1
-          - targets:
-              - 100.67.164.92:18300  # dgx-spark-2, vLLM (fndgx / qwen3.8-flash-next) since 2026-09-20
-            labels:
-              cluster: dgx-spark
-              nodename: dgx-spark-2
+          # - targets:
+          #     - 100.67.164.92:18300  # dgx-spark-2 (worker node for TP=2, no separate metrics API)
+          #   labels:
+          #     cluster: dgx-spark
+          #     nodename: dgx-spark-2
 
       # MacBook Pro (Apple Silicon) — personal laptop host metrics via node_exporter,
       # installed as a LaunchAgent (~/Library/LaunchAgents/com.prometheus.node_exporter.plist,

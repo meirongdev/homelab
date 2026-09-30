@@ -5,7 +5,7 @@
 #
 # ⚠️ **直连 DGX 推理引擎，不经 LLM 网关**：省掉 virtual key 这条 Vault 依赖。
 # 模型 id 是后端相关的 —— 网关路由用带 provider 前缀的名字
-# （`custom_dgx/qwen3.8-27b-sglang`），裸引擎提供的是 `qwen3.8-27b-sglang`，
+# （`custom_dgx/qwen3.8-flash-next-tp2`），裸引擎提供的是 `qwen3.8-flash-next-tp2`，
 # 写前缀名会 404。上游 2026-08-03 (d833623) 把模型链改成读 LLM_MODELS 后才可配。
 # ⚠️ 2026-09-19 DGX 又换了主力栈（Qwen3.8-Flash-Next → Qwen3.8-27B-Uncensored + SGLang），
 #    ☠️ **这次连端点一起变**：:8000(k3s/vLLM) → :8888(docker/SGLang)，旧端口已不监听。
@@ -77,21 +77,21 @@ spec:
                 # 同一台机器也在给 Open Notebook 供模型，见 reference/open-notebook.md。
                 # ⚠️ :8888 是 docker/SGLang 栈；上一栈的 :8000(k3s/vLLM) 已经不监听了。
                 - name: LLM_BASE_URL
-                  value: http://100.97.87.120:8888
+                  value: http://100.97.87.120:8000
                 # 裸引擎的模型 id，不带网关的 provider 前缀。
                 # ⚠️ 必须与 DGX 当前 serve 的模型逐字同名。
                 # ☠️ 判据变了：旧栈(vLLM)写错回 404，**新栈(SGLang)回 200 并原样回显**，
                 #    写错完全静默 —— 核对方式只有 `curl :8888/v1/models`。
-                # 2026-09-19 由 qwen38-flash-next 换为 qwen3.8-27b-sglang。
+                # 2026-09-19 由 qwen38-flash-next 换为 qwen3.8-flash-next-tp2。
                 # ☠️ 上游 0632049 起，换模型**只改这一行**（模型相关参数全部下沉成 LLM_*）：
                 #    若新栈关思考的键名不是 enable_thinking，还要一起改 LLM_THINKING_KWARG。
                 #    验收不用手写请求，上游带了一条默认跳过、不进 CI 的实测用例：
-                #      LLM_LIVE_URL=http://100.97.87.120:8888 LLM_LIVE_MODEL=<新模型> \
+                #      LLM_LIVE_URL=http://100.97.87.120:8000 LLM_LIVE_MODEL=<新模型> \
                 #        go test ./internal/llm -run Live -v
                 #    它会真调一次并断言推理确实被关掉；挂了就换 LLM_LIVE_KWARG 试，
                 #    试通的值就是要写进清单的那个。
                 - name: LLM_MODELS
-                  value: qwen3.8-27b-sglang
+                  value: qwen3.8-flash-next-tp2
                 - name: LLM_CONCURRENCY
                   value: "8"
                 # 单次调用预算（= 上游 llm.DefaultTimeout，可配，不必重构镜像）。
