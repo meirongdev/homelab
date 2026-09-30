@@ -51,13 +51,13 @@ data:
         #    旧端口已经不监听（connection refused）。
         {"name": "dgx-vllm", "provider": "openai_compatible",
          "modalities": ["language"],
-         "api_key": "dummy", "base_url": "http://100.97.87.120:8888/v1"},
+         "api_key": "dummy", "base_url": "http://100.97.87.120:8000/v1"},
         {"name": "mac-omlx", "provider": "openai_compatible",
          "modalities": ["language", "embedding", "speech_to_text", "text_to_speech"],
          "api_key": "dummy", "base_url": "http://100.89.15.120:8000/v1"},
     ]
     MODELS = [
-        # 2026-09-19 DGX 换主力栈：qwen38-flash-next → qwen3.8-27b-sglang
+        # 2026-09-19 DGX 换主力栈：qwen38-flash-next → qwen3.8-flash-next-tp2
         # （Qwen3.8-27B-Uncensored NVFP4 + SGLang + DFlash2，单节点）。
         # ☠️ 名字必须与裸引擎的 served name 逐字相同 —— 这里**不走 LLM 网关**，
         #    填网关别名（custom_dgx/…）会 404。
@@ -76,7 +76,7 @@ data:
         #    两次扫下来外部引用都是 0。
         # ⚠️ **别顺手删 `mlx-community__Qwen3.6-35B-A3B-nvfp4`**：它看着也像遗留，但 OMLX
         #    仍在提供（2026-09-19 实测 `/v1/models` 有它），是可用备选而非死条目。
-        {"name": "qwen3.8-27b-sglang", "type": "language", "credential": "dgx-vllm"},
+        {"name": "qwen3.8-flash-next-tp2", "type": "language", "credential": "dgx-vllm"},
         # 备用对话模型（非默认）：DGX 是跨境共享机器且暂无告警（ROADMAP #4），
         # 它不可达时在 UI 里一键切到这个本地 35B（262k ctx）兜底。
         # ⚠️ 这里走 mac-omlx 凭据直连 OMLX，所以填的是 OMLX 的模型 ID，
@@ -104,13 +104,13 @@ data:
         #     112 token，输出量与输入时长无关。10 分钟音频只转出 8%，且 HTTP 200。
     ]
     DEFAULTS = {  # 值是上面 MODELS 里的 name
-        "default_chat_model": "qwen3.8-27b-sglang",
-        "default_transformation_model": "qwen3.8-27b-sglang",
+        "default_chat_model": "qwen3.8-flash-next-tp2",
+        "default_transformation_model": "qwen3.8-flash-next-tp2",
         # ⚠️ max_model_len 仍是 262144（2026-09-19 换栈后不变，实测 /v1/models 确认）：
         #    长上下文角色有真实上限，整本书一次性塞进去会超窗。
         #    兜底的 Mac Ornith 也是 262k，换过去拿不到更多窗口。
-        "large_context_model": "qwen3.8-27b-sglang",
-        "default_tools_model": "qwen3.8-27b-sglang",
+        "large_context_model": "qwen3.8-flash-next-tp2",
+        "default_tools_model": "qwen3.8-flash-next-tp2",
         "default_embedding_model": "mlx-community__Qwen3-Embedding-4B-4bit-DWQ",
         "default_text_to_speech_model": "mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
         "default_speech_to_text_model": "mlx-community__Qwen3-ASR-1.7B-8bit",
@@ -122,9 +122,9 @@ data:
     EPISODE_PROFILE_LLMS = {   # profile 名 -> 出大纲/台本的 language 模型
         # ⚠️ 同样受 262k 限制（这里曾按旧栈 1M 写「整本书塞得进去」）。长书出大纲
         #    若开始截断/报错，先看是不是超窗，别先怀疑上游挂了。
-        "tech_discussion": "qwen3.8-27b-sglang",
-        "business_analysis": "qwen3.8-27b-sglang",
-        "solo_expert": "qwen3.8-27b-sglang",
+        "tech_discussion": "qwen3.8-flash-next-tp2",
+        "business_analysis": "qwen3.8-flash-next-tp2",
+        "solo_expert": "qwen3.8-flash-next-tp2",
     }
     PODCAST_TTS = "mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit"
     PODCAST_LANGUAGE = None    # None = 沿用上游默认（英文）；要中文播客填 "zh"

@@ -1031,8 +1031,8 @@ spec:
             summary: "dgx-spark 推理引擎不可用（宿主在线，推理端口无响应）：{{ $labels.nodename }}"
             description: |
               DGX 推理端点（2026-09-20 起两台常驻、双栈并跑）：
-              S1 (dgx-spark-1) 100.97.87.120:8888  = qwen38un（SGLang，`qwen3.8-27b-sglang`，主力）
-              S2 (dgx-spark-2) 100.67.164.92:18300 = fndgx（vLLM，`qwen3.8-flash-next`，常驻）
+              S1 (dgx-spark-1) 100.97.87.120:8000  = qwen38un（SGLang，`qwen3.8-flash-next-tp2`，主力）
+              S2 (dgx-spark-2) 100.97.87.120:8000 = fndgx（vLLM，`qwen3.8-flash-next`，常驻）
               {{ $labels.nodename }} 对应的那个端点没了，而宿主机还活着。
               ☠️ **它不会自己回来**：上游 2026-09-20 起 docker 是唯一运行时（k3s 已拆），
               既无 liveness 探针也无 `--restart` 策略（上游刻意如此），没人动手就一直挂着。
@@ -1121,13 +1121,13 @@ spec:
               引擎**看着是活的**（up==1、/health 200、/v1/models 200）但一步都没往前走。
               ☠️ 别拿 `/health` 或 `/v1/models` 判断，它们在这个故障里照样返回 200。
               有判别力的真生成探针（按 {{ $labels.nodename }} 选对应一条）：
-                S1: `curl -s -m 60 -o /dev/null -w '%{http_code}\n' http://100.97.87.120:8888/health_generate`（SGLang 专有能力）
-                S2: `curl -s -m 60 -o /dev/null -w '%{http_code}\n' -H 'Content-Type: application/json' -d '{"model":"qwen3.8-flash-next","messages":[{"role":"user","content":"OK"}],"max_tokens":8}' http://100.67.164.92:18300/v1/chat/completions`（该 vLLM 构建无 /health_generate，2026-09-21 实测 404）
+                S1: `curl -s -m 60 -o /dev/null -w '%{http_code}\n' http://100.97.87.120:8000/health_generate`（SGLang 专有能力）
+                S2: `curl -s -m 60 -o /dev/null -w '%{http_code}\n' -H 'Content-Type: application/json' -d '{"model":"qwen3.8-flash-next","messages":[{"role":"user","content":"OK"}],"max_tokens":8}' http://100.97.87.120:8000/v1/chat/completions`（该 vLLM 构建无 /health_generate，2026-09-21 实测 404）
               ☠️ 也别拿"发个请求成功了"当凭据来判断模型对不对：**SGLang 接受任意 model 名
               并原样回显**（上游 gotcha #10），vLLM 才会 404。
               现场取证（按 {{ $labels.nodename }} 选对应一条）：
-                S1: `curl -s http://100.97.87.120:8888/metrics | grep -E 'num_running_reqs|num_queue_reqs|generation_tokens_total'`
-                S2: `curl -s http://100.67.164.92:18300/metrics | grep -E 'num_requests_running|num_requests_waiting|generation_tokens_total'`
+                S1: `curl -s http://100.97.87.120:8000/metrics | grep -E 'num_running_reqs|num_queue_reqs|generation_tokens_total'`
+                S2: `curl -s http://100.97.87.120:8000/metrics | grep -E 'num_requests_running|num_requests_waiting|generation_tokens_total'`
               恢复：`cd ~/projects/meirongdev/nv-dgx-spark && make restart`（S1 约 3 分钟 / S2 约 5 分钟）。
               没有探针会替你动手 —— 这条响了就是要人动手。
         - alert: DgxSparkInferenceRestarted
@@ -1163,7 +1163,7 @@ spec:
               2026-09-20 起 k3s 已拆），所以这几乎一定是人为动作 —— 若不是你，那就是这台
               **共享**机器上的另一个人。
               Check: `cd ~/projects/meirongdev/nv-dgx-spark && make status`
-              日志：`make logs`（docker 栈：S1 `docker logs --since 30m qwen3.8-27b-sglang`、
+              日志：`make logs`（docker 栈：S1 `docker logs --since 30m qwen3.8-flash-next-tp2`、
               S2 `docker logs --since 30m qwen38-flash`）
               ⚠️ 刚重启后别做性能基准（冷启动约 30% 慢，首个请求含 CUDA graph/JIT 尖峰）。
               ⚠️ 若同时看到 DgxSparkInferenceDown 转 resolved，那就是一次正常重启，不用查。
@@ -1221,8 +1221,8 @@ spec:
               S1（SGLang）max_running_requests=16；S2（vLLM fndgx）max-num-seqs=8
               （S2 侧阈值未校准，见规则注释）。长批处理会把交互请求饿死。
               查当前占用（按 {{ $labels.nodename }} 选一条）：
-                S1: `curl -s http://100.97.87.120:8888/metrics | grep -E 'num_running_reqs|num_queue_reqs|token_usage'`
-                S2: `curl -s http://100.67.164.92:18300/metrics | grep -E 'num_requests_running|num_requests_waiting|kv_cache_usage_perc'`
+                S1: `curl -s http://100.97.87.120:8000/metrics | grep -E 'num_running_reqs|num_queue_reqs|token_usage'`
+                S2: `curl -s http://100.97.87.120:8000/metrics | grep -E 'num_requests_running|num_requests_waiting|kv_cache_usage_perc'`
               或 `cd ~/projects/meirongdev/nv-dgx-spark && make status`。
               本集群的常驻并发客户：jobs-sg enrich（每晚 19:10 UTC，LLM_CONCURRENCY=8）、
               calibre 元数据作业、Open Notebook、网关上的交互式 CLI。

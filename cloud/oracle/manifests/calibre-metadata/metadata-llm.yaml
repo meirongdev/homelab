@@ -38,7 +38,7 @@
 #   · ☠️ **2026-09-02 DGX 换了主力模型**（`deepseek-v4-flash` → `qwen38-flash-next`，
 #     max_model_len 1M → 262144，旧名已从 `/v1/models` 消失）。上面「别换模型」的前提
 #     由上游单方面消失了，不是本仓库的选择。
-#   · ☠️ **2026-09-19 DGX 又换栈**（`qwen38-flash-next` → `qwen3.8-27b-sglang`，
+#   · ☠️ **2026-09-19 DGX 又换栈**（`qwen38-flash-next` → `qwen3.8-flash-next-tp2`，
 #     Qwen3.8-27B-Uncensored NVFP4 + SGLang + DFlash2，单节点）。max_model_len 仍是
 #     262144；**端点从 :8000 换到 :8888**，但本作业走网关、不直连，所以只改模型名。
 #   · ✅ **护栏已对新栈复验**（2026-09-19）：用本文件线上那份提示词 + 同规模摘录
@@ -74,7 +74,7 @@
 #      裸 nginx 无鉴权），已补。key 走 Vault `oracle-k3s/calibre-metadata` → ESO
 #      → Secret `calibre-metadata-secrets`（本文件末尾）。
 #   3) 模型名：网关别名与裸引擎刻意同名（下游换 base_url 就能绕过网关），代价是
-#      **DGX 换模型时这里要跟着改**（2026-09-19 已跟着改成 `qwen3.8-27b-sglang`）。
+#      **DGX 换模型时这里要跟着改**（2026-09-19 已跟着改成 `qwen3.8-flash-next-tp2`）。
 #
 # 对照：同集群的 `jobs-sg/cronjob-enrich.yaml` 是**直连 DGX、不经网关**（省掉 virtual
 # key 那条 Vault 依赖）。本作业学不了 —— 它在 oracle，这正是 1) 存在的原因。
@@ -118,7 +118,7 @@ data:
     # 2026-08-29 起指向 LiteLLM 网关的跨集群 NodePort，见 CronJob 的 env 注释。
     LLM_URL = os.environ.get("LLM_URL", "")
     LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
-    LLM_MODEL = os.environ.get("LLM_MODEL", "qwen3.8-27b-sglang")
+    LLM_MODEL = os.environ.get("LLM_MODEL", "qwen3.8-flash-next-tp2")
     LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "300"))
 
     DRY_RUN = os.environ.get("DRY_RUN", "1") != "0"
@@ -301,14 +301,14 @@ data:
         body = json.dumps({
             "model": LLM_MODEL,
             "messages": [{"role": "user", "content": PROMPT + text}],
-            # ⚠️ 历任主力模型（deepseek-v4-flash → qwen38-flash-next → qwen3.8-27b-sglang）
+            # ⚠️ 历任主力模型（deepseek-v4-flash → qwen38-flash-next → qwen3.8-flash-next-tp2）
             # 全都是**推理模型**：先产出 reasoning_content 再产出 content。预算不够时
             # reasoning parser 不会伪造闭合标签 —— 结果是 finish_reason=length 且
             # **content 为 null**（不报错、不是空串），2026-08-07 首次 DRY-RUN 就是这样崩的。
             # 最早那次在 800 下怎么崩的没有留下 token 级记录，只有现象（08-07 实录）。
             # 有实测的两笔账（同为 6000 字摘录下的整个 completion，含 reasoning）：
             #   qwen38-flash-next   389–512 token（reasoning 280–350）→ 2000 约 4 倍冗余
-            #   qwen3.8-27b-sglang  769 token（默认档 xhigh）        → 2000 约 2.6 倍冗余
+            #   qwen3.8-flash-next-tp2  769 token（默认档 xhigh）        → 2000 约 2.6 倍冗余
             # 见文件头 2026-09-19 那条复验。余量在变薄，但仍没到要动这个值的程度。
             "max_tokens": 2000,
             "temperature": 0,
@@ -613,7 +613,7 @@ spec:
                 # DGX 别名一个**（实测：白名单内的模型 200、openrouter/* 403），
                 # 所以作业越权不了，也花不到 OpenRouter 的钱。
                 # ⚠️ 2026-09-19 DGX 换栈后，白名单里的名字必须是
-                # `qwen3.8-27b-sglang`（原来是 `qwen38-flash-next`）—— 改法见
+                # `qwen3.8-flash-next-tp2`（原来是 `qwen38-flash-next`）—— 改法见
                 # docs/reference/litellm-gateway.md 坑 A。
                 # ☠️ 白名单存在 LiteLLM 的 Postgres 里、**不在 git**：将来改网关
                 # 模型别名而不同步改这把 key，就会「清单正确 + Synced + 调用全 403」。
@@ -627,7 +627,7 @@ spec:
                 # 别加 provider 前缀（`custom_dgx/...` 那个别名也在，指同一个上游）。
                 # 换模型 = 护栏全部重验（DRY_RUN=1 先跑一轮），见文件头 2026-09-19 那条。
                 - name: LLM_MODEL
-                  value: "qwen3.8-27b-sglang"
+                  value: "qwen3.8-flash-next-tp2"
                 # 与 jobs-sg 同口径；nginx 代理侧也是 300s，两边要一致，
                 # 否则代理先断会让客户端看到不完整响应而非超时。
                 - name: LLM_TIMEOUT
