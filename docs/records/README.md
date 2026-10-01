@@ -4,6 +4,7 @@
 
 | 日期 | 记录 | 内容 |
 |------|------|------|
+| 2026-10-01 | [oracle-firewalld-flushes-cilium-iptables](2026-10-01-oracle-firewalld-flushes-cilium-iptables.md) | oracle pod 出站全断 30min、全站入口断 24min。needrestart 升 libssl 后重启 firewalld，**有 direct 规则就 flush 全部 iptables**，Cilium masquerade 被清。☠️ 08-01「OCI DNS 故障」是同一个病 |
 | 2026-09-12 | [falco-syscall-drops-apt-upgrade](2026-09-12-falco-syscall-drops-apt-upgrade.md) | Falco 一分钟丢 **402,586 个 syscall**（检测盲区）。☠️ 别查 CPU limit——全程 0.024/1 核零 throttle；真因是 `unattended-upgrades` 升 glibc+locales+python3.12 打出 fork 21/s，灌满**全机共用的那一个 8MB** 缓冲区。已改 32MB，阈值仍 `>0` |
 | 2026-09-01 | [oracle-apparmor-af-unix-panic](2026-09-01-oracle-apparmor-af-unix-panic.md) | oracle 三个月的「宿主层硬重置」实为**内核 AppArmor 空指针**。☠️ 客场查不到是因为 `panic_on_oops=1` 让 journald 来不及落盘——「日志戛然而止」恰是 guest panic 的标准形态，不是宿主层证据。触发方是 uptime-kuma 容器内默认自启的 nscd，关掉后该函数调用 69→**0** |
 | 2026-08-31 | [trivy-stale-replicaset-reports](2026-08-31-trivy-stale-replicaset-reports.md) | `TrivyExposedSecretFound` 烧 25h／42 条 Telegram，**没有任何真泄漏**：报告挂在 `replicas=0` 的 ReplicaSet 上，**24h TTL 只重扫有副本的**，指标衰减到 20 就平台化，永不自愈 |
@@ -21,7 +22,7 @@
 | 2026-08-12 | [slo-nan-poisoning](2026-08-12-slo-nan-poisoning.md) | SLI 0/0 产出 NaN 写入 TSDB、传染 30d 序列 → 5 个错误预算面板全 N/A 而告警链路全绿 |
 | 2026-08-11 | [gateway-api-crd-stall](2026-08-11-gateway-api-crd-stall.md) | Cilium 1.20 漏配 Gateway API CRD → 控制器静默未初始化 30h；旧路由照常 200，只有新增路由 503 |
 | 2026-08-03 | [namespace-prune-cascade](2026-08-03-namespace-prune-cascade.md) | Namespace 内嵌清单 → 删文件 prune 掉整个 ns → 级联删光同 ns 数据（`Prune=false` 拦不住）；已从 restic 恢复 |
-| 2026-08-01 | [oracle-k3s-dns-outage](2026-08-01-oracle-k3s-dns-outage.md) | oracle 丢 OCI DNS 上游 → CoreDNS 全挂 → cloudflared 崩溃 → meirong.dev 不可达 ~20min |
+| 2026-08-01 | [oracle-k3s-dns-outage](2026-08-01-oracle-k3s-dns-outage.md) | cloudflared 崩溃 → meirong.dev 不可达 ~20min。⚠️ 原定性「OCI DNS 上游故障」是**错的**，真因见 2026-10-01 |
 | 2026-07-12 | [pve-screen-backlight-always-on](2026-07-12-pve-screen-backlight-always-on.md) | pve 屏幕常亮（`setterm powersave` 静默失败） |
 | 2026-06-07 | [zitadel-console-grpc-404](2026-06-07-zitadel-console-grpc-404.md) | ZITADEL Console v1 gRPC 经网关 404 → Cilium `enableAppProtocol` |
 | 2026-03-15 | [cilium-hubble-tls-issue](2026-03-15-cilium-hubble-tls-issue.md) | Hubble TLS 证书问题排查 |

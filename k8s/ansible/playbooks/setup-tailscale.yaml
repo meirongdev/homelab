@@ -241,7 +241,8 @@
     # us via ClusterMesh VXLAN (which itself rides Tailscale) and picks that as its
     # endpoint: WireGuard-over-VXLAN-over-WireGuard. Blocking 41641 to/from the CNI
     # ranges makes those candidates never validate, so the real public path wins.
-    # Same guard exists on node0 via firewalld direct rules (oracle playbook).
+    # Same unit on node0 (oracle playbook) — there it replaced firewalld direct rules
+    # on 2026-10-01, which made every firewalld restart flush Cilium's iptables.
     - name: Install tailscale-no-cni-endpoint recursion guard unit
       ansible.builtin.copy:
         dest: /etc/systemd/system/tailscale-no-cni-endpoint.service

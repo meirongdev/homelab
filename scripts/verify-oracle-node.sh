@@ -51,7 +51,8 @@ echo "gro=$(sudo ethtool -k "$IF" 2>/dev/null | awk -F": " "/rx-udp-gro-forwardi
 echo "dispatcher=$(systemctl is-enabled networkd-dispatcher 2>/dev/null)"
 echo "gro_script=$([ -x /etc/networkd-dispatcher/routable.d/50-tailscale-ethtool ] && echo yes || echo no)"
 echo "ipfwd=$(sysctl -n net.ipv4.ip_forward 2>/dev/null)"
-echo "guard=$(sudo firewall-cmd --permanent --direct --get-all-rules 2>/dev/null | grep -c 41641)"
+echo "guard=$({ sudo iptables -S INPUT; sudo iptables -S OUTPUT; } 2>/dev/null | grep -c 41641)"
+echo "fw_direct=$(for p in --direct "--permanent --direct"; do for k in rules chains passthroughs; do sudo firewall-cmd $p --get-all-$k 2>/dev/null; done; done | grep -c .)"
 echo "fwdpolicy=$(sudo iptables -S FORWARD 2>/dev/null | awk "/^-P FORWARD/{print \$3}")"
 echo "resolv_extra=$(awk "/^nameserver/{print \$2}" /run/systemd/resolve/resolv.conf 2>/dev/null | grep -vFx 169.254.169.254 | tr "\n" " ")"
 echo "dropin_dns=$(sed -n "s/^DNS=//p" /etc/systemd/resolved.conf.d/*.conf 2>/dev/null | head -1)"
@@ -78,8 +79,13 @@ if [ -n "$HOST" ]; then
     && ok "GRO 修复已持久化（networkd-dispatcher + drop-in 脚本）" \
     || bad "GRO 修复未持久化 → 下次重启会丢（dispatcher=$(g dispatcher) script=$(g gro_script)）"
   [ "$(g ipfwd)" = "1" ] && ok "net.ipv4.ip_forward = 1" || bad "ip_forward = $(g ipfwd)"
-  [ "$(g guard)" -ge 2 ] 2>/dev/null && ok "firewalld 递归防护规则在（$(g guard) 条 41641）" \
-    || bad "firewalld 递归防护缺失（$(g guard) 条）—— 可能出现 WireGuard-over-VXLAN-over-WireGuard"
+  [ "$(g guard)" -ge 2 ] 2>/dev/null && ok "递归防护规则在（iptables $(g guard) 条 41641，tailscale-no-cni-endpoint.service）" \
+    || bad "递归防护缺失（$(g guard) 条）—— 可能出现 WireGuard-over-VXLAN-over-WireGuard"
+  # ☠️ 有任意一条 direct 配置，firewalld 每次 start/stop/reload 都会 flush iptables 全部表，
+  # 连 Cilium 的 masquerade 一起清 → pod 新建出站全断 ~30min。
+  # 见 records/2026-10-01-oracle-firewalld-flushes-cilium-iptables.md
+  [ "$(g fw_direct)" = "0" ] && ok "firewalld 无 direct 配置（重启/reload 不会清空 Cilium 的 iptables）" \
+    || bad "firewalld 有 $(g fw_direct) 条 direct 配置 —— 下次 firewalld 重启（needrestart 会做）将清空 Cilium masquerade 链"
   # pod↔pod 转发靠的是 policy ACCEPT（+ Cilium 自己的 CILIUM_FORWARD 链），不是显式
   # 的 -A FORWARD ACCEPT 规则 —— 那两条 2026-08-05 已从 playbook 删除：Cilium 重建
   # FORWARD 链时必然把它们丢掉，永远无法收敛。所以这里只查 policy。
