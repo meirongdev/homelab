@@ -257,6 +257,34 @@ trivy:
       # NVD 9.8 过度评分。本集群两节点均为 x86_64 64 位(5600H / J4105 VM), 不可触发。
       - id: CVE-2026-31789
         statement: "alpine openssl 3.3.2-r4(修复 3.3.7-r0); OpenSSL 官方 only 32 bit platforms affected 且需 >1GB 证书, homelab 两节点均 x86_64, NVD 9.8 过度评分, 与 oracle 同口径, 2026-11 复审"
+      # --- PyJWT 非对称 PEM 识别绕过 + Next.js next/og RCE（2026-10-01 新增）---
+      # 2026-10-01 homelab 烧 3 条 Critical，逐条核过 = 2 个 advisory（均 09-29/30 才发布）：
+      #   litellm v1.103.1 PyJWT 2.13.0 · open_notebook 1.14.0 PyJWT 2.13.0 + next 16.2.6。
+      #   multica-web v0.4.28（next 16.2.6）09-30 13:44 扫的、早于 advisory 入库，下轮重扫必中，
+      #   同一条豁免一并覆盖。
+      # ☠️ 无已修镜像（2026-10-01 读上游 lockfile 实测，不看 release notes）：
+      #   litellm v1.103.2（当天 06:35 UTC 发）uv.lock 仍锁 PyJWT 2.13.0 —— 上一个提交
+      #   「bump v1.103.1 to fix Trivy critical」并没有修掉这一条；litellm main 已是 2.15.0，
+      #   下个 release 应会带上。open_notebook 1.14.0 仍是最新 stable。
+      #
+      # GHSA-ffc3-869f-jxw9 / CVE-2026-102268（PyJWT ≤2.13.0，修复 2.14.0）——**不可达**：
+      #   advisory 原文两个前提须同时成立：①jwt.decode 的 algorithms 白名单**混用** HMAC 与
+      #   非对称算法 ②验签密钥以原始 PEM 传入。litellm v1.103.1 全部 jwt.decode 调用点逐个
+      #   看过：白名单要么纯 HS256、要么纯非对称（SUPPORTED_JWT_ALGORITHMS / ID token 列表）、
+      #   要么单一算法，**没有一处混用**；且本集群未开 enable_jwt_auth。open_notebook 自身
+      #   代码不调 jwt，PyJWT 只经 mcp 1.28.1 引入，而 mcp 只用 jwt.encode（客户端签名）。
+      # GHSA-vcvr-r3jv-pc5j（next ≥16.2.0 <16.3.6，无 CVE 号故写 GHSA）——**不可达**：
+      #   advisory 原文只影响用 Node.js 版 `next/og` ImageResponse、且把攻击者可控值塞进
+      #   SVG 的应用。open-notebook v1.14.0 / multica v0.4.28 源码 grep next/og、
+      #   ImageResponse、@vercel/og 及 opengraph-image/icon 等生成型元数据文件，零命中。
+      # ⚠️ 覆盖范围：按 ID 全集群生效。将来新增 Next.js 服务若用 next/og 生成图片，或新增
+      #   Python 服务的 jwt.decode 混用 HS 与 RS/ES 白名单，对应条目必须立刻重估。
+      # 复审触发比日期有用：litellm bump 到 PyJWT ≥2.14.0 且 open_notebook 同样、
+      #   各 Next.js 镜像 bump 到 next ≥16.3.6，就删对应条目。
+      - id: CVE-2026-102268
+        statement: "PyJWT ≤2.13.0 非对称 PEM 识别绕过致 HS/RS 混淆(修复 2.14.0, 2026-09-29 发布); 触发需 jwt.decode 白名单混用 HMAC 与非对称算法, litellm v1.103.1 全部调用点无混用且未开 enable_jwt_auth, open_notebook 只经 mcp SDK 引入且仅 encode; litellm v1.103.2 仍锁 2.13.0 无已修镜像, 2026-11 复审"
+      - id: GHSA-vcvr-r3jv-pc5j
+        statement: "Next.js next/og ImageResponse(Node 版) RCE(修复 16.3.6, 2026-09-30 发布); 触发需应用用 next/og 生成图片且传入攻击者可控 SVG 值, open_notebook 1.14.0 / multica-web v0.4.28 源码零引用 next/og, 无已修镜像, 2026-11 复审"
   # 扫描 Job（client）资源
   resources:
     requests:
