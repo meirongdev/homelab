@@ -271,6 +271,16 @@ trivy:
         statement: "Next.js Windows 路径穿越 RCE(修复 16.3.3/15.5.24); Vercel 公告原文 Linux and macOS are not affected, 两集群全 Linux 容器故架构上不适用, 2026-11 复审"
       - id: GHSA-2xp9-vwfh-vxw4
         statement: "Next.js 图片优化经 sharp/libheif 解 AVIF 的 RCE(修复 16.3.3); 触发需优化攻击者可控 AVIF, 受影响服务 remotePatterns 为空(远程源实测 400 url not allowed), 写入本源需已有账号(multica 关注册/notebook 有口令/zitadel 品牌图要 org 管理员); zitadel-login v4.17.3 仍 16.2.11 / multica-web v0.4.42 仍 16.2.6 / open_notebook 1.14.0 为最新 stable, 均无已修镜像, 2026-11 复审"
+      # --- Next.js next/og ImageResponse RCE（2026-10-01 新增，与 homelab 同批）---
+      # 本集群只命中 homepage v2.3.0（next 16.3.3；影响范围 ≥16.2.0 <16.3.6）。
+      # zitadel-login v4.13.1 是 next 16.1.6，不在范围内。
+      # ☠️ 无已修镜像：homepage 最新 v2.4.0 及 main/dev 的 package.json 均仍 ^16.3.3。
+      # **不可达**：advisory 原文只影响用 Node.js 版 `next/og` ImageResponse、且把攻击者
+      #   可控值塞进 SVG 的应用；homepage v2.3.0 / v2.4.0 源码 grep next/og、ImageResponse、
+      #   @vercel/og 零命中。可达性细节与覆盖范围警告见 homelab 侧同 ID 注释。
+      # 复审触发：homepage bump 到 next ≥16.3.6 就删本条。
+      - id: GHSA-vcvr-r3jv-pc5j
+        statement: "Next.js next/og ImageResponse(Node 版) RCE(修复 16.3.6, 2026-09-30 发布); 触发需应用用 next/og 生成图片且传入攻击者可控 SVG 值, homepage v2.3.0/v2.4.0 源码零引用 next/og, v2.4.0 仍 ^16.3.3 无已修镜像, 2026-11 复审"
       # --- anyio IDNA 2003 主机名编码(2026-09-20 新增, 与 homelab 同批) ---
       # 本 ID 在 oracle 只命中 calibre-web-automated(anyio 4.14.1, 修复 4.14.2)一个镜像,
       # 9 个共享该镜像的 workload(calibre-web + calibre-metadata-* ×7 + ebook-sync-monitor
