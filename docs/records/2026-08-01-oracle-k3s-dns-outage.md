@@ -3,6 +3,13 @@
 > 日期: 2026-08-01
 > 影响: 全部 `*.meirong.dev` 公网不可达约 20 分钟（07-31 22:31–22:52 UTC = 08-01 06:31–06:52 UTC+8），触发多条 Telegram 告警；无数据丢失
 > 根因: oracle-k3s 节点短暂丢失到 Oracle Cloud DNS（`169.254.169.254:53`）的连通性 → CoreDNS 全外网解析失败 → cloudflared 崩溃（exit 1）→ Cloudflare Tunnel 整体下线
+>
+> ⚠️ **2026-10-01 更正：上面这条根因是错的**，下文保留原样作为当时的判断。窗口开始前一分钟
+> （22:30 UTC）unattended-upgrades 刚升完 `libssl3t64 openssl`。needrestart 随后重启了
+> firewalld，而 firewalld 因为节点上有 direct 规则，flush 掉了全部 iptables，Cilium 的
+> masquerade 链也被清空，pod 出站从此没有 SNAT。所以断掉的不是 OCI DNS，是本机所有 pod 的
+> 新建出站连接。「后续（2026-08-12）」那节加的 1.1.1.1 上游对这个病无效，10-01 复发时三个上游
+> 一起超时。→ [2026-10-01-oracle-firewalld-flushes-cilium-iptables.md](2026-10-01-oracle-firewalld-flushes-cilium-iptables.md)
 
 ## 症状：收到的 Telegram 告警
 

@@ -1,6 +1,6 @@
 # Tailscale Cross-Cluster Networking
 
-> Last updated: 2026-09-21
+> Last updated: 2026-10-01
 > Status: 生效事实
 >
 > Rewritten 2026-07-07 after the topology review. The original design (each K3s node
@@ -263,7 +263,14 @@ the endpoint → WG rides VXLAN rides WG, with the real public path never winnin
 Both nodes therefore DROP udp/41641 to/from the CNI ranges:
 
 - k8s-node: `tailscale-no-cni-endpoint.service` (iptables, see `k8s/ansible/playbooks/setup-tailscale.yaml`)
-- node0: firewalld direct rules (see `cloud/oracle/ansible/playbooks/setup-tailscale.yaml`)
+- node0: the same unit, CIDRs mirrored (see `cloud/oracle/ansible/playbooks/setup-tailscale.yaml`)
+
+☠️ **node0 must have zero firewalld direct rules.** Until 2026-10-01 its guard was two
+firewalld direct rules — and while *any* direct rule exists, firewalld 2.x flushes every
+iptables table (`-F -X -Z`) on each start/stop/reload, Cilium's masquerade chain included.
+needrestart restarts firewalld after routine libssl/python/libc upgrades, so pod egress
+died for up to 30 min at a time. `just oracle verify-node` asserts the count is 0.
+→ [records/2026-10-01-oracle-firewalld-flushes-cilium-iptables.md](../records/2026-10-01-oracle-firewalld-flushes-cilium-iptables.md)
 
 ### Direct connection requirements
 

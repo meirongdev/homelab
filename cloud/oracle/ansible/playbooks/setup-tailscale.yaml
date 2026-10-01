@@ -23,24 +23,53 @@
     # the homelab node can "reach" it through ClusterMesh VXLAN (which rides Tailscale)
     # and would select it: WireGuard-over-VXLAN-over-WireGuard. Drop 41641 to/from the
     # CNI ranges so those candidates never validate and the public path wins.
-    # Mirrors k8s-node's tailscale-no-cni-endpoint.service (homelab playbook).
-    - name: Recursion guard — drop 41641 to own CNI range (INPUT)
-      ansible.builtin.command:
-        cmd: firewall-cmd --permanent --direct --add-rule ipv4 filter INPUT 0 -p udp --dport 41641 -d 10.52.0.0/16 -j DROP
-      register: fw_in
-      changed_when: "'ALREADY_ENABLED' not in fw_in.stderr"
+    # Same unit as k8s-node's tailscale-no-cni-endpoint.service (homelab playbook),
+    # CIDRs mirrored.
+    #
+    # ☠️ 2026-10-01 起不许再用 firewalld direct 规则实现它（原先就是）：只要存在任意一条
+    # direct 规则，firewalld 2.x 每次 start/stop/reload 都会对 iptables 全部表执行
+    # -F -X -Z（fw.py `may_skip_flush_direct_backends`），连 Cilium 的 CILIUM_POST_nat
+    # masquerade 链一起清掉 → pod 新建的出站连接（含 CoreDNS 的全部上游）全部失效，
+    # 直到 Cilium 自己重装规则（实测 30 分钟）。触发者是 unattended-upgrades 的
+    # needrestart（升 libssl/python/libc 就会重启 firewalld）。
+    # 见 docs/records/2026-10-01-oracle-firewalld-flushes-cilium-iptables.md
+    - name: Install tailscale-no-cni-endpoint recursion guard unit
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/tailscale-no-cni-endpoint.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Prevent Tailscale from using CNI addresses as WireGuard endpoints (recursion guard)
+          After=network-online.target
 
-    - name: Recursion guard — drop 41641 to peer CNI range (OUTPUT)
-      ansible.builtin.command:
-        cmd: firewall-cmd --permanent --direct --add-rule ipv4 filter OUTPUT 0 -p udp --dport 41641 -d 10.42.0.0/16 -j DROP
-      register: fw_out
-      changed_when: "'ALREADY_ENABLED' not in fw_out.stderr"
+          [Service]
+          Type=oneshot
+          ExecStart=/bin/sh -c "/usr/sbin/iptables -C INPUT -p udp --dport 41641 -d 10.52.0.0/16 -j DROP 2>/dev/null || /usr/sbin/iptables -I INPUT 1 -p udp --dport 41641 -d 10.52.0.0/16 -j DROP"
+          ExecStart=/bin/sh -c "/usr/sbin/iptables -C OUTPUT -p udp --dport 41641 -d 10.42.0.0/16 -j DROP 2>/dev/null || /usr/sbin/iptables -I OUTPUT 1 -p udp --dport 41641 -d 10.42.0.0/16 -j DROP"
+          RemainAfterExit=yes
 
-    - name: Reload firewalld to apply recursion guard
-      ansible.builtin.service:
-        name: firewalld
-        state: reloaded
-      when: fw_in.changed or fw_out.changed
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start recursion guard unit
+      ansible.builtin.systemd:
+        name: tailscale-no-cni-endpoint.service
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    # 迁移旧节点：运行时 + 永久配置各删一遍，**绝不 reload** —— 删之前 direct 规则还在
+    # 运行时里，此刻 reload 正好触发一次上面那个 flush。运行时删除只对该条规则做 iptables -D。
+    - name: Remove legacy firewalld direct guard rules (runtime + permanent, no reload)
+      ansible.builtin.command:
+        cmd: "firewall-cmd {{ item.0 }} --direct --remove-rule ipv4 filter {{ item.1 }}"
+      loop: "{{ ['--permanent', ''] | product(legacy_direct_rules) | list }}"
+      vars:
+        legacy_direct_rules:
+          - "INPUT 0 -p udp --dport 41641 -d 10.52.0.0/16 -j DROP"
+          - "OUTPUT 0 -p udp --dport 41641 -d 10.42.0.0/16 -j DROP"
+      register: fw_rm
+      changed_when: "'NOT_ENABLED' not in fw_rm.stderr"
 
     # --- Tailscale ip rule 收敛器（2026-08-12 重构，取代 boot-oneshot）---
     # 守一条不变量：5200 `to 100.64.0.0/10 lookup 52`。挡的是 Cilium identity-mark
