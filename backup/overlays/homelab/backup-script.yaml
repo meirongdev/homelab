@@ -80,7 +80,7 @@ data:
           dest="/work/pvc/$(basename "$d")"
           find "$d" -maxdepth 3 \
             \( -name processed_books -o -name thumbnails -o -name cache -o -name .cache \) -prune -o \
-            -type f \( -name '*.db' -o -name '*.db-wal' -o -name '*.db-shm' -o -name '*.db-journal' -o -name '*.sqlite*' -o -name '*.json' \) -size -80M -print 2>/dev/null | \
+            -type f \( -name '*.db' -o -name '*.db-wal' -o -name '*.db-shm' -o -name '*.db-journal' -o -name '*.sqlite*' -o -name '*.json' \) -size -512M -print 2>/dev/null | \
           while IFS= read -r f; do
             rel="${f#"$d"/}"
             mkdir -p "$dest/$(dirname "$rel")"
