@@ -161,7 +161,7 @@ spec:
       containers:
         - name: litellm
           # litellm/litellm:v1.94.1 @ 2026-08-01（官方 Python proxy；Rust 网关当前仅 /v1/realtime）
-          image: litellm/litellm@sha256:29b7f41dd84601550354b98a8e7c767256a18300ad20a5821fbb652ec0a3ea93
+          image: litellm/litellm@sha256:df15400b5b80925c45d3fd53f8f7a6c0eaa8a25a86833e1b358002e129018943
           args: ["--config", "/app/config.yaml", "--port", "4000"]
           ports:
             - containerPort: 4000
