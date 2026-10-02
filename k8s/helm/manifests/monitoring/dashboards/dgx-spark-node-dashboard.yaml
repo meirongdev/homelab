@@ -346,42 +346,12 @@ data:
             "defaults": {
               "color": {"mode": "palette-classic"},
               "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
-              "unit": "percent",
-              "min": 0,
-              "max": 100,
-              "mappings": []
-            },
-            "overrides": []
-          },
-          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
-          "id": 10,
-          "options": {
-            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
-            "tooltip": {"mode": "multi", "sort": "desc"}
-          },
-          "targets": [
-            {
-              "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "100 - (node_filesystem_avail_bytes{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\", fstype!~\"tmpfs|overlay|squashfs|ramfs\"} / node_filesystem_size_bytes{job=\"node-exporter-dgx-spark\", nodename=~\"$nodename\", fstype!~\"tmpfs|overlay|squashfs|ramfs\"} * 100)",
-              "legendFormat": "{{nodename}} {{mountpoint}}",
-              "refId": "A"
-            }
-          ],
-          "title": "磁盘使用率 % (by mountpoint)",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "fieldConfig": {
-            "defaults": {
-              "color": {"mode": "palette-classic"},
-              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
               "unit": "binBps",
               "mappings": []
             },
             "overrides": []
           },
-          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
           "id": 11,
           "options": {
             "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
