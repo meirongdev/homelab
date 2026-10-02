@@ -64,22 +64,22 @@ ebook-sync-status:
 # 本地同步电子书 (测试模式)
 sync-ebooks-dry-run:
     @echo "⏳ 测试模式: 显示会同步的电子书..."
-    bash scripts/sync-ebooks.sh --dry-run
+    bash ../../scripts/sync-ebooks.sh --dry-run
 
 # 本地同步电子书 (导入+备份)
 sync-ebooks:
     @echo "⏳ 同步电子书到 calibre-web..."
-    bash scripts/sync-ebooks.sh --backup
+    bash ../../scripts/sync-ebooks.sh --upload --backup
 
 # 本地同步电子书 (导入+备份+清理)
 sync-ebooks-cleanup:
     @echo "⏳ 同步电子书到 calibre-web 并删除本地副本..."
-    bash scripts/sync-ebooks.sh --backup --cleanup
+    bash ../../scripts/sync-ebooks.sh --upload --backup --cleanup
 
 # 本地同步电子书 (导入+清理，不备份)
 sync-ebooks-no-backup:
     @echo "⏳ 同步电子书到 calibre-web (不备份)..."
-    bash scripts/sync-ebooks.sh --no-backup --cleanup
+    bash ../../scripts/sync-ebooks.sh --upload --no-backup --cleanup
 
 # 查看电子书备份
 ebook-backup-list:
