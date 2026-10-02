@@ -36,6 +36,9 @@ data:
   # （xiaogpt 原生读 MI_USER / MI_PASS / OPENAI_API_KEY / MI_DID）——这里写了同名字段会**覆盖**环境变量。
   # ⚠️ 程序只在启动时读一次：改了这里要把 Deployment 的 xiaogpt/config-rev +1，否则 Pod 不重启、改动不生效。
   # 关键词是**前缀匹配**：「请帮我…」不触发，必须以「请问/帮我/回答」开头。
+  # ☠️ prompt 不是 system 消息：xiaogpt 把它拼在**首个问题后面**（`f"{query},{prompt}"`），之后这条
+  #    首轮消息一直钉在历史里（另保留最近 5 轮）。所以只写要求、别写身份声明——写「你是由家庭服务器
+  #    驱动的助手」会被模型当成用户的说法去「纠正」（10-03 实测它回「我并不是…而是通义千问」）。
   xiaogpt.json: |
     {
       "hardware": "S12A",
@@ -50,7 +53,7 @@ data:
           }
         }
       },
-      "prompt": "你是由家庭服务器驱动的智能语音助手。请直接用简明、亲切、通俗的口语回答用户。绝对不要输出思考过程（不要输出think标签），不要使用Markdown格式或列表排版，控制在一两百字内直接作答。",
+      "prompt": "回答会由音箱直接念出来：请用简明、亲切、通俗的口语直接回答，控制在一两百字以内；不要输出思考过程，不要用 Markdown、列表、表情符号或网址。",
       "keyword": ["请问", "帮我", "回答"],
       "mute_xiaoai": true,
       "stream": false,
@@ -134,7 +137,7 @@ spec:
       labels:
         app: xiaogpt
       annotations:
-        xiaogpt/config-rev: "1"   # 改 xiaogpt-config 后 +1，触发重启
+        xiaogpt/config-rev: "2"   # 改 xiaogpt-config 后 +1，触发重启
     spec:
       priorityClassName: bulk
       nodeSelector:
