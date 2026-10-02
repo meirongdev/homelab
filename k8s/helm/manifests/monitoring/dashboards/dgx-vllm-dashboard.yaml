@@ -333,13 +333,13 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum by (nodename) (rate((sglang:generation_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"} or vllm:generation_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"})[$__rate_interval]))",
+              "expr": "sum by (nodename) (rate(sglang:generation_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:generation_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]))",
               "legendFormat": "generation",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum by (nodename) (rate((sglang:prompt_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"} or vllm:prompt_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"})[$__rate_interval]))",
+              "expr": "sum by (nodename) (rate(sglang:prompt_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:prompt_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]))",
               "legendFormat": "prompt",
               "refId": "B"
             }
@@ -418,19 +418,19 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.50, sum by (le) (rate((sglang:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"} or vllm:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"})[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(sglang:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
               "legendFormat": "p50",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.95, sum by (le) (rate((sglang:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"} or vllm:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"})[$__rate_interval])))",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(sglang:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
               "legendFormat": "p95",
               "refId": "B"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.99, sum by (le) (rate((sglang:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"} or vllm:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"})[$__rate_interval])))",
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(sglang:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
               "legendFormat": "p99",
               "refId": "C"
             }
@@ -455,19 +455,19 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.50, sum by (le) (rate((sglang:e2e_request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"} or vllm:e2e_request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"})[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(sglang:e2e_request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:e2e_request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
               "legendFormat": "p50",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.95, sum by (le) (rate((sglang:e2e_request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"} or vllm:e2e_request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"})[$__rate_interval])))",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(sglang:e2e_request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:e2e_request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
               "legendFormat": "p95",
               "refId": "B"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.99, sum by (le) (rate((sglang:e2e_request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"} or vllm:e2e_request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"})[$__rate_interval])))",
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(sglang:e2e_request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:e2e_request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
               "legendFormat": "p99",
               "refId": "C"
             }
@@ -492,13 +492,13 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.50, sum by (le) (rate((sglang:inter_token_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"} or vllm:inter_token_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"})[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(sglang:inter_token_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:inter_token_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
               "legendFormat": "p50",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.95, sum by (le) (rate((sglang:inter_token_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"} or vllm:inter_token_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"})[$__rate_interval])))",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(sglang:inter_token_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:inter_token_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
               "legendFormat": "p95",
               "refId": "B"
             }
@@ -523,13 +523,13 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.50, sum by (le) (rate((sglang:queue_time_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"} or vllm:request_queue_time_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"})[$__rate_interval])))",
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(sglang:queue_time_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:request_queue_time_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
               "legendFormat": "p50",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.95, sum by (le) (rate((sglang:queue_time_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"} or vllm:request_queue_time_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"})[$__rate_interval])))",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(sglang:queue_time_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:request_queue_time_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
               "legendFormat": "p95",
               "refId": "B"
             }
