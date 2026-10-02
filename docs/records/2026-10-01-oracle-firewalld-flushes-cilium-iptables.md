@@ -86,9 +86,8 @@ firewalld 是 Python 写的，并且链接 libssl。凡是升 python3.x / libssl
 
 ## 三、处置
 
-1. **护栏改用 systemd unit**（已在线执行）：`/etc/systemd/system/tailscale-no-cni-endpoint.service`
-   与 k8s-node 用同一个 unit，CIDR 对调（INPUT 丢 `10.52.0.0/16`，OUTPUT 丢 `10.42.0.0/16`），
-   enable + start 后 `iptables -S INPUT/OUTPUT` 各一条 41641 DROP。
+1. **护栏改用 systemd unit**：`/etc/systemd/system/tailscale-no-cni-endpoint.service`
+   与 k8s-node 用同一个 unit，CIDR 对调（INPUT 丢 `10.52.0.0/16`，OUTPUT 丢 `10.42.0.0/16`）。
 2. **删掉 firewalld direct 规则，且不 reload**：运行时和永久配置各删一遍。删之前 direct 规则
    还在运行时里，这时 reload 会正好再 flush 一次。运行时删除只对那一条规则做 `iptables -D`
    （`fw_direct.py` `remove_rule` → `_register_rule` 在规则清空时删掉 chain 键，
@@ -103,8 +102,16 @@ firewalld 是 Python 写的，并且链接 libssl。凡是升 python3.x / libssl
    done
    ```
 
+   ☠️ **删完必须 `sudo systemctl restart tailscale-no-cni-endpoint`**。nftables 后端下，
+   direct 规则**直接插在内建 INPUT/OUTPUT 链里**，没有 `*_direct` 链，内容和 unit 的规则逐字相同。
+   10-01 在线迁移时是先启动 unit、再删 direct 规则：unit 的 `iptables -C` 把 firewalld 那条认成了
+   自己的，于是跳过插入；10-02 删掉 direct 规则，删的正是唯一一份，`verify-node` 报
+   「递归防护缺失（0 条）」。restart unit 后规则补回，`tailscale status` 里没有 peer 用过 CNI 地址，
+   这段空窗没有造成影响。之前巡检看到的「2 条」也是 firewalld 那两条，不是 unit 插的。
 3. **playbook**：`cloud/oracle/ansible/playbooks/setup-tailscale.yaml` 改为装同一个 unit，
-   并带一个迁移任务（同上，运行时 + 永久配置删除，不 reload）。
+   并带一个迁移任务（同上，运行时 + 永久配置删除，不 reload）。迁移任务**排在装 unit 之前**；
+   删过规则就把 unit 的状态设为 `restarted`（oneshot + RemainAfterExit 时，对已 active 的 unit
+   用 `started` 不会重跑 ExecStart）。
 4. **巡检**：`scripts/verify-oracle-node.sh` 的护栏检查改为看 iptables，并新增一条断言：
    firewalld 运行时 + 永久配置里的 direct rules/chains/passthroughs 总数必须为 0。
 
