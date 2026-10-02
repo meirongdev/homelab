@@ -158,9 +158,9 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "node_hwmon_temp_celsius{job=\"node-exporter-metal-nodes\", sensor=~\"Tctl|Package.*|k10temp.*|coretemp.*\"}",
+              "expr": "node_hwmon_temp_celsius{job=\"node-exporter-metal-nodes\"} * on(instance, chip, sensor) group_left(label) node_hwmon_sensor_label{label=~\"Tctl|Package.*\"}",
               "instant": true,
-              "legendFormat": "{{nodename}} {{chip}} {{sensor}}"
+              "legendFormat": "{{nodename}} {{label}}"
             }
           ]
         },
@@ -182,8 +182,8 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "node_hwmon_temp_celsius{job=\"node-exporter-metal-nodes\", sensor=~\"Tctl|Package.*|k10temp.*|coretemp.*\"}",
-              "legendFormat": "{{nodename}} {{sensor}}"
+              "expr": "node_hwmon_temp_celsius{job=\"node-exporter-metal-nodes\"} * on(instance, chip, sensor) group_left(label) node_hwmon_sensor_label{label=~\"Tctl|Package.*\"}",
+              "legendFormat": "{{nodename}} {{label}}"
             }
           ]
         },

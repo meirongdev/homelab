@@ -79,7 +79,7 @@ spec:
             summary: "falcosidekick 不可达 —— Falco 告警推不到 Telegram"
             description: >-
               falcosidekick:2801 抓取失败超过 10 分钟。Falco 本身照常检测、日志照常进 Loki
-              （`{namespace="falco"}`），但**主动推送这条路断了**。查
+              （`{k8s_namespace_name="falco"}`），但**主动推送这条路断了**。查
               `kubectl --context oracle-k3s logs -n falco deploy/falco-falcosidekick`。
 
         # (3) 推送在失败。⚠️ status="error" 这个序列**只有第一次失败之后才存在**，所以

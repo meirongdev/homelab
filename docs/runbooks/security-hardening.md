@@ -1,6 +1,6 @@
 # Security Hardening Runbook — 集群内部安全（Phase 0 + 1）
 
-> Last updated: 2026-09-02
+> Last updated: 2026-10-02
 >
 > **触发条件**：部署/验证/回滚集群内部安全组件（PSA / kube-bench / Trivy / Kyverno / 节点加固 / Hubble）。
 > **成功判定**：各层验证步骤通过（每 Phase 内嵌验证命令与冒烟/巡检判据）。
@@ -101,7 +101,7 @@ kubectl --context k3s-homelab run kb --rm -it --image=docker.io/aquasec/kube-ben
 kubectl --context k3s-homelab get pods -n trivy-system
 kubectl --context k3s-homelab get vulnerabilityreports,configauditreports,exposedsecretreports -A
 ```
-- 指标核对（首次扫描后）：`kubectl -n trivy-system port-forward svc/trivy-operator 8080:8080` 然后 `curl -s localhost:8080/metrics | grep trivy_`，确认 `trivy_image_vulnerabilities` / `trivy_exposedsecrets_findings` / `trivy_resource_configaudits` 名称与 `manifests/monitoring/alerts/trivy-alerts.yaml` 一致（不同 chart 版本可能微调）。
+- 指标核对（首次扫描后）：`kubectl -n trivy-system port-forward svc/trivy-operator 8080:8080` 然后 `curl -s localhost:8080/metrics | grep trivy_`，确认 `trivy_image_vulnerabilities` / `trivy_image_exposedsecrets` / `trivy_resource_configaudits` 名称与 `manifests/monitoring/alerts/trivy-alerts.yaml` 一致（不同 chart 版本可能微调）。
 - 看板：Grafana → `Security` 文件夹 → "Security / Trivy 漏洞概览"。
 - 告警：critical CVE / 暴露密钥经 Alertmanager→Telegram。
 

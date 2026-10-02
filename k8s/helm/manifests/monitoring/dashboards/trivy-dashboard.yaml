@@ -63,7 +63,7 @@ data:
           "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }, "color": { "mode": "thresholds" } } },
-          "targets": [ { "expr": "sum(trivy_exposedsecrets_findings{cluster=~\"$cluster\"})", "refId": "A" } ]
+          "targets": [ { "expr": "sum(trivy_image_exposedsecrets{cluster=~\"$cluster\"})", "refId": "A" } ]
         },
         {
           "id": 4, "type": "stat", "title": "Critical 配置审计",
