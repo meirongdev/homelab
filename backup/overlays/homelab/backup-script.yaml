@@ -74,7 +74,9 @@ data:
       # （worker-backup-script.yaml，整目录扫）覆盖。这两条留着是给 CI 的 H4 用的
       # （H4 只解析本文件的白名单），也留着以便将来搬回来。
       # 别因为"这里有它"就以为控制面这份快照里有它们 —— 恢复时按 --host homelab-worker 找。
-      for pat in open-notebook-data jobs-sg-data jellyfin-config navidrome-data; do
+      # `xiaogpt-data`（2026-10-03）同理：钉在 k8s-worker-106，里面只有一个 mi-token.json
+      # （小米 passToken，每次登录轮换，丢了能从 Vault 种子重建，见 xiaogpt.yaml 文件头）。
+      for pat in open-notebook-data jobs-sg-data jellyfin-config navidrome-data xiaogpt-data; do
         for d in "$base"/*"$pat"*; do
           [ -d "$d" ] || continue
           dest="/work/pvc/$(basename "$d")"

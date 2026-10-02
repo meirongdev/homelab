@@ -1,6 +1,6 @@
 # Services — 服务清单
 
-> Last updated: 2026-09-26
+> Last updated: 2026-10-03
 > Status: 生效事实
 >
 > **这张表是服务清单的唯一真相源**：`docs/README.md`、`docs/ARCHITECTURE.md` 与各 runbook
@@ -34,6 +34,7 @@
 | Jellyfin (视频) | homelab | `media` | `media.meirong.dev` | 2026-08-16；媒体读 106 只读 NFS，config 走 local-path（[OIDC 接入中](identity.md#jellyfin)） |
 | Navidrome (音乐) | homelab | `media` | `music.meirong.dev` | 2026-08-16；媒体读 106 只读 NFS，DB 走 local-path |
 | Podcast (自录 RSS 发布) | homelab | `media` | `podcast.meirong.dev` | 2026-08-16；nginx 伺服 106 只读 NFS 的 mp3 + rss.xml |
+| xiaogpt (小爱音箱接 LLM) | homelab | `personal-services` | Internal only | 2026-10-03 从 Mac docker 迁入，钉 `k8s-worker-106`；无 Web 界面、走小米云 + 集群内 LiteLLM。☠️ 登录身份看 token 文件不看账号配置，见备忘 |
 | Grafana | homelab | `monitoring` | `grafana.meirong.dev` | |
 | HashiCorp Vault | homelab | `vault` | `vault.meirong.dev` | |
 | ArgoCD | oracle-k3s | `argocd` | `argocd.meirong.dev` | 2026-08-02 控制面迁 oracle，经 Tailscale 纳管 homelab |
@@ -163,6 +164,19 @@ Vault：它必须与上游 `NakamaConfig.SERVER_KEY` 一致，放 Vault 会让�
 + 手工建库 + 备份脚本加一行，不是 `Database` CR。homelab 刻意不装 CNPG（operator 自身
 实测开销比省下的 postmaster 还贵），理由见
 [decisions/shared-postgres-platform.md](../decisions/shared-postgres-platform.md) 决策四。
+
+### xiaogpt — 登录身份看 token 文件，不看账号配置
+
+清单与换 token 步骤在 [`xiaogpt.yaml`](../../k8s/helm/manifests/personal-services/xiaogpt.yaml) 文件头。
+
+☠️ **miservice 只要 token 里有 passToken 就直接用它登录，`MI_USER`/`MI_PASS` 根本不参与。**
+token 若是另一个小米账号的，表现是「音箱永远 offline（ubus 返回 `Device is offline` 608）+
+米家 0 设备」，跟跨境网络故障一模一样（2026-10-03 实踩，误判了一个多小时）。排障第一步：
+核对 token 的 `userId` 等于 `MI_USER`；米家里出现以陌生数字命名的空家庭就是这个信号。
+
+⚠️ 海外 IP 用密码登录大陆账号会被风控拒（`KeyError: 'userId'`），只能用浏览器取的 passToken；
+它每次登录都轮换，所以落在 PVC 上，Vault 里那份只是种子。**单实例**：两个实例会重复回答并互相
+轮换掉 token。「无日志」≠ 正常——对话接口为空时 xiaogpt 什么都不打。
 
 ---
 
