@@ -1,0 +1,227 @@
+---
+# xiaogpt —— 让小爱音箱（S12A）把「请问/帮我/回答」开头的问题转给自建 LLM。
+# 上游: https://github.com/yihong0618/xiaogpt   无 Web 界面：没有 Service / HTTPRoute / 探针。
+#
+# 工作方式：全走小米云，不碰局域网。轮询小米的对话记录接口 → 命中关键词就 ubus player_pause
+# 打断小爱 → 问 LiteLLM → 用 mina text_to_speech 让音箱念出来。所以它放在哪个节点都能用；
+# 钉 k8s-worker-106 是用户指定，且出口是家里宽带 IP（见下面风控一条）。
+#
+# ☠️ 登录身份由 token 文件决定，**不是** MI_USER：miservice 只要 token 里有 passToken 就直接拿它
+#    换 serviceToken，账号密码根本不参与。2026-10-03 就栽在这：token 是另一个账号的，音箱绑在
+#    正确账号下 → 表现为「音箱永远 offline + 米家 0 设备」，被误判成跨境网络问题查了一个多小时。
+#    排障第一步：核对 token 的 userId 等于 MI_USER。
+# ☠️ 海外用密码登录大陆账号会被风控拒（`KeyError: 'userId'` → `Login failed`），只能用浏览器
+#    拿的 passToken。而 passToken **每次登录都会轮换**，所以 token 必须落盘（下面的 PVC）；
+#    Vault 里那份只是首次启动的种子，跑过一次以后就旧了。
+# ☠️ 只能有一个实例（所以 Recreate）：两个实例会同时回答，还会互相轮换掉对方的 passToken。
+#    迁移前那个 Mac 上的 docker 容器同理——别和这里同时跑。
+#
+# 换 token（passToken 失效 / 换账号）：
+#   export VAULT_ADDR=https://vault.meirong.dev
+#   vault kv patch secret/homelab/xiaogpt mi-token=@<新的 .mi.token>   # {"userId":…,"passToken":…,"deviceId":…}
+#   kubectl --context k3s-homelab -n personal-services annotate externalsecret xiaogpt-secret force-sync=$(date +%s) --overwrite
+#   kubectl --context k3s-homelab -n personal-services exec deploy/xiaogpt -- sh -c ': > "$HOME/.mi.token"'
+#   kubectl --context k3s-homelab -n personal-services rollout restart deploy/xiaogpt
+#   （清空而不是删除：文件是 subPath 挂载删不掉；initContainer 只在文件为空时才从种子拷，
+#    且它只在**新 Pod** 启动时跑，容器原地重启不会重新播种 —— 所以最后一步必须是 rollout restart。）
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: xiaogpt-config
+  namespace: personal-services
+  labels:
+    app: xiaogpt
+data:
+  # 只放不敏感的配置。账号 / 密码 / LLM key / 设备 ID 走下面 Secret 的环境变量
+  # （xiaogpt 原生读 MI_USER / MI_PASS / OPENAI_API_KEY / MI_DID）——这里写了同名字段会**覆盖**环境变量。
+  # ⚠️ 程序只在启动时读一次：改了这里要把 Deployment 的 xiaogpt/config-rev +1，否则 Pod 不重启、改动不生效。
+  # 关键词是**前缀匹配**：「请帮我…」不触发，必须以「请问/帮我/回答」开头。
+  xiaogpt.json: |
+    {
+      "hardware": "S12A",
+      "api_base": "http://litellm.litellm.svc.cluster.local:4000/v1",
+      "gpt_options": {
+        "model": "qwen3.8-flash-next-tp2",
+        "temperature": 0.7,
+        "max_tokens": 500,
+        "extra_body": {
+          "chat_template_kwargs": {
+            "enable_thinking": false
+          }
+        }
+      },
+      "prompt": "你是由家庭服务器驱动的智能语音助手。请直接用简明、亲切、通俗的口语回答用户。绝对不要输出思考过程（不要输出think标签），不要使用Markdown格式或列表排版，控制在一两百字内直接作答。",
+      "keyword": ["请问", "帮我", "回答"],
+      "mute_xiaoai": true,
+      "stream": false,
+      "verbose": 1
+    }
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: xiaogpt-secret
+  namespace: personal-services
+spec:
+  # 前置手工步骤（不先写，ESO 会一直 SecretSyncedError、Pod 停在 CreateContainerConfigError）：
+  #   vault kv put secret/homelab/xiaogpt mi-user=<小米ID> mi-pass=<密码> \
+  #     openai-key=<LiteLLM 虚拟 key> mi-did=<音箱 miotDID> mi-token=@<.mi.token 文件>
+  # ⚠️ LiteLLM 虚拟 key 自带模型白名单（存在 Postgres 里），ConfigMap 换了 model 要同步改 key，
+  #    见 docs/reference/litellm-gateway.md。
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: xiaogpt-secret
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: mi-user
+      remoteRef:
+        key: homelab/xiaogpt
+        property: mi-user
+    - secretKey: mi-pass
+      remoteRef:
+        key: homelab/xiaogpt
+        property: mi-pass
+    - secretKey: openai-key
+      remoteRef:
+        key: homelab/xiaogpt
+        property: openai-key
+    - secretKey: mi-did
+      remoteRef:
+        key: homelab/xiaogpt
+        property: mi-did
+    - secretKey: mi-token
+      remoteRef:
+        key: homelab/xiaogpt
+        property: mi-token
+---
+# 只装一个 token 文件。文件名必须以 .json 结尾：worker 夜备只捞 *.db* / *.sqlite* / *.json，
+# 叫 mi.token 就静默不进 restic。丢了也能从 Vault 种子 + 浏览器重新取 passToken 恢复。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: xiaogpt-data
+  namespace: personal-services
+  labels:
+    app: xiaogpt
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 64Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: xiaogpt
+  namespace: personal-services
+  labels:
+    app: xiaogpt
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate   # ☠️ 不能滚动更新：新旧两个实例同时在线 = 每个问题回答两遍 + 互相轮换 passToken
+  selector:
+    matchLabels:
+      app: xiaogpt
+  template:
+    metadata:
+      labels:
+        app: xiaogpt
+      annotations:
+        xiaogpt/config-rev: "1"   # 改 xiaogpt-config 后 +1，触发重启
+    spec:
+      priorityClassName: bulk
+      nodeSelector:
+        kubernetes.io/hostname: k8s-worker-106
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # PVC 里已有 token 就绝不覆盖：它比 Vault 种子新（每次登录都会轮换）。
+        - name: seed-token
+          image: docker.io/yihong0618/xiaogpt@sha256:e0e464294eacdf79cbedfd70aaa021e41cb015d9297f962825af8b3b78dec0b4
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              if [ -s /data/mi-token.json ]; then
+                echo "seed-token: keep existing token on PVC"
+              else
+                cp /seed/mi-token.json /data/mi-token.json
+                chmod 600 /data/mi-token.json
+                echo "seed-token: seeded from Vault"
+              fi
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 100m, memory: 32Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: seed
+              mountPath: /seed
+              readOnly: true
+      containers:
+        - name: xiaogpt
+          # 多架构 index digest（amd64 + arm64）。上游只发 :latest，而 Kyverno 的 disallow-latest-tag 是 Enforce。
+          image: docker.io/yihong0618/xiaogpt@sha256:e0e464294eacdf79cbedfd70aaa021e41cb015d9297f962825af8b3b78dec0b4
+          # 绕开镜像入口的 `pdm run`：直接用 venv 的 python，非 root 下不用给 pdm 可写目录。
+          command: ["/app/.venv/bin/python", "/app/xiaogpt.py", "--config", "/config/xiaogpt.json"]
+          workingDir: /app
+          env:
+            - name: HOME   # token 路径 = $HOME/.mi.token（镜像默认 /root，非 root 进不去）
+              value: /home/xiaogpt
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: MI_USER
+              valueFrom: { secretKeyRef: { name: xiaogpt-secret, key: mi-user } }
+            - name: MI_PASS
+              valueFrom: { secretKeyRef: { name: xiaogpt-secret, key: mi-pass } }
+            - name: OPENAI_API_KEY
+              valueFrom: { secretKeyRef: { name: xiaogpt-secret, key: openai-key } }
+            - name: MI_DID
+              valueFrom: { secretKeyRef: { name: xiaogpt-secret, key: mi-did } }
+          resources:
+            # 2026-10-03 在 Mac 上实测空闲 134MiB、CPU 0.1%（每秒轮询一次）。limit 留了约 2.8 倍，
+            # 因为只量过空闲、没量过回答时的峰值——真跑一阵后按 rssBytes 校准。
+            requests: { cpu: 10m, memory: 160Mi }
+            limits: { cpu: 500m, memory: 384Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            # ☠️ 必须 subPath 挂成单个文件：miservice 登录失败时会 os.remove(token)，
+            #    单文件 bind mount 下 remove 报 EBUSY、token 保住；挂整个目录则 token 真被删掉，
+            #    下次启动退回密码登录 → 被风控拒 → 一直 CrashLoop 直到手工重新播种。
+            - name: data
+              mountPath: /home/xiaogpt/.mi.token
+              subPath: mi-token.json
+      volumes:
+        - name: config
+          configMap:
+            name: xiaogpt-config
+        - name: seed
+          secret:
+            secretName: xiaogpt-secret
+            items:
+              - key: mi-token
+                path: mi-token.json
+        - name: data
+          persistentVolumeClaim:
+            claimName: xiaogpt-data
