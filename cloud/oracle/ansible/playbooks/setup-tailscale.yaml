@@ -33,6 +33,23 @@
     # 直到 Cilium 自己重装规则（实测 30 分钟）。触发者是 unattended-upgrades 的
     # needrestart（升 libssl/python/libc 就会重启 firewalld）。
     # 见 docs/records/2026-10-01-oracle-firewalld-flushes-cilium-iptables.md
+    # 迁移旧节点：运行时 + 永久配置各删一遍，**绝不 reload** —— 删之前 direct 规则还在
+    # 运行时里，此刻 reload 正好触发一次上面那个 flush。运行时删除只对该条规则做 iptables -D。
+    # ☠️ 必须排在 unit 之前，删了就要重跑 unit：nftables 后端下 direct 规则**直接插在内建
+    # INPUT/OUTPUT 链里**（没有 *_direct 链），与 unit 的规则逐字相同。unit 的 `iptables -C`
+    # 会把 firewalld 那条认成自己的而跳过插入，随后删 direct = 删掉唯一一份，护栏归零
+    # （2026-10-02 在线迁移时真这样丢过，verify-node 报「递归防护缺失（0 条）」）。
+    - name: Remove legacy firewalld direct guard rules (runtime + permanent, no reload)
+      ansible.builtin.command:
+        cmd: "firewall-cmd {{ item.0 }} --direct --remove-rule ipv4 filter {{ item.1 }}"
+      loop: "{{ ['--permanent', ''] | product(legacy_direct_rules) | list }}"
+      vars:
+        legacy_direct_rules:
+          - "INPUT 0 -p udp --dport 41641 -d 10.52.0.0/16 -j DROP"
+          - "OUTPUT 0 -p udp --dport 41641 -d 10.42.0.0/16 -j DROP"
+      register: fw_rm
+      changed_when: "'NOT_ENABLED' not in fw_rm.stderr"
+
     - name: Install tailscale-no-cni-endpoint recursion guard unit
       ansible.builtin.copy:
         dest: /etc/systemd/system/tailscale-no-cni-endpoint.service
@@ -51,25 +68,14 @@
           [Install]
           WantedBy=multi-user.target
 
+    # oneshot + RemainAfterExit：unit 已 active 时 `started` 不会重跑 ExecStart，
+    # 所以刚删过 direct 规则就必须 restarted，否则规则补不回来。
     - name: Enable and start recursion guard unit
       ansible.builtin.systemd:
         name: tailscale-no-cni-endpoint.service
         enabled: true
-        state: started
+        state: "{{ 'restarted' if fw_rm.changed else 'started' }}"
         daemon_reload: true
-
-    # 迁移旧节点：运行时 + 永久配置各删一遍，**绝不 reload** —— 删之前 direct 规则还在
-    # 运行时里，此刻 reload 正好触发一次上面那个 flush。运行时删除只对该条规则做 iptables -D。
-    - name: Remove legacy firewalld direct guard rules (runtime + permanent, no reload)
-      ansible.builtin.command:
-        cmd: "firewall-cmd {{ item.0 }} --direct --remove-rule ipv4 filter {{ item.1 }}"
-      loop: "{{ ['--permanent', ''] | product(legacy_direct_rules) | list }}"
-      vars:
-        legacy_direct_rules:
-          - "INPUT 0 -p udp --dport 41641 -d 10.52.0.0/16 -j DROP"
-          - "OUTPUT 0 -p udp --dport 41641 -d 10.42.0.0/16 -j DROP"
-      register: fw_rm
-      changed_when: "'NOT_ENABLED' not in fw_rm.stderr"
 
     # --- Tailscale ip rule 收敛器（2026-08-12 重构，取代 boot-oneshot）---
     # 守一条不变量：5200 `to 100.64.0.0/10 lookup 52`。挡的是 Cilium identity-mark
