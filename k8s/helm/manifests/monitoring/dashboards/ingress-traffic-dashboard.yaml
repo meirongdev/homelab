@@ -49,9 +49,9 @@ data:
           "keepTime": true,
           "tags": [],
           "targetBlank": true,
-          "title": "Cloudflare Tunnel 观测",
+          "title": "Cloudflare 边缘访问分析",
           "type": "link",
-          "url": "/d/cloudflare-tunnel/cloudflare-tunnel-observability"
+          "url": "/d/cf-analytics-overview/"
         }
       ],
       "panels": [

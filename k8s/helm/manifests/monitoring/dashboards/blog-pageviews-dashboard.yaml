@@ -820,6 +820,7 @@ data:
       "schemaVersion": 39,
       "style": "dark",
       "tags": [
+        "curated",
         "cloudflare",
         "blog"
       ],
