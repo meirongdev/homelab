@@ -126,6 +126,9 @@ sudo systemctl restart firewalld
 sudo iptables-save | grep -c CILIUM            # 数值不变
 ```
 
+2026-10-02 实测通过：重启前后 CILIUM 规则都是 44 条，41641 护栏 2 条也还在；
+之后 3 分钟内 CoreDNS 零超时，cloudflared 没有新增重启。
+
 回滚：`sudo systemctl disable --now tailscale-no-cni-endpoint`，再用
 `firewall-cmd --permanent --direct --add-rule ...` 把旧规则加回（**会恢复 flush 风险**）。
 
