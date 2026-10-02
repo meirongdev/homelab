@@ -171,7 +171,7 @@ Vault：它必须与上游 `NakamaConfig.SERVER_KEY` 一致，放 Vault 会让�
 
 ☠️ **miservice 只要 token 里有 passToken 就直接用它登录，`MI_USER`/`MI_PASS` 根本不参与。**
 token 若是另一个小米账号的，表现是「音箱永远 offline（ubus 返回 `Device is offline` 608）+
-米家 0 设备」，跟跨境网络故障一模一样（2026-10-03 实踩，误判了一个多小时）。排障第一步：
+米家 0 设备」，跟跨境网络故障一模一样（2026-10-03 实踩，先后被误判成跨境网络和绑定问题）。排障第一步：
 核对 token 的 `userId` 等于 `MI_USER`；米家里出现以陌生数字命名的空家庭就是这个信号。
 
 ⚠️ 海外 IP 用密码登录大陆账号会被风控拒（`KeyError: 'userId'`），只能用浏览器取的 passToken；

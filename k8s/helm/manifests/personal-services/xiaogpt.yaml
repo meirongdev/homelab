@@ -8,7 +8,7 @@
 #
 # ☠️ 登录身份由 token 文件决定，**不是** MI_USER：miservice 只要 token 里有 passToken 就直接拿它
 #    换 serviceToken，账号密码根本不参与。2026-10-03 就栽在这：token 是另一个账号的，音箱绑在
-#    正确账号下 → 表现为「音箱永远 offline + 米家 0 设备」，被误判成跨境网络问题查了一个多小时。
+#    正确账号下 → 表现为「音箱永远 offline + 米家 0 设备」，先后被误判成跨境网络问题和绑定残缺。
 #    排障第一步：核对 token 的 userId 等于 MI_USER。
 # ☠️ 海外用密码登录大陆账号会被风控拒（`KeyError: 'userId'` → `Login failed`），只能用浏览器
 #    拿的 passToken。而 passToken **每次登录都会轮换**，所以 token 必须落盘（下面的 PVC）；
@@ -179,7 +179,8 @@ spec:
               readOnly: true
       containers:
         - name: xiaogpt
-          # 多架构 index digest（amd64 + arm64）。上游只发 :latest，而 Kyverno 的 disallow-latest-tag 是 Enforce。
+          # 多架构 index digest（amd64 + arm64）= 2026-02-24 的 :latest。版本标签停在 v3.23（2025-10-26），
+          # 比 :latest 旧；而 Kyverno 的 disallow-latest-tag 是 Enforce，所以按 digest 钉。
           image: docker.io/yihong0618/xiaogpt@sha256:e0e464294eacdf79cbedfd70aaa021e41cb015d9297f962825af8b3b78dec0b4
           # 绕开镜像入口的 `pdm run`：直接用 venv 的 python，非 root 下不用给 pdm 可写目录。
           command: ["/app/.venv/bin/python", "/app/xiaogpt.py", "--config", "/config/xiaogpt.json"]
@@ -198,8 +199,8 @@ spec:
             - name: MI_DID
               valueFrom: { secretKeyRef: { name: xiaogpt-secret, key: mi-did } }
           resources:
-            # 2026-10-03 在 Mac 上实测空闲 134MiB、CPU 0.1%（每秒轮询一次）。limit 留了约 2.8 倍，
-            # 因为只量过空闲、没量过回答时的峰值——真跑一阵后按 rssBytes 校准。
+            # 2026-10-03 Pod 内实测（amd64、空闲）rss 94Mi / workingSet 96Mi、CPU 2m（每秒轮询一次）；
+            # Mac arm64 上是 134MiB。limit 留得宽，因为只量过空闲、没量过回答时的峰值——跑一阵后按 rssBytes 再校准。
             requests: { cpu: 10m, memory: 160Mi }
             limits: { cpu: 500m, memory: 384Mi }
           securityContext:
@@ -209,9 +210,10 @@ spec:
             - name: config
               mountPath: /config
               readOnly: true
-            # ☠️ 必须 subPath 挂成单个文件：miservice 登录失败时会 os.remove(token)，
-            #    单文件 bind mount 下 remove 报 EBUSY、token 保住；挂整个目录则 token 真被删掉，
-            #    下次启动退回密码登录 → 被风控拒 → 一直 CrashLoop 直到手工重新播种。
+            # ☠️ 必须 subPath 挂成单个文件：miservice 登录失败时会 os.remove(token)。
+            #    10-03 在 Pod 里实测 remove 报 PermissionError（父目录 /home/xiaogpt 是运行时以 root 建的
+            #    挂载点父目录，uid 1000 无写权限）；即便有写权限，挂载点的 unlink 也是 EBUSY——两层都挡得住。
+            #    挂整个目录则 token 真被删掉，下次启动退回密码登录 → 被风控拒 → 一直 CrashLoop 直到手工重新播种。
             - name: data
               mountPath: /home/xiaogpt/.mi.token
               subPath: mi-token.json
