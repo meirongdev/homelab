@@ -15,6 +15,7 @@
 
 | 日期 | 方案 | 状态 |
 |------|------|------|
+| 2026-10-02 | [Ubuntu 26.04 LTS 升级与 IaC 适配](2026-10-02-ubuntu-26-04-upgrade-plan.md) | 📐 设计（待生态成熟与 IaC 适配） |
 | 2026-09-03 | [DGX 换模型提速：事故式切换 → 改一个值 + 跑两条命令](2026-09-03-dgx-model-swap-optimizations.md) | 📐 设计（未实施；[换栈 SOP §8](../runbooks/dgx-model-swap-homelab-followup.md) 的展开） |
 | 2026-08-16 | [多媒体仓库（音乐 / 自录 podcast / 视频）](2026-08-16-multimedia-repository.md) | ⚠️ 部分完成（Jellyfin/Navidrome/podcast 已上线） |
 | 2026-08-16 | [多媒体目录重组（storage-106 `/storage/tv` 清理去重）](2026-08-16-media-directory-reorganization.md) | ✅ 已完成（回收 ~146G） |

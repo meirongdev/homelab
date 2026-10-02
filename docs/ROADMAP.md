@@ -1,6 +1,6 @@
 # Homelab Roadmap
 
-> Last updated: 2026-09-27
+> Last updated: 2026-10-02
 > 本文只回答两件事：**还剩什么没做**，和**为什么不做**。做过什么在
 > [CHANGELOG.md](CHANGELOG.md)（2026-09-02 拆出，原因见那里）。
 > **实施细节不写在这里**：每条压到一句话，展开看链接指向的 `reference/`（事实）、
@@ -35,6 +35,7 @@
 | 17 | **k8s-node 挪到 LAN，退役 pve 的 NAT 子网** | 控制面躲在 pve 的 `10.10.10.0/24` NAT 后面而 worker 直挂 LAN，是 ip rule 5240、经 pve 转发的静态路由、pve→k8s-node 单向 TCP 不通等一整类复杂度的根源（[tailscale-network.md](reference/tailscale-network.md)）。要动 tls-san、Cilium 的 `k8sServiceHost`、worker 的 `K3S_URL`、oracle 借道 pve 的 10.10.10.0/24 路由通告，是停机变更，先立 ADR 再做 |
 | 18 | **Aiven 库的收尾（root 已 init+import，从未 apply）** | 2026-09-17 review 后重排，剩下的都是"用之前"的判断题：① `termination_protection` 云上仍是 **false**（服务现在可被删），config 要 true，未 apply；② 证书链是自签的 `Project CA`，默认校验直接失败，接之前要么 `ca_model = "letsencrypt"`（free 计划能不能用未测，且要 apply）要么带 `sslrootcert`；③ 数据**不在任何备份面内**（H4 只查清单 PVC），要存东西先在 storage.md 登记归属；④ 服务已自行进入 **POWEROFF**（free 计划的空闲关机），Terraform 开不回来，要用就得先去 Console 开机。☠️ **首次 apply 会把库关严**：`pg_ip_filter` 默认 `[]`，而 root 现在驱动的是真正生效的 `ip_filter` 字段，所以那条 plan 是 `- "0.0.0.0/0"` / `- "::/0"`——先把调用方出口地址填进 `terraform.tfvars` 再 apply，且 apply 后回读 API 验收（从前那份配置写的是 `ip_filter_string`，与云上对不上，plan 恒不报这条差异，2026-09-17 已修）。当前待 apply：0 add / 1 change / 0 destroy（`termination_protection`、`service_log`、`ip_filter` 清空、`public_access.pg=true`，外加一个只在本地的 `timeouts` 块） ([README](../aiven/README.md)) |
 | 19 | **对标 Mafyuh/iac 余下的三件（2026-09-26 评估，需拍板）** | 同批已落地 ArgoCD 告警 / gitleaks（见 CHANGELOG 同日条）。剩下的都改变既有边界：① **manual-helm 四件套建「只对账不同步」的 ArgoCD App**（无 `automated`）：「提交≠部署」从靠记忆变成 UI 上的 OutOfSync，部署变成点一次 Sync；`ArgoCDAppOutOfSync` 已按 autosync 过滤，不会因此误报。先按 [采纳方法](decisions/manual-helm-to-argocd-adoption.md) 做渲染等价性核对（justfile 里的 `--set` 要搬进 values），顺序 ESO → ArgoCD 自管 → Vault → Cilium 最后（oracle 的 Cilium 同步出错会切断 ArgoCD 自己的网络）；② **k3s 升级交 system-upgrade-controller**（Plan CR：版本改一处，执行交给控制器），先试 oracle 与 worker，控制面单节点仍有 API 停机；③ **PR 贴渲染 diff**（`render-manifests.py --out` 跑 base/head 两遍再 diff，同 Mafyuh 的 flux-diff）：当前直接推 main、几乎没有 PR，等改走 PR 流程再做，否则没有读者。 |
+| 20 | **Ubuntu 26.04 LTS 节点升级与 IaC 适配** | 评估 26.04 LTS 生态成熟度；补齐 Terraform/Ansible 对新镜像与源的支持；在 PVE 独立实验 VM 沙盒验证 Cilium 1.20+ eBPF、Falco/Tetragon 与 K3s；严禁生产节点裸机 `do-release-upgrade`，按快照与滚动重建流程替换节点。（[方案](plans/2026-10-02-ubuntu-26-04-upgrade-plan.md)） |
 
 ### 已知问题（不阻塞，无人认领）
 
