@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 ################################################################################
 # sync-ebooks.sh — calibre-web 电子书同步脚本
 #
@@ -33,6 +33,7 @@ LOG_FILE="${MANIFEST_DIR}/sync.log"
 KUBE_CONTEXT="${KUBE_CONTEXT:-oracle-k3s}"
 NAMESPACE="personal-services"
 POD_SELECTOR="app=calibre-web"
+CONTAINER="calibre-web"
 INGEST_PATH="/cwa-book-ingest"
 DB_PATH="/calibre-library/metadata.db"
 
@@ -46,6 +47,7 @@ CLEANUP=false
 VERBOSE=false
 FILTER_NON_EBOOKS=true   # 简历/Confluence 导出等；--no-filter-non-ebooks 关掉
 RETRY_COUNT=3
+AUTO_CONFIRM=false
 LOCK_FILE="/tmp/ebook-sync.lock"
 
 # --- 超时（2026-09-08 从 sync_ebooks.py 并入）---
@@ -100,19 +102,7 @@ acquire_lock() {
   fi
   echo "$$" > "$LOCK_FILE"
   trap 'rm -f "$LOCK_FILE"' EXIT
-}
-
-normalize_title() {
-  local t="$1"
-  t="${t%.*}"                                # 移除扩展名
-  t=$(echo "$t" | sed -E '
-    s/ \([^)]*\)//g;                         # 移除 (Author)
-    s/ \[[^]]*\]//g;                         # 移除 [Z-Library]
-    s/ - [^-]*$//;                           # 尾部 - something
-    s/[[:punct:]]/ /g;                       # 标点变空格
-    s/[[:space:]]+/ /g;                      # 合并空格
-  ')
-  echo "${t,,}" | xargs                       # 小写 + trim
+  trap 'rm -f "$LOCK_FILE"; exit 130' INT TERM
 }
 
 # ☠️ 循环变量必须 `local`（2026-09-08 修的真缺陷）：原来用的是裸 `f`，而调用它的
@@ -221,9 +211,13 @@ sys.exit(1 if reason else 0)
 
 validate_pdf() {
   local magic
-  magic=$(xxd -l 5 -p "$1" 2>/dev/null)
-  if [[ "$magic" != "255044462d" ]]; then   # 头部 %PDF-
+  magic=$(head -c 5 "$1" 2>/dev/null)
+  if [[ "$magic" != "%PDF-" ]]; then   # 头部 %PDF-
     echo "缺 %PDF- 头（实际前 5 字节: ${magic:-空})"
+    return 1
+  fi
+  if ! tail -c 1024 "$1" 2>/dev/null | grep -aq "%%EOF"; then
+    echo "缺 %%EOF 尾部标记（疑似下载截断）"
     return 1
   fi
   return 0
@@ -249,10 +243,15 @@ validate_file() {
 scan_local() {
   local find_expr=()
   local fmt                     # ⚠️ 必须 local，见 is_ebook 的注释
+  local first=true
   for fmt in "${SUPPORTED_FORMATS[@]}"; do
-    find_expr+=(-o -iname "*.$fmt")
+    if [[ $first == true ]]; then
+      find_expr+=(-iname "*.$fmt")
+      first=false
+    else
+      find_expr+=(-o -iname "*.$fmt")
+    fi
   done
-  find_expr=("${find_expr[@]:1}")  # 去掉首个 -o
   find "$LOCAL_BOOKS_DIR" -maxdepth 1 -type f \( "${find_expr[@]}" \) 2>/dev/null | sort
 }
 
@@ -285,56 +284,69 @@ check_kubectl_ready() {
   return 0
 }
 
+# 懒加载 Pod 缓存（单批次避免 60+ 次重复调用 kubectl get pod）
+CACHED_POD_NAME=""
 # 只取 Running 的 pod（2026-09-08 从 sync_ebooks.py 并入 --field-selector）。
 # 不加这条会挑到 Terminating/Pending 的那个，然后 exec 报一句看不懂的错。
 get_pod_name() {
-  kt "$TIMEOUT" get pod -n "$NAMESPACE" \
+  if [[ -n "$CACHED_POD_NAME" ]]; then
+    echo "$CACHED_POD_NAME"
+    return 0
+  fi
+  local pod
+  pod=$(kt "$TIMEOUT" get pod -n "$NAMESPACE" \
     -l "$POD_SELECTOR" --field-selector=status.phase=Running \
-    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  if [[ -n "$pod" ]]; then
+    CACHED_POD_NAME="$pod"
+    echo "$pod"
+    return 0
+  fi
+  return 1
 }
 
-# --- 传到 pod：tar 打包 → `kubectl exec -i` 的 stdin 解包 ---
-# ☠️ 刻意**不用 `kubectl cp`**：它在非 ASCII 文件名上退出码 0 却什么都没拷。
-upload_kubectl() {
+# --- 传到 pod：管道流式传输 + 原地 sha256 校验（单次 exec 会话）---
+# ☠️ 刻意**不用 `kubectl cp`**（非 ASCII 文件名静默丢失）与**本地中间 tar 临时文件**。
+# 标准流管道直传，远端解包成功后立即原地计算 sha256 并输出，消除 SPDY 握手税与 Ingest 竞态。
+upload_and_verify_once() {
   local file="$1" dest_dir="$2"
   local pod
   pod=$(get_pod_name) || return 1
   local filename; filename=$(basename "$file")
-  local tar_file="/tmp/ebook_${RANDOM}.tar"
-  (
-    cd "$(dirname "$file")" && tar -cf "$tar_file" "$filename" 2>/dev/null
-  ) || return 1
-  kt "$CP_TIMEOUT" exec -i -n "$NAMESPACE" "$pod" -- \
-    sh -c "cd ${dest_dir} && tar xf -" < "$tar_file" 2>/dev/null
-  local rc=$?; rm -f "$tar_file"; return $rc
+  local src_cksum; src_cksum=$(checksum "$file")
+
+  local remote_output
+  remote_output=$(tar -C "$(dirname "$file")" -cf - "$filename" 2>/dev/null | \
+    kt "$CP_TIMEOUT" exec -i -n "$NAMESPACE" -c "$CONTAINER" "$pod" -- \
+      sh -c 'tar -C "$1" -xf - && sha256sum "$1/$2"' _ "$dest_dir" "$filename" 2>/dev/null)
+  local rc=$?
+  if [[ $rc -ne 0 ]]; then
+    # 若失败可能是 Pod 重启/漂移，失效缓存供重试
+    CACHED_POD_NAME=""
+    return 1
+  fi
+
+  local remote_cksum
+  remote_cksum=$(echo "$remote_output" | awk '{print $1}')
+  if [[ -z "$remote_cksum" || "$src_cksum" != "$remote_cksum" ]]; then
+    return 2 # 校验和不匹配
+  fi
+  return 0
 }
 
-# --- 带重试的上传 ---
-upload_file() {
+# --- 带重试的流式上传与校验 ---
+upload_and_verify() {
   local file="$1" dest="$2"
   local attempt=0 rc=1
 
   while (( attempt < RETRY_COUNT )); do
-    ((attempt++))
-    upload_kubectl "$file" "$dest"
+    ((++attempt))
+    upload_and_verify_once "$file" "$dest"
     rc=$?
     [[ $rc -eq 0 ]] && break
     [[ $attempt -lt $RETRY_COUNT ]] && sleep $(( attempt * 3 ))
   done
   return $rc
-}
-
-# --- 传输后校验 ---
-verify_transfer() {
-  local file="$1" dest="$2"
-  local filename; filename=$(basename "$file")
-  local src_cksum; src_cksum=$(checksum "$file")
-
-  local pod; pod=$(get_pod_name) || return 1
-  local remote_cksum
-  remote_cksum=$(kt "$TIMEOUT" exec -n "$NAMESPACE" "$pod" -- \
-    sha256sum "${dest}/${filename}" 2>/dev/null | awk '{print $1}')
-  [[ "$src_cksum" == "$remote_cksum" ]]
 }
 
 # ============================================================================
@@ -343,7 +355,7 @@ verify_transfer() {
 query_db() {
   local sql="$1"
   local pod; pod=$(get_pod_name) || return 1
-  kt "$TIMEOUT" exec -n "$NAMESPACE" "$pod" -- \
+  kt "$TIMEOUT" exec -n "$NAMESPACE" -c "$CONTAINER" "$pod" -- \
     sqlite3 "$DB_PATH" "$sql" 2>/dev/null
 }
 
@@ -360,22 +372,6 @@ get_db_book_count() {
 }
 
 # ============================================================================
-# 检查重复
-# ============================================================================
-is_already_imported() {
-  local filename="$1"; shift
-  local titles=("$@")
-  local norm; norm=$(normalize_title "$filename")
-  [[ -z "$norm" ]] && return 1
-  local t
-  for t in "${titles[@]}"; do
-    local norm_t; norm_t=$(normalize_title "$t")
-    [[ "$norm" == "$norm_t" ]] && return 0
-  done
-  return 1
-}
-
-# ============================================================================
 # 检查流程
 # ============================================================================
 do_check() {
@@ -387,7 +383,7 @@ do_check() {
 
   # 1. 扫描本地
   log "扫描本地目录: $LOCAL_BOOKS_DIR"
-  IFS=$'\n' read -r -d '' -a all_files < <( scan_local && printf '\0' )
+  IFS=$'\n' read -r -d '' -a all_files < <( scan_local && printf '\0' ) || true
   local total=${#all_files[@]}
 
   if [[ $total -eq 0 ]]; then
@@ -400,7 +396,7 @@ do_check() {
   TRANSPORT=""
   if check_kubectl_ready; then
     TRANSPORT="kubectl"
-    log "传输通道: tar | kubectl exec -i（传后校验 sha256）"
+    log "传输通道: 管道流式传输直达 pod（原地 sha256 校验）"
   else
     warn "kubectl 不可用，仅做文件检查"
   fi
@@ -436,9 +432,36 @@ do_check() {
     # ⚠️ 必须走 kt（否则这一句没有超时——2026-09-08 用 bash -x 核对每个 kubectl
     #    调用时发现它是唯一漏网的那个）。
     IFS=$'\n' read -r -d '' -a ingest_files < <(
-      kt "$TIMEOUT" exec -n "$NAMESPACE" "$pod" -- \
+      kt "$TIMEOUT" exec -n "$NAMESPACE" -c "$CONTAINER" "$pod" -- \
         sh -c "ls -1 ${INGEST_PATH} 2>/dev/null" && printf '\0'
     ) || true
+  fi
+
+  # 预先批量匹配已入库书籍（以 Python 在内存中秒级去重，避免 bash 逐书子进程 fork 挂死）
+  local matched_raw=""
+  if [[ ${#db_titles[@]} -gt 0 && ${#all_files[@]} -gt 0 ]]; then
+    matched_raw=$(python3 -c "
+import sys, os, re
+
+def norm(t):
+    t = os.path.splitext(t)[0]
+    t = re.sub(r'[（\(][^）\)]*[）\)]', '', t)
+    t = re.sub(r'[【\[][^】\]]*[】\]]', '', t)
+    t = re.sub(r' - [^-]*$', '', t)
+    t = re.sub(r'[^\w\s]', ' ', t)
+    t = re.sub(r'\s+', ' ', t)
+    return t.strip().lower()
+
+with open(sys.argv[1], 'r', encoding='utf-8', errors='ignore') as f:
+    db_titles = {norm(line) for line in f if line.strip()}
+db_titles.discard('')
+
+with open(sys.argv[2], 'r', encoding='utf-8', errors='ignore') as f:
+    for line in f:
+        fn = line.strip()
+        if fn and norm(fn) in db_titles:
+            print(fn)
+" <(printf '%s\n' "${db_titles[@]}") <(for f in "${all_files[@]}"; do basename "$f"; done))
   fi
 
   # 5. 分类
@@ -471,7 +494,9 @@ do_check() {
 
     # 在数据库?
     if [[ ${#db_titles[@]} -gt 0 ]]; then
-      is_already_imported "$fn" "${db_titles[@]}" && { already_imported+=("$f"); continue; }
+      if [[ $'\n'"$matched_raw"$'\n' == *$'\n'"$fn"$'\n'* ]]; then
+        already_imported+=("$f"); continue
+      fi
     fi
 
     to_upload+=("$f")
@@ -512,24 +537,42 @@ do_check() {
   # 保存状态供 upload 阶段使用
   echo "${#to_upload[@]}" > "${MANIFEST_DIR}/pending.count"
   printf '%s\n' "${to_upload[@]}" > "${MANIFEST_DIR}/pending.txt"
+  printf '%s\n' "${already_imported[@]}" > "${MANIFEST_DIR}/already_imported.txt"
   printf '%s\n' "${corrupted[@]}" > "${MANIFEST_DIR}/corrupted.txt"
 }
 
 show_verbose_list() {
-  local -n arr=$1
-  local label="待上传"
-  case $1 in
-    to_upload) label="待上传";;
-    in_ingest) label="Ingest 中";;
-    already_imported) label="已导入";;
-    corrupted) label="损坏";;
-  esac
-  echo "--- $label (${#arr[@]}) ---"
-  local item
-  for item in "${arr[@]}"; do
-    echo "  $(basename "$item")"
+  local name
+  for name in "$@"; do
+    local -n arr=$name
+    [[ ${#arr[@]} -eq 0 ]] && continue
+    local label="$name"
+    case $name in
+      to_upload)        label="待上传";;
+      in_ingest)        label="Ingest 处理中";;
+      already_imported) label="已导入";;
+      corrupted)        label="损坏";;
+    esac
+    echo "--- $label (${#arr[@]}) ---"
+    local item
+    for item in "${arr[@]}"; do
+      echo "  $(basename "$item")"
+    done
+    echo ""
   done
-  echo ""
+}
+
+cleanup_imported_files() {
+  if [[ $CLEANUP == true && $DRY_RUN == false && ${#already_imported[@]} -gt 0 ]]; then
+    log "清理已在书库中的本地文件 (${#already_imported[@]} 本)..."
+    local afile
+    for afile in "${already_imported[@]}"; do
+      [[ -f "$afile" ]] || continue
+      [[ $BACKUP == true ]] && cp "$afile" "$BACKUP_DIR/" 2>/dev/null || true
+      rm -f "$afile"
+    done
+    success "已清理 ${#already_imported[@]} 本已入库的本地文件"
+  fi
 }
 
 # ============================================================================
@@ -546,10 +589,13 @@ do_upload() {
   fi
 
   mapfile -t pending < "${MANIFEST_DIR}/pending.txt" 2>/dev/null || true
+  mapfile -t already_imported < "${MANIFEST_DIR}/already_imported.txt" 2>/dev/null || true
   local total=${#pending[@]}
   if [[ $total -eq 0 ]]; then
     success "没有待上传的文件"
+    cleanup_imported_files
     rm -f "${MANIFEST_DIR}/pending.txt"
+    rm -f "${MANIFEST_DIR}/already_imported.txt"
     return 0
   fi
 
@@ -557,7 +603,7 @@ do_upload() {
   if check_kubectl_ready; then
     TRANSPORT="kubectl"
     DEST_DIR="$INGEST_PATH"
-    log "传输通道: tar | kubectl exec -i（传后校验 sha256）"
+    log "传输通道: 管道流式传输直达 pod（原地 sha256 校验）"
   else
     error "kubectl 不可用，无法上传"
     return 1
@@ -569,10 +615,21 @@ do_upload() {
   # 确认
   echo ""
   warn "即将上传 $total 本电子书 → $TRANSPORT:$DEST_DIR"
-  [[ $BACKUP == true ]] && echo "  备份目录: $BACKUP_DIR"
-  [[ $CLEANUP == true ]] && echo "  导入后删除本地文件: 是"
+  if [[ $BACKUP == true ]]; then
+    echo "  备份目录: $BACKUP_DIR"
+  fi
+  if [[ $CLEANUP == true ]]; then
+    echo "  导入后删除本地文件: 是"
+  fi
   echo ""
-  [[ $DRY_RUN == false ]] && { read -p "确认执行? (y/N): " -r; echo; [[ ! $REPLY =~ ^[Yy]$ ]] && { warn "已取消"; return 0; } }
+  if [[ $DRY_RUN == false && $AUTO_CONFIRM == false ]]; then
+    read -p "确认执行? (y/N): " -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+      warn "已取消"
+      return 0
+    fi
+  fi
 
   # 备份
   if [[ $BACKUP == true && $DRY_RUN == false ]]; then
@@ -586,34 +643,38 @@ do_upload() {
 
   local file                    # ⚠️ 必须 local，见 is_ebook 的注释
   for file in "${pending[@]}"; do
-    ((idx++))
+    ((++idx))
     local fn; fn=$(basename "$file")
     local filesize; filesize=$(du -h "$file" | awk '{print $1}')
-    printf "  [%d/%d] %s ... " "$idx" "$total" "${fn:0:60}"
+    printf "  [%d/%d] (%s) %s ... " "$idx" "$total" "$filesize" "${fn:0:50}"
 
     if [[ $DRY_RUN == true ]]; then
       echo -e "${YELLOW}🟡 dry-run${NC}"
       continue
     fi
 
-    # 上传 + 重试
-    if upload_file "$file" "$DEST_DIR"; then
-      # 校验和验证
-      if verify_transfer "$file" "$DEST_DIR"; then
-        echo -e "${GREEN}✅  ${filesize}${NC}"
-        ((success_count++))
-        # 备份
-        [[ $BACKUP == true ]] && cp "$file" "$BACKUP_DIR/" 2>/dev/null
-        # 可选 cleanup
-        [[ $CLEANUP == true ]] && rm -f "$file"
-      else
-        echo -e "${RED}❌ checksum 不匹配${NC}"
-        ((cksum_fail++))
-        ((fail_count++))
+    # 流式传输 + 原地原子校验
+    local rc=1
+    upload_and_verify "$file" "$DEST_DIR"
+    rc=$?
+    if [[ $rc -eq 0 ]]; then
+      echo -e "${GREEN}✅${NC}"
+      ((++success_count))
+      # 备份
+      if [[ $BACKUP == true ]]; then
+        cp "$file" "$BACKUP_DIR/" 2>/dev/null || true
       fi
+      # 可选 cleanup
+      if [[ $CLEANUP == true ]]; then
+        rm -f "$file"
+      fi
+    elif [[ $rc -eq 2 ]]; then
+      echo -e "${RED}❌ checksum 不匹配${NC}"
+      ((++cksum_fail))
+      ((++fail_count))
     else
       echo -e "${RED}❌ 上传失败${NC}"
-      ((fail_count++))
+      ((++fail_count))
     fi
   done
 
@@ -621,7 +682,9 @@ do_upload() {
   echo ""; success "上传完成"
   echo "  ✅ 成功: $success_count"
   echo "  ❌ 失败: $fail_count"
-  [[ $cksum_fail -gt 0 ]] && warn "  校验和失败: $cksum_fail"
+  if [[ $cksum_fail -gt 0 ]]; then
+    warn "  校验和失败: $cksum_fail"
+  fi
 
   # 验证导入
   echo ""; echo "════════════════════════════════════════════════════"
@@ -631,6 +694,10 @@ do_upload() {
   local diff=$(( post_count - pre_count ))
   log "数据库: 上传前 ${pre_count} 本 → 当前 ${post_count} 本 (新增 ${diff})"
 
+  if [[ $diff -lt $success_count && $success_count -gt 0 ]]; then
+    log "提示: 书籍已安全送入 Ingest 目录，Calibre-Web 后台正在异步处理入库"
+  fi
+
   # 查询新入库的书名
   if [[ $diff -gt 0 ]]; then
     local new_titles
@@ -639,10 +706,15 @@ do_upload() {
     echo "$new_titles" | head -10 | while IFS= read -r line; do
       [[ -n "$line" ]] && echo "    · $line"
     done
-    [[ $(echo "$new_titles" | wc -l) -gt 10 ]] && echo "    ... 还有更多"
+    if [[ $(echo "$new_titles" | wc -l) -gt 10 ]]; then
+      echo "    ... 还有更多"
+    fi
   fi
 
+  cleanup_imported_files
+
   rm -f "${MANIFEST_DIR}/pending.txt"
+  rm -f "${MANIFEST_DIR}/already_imported.txt"
 }
 
 # ============================================================================
@@ -668,6 +740,7 @@ usage() {
   --timeout SEC             kubectl 查询/exec 超时（默认: 60）
   --cp-timeout SEC          单文件传输超时（默认: 600）
   --dry-run                 模拟运行
+  -y, --yes                 自动确认上传（跳过确认提示）
   --backup                  备份已导入文件（默认启用）
   --no-backup               禁用备份
   --cleanup                 导入后删除本地文件
@@ -704,6 +777,7 @@ parse_args() {
       --timeout)        TIMEOUT="$2"; shift 2;;
       --cp-timeout)     CP_TIMEOUT="$2"; shift 2;;
       --dry-run)        DRY_RUN=true; shift;;
+      -y|--yes)         AUTO_CONFIRM=true; shift;;
       --backup)         BACKUP=true; shift;;
       --no-backup)      BACKUP=false; shift;;
       --cleanup)        CLEANUP=true; shift;;
