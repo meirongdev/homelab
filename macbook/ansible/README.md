@@ -145,6 +145,42 @@ D=~/.omlx/models/<org>/<name>
 HF_HUB_DISABLE_XET=1 /opt/homebrew/opt/omlx/libexec/bin/hf download <org>/<name> --local-dir "$D"
 ```
 
+**DFlash2 投机解码**（2026-10-03 开启，生成提速 1.3–3.4 倍。草稿模型猜、主模型逐个验证，
+设计上不改变输出分布；但 temp=0 下实测与基线**不逐字相同**（中文长文 444 vs 454 token），
+是批量验证的数值差异，不是质量退化的证据，也没做过质量对比）。这是 OMLX 的 per-model 设置，归 admin 面板/`~/.omlx/model_settings.json`，
+不归 Ansible；重建机器时照抄：
+
+```bash
+# 草稿模型：z-lab（DFlash 作者）为 Qwen3.8-27B 训练的 5 层 DFlash2 drafter，3.85 GB
+D=~/.omlx/drafts/z-lab/Qwen3.8-27B-DFlash2      # 刻意不放 ~/.omlx/models，否则会被当成模型列进 /v1/models
+HF_HUB_DISABLE_XET=1 /opt/homebrew/opt/omlx/libexec/bin/hf download z-lab/Qwen3.8-27B-DFlash2 --local-dir "$D"
+# ~/.omlx/model_settings.json 里该模型加两个键，然后 launchctl kickstart -k gui/$(id -u)/sh.brew.omlx
+#   "Qwen3.8-27B-MLX-4bit": {"dflash_enabled": true, "dflash_draft_model": "/Users/matstudio/.omlx/drafts/z-lab/Qwen3.8-27B-DFlash2"}
+```
+
+生效判据是 `/opt/homebrew/var/log/omlx.log` 里的 `DFlash drafter attached to engine ... kind=dflash2`。
+`qwen3_5` 架构 + VLM 引擎走的是**批处理引擎内的 drafter**，视觉输入与并发都保留
+（其它架构会退到单流 DFlashEngine）。实测（同一组 prompt，512 token，关思考）：
+
+| | 基线 | DFlash temp=0 | DFlash temp=0.7 |
+|---|---|---|---|
+| 写代码 | 31.9 tok/s | 96–109 tok/s | 91–94 tok/s |
+| 中文长文 | 31.9 tok/s | 43.8 tok/s | 39–42 tok/s |
+
+基线 31.9 已接近带宽上限（稠密 27B 每 token 读一遍 16.6G 权重），不靠投机解码调参快不了多少。
+可预测的文本（代码）收益最大；中文散文草稿命中率低，只多 25–37%。
+⚠️ 没走 MTP：这一版（以及 mlx-community 的 4bit）转换时**删掉了 MTP 权重**，OMLX 的
+Lightning MTP 没有头可用。
+
+**预填充**（2026-10-03 实测）：3.7k token 865 tok/s（TTFT 4.2s）、14.8k token 1000 tok/s（TTFT 14.8s），
+长文档/长对话时首 token 的等待才是瓶颈。OMLX 的 `qwen35_prefill` native 内核（q4 affine qmm、
+head_dim 256 注意力）专门加速这一段，但**默认安装不带**（日志里自定义内核全部 import 失败就是这个），
+`brew reinstall jundot/omlx/omlx --with-custom-kernel` 在 Studio 上**编译失败**：
+`xcrun: error: unable to find utility "metal"` —— 要**完整 Xcode** 里的 Metal 编译器，
+Command Line Tools 不够。Homebrew 失败时会还原原安装，服务不受影响。装了 Xcode
+（`sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`，`xcrun -sdk macosx metal --version` 能出版本号）
+之后再重跑那条 reinstall，再按上面的数字对比。
+
 ## 相关（在本 repo 别处）
 
 - **Multica daemon**（这台机跑的「执行任务那一半」）：安装/重建/退役全流程见 [docs/runbooks/multica-install.md](../../docs/runbooks/multica-install.md) 的步骤 6；⚠️ daemon 掉线时**服务端一切正常**（页面 200、监控全绿），判据在服务端 `agent_runtime` 表
