@@ -556,6 +556,20 @@ reranker / nemoguard / 视觉 / riva-translate / palmyra 垂类）全部早于�
 
 主机侧（OMLX 安装、key、模型下载）→ `macbook/ansible/README.md`；指标 → [omlx-inference-metrics.md](omlx-inference-metrics.md)。
 
+## Mac Studio 文生图：`studio/qwen-image-2.1`（2026-10-03）
+
+**不走 OMLX**（它不做文生图）：`:8010` 是自写的 OpenAI 转接层，背后是只监听本机的 mflux-server。
+选型与架构 → [decisions/studio-image-generation.md](../decisions/studio-image-generation.md)。
+
+| | |
+|---|---|
+| 别名 → 上游 | `studio/qwen-image-2.1` → `openai/qwen-image-2.1` @ `100.98.220.75:8010/v1`，`model_info.mode: image_generation`，`timeout: 900` |
+| 调用 | `POST /v1/images/generations`，`size` 须为 16 的倍数（默认 `1024x1024`），`n` ≤ 4 |
+| 非标准参数 | `steps`（默认 40）/ `seed` / `negative_prompt` / `guidance` 放 `extra_body`；2026-10-03 在网关 pod 内实测透传生效 |
+| ☠️ 返回格式 | **只有 `b64_json`**，`response_format=url` 回 400（上游不存图）|
+| 耗时 | 1024² / 40 步约 63s，**串行**排队。经 `llm.meirong.dev` 有 Cloudflare 100s 源站超时：排到第二张就 524，批量走 Tailscale NodePort |
+| key 白名单 | 只加进了 `LITELLM_VK` |
+
 ☠️ **`mac/*` 的 `api_key: dummy` 能用，是 Mac 上一个开关的结果**（2026-09-30 起）：OMLX 0.7 起
 非回环监听必须配 key，现行配法是 key + `allow_unauthenticated_inference: true`，推理端点因此仍免鉴权。
 那个开关一丢，`mac/*`（以及 `studio/*`）全部 401，而网关这边清单正确、ArgoCD Synced。
@@ -567,7 +581,7 @@ reranker / nemoguard / 视觉 / riva-translate / palmyra 垂类）全部早于�
 |---|---|---|
 | `codex --profile litellm` | `custom_dgx/qwen3.8-27b-sglang` | `~/.codex/litellm.config.toml`（本机）|
 | `codex --profile mac` | `mac/ornith` | `~/.codex/mac.config.toml`（本机）|
-| 本机任意 OpenAI 兼容客户端 | `studio/qwen3.8-27b` | 读 `LITELLM_VK`；目前没有固定消费方 |
+| 本机任意 OpenAI 兼容客户端 | `studio/qwen3.8-27b`、`studio/qwen-image-2.1` | 读 `LITELLM_VK`；目前没有固定消费方 |
 | k8sgpt（`--backend openai`）| `qwen3.8-27b-sglang` | `~/Library/Application Support/k8sgpt/k8sgpt.yaml`（本机）|
 | k8sgpt（`--backend localai`）| `mac/ornith-fast` | 同上 |
 | oracle 上的 calibre 元数据作业 | `qwen3.8-27b-sglang`（经 `litellm-external` NodePort）| [清单内嵌脚本](../../cloud/oracle/manifests/calibre-metadata/metadata-llm.yaml) |

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Managed by Ansible (macbook/ansible/playbooks/image-gen.yaml). Do not edit by hand. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{{ ig_shim_label }}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <!-- 只用标准库；借 mflux-server 的 venv 是为了不依赖系统 python 的版本 -->
+        <string>{{ ig_python }}</string>
+        <string>{{ ig_shim }}</string>
+        <string>--host</string>
+        <string>0.0.0.0</string>
+        <string>--port</string>
+        <string>{{ ig_shim_port }}</string>
+        <string>--upstream</string>
+        <string>http://127.0.0.1:{{ ig_server_port }}</string>
+        <string>--model-id</string>
+        <string>{{ ig_model }}</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>{{ ig_log_dir }}/openai-images-shim.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{ ig_log_dir }}/openai-images-shim.log</string>
+</dict>
+</plist>
