@@ -71,7 +71,10 @@ tailnet ─► :8010  openai_images_shim.py ─► 127.0.0.1:4030  Orbiter/mflux
 
 ## 后果
 
-- **只回 `b64_json`**：上游不存图，`response_format=url` 回 400，而不是悄悄换格式。
+- **只回 `b64_json`**：上游不存图。直连转接层时 `response_format=url` 回 400；但**经网关时**
+  LiteLLM 不认识这个模型名，会把 `response_format` 整个当成不支持而 400（连 `b64_json` 也拒），
+  唯一有效的绕法是该模型开 `drop_params`（`allowed_openai_params` 对 image_generation 无效），
+  代价是经网关请求 `url` 会静默拿到 `b64_json`。
 - **串行**：一次一张，1024² 约 63s。经 `llm.meirong.dev` 有 Cloudflare 100s 源站超时（524），
   排到第二张就会超；批量走 Tailscale NodePort。
 - **内存**：常驻 42 GiB、峰值 68.5 GiB。OMLX 的池天花板（自动档 ~106 GB）**不知道这个进程**，

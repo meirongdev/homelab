@@ -566,7 +566,7 @@ reranker / nemoguard / 视觉 / riva-translate / palmyra 垂类）全部早于�
 | 别名 → 上游 | `studio/qwen-image-2.1` → `openai/qwen-image-2.1` @ `100.98.220.75:8010/v1`，`model_info.mode: image_generation`，`timeout: 900` |
 | 调用 | `POST /v1/images/generations`，`size` 须为 16 的倍数（默认 `1024x1024`），`n` ≤ 4 |
 | 非标准参数 | `steps`（默认 40）/ `seed` / `negative_prompt` / `guidance` 放 `extra_body`；2026-10-03 在网关 pod 内实测透传生效 |
-| ☠️ 返回格式 | **只有 `b64_json`**，`response_format=url` 回 400（上游不存图）|
+| ☠️ 返回格式 | **只有 `b64_json`**（上游不存图）。经网关时 `response_format` 被 `drop_params` 丢掉：请求 `url` 不报错、拿到的是 `b64_json`（`url` 为 null）。不开 `drop_params` 的话 LiteLLM 连 `b64_json` 都拒（不认识这个模型名）；`allowed_openai_params` 对 image_generation 无效（2026-10-03 同版本 Router 实测）|
 | 耗时 | 1024² / 40 步约 63s，**串行**排队。经 `llm.meirong.dev` 有 Cloudflare 100s 源站超时：排到第二张就 524，批量走 Tailscale NodePort |
 | key 白名单 | 只加进了 `LITELLM_VK` |
 
