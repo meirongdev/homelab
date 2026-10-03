@@ -136,8 +136,13 @@ data:
     router_settings:
       fallbacks: [{"qwen3.8-flash-next-tp2": ["mac/ornith"]}]
 
+    # ── 客户端 IP（2026-10-03）──
+    # 公网请求到 LiteLLM 时 TCP 对端已经是集群内地址，spend log 的 requester_ip_address
+    # 全记成 10.42.0.152。client_ip hook 改用 Cloudflare 写的 CF-Connecting-IP。
+    # ⚠️ 别改成 general_settings.use_x_forwarded_for：那会把整条可伪造的 XFF 链存成一个字符串。
+    #    理由与信任边界见 client_ip.py 的文件头。
     litellm_settings:
-      callbacks: ["codex_compat.codex_compat_handler"]
+      callbacks: ["codex_compat.codex_compat_handler", "client_ip.client_ip_handler"]
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -159,10 +164,12 @@ spec:
         #    ⇒ ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按**旧路由表**继续跑。
         #    2026-08-25 实际踩过一次（改了 mac/ornith 后必须手动 rollout restart 才生效）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py 的 STAMP_ONLY），别手改。
-        checksum/config: "e59203ea5ec99273"
+        checksum/config: "367131878c73e7e4"
         # 同理，但盯的是 codex_compat.py（litellm-codex-compat ConfigMap）：
         # 也是 subPath 挂载 + 只在启动时 import，改了不重启就是静默跑旧代码。
         checksum/codex-compat-py: "e5da4a39d90243d4"
+        # 同理，盯 client_ip.py（litellm-client-ip ConfigMap）。
+        checksum/client-ip-py: "dec9b9214176e3ae"
       labels:
         app: litellm
     spec:
@@ -213,6 +220,10 @@ spec:
               mountPath: /app/codex_compat.py
               subPath: codex_compat.py
               readOnly: true
+            - name: client-ip
+              mountPath: /app/client_ip.py
+              subPath: client_ip.py
+              readOnly: true
           resources:
             # memory 512Mi → 1400Mi（2026-09-09）：**这不是为了防它自己 OOM**（limit 2Gi、
             # 零重启），是因为 512Mi 让调度器把它低估了 2.4 倍。
@@ -248,6 +259,9 @@ spec:
         - name: codex-compat
           configMap:
             name: litellm-codex-compat
+        - name: client-ip
+          configMap:
+            name: litellm-client-ip
 ---
 apiVersion: v1
 kind: Service

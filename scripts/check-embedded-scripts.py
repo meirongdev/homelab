@@ -66,6 +66,14 @@ TARGETS = [
         "stamp": ("k8s/helm/manifests/litellm/litellm.yaml",
                   "checksum/codex-compat-py"),
     },
+    {
+        # LiteLLM 的客户端 IP hook（CF-Connecting-IP → spend log 的 requester_ip_address）。同上套路。
+        "src": "k8s/helm/manifests/litellm/client_ip.py",
+        "cm": "k8s/helm/manifests/litellm/litellm-client-ip-cm.yaml",
+        "key": "client_ip.py",
+        "stamp": ("k8s/helm/manifests/litellm/litellm.yaml",
+                  "checksum/client-ip-py"),
+    },
     # ── KRR 内存构成附表 ──────────────────────────────────────────────────────
     # ☠️ 下面两条是**同一个 `src` 的两份内嵌副本**（homelab 与 oracle 各一份）。
     # 这是本列表里第一次出现一对多，登记两条就够了：每条各自校验/重写自己那份 ConfigMap，
