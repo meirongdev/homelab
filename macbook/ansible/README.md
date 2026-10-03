@@ -24,7 +24,6 @@ just ai-clis                 # 安装 AI CLI 工具（claude/qwen/codex/hermes�
 just omlx [host]             # OMLX 本体：brew + LaunchAgent + settings.json 的 host/port/key（key 从 Vault 取）
 just node-exporter [host]    # 装/升级 node_exporter LaunchAgent（无需 sudo，幂等）
 just omlx-metrics [host]     # 装/升级 OMLX 指标采集 LaunchAgent（无需 sudo，幂等）
-just image-gen               # 文生图 Qwen-Image-2.1 + OpenAI 转接层（仅 Studio，首次下 33 GB）
 just power [host]            # headless 电源策略（逐台问 sudo 密码）
 just multica-daemon          # 装/升级 Multica daemon LaunchAgent（仅 M2，认证全自动，从 Vault 取 PAT）
 just site [host]             # 上面几个一起跑（逐台跑、逐台问 sudo 密码）
@@ -45,7 +44,6 @@ just os-upgrade-major <host> # 大版本升级（如 26 → 27），见下文风
 | `packages.yaml` | macs | 确保 Homebrew(`/opt/homebrew`)+ CLI 包(`homebrew_packages`：`tmux`、`uv`)就位;以登录用户身份跑(brew 不能 root)。Homebrew 缺失才跑官方安装器——**首次安装需交互式 admin 密码**,故重建机器时单独手动跑一次 | 否 |
 | `ai-clis.yaml` | macbook | 安装 AI CLI 工具: `claude`(`@anthropic-ai/claude-code` npm), `qwen`(`@qwen-code/qwen-code` npm), `codex`(brew cask, 自含 arm64 二进制), `hermes`(`hermes-agent` brew formula)。先通过 brew 装 `node`(带 npm), 再 `npm install -g`。幂等：已装的不重装 | 否 |
 | `omlx.yaml` | omlx | OMLX 本体：tap（☠️ formula 在 `jundot/omlx` 主仓，不带 URL 的 `brew tap` 会去拉不存在的 `homebrew-omlx`，报的却是「could not read Username」）→ `brew install`（**只 present，不升级**）→ 往 `~/.omlx/settings.json` **合并**四个键（`server.host=0.0.0.0` · `server.port=8000` · `auth.api_key`=Vault `secret/homelab/omlx` · `auth.allow_unauthenticated_inference=true`），其余设置不碰 → `brew services` 的 LaunchAgent `sh.brew.omlx`。没 key 时在启动前失败（0.7 起没 key 就 crash-loop）。验收：`/v1/models` 免 key 200、`/api/status` 无 key 401 / 带 key 200 | 否 |
-| `image-gen.yaml` | image_gen | 文生图：Orbiter/mflux-server（钉提交，`mflux==0.20.0`）+ `files/openai_images_shim.py`（OpenAI `/v1/images/generations` → 异步队列）两个 LaunchAgent；权重 `Qwen/Qwen-Image-2.1` 33 GB 进 HF 缓存、运行时 `HF_HUB_OFFLINE=1`；mflux-server **只监听 127.0.0.1**（无鉴权的 `/api/load`），对 tailnet 只开转接层 `:8010`；☠️ 进程内存随出现过的分辨率单调增长（每个新尺寸 +13 GB），所以转接层只放行 `ig_sizes` 里的尺寸、上游满 `ig_max_pending` 个任务就 429；最后用默认尺寸 2 步真出一张图验收。选型 → [ADR](../../docs/decisions/studio-image-generation.md) | 否 |
 | `node-exporter.yaml` | macs | 下载校验 `darwin-arm64` 二进制 → `~/.local/bin/node_exporter`；写 LaunchAgent（`:9100`, KeepAlive, RunAtLoad, **`--collector.textfile.directory`**）→ `~/Library/LaunchAgents/com.prometheus.node_exporter.plist`；`launchctl bootstrap` 到 GUI 域；校验 `/metrics` 200 + `node_textfile_scrape_error == 0` | 否 |
 | `omlx-metrics.yaml` | omlx | OMLX 推理指标的**生产端**：LaunchAgent `com.meirongdev.omlx-textfile-collector` 每 60s 把 `~/.omlx/stats.json` 渲染成 `omlx.prom`，投进上面那个 textfile 目录。☠️ **StartInterval 不是 KeepAlive**（渲染器跑 0.03s 就退，KeepAlive 会变重启风暴）。☠️ 渲染器是 **`mlx-learning` 仓 venv 里的 console script**（跨仓依赖），缺了会明确失败并给出 `uv sync` 的修法。`stats.json` 还不存在（OMLX 没服务过请求）时装好 plist 但**不启动**。验收会一路查到 node_exporter 那端 | 否 |
 | `multica-daemon.yaml` | macbook | 装 `multica` CLI（**`darwin-arm64` 预编译包**，固定版本 + sha256，不走 Homebrew）→ 指向自建 service → 用 Vault 里的 PAT 认证 → LaunchAgent `ai.multica.daemon`。⚠️ 未认证时**刻意不 bootstrap**（否则 KeepAlive 会把必然失败的进程反复拉起）。这是 Multica「执行任务的那一半」，整体安装见 [docs/runbooks/multica-install.md](../../docs/runbooks/multica-install.md) | 否 |

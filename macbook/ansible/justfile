@@ -38,11 +38,6 @@ omlx target="omlx":
     export OMLX_API_KEY
     ansible-playbook playbooks/omlx.yaml --limit '{{target}}'
 
-# 首次要下 33 GB 权重；装完会真生成一张 256² 小图做端到端验收。架构见 playbook 文件头。
-# 文生图：Qwen-Image-2.1 on mflux + OpenAI 兼容转接层（:8010，接 LiteLLM；无需 sudo）
-image-gen target="image_gen":
-    ansible-playbook playbooks/image-gen.yaml --limit '{{target}}'
-
 # OMLX 指标的**生产端**，读取端在 `just node-exporter`（那边加 textfile flag）。
 # 两个都跑过才有指标；只跑一个不报错，指标静默不出现。
 # ⚠️ 渲染器是 mlx-learning 仓 venv 里的 console script（跨仓依赖），缺了会明确失败。

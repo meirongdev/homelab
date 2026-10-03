@@ -710,21 +710,6 @@ prometheus:
               nodename: mac-studio
         relabel_configs: *omlx_probe_relabel
 
-      # Mac Studio 文生图（Qwen-Image-2.1 on mflux，2026-10-03）—— 抓的是 OpenAI 转接层自己的
-      # /metrics（macbook/ansible/files/openai_images_shim.py），没有额外 exporter。
-      # ⚠️ up=1 只说明转接层活着。**mflux-server 死没死看 mflux_upstream_up**（转接层每次被抓
-      #    都去问一次上游 /api/ps）：转接层活、上游死时 up 仍是 1，内置 TargetDown 看不见，
-      #    所以另有一条 MfluxUpstreamDown（prometheus-rules.yaml）。转接层自己挂了才是 TargetDown。
-      # 选型与架构 → docs/decisions/studio-image-generation.md
-      - job_name: 'mflux-mac-studio'
-        scrape_interval: 30s
-        static_configs:
-          - targets:
-              - 100.98.220.75:8010
-            labels:
-              cluster: mac-studio
-              nodename: mac-studio
-
       # oracle-k3s 指标均为 push 模式（OTel Collector → prometheusremotewrite）
       # 包含: node-exporter, kube-state-metrics, cloudflared, traefik
       # See: cloud/oracle/manifests/monitoring/otel-collector.yaml
