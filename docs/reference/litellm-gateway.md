@@ -552,7 +552,7 @@ reranker / nemoguard / 视觉 / riva-translate / palmyra 垂类）全部早于�
 | 模型 | HF `lmstudio-community/Qwen3.8-27B-MLX-4bit`（VLM，262k ctx）。OMLX 0.7 的模型 ID **不带 org**，别照 M2 写成 `org__name` |
 | 兜底 | **不在任何兜底链里**，只能指名调用。它是多出来的一个可选模型，不是 DGX 的替身 |
 | key 白名单 | 只加进了 `LITELLM_VK`（2c15baf776…）。其余 key 都是给特定消费方的窄 key，**刻意没加**；谁要用就按坑 A 单独加 |
-| 实测（直连，2026-10-03）| 冷装载 14.4s，短 prompt 解码 ~29 tok/s；思维链分离到 `reasoning_content`（同样受下面「小 `max_tokens` 漏进 `content`」影响）|
+| 实测（直连，2026-10-03）| 冷装载 14.4s；开了 DFlash2 投机解码后，写代码 ~100 tok/s、中文长文 ~43 tok/s（基线 31.9，配置与数据见 `macbook/ansible/README.md`）；思维链分离到 `reasoning_content`（同样受下面「小 `max_tokens` 漏进 `content`」影响）|
 
 主机侧（OMLX 安装、key、模型下载）→ `macbook/ansible/README.md`；指标 → [omlx-inference-metrics.md](omlx-inference-metrics.md)。
 
