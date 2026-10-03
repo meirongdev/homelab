@@ -8,8 +8,7 @@
 # Config: config.yaml in git (model_list); keys/spend live in Postgres —— 2026-08-25 起
 #   是共享实例 `databases/apps-pg` 的 litellm 租户，不再是本 ns 自带的 litellm-pg。
 # 自托管上游: DGX (qwen3.8-flash-next-tp2, 主) + MacPro M2 OMLX (Ornith-1.5-35B, 兜底)
-#   + Mac Studio OMLX (Qwen3.8-27B, 独立可指名、不进兜底链, 2026-10-03)
-#   + Mac Studio 文生图 (Qwen-Image-2.1 on mflux, /v1/images/generations, 2026-10-03),
+#   + Mac Studio OMLX (Qwen3.8-27B, 独立可指名、不进兜底链, 2026-10-03),
 #   fallbacks 键 = 严格的"主→兜底"链（见 docs/plans/2026-08-01-litellm-gateway-migration.md §3 决策 6）。
 # 升版：改 image digest + 注释 tag → git push。不要追 main-stable。
 apiVersion: v1
@@ -88,27 +87,6 @@ data:
           model: openai/Qwen3.8-27B-MLX-4bit
           api_base: http://100.98.220.75:8000/v1
           api_key: dummy
-      # ── Mac Studio 文生图：Qwen-Image-2.1 on mflux（2026-10-03）──
-      # 不是 OMLX（它不做文生图），是 :8010 上的 OpenAI 兼容转接层 → 本机 mflux-server。
-      # 架构与选型 → docs/decisions/studio-image-generation.md；主机侧 macbook/ansible `just image-gen`。
-      # ☠️ 只回 b64_json（上游不存图，没有 URL 可给）。
-      # ☠️ drop_params 不能删：LiteLLM 不认识这个模型名，会把 response_format 当成「不支持」
-      #    直接 400 —— 连显式写 b64_json 的请求也拒（OpenAI SDK 调文生图常这么写）。
-      #    2026-10-03 在 pod 内用同版本 Router 实测：allowed_openai_params 写在这里对
-      #    image_generation **无效**，只有 drop_params 有效。代价：请求 url 的客户端拿到的是
-      #    b64_json（url 字段为 null）而不是报错；直连转接层时 url 仍然回 400。
-      # ⚠️ 1024² 40 步约 63s，上游一次只跑一张、其余排队。经 llm.meirong.dev 走 Cloudflare
-      #    有 100s 的源站超时（524）：排到第二张就会超。批量出图走 Tailscale NodePort。
-      # steps / seed / negative_prompt / guidance 用 extra_body 传（2026-10-03 在 pod 内实测透传有效）。
-      - model_name: studio/qwen-image-2.1
-        litellm_params:
-          model: openai/qwen-image-2.1
-          api_base: http://100.98.220.75:8010/v1
-          api_key: dummy
-          timeout: 900
-          drop_params: true
-        model_info:
-          mode: image_generation
       # ── OpenRouter（第三来源，独立透传，2026-08-16）──
       # 全部模型透传：openrouter/<任意 OpenRouter 模型 ID> 直接命中。
       # ⚠️ key 是真实付费凭据：用环境变量引用（os.environ/OPENROUTER_API_KEY），
@@ -181,7 +159,7 @@ spec:
         #    ⇒ ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按**旧路由表**继续跑。
         #    2026-08-25 实际踩过一次（改了 mac/ornith 后必须手动 rollout restart 才生效）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py 的 STAMP_ONLY），别手改。
-        checksum/config: "22adbbb648b420b4"
+        checksum/config: "e59203ea5ec99273"
         # 同理，但盯的是 codex_compat.py（litellm-codex-compat ConfigMap）：
         # 也是 subPath 挂载 + 只在启动时 import，改了不重启就是静默跑旧代码。
         checksum/codex-compat-py: "e5da4a39d90243d4"
