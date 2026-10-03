@@ -1,6 +1,6 @@
 # Open Notebook — AI 研读知识库（架构事实）
 
-> Last updated: 2026-09-30
+> Last updated: 2026-10-04
 > Status: 生效事实
 > Scope: Open Notebook（NotebookLM 自托管替代）在 homelab 集群的部署形态、模型接线、
 > 配置真相源地图、备份口径，本文是 source of truth。
@@ -35,7 +35,7 @@
 
 | 角色 | 后端 | 模型 |
 |---|---|---|
-| 对话/转换/长上下文/工具（默认） | DGX SGLang `100.97.87.120:8888` | `qwen3.8-27b-sglang`（262k ctx；2026-09-19 由 `qwen38-flash-next` 换入，☠️ 端点同时从 `:8000` 换到 `:8888`）|
+| 对话/转换/长上下文/工具（默认） | DGX vLLM `100.97.87.120:8000` | `qwen3.8-flash-next-tp2`（262k ctx；2026-09-30 由 `qwen3.8-27b-sglang` 换入，☠️ 端点同时从 `:8888` 换回 `:8000`）|
 | 对话兜底（非默认，UI 手动切） | Mac OMLX `100.89.15.120:8000` | `ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit`（262k ctx；2026-08-25 由 Qwen3.6-35B 换入） |
 | Embedding | Mac OMLX | Qwen3-Embedding-4B（2560 维） |
 | STT | Mac OMLX | `Qwen3-ASR-1.7B-8bit` |
@@ -45,11 +45,11 @@
 `allow_unauthenticated_inference: true`。它一丢，这四个角色一起 401（2026-09-30 起，
 见 [omlx-inference-metrics.md 的「鉴权」](omlx-inference-metrics.md#鉴权omlx-07-起)）。
 
-☠️ **DGX 换主力栈带来三条本仓库控制不了的后果**（2026-09-02 两条 + 2026-09-19 一条）：
+☠️ **DGX 换主力栈带来三条本仓库控制不了的后果**（2026-09-02 两条 + 2026-09-19 一条，2026-10-04 按 09-30 那次换栈核过）：
 
 1. **长上下文角色有硬上限**：`large_context_model` 与三个播客 profile 的
    "整本书塞得进去"是靠更早那个栈的 1M ctx 成立的，此后一直是 262144
-   （2026-09-19 换栈后**仍是** 262144，这一条没有恶化）。兜底的 Mac Ornith 也是 262k，
+   （09-19、09-30 两次换栈后**仍是** 262144，这一条没有恶化）。兜底的 Mac Ornith 也是 262k，
    **切过去拿不到更多窗口**。长书开始截断或报超窗时先按这条判，别先怀疑上游挂了。
 2. **改名不会带走旧条目**：provisioner 只增不删（unmanaged models 只打 note），
    旧条目必须手删。✅ 2026-09-03 已删掉 UI 里的 `deepseek-v4-flash`——删前先扫过
@@ -59,16 +59,18 @@
    ☠️ **这次的扫法和上次不同，别再只扫 API**：本版本有 404 的端点，"扫不到"不等于"没有"。
    改成**直查 SurrealDB 的全部 19 张表**（`ws://open-notebook-surrealdb…` 的 HTTP `/sql`，
    `INFO FOR DB` 取表名后逐表 `SELECT *` 再 grep model id），这才是没有盲区的判据。
-   ☠️ **而且死条目的危害在换成 SGLang 后变大了**：vLLM 时代选中它当场 404，而 SGLang
-   **接受任意 model 名并原样回显** —— 实测回 200、`model` 字段照抄那个不存在的名字，
-   实际跑的是当前加载的模型。清理从"卫生"变成"必须"。
+   ⚠️ **09-30 换栈后旧条目 `qwen3.8-27b-sglang` 还在**（2026-10-04 查 `/api/models`；7 个
+   默认角色都已指向 `qwen3.8-flash-next-tp2`）。引擎换回 vLLM 后，选中它会当场 404。
+   SGLang 那一栈（09-19 至 09-30）上更危险：它接受任意 model 名并原样回显，死条目回 200、
+   实际跑的是当前加载的模型。所以它现在是卫生问题。删之前照上面的 SurrealDB 全表扫法
+   确认没有引用。
    ⚠️ **`mlx-community__Qwen3.6-35B-A3B-nvfp4` 看着像遗留但不要删**：OMLX 仍在提供它
    （2026-09-19 实测），是可用备选。
-3. ☠️ **2026-09-19 换栈同时换了端点**（`:8000` → `:8888`），所以这次改的不只是模型名，
-   还有凭据 `dgx-vllm` 的 `base_url`。凭据名仍叫 `dgx-vllm`（引擎其实已是 SGLang）是
-   **刻意保留**的：provisioner 只增不删，改名只会多出一条新凭据、旧那条变死条目。
-   ⚠️ 新引擎**接受任意 model 名并原样回显**（vLLM 才 404），所以模型名写错在这条
-   直连路径上是完全静默的 —— 只能靠 `curl :8888/v1/models` 核对。
+3. ☠️ **端点随栈变**：09-19 从 `:8000` 换到 `:8888`（SGLang），09-30 又换回 `:8000`
+   （vLLM 双机 TP=2）。所以每次换栈都要一起核对凭据 `dgx-vllm` 的 `base_url`，不只是
+   模型名。凭据名一直叫 `dgx-vllm` 是**刻意保留**的：provisioner 只增不删，改名只会多出
+   一条新凭据、旧那条变死条目。当前引擎是 vLLM，模型名写错会 404；核对 served name 用
+   `curl -s http://100.97.87.120:8000/v1/models`（本机任意目录）。
 
 上游模型的事实（served name / 端点 / ctx / 冷启动 / 回滚）以
 [litellm-gateway.md](litellm-gateway.md) 的「DGX 主力栈」为准，这里不重复。

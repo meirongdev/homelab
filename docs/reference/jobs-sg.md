@@ -1,6 +1,6 @@
 # jobs-sg — 新加坡 SWE 岗位趋势周报（架构事实）
 
-> Last updated: 2026-09-19
+> Last updated: 2026-10-04
 > Status: 生效事实
 > Scope: jobs-sg 在 homelab 集群的部署形态、镜像固定方式、备份口径、首次上线依赖顺序
 > 本文是 source of truth。应用代码在 [meirongdev/jobs-sg](https://github.com/meirongdev/jobs-sg)。
@@ -73,33 +73,36 @@ ingest 约 02:20 SGT 落地，数字必须当场就是最新的。周报仍是�
 
 ## LLM 富化：直连 DGX，不经 LLM 网关
 
-`enrich` 的 `LLM_BASE_URL` 指向 **DGX Spark 推理引擎 `http://100.97.87.120:8888`**
+`enrich` 的 `LLM_BASE_URL` 指向 **DGX Spark 推理引擎 `http://100.97.87.120:8000`**
 （Tailscale IP，pod 直连；同一台机器也在给 Open Notebook 供模型）。这样**完全不需要
 LLM 网关的 virtual key**，也就少了一条 Vault 依赖。
 
 ⚠️ **模型 id 是后端相关的**：LLM 网关路由用带 provider 前缀的名字
-（`custom_dgx/qwen3.8-27b-sglang`），裸引擎提供的是 `qwen3.8-27b-sglang`，写前缀名
+（`custom_dgx/qwen3.8-flash-next-tp2`），裸引擎提供的是 `qwen3.8-flash-next-tp2`，写前缀名
 会 404。上游原先把模型链**硬编码**成网关形式，2026-08-03（`d833623`）才改成读
 `LLM_MODELS` / `LLM_CONCURRENCY` 环境变量（默认仍是网关链，不破兼容）。
 
 实测（2026-08-03，`jobs-sg` ns 内的 pod）：DGX 可达、**无需认证**、`x-bf-vk` 头被
 vLLM 忽略；当时的模型 `deepseek-v4-flash`（1M ctx）返回的正是 enrich 要的严格 JSON。
 
-☠️ **2026-09-19 DGX 又换了主力栈**（`qwen38-flash-next` → `qwen3.8-27b-sglang`，
-引擎 vLLM → SGLang）。因为本作业**直连** DGX，git 里那份网关清单帮不上忙，只有
+☠️ **2026-09-30 DGX 换了主力栈**（`qwen3.8-27b-sglang` → `qwen3.8-flash-next-tp2`，
+引擎 SGLang → vLLM，双机 TP=2）。因为本作业**直连** DGX，git 里那份网关清单帮不上忙，只有
 `LLM_BASE_URL` + `LLM_MODELS` 跟着改才有效。模型事实见
-[litellm-gateway.md](litellm-gateway.md) 的「DGX 主力栈」。
-☠️ **这次连端点一起变了**：`:8000`（k3s/vLLM）→ `:8888`（docker/SGLang），旧端口已完全
-不监听。只改模型名等于把作业指向一个空端口。
-☠️ **而且新引擎不会再用 404 提醒你**：SGLang **接受任意 model 名并原样回显**（vLLM 才
-会 404），所以模型名写错在这条路径上是**完全静默**的 —— 唯一判据是
-`curl -s http://100.97.87.120:8888/v1/models` 报的 served name。
-☠️ **`reasoning_tokens` 判据在新栈上失效**：`usage.completion_tokens_details.reasoning_tokens`
-恒为 `null`（vLLM 才导出）。下面那套"用 reasoning_tokens 判断推理有没有被关掉"的方法
-在这里会读到 `None`，**与"确实关掉了"完全同形**。改看 `message.reasoning_content` 的长度。
-✅ 2026-09-19 已在新栈复验（直打 `:8888`）：`{"enable_thinking":false}` 生效
-（reasoning_content 0 字符 / completion 7 token），旧键 `{"thinking":false}` 仍是静默空操作
-（417 字符推理照出）—— 即 `LLM_THINKING_KWARG` 保持默认值 `enable_thinking` 就对。
+[litellm-gateway.md](litellm-gateway.md) 的「DGX 主力栈」。和上一栈比，本作业要知道的变化：
+
+- **端口改回 `:8000`**，上一栈的 `:8888` 已不响应。只改模型名、不改端口，等于把作业指向空端口。
+- **模型名写错又会 404 了**（vLLM）。上一栈 SGLang 会原样回显任意名字，写错是静默的。
+- ☠️ **直连时思维链在 `message.reasoning`，`reasoning_content` 恒为空**（经网关时 LiteLLM
+  才改写成 `reasoning_content`）。09-19 那次为了绕开 SGLang 把判据改成「看
+  `reasoning_content` 长度」，在这一栈上会恒读到 0，**与「确实关掉了」完全同形**。
+- **`usage.completion_tokens_details.reasoning_tokens` 有值了**（关思考时为 0）。客户端
+  `checkThinkingHonoured` 读的就是它，所以 `reasoning was not disabled` 那条 WARN 在上一栈
+  （09-19 至 09-30，恒为 `null`）其实一直是瞎的，这一栈重新有效。
+
+✅ 2026-10-04 用上游自带的实测用例复验（`LLM_LIVE_URL=http://100.97.87.120:8000
+LLM_LIVE_MODEL=qwen3.8-flash-next-tp2 go test ./internal/llm -run Live -v`，在 jobs-sg 仓库根目录）：
+PASS，`enable_thinking=false` 生效，1.02s 抽出 13 个词。即 `LLM_THINKING_KWARG` 保持默认值就对。
+上一栈的差异与复验记录在 git 历史里（`git show 9271654:docs/reference/jobs-sg.md`）。
 ✅ 严格 JSON 这条契约已在新模型上复验（2026-09-03，直接打网关、用仓库里那份
 `ExtractPrompt`）：三种参数（默认 / `{"thinking":false}` / `{"enable_thinking":false}`）
 都回合法 JSON 且六个 key 齐全，reasoning 分别是 142 / 134 / 0。
@@ -214,7 +217,7 @@ reasoning 占了这个模型 **约 95%** 的 output token。上游 `472aaf5` 加
 那个 400 就是服务端在校验这个字段的证据。⚠️ 它的失效形态因此和 `chat_template_kwargs`
 相反：换模型后该值若不被支持，是整轮 400 全挂，而不是悄悄不生效。
 
-✅ **2026-09-19 在新栈 `qwen3.8-27b-sglang` 上复验**，结论是「机制成立，但枚举换了一套」：
+✅ **2026-09-19 在 `qwen3.8-27b-sglang`（09-19 至 09-30 那一栈）上复验**，结论是「机制成立，但枚举换了一套」：
 
 | 请求 | 结果 |
 |---|---|
@@ -227,10 +230,14 @@ reasoning 占了这个模型 **约 95%** 的 output token。上游 `472aaf5` 加
 `minimal` 现在会让整轮 400 全挂。默认档从常规推理变成 `xhigh`，这个封顶键比在旧栈上
 **更不能省**。
 
-⚠️ **这个键能用，靠的是本作业直连 DGX**。经 LLM 网关传同一个参数会被 LiteLLM 判为
-不支持（`UnsupportedParamsError`，2026-09-19 实测）—— 所以别把本节的做法照搬给
-走网关的消费方（oracle 的 calibre 元数据作业就是），详见
-[litellm-gateway.md](litellm-gateway.md)。这也是「改走网关」这个选项的一项隐藏成本。
+✅ **当前栈 `qwen3.8-flash-next-tp2`**（2026-10-04 直连实测）：档位仍是 `low` / `medium` /
+`xhigh`（默认），`minimal` 和 `high` 回 400，所以清单里的 `{"reasoning_effort":"medium"}`
+**原样有效**。只在一道短算术题上看过推理变短（默认 152 字 → `medium` 85 字），真实提示词
+上压缩多少没在这一栈重测。
+
+⚠️ 2026-09-19 时经 LLM 网关传这个参数会报 `UnsupportedParamsError`，所以当时说「只有直连
+才能封顶」。2026-10-04 起网关（v1.103.1）已能转发，但**裸别名上传错档位会被兜底吞掉**、
+悄悄换成 Mac 回 200，详见 [litellm-gateway.md](litellm-gateway.md)。
 
 **用法定位**：`LLM_THINKING=false` 只用来啃积压，不用于稳态；清单里因此不设它
 （= 默认开启），啃积压走一次性 Job（不进 git，见下节）。稳态用下一节的封顶。
@@ -238,8 +245,8 @@ reasoning 占了这个模型 **约 95%** 的 output token。上游 `472aaf5` 加
 ## 稳态旋钮：给推理封顶（`LLM_EXTRA_BODY` + `reasoning_effort`）
 
 这一类推理模型会在个别岗位上把推理写飞，这是 enrich 记 partial 的常态成因
-（下面的实测数字来自 `qwen38-flash-next`；新栈 `qwen3.8-27b-sglang` 的封顶键沿用同一个，
-跑飞的分布尚未在新栈上重测）。
+（下面的实测数字来自 2026-09-04 的 `qwen38-flash-next`；之后两栈都沿用同一个封顶键，
+跑飞的分布在 `qwen3.8-27b-sglang` 和当前的 `qwen3.8-flash-next-tp2` 上都没重测）。
 ☠️ 起手别去查"DGX 是不是慢了"：2026-09-04 那轮 `errors=21`，而引擎读数与前夜一致
 （每输出 token 0.043s、排队 0.06s、无抢占）。实测到的形态：
 
