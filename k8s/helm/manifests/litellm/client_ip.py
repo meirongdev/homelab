@@ -15,12 +15,16 @@ pod 自己的调用，没有一行是真实客户端 IP —— 「对外发了 k
 LiteLLM 自带的开关把**整条** `X-Forwarded-For` 原样存成字符串。这条链最左边是客户端自己
 可以填的（Cloudflare 只在后面追加，Envoy 的 `useRemoteAddress: true` 再追加 cloudflared
 的 pod IP），所以存下来的是 `<任意伪造值>, <真实 IP>, 10.42.x.x` 这种东西，按 IP 聚合就废了。
-`CF-Connecting-IP` 是 Cloudflare 边缘写的单个地址，客户端带同名头会被覆盖（上线后实测）。
+`CF-Connecting-IP` 是 Cloudflare 边缘写的单个地址。客户端自己带这个头的请求，Cloudflare
+直接回 403 `error code: 1000`，到不了源站（2026-10-03 经公网实测；Cloudflare 的 error 1000
+文档也把「请求含 CF-Connecting-IP 头」列为成因之一）。同次实测伪造 `X-Forwarded-For` /
+`True-Client-IP` 的请求能通过，记下的仍是 Cloudflare 看到的地址。
 
 ## 信任边界
 
 不经过 Cloudflare 的请求（集群内 pod 走 Service、tailnet 走 NodePort 31400）没有这个头，
-保持 LiteLLM 原来记的对端地址 —— 那两条路上对端地址本来就是真的。它们理论上能自己伪造
+保持 LiteLLM 原来记的对端地址 —— 那两条路上对端地址本来就是真的（实测 NodePort 记下的是
+调用方的 tailnet 100.x 地址，集群内调用记的是 pod IP）。它们理论上能自己伪造
 这个头，但能走到那两条路的只有集群内负载和 tailnet 设备，不在要防的范围里。
 
 ## 失败模式
