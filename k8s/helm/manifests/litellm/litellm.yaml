@@ -169,7 +169,7 @@ spec:
         # 也是 subPath 挂载 + 只在启动时 import，改了不重启就是静默跑旧代码。
         checksum/codex-compat-py: "e5da4a39d90243d4"
         # 同理，盯 client_ip.py（litellm-client-ip ConfigMap）。
-        checksum/client-ip-py: "dec9b9214176e3ae"
+        checksum/client-ip-py: "73ac6eb0b2a145f1"
       labels:
         app: litellm
     spec:

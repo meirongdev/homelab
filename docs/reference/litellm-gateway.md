@@ -569,6 +569,87 @@ reranker / nemoguard / 视觉 / riva-translate / palmyra 垂类）全部早于�
 那个开关一丢，`mac/*`（以及 `studio/*`）全部 401，而网关这边清单正确、ArgoCD Synced。
 → [omlx-inference-metrics.md 的「鉴权」](omlx-inference-metrics.md#鉴权omlx-07-起)
 
+## 每把 key 的用量与来源 IP（spend log）
+
+每次调用（含失败）在 `apps-pg` 的 `litellm` 库写一行 `LiteLLM_SpendLogs`。对外发了 key、
+想知道它什么时候、从哪、用了多少，查的就是这张表：
+
+| 列 | 内容 |
+|---|---|
+| `api_key` | key 的 sha256，不是原文 |
+| `metadata->>'user_api_key_alias'` | 发 key 时给的 `key_alias`，**没给就是空**，见下方「发 key」 |
+| `"startTime"` / `model_group` / `call_type` / `status` | 时间、别名、路由、`success`/`failure` |
+| `prompt_tokens` / `completion_tokens` / `total_tokens` | 用量。☠️ **别看 `spend`**：自托管模型没有单价，全表 spend 都是 0 |
+| `metadata->>'user_agent'` | 客户端 UA |
+| `requester_ip_address` | 来源 IP，见下 |
+
+不存对话内容：没开 `store_prompts_in_spend_logs`，`messages` / `response` 全表 0 行非空、
+`proxy_server_request` 是 `{}`（2026-10-03 核过）。别为排障顺手打开，那会把外部使用者的
+prompt 落进库。表没有设 `maximum_spend_logs_retention_period`，行会一直留着（2026-10-03 时
+2.3 MB），量级上不用管。
+
+### `requester_ip_address` 记的是谁（2026-10-03 起）
+
+| 进来的路径 | 记下的地址 |
+|---|---|
+| 公网 `llm.meirong.dev`（Cloudflare）| Cloudflare 的 `CF-Connecting-IP`，即真实客户端 IP；IPv6 客户端就是 IPv6 |
+| tailnet NodePort `:31400` | 调用方的 `100.x` 地址 |
+| 集群内走 Service | 调用方 pod IP |
+
+第一行靠 `client_ip.py` hook 改写（为什么不用 `general_settings.use_x_forwarded_for`、信任边界
+都在它的文件头）。LiteLLM 默认记 TCP 对端，公网调用到它这里对端已经是 `10.42.0.152`
+（k8s-node 的 CiliumInternalIP）。
+
+☠️ **2026-10-03 之前的行，公网调用一律是 `10.42.0.152`**，历史数据补不回来。
+
+⚠️ 公网路径上这个字段伪造不了：客户端自己带 `CF-Connecting-IP`，Cloudflare 直接回 403
+`error code: 1000`；伪造 `X-Forwarded-For` / `True-Client-IP` 能通过，但记下的仍是真实地址
+（均经公网实测）。
+
+⚠️ **被限流拒掉的 `/v1/responses` 请求，那行 IP 是空串**。这是 LiteLLM 本身的行为，不加 hook
+也一样（本地同 digest 镜像实测）；chat 被限流的行有 IP。
+
+hook 有没有加载：每个 pod 只在首次改写时打一条 WARNING。
+
+```bash
+kubectl --context k3s-homelab -n litellm logs deploy/litellm | grep client_ip
+```
+
+### 按 key × IP 看用量
+
+本机任意目录。没有别名的 key 显示哈希前 12 位，对照方法见坑 A 的「改名时先找出全部受影响的 key」：
+
+```bash
+kubectl --context k3s-homelab -n databases exec deploy/apps-pg -- psql -U postgres -d litellm -c "
+select coalesce(nullif(metadata->>'user_api_key_alias', ''), left(api_key, 12)) as key,
+       requester_ip_address as ip,
+       count(*) as calls, count(*) filter (where status = 'failure') as failed,
+       sum(total_tokens) as tokens, max(\"startTime\")::timestamp(0) as last_seen
+from \"LiteLLM_SpendLogs\" where \"startTime\" > now() - interval '7 days'
+group by 1, 2 order by calls desc;"
+```
+
+### 发给外部的 key
+
+2026-10-03 盘点：18 把 key 里 **17 把没有 `key_alias`**、**0 把设了 rpm/tpm/并发上限**。
+对外发 key 时这样建（master key 取法见坑 A）：
+
+```bash
+curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
+  -d '{"key_alias":"ext-<谁>","models":["studio/qwen3.8-27b"],"duration":"30d",
+       "rpm_limit":60,"max_parallel_requests":2}' \
+  http://100.94.186.7:31400/key/generate
+```
+
+| 参数 | 为什么 |
+|---|---|
+| `key_alias` | 上面的聚合查询按它分组；必须唯一，重名直接拒绝 |
+| `duration` | 到期自动失效（`30d` → `expires` 为 30 天后），调用方拿到 401 `expired_key` |
+| `rpm_limit` / `max_parallel_requests` | 超了回 429 `throttling_error`。**别用 `max_budget` 限额**：本地实测 max_budget=0.001 连发 6 次全是 200，spend 一直是 0 |
+
+以上参数都在本地用同 digest 镜像实测过（`max_parallel_requests=1` 时 4 个并发 1 个 200、3 个 429）。
+走 tailnet NodePort 是因为经 Cloudflare 调管理接口会被 WAF 拦（坑 A 那节）。
+
 ## 消费方
 
 | 消费方 | 用哪个别名 | 配置在哪 |
