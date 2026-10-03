@@ -16,6 +16,8 @@
         <string>127.0.0.1</string>
         <string>--port</string>
         <string>{{ ig_server_port }}</string>
+        <!-- ☠️ 开着的话每个新分辨率多常驻 ~26 GB 而不是 ~13 GB（见 playbook 文件头） -->
+        <string>--no-qwen21-context-cache</string>
     </array>
     <!-- 网页界面从 clients/web-ui 相对路径读文件 -->
     <key>WorkingDirectory</key>

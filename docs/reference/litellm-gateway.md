@@ -564,11 +564,14 @@ reranker / nemoguard / 视觉 / riva-translate / palmyra 垂类）全部早于�
 | | |
 |---|---|
 | 别名 → 上游 | `studio/qwen-image-2.1` → `openai/qwen-image-2.1` @ `100.98.220.75:8010/v1`，`model_info.mode: image_generation`，`timeout: 900` |
-| 调用 | `POST /v1/images/generations`，`size` 须为 16 的倍数（默认 `1024x1024`），`n` ≤ 4 |
+| 调用 | `POST /v1/images/generations`，`size` **只能是** `1024x1024`（默认）/`768x768`/`1280x720`/`720x1280`，`n` ≤ 4。上游已有 2 个未完成任务时直接 429（`image generator busy`）|
 | 非标准参数 | `steps`（默认 40）/ `seed` / `negative_prompt` / `guidance` 放 `extra_body`；2026-10-03 在网关 pod 内实测透传生效 |
 | ☠️ 返回格式 | **只有 `b64_json`**（上游不存图）。经网关时 `response_format` 被 `drop_params` 丢掉：请求 `url` 不报错、拿到的是 `b64_json`（`url` 为 null）。不开 `drop_params` 的话 LiteLLM 连 `b64_json` 都拒（不认识这个模型名）；`allowed_openai_params` 对 image_generation 无效（2026-10-03 同版本 Router 实测）|
 | 耗时 | 1024² / 40 步约 63s，**串行**排队。经 `llm.meirong.dev` 有 Cloudflare 100s 源站超时：排到第二张就 524，批量走 Tailscale NodePort |
 | key 白名单 | 只加进了 `LITELLM_VK` |
+| ☠️ 为什么限尺寸、限队列 | mflux-server 每遇到一个新分辨率多常驻 ~13 GB 且不释放；OpenAI SDK 对 524 的自动重试每次都再提交一张图。机制与实测 → [ADR](../decisions/studio-image-generation.md) |
+
+对外使用者看的说明（公开、不含密钥）→ [guides/llm-gateway-external-users.md](../guides/llm-gateway-external-users.md)。
 
 ☠️ **`mac/*` 的 `api_key: dummy` 能用，是 Mac 上一个开关的结果**（2026-09-30 起）：OMLX 0.7 起
 非回环监听必须配 key，现行配法是 key + `allow_unauthenticated_inference: true`，推理端点因此仍免鉴权。

@@ -17,6 +17,12 @@
 ☠️ 取图必须带 delete（上游默认就是）：图片以编码后的字节常驻在上游进程内存里，
    不取走就一直占着。客户端中途断开时本进程照样把任务跑完、取走、丢弃。
 ☠️ 失败和超时要 /api/cancel：上游的出错任务**不会自己离开队列**。
+☠️ 尺寸白名单（--sizes）不是洁癖：mflux-server 进程**每遇到一个新分辨率就多常驻约 13 GB 且永不释放**
+   （2026-10-03 实测，已关 qwen21 context cache；开着时是 ~26 GB）。不限尺寸，外部用户随手换几个
+   尺寸就能把 128G 的机器推进 swap，生成速度掉到三分之一。白名单让最坏情况有上界。
+☠️ 队列上限（--max-pending）：一次只能出一张图，1024² 约 1 分钟，而公网入口 100s 就 524。
+   OpenAI SDK 对 524 默认重试 2 次，**每次重试都会再提交一张新图** —— 实测一个请求在上游堆出 3 张、
+   客户端照样失败。超过上限直接 429 + Retry-After，重试就不再制造 GPU 工作。
 
 无鉴权：只在 tailnet 上监听，与 OMLX 的推理端点同一口径（allow_unauthenticated_inference）。
 只用标准库，跑在 mflux-server 的同一个 venv 里（不需要额外依赖）。
@@ -25,6 +31,7 @@
 import argparse
 import base64
 import json
+import subprocess
 import threading
 import time
 import urllib.error
@@ -34,6 +41,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ARGS = None
 LOCK = threading.Lock()
+SUBMIT_LOCK = threading.Lock()   # 「数队列 + 提交」必须原子，否则两个请求会同时看见空位
 METRICS = {
     "requests": {},            # status label -> count
     "images": 0,
@@ -62,11 +70,34 @@ class Error(Exception):
         self.status, self.message, self.kind = status, message, kind
 
 
+def upstream_rss_bytes():
+    """mflux-server 进程的常驻内存；拿不到返回 None（指标就不出这一行）。"""
+    try:
+        pid = subprocess.run(["pgrep", "-f", "mflux-server/server.py"], capture_output=True,
+                             text=True, timeout=5).stdout.split()[0]
+        rss_kb = subprocess.run(["ps", "-o", "rss=", "-p", pid], capture_output=True,
+                                text=True, timeout=5).stdout.strip()
+        return int(rss_kb) * 1024
+    except Exception:
+        return None
+
+
+def pending_tasks():
+    """上游队列里还没结束的任务数（end_time 在成功和失败时都会被设置）。"""
+    _, raw = upstream("/api/tasks", timeout=10)
+    return sum(1 for t in json.loads(raw) if not t.get("end_time"))
+
+
 def generate_one(prompt, width, height, extra):
     """提交一个任务并等到它结束，返回 base64 PNG。"""
     body = {"prompt": prompt, "width": width, "height": height, "format": "PNG", **extra}
     try:
-        _, raw = upstream("/api/generate", body)
+        with SUBMIT_LOCK:
+            pending = pending_tasks()
+            if pending >= ARGS.max_pending:
+                raise Error(429, f"image generator busy ({pending} in queue, about 1 minute each); "
+                                 "retry later, one request at a time", "rate_limit_error")
+            _, raw = upstream("/api/generate", body)
     except urllib.error.HTTPError as e:
         # 上游的 400 带着可读的原因（尺寸不是 16 的倍数、步数太少……），原样转给调用方。
         # flask-restx 的入参校验失败是 {"message": ..., "errors": {...}}，形状不同，一并兼容。
@@ -115,6 +146,8 @@ class Handler(BaseHTTPRequestHandler):
         data = obj if isinstance(obj, bytes) else json.dumps(obj).encode()
         self.send_response(status)
         self.send_header("Content-Type", ctype)
+        if status == 429:
+            self.send_header("Retry-After", "60")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         try:
@@ -146,6 +179,7 @@ class Handler(BaseHTTPRequestHandler):
                 up = 0
             with LOCK:
                 m = json.loads(json.dumps(METRICS))
+            rss = upstream_rss_bytes()
             lines = [
                 "# HELP mflux_upstream_up mflux-server answers /api/ps",
                 "# TYPE mflux_upstream_up gauge", f"mflux_upstream_up {up}",
@@ -161,6 +195,9 @@ class Handler(BaseHTTPRequestHandler):
                 "# HELP mflux_last_success_timestamp_seconds unix time of the last returned image",
                 "# TYPE mflux_last_success_timestamp_seconds gauge",
                 f"mflux_last_success_timestamp_seconds {m['last_success']:.0f}",
+                "# HELP mflux_upstream_rss_bytes resident memory of the mflux-server process",
+                "# TYPE mflux_upstream_rss_bytes gauge",
+                *([f"mflux_upstream_rss_bytes {rss}"] if rss is not None else []),
             ]
             return self.reply(200, ("\n".join(lines) + "\n").encode(), "text/plain; version=0.0.4")
         self.reply(404, {"error": {"message": "not found", "type": "invalid_request_error"}})
@@ -184,10 +221,10 @@ class Handler(BaseHTTPRequestHandler):
             n = int(req.get("n") or 1)
             if not 1 <= n <= ARGS.max_n:
                 raise Error(400, f"n must be 1..{ARGS.max_n}")
-            try:
-                w, h = (int(x) for x in str(req.get("size") or "1024x1024").lower().split("x"))
-            except ValueError:
-                raise Error(400, "size must look like 1024x1024")
+            size = str(req.get("size") or ARGS.sizes[0]).lower()
+            if size not in ARGS.sizes:
+                raise Error(400, f"size {size!r} not offered; choose one of: {', '.join(ARGS.sizes)}")
+            w, h = (int(x) for x in size.split("x"))
             # 非 OpenAI 字段原样透传给上游（OpenAI SDK 用 extra_body 发），其余忽略
             extra = {k: req[k] for k in ("seed", "steps", "guidance", "negative_prompt") if k in req}
             if "seed" in extra:
@@ -228,7 +265,11 @@ def main():
     p.add_argument("--timeout", type=int, default=900, help="seconds to wait for one image, queueing included")
     p.add_argument("--poll", type=float, default=1.0)
     p.add_argument("--max-n", type=int, default=4)
+    p.add_argument("--max-pending", type=int, default=2, help="429 when this many tasks are unfinished upstream")
+    p.add_argument("--sizes", default="1024x1024,768x768,1280x720,720x1280",
+                   help="allowed WxH, comma separated; the first is the default")
     ARGS = p.parse_args()
+    ARGS.sizes = [x.strip().lower() for x in ARGS.sizes.split(",") if x.strip()]
     ThreadingHTTPServer((ARGS.host, ARGS.port), Handler).serve_forever()
 
 

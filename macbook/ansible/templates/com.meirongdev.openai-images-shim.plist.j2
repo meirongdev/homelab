@@ -18,6 +18,10 @@
         <string>http://127.0.0.1:{{ ig_server_port }}</string>
         <string>--model-id</string>
         <string>{{ ig_model }}</string>
+        <string>--sizes</string>
+        <string>{{ ig_sizes | join(',') }}</string>
+        <string>--max-pending</string>
+        <string>{{ ig_max_pending }}</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
