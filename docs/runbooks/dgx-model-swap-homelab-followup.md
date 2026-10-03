@@ -1,6 +1,6 @@
 # DGX 换了主力模型：homelab 侧跟进 SOP
 
-> Last updated: 2026-09-21
+> Last updated: 2026-10-04
 > Status: 生效事实 + 切换 SOP
 > 触发条件：`100.97.87.120:<port>/v1/models` 返回的 served name 与仓库里的引用不一致
 > —— 上游（`~/projects/meirongdev/nv-dgx-spark`）换栈、改 served name、或从换栈中
@@ -308,7 +308,7 @@ Open Notebook 的接线只能在应用里看（值存的是模型 id，不是名
 | DGX 两台 GB10（`100.97.87.120` head / `100.67.164.92`，2026-09-20 起常驻 `fndgx` vLLM 栈） | **别人 tailnet 的共享节点**，经 Tailscale node sharing 进来 | served name / **端点** / **引擎** / ctx / 冷启动 / 并发上限 / **拓扑**全部由它单方面决定 | 引擎死 = 响（定向告警）；**换栈 = 哑**（只有第一个 404 或第一张空面板才发现，见 §8 哨兵那条） |
 | `nv-dgx-spark` 仓库 | 本机 `~/projects/meirongdev/nv-dgx-spark` | `stacks/PRIMARY` + `stacks/<id>/stack.env` = **"谁是主力"的唯一事实源**（2026-09-19 起）；memwatch、**权重与镜像保留期 = 我们的回滚窗口** | 那边换栈而我们没跟上，表现是哑的（见上一行）。✅ 好消息：make 动词已收敛成栈无关的 `status/restart/logs/test`，我们的 runbook 指针从此不会因换栈而过期 |
 | Mac 上的 OMLX（`100.89.15.120:8000`） | 另一台机器（笔记本） | 兜底上游 + embedding / TTS / STT 全在这；`fast` profile 的开关名也在它那边 | 兜底拿不拿得到是哑的（且受 key 白名单影响，见 §3） |
-| OpenRouter / NVIDIA build.nvidia.com | 第三方 SaaS | 第三、第四来源；**目录与限额在对方手里**（NVIDIA 点数制 + 40 RPM，OpenRouter 以接口的 pricing 为准） | 免费档 429/503 是响的；目录漂移是哑的 |
+| OpenRouter | 第三方 SaaS | 第三来源；**目录与限额在对方手里**（以接口的 pricing 为准；NVIDIA 第四来源 2026-10-04 已删） | 免费档 429/503 是响的；目录漂移是哑的 |
 
 ### B. 运行时状态：在本仓库部署、但**不在 git 里**
 
@@ -332,7 +332,7 @@ DGX profile 与 Qwen 启动默认由 `nv-dgx-spark/scripts/qwen-model-switch.sh`
 | 镜像 | 源码 | 我们改不动的东西 |
 |---|---|---|
 | `ghcr.io/meirongdev/jobs-sg` | `~/projects/meirongdev/jobs-sg` | 提示词、严格 JSON 契约、**关思考的 kwargs 名**（`{"thinking":false}` 在新栈是静默空操作）、`DefaultTimeout` |
-| `litellm/litellm@sha256:…` | 上游开源 | 通配别名的拼接行为（`nvidia/*` 双前缀那条） |
+| `litellm/litellm@sha256:…` | 上游开源 | 通配别名的拼接行为（`openrouter/*`；已删的 `nvidia/*` 就是因此多带一层前缀、全部 404） |
 | calibre 镜像 | KovidG 上游 | 我们内嵌的脚本在 git，但 calibre 本体与书库格式不在 |
 
 **这一类是本次最贵的教训**：一条静默失效（关思考的开关名）源头在别人的仓库与镜像里，

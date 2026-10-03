@@ -96,23 +96,8 @@ data:
           model: "openrouter/*"
           api_base: https://openrouter.ai/api/v1
           api_key: os.environ/OPENROUTER_API_KEY
-      # ── NVIDIA（第四来源：build.nvidia.com 免费 API，独立透传，2026-08-16）──
-      # ☠️ 这条现在是坏的（2026-08-25 查清）：`openai/nvidia/*` 会让发给上游的模型名
-      #    多带一层 `nvidia/`，实测 404 page not found。key 和上游都没问题 ——
-      #    pod 内直连 NVIDIA：裸名 meta/llama-3.3-70b-instruct 回 200，
-      #    带前缀的 nvidia/meta/llama-3.3-70b-instruct 回同样的 404。
-      #    修法是把 model 改成 "openai/*"（让捕获的通配内容单独成为模型名）。
-      # ⚠️ 这把 key 不是单模型授权：查 NVIDIA 的 /v1/models 返回 102 个模型。
-      #    授权问题回 401/403，404 page not found 是路由/模型名对不上，别混。
-      # ⚠️ nvidia 不是 LiteLLM 原生 provider，需用 openai/ 前缀声明 OpenAI 兼容调用。
-      #    详情与取模型清单的命令见 docs/reference/litellm-gateway.md。
-      # ⚠️ key 是真实凭据：环境变量引用（os.environ/NVIDIA_API_KEY），
-      #    值由 Vault secret/homelab/litellm-nvidia → ESO → Deployment env 注入，不进 git。
-      - model_name: "nvidia/*"
-        litellm_params:
-          model: "openai/nvidia/*"
-          api_base: https://integrate.api.nvidia.com/v1
-          api_key: os.environ/NVIDIA_API_KEY
+      # NVIDIA build.nvidia.com（原第四来源 `nvidia/*`）2026-10-04 删除：自 08-25 起全 404、
+      # 无消费方，且给 /v1/models 灌进 200+ 个不存在的条目。原因见 litellm-gateway.md。
     # ── Codex 多 agent 兼容层（2026-09-08）──
     # codex 的 `multi_agent_version: "v2"` 会把 agent 间消息作为私有的 `agent_message`
     # item 发进 `input`；自托管上游（vLLM / OMLX）拿 openai-python 的 union 校验请求体，
@@ -164,7 +149,7 @@ spec:
         #    ⇒ ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按**旧路由表**继续跑。
         #    2026-08-25 实际踩过一次（改了 mac/ornith 后必须手动 rollout restart 才生效）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py 的 STAMP_ONLY），别手改。
-        checksum/config: "367131878c73e7e4"
+        checksum/config: "0fdfb8082afe27bf"
         # 同理，但盯的是 codex_compat.py（litellm-codex-compat ConfigMap）：
         # 也是 subPath 挂载 + 只在启动时 import，改了不重启就是静默跑旧代码。
         checksum/codex-compat-py: "e5da4a39d90243d4"
@@ -203,10 +188,6 @@ spec:
             - name: OPENROUTER_API_KEY
               valueFrom:
                 secretKeyRef: { name: litellm-openrouter-secret, key: openrouter-api-key }
-            # NVIDIA 第四来源的免费 API key（Vault → ESO → 此处 env）
-            - name: NVIDIA_API_KEY
-              valueFrom:
-                secretKeyRef: { name: litellm-nvidia-secret, key: nvidia-api-key }
             # DB 迁移失败即退出（fail-closed），避免无表静默跑
             - name: ENFORCE_PRISMA_MIGRATION_CHECK
               value: "true"
