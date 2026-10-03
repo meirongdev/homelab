@@ -551,7 +551,7 @@ reranker / nemoguard / 视觉 / riva-translate / palmyra 垂类）全部早于�
 | 机器 | Mac Studio M5 Max / 128G，OMLX 0.7.0；池天花板 ~106G，**常驻、不换入换出**（M2 那条「只暴露一个 35B」的约束不适用）|
 | 模型 | HF `lmstudio-community/Qwen3.8-27B-MLX-4bit`（VLM，262k ctx）。OMLX 0.7 的模型 ID **不带 org**，别照 M2 写成 `org__name` |
 | 兜底 | **不在任何兜底链里**，只能指名调用。它是多出来的一个可选模型，不是 DGX 的替身 |
-| key 白名单 | 只加进了 `LITELLM_VK`（2c15baf776…）。其余 key 都是给特定消费方的窄 key，**刻意没加**；谁要用就按坑 A 单独加 |
+| key 白名单 | `LITELLM_VK`（2c15baf776…）与 xiaogpt 的专用 key（`key_alias=xiaogpt`，只有这一个模型）。其余 key 都是给特定消费方的窄 key，**刻意没加**；谁要用就按坑 A 单独加 |
 | 实测（直连，2026-10-03）| 冷装载 14.4s；开了 DFlash2 投机解码后，写代码 ~100 tok/s、中文长文 ~43 tok/s（基线 31.9，配置与数据见 `macbook/ansible/README.md`）；思维链分离到 `reasoning_content`（同样受下面「小 `max_tokens` 漏进 `content`」影响）|
 
 主机侧（OMLX 安装、key、模型下载）→ `macbook/ansible/README.md`；指标 → [omlx-inference-metrics.md](omlx-inference-metrics.md)。
@@ -660,6 +660,7 @@ curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
 | k8sgpt（`--backend openai`）| `qwen3.8-27b-sglang` | `~/Library/Application Support/k8sgpt/k8sgpt.yaml`（本机）|
 | k8sgpt（`--backend localai`）| `mac/ornith-fast` | 同上 |
 | oracle 上的 calibre 元数据作业 | `qwen3.8-27b-sglang`（经 `litellm-external` NodePort）| [清单内嵌脚本](../../cloud/oracle/manifests/calibre-metadata/metadata-llm.yaml) |
+| xiaogpt（小爱音箱，homelab `personal-services`）| `studio/qwen3.8-27b`，专用 key `key_alias=xiaogpt`（2026-10-03 前借用 calibre 那把）| [xiaogpt.yaml](../../k8s/helm/manifests/personal-services/xiaogpt.yaml) 的 ConfigMap |
 | Open Notebook | **不走网关**，直连 DGX 与 OMLX | [open-notebook.md](open-notebook.md) |
 
 ⚠️ 本机消费方全部读同一个 `LITELLM_VK`（`~/.zshrc`），所以坑 A 一旦发生是全体受影响。

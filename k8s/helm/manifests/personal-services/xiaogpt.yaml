@@ -39,12 +39,15 @@ data:
   # ☠️ prompt 不是 system 消息：xiaogpt 把它拼在**首个问题后面**（`f"{query},{prompt}"`），之后这条
   #    首轮消息一直钉在历史里（另保留最近 5 轮）。所以只写要求、别写身份声明——写「你是由家庭服务器
   #    驱动的助手」会被模型当成用户的说法去「纠正」（10-03 实测它回「我并不是…而是通义千问」）。
+  # 模型 = Mac Studio 的 OMLX（2026-10-03 从 DGX 的 qwen3.8-flash-next-tp2 换过来）。它**不在任何兜底链里**：
+  #    Studio 离线/睡眠时小爱这边就是答不上来，不会自动切到别的上游。
+  # 关思考（chat_template_kwargs）对这个模型实测有效：reasoning_content 0 字符，一两百字的回答约 2.5s。
   xiaogpt.json: |
     {
       "hardware": "S12A",
       "api_base": "http://litellm.litellm.svc.cluster.local:4000/v1",
       "gpt_options": {
-        "model": "qwen3.8-flash-next-tp2",
+        "model": "studio/qwen3.8-27b",
         "temperature": 0.7,
         "max_tokens": 500,
         "extra_body": {
@@ -71,6 +74,8 @@ spec:
   #     openai-key=<LiteLLM 虚拟 key> mi-did=<音箱 miotDID> mi-token=@<.mi.token 文件>
   # ⚠️ LiteLLM 虚拟 key 自带模型白名单（存在 Postgres 里），ConfigMap 换了 model 要同步改 key，
   #    见 docs/reference/litellm-gateway.md。
+  # openai-key 是专用 key（key_alias=xiaogpt，白名单只有 studio/qwen3.8-27b，2026-10-03 建）。
+  #    之前借用的是 calibre-metadata-llm 那把，spend log 里按 key 分不出谁在用。
   refreshInterval: "1h"
   secretStoreRef:
     name: vault-backend
@@ -137,7 +142,7 @@ spec:
       labels:
         app: xiaogpt
       annotations:
-        xiaogpt/config-rev: "2"   # 改 xiaogpt-config 后 +1，触发重启
+        xiaogpt/config-rev: "3"   # 改 xiaogpt-config 后 +1，触发重启
     spec:
       priorityClassName: bulk
       nodeSelector:
