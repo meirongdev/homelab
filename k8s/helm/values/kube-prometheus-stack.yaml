@@ -628,15 +628,37 @@ prometheus:
         #    ⚠️ mlx-learning 仓里那份 serving 说明的 PromQL 示例用的是**未加前缀**的名字
         #       （那是 Mac 本地 .prom 里的原名）；照抄到 Grafana 一定查不到，补上前缀。
         # 见: docs/reference/omlx-inference-metrics.md（口径与陷阱，唯一真相源）
-        metric_relabel_configs:
+        # ⚠️ 用锚点与 node-exporter-mac-studio 共用同一条规则：每台跑 OMLX 的 Mac 都要它，
+        #    哪台漏了，那台的 omlx_* 就会和 omlx-status 的同名序列撞在一起（见上）。
+        metric_relabel_configs: &omlx_alltime_rename
           - source_labels: [__name__]
             regex: 'omlx_(.*)'
             target_label: __name__
             replacement: 'omlx_alltime_${1}'
 
-      # MacBook OMLX 本地推理服务（http://100.89.15.120:8000）—— **OMLX 自己没有 /metrics**，
-      # 由集群内 json-exporter.monitoring 把它两个免鉴权 JSON 端点翻成指标。
-      # 形态同 blackbox：抓的是 exporter 的 /probe，target 参数写死在这里。
+      # Mac Studio (M5 Max / 128G, desktop) — 第二个 OMLX 推理节点，2026-10-03 入列。
+      # 与 MacBook 同一套 Ansible（macbook/ansible，inventory 主机 mac-studio，登录用户 matstudio）。
+      # 单独一个 job 而不是塞进 node-exporter-macbook：job 名是面板与告警的选择器，
+      # 把 Studio 放进名叫 macbook 的 job，等于让每条 `job="node-exporter-macbook"` 的查询
+      # 悄悄把两台机器叠在一起（同类坑见 docs/reference/observability-multicluster.md 的
+      # 「cluster 标签不等于集群成员」）。台式机、`pmset autorestart 1`，TargetDown 一律是真故障。
+      - job_name: 'node-exporter-mac-studio'
+        scrape_interval: 15s
+        static_configs:
+          - targets:
+              - 100.98.220.75:9100   # Matthews-Mac-Studio (Tailscale)
+            labels:
+              cluster: mac-studio
+              nodename: mac-studio
+        metric_relabel_configs: *omlx_alltime_rename
+
+      # Mac 上的 OMLX 本地推理服务（每台 Mac 的 :8000）—— **OMLX 自己没有 /metrics**，
+      # 由集群内 json-exporter.monitoring 把它两个 JSON 管理端点翻成指标。
+      # 形态同 blackbox：抓的是 exporter 的 /probe，**每台 Mac 一个 target**，
+      # relabel 把它挪进 ?target= 参数、instance 改成 Mac 的 URL、__address__ 换成 exporter。
+      # 所有节点共用 Vault secret/homelab/omlx 那一把 key（exporter 只挂一个 key 文件）。
+      # ☠️ 加节点后面板的每条查询都必须带 nodename：两台的 omlx_pool_* / 驻留字节一 sum()
+      #    就是一个不存在的机器的数字（omlx-dashboard 的 $nodename 变量就是干这个的）。
       #   omlx-status  ← /api/status        流量/吞吐（累计值，OMLX 重启归零）
       #   omlx-models  ← /v1/models/status  驻留/内存（engine pool 换入换出）
       # ⚠️ up{job="omlx-*"} = 「exporter 活着 **且** Mac 应答」，两者分不开。
@@ -654,13 +676,22 @@ prometheus:
         metrics_path: /probe
         params:
           module: ['omlx_status']
-          target: ['http://100.89.15.120:8000/api/status']
         static_configs:
-          - targets:
-              - json-exporter.monitoring.svc:7979
+          - targets: ['http://100.89.15.120:8000/api/status']   # mbp-m2-pro
             labels:
               cluster: macbook
               nodename: macbook-pro
+          - targets: ['http://100.98.220.75:8000/api/status']   # mac-studio
+            labels:
+              cluster: mac-studio
+              nodename: mac-studio
+        relabel_configs: &omlx_probe_relabel
+          - source_labels: [__address__]
+            target_label: __param_target
+          - source_labels: [__param_target]
+            target_label: instance
+          - target_label: __address__
+            replacement: json-exporter.monitoring.svc:7979
 
       - job_name: 'omlx-models'
         scrape_interval: 30s
@@ -668,13 +699,16 @@ prometheus:
         metrics_path: /probe
         params:
           module: ['omlx_models']
-          target: ['http://100.89.15.120:8000/v1/models/status']
         static_configs:
-          - targets:
-              - json-exporter.monitoring.svc:7979
+          - targets: ['http://100.89.15.120:8000/v1/models/status']   # mbp-m2-pro
             labels:
               cluster: macbook
               nodename: macbook-pro
+          - targets: ['http://100.98.220.75:8000/v1/models/status']   # mac-studio
+            labels:
+              cluster: mac-studio
+              nodename: mac-studio
+        relabel_configs: *omlx_probe_relabel
 
       # oracle-k3s 指标均为 push 模式（OTel Collector → prometheusremotewrite）
       # 包含: node-exporter, kube-state-metrics, cloudflared, traefik

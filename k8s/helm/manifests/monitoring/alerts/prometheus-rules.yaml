@@ -858,8 +858,8 @@ spec:
         # ⚠️ 这里用统一的 `job=~...` 是**故意的**，与本文件上方"刻意不统一放宽 job"
         # 那条注释不冲突：那条讲的是**内存阈值**，几台机的正常态差别太大；
         # 而"开机时长"没有这种个体差异，重启就是重启。
-        # 覆盖六台：两个 k3s 节点（job=node-exporter，homelab 与 oracle 共用此 job 名）
-        # + pve/106（node-exporter-metal-nodes）+ 两台 DGX。
+        # 覆盖七台：两个 k3s 节点（job=node-exporter，homelab 与 oracle 共用此 job 名）
+        # + pve/106（node-exporter-metal-nodes）+ 两台 DGX + Mac Studio。
         # ⚠️ DGX **本来想排除**（"按需开关机的工作站"），2026-08-09 查完推翻了这个假设：
         # dgx-spark-2 七天缺席 56.3h 看着像关机，但登上去 `last -x` 显示它
         # **从 Jun 4 连续运行到 Aug 7 从没关过**。那 48h 是**网络断了**——
@@ -870,13 +870,16 @@ spec:
         # 它们 08-07 那串重启是**内核升级链**（6.11.0-1014 → 6.17.0-1014 → 6.17.0-1029，
         # 每次都有干净的 shutdown 记录），这种事值得在 Telegram 留一行。
         # macbook 仍排除：它是真正按需开合盖的笔记本。
+        # Mac Studio（2026-10-03 加）**纳入**：常开台式机、无电池，配了 `pmset autorestart 1`，
+        # 所以它重启只有两种来源 —— 你主动重启/装系统更新，或**断电后自己开回来**。
+        # 后者正是要知道的：OMLX 推理会被打断，且断电意味着同一插座上的别的东西也断了。
         # 📌 dgx-spark-2 的登录方式是 `ssh -i ~/.ssh/vgio admin@100.67.164.92`
         # （用户名 **admin**，不是 ubuntu/matthew；它在另一个 tailnet
         # `kaixinhuang3307@gmail.com` / tailf63175.ts.net 下）。
         - alert: NodeRebooted
           # 窗口取 30m 而非更短：oracle 的指标要经 otel-collector 重新起来才 remote-write，
           # 开机头几分钟可能没有样本，窗口太窄会整个错过。
-          expr: (time() - node_boot_time_seconds{job=~"node-exporter|node-exporter-metal-nodes|node-exporter-dgx-spark"}) < 1800
+          expr: (time() - node_boot_time_seconds{job=~"node-exporter|node-exporter-metal-nodes|node-exporter-dgx-spark|node-exporter-mac-studio"}) < 1800
           for: 5m
           labels:
             severity: warning

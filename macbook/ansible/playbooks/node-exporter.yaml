@@ -1,7 +1,8 @@
 ---
-# Install / upgrade Prometheus node_exporter on the MacBook as a per-user LaunchAgent.
+# Install / upgrade Prometheus node_exporter on every Mac as a per-user LaunchAgent.
 # - prebuilt darwin-arm64 binary (no Homebrew), pinned + sha256-verified
-# - runs on :9100, scraped over Tailscale by homelab Prometheus (job node-exporter-macbook)
+# - runs on :9100, scraped over Tailscale by homelab Prometheus, one job per Mac
+#   (node-exporter-macbook / node-exporter-mac-studio, see inventory.yaml)
 # - NO sudo required (user-domain LaunchAgent in ~/Library/LaunchAgents)
 # Idempotent: re-running with the same version is a no-op.
 #
@@ -11,7 +12,7 @@
 # node_textfile_scrape_error==0 与 omlx_ 系列条数 >0。
 # 口径/陷阱 → docs/reference/omlx-inference-metrics.md（唯一真相源）
 - name: Deploy node_exporter (LaunchAgent)
-  hosts: macbook
+  hosts: macs
   gather_facts: true            # need ansible_user_dir
   vars:
     node_exporter_version: "1.11.1"
@@ -54,11 +55,13 @@
             checksum: "sha256:{{ node_exporter_sha256 }}"
             mode: "0644"
 
+        # 不用 unarchive：它在 macOS 上要求 GNU tar（"detected as tar type bsd. GNU tar required"），
+        # 而两台 Mac 都没装 gnu-tar。M2 一直没撞上只是因为二进制早装好了、走不到这一步，
+        # 2026-10-03 给 Mac Studio 首装时才炸。系统自带的 bsdtar 解 .tar.gz 毫无问题。
         - name: Extract tarball
-          ansible.builtin.unarchive:
-            src: "{{ ne_tarball }}"
-            dest: /tmp
-            remote_src: true
+          ansible.builtin.command:
+            argv: [/usr/bin/tar, -xzf, "{{ ne_tarball }}", -C, /tmp]
+          changed_when: true
 
         - name: Install binary
           ansible.builtin.copy:

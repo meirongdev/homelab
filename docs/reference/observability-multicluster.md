@@ -1,6 +1,6 @@
 # Multi-Cluster Observability Architecture
 
-> Last updated: 2026-09-30
+> Last updated: 2026-10-03
 > Status: 生效事实
 >
 > 遥测的**采集与汇聚侧**：三条管线怎么跨集群流动、应用怎么接日志/追踪、坏了怎么查。
@@ -14,7 +14,7 @@
 - **遥测不是单向的**：日志/追踪（Loki/Tempo）汇聚在 oracle-k3s；指标
   （Prometheus/Grafana/Alertmanager）仍汇聚在 homelab。
 - **方向**：homelab 跨 Tailscale 写出遥测；oracle 跨 Tailscale `prometheusremotewrite` 写指标。
-- **外部主机**：dgx-spark ×2 与 macbook 也接入采集（node_exporter / smartctl）。
+- **外部主机**：dgx-spark ×2、macbook 与 mac-studio 也接入采集（node_exporter / smartctl）。
 
 ## Overview
 
@@ -341,7 +341,9 @@ scrapeClasses 不会给它们 relabel，`cluster`/`nodename` 必须逐 target �
 | `node-exporter-metal-nodes` | `192.168.50.106:9100` (storage-node) | `cluster=homelab` |
 | `node-exporter-metal-nodes` | `192.168.50.4:9100` (proxmox-node) | `cluster=homelab` |
 | `node-exporter-dgx-spark` | `100.97.87.120:9100` / `100.67.164.92:9100`（经 Tailscale） | `cluster=dgx-spark` |
-| `node-exporter-macbook` | `100.89.15.120:9100`（经 Tailscale） | `cluster=macbook` / `nodename=macbook-pro`；⚠️ 唯一带 `metric_relabel_configs` 的 job（OMLX 那批 `omlx_*` → `omlx_alltime_*`，见下）|
+| `node-exporter-macbook` | `100.89.15.120:9100`（经 Tailscale） | `cluster=macbook` / `nodename=macbook-pro`；⚠️ 带 `metric_relabel_configs`（OMLX 那批 `omlx_*` → `omlx_alltime_*`，见下）|
+| `node-exporter-mac-studio` | `100.98.220.75:9100`（经 Tailscale） | `cluster=mac-studio` / `nodename=mac-studio`；与上一行用 YAML 锚点共用同一条 `omlx_alltime_` 改名规则 |
+| `omlx-status` / `omlx-models` | 每台 Mac 的 `:8000` 一个 target，relabel 进 `?target=`，实际抓 `json-exporter.monitoring.svc:7979/probe` | `cluster`/`nodename` 同上，`instance` = Mac 的 URL |
 | `smartctl-storage-106` / `smartctl-proxmox-pve` / `smartctl-dgx-spark` | `:9633`，120s | `nodename` 与 node-exporter job 对齐 |
 | `dgx-inference` | `100.97.87.120:8888`（S1，SGLang）/ `100.67.164.92:18300`（S2，vLLM `fndgx` 栈，2026-09-20 起）（均经 Tailscale） | `cluster=dgx-spark` / `nodename=dgx-spark-{1,2}`；☠️ **端口与指标前缀都随上游换栈而变**（2026-09-19 起 S1 为 SGLang `:8888` `sglang:*`，之前是 vLLM `:8000` `vllm:*`；2026-09-20 起 **同一 job 内 `sglang:*`（S1）与 `vllm:*`（S2）两前缀共存**，两节点 series 按 nodename 不相交，告警/面板一律 `or` 并集而非 `and`），job 名刻意取中性的 `dgx-inference`（原 `vllm-dgx-spark`）以免下次换引擎又要改一圈 |
 
@@ -360,12 +362,22 @@ scrapeClasses 不会给它们 relabel，`cluster`/`nodename` 必须逐 target �
   别再按「笔记本睡眠抖动」去 silence：2026-09 整月 macbook 的 TargetDown 全是真故障，其中
   09-29 重启后 OMLX 起不来 34h 就是靠它报出来的。`omlx-*` 挂而 `node-exporter-macbook` 活 =
   Mac 在、OMLX 不在（排查见 [omlx-inference-metrics.md](omlx-inference-metrics.md) 第 4 条）。
-  - **它同时驮着 OMLX 的推理计数器**（2026-08-23 起）：Mac 上另一个 LaunchAgent
+- **mac-studio**（M5 Max / 128G 台式机，2026-10-03 入列）: 与 macbook **同一套 Ansible**
+  （`macbook/ansible/`，inventory 主机 `mac-studio`；配方带主机名只跑它，如 `just node-exporter mac-studio`），
+  node_exporter / OMLX / 指标链路全同上。SSH: `ssh -i ~/.ssh/vgio matstudio@100.98.220.75`
+  （⚠️ 用户名是 **`matstudio`** 不是 matthew）。台式机无电池，`just power` 给它加了
+  `pmset autorestart 1`（断电恢复后自己开机），因此它也在 `NodeRebooted` 的覆盖面里，
+  而 macbook 不在。看板与 macbook 共用（「Mac / Node Exporter」、「Mac OMLX 推理」，顶部选机器）。
+- macbook 与 mac-studio 的共同点：
+  - **都驮着 OMLX 的推理计数器**（2026-08-23 起）：Mac 上另一个 LaunchAgent
     每 60s 把 `~/.omlx/stats.json` 渲染成 `.prom`，node_exporter 用
     `--collector.textfile.directory` 一起吐出来，抓取时改名为 `omlx_alltime_*`。
     部署 `cd macbook/ansible && just omlx-metrics`（读取端的 flag 由 `just node-exporter` 加，
     **两个都要跑**，少一个不报错、指标静默不出现）。
     口径/陷阱/验收 → [omlx-inference-metrics.md](omlx-inference-metrics.md)（唯一真相源）。
+  - ☠️ **再加一台 Mac 要改四处**，漏哪处都不报错：inventory（`macbook/ansible/inventory.yaml`）·
+    新的 `node-exporter-<mac>` job 挂上 `*omlx_alltime_rename` · `omlx-*` 两个 job 各加一个 target ·
+    「Mac / Node Exporter」面板里写死的 job 正则（常开的台式机另把 job 加进 `NodeRebooted`）。
 - **SMART 磁盘健康**（2026-06-27）: Linux 裸机跑 `smartctl_exporter`（:9633）。
   部署：storage-106 + pve（amd64）走 `cd proxmox/ansible && just node-exporter`（一个 playbook
   同装 node_exporter + smartctl_exporter）；DGX ×2（arm64）走 `nv-dgx-spark` repo

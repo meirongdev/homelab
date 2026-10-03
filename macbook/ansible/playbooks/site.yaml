@@ -1,11 +1,14 @@
 ---
-# Everything Ansible can configure on the MacBook, in order.
-# Run with: just site   (prompts for the sudo password, needed by power.yaml)
+# Everything Ansible can configure on the Macs, in order. Each play targets its own
+# group (macs / macbook / omlx, see inventory.yaml); plays with no matching host are skipped.
+# Run with: just site [host]   (one host at a time, prompts for its sudo password — power.yaml)
 - import_playbook: packages.yaml
 - import_playbook: ai-clis.yaml
 # 紧跟 ai-clis：multica daemon 靠探测 PATH 上的 claude/qwen/codex/hermes 来注册
 # 可用 runtime，CLI 没装齐时它起得来但一个 agent 都发现不了。
 - import_playbook: multica-daemon.yaml
+# 在 omlx-metrics 之前：stats.json 是 OMLX 写的，服务没起来那边只能空等。
+- import_playbook: omlx.yaml
 - import_playbook: node-exporter.yaml
 # 必须在 node-exporter 之后：读取端（--collector.textfile.directory）由它加上，
 # 反过来先跑本条的话，快照写出来没人读，而且两边都不报错。

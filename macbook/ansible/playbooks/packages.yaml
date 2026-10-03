@@ -1,14 +1,16 @@
 ---
-# Ensure Homebrew + CLI packages on the MacBook.
-# Runs as the login user (matthew) — Homebrew refuses to run as root, so NO become here.
+# Ensure Homebrew + CLI packages on every Mac.
+# Runs as the login user (matthew / matstudio, see inventory) — Homebrew refuses to run as root, so NO become here.
 # Idempotent: already-installed packages report ok (no change).
 - name: Homebrew + CLI packages
-  hosts: macbook
+  hosts: macs
   gather_facts: false
   vars:
     homebrew_prefix: /opt/homebrew          # Apple Silicon default prefix
     homebrew_packages:
       - tmux
+      # omlx-metrics 的渲染器住在 mlx-learning 仓的 venv 里，建那个 venv 要 `uv sync`
+      - uv
   tasks:
     - name: Check whether Homebrew is installed
       ansible.builtin.stat:

@@ -1,0 +1,178 @@
+---
+# OMLX 推理服务本体：brew formula + `brew services` 的 LaunchAgent + settings.json 里
+# 「起得来、连得上」的那几个键。
+#
+# 只**合并**下面四个键，从不重写整个文件。其余设置（内存天花板、并发、模型目录、TTL…）
+# 归 OMLX admin 面板管，每台机器各不相同：
+#   server.host = 0.0.0.0     json-exporter / LiteLLM 经 Tailscale 来连
+#   server.port = 8000        抓取配置与 LiteLLM 的 api_base 都写死了这个端口
+#   auth.api_key              ☠️ 0.7 起非回环监听**没 key 就起不来**：启动时等「Press Enter」，
+#                             launchd 下 stdin 是 EOF → 退出码 1 → KeepAlive 每 10s 拉起，
+#                             2026-09-29 M2 就这样挂了 34h。值 = Vault secret/homelab/omlx，
+#                             所有 OMLX 节点共用一把（json-exporter 只挂一个 key 文件）。
+#   auth.allow_unauthenticated_inference = true
+#                             推理端点免 key：LiteLLM `mac/*` 与 Open Notebook 填的都是 dummy。
+#                             关掉它这两处会一起 401。
+# 口径与鉴权边界 → docs/reference/omlx-inference-metrics.md「鉴权」
+#
+# key 由 `just omlx` 从 Vault 现取、经环境变量 OMLX_API_KEY 传入（不上命令行、不落盘）。
+# 没拿到 key 时：settings.json 里已有 key 就照常（只是不校验它与 Vault 一致），
+# 没有就在启动服务**之前**失败，而不是装一个必然 crash-loop 的 LaunchAgent。
+#
+# 不做的事：
+#   - 升级 OMLX：state=present。升级是有意识的动作（`brew upgrade jundot/omlx/omlx`），
+#     0.6 → 0.7 那次就是悄悄升上去、等到重启才炸。
+#   - 下载模型：admin 面板（http://<host>:8000/admin）。
+#
+# NO sudo。幂等：四个键都对时什么都不改、不重启。
+- name: OMLX inference server
+  hosts: omlx
+  gather_facts: true            # 需要 ansible_facts.user_dir / user_uid
+  vars:
+    homebrew_prefix: /opt/homebrew
+    # ☠️ formula 在 OMLX 主仓里。不带 URL 的 `brew tap jundot/omlx` 会去拉
+    #    jundot/homebrew-omlx，那个仓不存在，报的却是「could not read Username」，像鉴权问题。
+    omlx_tap: jundot/omlx
+    omlx_tap_url: https://github.com/jundot/omlx
+    omlx_formula: jundot/omlx/omlx
+    omlx_label: sh.brew.omlx                  # `brew services` 生成的 LaunchAgent label
+    omlx_port: 8000
+    omlx_settings_path: "{{ ansible_facts.user_dir }}/.omlx/settings.json"
+    omlx_api_key: "{{ lookup('ansible.builtin.env', 'OMLX_API_KEY') }}"
+    omlx_log: "{{ homebrew_prefix }}/var/log/omlx.log"
+
+  tasks:
+    - name: Tap OMLX (formula lives in the main repo)
+      community.general.homebrew_tap:
+        name: "{{ omlx_tap }}"
+        url: "{{ omlx_tap_url }}"
+        state: present
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    # 首次安装要编译 rust 扩展 + 建 python venv，十几分钟，给足超时。
+    - name: Install OMLX (present only — never upgrades)
+      community.general.homebrew:
+        name: "{{ omlx_formula }}"
+        state: present
+        path: "{{ homebrew_prefix }}/bin"
+        update_homebrew: false
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        HOMEBREW_NO_AUTO_UPDATE: "1"
+      async: 3600
+      poll: 15
+
+    - name: Ensure ~/.omlx exists
+      ansible.builtin.file:
+        path: "{{ omlx_settings_path | dirname }}"
+        state: directory
+        mode: "0755"
+
+    - name: Check for an existing settings.json
+      ansible.builtin.stat:
+        path: "{{ omlx_settings_path }}"
+      register: omlx_settings_stat
+
+    - name: Read settings.json
+      ansible.builtin.slurp:
+        src: "{{ omlx_settings_path }}"
+      register: omlx_settings_raw
+      when: omlx_settings_stat.stat.exists
+      no_log: true              # 里面有 api_key
+
+    - name: Merge the four invariant keys
+      ansible.builtin.set_fact:
+        omlx_current: "{{ omlx_now }}"
+        omlx_desired: >-
+          {{ omlx_now | combine({
+               'server': {'host': '0.0.0.0', 'port': omlx_port},
+               'auth': {'api_key': (omlx_api_key or omlx_now.get('auth', {}).get('api_key')),
+                        'allow_unauthenticated_inference': true}
+             }, recursive=true) }}
+      vars:
+        omlx_now: "{{ (omlx_settings_raw.content | b64decode | from_json) if omlx_settings_stat.stat.exists else {} }}"
+      no_log: true
+
+    - name: Refuse to start OMLX without an API key
+      ansible.builtin.assert:
+        that: omlx_desired.auth.api_key | default('', true) | length > 0
+        fail_msg: >-
+          {{ omlx_settings_path }} 里没有 auth.api_key，这次也没拿到（Vault 取不到？）。
+          0.7 起没 key 不能监听 0.0.0.0，服务起来就是 crash-loop，所以不启动。
+          先确认 `vault kv get -field=api_key secret/homelab/omlx` 能取到，再跑 just omlx。
+        quiet: true
+
+    # 只在语义不同时写：OMLX 自己用 json.dump(indent=2) 落盘，格式和 to_nice_json 不一样，
+    # 按字节比较会让每次运行都「changed」并白白重启一次推理服务。
+    - name: Write settings.json (only when a key actually differs)
+      ansible.builtin.copy:
+        content: "{{ omlx_desired | to_nice_json(indent=2) }}\n"
+        dest: "{{ omlx_settings_path }}"
+        mode: "0600"
+      when: omlx_desired != omlx_current
+      notify: restart omlx
+      no_log: true
+
+    - name: Keep settings.json private (it holds the key)
+      ansible.builtin.file:
+        path: "{{ omlx_settings_path }}"
+        mode: "0600"
+
+    - name: Ensure the LaunchAgent is running
+      ansible.builtin.shell: |
+        if ! launchctl print "gui/$(id -u)/{{ omlx_label }}" >/dev/null 2>&1; then
+          {{ homebrew_prefix }}/bin/brew services start {{ omlx_formula }}
+          echo STARTED
+        fi
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+      register: omlx_start
+      changed_when: "'STARTED' in omlx_start.stdout"
+
+    - name: Apply a pending restart before verifying
+      ansible.builtin.meta: flush_handlers
+
+    # 推理端点：不带 key 也必须 200（allow_unauthenticated_inference 的直接证据）。
+    # 没有模型时返回空列表，照样 200。
+    - name: Verify inference endpoints answer without a key
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ omlx_port }}/v1/models"
+        return_content: false
+      register: omlx_models
+      retries: 30
+      delay: 2
+      until: omlx_models.status == 200
+
+    # 管理端点：不带 key 必须 401（鉴权确实开着），带 key 必须 200（json-exporter 用的就是这把）。
+    - name: Verify admin endpoints reject a missing key
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ omlx_port }}/api/status"
+        status_code: 401
+
+    - name: Verify admin endpoints accept the key
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ omlx_port }}/api/status"
+        headers:
+          Authorization: "Bearer {{ omlx_desired.auth.api_key }}"
+      no_log: true
+
+    - name: Report
+      ansible.builtin.shell: |
+        set -o pipefail
+        v=$({{ homebrew_prefix }}/bin/brew list --versions omlx | awk '{print $2}')
+        runs=$(launchctl print "gui/$(id -u)/{{ omlx_label }}" | awk '$1=="runs"{print $3}')
+        echo "OMLX ${v} · launchd runs=${runs} · /v1/models 200 免 key · /api/status 401 无 key / 200 带 key"
+      args:
+        executable: /bin/bash
+      register: omlx_report
+      changed_when: false
+
+    - name: Show the result
+      ansible.builtin.debug:
+        msg: "{{ omlx_report.stdout }}"
+
+  handlers:
+    - name: restart omlx
+      ansible.builtin.command: "launchctl kickstart -k gui/{{ ansible_facts.user_uid }}/{{ omlx_label }}"
+      failed_when: false        # 首次安装时服务还没 bootstrap，下面的 start 会起它

@@ -1,6 +1,11 @@
-# Grafana Dashboard: MacBook / Node Exporter
-# Host metrics for the Apple Silicon MacBook Pro (cluster=macbook, nodename=macbook-pro),
-# scraped over Tailscale by homelab Prometheus (job node-exporter-macbook).
+# Grafana Dashboard: Mac / Node Exporter
+# Host metrics for the Apple Silicon Macs, scraped over Tailscale by homelab Prometheus,
+# one job per Mac (inventory: macbook/ansible/inventory.yaml):
+#   node-exporter-macbook     cluster=macbook     nodename=macbook-pro  (M2 MacBook Pro)
+#   node-exporter-mac-studio  cluster=mac-studio  nodename=mac-studio   (M5 Max Mac Studio, 2026-10-03)
+# ⚠️ Every query lists BOTH jobs explicitly. A third Mac = add its job to the regex below
+#    (every query + the nodename variable), otherwise it silently never shows up here.
+#    ConfigMap / uid keep the old "macbook" names on purpose: renaming them breaks saved links.
 # node_exporter is the prebuilt darwin-arm64 binary run by a LaunchAgent (:9100), no Homebrew.
 # NOTE: Darwin node_exporter exposes a DIFFERENT, smaller metric set than Linux —
 #   memory uses node_memory_{active,wired,compressed,inactive,free,total,swap_*}_bytes
@@ -22,7 +27,7 @@ data:
   macbook-node.json: |-
     {
       "annotations": {"list": []},
-      "description": "MacBook Pro (Apple Silicon) 主机指标：CPU/负载、内存（active/wired/compressed）、Swap、磁盘、网络（含 Tailscale utun）。Darwin node_exporter 指标集与 Linux 不同，无温度/电池。",
+      "description": "Apple Silicon Mac（M2 MacBook Pro / M5 Max Mac Studio，顶部 Node 选机器）主机指标：CPU/负载、内存（active/wired/compressed）、Swap、磁盘、网络（含 Tailscale utun）。Darwin node_exporter 指标集与 Linux 不同，无温度/电池。",
       "editable": true,
       "graphTooltip": 1,
       "links": [],
@@ -61,7 +66,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "up{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "expr": "up{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"}",
               "legendFormat": "{{nodename}}",
               "refId": "A"
             }
@@ -88,7 +93,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "time() - node_boot_time_seconds{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "expr": "time() - node_boot_time_seconds{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"}",
               "legendFormat": "{{nodename}}",
               "refId": "A"
             }
@@ -115,7 +120,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "count by (nodename) (node_cpu_seconds_total{job=\"node-exporter-macbook\", nodename=~\"$nodename\", mode=\"idle\"})",
+              "expr": "count by (nodename) (node_cpu_seconds_total{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\", mode=\"idle\"})",
               "legendFormat": "{{nodename}}",
               "refId": "A"
             }
@@ -142,7 +147,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "node_memory_total_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "expr": "node_memory_total_bytes{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"}",
               "legendFormat": "{{nodename}}",
               "refId": "A"
             }
@@ -181,7 +186,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "(node_memory_active_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"} + node_memory_wired_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"} + node_memory_compressed_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}) / node_memory_total_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"} * 100",
+              "expr": "(node_memory_active_bytes{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"} + node_memory_wired_bytes{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"} + node_memory_compressed_bytes{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"}) / node_memory_total_bytes{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"} * 100",
               "legendFormat": "{{nodename}}",
               "refId": "A"
             }
@@ -218,7 +223,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "node_memory_swap_used_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "expr": "node_memory_swap_used_bytes{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"}",
               "legendFormat": "{{nodename}}",
               "refId": "A"
             }
@@ -255,7 +260,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "100 - (avg by (nodename) (rate(node_cpu_seconds_total{job=\"node-exporter-macbook\", nodename=~\"$nodename\", mode=\"idle\"}[$__rate_interval])) * 100)",
+              "expr": "100 - (avg by (nodename) (rate(node_cpu_seconds_total{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\", mode=\"idle\"}[$__rate_interval])) * 100)",
               "legendFormat": "{{nodename}} busy %",
               "refId": "A"
             }
@@ -285,19 +290,19 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "node_load1{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "expr": "node_load1{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"}",
               "legendFormat": "{{nodename}} 1m",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "node_load5{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "expr": "node_load5{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"}",
               "legendFormat": "{{nodename}} 5m",
               "refId": "B"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "node_load15{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "expr": "node_load15{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"}",
               "legendFormat": "{{nodename}} 15m",
               "refId": "C"
             }
@@ -335,7 +340,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "(node_memory_active_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"} + node_memory_wired_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"} + node_memory_compressed_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}) / node_memory_total_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"} * 100",
+              "expr": "(node_memory_active_bytes{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"} + node_memory_wired_bytes{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"} + node_memory_compressed_bytes{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"}) / node_memory_total_bytes{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"} * 100",
               "legendFormat": "{{nodename}} used %",
               "refId": "A"
             }
@@ -365,31 +370,31 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "node_memory_wired_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "expr": "node_memory_wired_bytes{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"}",
               "legendFormat": "wired",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "node_memory_active_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "expr": "node_memory_active_bytes{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"}",
               "legendFormat": "active",
               "refId": "B"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "node_memory_compressed_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "expr": "node_memory_compressed_bytes{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"}",
               "legendFormat": "compressed",
               "refId": "C"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "node_memory_inactive_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "expr": "node_memory_inactive_bytes{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"}",
               "legendFormat": "inactive",
               "refId": "D"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "node_memory_free_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "expr": "node_memory_free_bytes{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"}",
               "legendFormat": "free",
               "refId": "E"
             }
@@ -418,13 +423,13 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "node_memory_swap_used_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "expr": "node_memory_swap_used_bytes{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"}",
               "legendFormat": "{{nodename}} swap used",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "node_memory_swap_total_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}",
+              "expr": "node_memory_swap_total_bytes{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"}",
               "legendFormat": "{{nodename}} swap total",
               "refId": "B"
             }
@@ -453,13 +458,13 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "rate(node_memory_swapped_in_bytes_total{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}[$__rate_interval])",
+              "expr": "rate(node_memory_swapped_in_bytes_total{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"}[$__rate_interval])",
               "legendFormat": "{{nodename}} swap in",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "rate(node_memory_swapped_out_bytes_total{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}[$__rate_interval])",
+              "expr": "rate(node_memory_swapped_out_bytes_total{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"}[$__rate_interval])",
               "legendFormat": "{{nodename}} swap out",
               "refId": "B"
             }
@@ -497,7 +502,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "100 - (node_filesystem_avail_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\", mountpoint=~\"/|/System/Volumes/Data\"} / node_filesystem_size_bytes{job=\"node-exporter-macbook\", nodename=~\"$nodename\", mountpoint=~\"/|/System/Volumes/Data\"} * 100)",
+              "expr": "100 - (node_filesystem_avail_bytes{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\", mountpoint=~\"/|/System/Volumes/Data\"} / node_filesystem_size_bytes{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\", mountpoint=~\"/|/System/Volumes/Data\"} * 100)",
               "legendFormat": "{{mountpoint}}",
               "refId": "A"
             }
@@ -525,13 +530,13 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "rate(node_disk_read_bytes_total{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}[$__rate_interval])",
+              "expr": "rate(node_disk_read_bytes_total{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"}[$__rate_interval])",
               "legendFormat": "{{device}} read",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "rate(node_disk_written_bytes_total{job=\"node-exporter-macbook\", nodename=~\"$nodename\"}[$__rate_interval])",
+              "expr": "rate(node_disk_written_bytes_total{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\"}[$__rate_interval])",
               "legendFormat": "{{device}} write",
               "refId": "B"
             }
@@ -567,13 +572,13 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "rate(node_network_receive_bytes_total{job=\"node-exporter-macbook\", nodename=~\"$nodename\", device!~\"lo0|awdl0|llw0|anpi.*|gif0|stf0|bridge.*\"}[$__rate_interval]) * 8",
+              "expr": "rate(node_network_receive_bytes_total{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\", device!~\"lo0|awdl0|llw0|anpi.*|gif0|stf0|bridge.*\"}[$__rate_interval]) * 8",
               "legendFormat": "{{device}} rx",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "rate(node_network_transmit_bytes_total{job=\"node-exporter-macbook\", nodename=~\"$nodename\", device!~\"lo0|awdl0|llw0|anpi.*|gif0|stf0|bridge.*\"}[$__rate_interval]) * 8",
+              "expr": "rate(node_network_transmit_bytes_total{job=~\"node-exporter-macbook|node-exporter-mac-studio\", nodename=~\"$nodename\", device!~\"lo0|awdl0|llw0|anpi.*|gif0|stf0|bridge.*\"}[$__rate_interval]) * 8",
               "legendFormat": "{{device}} tx",
               "refId": "B"
             }
@@ -584,7 +589,7 @@ data:
       ],
       "refresh": "30s",
       "schemaVersion": 40,
-      "tags": ["node-exporter", "macbook", "prometheus", "hardware", "metrics", "curated"],
+      "tags": ["node-exporter", "macbook", "mac", "prometheus", "hardware", "metrics", "curated"],
       "templating": {
         "list": [
           {
@@ -601,7 +606,7 @@ data:
           {
             "current": {},
             "datasource": {"type": "prometheus", "uid": "${datasource}"},
-            "definition": "label_values(up{job=\"node-exporter-macbook\"}, nodename)",
+            "definition": "label_values(up{job=~\"node-exporter-macbook|node-exporter-mac-studio\"}, nodename)",
             "hide": 0,
             "includeAll": true,
             "allValue": ".*",
@@ -609,7 +614,7 @@ data:
             "multi": true,
             "name": "nodename",
             "query": {
-              "query": "label_values(up{job=\"node-exporter-macbook\"}, nodename)",
+              "query": "label_values(up{job=~\"node-exporter-macbook|node-exporter-mac-studio\"}, nodename)",
               "refId": "StandardVariableQuery"
             },
             "refresh": 2,
@@ -621,7 +626,7 @@ data:
       "time": {"from": "now-3h", "to": "now"},
       "timepicker": {},
       "timezone": "browser",
-      "title": "MacBook / Node Exporter",
+      "title": "Mac / Node Exporter",
       "uid": "macbook-nodes",
       "version": 1
     }

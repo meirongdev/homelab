@@ -24,7 +24,7 @@
 #
 # NO sudo。幂等：重复跑安全（plist 未变则不重载，只 kickstart 一次刷新快照）。
 - name: OMLX textfile collector (LaunchAgent)
-  hosts: macbook
+  hosts: omlx
   gather_facts: true            # 需要 ansible_facts.user_dir
   vars:
     otc_label: com.meirongdev.omlx-textfile-collector

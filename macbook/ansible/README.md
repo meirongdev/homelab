@@ -1,39 +1,54 @@
-# MacBook (M2) — Ansible 配置归档
+# Mac (M2 MacBook + Mac Studio) — Ansible 配置归档
 
-对那台**远程 Apple Silicon MacBook Pro（M2）**做可复现配置。这台机是无头 / 合盖（clamshell）运行，只经 **Tailscale**（`100.89.15.120`）访问，作为 `cluster=macbook` 被 homelab Prometheus 监控。
+对两台**远程无头 Apple Silicon Mac** 做可复现配置，都只经 **Tailscale** 访问、都被 homelab
+Prometheus 监控、都跑 OMLX 推理：
 
-- 连接：`matthew@100.89.15.120`，key `~/.ssh/vgio`（见 `ansible.cfg`）。
+| inventory 主机 | 机器 | 连接 | Prometheus job |
+|---|---|---|---|
+| `mbp-m2-pro` | MacBook Pro M2，合盖运行 | `matthew@100.89.15.120` | `node-exporter-macbook`（`cluster=macbook`）|
+| `mac-studio` | Mac Studio M5 Max / 128G，台式机 | **`matstudio`**`@100.98.220.75` | `node-exporter-mac-studio`（`cluster=mac-studio`）|
+
+- key `~/.ssh/vgio`（见 `ansible.cfg`；登录用户默认 matthew，Studio 在 inventory 里覆盖）。
+- **哪台跑哪些 playbook 由 [inventory.yaml](inventory.yaml) 的分组决定**：`macs`（全部）·
+  `macbook`（只有 M2：AI CLI、multica）· `omlx`（两台）。
 - 控制端依赖：`ansible-core` + 集合 `community.general` / `ansible.posix`（本机已装）。
 
 ## 用法
 
-```bash
-just ping            # 连通性检查
-just packages        # 确保 Homebrew + CLI 包（tmux 等）就位（无需 sudo，幂等）
-just ai-clis         # 安装 AI CLI 工具（claude/qwen/codex/hermes，无需 sudo，幂等）
-just node-exporter   # 装/升级 node_exporter LaunchAgent（无需 sudo，幂等）
-just omlx-metrics    # 装/升级 OMLX 指标采集 LaunchAgent（无需 sudo，幂等）
-just power           # headless 电源策略（pmset disablesleep，需 sudo 密码 -K）
-just multica-daemon  # 装/升级 Multica daemon LaunchAgent（认证全自动，从 Vault 取 PAT）
-just site            # 上面几个一起跑（会问 sudo 密码）
+带 `target` 的配方不传参数就作用于该 playbook 的整个主机组，传主机名只跑一台。
 
-just os-updates      # 只读：列出待装的 macOS 更新 + 本次会装什么（不要密码）
-just os-update       # 装系统小版本/安全更新 + Safari/CLT，需要时自动重启并验收
-just os-update-no-restart  # 只装免重启的更新（Safari/CLT 等），需重启的留给下次
-just os-upgrade-major  # 大版本升级（如 26 → 27），见下文风险
+```bash
+just ping                    # 连通性检查（两台）
+just packages [host]         # 确保 Homebrew + CLI 包（tmux / uv）就位（无需 sudo，幂等）
+just ai-clis                 # 安装 AI CLI 工具（claude/qwen/codex/hermes，仅 M2，无需 sudo，幂等）
+just omlx [host]             # OMLX 本体：brew + LaunchAgent + settings.json 的 host/port/key（key 从 Vault 取）
+just node-exporter [host]    # 装/升级 node_exporter LaunchAgent（无需 sudo，幂等）
+just omlx-metrics [host]     # 装/升级 OMLX 指标采集 LaunchAgent（无需 sudo，幂等）
+just power [host]            # headless 电源策略（逐台问 sudo 密码）
+just multica-daemon          # 装/升级 Multica daemon LaunchAgent（仅 M2，认证全自动，从 Vault 取 PAT）
+just site [host]             # 上面几个一起跑（逐台跑、逐台问 sudo 密码）
+
+just os-updates [host]       # 只读：列出待装的 macOS 更新 + 本次会装什么（不要密码，可一次看两台）
+just os-update <host>        # 装系统小版本/安全更新 + Safari/CLT，需要时自动重启并验收（一次一台）
+just os-update-no-restart <host>  # 只装免重启的更新（Safari/CLT 等），需重启的留给下次
+just os-upgrade-major <host> # 大版本升级（如 26 → 27），见下文风险
 ```
+
+⚠️ 需要 sudo 的配方逐台跑：两台的登录密码不同，`--ask-become-pass` 只问一次，一次跑两台
+必有一台认证失败。`os-update` 另有断言，一次只允许一台（还因为两台同时重启就同时失联）。
 
 ## Ansible 自动化的部分（幂等）
 
-| Playbook | 内容 | sudo |
-|---|---|---|
-| `packages.yaml` | 确保 Homebrew(`/opt/homebrew`)+ CLI 包(`homebrew_packages`,默认 `tmux`)就位;以 matthew 身份跑(brew 不能 root)。Homebrew 缺失才跑官方安装器——**首次安装需交互式 admin 密码**,故重建机器时单独手动跑一次 | 否 |
-| `ai-clis.yaml` | 安装 AI CLI 工具: `claude`(`@anthropic-ai/claude-code` npm), `qwen`(`@qwen-code/qwen-code` npm), `codex`(brew cask, 自含 arm64 二进制), `hermes`(`hermes-agent` brew formula)。先通过 brew 装 `node`(带 npm), 再 `npm install -g`。幂等：已装的不重装 | 否 |
-| `node-exporter.yaml` | 下载校验 `darwin-arm64` 二进制 → `~/.local/bin/node_exporter`；写 LaunchAgent（`:9100`, KeepAlive, RunAtLoad, **`--collector.textfile.directory`**）→ `~/Library/LaunchAgents/com.prometheus.node_exporter.plist`；`launchctl bootstrap` 到 GUI 域；校验 `/metrics` 200 + `node_textfile_scrape_error == 0` | 否 |
-| `omlx-metrics.yaml` | OMLX 推理指标的**生产端**：LaunchAgent `com.meirongdev.omlx-textfile-collector` 每 60s 把 `~/.omlx/stats.json` 渲染成 `omlx.prom`，投进上面那个 textfile 目录。☠️ **StartInterval 不是 KeepAlive**（渲染器跑 0.03s 就退，KeepAlive 会变重启风暴）。☠️ 渲染器是 **`mlx-learning` 仓 venv 里的 console script**（跨仓依赖），缺了会明确失败并给出 `uv sync` 的修法。验收会一路查到 node_exporter 那端 | 否 |
-| `multica-daemon.yaml` | 装 `multica` CLI（**`darwin-arm64` 预编译包**，固定版本 + sha256，不走 Homebrew）→ 指向自建 service → 用 Vault 里的 PAT 认证 → LaunchAgent `ai.multica.daemon`。⚠️ 未认证时**刻意不 bootstrap**（否则 KeepAlive 会把必然失败的进程反复拉起）。这是 Multica「执行任务的那一半」，整体安装见 [docs/runbooks/multica-install.md](../../docs/runbooks/multica-install.md) | 否 |
-| `power.yaml` | `pmset -c disablesleep 1`——插电时保持**系统**唤醒，合盖也不睡，从而 Tailscale 远程常在线（让"保持唤醒"不依赖 Amphetamine GUI） | 是 |
-| `os-update.yaml` | macOS 软件更新，需要重启时无人值守地重启并验收。**不在 `site` 里**（它会重启机器），见下节 | 是（自己问密码） |
+| Playbook | 主机组 | 内容 | sudo |
+|---|---|---|---|
+| `packages.yaml` | macs | 确保 Homebrew(`/opt/homebrew`)+ CLI 包(`homebrew_packages`：`tmux`、`uv`)就位;以登录用户身份跑(brew 不能 root)。Homebrew 缺失才跑官方安装器——**首次安装需交互式 admin 密码**,故重建机器时单独手动跑一次 | 否 |
+| `ai-clis.yaml` | macbook | 安装 AI CLI 工具: `claude`(`@anthropic-ai/claude-code` npm), `qwen`(`@qwen-code/qwen-code` npm), `codex`(brew cask, 自含 arm64 二进制), `hermes`(`hermes-agent` brew formula)。先通过 brew 装 `node`(带 npm), 再 `npm install -g`。幂等：已装的不重装 | 否 |
+| `omlx.yaml` | omlx | OMLX 本体：tap（☠️ formula 在 `jundot/omlx` 主仓，不带 URL 的 `brew tap` 会去拉不存在的 `homebrew-omlx`，报的却是「could not read Username」）→ `brew install`（**只 present，不升级**）→ 往 `~/.omlx/settings.json` **合并**四个键（`server.host=0.0.0.0` · `server.port=8000` · `auth.api_key`=Vault `secret/homelab/omlx` · `auth.allow_unauthenticated_inference=true`），其余设置不碰 → `brew services` 的 LaunchAgent `sh.brew.omlx`。没 key 时在启动前失败（0.7 起没 key 就 crash-loop）。验收：`/v1/models` 免 key 200、`/api/status` 无 key 401 / 带 key 200 | 否 |
+| `node-exporter.yaml` | macs | 下载校验 `darwin-arm64` 二进制 → `~/.local/bin/node_exporter`；写 LaunchAgent（`:9100`, KeepAlive, RunAtLoad, **`--collector.textfile.directory`**）→ `~/Library/LaunchAgents/com.prometheus.node_exporter.plist`；`launchctl bootstrap` 到 GUI 域；校验 `/metrics` 200 + `node_textfile_scrape_error == 0` | 否 |
+| `omlx-metrics.yaml` | omlx | OMLX 推理指标的**生产端**：LaunchAgent `com.meirongdev.omlx-textfile-collector` 每 60s 把 `~/.omlx/stats.json` 渲染成 `omlx.prom`，投进上面那个 textfile 目录。☠️ **StartInterval 不是 KeepAlive**（渲染器跑 0.03s 就退，KeepAlive 会变重启风暴）。☠️ 渲染器是 **`mlx-learning` 仓 venv 里的 console script**（跨仓依赖），缺了会明确失败并给出 `uv sync` 的修法。`stats.json` 还不存在（OMLX 没服务过请求）时装好 plist 但**不启动**。验收会一路查到 node_exporter 那端 | 否 |
+| `multica-daemon.yaml` | macbook | 装 `multica` CLI（**`darwin-arm64` 预编译包**，固定版本 + sha256，不走 Homebrew）→ 指向自建 service → 用 Vault 里的 PAT 认证 → LaunchAgent `ai.multica.daemon`。⚠️ 未认证时**刻意不 bootstrap**（否则 KeepAlive 会把必然失败的进程反复拉起）。这是 Multica「执行任务的那一半」，整体安装见 [docs/runbooks/multica-install.md](../../docs/runbooks/multica-install.md) | 否 |
+| `power.yaml` | macs | `pmset -c disablesleep 1`——插电时保持**系统**唤醒，合盖也不睡，从而 Tailscale 远程常在线（让"保持唤醒"不依赖 Amphetamine GUI）。inventory 里 `pmset_autorestart: true` 的主机（Studio，无电池）另加 `pmset -a autorestart 1`：断电恢复后自己开机 | 是 |
+| `os-update.yaml` | macs | macOS 软件更新，需要重启时无人值守地重启并验收。**不在 `site` 里**（它会重启机器），见下节 | 是（自己问密码） |
 
 升级 node_exporter：改 `node-exporter.yaml` 里的 `node_exporter_version` + `node_exporter_sha256`，再 `just node-exporter`。
 
@@ -45,7 +60,7 @@ just os-upgrade-major  # 大版本升级（如 26 → 27），见下文风险
 
 ## 系统更新（`os-update.yaml`）
 
-系统设置里的自动更新开关全开着，但在这台无头机上不生效（2026-09-26：26.7 挂着没装，
+系统设置里的自动更新开关全开着，但在无头机上不生效（2026-09-26 M2 实测：26.7 挂着没装，
 已 96 天没重启），所以改由 Ansible 触发。先 `just os-updates` 看计划，再 `just os-update`。
 
 - **装什么**：不需要重启的（Safari、CLT…）全装，同一产品线只装最新版；需要重启的
@@ -55,11 +70,11 @@ just os-upgrade-major  # 大版本升级（如 26 → 27），见下文风险
 - **密码**：确认计划后问一次登录密码。sudo 和 Apple Silicon 的 volume owner 认证
   （`softwareupdate --user --stdinpass`）共用它，所以没用 `--ask-become-pass`（`-K` 拿到的
   密码不暴露给任务）。密码不进命令行参数。
-- **重启前拒绝继续的情况**：FileVault 开着、自动登录用户不是 `matthew`、没插电、空闲空间
+- **重启前拒绝继续的情况**：FileVault 开着、自动登录用户不是该机的登录用户（`matthew` / `matstudio`）、没插电、空闲空间
   不够（小版本 20 GiB、大版本 40 GiB）、已有 `softwareupdate` 在跑。前两条不满足时重启后
   这台机就回不来了（停在解锁界面或登录窗口）。Tailscale「Run when logged out」
   （下面手动步骤 5）CLI 查不了，没法断言，靠你自己保证。
-- **重启后验收**：版本到位、控制台用户是 `matthew`（自动登录生效）、node_exporter
+- **重启后验收**：版本到位、控制台用户是该机的登录用户（自动登录生效）、node_exporter
   `/metrics` 200、重启前**在运行的** LaunchAgent 全部重新跑起来（按运行时快照比对，
   没写死清单，hermes/vllm 这些非本 repo 管的也覆盖）、`SleepDisabled` 仍为 1
   （丢了就跑 `just power`）。
@@ -105,12 +120,31 @@ just os-upgrade-major  # 大版本升级（如 26 → 27），见下文风险
 > ```
 > 最近事件 `off` 且航拍 ≈0% → 屏已关。
 
+### Mac Studio 的现状（2026-10-03 逐项核对）
+
+上面是按 M2 写的。Studio 上对应各条的状态，以及它独有的两步：
+
+| 项 | Studio 现状 |
+|---|---|
+| 1 远程登录 | ✅ `com.openssh.sshd => enabled`；Tailscale 用的是 **Tailscale.app**（macsys 系统扩展），登录项 enabled、`TailscaleStartOnLogin=1` |
+| 1/5 Run when logged out | ❓ CLI 查不到。目前靠自动登录兜着：自动登录一旦失效（例如改了登录密码），重启后就只剩局域网 `192.168.50.33` 能 SSH |
+| 2/6 Amphetamine / 航拍壁纸 | 不适用：没装 Amphetamine，`displaysleep 10` 本来就会关屏 |
+| 3 自动登录 | ✅ `matstudio`；FileVault Off |
+| 4 立即锁屏 | 未核对 |
+| ⚠️ 第二个 Tailscale | brew 的 `tailscale` formula 也装了，它的 `tailscaled` 以 root LaunchDaemon（`sh.brew.tailscale`）常驻，处于 **Logged out**，占着一个 utun。隧道是 App 那个的，这个是多余的；两套 daemon 并存是隐患，清掉：`sudo brew services stop tailscale && brew uninstall tailscale` |
+| 渲染器 venv（omlx-metrics 的跨仓依赖）| ✅ 已手动建：`git clone https://github.com/meirongdev/mlx-learning.git ~/projects/meirongdev/mlx-learning && cd $_ && uv sync`（公开仓，走 https 不需要 GitHub 凭据）|
+
+⚠️ Studio 上**还没有模型**：`omlx-metrics` 装好了 plist 但没启动（`stats.json` 要等 OMLX
+服务过一次请求才出现），json-exporter 那边每 30s 一条 `load_seconds_per_gb_estimate` 的
+`null` ERROR 也是同一个原因。在 admin 面板（`http://100.98.220.75:8000/admin`）下好模型、
+跑过一次推理后，`just omlx-metrics mac-studio` 补完链路 B。
+
 ## 相关（在本 repo 别处）
 
 - **Multica daemon**（这台机跑的「执行任务那一半」）：安装/重建/退役全流程见 [docs/runbooks/multica-install.md](../../docs/runbooks/multica-install.md) 的步骤 6；⚠️ daemon 掉线时**服务端一切正常**（页面 200、监控全绿），判据在服务端 `agent_runtime` 表
 
-- Prometheus 抓取 job `node-exporter-macbook`：`k8s/helm/values/kube-prometheus-stack.yaml`
-  （⚠️ 那里有本机独有的 `metric_relabel_configs`：`omlx_*` → `omlx_alltime_*`，理由见下面那篇）
-- Grafana 看板 "MacBook / Node Exporter"：`k8s/helm/manifests/monitoring/dashboards/macbook-node-dashboard.yaml`（`Hardware` 文件夹）
+- Prometheus 抓取 job `node-exporter-macbook` / `node-exporter-mac-studio`：`k8s/helm/values/kube-prometheus-stack.yaml`
+  （⚠️ 两个 job 用 YAML 锚点共用 `metric_relabel_configs`：`omlx_*` → `omlx_alltime_*`，理由见下面那篇）
+- Grafana 看板 "Mac / Node Exporter"（两台共用，顶部选机器）：`k8s/helm/manifests/monitoring/dashboards/macbook-node-dashboard.yaml`（`Hardware` 文件夹）
 - **OMLX 推理指标**（两条链路的口径、陷阱、验收）：[docs/reference/omlx-inference-metrics.md](../../docs/reference/omlx-inference-metrics.md)
   · 看板 "Hardware / Mac OMLX 推理"：`k8s/helm/manifests/monitoring/dashboards/omlx-dashboard.yaml`

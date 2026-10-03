@@ -1,5 +1,7 @@
 # json-exporter —— prometheus-community 的通用 JSON→指标转换器，当前唯一用途是
-# 把 Mac OMLX（mbp-m2-pro，Tailscale 100.89.15.120:8000）的运行状态变成可抓取指标。
+# 把 Mac 上 OMLX 的运行状态变成可抓取指标。一个 exporter 服务所有 OMLX 节点
+# （mbp-m2-pro 100.89.15.120:8000 · mac-studio 100.98.220.75:8000，经 Tailscale），
+# 打哪台由抓取配置的 ?target= 决定；所有节点共用一把 key（见下方 Secret 挂载）。
 #
 # 端点与口径 / 面板 / 陷阱 → docs/reference/omlx-inference-metrics.md（唯一真相源）
 # 模块配置 → json-exporter-cm.yaml   抓取配置 → k8s/helm/values/kube-prometheus-stack.yaml

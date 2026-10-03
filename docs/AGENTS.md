@@ -20,7 +20,7 @@ cloud/oracle/                  # Oracle K3s (terraform|ansible|manifests|values|
 argocd/                        # GitOps (install|projects|applications/)
 cloudflare/terraform/          # Tunnel + DNS + WAF          tailscale/{terraform,ansible}/  # ACL · 节点 tailscale
 zitadel/                       # 身份/SSO                     backup/               # restic (kustomize)
-macbook/ansible/               # 远程无头 M2 MacBook         images/               # 自研镜像(各一条 build workflow)
+macbook/ansible/               # 无头 Mac:M2+Studio          images/               # 自研镜像(各一条 build workflow)
 scripts/                       # CI 的 6 个检查器（just check 跑的就是这些）+ oracle 巡检
 docs/                          # 见下方「Documentation Rules」
 根 justfile · versions.just    # 根 justfile 聚合全部子 justfile；versions.just = 两集群共享的版本
