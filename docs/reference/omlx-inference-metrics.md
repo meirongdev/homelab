@@ -106,7 +106,7 @@ Press Enter to continue」，launchd 下 stdin 是 EOF，于是退出码 1，Kee
 
 | 端点 | 无认证 / `Bearer dummy` | `Bearer <key>` | 谁在用 |
 |---|---|---|---|
-| `/v1/models`、`/v1/chat/completions`、`/v1/embeddings`、audio | 200 | 200 | LiteLLM `mac/*`、Open Notebook（都填 `api_key: dummy`，**不用改**）|
+| `/v1/models`、`/v1/chat/completions`、`/v1/embeddings`、audio | 200 | 200 | LiteLLM `mac/*` 与 `studio/*`、Open Notebook（都填 `api_key: dummy`，**不用改**）|
 | `/api/status`、`/v1/models/status`（管理端点，`verify_api_key`）| 401 | 200 | 链路 A 的 json-exporter |
 
 ☠️ **LiteLLM / Open Notebook 能继续用 `dummy`，全靠 `allow_unauthenticated_inference: true` 这一个开关**。

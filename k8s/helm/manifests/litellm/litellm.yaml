@@ -7,7 +7,8 @@
 #   - admin UI (/ui): LiteLLM 自带登录 (UI_USERNAME/UI_PASSWORD, Vault→ESO)
 # Config: config.yaml in git (model_list); keys/spend live in Postgres —— 2026-08-25 起
 #   是共享实例 `databases/apps-pg` 的 litellm 租户，不再是本 ns 自带的 litellm-pg。
-# 双自托管上游: DGX (qwen3.8-flash-next-tp2, 主) + MacPro M2 OMLX (Ornith-1.5-35B, 兜底),
+# 自托管上游: DGX (qwen3.8-flash-next-tp2, 主) + MacPro M2 OMLX (Ornith-1.5-35B, 兜底)
+#   + Mac Studio OMLX (Qwen3.8-27B, 独立可指名、不进兜底链, 2026-10-03),
 #   fallbacks 键 = 严格的"主→兜底"链（见 docs/plans/2026-08-01-litellm-gateway-migration.md §3 决策 6）。
 # 升版：改 image digest + 注释 tag → git push。不要追 main-stable。
 apiVersion: v1
@@ -73,6 +74,18 @@ data:
         litellm_params:
           model: "openai/ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit:fast"
           api_base: http://100.89.15.120:8000/v1
+          api_key: dummy
+      # ── Mac Studio（M5 Max / 128G，第三个自托管上游，2026-10-03）──
+      # OMLX 0.7 的模型 ID 不带 org（目录是 ~/.omlx/models/lmstudio-community/<name>/），
+      # 所以这里写的是裸名，不是 M2 那种 org__name。
+      # 独立可指名，**不在任何兜底链里**：它不是 DGX 的替身，只是多一个可选模型。
+      # 和 mac/* 一样靠 Studio 上的 allow_unauthenticated_inference 才能用 dummy（omlx.yaml 管着）。
+      # 冷装载 ~14s（16.9G），之后常驻：Studio 的池天花板 ~106G，不存在 M2 那种换入换出。
+      # ☠️ 新别名要进虚拟 key 的白名单才能用（坑 A）；2026-10-03 只加进了 LITELLM_VK。
+      - model_name: studio/qwen3.8-27b
+        litellm_params:
+          model: openai/Qwen3.8-27B-MLX-4bit
+          api_base: http://100.98.220.75:8000/v1
           api_key: dummy
       # ── OpenRouter（第三来源，独立透传，2026-08-16）──
       # 全部模型透传：openrouter/<任意 OpenRouter 模型 ID> 直接命中。
@@ -146,7 +159,7 @@ spec:
         #    ⇒ ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按**旧路由表**继续跑。
         #    2026-08-25 实际踩过一次（改了 mac/ornith 后必须手动 rollout restart 才生效）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py 的 STAMP_ONLY），别手改。
-        checksum/config: "6fe62c8c39cfa73a"
+        checksum/config: "e59203ea5ec99273"
         # 同理，但盯的是 codex_compat.py（litellm-codex-compat ConfigMap）：
         # 也是 subPath 挂载 + 只在启动时 import，改了不重启就是静默跑旧代码。
         checksum/codex-compat-py: "e5da4a39d90243d4"
