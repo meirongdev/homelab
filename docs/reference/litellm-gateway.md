@@ -1,6 +1,6 @@
 # LiteLLM 网关（运维事实与坑）
 
-> Last updated: 2026-09-30
+> Last updated: 2026-10-03
 > Status: 生效事实
 > Scope: `llm.meirong.dev` 这个 LLM 网关的配置生效路径、鉴权分层、上游可用性边界，
 > 本文是 source of truth。为什么选 LiteLLM、上游怎么选、Mac 兜底为何换 Ornith，见
@@ -543,9 +543,22 @@ reranker / nemoguard / 视觉 / riva-translate / palmyra 垂类）全部早于�
 ⚠️ **只暴露一个 Mac 35B**：OMLX 池天花板 30GB 装不下两个（19.95 + 19.08GB）。两个别名并存
 = 交替调用持续换入换出（~18s/次，期间回 `is busy`）。
 
+## Mac Studio 上游：`studio/qwen3.8-27b`（2026-10-03）
+
+| | |
+|---|---|
+| 别名 → 上游 | `studio/qwen3.8-27b` → `openai/Qwen3.8-27B-MLX-4bit` @ `100.98.220.75:8000/v1` |
+| 机器 | Mac Studio M5 Max / 128G，OMLX 0.7.0；池天花板 ~106G，**常驻、不换入换出**（M2 那条「只暴露一个 35B」的约束不适用）|
+| 模型 | HF `lmstudio-community/Qwen3.8-27B-MLX-4bit`（VLM，262k ctx）。OMLX 0.7 的模型 ID **不带 org**，别照 M2 写成 `org__name` |
+| 兜底 | **不在任何兜底链里**，只能指名调用。它是多出来的一个可选模型，不是 DGX 的替身 |
+| key 白名单 | 只加进了 `LITELLM_VK`（2c15baf776…）。其余 key 都是给特定消费方的窄 key，**刻意没加**；谁要用就按坑 A 单独加 |
+| 实测（直连，2026-10-03）| 冷装载 14.4s，短 prompt 解码 ~29 tok/s；思维链分离到 `reasoning_content`（同样受下面「小 `max_tokens` 漏进 `content`」影响）|
+
+主机侧（OMLX 安装、key、模型下载）→ `macbook/ansible/README.md`；指标 → [omlx-inference-metrics.md](omlx-inference-metrics.md)。
+
 ☠️ **`mac/*` 的 `api_key: dummy` 能用，是 Mac 上一个开关的结果**（2026-09-30 起）：OMLX 0.7 起
 非回环监听必须配 key，现行配法是 key + `allow_unauthenticated_inference: true`，推理端点因此仍免鉴权。
-那个开关一丢，`mac/*` 全部 401，而网关这边清单正确、ArgoCD Synced。
+那个开关一丢，`mac/*`（以及 `studio/*`）全部 401，而网关这边清单正确、ArgoCD Synced。
 → [omlx-inference-metrics.md 的「鉴权」](omlx-inference-metrics.md#鉴权omlx-07-起)
 
 ## 消费方
@@ -554,6 +567,7 @@ reranker / nemoguard / 视觉 / riva-translate / palmyra 垂类）全部早于�
 |---|---|---|
 | `codex --profile litellm` | `custom_dgx/qwen3.8-27b-sglang` | `~/.codex/litellm.config.toml`（本机）|
 | `codex --profile mac` | `mac/ornith` | `~/.codex/mac.config.toml`（本机）|
+| 本机任意 OpenAI 兼容客户端 | `studio/qwen3.8-27b` | 读 `LITELLM_VK`；目前没有固定消费方 |
 | k8sgpt（`--backend openai`）| `qwen3.8-27b-sglang` | `~/Library/Application Support/k8sgpt/k8sgpt.yaml`（本机）|
 | k8sgpt（`--backend localai`）| `mac/ornith-fast` | 同上 |
 | oracle 上的 calibre 元数据作业 | `qwen3.8-27b-sglang`（经 `litellm-external` NodePort）| [清单内嵌脚本](../../cloud/oracle/manifests/calibre-metadata/metadata-llm.yaml) |
