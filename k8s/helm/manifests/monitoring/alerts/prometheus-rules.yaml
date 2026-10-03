@@ -1284,6 +1284,28 @@ spec:
               ⚠️ 无 BMC/IPMI + WoL 无效时，真断电只能物理到场硬重启，重启后
               `cd ~/projects/meirongdev/nv-dgx-spark && make status && make test`。
 
+    # Mac Studio 文生图（Qwen-Image-2.1 on mflux，2026-10-03）。链路是
+    # tailnet → :8010 OpenAI 转接层 → 127.0.0.1:4030 mflux-server。转接层挂了 = up=0 = 内置
+    # TargetDown；**转接层活、mflux-server 死**时 up 仍是 1，只有转接层上报的
+    # mflux_upstream_up 知道 —— 这一条就是补那个洞。架构 → docs/decisions/studio-image-generation.md
+    - name: mac-studio-image-gen
+      rules:
+        - alert: MfluxUpstreamDown
+          # for 10m：mflux-server 重启要重读 33 GB 权重（实测一两分钟），launchd
+          # ThrottleInterval 60s；部署或手动 kickstart 造成的短暂不应答不该响。
+          expr: mflux_upstream_up{job="mflux-mac-studio"} == 0
+          for: 10m
+          labels:
+            severity: warning
+            component: inference
+          annotations:
+            summary: "Mac Studio 的 mflux-server 不应答（OpenAI 转接层还活着）"
+            description: |
+              studio/qwen-image-2.1 的调用此刻全部 502。转接层还在，否则这条不会有数据（响的会是 TargetDown）。
+              看进程与日志：`ssh -i ~/.ssh/vgio matstudio@100.98.220.75 'launchctl print gui/501/com.meirongdev.mflux-server | grep -E "state|runs|last exit"; tail -40 ~/.local/var/log/mflux-server.log'`
+              `runs` 飞涨 = 启动即崩（权重缺失时离线模式会直接报错：HF_HUB_OFFLINE=1）。
+              重装/修复：`cd macbook/ansible && just image-gen`（幂等，最后会真出一张小图验收）。
+
     - name: multicluster-telemetry
       rules:
         - alert: OracleTelemetryAbsent
