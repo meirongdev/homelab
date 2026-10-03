@@ -1,10 +1,14 @@
 # Mac OMLX 推理指标（采集口径与陷阱）
 
-> Last updated: 2026-09-30
+> Last updated: 2026-10-03
 > Status: 生效事实
 
 ## 速览
 
+- **两个 OMLX 节点**（2026-10-03 起）：`mbp-m2-pro`（M2 笔记本，`100.89.15.120`）与
+  `mac-studio`（M5 Max / 128G 台式机，`100.98.220.75`，登录用户 **`matstudio`**）。
+  同一套 Ansible（`macbook/ansible`，inventory 组 `omlx`）、同一个 json-exporter、
+  同一把 key、同一张面板，面板顶部 `nodename` **单选**切机器。
 - **OMLX 自己没有 `/metrics`**（0.6.3rc2 实测）。指标靠两条互补链路拼出来，
   都不改 OMLX 本身。⚠️ 链路 A 自 OMLX 0.7（2026-09-30）起**要 API key**，链路 B 读文件、不涉及鉴权，
   见下方[鉴权](#鉴权omlx-07-起)：
@@ -13,7 +17,7 @@
 |---|---|---|
 | 数据源 | OMLX 的 `/api/status` + `/v1/models/status` | Mac 上的 `~/.omlx/stats.json` |
 | 谁在跑 | 集群内 `json-exporter.monitoring` Deployment | Mac 上的 LaunchAgent，每 60s 渲染一次 `.prom` |
-| 怎么进 Prometheus | job `omlx-status` / `omlx-models` 抓 `/probe` | node_exporter textfile collector，随 job `node-exporter-macbook` |
+| 怎么进 Prometheus | job `omlx-status` / `omlx-models` 抓 `/probe`，每台 Mac 一个 target | node_exporter textfile collector，随各 Mac 的 job（`node-exporter-macbook` / `node-exporter-mac-studio`）|
 | 新鲜度 | 30s | 源文件 300s 才落盘（且只在有请求时落）|
 | 独有内容 | 驻留/内存/队列/能力位（实时状态） | 累计 prefill/generate 秒数、per-model token 账本、跨重启持久化 |
 | 指标前缀 | `omlx_*` | `omlx_alltime_*`（☠️ 抓取时改名，见陷阱 8）|
@@ -30,6 +34,7 @@
 
 | 东西 | 位置 |
 |---|---|
+| OMLX 本体（brew + LaunchAgent + `settings.json` 的 host/port/鉴权四个键） | `macbook/ansible/playbooks/omlx.yaml`（`just omlx`；只合并这四个键，不升级、不碰模型与其它设置）|
 | **A** exporter 清单（Deployment/Service） | `k8s/helm/manifests/monitoring/json-exporter/json-exporter.yaml` |
 | **A** 模块配置（JSON→指标的映射） | `k8s/helm/manifests/monitoring/json-exporter/json-exporter-cm.yaml` |
 | **A** OMLX API key（Vault `secret/homelab/omlx` → ESO） | `k8s/helm/manifests/monitoring/json-exporter/json-exporter-external-secret.yaml`；Mac 侧同一个 key 在 `~/.omlx/settings.json`（见[鉴权](#鉴权omlx-07-起)）|
@@ -45,9 +50,11 @@
 - 集群侧（A 的 exporter、两侧的抓取配置、面板）：`git push` → ArgoCD `monitoring-dashboards`
   （管 `manifests/monitoring/` 整个目录）与 `kube-prometheus-stack`（多源 values）各自同步，
   **无需手动 helm/kubectl**。
-- Mac 侧（B 的两个 LaunchAgent）：Ansible，可重复执行。
+- Mac 侧（OMLX 本体 + B 的两个 LaunchAgent）：Ansible，可重复执行。不带参数作用于全部
+  OMLX 节点，带主机名只跑一台（如 `just omlx-metrics mac-studio`）。
   ```bash
   cd macbook/ansible
+  just omlx            # OMLX 本体：host/port/key 四个键（key 从 Vault 现取）
   just node-exporter   # 读取端：--collector.textfile.directory（改了 plist 必须重启进程，handler 会做）
   just omlx-metrics    # 生产端：每 60s 渲染一次 .prom
   ```
@@ -86,11 +93,13 @@ Press Enter to continue」，launchd 下 stdin 是 EOF，于是退出码 1，Kee
 34h 里崩了 1.1 万次。OMLX 没有「跳过校验」的开关（`network_auth_error` 硬拒），只能配 key。
 告警侧是 `TargetDown @ macbook`（omlx-*）每 4h 一条，node-exporter 那个 job 是活的。
 
-**现行配法**（Mac 上 `~/.omlx/settings.json` 的 `auth`，0600，**不归 Ansible 管**）：
+**现行配法**（每台 Mac 上 `~/.omlx/settings.json` 的 `auth`，0600；2026-10-03 起由
+`cd macbook/ansible && just omlx` 维护，它只合并下面两个键加 `server.host`/`server.port`，
+别的设置仍归 admin 面板）：
 
 | 键 | 值 | 效果 |
 |---|---|---|
-| `api_key` | Vault `secret/homelab/omlx` 的 `api_key` | 满足非回环监听的启动校验；管理端点只认它 |
+| `api_key` | Vault `secret/homelab/omlx` 的 `api_key`（**所有 OMLX 节点共用**：json-exporter 只挂一个 key 文件）| 满足非回环监听的启动校验；管理端点只认它 |
 | `allow_unauthenticated_inference` | `true` | **推理**端点（`verify_inference_api_key`）免鉴权 |
 
 两类端点的实测边界（2026-09-30，经 Tailscale）：
@@ -113,16 +122,15 @@ Press Enter to continue」，launchd 下 stdin 是 EOF，于是退出码 1，Kee
 `http_client_config.authorization.credentials_file`。这个文件**每次请求都重读**
 （v0.8.0 本地实测：换成错 key 立即 503，换回立即 200，进程不重启），所以轮换 key 不需要重启 pod。
 
-**轮换 key**（两边必须一致；中间有几分钟 `up{job="omlx-*"}=0`，没超过 TargetDown 的 `for: 10m` 就不会告警）：
+**轮换 key**（集群与**每一台** Mac 必须一致；中间有几分钟 `up{job="omlx-*"}=0`，没超过 TargetDown 的 `for: 10m` 就不会告警）：
 
 ```bash
 export VAULT_ADDR=https://vault.meirong.dev
 vault kv put secret/homelab/omlx api_key="$(openssl rand -hex 32)"
 # ESO 默认 1h 才刷新，打注解立即同步
 kubectl --context k3s-homelab -n monitoring annotate externalsecret json-exporter-omlx force-sync="$(date +%s)" --overwrite
-# key 走 stdin 写进 Mac 的 settings.json（不上命令行），再重启 OMLX
-vault kv get -field=api_key secret/homelab/omlx | ssh -i ~/.ssh/vgio matthew@100.89.15.120 \
-  '/usr/bin/python3 -c "import json,os,sys; p=os.path.expanduser(\"~/.omlx/settings.json\"); d=json.load(open(p)); d.setdefault(\"auth\",{}).update(api_key=sys.stdin.read().strip(), allow_unauthenticated_inference=True); json.dump(d,open(p,\"w\"),indent=2)" && chmod 600 ~/.omlx/settings.json && launchctl kickstart -k gui/$(id -u)/sh.brew.omlx'
+# 把新 key 写进每台 Mac 的 settings.json 并重启 OMLX（key 经环境变量传，不上命令行）
+cd macbook/ansible && just omlx
 ```
 
 **症状对照**：
@@ -218,8 +226,15 @@ rate(omlx_alltime_cached_prompt_tokens_total[30m])
    json_exporter 遇到 `null` 会**丢弃该指标并每次抓取刷一条 ERROR 日志**，
    所以这两个字段单独放在 `omlx_model_resident` 里、用 jsonpath `?(@.loaded == true)` 过滤。
    ⚠️ 谁要是把它们合并回 `omlx_model`，就会得到 11 模型 × 2 字段 × 每 30s 的稳定日志噪音。
+   ⚠️ **有一条 `null` 绕不开**：`load_seconds_per_gb_estimate` 在 OMLX 进程**这次启动后
+   还没装载过任何模型**时是 `null`。它在根对象上，filter 只能作用于数组；
+   v0.8.0 的 `SanitizeValue` 只把 `<nil>` 认成 NaN，而 client-go 的 jsonpath 输出的是 `null`。
+   所以那段时间 `omlx_pool_load_seconds_per_gb` 缺席，日志每 30s 一条
+   `path="{ .load_seconds_per_gb_estimate }" value=null`。**这条 ERROR 是信号不是故障**：
+   = 「这台 OMLX 自启动后还没装过模型」。新装还没放模型的节点（2026-10-03 的 mac-studio）
+   会一直刷到第一次装载为止；M2 只在重启后、首次装载前刷一小段。
 4. **`up{job="omlx-*"}` 分不清是 exporter 挂了还是 Mac/OMLX 挂了**（probe 形态的固有代价）。
-   ⚠️ 这两个 job 与 `node-exporter-macbook` **都在**内置 `TargetDown` 的覆盖面里（它对全部 job
+   ⚠️ 这两个 job 与各 Mac 的 node-exporter job **都在**内置 `TargetDown` 的覆盖面里（它对全部 job
    生效，没有排除项）。旧版本这里写的「未纳入 TargetDown」是错的，而且前提也已失效：Mac 已
    `pmset disablesleep` 常开，2026-09 整月 macbook 的 TargetDown 全是真故障，一次睡眠抖动都没有。
    所以**别为降噪去排除它们**：2026-09-29 重启后 OMLX 起不来 34h，报出来的就是这条
@@ -261,9 +276,13 @@ rate(omlx_alltime_cached_prompt_tokens_total[30m])
    而不是装一个每 60s 空转的 LaunchAgent。反过来，升级 mlx-learning 之后
    不需要重跑 playbook，plist 指的就是 venv 里的脚本本身。
 
-## 这台机器的物理约束（读面板要知道的）
+## 物理约束（读面板要知道的）
 
-来自 Mac 侧 `~/.omlx/settings.json` 与 `model_settings.json`（2026-08-22 实测值）：
+**mac-studio**：OMLX 设置全用默认（`just omlx` 只写那四个键），内存天花板是自动档，
+2026-10-03 实测 `final_ceiling` = 113931797392 B（≈106 GiB）；暂无模型，模型由 admin 面板下载。
+下面这张表**只是 mbp-m2-pro 的**，别套到 Studio 上。
+
+**mbp-m2-pro**：来自它的 `~/.omlx/settings.json` 与 `model_settings.json`（2026-08-22 实测值）：
 
 | 设置 | 值 | 对面板的含义 |
 |---|---|---|
@@ -314,7 +333,8 @@ docker rm -f jx
 ## 验收（链路 B）
 
 平时不用手动查：`cd macbook/ansible && just omlx-metrics` 自己会跑完下面这套并打印结论
-（渲染器 → 源数据 → node_exporter 三段各有各的判据和修法）。要单独看某一段：
+（渲染器 → 源数据 → node_exporter 三段各有各的判据和修法）。要单独看某一段
+（下面以 M2 为例；Studio 换成 `matstudio@100.98.220.75`）：
 
 ```bash
 # 1. node_exporter 真的在读那个目录吗（缺 flag 时这条指标**根本不存在**，不是 0）
@@ -335,7 +355,7 @@ ssh -i ~/.ssh/vgio matthew@100.89.15.120 \
 进了 Prometheus 之后（注意是**改名后**的 `omlx_alltime_`）：
 
 ```promql
-count(omlx_alltime_requests_total)                       # 应为 1（全局那份）
+count(omlx_alltime_requests_total)                       # 应等于在跑链路 B 的 Mac 台数（每台一份全局）
 count(omlx_alltime_model_requests_total)                 # 应等于 stats.json 里的模型数
 time() - omlx_alltime_stats_collected_timestamp_seconds  # 采集器新鲜度，应 < 120s
 ```

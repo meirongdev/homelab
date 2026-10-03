@@ -24,6 +24,9 @@
 #    × 每 30s = 稳定的日志噪音）。`actual_size` / `last_access` 只在模型驻留时非 null，
 #    所以它们**单独放在 omlx_model_resident 里、用 `?(@.loaded == true)` 过滤**，
 #    不要合并回 omlx_model —— 合并回去就是上面那串 ERROR。
+#    唯一过滤不掉的是根对象上的 `load_seconds_per_gb_estimate`：OMLX 这次启动后还没装过
+#    模型时它是 null（filter 只作用于数组），于是每 30s 一条 ERROR、该指标缺席。那是
+#    「这台还没装过模型」的信号，不是配置错误，别为它删指标（详见 reference 陷阱 3）。
 #
 # ⚠️ custom_kernels 是**字典不是数组**，jsonpath 带不出 key 名，所以 4 个内核只能一条条写死；
 #    OMLX 升级新增内核时这里不会自动出现（面板少一格，不报错）。

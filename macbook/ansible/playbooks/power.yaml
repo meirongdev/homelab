@@ -1,26 +1,38 @@
 ---
-# Headless / clamshell power policy for the remote MacBook.
+# Headless power policy for the remote Macs.
 #
-# Goal: keep the SYSTEM awake on AC power so the lid-closed Mac stays reachable over
-# Tailscale (this makes "stay awake" independent of the Amphetamine GUI app).
+# Goal: keep the SYSTEM awake on AC power so each Mac stays reachable over Tailscale
+# (lid-closed MacBook included; this makes "stay awake" independent of the Amphetamine GUI app).
+# os-update.yaml's post-restart verdict asserts SleepDisabled == 1, so every Mac gets it.
 #
-# NOTE: this does NOT stop the aerial-wallpaper CPU burn. That requires the DISPLAY to
-# sleep, which is gated by Amphetamine's "Allow display sleep" toggle — a GUI-only setting
+# Hosts with `pmset_autorestart: true` (inventory: the Mac Studio, a desktop with no battery)
+# also power back on by themselves after a power cut — otherwise an outage leaves the box
+# off until someone physically presses the button. A battery MacBook never loses power that
+# way, so it is left at the macOS default.
+#
+# NOTE: this does NOT stop the MacBook's aerial-wallpaper CPU burn. That requires the DISPLAY
+# to sleep, which is gated by Amphetamine's "Allow display sleep" toggle — a GUI-only setting
 # Ansible cannot change. See README ("Manual / GUI-only steps").
 #
-# Needs root for pmset:  run via `just power`  (adds --ask-become-pass).
+# Needs root for pmset:  run via `just power <host>`  (adds --ask-become-pass).
 - name: macOS headless power policy
-  hosts: macbook
+  hosts: macs
   become: true
   gather_facts: false
   tasks:
-    - name: Read current SleepDisabled flag
-      ansible.builtin.shell: "set -o pipefail; pmset -g | awk '/SleepDisabled/{print $2}'"
+    - name: Read current pmset flags
+      ansible.builtin.shell: "set -o pipefail; pmset -g | awk '$1==\"SleepDisabled\"||$1==\"autorestart\"{print $1\"=\"$2}'"
       args:
         executable: /bin/bash
-      register: sleep_disabled
+      register: pmset_now
       changed_when: false
 
     - name: Keep the system awake on AC power (lid-closed clamshell stays reachable)
       ansible.builtin.command: pmset -c disablesleep 1
-      when: (sleep_disabled.stdout | trim) != "1"
+      when: "'SleepDisabled=1' not in pmset_now.stdout_lines"
+
+    - name: Power back on after a power failure (desktops only)
+      ansible.builtin.command: pmset -a autorestart 1
+      when:
+        - pmset_autorestart | default(false) | bool
+        - "'autorestart=1' not in pmset_now.stdout_lines"

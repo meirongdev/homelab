@@ -1,31 +1,49 @@
+# 管两台远程 Mac：M2 MacBook（mbp-m2-pro）与 Mac Studio（mac-studio），见 inventory.yaml。
+# 带 `target` 参数的配方默认作用于该 playbook 的整个主机组，也可以传主机名或组名
+# （ansible --limit 语法）只跑一台：`just node-exporter mac-studio`。
+# 需要 sudo 的配方（power / site）逐台运行、逐台问密码 —— 两台的登录密码不同，
+# `--ask-become-pass` 只问一次，一次跑两台必有一台认证失败。
+
 # Show help
 help:
     @just --list --unsorted
 
-# 连通性检查（经 Tailscale ping 这台 MacBook）
-ping:
-    ansible-playbook playbooks/ping.yaml
+# 连通性检查（经 Tailscale ping 每台 Mac）
+ping target="macs":
+    ansible-playbook playbooks/ping.yaml --limit '{{target}}'
 
-# 确保 Homebrew + CLI 包（tmux 等）就位（无需 sudo，幂等）
-packages:
-    ansible-playbook playbooks/packages.yaml
+# 确保 Homebrew + CLI 包（tmux / uv 等）就位（无需 sudo，幂等）
+packages target="macs":
+    ansible-playbook playbooks/packages.yaml --limit '{{target}}'
 
-# 安装/确认 AI CLI 工具（claude/qwen/codex/hermes，无需 sudo，幂等）
+# 安装/确认 AI CLI 工具（claude/qwen/codex/hermes，仅 MacBook，无需 sudo，幂等）
 ai-clis:
     ansible-playbook playbooks/ai-clis.yaml
 
 # 顺带给它加 --collector.textfile.directory —— 那是 OMLX 指标的**读取端**，
 # 生产端是下面的 omlx-metrics。
 # 部署/升级 node_exporter LaunchAgent（无需 sudo）
-node-exporter:
-    ansible-playbook playbooks/node-exporter.yaml
+node-exporter target="macs":
+    ansible-playbook playbooks/node-exporter.yaml --limit '{{target}}'
+
+# key 从 Vault 现取（secret/homelab/omlx → api_key），经环境变量传给 playbook，
+# 不上命令行、不落盘。取不到时：已配过 key 的机器照常，新机器会在启动服务前失败。
+# OMLX 推理服务本体（brew + LaunchAgent + settings.json 的 host/port/鉴权；不升级、不碰模型）
+omlx target="omlx":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export VAULT_ADDR="${VAULT_ADDR:-https://vault.meirong.dev}"
+    OMLX_API_KEY="$(vault kv get -field=api_key secret/homelab/omlx 2>/dev/null || true)"
+    [ -n "$OMLX_API_KEY" ] || echo "⚠️  Vault 里取不到 secret/homelab/omlx → api_key（vault token 过期？）" >&2
+    export OMLX_API_KEY
+    ansible-playbook playbooks/omlx.yaml --limit '{{target}}'
 
 # OMLX 指标的**生产端**，读取端在 `just node-exporter`（那边加 textfile flag）。
 # 两个都跑过才有指标；只跑一个不报错，指标静默不出现。
 # ⚠️ 渲染器是 mlx-learning 仓 venv 里的 console script（跨仓依赖），缺了会明确失败。
 # 部署/升级 OMLX 指标采集 LaunchAgent（stats.json → node_exporter textfile 快照）
-omlx-metrics:
-    ansible-playbook playbooks/omlx-metrics.yaml
+omlx-metrics target="omlx":
+    ansible-playbook playbooks/omlx-metrics.yaml --limit '{{target}}'
 
 # PAT 从 Vault 现取（secret/homelab/multica → daemon_pat）以 -e 传给 playbook，
 # 不落盘、不进 git。需要本机已有可用的 vault token（`vault token lookup` 能过）。
@@ -36,7 +54,7 @@ omlx-metrics:
 #
 # PAT 轮换：web UI 生成新的 → `vault kv patch secret/homelab/multica daemon_pat=mul_...`
 #
-# 部署/升级 Multica daemon LaunchAgent（无需 sudo，幂等，认证全自动）
+# 部署/升级 Multica daemon LaunchAgent（仅 MacBook，无需 sudo，幂等，认证全自动）
 multica-daemon:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -50,32 +68,47 @@ multica-daemon:
       ansible-playbook playbooks/multica-daemon.yaml -e "md_pat=$pat"
     fi
 
-# 应用 headless/clamshell 电源策略（保持远程可达；需 sudo 密码）
-power:
-    ansible-playbook playbooks/power.yaml --ask-become-pass
+# 应用 headless 电源策略（disablesleep；Studio 另加断电恢复自动开机；逐台问 sudo 密码）
+power target="macs":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for h in $(ansible '{{target}}' --list-hosts | awk 'NR>1{print $1}'); do
+      echo "── ${h}：输入它的登录密码"
+      ansible-playbook playbooks/power.yaml --limit "$h" --ask-become-pass
+    done
 
-# 一次跑全部 Ansible 能做的（包/AI CLI/multica daemon/node_exporter/OMLX 指标/电源）
-site:
-    ansible-playbook playbooks/site.yaml --ask-become-pass
+# site 会跑 omlx.yaml，所以同样从 Vault 取 OMLX key（见 omlx 配方）。
+# 一次跑全部 Ansible 能做的（包/AI CLI/multica/OMLX/node_exporter/OMLX 指标/电源；逐台问密码）
+site target="macs":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export VAULT_ADDR="${VAULT_ADDR:-https://vault.meirong.dev}"
+    OMLX_API_KEY="$(vault kv get -field=api_key secret/homelab/omlx 2>/dev/null || true)"
+    [ -n "$OMLX_API_KEY" ] || echo "⚠️  Vault 里取不到 secret/homelab/omlx → api_key（vault token 过期？）" >&2
+    export OMLX_API_KEY
+    for h in $(ansible '{{target}}' --list-hosts | awk 'NR>1{print $1}'); do
+      echo "── ${h}：输入它的登录密码"
+      ansible-playbook playbooks/site.yaml --limit "$h" --ask-become-pass
+    done
 
 # 系统更新四个配方共用 playbooks/os-update.yaml，刻意不进 site：site 是可反复跑的配置，
 # 这个会重启机器。前置条件与验收内容见 README「系统更新」。
 # 只读：列出待装的 macOS 更新、本次会装什么、前置检查是否满足（不要密码，不改任何东西）
-os-updates:
-    ansible-playbook playbooks/os-update.yaml --check
+os-updates target="macs":
+    ansible-playbook playbooks/os-update.yaml --check --limit '{{target}}'
 
 # ⚠️ 需要重启时会**自动重启**并等它回来验收，正在跑的 multica 任务 / OMLX 推理会被中断。
-# 大版本（如 macOS 27）一律跳过。确认计划并输入登录密码后才动手。
-# 装 macOS 小版本/安全更新 + Safari/CLT 等（交互输入登录密码）
-os-update:
-    ansible-playbook playbooks/os-update.yaml
+# 大版本（如 macOS 27）一律跳过。确认计划并输入登录密码后才动手。一次只能一台。
+# 装 macOS 小版本/安全更新 + Safari/CLT 等（交互输入登录密码；host 必填，如 mbp-m2-pro）
+os-update host:
+    ansible-playbook playbooks/os-update.yaml --limit '{{host}}'
 
 # 只装免重启的更新（Safari/CLT 等），需重启的一次性留给 just os-update
-os-update-no-restart:
-    ansible-playbook playbooks/os-update.yaml -e allow_restart=false
+os-update-no-restart host:
+    ansible-playbook playbooks/os-update.yaml --limit '{{host}}' -e allow_restart=false
 
 # ☠️ 大版本升级后可能要重新批准 Tailscale 系统扩展、或停在升级后的设置助手 ——
 #    任何一个都会让这台远程机失联，只能去现场处理。确认有人能碰到机器再跑。
 # 大版本升级（如 macOS 26 → 27），其余同 os-update
-os-upgrade-major:
-    ansible-playbook playbooks/os-update.yaml -e allow_major=true
+os-upgrade-major host:
+    ansible-playbook playbooks/os-update.yaml --limit '{{host}}' -e allow_major=true

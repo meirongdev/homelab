@@ -1,7 +1,7 @@
 ---
-# Connectivity check: confirms the MacBook is reachable over Tailscale + the SSH key works.
-- name: Ping the MacBook
-  hosts: macbook
+# Connectivity check: confirms every Mac is reachable over Tailscale + the SSH key works.
+- name: Ping the Macs
+  hosts: macs
   gather_facts: false
   tasks:
     - name: Ping

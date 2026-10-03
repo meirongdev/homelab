@@ -22,7 +22,7 @@ mod zitadel 'zitadel/terraform/justfile'              # 身份 / SSO terraform
 mod proxmox 'proxmox/terraform/justfile'              # pve 上的 VM 预配
 mod proxmox-storage 'proxmox/terraform-storage/justfile'  # 106 上的 worker VM 预配
 mod proxmox-ansible 'proxmox/ansible/justfile'        # pve / 106 宿主机配置
-mod macbook 'macbook/ansible/justfile'                # 远程无头 M2 MacBook
+mod macbook 'macbook/ansible/justfile'                # 远程无头 Mac：M2 MacBook + Mac Studio
 mod aiven 'aiven/terraform/justfile'                  # Aiven free-tier PostgreSQL（外部库，与集群内 apps-pg 无关）
 
 

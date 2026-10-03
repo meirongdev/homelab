@@ -24,8 +24,12 @@
 #
 # 一次只装**一个**需重启的更新（取版本最高的；小版本会覆盖更早的安全补丁），
 # 其余下次再跑。需要「关机」才能完成的更新一律不装（远程关了机没人按电源键）。
+#
+# 一次只动**一台** Mac（justfile 的真装配方都要求传 host，下面另有断言兜底）：
+# pause 只问一次密码，而每台的登录密码不同；两台同时重启也就同时失联。
+# 只读的 `just os-updates` 可以一次看全部。
 - name: macOS software update (unattended restart)
-  hosts: macbook
+  hosts: macs
   gather_facts: true            # 需要 ansible_facts.user_id
   vars:
     # 大版本升级默认跳过：升级后可能要重新批准 Tailscale 系统扩展、或停在
@@ -176,6 +180,15 @@
       ansible.builtin.meta: end_host
 
     # ── 真装 ─────────────────────────────────────────────────────────────────
+    - name: Refuse to install on more than one Mac at a time
+      ansible.builtin.assert:
+        that: ansible_play_hosts_all | length == 1
+        fail_msg: >-
+          这次会装到 {{ ansible_play_hosts_all | join(' + ') }} 上。一次只升级一台
+          （密码各不相同，且重启会同时失联）：just os-update <host>
+        quiet: true
+      run_once: true
+
     # 这一步同时是确认闸门：看过上面的计划再输密码，Ctrl-C 再按 A 中止。
     - name: Confirm the plan and read the login password
       ansible.builtin.pause:
