@@ -279,7 +279,8 @@ rate(omlx_alltime_cached_prompt_tokens_total[30m])
 ## 物理约束（读面板要知道的）
 
 **mac-studio**：OMLX 设置全用默认（`just omlx` 只写那四个键），内存天花板是自动档，
-2026-10-03 实测 `final_ceiling` = 113931797392 B（≈106 GiB）；暂无模型，模型由 admin 面板下载。
+2026-10-03 实测 `final_ceiling` ≈ 106 GiB（随可用内存小幅浮动）。模型：`Qwen3.8-27B-MLX-4bit`
+（VLM，估算 16.9G，冷装载 14.4s，解码约 29 tok/s），下载方法见 `macbook/ansible/README.md`。
 下面这张表**只是 mbp-m2-pro 的**，别套到 Studio 上。
 
 **mbp-m2-pro**：来自它的 `~/.omlx/settings.json` 与 `model_settings.json`（2026-08-22 实测值）：

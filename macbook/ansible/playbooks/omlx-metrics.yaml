@@ -170,10 +170,14 @@
   handlers:
     # bootout 是异步的：没等它消失就 bootstrap 会拿到
     # "Bootstrap failed: 5: Input/output error"（同 node-exporter.yaml 的 handler）。
+    # ☠️ 只重启**已经加载**的 agent。首次装载归上面的 "Deploy the agent"，它先确认
+    #    stats.json 存在；handler 要是无条件 bootstrap，就会在 play 结束时绕过那道闸 ——
+    #    2026-10-03 Mac Studio 首装时它就这样空转了 40 轮（每轮一行 "No such file"）。
     - name: reload omlx textfile collector
       ansible.builtin.shell: |
         uid=$(id -u)
         label="{{ otc_label }}"
+        launchctl print "gui/${uid}/${label}" >/dev/null 2>&1 || exit 0
         launchctl bootout "gui/${uid}/${label}" 2>/dev/null || true
         for _ in 1 2 3 4 5; do
           launchctl print "gui/${uid}/${label}" >/dev/null 2>&1 || break

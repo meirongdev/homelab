@@ -134,10 +134,16 @@ just os-upgrade-major <host> # 大版本升级（如 26 → 27），见下文风
 | ⚠️ 第二个 Tailscale | brew 的 `tailscale` formula 也装了，它的 `tailscaled` 以 root LaunchDaemon（`sh.brew.tailscale`）常驻，处于 **Logged out**，占着一个 utun。隧道是 App 那个的，这个是多余的；两套 daemon 并存是隐患，清掉：`sudo brew services stop tailscale && brew uninstall tailscale` |
 | 渲染器 venv（omlx-metrics 的跨仓依赖）| ✅ 已手动建：`git clone https://github.com/meirongdev/mlx-learning.git ~/projects/meirongdev/mlx-learning && cd $_ && uv sync`（公开仓，走 https 不需要 GitHub 凭据）|
 
-⚠️ Studio 上**还没有模型**：`omlx-metrics` 装好了 plist 但没启动（`stats.json` 要等 OMLX
-服务过一次请求才出现），json-exporter 那边每 30s 一条 `load_seconds_per_gb_estimate` 的
-`null` ERROR 也是同一个原因。在 admin 面板（`http://100.98.220.75:8000/admin`）下好模型、
-跑过一次推理后，`just omlx-metrics mac-studio` 补完链路 B。
+**模型**（2026-10-03）：`Qwen3.8-27B-MLX-4bit`（HF `lmstudio-community/Qwen3.8-27B-MLX-4bit`，
+16.1 GB，VLM，262k ctx）。实测冷装载 14.4s、短 prompt 解码约 29 tok/s。
+OMLX 0.7 的目录布局是 `~/.omlx/models/<org>/<name>/`，模型 ID **不带 org**；M2 上那批
+`org__name` 平铺目录是旧版留下的，两种都能识别。命令行下载与 admin 面板等价，但 OMLX
+**只在启动时扫描**，下完要 `launchctl kickstart -k gui/$(id -u)/sh.brew.omlx` 才会出现在 `/v1/models`：
+```bash
+ssh -i ~/.ssh/vgio matstudio@100.98.220.75
+D=~/.omlx/models/<org>/<name>
+HF_HUB_DISABLE_XET=1 /opt/homebrew/opt/omlx/libexec/bin/hf download <org>/<name> --local-dir "$D"
+```
 
 ## 相关（在本 repo 别处）
 
