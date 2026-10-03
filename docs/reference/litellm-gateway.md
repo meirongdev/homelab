@@ -1,6 +1,6 @@
 # LiteLLM 网关（运维事实与坑）
 
-> Last updated: 2026-10-03
+> Last updated: 2026-10-04
 > Status: 生效事实
 > Scope: `llm.meirong.dev` 这个 LLM 网关的配置生效路径、鉴权分层、上游可用性边界，
 > 本文是 source of truth。为什么选 LiteLLM、上游怎么选、Mac 兜底为何换 Ornith，见
@@ -96,7 +96,7 @@ curl -s -H "Authorization: Bearer $MK" "https://llm.meirong.dev/key/info?key=$VK
 # 覆盖白名单（整个列表替换，不是增量）
 curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
   -d '{"key":"'"$VK"'","models":["custom_dgx/qwen3.8-27b-sglang","qwen3.8-27b-sglang",
-       "mac/ornith","mac/ornith-fast","openrouter/*","nvidia/*"]}' \
+       "mac/ornith","mac/ornith-fast","openrouter/*"]}' \
   https://llm.meirong.dev/key/update
 ```
 
@@ -317,59 +317,14 @@ v2 的任务投递依赖 OpenAI 后端那边的线程状态，自建 vLLM 没有
 或谁手动开了 v2，都不会再撞 400；② `encrypted_function_args` 等另三种类型同样会撞，
 不限于多 agent 场景。
 
-## ☠️ 上游 `nvidia/*` 打不通：是 `model` 字段的双前缀，不是 key 的问题
-
-清单里写的是 `model_name: "nvidia/*"` → `model: "openai/nvidia/*"`。LiteLLM 用别名里被
-`*` 捕获的部分去替换 `model` 里的 `*`，于是发给上游的模型名带上了多余的 `nvidia/`。
-
-2026-08-25 在 litellm pod 里直连 `integrate.api.nvidia.com` 实测（用的就是网关自己那把
-`NVIDIA_API_KEY`）：
-
-| 发出去的 model | 结果 |
-|---|---|
-| `meta/llama-3.3-70b-instruct`（裸名）| 200 OK |
-| `nvidia/meta/llama-3.3-70b-instruct`（网关实际发的形状）| 404 `page not found`，与经网关调用时报的错逐字相同 |
-
-**所以 key 是好的、上游是通的，坏的是 `model` 字段的写法。**
-
-⚠️ **一个曾经的误判，写下来免得重复**：一度以为「NVIDIA 一把 key 只授权一个模型、要用别的
-免费模型得另外生成 key」。实测不成立：拿这把 key 查 `GET /v1/models` 返回 102 个模型
-（`deepseek-ai/deepseek-v4-flash-0731`、`meta/llama-3.3-70b-instruct`、`google/gemma-4-31b-it`、
-`minimaxai/minimax-m3`、`mistralai/mistral-large` 等），且裸名调用成功。判据很简单：
-**授权问题回 401/403，`404 page not found` 是路由/模型名对不上**，别把这两类混起来。
-
-**怎么修（未部署验证）**：把 `model` 改成 `"openai/*"`，让捕获到的通配内容单独成为模型名：
-
-```yaml
-      - model_name: "nvidia/*"
-        litellm_params:
-          model: "openai/*"                       # 不是 openai/nvidia/* —— 后者会多带一层前缀
-          api_base: https://integrate.api.nvidia.com/v1
-          api_key: os.environ/NVIDIA_API_KEY
-```
-
-改完必须实调一次确认（`nvidia/meta/llama-3.3-70b-instruct` 应回 200），**别只看
-`/v1/models` 里有没有它**，见下条。
-
-⚠️ 它还污染 `/v1/models`：master key 查询会看到 200+ 个 `nvidia/` 前缀条目，内容却是
-OpenAI 的模型名（`nvidia/gpt-4o`、`nvidia/dall-e-3`、`nvidia/sora-2`、`nvidia/o3` …），
-NVIDIA 上并不存在。这是 LiteLLM 按 openai provider 的静态模型表展开通配的结果，与 key 能
-访问什么无关。**别拿 `/v1/models` 里出现某个 `nvidia/X` 当作它可用的证据。**
-
-这把 key 实际能用的模型清单（102 个，随 NVIDIA 目录变）现取：
-
-```bash
-POD=$(kubectl --context k3s-homelab -n litellm get pod -l app=litellm -o jsonpath='{.items[0].metadata.name}')
-kubectl --context k3s-homelab -n litellm exec "$POD" -- python3 -c "
-import os,json,urllib.request
-r=urllib.request.Request('https://integrate.api.nvidia.com/v1/models',
-    headers={'Authorization':'Bearer '+os.environ['NVIDIA_API_KEY']})
-print('\n'.join(m['id'] for m in json.load(urllib.request.urlopen(r,timeout=30))['data']))"
-```
-
-## 怎么查「哪些模型能免费用」（两个 provider 口径完全不同）
+## 怎么查「哪些模型能免费用」
 
 下次要挑模型解决问题，从这里开始查，别凭印象。
+
+NVIDIA build.nvidia.com 曾是第四来源（`nvidia/*`），**2026-10-04 删除**：路由写成
+`openai/nvidia/*` 会给上游模型名多带一层前缀，自 2026-08-25 起全部 404，没有消费方，
+还给 `/v1/models` 灌进 200+ 个不存在的条目。当时的排查、修法与模型筛选（本机仓库根目录）：
+`git show 9271654:docs/reference/litellm-gateway.md`。
 
 ### OpenRouter：按模型分免费/付费，公开 API 免鉴权可查
 
@@ -404,22 +359,14 @@ shell 里会 SyntaxError，第一版就这么写错过。）
 **免费档限额**（官方 docs 原文）：20 请求/分；终身购买信用 < $10 → 50 请求/天，
 ≥ $10 → 1000 请求/天（买过一次就永久提档）。负余额会让免费模型也报 402。
 
-### NVIDIA build.nvidia.com：不按模型分，是信用点制
-
-**「哪些模型免费」对 NVIDIA 是个错问题**：所有 NIM 托管模型共用同一份免费额度，
-注册赠 1000 点（约 1 点 = 1 次调用），可申请加到 5000；40 RPM（可申请 200）。
-用完的是点数，不是某个模型的权限。
-
-所以对 NVIDIA 要问的是「这把 key 能调哪些」，命令见上一节（查 `/v1/models` 的那条）。
-单个模型的发布日期/能力/许可看 `https://build.nvidia.com/<model-id>/modelcard`。
-
-⚠️ **列表里有不等于能调**，实测（2026-08-25）：`moonshotai/kimi-k2.6` 在那 102 个里但调用回
-404；`nvidia/nemotron-3-ultra-550b-a55b` 回 503 `service temporarily overloaded`。
+⚠️ **免费档不能当兜底**：503 / 超时 / 429 都实际撞到过（`poolside/laguna-xs-2.1:free`
+经 OpenRouter 直接 429）。它只配当「碰运气的额外一档」，不能进 `fallbacks` 链当依赖。
 
 ### ☠️ 同一个模型换 provider，思维链是否分离会变
 
 这是挑模型时最容易踩的一条：**`reasoning_content` 能不能正确分离，取决于 provider 的
-托管实现，不是模型本身**。同一个 `nemotron-3.5-lightning`，同一个提示词：
+托管实现，不是模型本身**。同一个 `nemotron-3.5-lightning`，同一个提示词（2026-08-25；
+NVIDIA 路由已删，结论对挑任何 provider 都成立）：
 
 | 路径 | finish | content | reasoning_content |
 |---|---|---|---|
@@ -429,92 +376,6 @@ shell 里会 SyntaxError，第一版就这么写错过。）
 **所以「这个模型能用吗」必须按 `(provider, model)` 组合验证，不能只按模型名。**
 判断办法就是发一次真实请求看 `message` 的 key 和 `content` 首行，与 Mac OMLX 那个坑同源
 （见下一节），只是这次变量是 provider 而不是 `max_tokens`。
-
-### 可用性实测（2026-08-25，绕过网关直连 NVIDIA）
-
-同一编码任务，`max_tokens=700`：
-
-| 模型 | 状态 | 延迟 | 出 tok | reasoning 分离 |
-|---|---|---|---|---|
-| `poolside/laguna-xs-2.1` | stop | 0.7–1.0s | 34 | 无思维链 |
-| `nvidia/nemotron-3-super-120b-a12b` | stop | 2.5s | 90 | ✅ |
-| `minimaxai/minimax-m3` | stop | 4.4s | 50 | 无思维链 |
-| `nvidia/nemotron-3.5-lightning-30b-a3b` | stop | 9.0–15.8s | 424–456 | ✅ |
-| `moonshotai/kimi-k3` | stop | 19.3s | 46 | ✅ |
-| `stepfun-ai/step-3.7-flash` | stop | 44.6s | 342 | ✅ |
-| `deepseek-ai/deepseek-v4-flash-0731` | stop / 超时 | 221.5s / >70s | 33 | 无思维链 |
-| `nvidia/nemotron-3-ultra-550b-a55b` | 503 | — | — | — |
-| `openai/gpt-oss-120b` | 超时 | >240s | — | — |
-
-能用的那些输出全部正确、`content` 全部干净（NVIDIA 托管端的 parser 是对的）。
-
-⚠️ **修正一条先前的推荐**：本文档曾把 `deepseek-v4-flash-0731` 标为「与 DGX 主力同款，
-适合做同模型兜底」。**推理成立但实测否掉了它**（而且 2026-09-02 起 DGX 主力是
-Qwen3.8-Flash-Next，连"同款"这个前提本身也不成立了）：221.5s 才吐 33 个 token，比本地 DGX（~4s）
-慢两个数量级，当兜底只会让请求挂死。按数据要在 NVIDIA 里选一个，是
-`poolside/laguna-xs-2.1`（0.7s、零思维链、专做 agentic coding，比本地 DGX 还快），
-`nemotron-3.5-lightning-30b-a3b` 作为要多模态/更强推理时的第二选择。
-
-⚠️ **免费档不能当兜底**：503 / 超时 / 429 都实际撞到过（`poolside/laguna-xs-2.1:free`
-经 OpenRouter 直接 429）。它只配当「碰运气的额外一档」，不能进 `fallbacks` 链当依赖。
-
-## NVIDIA provider 可用模型（只列近 3 个月发布的）
-
-**口径**：只考虑发布日期在最近 3 个月内的模型，更早的一律不用（模型迭代太快，
-旧版在编码/agent/工具调用上差一代就明显吃亏）。本表窗口 = 2026-05-25 ~ 2026-08-25。
-
-☠️ **日期不能从 API 拿**：NVIDIA 的 `GET /v1/models` 里 `created` 字段是常量假值
-（102 个模型全是 `735790403` = 1993-04-26）。所以下表日期全部来自**厂商公告/模型卡**，
-刷新本表时必须重查，不能指望接口。每个模型的权威来源是
-`https://build.nvidia.com/<model-id>/modelcard`。
-
-### 窗口内 · 适合开发用途
-
-| 模型 | 发布 | 是什么 |
-|---|---|---|
-| `nvidia/nemotron-3.5-lightning-30b-a3b` | 2026-08-11 | 30B MoE / 3B 激活，为 agent 执行做的「快」档，单 H100 可跑 |
-| `meta/muse-glimmer-30b` | 2026-08-10 | Meta 自 Llama 4 后首个开放权重模型；30B dense 多模态、agent 调优、Apache 2.0 |
-| `deepseek-ai/deepseek-v4-flash-0731` | 2026-07-31 | 曾是 DGX 主力同款（2026-09-02 起不再是），且免费档实测 221.5s / 超时，不可用（见上方实测表）|
-| `moonshotai/kimi-k3` | 2026-07-16（权重 07-27）| 2.8T MoE、1M ctx、原生视觉；agentic coding 强 |
-| `poolside/laguna-xs-2.1` | 2026-07-02 | 33B MoE / 3B 激活，专做 agentic coding |
-| `minimaxai/minimax-m3` | 2026-05-31 | 1M ctx + 原生多模态 + 前沿编码，开放权重 |
-| `stepfun-ai/step-3.7-flash` | 2026-05-29 | 198B MoE VLM（~11B 激活），面向编码 agent 与检索流程 |
-| `nvidia/nemotron-3-ultra-550b-a55b` | 2026-06-04 | 550B/55B 激活推理模型；最强但也最慢，按需用 |
-
-### 窗口内 · 但与开发无关（列出以免重复筛查）
-
-| 模型 | 发布 | 为什么不用 |
-|---|---|---|
-| `nvidia/ising-calibration-1.5-31b` | 2026-07-20 | 量子标定图像解读专用 VLM |
-| `thinkingmachines/inkling` | 2026-07-15 | base 模型（给你微调用的），不是 instruct，直接当助手用会很怪 |
-| `google/diffusiongemma-26b-a4b-it` | 2026-06-10 | 文本扩散，实验性；快但不是通用助手 |
-| `nvidia/nemotron-3.5-content-safety` | 2026-06-04 | 4B 护栏/审核模型 |
-
-### 刚好落在窗口外（别再考虑）
-
-`moonshotai/kimi-k2.6`（2026-04-20）· `google/gemma-4-31b-it`（2026-04-02）·
-`nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`（2026-04-28）·
-`nvidia/nemotron-3-super-120b-a12b`（2026-03-11）·
-`nvidia/nemotron-3-nano-30b-a3b` 与 `nvidia/nemotron-nano-3-30b-a3b`（2025-12）·
-`nvidia/cosmos-reason2-8b`（2025-12-19）· `openai/gpt-oss-120b` / `gpt-oss-20b`（2025-08）。
-
-⚠️ **那 8 个名字带 code 的是陷阱**：`starcoder2-15b`、`codegemma-*`、
-`deepseek-coder-6.7b-instruct`、`granite-*-code`、`codellama-70b`、`codestral-22b` 是
-补全式老模型，不跟随指令、不会用工具，拿来当开发助手很难用。别被名字骗了。
-
-其余约 70 个（`llama-3.1/3.2`、`gemma-2b/3`、`mistral-7b-v0.3`、`phi-3`、`granite-3.0`、
-`yi-large`、`llama2-70b`、`mixtral-8x22b`、`nemotron-4-340b`、各类 embedding /
-reranker / nemoguard / 视觉 / riva-translate / palmyra 垂类）全部早于窗口或非对话用途。
-
-未逐一核实日期的（都不是对话模型，用不到就没查）：`mistralai/mistral-nemotron`、
-`nvidia/llama-3.3-nemotron-super-49b-v1.5`、`nvidia/nemotron-3-embed-1b`、
-`nvidia/llama-nemotron-embed-1b-v2`、`nvidia/llama-nemotron-embed-vl-1b-v2`、
-`nvidia/nemotron-parse`、`nvidia/nemotron-nano-12b-v2-vl`、
-`nvidia/ai-synthetic-video-detector`、`nvidia/riva-translate-4b-instruct-v2`、
-`nvidia/llama-3.1-nemotron-safety-guard-8b-v3`、`writer/palmyra-creative-122b`。
-**要用它们之前先查日期**，别假设在窗口内。
-
-⚠️ 上表只说明「发布在窗口内」，不代表可用，可用性看上方实测表。
 
 ## 上游是思维链模型：小 `max_tokens` 会把思维链漏进 `content`
 

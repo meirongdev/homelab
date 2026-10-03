@@ -24,7 +24,7 @@
 - [open-notebook.md](open-notebook.md) — AI 研读知识库：部署形态、模型接线（DGX + Mac OMLX）、配置真相源地图、备份口径
 - [litellm-gateway.md](litellm-gateway.md) — LLM 网关运维事实。☠️ **配置真相源分两半**：模型/路由在 git，
   虚拟 key 的模型白名单在 Postgres，改别名不同步改 key 就「配置正确 + 调用全挂」。
-  另含 `/v1/models` 为何会自查误判、`nvidia/*` 双前缀、免费模型怎么查、按 (provider, model) 验证思维链、
+  另含 `/v1/models` 为何会自查误判、免费模型怎么查、按 (provider, model) 验证思维链、
   按 key 查用量与真实来源 IP、对外发 key 的参数
 - [jobs-sg.md](jobs-sg.md) — SG 岗位周报：独立 ns + 3 个 CronJob、digest 固定、备份两条路径、bootstrap 依赖
 - [calibre-metadata.md](calibre-metadata.md) — 书库元数据：覆盖率实测、mtime 冒充出版日期（487 本）、回补匹配门与判据、拿不到书评/评分的边界
