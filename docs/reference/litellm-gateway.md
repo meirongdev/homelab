@@ -25,7 +25,7 @@
 | **虚拟 key 能访问哪些模型** | Postgres | 只能调 API（坑 A）|
 | 花费账本 / key 有效期 | Postgres | `/ui` 或 API |
 
-## DGX 主力栈：2026-09-19 换成 Qwen3.8-27B-Uncensored (SGLang)
+## DGX 主力栈：2026-09-30 起是 Qwen3.8-Flash-Next 双机 TP=2（vLLM）
 
 上游（`~/projects/meirongdev/nv-dgx-spark`）单方面换栈，本仓库只是跟着改引用。**这一节是本
 仓库关于该上游的唯一真相源**；换栈的技术理由与压测数据在 nv-dgx-spark 仓库，不在这里复制。
@@ -37,34 +37,37 @@
 [plans/2026-09-03-dgx-model-swap-optimizations.md](../plans/2026-09-03-dgx-model-swap-optimizations.md)
 （📐 未实施，所以本页的机制描述仍是现状，别照着它以为门禁已经存在）。
 
+⚠️ 2026-09-30 这次换栈只改了清单（`c4795ac`），本节与 jobs-sg / open-notebook 两页到
+2026-10-04 才补上，期间写的一直是上一栈 SGLang `:8888`。SOP 里「改文档」那步漏掉就是这个样子。
+
 | | |
 |---|---|
-| 上游栈 id | `qwen38un`（Qwen3.8-27B-Uncensored NVFP4 + SGLang + DFlash2 投机解码）|
-| served name | `qwen3.8-27b-sglang` |
-| 端点 | ☠️ **变了**：`100.97.87.120:8888/v1`（docker/SGLang）。上一栈的 `:8000`（k3s/vLLM）**已完全不监听** —— 旧引用拿到的是 connection refused，不是 404 |
-| 引擎 | **SGLang**（前两栈都是 vLLM）。☠️ 它**接受任意 model 名并原样回显**，vLLM 才会 404 —— 所以"请求成功了"**不能**证明模型名写对了，唯一判据是 `/v1/models` 报的 served name |
-| `max_model_len` | **262144**（与上一栈相同）。这次长上下文规划不用重算 |
-| 拓扑 / 冷启动 | **网关单节点**（`tp_size=1`，只路由 S1；⚠️ 2026-09-20 起 S2 不再空闲 —— 上游在其上常驻新栈 `fndgx`（vLLM 单节点 `qwen3.8-flash-next`，`100.67.164.92:18300`），但**未入本网关**：无别名、无虚拟 key 白名单，与主力栈并跑仅供直连消费方）。加载**约 3 分钟**（权重只有 23 GiB，上一栈 126 GiB）。`DgxSparkInferenceDown` 的 `for` 因此从 15m 收回 10m |
-| 自愈 | ☠️ **没有**：docker + tmux，既无 liveness 探针也无 `--restart`（上游刻意如此）。引擎挂了会一直挂着，直到有人动手 |
-| 并发 | `max_running_requests=16`；KV 池 1,220,951 token（`mem-fraction-static 0.80`）≈ 4.6 路满窗并发 —— 这次**条数才是瓶颈**，KV 不是。排队告警阈值仍**不**按 16 等比抬（理由见告警注释）|
-| 关思考 | `chat_template_kwargs {"enable_thinking": false}`（✅ 实测有效）；顶层 `reasoning_effort` 枚举换成 `xhigh`(默认)/`medium`/`low`，旧栈的 `minimal` 现在回 **400** |
-| CoT 字段 | `reasoning_content`（不是 `reasoning`；GLM 那栈才是后者）|
+| 上游栈 id | `hibrid48tp2`（Qwen3.8-Flash-Next hibrid48 NVFP4，K=5 MTP 投机解码）。定义在上游 `stacks/hibrid48tp2/stack.env` |
+| served name | `qwen3.8-flash-next-tp2` |
+| 端点 | `100.97.87.120:8000/v1`（head 在 S1）。上一栈的 `:8888` 已不响应（2026-10-04 实测）|
+| 引擎 | vLLM 0.30.0（`GET :8000/version`）。模型名写错回 **404** `The model ... does not exist`；上一栈 SGLang「任意名字原样回显 200」的坑不再存在 |
+| `max_model_len` | 262144 |
+| 拓扑 / 冷启动 | **双机 TP=2，占满 S1+S2 两台的 GPU**。09-20 起在 S2 上常驻的 `fndgx`（`100.67.164.92:18300`）已停。加载约 4–5 分钟（上游 `STACK_LOAD_TIME`）。☠️ 两个 rank 必须成对起停，上游 `make restart` 是唯一安全路径，别单独重启一台 |
+| 自愈 | 未核实。运行时仍是 docker + tmux（`STACK_RUNTIME` / `STACK_TMUX`），重启策略写在 DGX 本机的启动脚本里，本仓库和上游仓库都看不到 |
+| 并发 | `max-num-seqs=64`。上游实测单流约 99 tok/s、64 并发聚合约 562 tok/s |
+| 关思考 | `chat_template_kwargs {"enable_thinking": false}`，直连与经网关都实测有效（`reasoning_tokens=0`）|
+| `reasoning_effort` | 只认 `low` / `medium` / `xhigh`（默认）；`minimal`、`high` 回 400 `Unexpected reasoning effort …`。档位集合每次换栈都变过，别跨栈照抄 |
+| CoT 字段 | ☠️ **直连是 `reasoning`，经网关是 `reasoning_content`**（LiteLLM 改写，原字段留在 `provider_specific_fields.reasoning`）。直连的消费方若只读 `reasoning_content`，会恒读到空 |
+| `reasoning_tokens` | 有值，关思考时为 0。上一栈 SGLang 恒为 `null` 的问题不再存在 |
 | 回滚 | 上游 `make switch TO=<stack-id>`（`make stack-check` 列出可选）。☠️ 回滚要把网关别名 + jobs-sg + open-notebook + oracle calibre 四处一起回退，**外加坑 A 的 key 白名单** |
 
-☠️ **网关这条路传不了 `reasoning_effort`**（2026-09-19 实测，与栈无关，是 LiteLLM 的行为）：
-`openai/` 自定义端点上这个参数被判为不支持，回
-`litellm.UnsupportedParamsError: openai does not support parameters: ['reasoning_effort']`；
-裸别名上还会再掉进 `fallbacks` 然后回 500。**同一个参数直连 DGX 的 `:8888` 是 200。**
-所以「给推理封顶」这件事只有**直连**的消费方（jobs-sg enrich）做得到，**经网关的做不到**
-（calibre 元数据作业）。要在网关侧放行，得开 `litellm_settings.drop_params` 或按请求传
-`allowed_openai_params=['reasoning_effort']` —— 两者都还没做，别假设它能用。
+✅ **经网关可以传 `reasoning_effort`**（2026-10-04 实测，镜像 v1.103.1）：对带前缀的
+`custom_dgx/qwen3.8-flash-next-tp2` 传非法档位 `minimal`，回的是 DGX 自己的 400 原文，
+说明参数确实转发到了上游。本页先前写的「网关传不了，报 `UnsupportedParamsError`」是
+2026-09-19 旧版 LiteLLM 的行为，已不成立。
 
-☠️ **`usage.completion_tokens_details.reasoning_tokens` 在这一栈恒为 `null`**（vLLM 才导出它）。
-运行簿里"用 reasoning_tokens 判断思考有没有被关掉"的老办法在这里会读到 `None`，**与"推理确实
-被关掉了"完全同形**。新判据是 `choices[0].message.reasoning_content` 的长度（关掉时 0 字符）。
+☠️ **但裸别名上，参数错误会被兜底悄悄吞掉**：同样传 `minimal` 给 `qwen3.8-flash-next-tp2`，
+DGX 回 400 → 走 `fallbacks` → `mac/ornith` 接受这个参数 → **200**，只有响应里的 `model`
+（`ornith-ai__…`）看得出换了模型。调参数、试档位时用带前缀的别名，错误才会原样回来。
+机制见坑 A2 末尾。
 
-⚠️ **质量闸门仍未跑**：与上一栈同样的情况 —— 速度与契约（严格 JSON、关思考）已实测，
-**输出质量没有**。另外这是一个 uncensored 微调，对齐行为与上游原版不同，别假设一致。
+⚠️ **质量**：上游只给了速度基准（`benchmarks/hibrid48tp2-2026-09-30/`），本仓库这次换栈
+没有记录输出质量的验证。
 
 ## ☠️ 坑 A：虚拟 key 的模型白名单在 Postgres 里，git 完全管不到
 
@@ -95,7 +98,7 @@ curl -s -H "Authorization: Bearer $MK" "https://llm.meirong.dev/key/info?key=$VK
 
 # 覆盖白名单（整个列表替换，不是增量）
 curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
-  -d '{"key":"'"$VK"'","models":["custom_dgx/qwen3.8-27b-sglang","qwen3.8-27b-sglang",
+  -d '{"key":"'"$VK"'","models":["custom_dgx/qwen3.8-flash-next-tp2","qwen3.8-flash-next-tp2",
        "mac/ornith","mac/ornith-fast","openrouter/*"]}' \
   https://llm.meirong.dev/key/update
 ```
@@ -158,7 +161,7 @@ litellm.BadRequestError: LLM Provider NOT provided. ... You passed model=mac/orn
 
 ```yaml
 router_settings:
-  fallbacks: [{"qwen3.8-27b-sglang": ["mac/ornith"]}]
+  fallbacks: [{"qwen3.8-flash-next-tp2": ["mac/ornith"]}]
 ```
 
 ☠️ **为什么拖了这么久没被发现**（三条叠加）：
@@ -190,6 +193,10 @@ router_settings:
 不是返回码。
 
 修完之后那条误导性的 500 一并消失了（现在直接回 400 + 真实原因）。
+
+☠️ **上面说的那种组合，2026-10-04 已经出现**：新版 LiteLLM 会把 `reasoning_effort` 转发给
+上游，而 Mac 接受 `minimal`、DGX 不接受。于是裸别名传 `minimal` 时兜底真的打到了 Mac，
+回 200（见本页 DGX 一节）。上面那张表第二行描述的是 09-19 的版本，现在不再成立。
 
 ⚠️ **只有裸别名配了兜底，`custom_dgx/` 前缀那条刻意不配**：它是给"我就是要打 DGX"的
 消费方用的，被静默换成 Mac 反而有害（实测它现在会老老实实报连接错误）。
@@ -382,13 +389,13 @@ NVIDIA 路由已删，结论对挑任何 provider 都成立）：
 `reasoning_content` 的切分依赖 `</think>` 闭合标签；token 用完标签不出现，parser 就失去切分
 依据、把整段思考原样放进 `content`（不报错、不告警，只是答案变成一坨思考过程）。
 
-- 受影响的是所有自托管上游（DGX 的 `qwen3.8-27b-sglang`、Mac 的 Ornith 都是思维链模型），
+- 受影响的是所有自托管上游（DGX 的 `qwen3.8-flash-next-tp2`、Mac 的 Ornith、Studio 的
+  Qwen3.8-27B 都是思维链模型），
   不是某个模型的缺陷；
-- DGX 侧的开关与 Mac 不同：`--reasoning-parser qwen3` 已开，单请求可发
-  `chat_template_kwargs: {"enable_thinking": false}` **真关掉思考**（实测 2026-09-03：
-  `reasoning_tokens=0`、`content` 干净）。`reasoning_effort` 只接受
-  `none`/`low`/`medium`/`xhigh`，**`high` 会被 400 拒**（报错文本还漏了 `none`，别照抄）。
-  ⚠️ 这套枚举与旧栈 V4-Flash 完全不同（那边只有 `max` 真生效），**别跨栈照抄档位**；
+- DGX 侧的开关与 Mac 不同：单请求发 `chat_template_kwargs: {"enable_thinking": false}`
+  **真关掉思考**（2026-10-04 实测：`reasoning_tokens=0`、`content` 干净）。`reasoning_effort`
+  的档位见本页 DGX 一节。⚠️ 档位集合每换一次栈都变过（09-03 那栈还认 `none`，V4-Flash
+  只有 `max` 真生效），**别跨栈照抄档位**；
 - ☠️ **关思考的 kwargs 名换了，写错是静默空操作**：新栈认 `enable_thinking`，旧栈那套
   `thinking` 打上去**不报错也不生效**。2026-09-03 用 jobs-sg 线上那份提示词实测三种写法
   **都回 200**，差别只在 `usage.completion_tokens_details.reasoning_tokens`：基线 142、
@@ -412,7 +419,7 @@ NVIDIA 路由已删，结论对挑任何 provider 都成立）：
 | 机器 | Mac Studio M5 Max / 128G，OMLX 0.7.0；池天花板 ~106G，**常驻、不换入换出**（M2 那条「只暴露一个 35B」的约束不适用）|
 | 模型 | HF `lmstudio-community/Qwen3.8-27B-MLX-4bit`（VLM，262k ctx）。OMLX 0.7 的模型 ID **不带 org**，别照 M2 写成 `org__name` |
 | 兜底 | **不在任何兜底链里**，只能指名调用。它是多出来的一个可选模型，不是 DGX 的替身 |
-| key 白名单 | `LITELLM_VK`（2c15baf776…）与 xiaogpt 的专用 key（`key_alias=xiaogpt`，只有这一个模型）。其余 key 都是给特定消费方的窄 key，**刻意没加**；谁要用就按坑 A 单独加 |
+| key 白名单 | `LITELLM_VK`（2c15baf776…）、xiaogpt 的专用 key（`key_alias=xiaogpt`，只有这一个模型）、外部使用者的 `ext-team-1`（账户与 key 两层白名单都有）。其余 key 都是给特定消费方的窄 key，**刻意没加**；谁要用就按坑 A 单独加 |
 | 实测（直连，2026-10-03）| 冷装载 14.4s；开了 DFlash2 投机解码后，写代码 ~100 tok/s、中文长文 ~43 tok/s（基线 31.9，配置与数据见 `macbook/ansible/README.md`）；思维链分离到 `reasoning_content`（同样受下面「小 `max_tokens` 漏进 `content`」影响）|
 
 主机侧（OMLX 安装、key、模型下载）→ `macbook/ansible/README.md`；指标 → [omlx-inference-metrics.md](omlx-inference-metrics.md)。
@@ -515,13 +522,14 @@ curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
 
 | 消费方 | 用哪个别名 | 配置在哪 |
 |---|---|---|
-| `codex --profile litellm` | `custom_dgx/qwen3.8-27b-sglang` | `~/.codex/litellm.config.toml`（本机）|
 | `codex --profile mac` | `mac/ornith` | `~/.codex/mac.config.toml`（本机）|
 | 本机任意 OpenAI 兼容客户端 | `studio/qwen3.8-27b` | 读 `LITELLM_VK`；目前没有固定消费方 |
-| k8sgpt（`--backend openai`）| `qwen3.8-27b-sglang` | `~/Library/Application Support/k8sgpt/k8sgpt.yaml`（本机）|
-| k8sgpt（`--backend localai`）| `mac/ornith-fast` | 同上 |
-| oracle 上的 calibre 元数据作业 | `qwen3.8-27b-sglang`（经 `litellm-external` NodePort）| [清单内嵌脚本](../../cloud/oracle/manifests/calibre-metadata/metadata-llm.yaml) |
+| k8sgpt（默认，`--backend localai`）| `mac/ornith-fast` | `~/Library/Application Support/k8sgpt/k8sgpt.yaml`（本机）|
+| k8sgpt（`--backend openai`）| `qwen3.8-flash-next-tp2` | 同上。☠️ explain 输出为空：k8sgpt 0.4.39 实际按 2048 截断（无视配置里的 `maxtokens: 4096`），DGX 默认开思考，2048 全用在思考上。网关记 `success`、`completion_tokens=2048`。所以 2026-10-04 起默认后端改成 localai |
+| oracle 上的 calibre 元数据作业 | `qwen3.8-flash-next-tp2`（经 `litellm-external` NodePort）| [清单内嵌脚本](../../cloud/oracle/manifests/calibre-metadata/metadata-llm.yaml) |
 | xiaogpt（小爱音箱，homelab `personal-services`）| `studio/qwen3.8-27b`，专用 key `key_alias=xiaogpt`（2026-10-03 前借用 calibre 那把）| [xiaogpt.yaml](../../k8s/helm/manifests/personal-services/xiaogpt.yaml) 的 ConfigMap |
 | Open Notebook | **不走网关**，直连 DGX 与 OMLX | [open-notebook.md](open-notebook.md) |
+| `codex --profile dgx` / `m2` | **不走网关**，直连 DGX / M2 的 OMLX | `~/.codex/{dgx,m2}.config.toml`（本机）。原来经网关的 `--profile litellm` 已不存在 |
+| 外部使用者（UI 账户 `ext-team-1`）| 5 个自托管别名 + 17 个 OpenRouter `:free` 模型 | Postgres（账户与 key 各一层白名单），见上方「发给外部的 key」 |
 
 ⚠️ 本机消费方全部读同一个 `LITELLM_VK`（`~/.zshrc`），所以坑 A 一旦发生是全体受影响。
