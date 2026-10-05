@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Managed by Ansible (macbook/ansible/playbooks/macmon.yaml). Do not edit by hand. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{{ macmon_label }}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{ macmon_bin }}</string>
+        <string>serve</string>
+        <string>--host</string>
+        <string>0.0.0.0</string>
+        <string>--port</string>
+        <string>{{ macmon_port }}</string>
+        <!-- 与 Prometheus 抓取间隔对齐：GPU 功耗是整个采样区间的能耗均值，
+             间隔比抓取短就只看得到其中一段。 -->
+        <string>--interval</string>
+        <string>{{ macmon_interval_ms }}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>{{ ansible_facts.user_dir }}/.local/var/log/macmon.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{ ansible_facts.user_dir }}/.local/var/log/macmon.err.log</string>
+</dict>
+</plist>

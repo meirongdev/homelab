@@ -1,6 +1,6 @@
 # Homelab Changelog
 
-> Last updated: 2026-10-04
+> Last updated: 2026-10-05
 > 已经做完的事，一条一行，按阶段/时间倒着找。**这里只回答「做过什么」**——
 > 还剩什么没做看 [ROADMAP.md](ROADMAP.md)，现在是什么样看 [reference/](reference/README.md)。
 > 2026-09-02 从 ROADMAP 拆出：那份文件长到 23.8KB，9 条开放项被 65 条历史淹没，
@@ -114,6 +114,7 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-10-03 | **Mac Studio 文生图 Qwen-Image-2.1，接进 LiteLLM（`studio/qwen-image-2.1`）**：OMLX 不做文生图；现成的 mlx-openai-server 钉着 mflux<0.18（没有 2.1），Orbiter/mflux-server 支持 2.1 但接口是异步任务。于是 mflux-server（只监听本机）+ 自写约 240 行的 OpenAI 转接层（`/v1/images/generations`，只回 b64_json，失败/超时会 cancel 上游任务），`just image-gen` 部署并真出一张图验收。实测 1024²/40 步 63s、峰值 68.5 GiB。新抓取 job `mflux-mac-studio` + 告警 `MfluxUpstreamDown`（转接层活、上游死时 TargetDown 看不见） ([ADR](decisions/studio-image-generation.md) · [网关](reference/litellm-gateway.md)) |
 | 2026-10-03 | **Studio 文生图同日撤下**：实测生成一张 1024² 的那一分钟，同机 Qwen3.8-27B 解码从 111 掉到 18–26 tok/s；首次出图后常驻 29–68 GB 直到重启。Studio 的本职是对话推理，偶尔出图撑不起这个代价和维护面。移除 LaunchAgent、权重（33 GB）、网关别名与 key 白名单、抓取 job、告警与 ansible 部署；ADR 标为已退役并记下恢复路径 ([ADR](decisions/studio-image-generation.md)) |
 | 2026-10-04 | **LiteLLM 删除 NVIDIA 路由 `nvidia/*`**：自 08-25 起全部 404（`openai/nvidia/*` 给上游模型名多带一层前缀），一直没修也没有消费方，还给 `/v1/models` 灌进 203 个不存在的条目。删掉路由、`NVIDIA_API_KEY` 与 ExternalSecret `litellm-nvidia-secret`，参考页去掉 NVIDIA 三节（666→527 行），当时的排查留在 git 历史。Vault 的 `secret/homelab/litellm-nvidia` 与各虚拟 key 白名单里的 `nvidia/*` 未动（后者已匹配不到任何路由）。顺带修复 09-30 那次把表格行插进本文件标题的问题 ([网关](reference/litellm-gateway.md)) |
+| 2026-10-05 | **Mac Studio 功耗 / 温度 / 风扇进 Grafana**：Darwin 版 node_exporter 没有任何温度/功耗指标，改用 macmon（读 IOReport + SMC，无 sudo，自带 `/metrics`），`just macmon` 装成 LaunchAgent（`:9090`，采样 15s 与抓取对齐）→ job `macmon` →「Mac / Node Exporter」新增「🌡️ 功耗 / 温度」行。压测核过：整机（SMC `PSTR`，非墙插）空闲 4.3W / CPU 满载 74W / GPU 满载 104W，温度与风扇随负载变化。M5 上 CPU/内存/ANE 功耗恒为 0，抓取时按 nodename 丢掉，面板只拆「整机 / GPU / 其余」([observability-multicluster.md](reference/observability-multicluster.md)) |
 ### 审计与清理（历史）
 
 | 时间 | 内容 |
