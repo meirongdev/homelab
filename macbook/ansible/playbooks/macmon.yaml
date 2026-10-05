@@ -1,0 +1,121 @@
+---
+# Mac 的功耗 / 温度 / 风扇：macmon（https://github.com/vladkens/macmon）以 LaunchAgent
+# 常驻跑 `macmon serve`，:9090 直接吐 Prometheus 格式，homelab Prometheus 的 `macmon` job
+# 经 Tailscale 来抓。node_exporter 的 Darwin 版**没有**任何温度/功耗指标（thermal 那个
+# collector 在 Apple Silicon 上什么都不吐），这是补这一块的唯一来源。
+#
+# 为什么是 macmon：它读 IOReport + SMC，**不要 sudo**（powermetrics/asitop 都要 root，
+# 无头机上没法做成 LaunchAgent）；自带 /metrics，不需要再写一个渲染器。
+#
+# 口径（2026-10-05 在 Studio M5 Max / macOS 27.0.1 / macmon 0.8.2 上压测核过）：
+#   macmon_sys_power_watts    整机功耗 = SMC `PSTR`。空闲 4.3W，CPU 满载 74W，GPU 满载 104W。
+#                             是 SoC 侧读数、**不是墙插功率**（不含电源损耗），且是采样时刻的点值。
+#   macmon_gpu_power_watts    GPU 功耗（IOReport，整个采样区间的平均）。GPU 满载 81W。
+#   macmon_{cpu,gpu}_temp_celsius  SMC 温度探头均值。空闲 ~25°C 是真的（≈室温：4W 下大散热器
+#                             几乎不升温），CPU 满载 15s 升到 46°C、GPU 满载到 51°C。
+#   macmon_fan_speed_rpm      两个风扇；空闲 ~1000rpm（最低档）。
+# ☠️ M5 上 CPU / 内存 / ANE 功耗**恒为 0**：IOReport 里单位是 mJ 的能耗通道全读 0，
+#    只有 nJ 的「GPU Energy」有数（`macmon debug` 可见）。CPU 满载 74W 时 cpu_power 仍是 0，
+#    所以它是坏的、不是空闲。Prometheus 侧按 nodename 把这几个指标丢掉（见 `macmon` job），
+#    面板里「其余」= 整机 − GPU。升级 macmon 后在 Studio 上跑一次 `macmon stress cpu` +
+#    `macmon pipe`，cpu_power 有数了再撤掉那条 drop。
+#
+# ⚠️ 别用 `macmon serve --install`：它装的是另一个 label（com.macmon）、同样抢 :9090，
+#    而且不能带 --interval（采样会是 1s，15s 抓一次只看得到 1/15 的 GPU 能耗窗口）。
+#    采样间隔与抓取间隔对齐（15s），GPU 功耗才是两次抓取之间的真平均。
+#
+# 不升级 macmon（state=present）；`brew upgrade macmon` 之后重跑本 playbook 不会重启进程，
+# 要手动 `launchctl kickstart -k gui/$(id -u)/com.meirongdev.macmon`。
+#
+# NO sudo。幂等：已装、plist 未变时什么都不改。
+- name: macmon (power / temperature exporter)
+  hosts: macmon
+  gather_facts: true            # 需要 ansible_facts.user_dir
+  vars:
+    homebrew_prefix: /opt/homebrew
+    macmon_label: com.meirongdev.macmon
+    macmon_bin: "{{ homebrew_prefix }}/bin/macmon"
+    # 与 k8s/helm/values/kube-prometheus-stack.yaml 的 `macmon` job 对齐（端口 + 15s）。
+    macmon_port: 9090
+    macmon_interval_ms: 15000
+    macmon_plist: "{{ ansible_facts.user_dir }}/Library/LaunchAgents/{{ macmon_label }}.plist"
+
+  tasks:
+    - name: Install macmon (present only — never upgrades)
+      community.general.homebrew:
+        name: macmon
+        state: present
+        path: "{{ homebrew_prefix }}/bin"
+        update_homebrew: false
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        HOMEBREW_NO_AUTO_UPDATE: "1"
+
+    - name: Ensure log / LaunchAgents directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ ansible_facts.user_dir }}/.local/var/log"
+        - "{{ ansible_facts.user_dir }}/Library/LaunchAgents"
+
+    - name: Install LaunchAgent plist
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/com.meirongdev.macmon.plist.j2"
+        dest: "{{ macmon_plist }}"
+        mode: "0644"
+      notify: reload macmon
+
+    - name: Ensure LaunchAgent is loaded (bootstrap into the GUI domain)
+      ansible.builtin.shell: |
+        uid=$(id -u)
+        if ! launchctl print "gui/${uid}/{{ macmon_label }}" >/dev/null 2>&1; then
+          launchctl bootstrap "gui/${uid}" "{{ macmon_plist }}"
+          echo BOOTSTRAPPED
+        fi
+      register: macmon_load
+      changed_when: "'BOOTSTRAPPED' in macmon_load.stdout"
+
+    - name: Apply pending macmon restarts before verifying
+      ansible.builtin.meta: flush_handlers
+
+    # 第一个采样要等满一个 interval 才出来，之前 /metrics 没有数据行。
+    # 值取 $NF：chip 标签是 "Apple M5 Max"，带空格，按列切会切进标签里。
+    # 只看 200 不够：M5 上 CPU 功耗是一个「看起来正常的 0」，所以断言的是整机功耗与温度
+    # 两个**有值**的指标，而不是端点活着。
+    - name: Wait for the first sample
+      ansible.builtin.shell: |
+        set -o pipefail
+        curl -sf --max-time 5 http://127.0.0.1:{{ macmon_port }}/metrics \
+          | awk '/^macmon_(sys_power_watts|cpu_temp_celsius|gpu_power_watts)\{/{n=$0; sub(/\{.*/, "", n); print n"="$NF}'
+      args:
+        executable: /bin/bash
+      register: macmon_sample
+      changed_when: false
+      retries: 12
+      delay: 5
+      until: "'macmon_sys_power_watts' in macmon_sample.stdout"
+
+    - name: Assert power and temperature are real readings
+      ansible.builtin.assert:
+        that:
+          - macmon_sample.stdout is search('macmon_sys_power_watts=[0-9]*[1-9]')
+          - macmon_sample.stdout is search('macmon_cpu_temp_celsius=[1-9]')
+        fail_msg: >-
+          macmon 起来了，但整机功耗或 CPU 温度是 0（实际: {{ macmon_sample.stdout_lines }}）。
+          新芯片/新系统常见：先在机器上跑 `macmon debug` 看 SMC 的 PSTR 与温度探头能不能读。
+        success_msg: "{{ macmon_sample.stdout_lines }}"
+
+  handlers:
+    # bootout 是异步的，没退干净就 bootstrap 会报 "Bootstrap failed: 5: Input/output error"。
+    - name: reload macmon
+      ansible.builtin.shell: |
+        uid=$(id -u)
+        label="{{ macmon_label }}"
+        launchctl bootout "gui/${uid}/${label}" 2>/dev/null || true
+        for _ in 1 2 3 4 5; do
+          launchctl print "gui/${uid}/${label}" >/dev/null 2>&1 || break
+          sleep 1
+        done
+        launchctl bootstrap "gui/${uid}" "{{ macmon_plist }}"

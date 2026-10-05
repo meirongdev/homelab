@@ -9,8 +9,12 @@
 # node_exporter is the prebuilt darwin-arm64 binary run by a LaunchAgent (:9100), no Homebrew.
 # NOTE: Darwin node_exporter exposes a DIFFERENT, smaller metric set than Linux —
 #   memory uses node_memory_{active,wired,compressed,inactive,free,total,swap_*}_bytes
-#   (no MemAvailable/MemTotal), and there are NO thermal/battery/powersupply collectors,
-#   so this dashboard has no temperature panel (unlike DGX Spark).
+#   (no MemAvailable/MemTotal), and there are NO thermal/battery/powersupply collectors.
+# Power / temperature / fans therefore come from a SECOND exporter, macmon (job `macmon`,
+#   :9090, macbook/ansible `just macmon`), installed on the Studio only — the M2 shows
+#   "No data" in that row. On the M5 its CPU/RAM/ANE power reads a constant 0 and is dropped
+#   at scrape time, so the power panel splits system power into GPU + "the rest".
+#   Readings and caveats: macbook/ansible/playbooks/macmon.yaml header.
 # Auto-loaded via the kube-prometheus-stack grafana-sc-dashboard sidecar
 # (label grafana_dashboard: "1") and synced by the ArgoCD monitoring-dashboards App.
 ---
@@ -27,7 +31,7 @@ data:
   macbook-node.json: |-
     {
       "annotations": {"list": []},
-      "description": "Apple Silicon Mac（M2 MacBook Pro / M5 Max Mac Studio，顶部 Node 选机器）主机指标：CPU/负载、内存（active/wired/compressed）、Swap、磁盘、网络（含 Tailscale utun）。Darwin node_exporter 指标集与 Linux 不同，无温度/电池。",
+      "description": "Apple Silicon Mac（M2 MacBook Pro / M5 Max Mac Studio，顶部 Node 选机器）主机指标：功耗/温度/风扇（macmon，仅 Studio）、CPU/负载、内存（active/wired/compressed）、Swap、磁盘、网络（含 Tailscale utun）。Darwin node_exporter 指标集与 Linux 不同，自身无温度/功耗，那一行来自 macmon。",
       "editable": true,
       "graphTooltip": 1,
       "links": [],
@@ -234,6 +238,380 @@ data:
         {
           "collapsed": false,
           "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5},
+          "id": 105,
+          "title": "🌡️ 功耗 / 温度 (macmon，仅 Mac Studio)",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "description": "SMC PSTR：SoC 侧整机功耗，采样时刻的点值。不是墙插功率（不含电源损耗，墙插更高）。实测空闲 ~4W、CPU 满载 ~74W、GPU 满载 ~104W。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 100},
+                {"color": "red", "value": 150}
+              ]},
+              "unit": "watt",
+              "decimals": 1,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 0, "y": 6},
+          "id": 16,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "value"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "macmon_sys_power_watts{job=\"macmon\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}}",
+              "refId": "A"
+            }
+          ],
+          "title": "整机功耗 / System Power",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "description": "IOReport GPU Energy，15s 采样区间内的平均。OMLX 推理主要烧在这里。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 60},
+                {"color": "red", "value": 100}
+              ]},
+              "unit": "watt",
+              "decimals": 1,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 4, "y": 6},
+          "id": 17,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "value"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "macmon_gpu_power_watts{job=\"macmon\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}}",
+              "refId": "A"
+            }
+          ],
+          "title": "GPU 功耗 / GPU Power",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "description": "CPU 区 SMC 温度探头的均值。空闲 ~25°C 是真的（4W 下几乎不升温）。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 80},
+                {"color": "red", "value": 95}
+              ]},
+              "unit": "celsius",
+              "decimals": 1,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 8, "y": 6},
+          "id": 18,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "value"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "macmon_cpu_temp_celsius{job=\"macmon\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}}",
+              "refId": "A"
+            }
+          ],
+          "title": "CPU 温度 / CPU Temp",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "description": "GPU 区 SMC 温度探头的均值。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 80},
+                {"color": "red", "value": 95}
+              ]},
+              "unit": "celsius",
+              "decimals": 1,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 12, "y": 6},
+          "id": 19,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "value"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "macmon_gpu_temp_celsius{job=\"macmon\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}}",
+              "refId": "A"
+            }
+          ],
+          "title": "GPU 温度 / GPU Temp",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "description": "两个风扇里转得快的那个。空闲 ~1000rpm 是最低档，上限 3625rpm。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 2000},
+                {"color": "red", "value": 3000}
+              ]},
+              "unit": "rpm",
+              "decimals": 0,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 16, "y": 6},
+          "id": 20,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "value"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "max by (nodename) (macmon_fan_speed_rpm{job=\"macmon\", nodename=~\"$nodename\"})",
+              "legendFormat": "{{nodename}}",
+              "refId": "A"
+            }
+          ],
+          "title": "风扇 / Fan",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "description": "近 24h 整机功耗均值 × 24h。SoC 侧读数，墙插耗电更高；数据不足 24h 时是按已有均值外推的。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]},
+              "unit": "kwatth",
+              "decimals": 2,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 20, "y": 6},
+          "id": 21,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "value"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "avg_over_time(macmon_sys_power_watts{job=\"macmon\", nodename=~\"$nodename\"}[24h]) * 24 / 1000",
+              "legendFormat": "{{nodename}}",
+              "refId": "A"
+            }
+          ],
+          "title": "近 24h 耗电 / Energy 24h",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "description": "整机 = SMC PSTR；GPU = IOReport；其余 = 整机 − GPU（CPU、内存、SSD、IO、风扇）。M5 上 macmon 读不到 CPU/内存/ANE 各自的功耗（恒为 0，已在抓取时丢掉），所以只能这样拆。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "unit": "watt",
+              "min": 0,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 10},
+          "id": 22,
+          "options": {
+            "legend": {"calcs": ["mean", "lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "macmon_sys_power_watts{job=\"macmon\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}} 整机",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "macmon_gpu_power_watts{job=\"macmon\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}} GPU",
+              "refId": "B"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "macmon_sys_power_watts{job=\"macmon\", nodename=~\"$nodename\"} - macmon_gpu_power_watts{job=\"macmon\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}} 其余 (CPU/内存/IO)",
+              "refId": "C"
+            }
+          ],
+          "title": "功耗 / Power (W)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "description": "SMC 温度探头均值。Apple Silicon 在 ~100°C 以上才会因温度降频。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 0, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "unit": "celsius",
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 10},
+          "id": 23,
+          "options": {
+            "legend": {"calcs": ["mean", "lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "macmon_cpu_temp_celsius{job=\"macmon\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}} CPU",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "macmon_gpu_temp_celsius{job=\"macmon\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}} GPU",
+              "refId": "B"
+            }
+          ],
+          "title": "温度 / Temperature",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 0, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "unit": "rpm",
+              "min": 0,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 7, "w": 12, "x": 0, "y": 18},
+          "id": 24,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "macmon_fan_speed_rpm{job=\"macmon\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}} {{fan}}",
+              "refId": "A"
+            }
+          ],
+          "title": "风扇转速 / Fan RPM",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "description": "活跃驻留率：采样区间里处于工作频点的时间占比（不按频率折算）。拿来对照上面的功耗曲线是谁在烧。",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 7, "w": 12, "x": 12, "y": 18},
+          "id": 25,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "macmon_gpu_active_ratio{job=\"macmon\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}} GPU",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "macmon_cpu_active_ratio{job=\"macmon\", nodename=~\"$nodename\"}",
+              "legendFormat": "{{nodename}} CPU",
+              "refId": "B"
+            }
+          ],
+          "title": "GPU / CPU 活跃率",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 25},
           "id": 101,
           "title": "⚙️ CPU / 负载",
           "type": "row"
@@ -251,7 +629,7 @@ data:
             },
             "overrides": []
           },
-          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 26},
           "id": 7,
           "options": {
             "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
@@ -281,7 +659,7 @@ data:
             },
             "overrides": []
           },
-          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 26},
           "id": 8,
           "options": {
             "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
@@ -312,7 +690,7 @@ data:
         },
         {
           "collapsed": false,
-          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 14},
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 34},
           "id": 102,
           "title": "🧠 内存 / Memory",
           "type": "row"
@@ -331,7 +709,7 @@ data:
             },
             "overrides": []
           },
-          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 15},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 35},
           "id": 9,
           "options": {
             "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
@@ -361,7 +739,7 @@ data:
             },
             "overrides": []
           },
-          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 15},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 35},
           "id": 10,
           "options": {
             "legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true},
@@ -414,7 +792,7 @@ data:
             },
             "overrides": []
           },
-          "gridPos": {"h": 7, "w": 12, "x": 0, "y": 23},
+          "gridPos": {"h": 7, "w": 12, "x": 0, "y": 43},
           "id": 11,
           "options": {
             "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
@@ -449,7 +827,7 @@ data:
             },
             "overrides": []
           },
-          "gridPos": {"h": 7, "w": 12, "x": 12, "y": 23},
+          "gridPos": {"h": 7, "w": 12, "x": 12, "y": 43},
           "id": 12,
           "options": {
             "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
@@ -474,7 +852,7 @@ data:
         },
         {
           "collapsed": false,
-          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 30},
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 50},
           "id": 103,
           "title": "💾 磁盘 / Disk",
           "type": "row"
@@ -493,7 +871,7 @@ data:
             },
             "overrides": []
           },
-          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 31},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 51},
           "id": 13,
           "options": {
             "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
@@ -521,7 +899,7 @@ data:
             },
             "overrides": []
           },
-          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 31},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 51},
           "id": 14,
           "options": {
             "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
@@ -546,7 +924,7 @@ data:
         },
         {
           "collapsed": false,
-          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 39},
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 59},
           "id": 104,
           "title": "🌐 网络 / Network",
           "type": "row"
@@ -563,7 +941,7 @@ data:
             },
             "overrides": []
           },
-          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 40},
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 60},
           "id": 15,
           "options": {
             "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},

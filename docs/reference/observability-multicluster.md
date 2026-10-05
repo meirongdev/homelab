@@ -1,6 +1,6 @@
 # Multi-Cluster Observability Architecture
 
-> Last updated: 2026-10-03
+> Last updated: 2026-10-05
 > Status: 生效事实
 >
 > 遥测的**采集与汇聚侧**：三条管线怎么跨集群流动、应用怎么接日志/追踪、坏了怎么查。
@@ -343,6 +343,7 @@ scrapeClasses 不会给它们 relabel，`cluster`/`nodename` 必须逐 target �
 | `node-exporter-dgx-spark` | `100.97.87.120:9100` / `100.67.164.92:9100`（经 Tailscale） | `cluster=dgx-spark` |
 | `node-exporter-macbook` | `100.89.15.120:9100`（经 Tailscale） | `cluster=macbook` / `nodename=macbook-pro`；⚠️ 带 `metric_relabel_configs`（OMLX 那批 `omlx_*` → `omlx_alltime_*`，见下）|
 | `node-exporter-mac-studio` | `100.98.220.75:9100`（经 Tailscale） | `cluster=mac-studio` / `nodename=mac-studio`；与上一行用 YAML 锚点共用同一条 `omlx_alltime_` 改名规则 |
+| `macmon` | `100.98.220.75:9090`（mac-studio，经 Tailscale；每台 Mac 一个 target）| `cluster`/`nodename` 同上；⚠️ `metric_relabel_configs` 按 nodename 丢掉 M5 上恒为 0 的 CPU/内存/ANE 功耗（见下）|
 | `omlx-status` / `omlx-models` | 每台 Mac 的 `:8000` 一个 target，relabel 进 `?target=`，实际抓 `json-exporter.monitoring.svc:7979/probe` | `cluster`/`nodename` 同上，`instance` = Mac 的 URL |
 | `smartctl-storage-106` / `smartctl-proxmox-pve` / `smartctl-dgx-spark` | `:9633`，120s | `nodename` 与 node-exporter job 对齐 |
 | `dgx-inference` | `100.97.87.120:8888`（S1，SGLang）/ `100.67.164.92:18300`（S2，vLLM `fndgx` 栈，2026-09-20 起）（均经 Tailscale） | `cluster=dgx-spark` / `nodename=dgx-spark-{1,2}`；☠️ **端口与指标前缀都随上游换栈而变**（2026-09-19 起 S1 为 SGLang `:8888` `sglang:*`，之前是 vLLM `:8000` `vllm:*`；2026-09-20 起 **同一 job 内 `sglang:*`（S1）与 `vllm:*`（S2）两前缀共存**，两节点 series 按 nodename 不相交，告警/面板一律 `or` 并集而非 `and`），job 名刻意取中性的 `dgx-inference`（原 `vllm-dgx-spark`）以免下次换引擎又要改一圈 |
@@ -368,6 +369,11 @@ scrapeClasses 不会给它们 relabel，`cluster`/`nodename` 必须逐 target �
   （⚠️ 用户名是 **`matstudio`** 不是 matthew）。台式机无电池，`just power` 给它加了
   `pmset autorestart 1`（断电恢复后自己开机），因此它也在 `NodeRebooted` 的覆盖面里，
   而 macbook 不在。看板与 macbook 共用（「Mac / Node Exporter」、「Mac OMLX 推理」，顶部选机器）。
+  **功耗/温度/风扇只有它有**（2026-10-05）：Darwin 版 node_exporter 一个温度/功耗指标都没有，
+  另跑 macmon（`just macmon`，LaunchAgent，`:9090`，无 sudo）→ job `macmon` → 「Mac / Node Exporter」
+  的「🌡️ 功耗 / 温度」行。☠️ M5 上 macmon 的 CPU/内存/ANE 功耗**恒为 0**（CPU 满载 74W 时也是 0，
+  是读不到不是空闲），抓取时已丢掉，面板只拆「整机 / GPU / 其余」；整机功耗是 SMC `PSTR`
+  （SoC 侧，**不是墙插功率**）。口径与压测数字 → `macbook/ansible/playbooks/macmon.yaml` 文件头。
 - macbook 与 mac-studio 的共同点：
   - **都驮着 OMLX 的推理计数器**（2026-08-23 起）：Mac 上另一个 LaunchAgent
     每 60s 把 `~/.omlx/stats.json` 渲染成 `.prom`，node_exporter 用
@@ -378,6 +384,8 @@ scrapeClasses 不会给它们 relabel，`cluster`/`nodename` 必须逐 target �
   - ☠️ **再加一台 Mac 要改四处**，漏哪处都不报错：inventory（`macbook/ansible/inventory.yaml`）·
     新的 `node-exporter-<mac>` job 挂上 `*omlx_alltime_rename` · `omlx-*` 两个 job 各加一个 target ·
     「Mac / Node Exporter」面板里写死的 job 正则（常开的台式机另把 job 加进 `NodeRebooted`）。
+    要功耗/温度再加两处：inventory 的 `macmon` 组 + `macmon` job 的一个 target（先在那台上压测一次，
+    看它的芯片哪些功耗通道读 0，别照抄 Studio 的 drop 规则）。
 - **SMART 磁盘健康**（2026-06-27）: Linux 裸机跑 `smartctl_exporter`（:9633）。
   部署：storage-106 + pve（amd64）走 `cd proxmox/ansible && just node-exporter`（一个 playbook
   同装 node_exporter + smartctl_exporter）；DGX ×2（arm64）走 `nv-dgx-spark` repo

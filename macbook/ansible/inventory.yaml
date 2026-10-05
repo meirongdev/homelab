@@ -6,8 +6,9 @@
 #   macs    → ping / packages / node-exporter / power / os-update   (every Mac)
 #   macbook → ai-clis / multica-daemon                               (M2 only)
 #   omlx    → omlx / omlx-metrics                                     (OMLX inference nodes)
-# Prometheus side: one node-exporter job per Mac + both Macs as targets of the omlx-* jobs
-# (k8s/helm/values/kube-prometheus-stack.yaml).
+#   macmon  → macmon (power / temperature / fans, :9090)              (Studio only so far)
+# Prometheus side: one node-exporter job per Mac + both Macs as targets of the omlx-* jobs,
+# + the macmon job (k8s/helm/values/kube-prometheus-stack.yaml).
 macs:
   hosts:
     mbp-m2-pro:
@@ -25,4 +26,10 @@ macbook:
 omlx:
   hosts:
     mbp-m2-pro:
+    mac-studio:
+
+# Adding the M2 here is not enough on its own: also add it as a target of the `macmon`
+# scrape job, and check which power channels read 0 on that chip (see macmon.yaml).
+macmon:
+  hosts:
     mac-studio:
