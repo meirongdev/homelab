@@ -7,18 +7,27 @@
 # 为什么是 macmon：它读 IOReport + SMC，**不要 sudo**（powermetrics/asitop 都要 root，
 # 无头机上没法做成 LaunchAgent）；自带 /metrics，不需要再写一个渲染器。
 #
-# 口径（2026-10-05 在 Studio M5 Max / macOS 27.0.1 / macmon 0.8.2 上压测核过）：
-#   macmon_sys_power_watts    整机功耗 = SMC `PSTR`。空闲 4.3W，CPU 满载 74W，GPU 满载 104W。
-#                             是 SoC 侧读数、**不是墙插功率**（不含电源损耗），且是采样时刻的点值。
-#   macmon_gpu_power_watts    GPU 功耗（IOReport，整个采样区间的平均）。GPU 满载 81W。
-#   macmon_{cpu,gpu}_temp_celsius  SMC 温度探头均值。空闲 ~25°C 是真的（≈室温：4W 下大散热器
-#                             几乎不升温），CPU 满载 15s 升到 46°C、GPU 满载到 51°C。
-#   macmon_fan_speed_rpm      两个风扇；空闲 ~1000rpm（最低档）。
-# ☠️ M5 上 CPU / 内存 / ANE 功耗**恒为 0**：IOReport 里单位是 mJ 的能耗通道全读 0，
-#    只有 nJ 的「GPU Energy」有数（`macmon debug` 可见）。CPU 满载 74W 时 cpu_power 仍是 0，
-#    所以它是坏的、不是空闲。Prometheus 侧按 nodename 把这几个指标丢掉（见 `macmon` job），
-#    面板里「其余」= 整机 − GPU。升级 macmon 后在 Studio 上跑一次 `macmon stress cpu` +
-#    `macmon pipe`，cpu_power 有数了再撤掉那条 drop。
+# 口径（2026-10-05 两台都压测核过，都是 macOS 27.0.1 / macmon 0.8.2）：
+#                               Studio M5 Max（台式）        M2 Pro MacBook（合盖、插电）
+#   macmon_sys_power_watts      空闲 4.3W / CPU 满载 74W     空闲 7–9W / CPU 满载 37W
+#                               / GPU 满载 104W              / GPU 满载 28W
+#     整机功耗 = SMC `PSTR`：SoC 侧读数、**不是墙插功率**（不含电源损耗），是采样时刻的点值。
+#   macmon_gpu_power_watts      GPU 满载 81W                 GPU 满载 13W
+#     IOReport，整个采样区间的平均。
+#   macmon_gpu_temp_celsius     空闲 ~25°C，满载 51°C        空闲 ~39°C，满载 47°C
+#   macmon_cpu_temp_celsius     空闲 ~25°C，满载 46°C        ☠️ 不可用，抓取时丢掉（见下）
+#     Studio 空闲 ~25°C 是真的（≈室温：4W 下大散热器几乎不升温）。
+#   macmon_fan_speed_rpm        空闲 ~1000rpm（最低档）      低负载下 0：风扇真的停转
+#                                                            （SMC 目标转速 F0Tg 也是 0）
+# ☠️ CPU / 内存 / ANE 功耗**恒为 0**，两台都是：IOReport 里单位是 mJ 的能耗通道全读 0，
+#    只有 nJ 的「GPU Energy」有数（`macmon debug` 可见）。CPU 满载时 cpu_power 仍是 0，
+#    所以是读不到、不是空闲。M5 Max 与 M2 Pro 一样坏 → 跟 macOS 27 有关，不是芯片。
+#    Prometheus 侧把这几个指标对所有 Mac 丢掉（见 `macmon` job），面板里「其余」= 整机 − GPU。
+#    升级 macmon 或 macOS 后跑一次 `macmon stress cpu` + `macmon pipe`，cpu_power 有数了再撤 drop。
+# ☠️ M2 的 CPU 温度是坏的：macmon 把 Tp*/Te*/Ts* 全部 SMC 探头取平均，而 M2 的 P 核探头
+#    （Tp*）在 P 簇断电时读 0–8°C（P 核醒着时才是真实的 35–45°C），于是空闲时均值在
+#    13↔29°C 之间每几秒跳一次，真实值是 35–43°C。Studio 没有这个问题（5h 标准差 0.12°C）。
+#    所以 M2 的 macmon_cpu_temp_celsius 在抓取时丢掉，它的芯片温度看 GPU 温度（同一块 die）。
 #
 # ⚠️ 别用 `macmon serve --install`：它装的是另一个 label（com.macmon）、同样抢 :9090，
 #    而且不能带 --interval（采样会是 1s，15s 抓一次只看得到 1/15 的 GPU 能耗窗口）。
@@ -82,13 +91,13 @@
 
     # 第一个采样要等满一个 interval 才出来，之前 /metrics 没有数据行。
     # 值取 $NF：chip 标签是 "Apple M5 Max"，带空格，按列切会切进标签里。
-    # 只看 200 不够：M5 上 CPU 功耗是一个「看起来正常的 0」，所以断言的是整机功耗与温度
-    # 两个**有值**的指标，而不是端点活着。
+    # 只看 200 不够：CPU 功耗是一个「看起来正常的 0」，所以断言的是整机功耗与 GPU 温度
+    # 两个**有值**的指标，而不是端点活着（不用 CPU 温度：M2 上它坏得非零，断言拦不住）。
     - name: Wait for the first sample
       ansible.builtin.shell: |
         set -o pipefail
         curl -sf --max-time 5 http://127.0.0.1:{{ macmon_port }}/metrics \
-          | awk '/^macmon_(sys_power_watts|cpu_temp_celsius|gpu_power_watts)\{/{n=$0; sub(/\{.*/, "", n); print n"="$NF}'
+          | awk '/^macmon_(sys_power_watts|gpu_temp_celsius|gpu_power_watts)\{/{n=$0; sub(/\{.*/, "", n); print n"="$NF}'
       args:
         executable: /bin/bash
       register: macmon_sample
@@ -101,9 +110,9 @@
       ansible.builtin.assert:
         that:
           - macmon_sample.stdout is search('macmon_sys_power_watts=[0-9]*[1-9]')
-          - macmon_sample.stdout is search('macmon_cpu_temp_celsius=[1-9]')
+          - macmon_sample.stdout is search('macmon_gpu_temp_celsius=[1-9]')
         fail_msg: >-
-          macmon 起来了，但整机功耗或 CPU 温度是 0（实际: {{ macmon_sample.stdout_lines }}）。
+          macmon 起来了，但整机功耗或 GPU 温度是 0（实际: {{ macmon_sample.stdout_lines }}）。
           新芯片/新系统常见：先在机器上跑 `macmon debug` 看 SMC 的 PSTR 与温度探头能不能读。
         success_msg: "{{ macmon_sample.stdout_lines }}"
 

@@ -654,13 +654,16 @@ prometheus:
 
       # Mac 的功耗 / 温度 / 风扇：macmon serve（:9090，部署 macbook/ansible `just macmon`）。
       # Darwin 版 node_exporter 没有任何温度/功耗指标，这是唯一来源。形态同 omlx-*：
-      # 一个 job、每台 Mac 一个 target，面板按 nodename 选机器（目前只装了 Studio）。
+      # 一个 job、每台 Mac 一个 target，面板按 nodename 选机器。
       # 15s 与 Mac 上的 --interval 15000 对齐：GPU 功耗是采样区间内的能耗均值，
       # 抓得比采样慢就会整段跳过。
-      # ☠️ M5 上 IOReport 里单位是 mJ 的能耗通道全读 0：CPU 满载 74W 时 cpu_power 仍是 0。
-      #    留着它们，面板会把「读不到」显示成「空闲」，所以按 nodename 丢掉；all_power =
-      #    cpu+gpu+ane，在这台上就等于 GPU，一并丢。只对 mac-studio 生效，别的芯片不受影响。
-      #    *_usage_ratio 是 macmon 自己标了 DEPRECATED 的重复指标（= *_scaled_ratio）。
+      # ☠️ macOS 27 上 IOReport 里单位是 mJ 的能耗通道全读 0：CPU 满载时 cpu_power 仍是 0
+      #    （M5 Max 与 M2 Pro 都这样，所以跟系统有关、不是芯片）。留着它们，面板会把
+      #    「读不到」显示成「空闲」，所以对所有 Mac 丢掉；all_power = cpu+gpu+ane，此时就等于
+      #    GPU，一并丢。升级 macOS/macmon 后按 playbook 文件头的方法复测，有数了再撤。
+      # ☠️ M2 的 CPU 温度是坏的：P 核探头断电时读 0–8°C，macmon 拿它们一起取平均，空闲时
+      #    在 13↔29°C 之间跳（真实 35–43°C）。只丢 macbook-pro 的，Studio 的没问题。
+      # *_usage_ratio 是 macmon 自己标了 DEPRECATED 的重复指标（= *_scaled_ratio）。
       # ⚠️ sys_power 是 SMC PSTR（SoC 侧），不是墙插功率，不含电源损耗。
       # 口径与压测数字: macbook/ansible/playbooks/macmon.yaml 文件头
       - job_name: 'macmon'
@@ -671,12 +674,17 @@ prometheus:
             labels:
               cluster: mac-studio
               nodename: mac-studio
+          - targets:
+              - 100.89.15.120:9090   # mbp-m2-pro (Tailscale)
+            labels:
+              cluster: macbook
+              nodename: macbook-pro
         metric_relabel_configs:
-          - source_labels: [nodename, __name__]
-            regex: 'mac-studio;macmon_(cpu|ane|ram|gpu_ram|all)_power_watts'
-            action: drop
           - source_labels: [__name__]
-            regex: 'macmon_.*_usage_ratio'
+            regex: 'macmon_(cpu|ane|ram|gpu_ram|all)_power_watts|macmon_.*_usage_ratio'
+            action: drop
+          - source_labels: [nodename, __name__]
+            regex: 'macbook-pro;macmon_cpu_temp_celsius'
             action: drop
 
       # Mac 上的 OMLX 本地推理服务（每台 Mac 的 :8000）—— **OMLX 自己没有 /metrics**，

@@ -11,9 +11,10 @@
 #   memory uses node_memory_{active,wired,compressed,inactive,free,total,swap_*}_bytes
 #   (no MemAvailable/MemTotal), and there are NO thermal/battery/powersupply collectors.
 # Power / temperature / fans therefore come from a SECOND exporter, macmon (job `macmon`,
-#   :9090, macbook/ansible `just macmon`), installed on the Studio only — the M2 shows
-#   "No data" in that row. On the M5 its CPU/RAM/ANE power reads a constant 0 and is dropped
-#   at scrape time, so the power panel splits system power into GPU + "the rest".
+#   :9090, macbook/ansible `just macmon`), on both Macs. On macOS 27 its CPU/RAM/ANE power
+#   reads a constant 0 and is dropped at scrape time, so the power panel splits system power
+#   into GPU + "the rest". The M2's CPU temperature is garbage and also dropped — its CPU
+#   temperature tile is empty by design; read the GPU temperature (same die) instead.
 #   Readings and caveats: macbook/ansible/playbooks/macmon.yaml header.
 # Auto-loaded via the kube-prometheus-stack grafana-sc-dashboard sidecar
 # (label grafana_dashboard: "1") and synced by the ArgoCD monitoring-dashboards App.
@@ -31,7 +32,7 @@ data:
   macbook-node.json: |-
     {
       "annotations": {"list": []},
-      "description": "Apple Silicon Mac（M2 MacBook Pro / M5 Max Mac Studio，顶部 Node 选机器）主机指标：功耗/温度/风扇（macmon，仅 Studio）、CPU/负载、内存（active/wired/compressed）、Swap、磁盘、网络（含 Tailscale utun）。Darwin node_exporter 指标集与 Linux 不同，自身无温度/功耗，那一行来自 macmon。",
+      "description": "Apple Silicon Mac（M2 MacBook Pro / M5 Max Mac Studio，顶部 Node 选机器）主机指标：功耗/温度/风扇（macmon）、CPU/负载、内存（active/wired/compressed）、Swap、磁盘、网络（含 Tailscale utun）。Darwin node_exporter 指标集与 Linux 不同，自身无温度/功耗，那一行来自 macmon。",
       "editable": true,
       "graphTooltip": 1,
       "links": [],
@@ -239,12 +240,12 @@ data:
           "collapsed": false,
           "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5},
           "id": 105,
-          "title": "🌡️ 功耗 / 温度 (macmon，仅 Mac Studio)",
+          "title": "🌡️ 功耗 / 温度 (macmon)",
           "type": "row"
         },
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "description": "SMC PSTR：SoC 侧整机功耗，采样时刻的点值。不是墙插功率（不含电源损耗，墙插更高）。实测空闲 ~4W、CPU 满载 ~74W、GPU 满载 ~104W。",
+          "description": "SMC PSTR：SoC 侧整机功耗，采样时刻的点值。不是墙插功率（不含电源损耗，墙插更高）。实测 Studio 空闲 ~4W、CPU 满载 ~74W、GPU 满载 ~104W；M2 空闲 7–9W、CPU 满载 ~37W。",
           "fieldConfig": {
             "defaults": {
               "color": {"mode": "thresholds"},
@@ -267,7 +268,7 @@ data:
             "justifyMode": "auto",
             "orientation": "horizontal",
             "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
-            "textMode": "value"
+            "textMode": "auto"
           },
           "targets": [
             {
@@ -305,7 +306,7 @@ data:
             "justifyMode": "auto",
             "orientation": "horizontal",
             "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
-            "textMode": "value"
+            "textMode": "auto"
           },
           "targets": [
             {
@@ -320,7 +321,7 @@ data:
         },
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "description": "CPU 区 SMC 温度探头的均值。空闲 ~25°C 是真的（4W 下几乎不升温）。",
+          "description": "CPU 区 SMC 温度探头的均值。Studio 空闲 ~25°C 是真的（4W 下几乎不升温）。M2 上这个值是坏的（P 核断电时探头读 0–8°C，均值乱跳），已在抓取时丢掉，M2 看 GPU 温度。",
           "fieldConfig": {
             "defaults": {
               "color": {"mode": "thresholds"},
@@ -343,7 +344,7 @@ data:
             "justifyMode": "auto",
             "orientation": "horizontal",
             "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
-            "textMode": "value"
+            "textMode": "auto"
           },
           "targets": [
             {
@@ -358,7 +359,7 @@ data:
         },
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "description": "GPU 区 SMC 温度探头的均值。",
+          "description": "GPU 区 SMC 温度探头的均值。M2 上它也是芯片温度的唯一可靠读数（与 CPU 同一块 die）。",
           "fieldConfig": {
             "defaults": {
               "color": {"mode": "thresholds"},
@@ -381,7 +382,7 @@ data:
             "justifyMode": "auto",
             "orientation": "horizontal",
             "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
-            "textMode": "value"
+            "textMode": "auto"
           },
           "targets": [
             {
@@ -396,7 +397,7 @@ data:
         },
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "description": "两个风扇里转得快的那个。空闲 ~1000rpm 是最低档，上限 3625rpm。",
+          "description": "两个风扇里转得快的那个。Studio 空闲 ~1000rpm 是最低档；MacBook 低负载时风扇完全停转，0 是真的。",
           "fieldConfig": {
             "defaults": {
               "color": {"mode": "thresholds"},
@@ -419,7 +420,7 @@ data:
             "justifyMode": "auto",
             "orientation": "horizontal",
             "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
-            "textMode": "value"
+            "textMode": "auto"
           },
           "targets": [
             {
@@ -453,7 +454,7 @@ data:
             "justifyMode": "auto",
             "orientation": "horizontal",
             "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
-            "textMode": "value"
+            "textMode": "auto"
           },
           "targets": [
             {
@@ -468,7 +469,7 @@ data:
         },
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "description": "整机 = SMC PSTR；GPU = IOReport；其余 = 整机 − GPU（CPU、内存、SSD、IO、风扇）。M5 上 macmon 读不到 CPU/内存/ANE 各自的功耗（恒为 0，已在抓取时丢掉），所以只能这样拆。",
+          "description": "整机 = SMC PSTR；GPU = IOReport；其余 = 整机 − GPU（CPU、内存、SSD、IO、风扇）。macOS 27 上 macmon 读不到 CPU/内存/ANE 各自的功耗（恒为 0，已在抓取时丢掉），所以只能这样拆。",
           "fieldConfig": {
             "defaults": {
               "color": {"mode": "palette-classic"},
@@ -510,7 +511,7 @@ data:
         },
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "description": "SMC 温度探头均值。Apple Silicon 在 ~100°C 以上才会因温度降频。",
+          "description": "SMC 温度探头均值。Apple Silicon 在 ~100°C 以上才会因温度降频。M2 没有 CPU 曲线（读数是坏的，已丢掉），看它的 GPU 曲线。",
           "fieldConfig": {
             "defaults": {
               "color": {"mode": "palette-classic"},

@@ -24,7 +24,7 @@ just ai-clis                 # 安装 AI CLI 工具（claude/qwen/codex/hermes�
 just omlx [host]             # OMLX 本体：brew + LaunchAgent + settings.json 的 host/port/key（key 从 Vault 取）
 just node-exporter [host]    # 装/升级 node_exporter LaunchAgent（无需 sudo，幂等）
 just omlx-metrics [host]     # 装/升级 OMLX 指标采集 LaunchAgent（无需 sudo，幂等）
-just macmon [host]           # 装/升级 macmon 功耗/温度/风扇 exporter（:9090，目前只有 Studio，无需 sudo，幂等）
+just macmon [host]           # 装/升级 macmon 功耗/温度/风扇 exporter（:9090，两台，无需 sudo，幂等）
 just power [host]            # headless 电源策略（逐台问 sudo 密码）
 just multica-daemon          # 装/升级 Multica daemon LaunchAgent（仅 M2，认证全自动，从 Vault 取 PAT）
 just site [host]             # 上面几个一起跑（逐台跑、逐台问 sudo 密码）
@@ -47,7 +47,7 @@ just os-upgrade-major <host> # 大版本升级（如 26 → 27），见下文风
 | `omlx.yaml` | omlx | OMLX 本体：tap（☠️ formula 在 `jundot/omlx` 主仓，不带 URL 的 `brew tap` 会去拉不存在的 `homebrew-omlx`，报的却是「could not read Username」）→ `brew install`（**只 present，不升级**）→ 往 `~/.omlx/settings.json` **合并**四个键（`server.host=0.0.0.0` · `server.port=8000` · `auth.api_key`=Vault `secret/homelab/omlx` · `auth.allow_unauthenticated_inference=true`），其余设置不碰 → `brew services` 的 LaunchAgent `sh.brew.omlx`。没 key 时在启动前失败（0.7 起没 key 就 crash-loop）。验收：`/v1/models` 免 key 200、`/api/status` 无 key 401 / 带 key 200 | 否 |
 | `node-exporter.yaml` | macs | 下载校验 `darwin-arm64` 二进制 → `~/.local/bin/node_exporter`；写 LaunchAgent（`:9100`, KeepAlive, RunAtLoad, **`--collector.textfile.directory`**）→ `~/Library/LaunchAgents/com.prometheus.node_exporter.plist`；`launchctl bootstrap` 到 GUI 域；校验 `/metrics` 200 + `node_textfile_scrape_error == 0` | 否 |
 | `omlx-metrics.yaml` | omlx | OMLX 推理指标的**生产端**：LaunchAgent `com.meirongdev.omlx-textfile-collector` 每 60s 把 `~/.omlx/stats.json` 渲染成 `omlx.prom`，投进上面那个 textfile 目录。☠️ **StartInterval 不是 KeepAlive**（渲染器跑 0.03s 就退，KeepAlive 会变重启风暴）。☠️ 渲染器是 **`mlx-learning` 仓 venv 里的 console script**（跨仓依赖），缺了会明确失败并给出 `uv sync` 的修法。`stats.json` 还不存在（OMLX 没服务过请求）时装好 plist 但**不启动**。验收会一路查到 node_exporter 那端 | 否 |
-| `macmon.yaml` | macmon | 功耗 / 温度 / 风扇：`brew install macmon`（只 present）→ LaunchAgent `com.meirongdev.macmon` 跑 `macmon serve --port 9090 --interval 15000`（采样间隔与 Prometheus 抓取对齐）。Darwin 版 node_exporter 没有任何温度/功耗指标，靠它补。**不要 sudo**（读 IOReport + SMC）。☠️ M5 上 CPU/内存/ANE 功耗恒为 0（不是空闲，CPU 满载 74W 时也是 0），抓取时已按 nodename 丢掉；整机功耗是 SMC `PSTR`，不是墙插功率。口径与压测数字在 playbook 文件头。别用 `macmon serve --install`（另一个 label、抢同一端口、不能设采样间隔）。验收断言整机功耗与 CPU 温度非 0 | 否 |
+| `macmon.yaml` | macmon | 功耗 / 温度 / 风扇：`brew install macmon`（只 present）→ LaunchAgent `com.meirongdev.macmon` 跑 `macmon serve --port 9090 --interval 15000`（采样间隔与 Prometheus 抓取对齐）。Darwin 版 node_exporter 没有任何温度/功耗指标，靠它补。**不要 sudo**（读 IOReport + SMC）。☠️ macOS 27 上 CPU/内存/ANE 功耗恒为 0（不是空闲，CPU 满载时也是 0；两台都这样），抓取时已丢掉；☠️ M2 的 CPU 温度是坏的（P 核断电时探头读 0–8°C，均值乱跳），也已丢掉，M2 看 GPU 温度；整机功耗是 SMC `PSTR`，不是墙插功率。两台的口径与压测数字在 playbook 文件头。别用 `macmon serve --install`（另一个 label、抢同一端口、不能设采样间隔）。验收断言整机功耗与 GPU 温度非 0 | 否 |
 | `multica-daemon.yaml` | macbook | 装 `multica` CLI（**`darwin-arm64` 预编译包**，固定版本 + sha256，不走 Homebrew）→ 指向自建 service → 用 Vault 里的 PAT 认证 → LaunchAgent `ai.multica.daemon`。⚠️ 未认证时**刻意不 bootstrap**（否则 KeepAlive 会把必然失败的进程反复拉起）。这是 Multica「执行任务的那一半」，整体安装见 [docs/runbooks/multica-install.md](../../docs/runbooks/multica-install.md) | 否 |
 | `power.yaml` | macs | `pmset -c disablesleep 1`——插电时保持**系统**唤醒，合盖也不睡，从而 Tailscale 远程常在线（让"保持唤醒"不依赖 Amphetamine GUI）。inventory 里 `pmset_autorestart: true` 的主机（Studio，无电池）另加 `pmset -a autorestart 1`：断电恢复后自己开机 | 是 |
 | `os-update.yaml` | macs | macOS 软件更新，需要重启时无人值守地重启并验收。**不在 `site` 里**（它会重启机器），见下节 | 是（自己问密码） |
@@ -189,7 +189,7 @@ Command Line Tools 不够。Homebrew 失败时会还原原安装，服务不受�
 
 - Prometheus 抓取 job `node-exporter-macbook` / `node-exporter-mac-studio`：`k8s/helm/values/kube-prometheus-stack.yaml`
   （⚠️ 两个 job 用 YAML 锚点共用 `metric_relabel_configs`：`omlx_*` → `omlx_alltime_*`，理由见下面那篇）
-- Prometheus 抓取 job `macmon`（功耗/温度/风扇，`:9090`，每台 Mac 一个 target，目前只有 Studio）：同一文件；看板是下面这张的「🌡️ 功耗 / 温度」行
+- Prometheus 抓取 job `macmon`（功耗/温度/风扇，`:9090`，每台 Mac 一个 target）：同一文件；看板是下面这张的「🌡️ 功耗 / 温度」行
 - Grafana 看板 "Mac / Node Exporter"（两台共用，顶部选机器）：`k8s/helm/manifests/monitoring/dashboards/macbook-node-dashboard.yaml`（`Hardware` 文件夹）
 - **OMLX 推理指标**（两条链路的口径、陷阱、验收）：[docs/reference/omlx-inference-metrics.md](../../docs/reference/omlx-inference-metrics.md)
   · 看板 "Hardware / Mac OMLX 推理"：`k8s/helm/manifests/monitoring/dashboards/omlx-dashboard.yaml`
