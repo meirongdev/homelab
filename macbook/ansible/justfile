@@ -45,7 +45,7 @@ omlx target="omlx":
 omlx-metrics target="omlx":
     ansible-playbook playbooks/omlx-metrics.yaml --limit '{{target}}'
 
-# M5 上 CPU/内存/ANE 功耗读 0，Prometheus 侧已按 nodename 丢掉，口径见 playbook 文件头。
+# macOS 27 上 CPU/内存/ANE 功耗读 0、M2 的 CPU 温度是坏的，都在 Prometheus 侧丢掉；口径见 playbook 文件头。
 # 部署/升级 macmon 功耗/温度/风扇 exporter LaunchAgent（:9090，无需 sudo）
 macmon target="macmon":
     ansible-playbook playbooks/macmon.yaml --limit '{{target}}'
