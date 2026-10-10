@@ -365,6 +365,28 @@ trivy:
       #   而扫描 Job 的 `trivy image` 不带 `--platform`、默认只解析 amd64（见
       #   docs/reference/trivy-cve-ops.md「它扫的是哪个架构」）—— 两个变体一边修好一边没修
       #   完全可能，只核 amd64 等于没核。
+      #
+      # --- 2026-10-11 再出现处理：Debian 12 (bookworm) perl 三条 Critical 命中 postgres & uptime-kuma ---
+      # 2026-10-10 Debian 发布 5.36.0-7+deb12u4 修复版后，CNPG postgresql:17.10（apps-pg / zitadel-pg）
+      # 与 uptime-kuma:2.5.0-slim（带 5.36.0-7+deb12u3）重新命中，合计 27 条 Critical。
+      # 依据沿用上方实测结论：
+      #   · CVE-2026-8376：公告原文限定 "on 32-bit builds"，本集群 aarch64 64 位不可触发。
+      #   · CVE-2026-42496：uptime-kuma 的 perl-base 无 Archive/Tar.pm 为源码包误判；
+      #     postgres 进程不解不可信归档。
+      #   · CVE-2026-13221：需编译 >65535 分支正则，数据库与 Node 应用均不调用 perl。
+      - id: CVE-2026-13221
+        statement: "CNPG PostgreSQL 与 uptime-kuma 基底 perl 5.36.0 正则处理(修复 5.36.0-7+deb12u4); 触发需编译 >65535 分支正则, 数据库与 Node 应用均不调用 perl, 2026-12 复审"
+      - id: CVE-2026-42496
+        statement: "CNPG PostgreSQL 与 uptime-kuma 基底 perl-archive-tar 符号链接路径穿越(修复 5.36.0-7+deb12u4); uptime-kuma 无 Archive/Tar.pm 为源码包误判, postgres 不解不可信归档, 2026-12 复审"
+      - id: CVE-2026-8376
+        statement: "CNPG PostgreSQL 与 uptime-kuma 基底 perl 正则编译堆溢出(修复 5.36.0-7+deb12u4); 公告原文限定 on 32-bit builds, oracle 为 64 位 arm64 架构上不可触发, 2026-12 复审"
+      # --- proxy-addr IPv4-mapped IPv6 trust 校验绕过（2026-10-11 新增）---
+      # 命中 excalidraw-room(2.0.6) 与 uptime-kuma:2.5.0-slim(2.0.7)，修复版 2.0.8。
+      # 触发需配置 trust proxy 包含 IPv4-mapped IPv6 子网并基于 req.ip 做鉴权：
+      # excalidraw-room 纯 Socket.IO 中继无 IP 鉴权，uptime-kuma 不基于此类 IP 鉴权。
+      # 两个上游镜像目前均无包含 proxy-addr >=2.0.8 的已修版本。
+      - id: CVE-2026-90711
+        statement: "proxy-addr <2.0.8 IPv4-mapped IPv6 trust 绕过(修复 2.0.8, 2026-09-15 发布); 触发需配置 trust proxy 带 IPv4-mapped IPv6 子网, excalidraw-room 纯 Socket.IO 中继无 IP 鉴权, uptime-kuma 不基于此类 IP 鉴权, 2.5.0-slim 与自建 excalidraw-room 均无已修版本, 2026-12 复审"
 
     # ---- 暴露密钥（exposed secrets）的既知假阳性（2026-08-30 新增）----
     # 背景：`TrivyExposedSecretFound` 自上线起引用的指标名 `trivy_exposedsecrets_findings`
