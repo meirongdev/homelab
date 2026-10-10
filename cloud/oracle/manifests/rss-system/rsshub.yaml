@@ -18,15 +18,10 @@ spec:
       priorityClassName: bulk   # 非核心，与同文件 browserless 一致（2026-08-12 补齐）
       containers:
         - name: rsshub
-          # 2026-08-04 digest 刷新（原 sha256:5bd34215…，已落后 upstream :latest）。
-          # 动因：旧 digest 带 libgnutls30 CVE-2026-33845/42010 + protobufjs CVE-2026-41242。
-          # 2026-09-14 再刷一次（原 sha256:b419ecc3…）。动因：旧 digest 的 Debian perl 停在
-          # 5.40.1-6，带 CVE-2026-13221/42496/8376 三条 Critical；乘以 perl 源码包拆出的
-          # 4 个二进制包 = 该次 TrivyImageCriticalVulnerabilities 15 条里的 12 条。
-          # 新 digest 实测四个包（perl / perl-base / libperl5.40 / perl-modules-5.40）都是
-          # 5.40.1-6+deb13u1，且 **amd64 与 arm64 两个变体分别 dpkg -l 核过**——节点是 arm64，
-          # 真正在跑的是 arm64 变体，而 trivy 默认只扫 amd64，只核后者等于没核。
-          image: diygod/rsshub@sha256:2580aabbec453a4f11fd86af97f8b48a826e685623418d8f8cfdd21dceb459fd  # 当前 :latest 的多架构 index digest（amd64 + arm64）
+          # 2026-10-11 digest 刷新（原 sha256:2580aabb…）。动因：旧 digest 带 vm2 CVE-2026-100721
+          # Critical；新 digest 实测 vm2 升至 3.12.2（修复版本），多架构 index digest（amd64 + arm64）
+          # 本地 Trivy 扫描验证 Critical 为 0。
+          image: diygod/rsshub@sha256:0b6576b501f8562def759bc76c5829a030409a099960cbe492a88d99ac9973e4  # 当前 :latest 的多架构 index digest（amd64 + arm64）
           ports:
             - containerPort: 1200
               name: http
