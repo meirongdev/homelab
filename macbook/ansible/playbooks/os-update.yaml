@@ -47,7 +47,7 @@
     su_pass_file: /var/root/.macbook-os-update.pass
     su_launcher: /var/root/macbook-os-update.sh
     # 列出 ~/Library/LaunchAgents 里**正在运行**的 label。重启前后各跑一次，
-    # 之前在跑的之后必须也在跑（不写死清单：hermes/vllm 这些非本 repo 管的也一并覆盖）。
+    # 之前在跑的之后必须也在跑（不写死清单：vllm 这类非本 repo 管的也一并覆盖）。
     su_agents_script: |
       uid=$(id -u)
       for p in "$HOME"/Library/LaunchAgents/*.plist; do

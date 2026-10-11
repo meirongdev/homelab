@@ -1,12 +1,12 @@
 ---
-# Install AI CLI tools on the MacBook. Idempotent — safe to re-run.
-# Runs as the login user (matthew) — Homebrew + npm refuse to run as root, so NO become.
+# Install AI CLI tools. Idempotent — safe to re-run.
+# Runs as the login user — Homebrew + npm refuse to run as root, so NO become.
 #
-# Tool → method:
-#   claude (Claude Code)   npm @anthropic-ai/claude-code
-#   qwen   (Qwen Code)     npm @qwen-code/qwen-code
-#   codex  (OpenAI Codex)  brew cask codex           (self-contained arm64 binary)
-#   hermes (Hermes Agent)  brew formula hermes-agent
+# Tool → method → hosts:
+#   claude (Claude Code)        npm @anthropic-ai/claude-code   macbook (M2)
+#   qwen   (Qwen Code)          npm @qwen-code/qwen-code        macbook
+#   codex  (OpenAI Codex)       brew cask codex                 macbook  (self-contained arm64 binary)
+#   agy    (Antigravity CLI)    brew cask antigravity-cli       base     (every Mac)
 #
 # Prerequisites: Homebrew must already be installed (packages.yaml handles that).
 - name: AI CLI tools
@@ -16,7 +16,6 @@
     homebrew_prefix: /opt/homebrew
     homebrew_formulas:
       - node           # brings npm; required for claude + qwen
-      - hermes-agent
     homebrew_casks:
       - codex
     npm_global_packages:
@@ -47,5 +46,23 @@
         state: present
         executable: "{{ homebrew_prefix }}/bin/npm"
       loop: "{{ npm_global_packages }}"
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+# cask 标了 auto_updates，`brew upgrade` 不会升它，这里也只管装上。M5 上 cask 那份停在初装的
+# 1.1.7，PATH 上实际用的是官方安装器放的 ~/.local/bin/agy（.zprofile 里那段 PATH 就是它加的）。
+- name: AI CLI tools on every Mac
+  hosts: base
+  gather_facts: false
+  vars:
+    homebrew_prefix: /opt/homebrew
+    homebrew_casks:
+      - antigravity-cli
+  tasks:
+    - name: Ensure Antigravity CLI is present
+      community.general.homebrew_cask:
+        name: "{{ homebrew_casks }}"
+        state: present
+        path: "{{ homebrew_prefix }}/bin"
       environment:
         PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"

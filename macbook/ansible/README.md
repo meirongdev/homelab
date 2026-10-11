@@ -1,16 +1,19 @@
-# Mac (M2 MacBook + Mac Studio) — Ansible 配置归档
+# Mac (M2 MacBook + Mac Studio + M5 工作站) — Ansible 配置归档
 
 对两台**远程无头 Apple Silicon Mac** 做可复现配置，都只经 **Tailscale** 访问、都被 homelab
-Prometheus 监控、都跑 OMLX 推理：
+Prometheus 监控、都跑 OMLX 推理。另外管**本机 M5 的开发环境**（只装软件，见「开发环境」一节）：
 
 | inventory 主机 | 机器 | 连接 | Prometheus job |
 |---|---|---|---|
 | `mbp-m2-pro` | MacBook Pro M2，合盖运行 | `matthew@100.89.15.120` | `node-exporter-macbook`（`cluster=macbook`）|
 | `mac-studio` | Mac Studio M5 Max / 128G，台式机 | **`matstudio`**`@100.98.220.75` | `node-exporter-mac-studio`（`cluster=mac-studio`）|
+| `m5` | MacBook Pro M5，日常工作机（跑 Ansible 的这台） | 本地连接 | 无 |
 
 - key `~/.ssh/vgio`（见 `ansible.cfg`；登录用户默认 matthew，Studio 在 inventory 里覆盖）。
-- **哪台跑哪些 playbook 由 [inventory.yaml](inventory.yaml) 的分组决定**：`macs`（全部）·
-  `macbook`（只有 M2：AI CLI、multica）· `omlx`（两台）。
+- **哪台跑哪些 playbook 由 [inventory.yaml](inventory.yaml) 的分组决定**：`macs`（两台远程机）·
+  `macbook`（只有 M2：AI CLI、multica）· `omlx`（两台远程机）· 开发环境三层 `base`（三台）/
+  `dev`、`ops`（M5 + M2）。⚠️ `m5` 刻意不在 `macs` 里：那个组会被 `power`（禁睡眠）、
+  `os-update`（无人值守重启）、`node-exporter` 作用到。
 - 控制端依赖：`ansible-core` + 集合 `community.general` / `ansible.posix`（本机已装）。
 
 ## 用法
@@ -19,8 +22,9 @@ Prometheus 监控、都跑 OMLX 推理：
 
 ```bash
 just ping                    # 连通性检查（两台）
-just packages [host]         # 确保 Homebrew + CLI 包（tmux / uv）就位（无需 sudo，幂等）
-just ai-clis                 # 安装 AI CLI 工具（claude/qwen/codex/hermes，仅 M2，无需 sudo，幂等）
+just packages [host]         # 开发环境的软件：base 层（三台）+ ops 层（M5、M2）（无需 sudo，幂等）
+just mise [host]             # 语言运行时（mise，M5、M2）（无需 sudo，幂等）
+just ai-clis [host]          # AI CLI：claude/qwen/codex 仅 M2，Antigravity CLI 三台（无需 sudo，幂等）
 just omlx [host]             # OMLX 本体：brew + LaunchAgent + settings.json 的 host/port/key（key 从 Vault 取）
 just node-exporter [host]    # 装/升级 node_exporter LaunchAgent（无需 sudo，幂等）
 just omlx-metrics [host]     # 装/升级 OMLX 指标采集 LaunchAgent（无需 sudo，幂等）
@@ -42,8 +46,9 @@ just os-upgrade-major <host> # 大版本升级（如 26 → 27），见下文风
 
 | Playbook | 主机组 | 内容 | sudo |
 |---|---|---|---|
-| `packages.yaml` | macs | 确保 Homebrew(`/opt/homebrew`)+ CLI 包(`homebrew_packages`：`tmux`、`uv`)就位;以登录用户身份跑(brew 不能 root)。Homebrew 缺失才跑官方安装器——**首次安装需交互式 admin 密码**,故重建机器时单独手动跑一次 | 否 |
-| `ai-clis.yaml` | macbook | 安装 AI CLI 工具: `claude`(`@anthropic-ai/claude-code` npm), `qwen`(`@qwen-code/qwen-code` npm), `codex`(brew cask, 自含 arm64 二进制), `hermes`(`hermes-agent` brew formula)。先通过 brew 装 `node`(带 npm), 再 `npm install -g`。幂等：已装的不重装 | 否 |
+| `packages.yaml` | base · ops | base：Homebrew(`/opt/homebrew`)+ 基础 CLI + AWS/GCP CLI（`awscli` + `gcloud-cli` cask）+ 克隆 oh-my-zsh/两个插件/TPM；ops：k8s/IaC 工具，HashiCorp 的 terraform/vault **先逐个 `brew trust` 再装**。以登录用户身份跑(brew 不能 root)，只补装不升级。Homebrew 缺失才跑官方安装器——**首次安装需交互式 admin 密码**,故重建机器时单独手动跑一次。包清单与理由见 playbook 本身和下面「开发环境」 | 否 |
+| `mise.yaml` | dev | 写 `~/.config/mise/config.toml`（整份覆盖，版本写前缀不写 latest）→ `mise ls --missing` 有缺才 `mise install` → 再查一遍断言全部装齐。缺 mise 本体时提前失败并指向 `just packages` | 否 |
+| `ai-clis.yaml` | macbook · base | base（三台）：`agy`（`antigravity-cli` brew cask，`auto_updates`，brew 不升级它）。macbook 只有 M2：安装 AI CLI 工具: `claude`(`@anthropic-ai/claude-code` npm), `qwen`(`@qwen-code/qwen-code` npm), `codex`(brew cask, 自含 arm64 二进制)。hermes 2026-10-11 起不再安装（三台都已卸载）。先通过 brew 装 `node`(带 npm), 再 `npm install -g`。幂等：已装的不重装 | 否 |
 | `omlx.yaml` | omlx | OMLX 本体：tap（☠️ formula 在 `jundot/omlx` 主仓，不带 URL 的 `brew tap` 会去拉不存在的 `homebrew-omlx`，报的却是「could not read Username」）→ `brew install`（**只 present，不升级**）→ 往 `~/.omlx/settings.json` **合并**四个键（`server.host=0.0.0.0` · `server.port=8000` · `auth.api_key`=Vault `secret/homelab/omlx` · `auth.allow_unauthenticated_inference=true`），其余设置不碰 → `brew services` 的 LaunchAgent `sh.brew.omlx`。没 key 时在启动前失败（0.7 起没 key 就 crash-loop）。验收：`/v1/models` 免 key 200、`/api/status` 无 key 401 / 带 key 200 | 否 |
 | `node-exporter.yaml` | macs | 下载校验 `darwin-arm64` 二进制 → `~/.local/bin/node_exporter`；写 LaunchAgent（`:9100`, KeepAlive, RunAtLoad, **`--collector.textfile.directory`**）→ `~/Library/LaunchAgents/com.prometheus.node_exporter.plist`；`launchctl bootstrap` 到 GUI 域；校验 `/metrics` 200 + `node_textfile_scrape_error == 0` | 否 |
 | `omlx-metrics.yaml` | omlx | OMLX 推理指标的**生产端**：LaunchAgent `com.meirongdev.omlx-textfile-collector` 每 60s 把 `~/.omlx/stats.json` 渲染成 `omlx.prom`，投进上面那个 textfile 目录。☠️ **StartInterval 不是 KeepAlive**（渲染器跑 0.03s 就退，KeepAlive 会变重启风暴）。☠️ 渲染器是 **`mlx-learning` 仓 venv 里的 console script**（跨仓依赖），缺了会明确失败并给出 `uv sync` 的修法。`stats.json` 还不存在（OMLX 没服务过请求）时装好 plist 但**不启动**。验收会一路查到 node_exporter 那端 | 否 |
@@ -59,6 +64,46 @@ just os-upgrade-major <host> # 大版本升级（如 26 → 27），见下文风
 指标静默不出现 —— 所以两个 playbook 都会跨过自己那一半去验收整条链路，并在缺另一半时
 直接告诉你该跑哪条命令。`just site` 已按正确顺序（先读取端后生产端）包含两者。
 口径/陷阱/单段排查 → [docs/reference/omlx-inference-metrics.md](../../docs/reference/omlx-inference-metrics.md)。
+
+## 开发环境（base / dev / ops）
+
+按层装，每台只进它需要的组（[inventory.yaml](inventory.yaml)）：
+
+| 层 | 组 | 主机 | 装什么 | playbook |
+|---|---|---|---|---|
+| 1 基础 | `base` | M5 · M2 · Studio | awscli、gcloud、gh、tmux、chezmoi、age、mise、uv、fzf、ripgrep、yq、htop、just、lazygit；oh-my-zsh + zsh-autosuggestions + zsh-syntax-highlighting；TPM | `packages.yaml` |
+| 2 运行时 | `dev` | M5 · M2 | mise 管：node、pnpm、bun、go、python、java（temurin）、maven、gradle、rust | `mise.yaml` |
+| 3 运维 | `ops` | M5 · M2 | kubectl、helm、kubectx、k9s、cilium-cli、hubble、argocd、ansible、gitleaks、kind、tilt、k6、kubeconform、terraform、vault | `packages.yaml` |
+
+Antigravity CLI（`agy`）也是三台都装，但归 `ai-clis.yaml`（和其它 AI CLI 放在一起）。
+
+```bash
+just packages m5 && just mise m5 && just ai-clis m5   # 一台：先 packages（装 mise 本体）再 mise
+just packages && just mise && just ai-clis            # 全部（按各自的组）
+```
+
+**边界：Ansible 只装软件，配置文件归 chezmoi**（dotfiles 仓库 `meirongdev/dotfiles`，
+含 age 加密的凭据）。`~/.zshrc`、`~/.tmux.conf` 都不在这里写，所以：
+
+- oh-my-zsh 是 `git clone` 下来的，**不跑它的 `install.sh`**（那个会改写 `~/.zshrc` 并 `chsh`）。
+  还没有 `.zshrc` 的机器（Studio）装完 oh-my-zsh 也不生效，要等 chezmoi 写出 `.zshrc`。
+- mise 装好的运行时，要等 `.zshrc` 里有 `eval "$(mise activate zsh)"` 才会用上，在那之前
+  PATH 上仍是 brew 的 node/go。brew 的 node 会一直在（`ai-clis.yaml` 和 qwen-code 等 formula 依赖它）。
+- ☠️ **mise 的 shim 不在默认位置**（`shims_dir = ~/.local/share/mise/shims-hidden`，写在 `mise.yaml` 管的全局配置里）。
+  Orca 会无条件把默认的 `~/.local/share/mise/shims` 拼到它 daemon 的 PATH 最前面（排在 fnm/Homebrew 前），
+  shim 一出现，Orca 拉起的所有会话就改用 mise 的 node/python/java。别改回默认，也别在这台机器上 `mise activate --shims`。
+- AWS/GCP CLI 装上≠能管资源。`~/.aws/config` 与 gcloud 配置由 chezmoi 按 role 下发，
+  `~/.aws/credentials` 目前只发 `workstation`（dotfiles README 里的「暂定」）；gcloud 的登录令牌
+  不在 chezmoi 里，每台要自己 `gcloud auth login --no-launch-browser`（无头机用这个）。
+
+**新机器从零开始**：先手动做 Ansible 做不了的两步，再跑上面两条命令。
+
+1. `xcode-select --install`：没装 CLT 时，`/usr/bin/python3` 只是个会弹 GUI 安装框的占位程序，
+   Ansible 的任何模块都跑不起来（无头机上那个框没人看得见）。
+2. Homebrew 官方安装器：要交互输入 admin 密码。
+
+要在新机器上改这个仓库（密钥、kubeconfig、pre-push 钩子、要从旧机拷的 gitignored 文件），
+完整流程见 [docs/guides/dev-machine-bootstrap.md](../../docs/guides/dev-machine-bootstrap.md)。
 
 ## 系统更新（`os-update.yaml`）
 
@@ -78,7 +123,7 @@ just os-upgrade-major <host> # 大版本升级（如 26 → 27），见下文风
   （下面手动步骤 5）CLI 查不了，没法断言，靠你自己保证。
 - **重启后验收**：版本到位、控制台用户是该机的登录用户（自动登录生效）、node_exporter
   `/metrics` 200、重启前**在运行的** LaunchAgent 全部重新跑起来（按运行时快照比对，
-  没写死清单，hermes/vllm 这些非本 repo 管的也覆盖）、`SleepDisabled` 仍为 1
+  没写死清单，vllm 这类非本 repo 管的也覆盖）、`SleepDisabled` 仍为 1
   （丢了就跑 `just power`）。
 - **日志**：`/var/log/macbook-os-update.log`（root）。安装失败时 playbook 会直接把末尾打出来；
   重启前就失败的（认证、找不到该更新）会立刻报错，不用等超时。

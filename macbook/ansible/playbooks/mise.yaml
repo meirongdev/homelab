@@ -1,0 +1,144 @@
+---
+# 第 2 层：语言运行时，全部交给 mise（替代 sdkman / fnm / brew 的 go·node·python 那一套）。
+# mise 本体由 packages.yaml 的 base 层装；这里只写全局配置 ~/.config/mise/config.toml 并 `mise install`。
+#
+# ⚠️ 装好≠生效：shell 里要有 `eval "$(mise activate zsh)"` 才会用到这些版本。那一行属于
+#    chezmoi 管的 ~/.zshrc，不在这里写；没有它，PATH 上照样是 brew 的 node/go。
+#    brew 的 node 不会消失：ai-clis.yaml 和 qwen-code 等 formula 依赖它，与 mise 的并存。
+# ⚠️ Ansible 的 ssh 不加载 .zshrc，所以这里一律用 mise 的全路径。别的 playbook 要用
+#    mise 管的运行时，得 `mise exec -- <cmd>`。
+# ☠️ shim 刻意挪出默认位置（下面配置里的 shims_dir）：Orca 会**无条件**把
+#    ~/.local/share/mise/shims 拼到它 daemon 的 PATH 最前面，排在 fnm / Homebrew 之前，
+#    shim 一出现，mise 的全局版本就成了 Orca 拉起的所有会话的 node/python/java。2026-10-11
+#    首次跑完就这样：M2 的 Orca 会话 node 从 fnm 24 变成 mise 26，M5 上装在旧 node 下的 `pi`
+#    直接报 "No version is set for shim"。我们用 `mise activate`（改 PATH）不用 shim，挪走无损失。
+#
+# 版本写前缀不写 latest：latest 让每次跑都可能装一个新版本（不幂等），几台机器也会各停在
+# 不同版本上。前缀优先匹配已装版本，所以重跑不升级；升级 = 改这里的前缀再跑。
+# 旧版本不会自动删，清理用 `mise prune`。
+- name: Language runtimes via mise
+  hosts: dev
+  gather_facts: false
+  vars:
+    homebrew_prefix: /opt/homebrew
+    mise_bin: "{{ homebrew_prefix }}/bin/mise"
+  environment:
+    PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+  tasks:
+    - name: Check that mise is installed
+      ansible.builtin.stat:
+        path: "{{ mise_bin }}"
+      register: mise_stat
+
+    - name: Fail early if mise is missing
+      ansible.builtin.fail:
+        msg: "{{ mise_bin }} 不存在：先跑 `just packages {{ inventory_hostname }}`（base 层装 mise）"
+      when: not mise_stat.stat.exists and not ansible_check_mode
+
+    # --check 连着 packages.yaml 一起跑时，mise 是「将会装」而不是「已装」，别报成失败。
+    - name: Note that --check stops here until mise is installed
+      ansible.builtin.debug:
+        msg: "mise 还没装（packages.yaml 会装），--check 到此为止；真跑时先 packages 再 mise"
+      when: not mise_stat.stat.exists and ansible_check_mode
+
+    - name: End this host's --check run
+      ansible.builtin.meta: end_host
+      when: not mise_stat.stat.exists and ansible_check_mode
+
+    - name: Ensure the mise config directory exists
+      ansible.builtin.file:
+        path: ~/.config/mise
+        state: directory
+        mode: "0755"
+
+    # 版本取自 M5 当时实际在用的：node/go/pnpm 是 brew 的，java/maven/gradle 是 sdkman 的，
+    # python 3.13 是用 uv 装过的那个。rust 走 rustup（mise 的 core:rust 复用 ~/.rustup）。
+    - name: Write the global mise config
+      ansible.builtin.copy:
+        dest: ~/.config/mise/config.toml
+        mode: "0644"
+        content: |
+          # 由 homelab 仓库 macbook/ansible/playbooks/mise.yaml 管理，手改会在下次运行时被覆盖。
+          [settings]
+          # 别改回默认：Orca 会把默认的 ~/.local/share/mise/shims 塞到 PATH 最前面（见 playbook 文件头）。
+          shims_dir = "~/.local/share/mise/shims-hidden"
+
+          [tools]
+          node = "26"
+          pnpm = "10"
+          bun = "1"
+          go = "1.27"
+          python = "3.13"
+          java = "temurin-25"
+          maven = "3.9"
+          gradle = "9"
+          rust = "stable"
+
+    # 旧目录里只该有 mise 自己的 shim（指向 mise 二进制的软链）；有别的东西就停下，别连带删掉。
+    - name: Find anything in the default shim dir that is not a mise shim
+      ansible.builtin.shell: |
+        d="$HOME/.local/share/mise/shims"
+        [ -d "$d" ] || exit 0
+        for f in "$d"/* "$d"/.[!.]*; do
+          [ -e "$f" ] || [ -L "$f" ] || continue
+          case "$(readlink "$f")" in */mise) ;; *) echo "$f" ;; esac
+        done
+      register: foreign_shims
+      changed_when: false
+      check_mode: false
+
+    - name: Refuse to delete the default shim dir if it holds foreign files
+      ansible.builtin.assert:
+        that: foreign_shims.stdout | length == 0
+        fail_msg: "~/.local/share/mise/shims 里有不是 mise shim 的文件，手动处理后再跑：{{ foreign_shims.stdout_lines }}"
+        quiet: true
+
+    - name: Remove the default shim dir (Orca puts it at the front of its PATH)
+      ansible.builtin.file:
+        path: ~/.local/share/mise/shims
+        state: absent
+
+    - name: Find runtimes that are not installed yet
+      ansible.builtin.command: "{{ mise_bin }} ls --missing --json"
+      args:
+        chdir: ~                            # 只看全局配置，别被当前目录的项目配置带偏
+      register: mise_missing
+      changed_when: false
+      check_mode: false
+
+    - name: Install missing runtimes
+      ansible.builtin.command: "{{ mise_bin }} install"
+      args:
+        chdir: ~
+      when: mise_missing.stdout | from_json | length > 0
+
+    - name: Re-check that nothing is missing
+      ansible.builtin.command: "{{ mise_bin }} ls --missing --json"
+      args:
+        chdir: ~
+      register: mise_after
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Assert every runtime is installed
+      ansible.builtin.assert:
+        that: mise_after.stdout | from_json | length == 0
+        # 列出的版本若不是配置要的那个（没有 requested_version），多半是 installs/<tool>/ 下
+        # 一次没装完的残留目录（M5 上 10-02 留下过 node 26.10.0），`mise uninstall <tool>@<ver>` 清掉。
+        fail_msg: "mise install 之后仍有缺失：{{ mise_after.stdout }}"
+        quiet: true
+      when: not ansible_check_mode
+
+    # 上面的 install 会触发 reshim；shims_dir 若没生效，shim 会回到 Orca 认的那个目录。
+    - name: Check the default shim dir stayed gone
+      ansible.builtin.stat:
+        path: ~/.local/share/mise/shims
+      register: default_shims
+      when: not ansible_check_mode
+
+    - name: Assert mise did not recreate the default shim dir
+      ansible.builtin.assert:
+        that: not default_shims.stat.exists
+        fail_msg: "mise 又在 ~/.local/share/mise/shims 建了 shim：config.toml 里的 shims_dir 没生效？"
+        quiet: true
+      when: not ansible_check_mode

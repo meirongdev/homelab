@@ -14,7 +14,8 @@
 #   包括 ~/.ssh、各 AI CLI 的凭据、以及本仓库。上游建议的隔离做法是专用 Unix 用户
 #   或 VM；若日后要收紧，改这里的 hosts/become 与 LaunchAgent 的用户域即可。
 #
-# 前置：ai-clis.yaml 已装好 claude/qwen/codex/hermes（daemon 靠探测 PATH 发现它们）。
+# 前置：ai-clis.yaml 已装好 claude/qwen/codex（daemon 靠探测 PATH 发现它们）。
+# hermes 2026-10-11 起不再安装（三台都已卸载），下面 08-18 的实测记录里那一行仅作历史。
 #
 # 实测哪些 agent 真能注册（2026-08-18，`multica daemon status --output json` +
 # 服务端 agent_runtime 表双向核对）：

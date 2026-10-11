@@ -1,6 +1,6 @@
 # 新机器开发环境 bootstrap（配到能改 homelab repo）
 
-> Last updated: 2026-09-26
+> Last updated: 2026-10-12
 > 面向「换了一台 Mac，要把本机环境配到能 clone、改、验证这个 repo」的流程。
 > 排障/恢复类走 [runbooks/](../runbooks/README.md)；AI 助手上下文见 [../AGENTS.md](../AGENTS.md)（唯一上下文文件，细节按域在 [reference/](../reference/README.md)）。
 
@@ -14,13 +14,26 @@
 
 ## 2. 工具链
 
+工具清单的唯一来源是 `macbook/ansible`（[README](../../macbook/ansible/README.md) 的「开发环境」一节，
+分 base / dev / ops 三层）。手工只做 Ansible 自己跑起来之前的那几步：
+
 ```bash
-brew install just uv terraform helm kubectl git python3 gitleaks
-uv tool install ansible        # 提供 ansible-playbook（justfile 直接调它）
+xcode-select --install          # 没有 CLT 时 /usr/bin/python3 只是占位程序，Ansible 的模块跑不起来
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"   # 交互输入 admin 密码
+brew install just ansible
 ```
 
+clone（第 3 节第一条命令）之后，在 `macbook/ansible/inventory.yaml` 里照 `m5` 的写法登记这台机器
+（`workstation` 组，`ansible_connection: local`，再加进 `base`/`dev`/`ops` 组），然后装其余全部：
+
+```bash
+cd macbook/ansible && just packages m5 && just mise m5 && just ai-clis m5   # m5 换成你登记的主机名
+```
+
+下面几条是本仓库为什么离不开它们：
+
 - `just`：repo 的主任务运行器（全部 root 都用它，含 `cloud/oracle/terraform/`——那里 2026-09-06 前是 Makefile）。
-- `uv`：`check-manifests.py` 用 `uv run --with pyyaml`；ansible 建议 `uv tool install` 隔离。
+- `uv`：`check-manifests.py` 用 `uv run --with pyyaml`。
 - `gitleaks`：`just check`（即 pre-push 钩子）的密钥扫描。没装只会打一行警告然后跳过，
   而 CI 的 `secret-scan.yml` 在 push **之后**才跑——公开仓库里那时密钥已经泄露，只能轮换。
 - `terraform`：8 个 root 都用它：`proxmox/terraform`、`proxmox/terraform-storage`

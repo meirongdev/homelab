@@ -1,14 +1,18 @@
-# Apple Silicon Macs reached over Tailscale. SSH key comes from ansible.cfg (~/.ssh/vgio);
-# login user defaults to matthew there, a host that differs sets ansible_user here.
+# Apple Silicon Macs. The remote ones are reached over Tailscale: SSH key comes from ansible.cfg
+# (~/.ssh/vgio); login user defaults to matthew there, a host that differs sets ansible_user here.
 #
-# Host vars live ONLY under `macs`; the role groups below just name the hosts.
-# Playbooks target a role group, so a new Mac gets exactly the roles it is listed in:
-#   macs    → ping / packages / node-exporter / power / os-update   (every Mac)
-#   macbook → ai-clis / multica-daemon                               (M2 only)
-#   omlx    → omlx / omlx-metrics                                     (OMLX inference nodes)
-#   macmon  → macmon (power / temperature / fans, :9090)              (both Macs)
-# Prometheus side: one node-exporter job per Mac + both Macs as targets of the omlx-* jobs,
-# + the macmon job (k8s/helm/values/kube-prometheus-stack.yaml).
+# Host vars live ONLY under `macs` / `workstation`; the role groups below just name the hosts.
+# Playbooks target a role group, so a Mac gets exactly the roles it is listed in:
+#   macs    → ping / node-exporter / power / os-update                  (remote headless fleet)
+#   macbook → ai-clis (claude/qwen/codex) / multica-daemon               (M2 only)
+#   omlx    → omlx / omlx-metrics                                        (OMLX inference nodes)
+#   macmon  → macmon (power / temperature / fans, :9090)                 (both remote Macs)
+#   base    → packages: Homebrew + base CLI + AWS/GCP CLI + oh-my-zsh/plugins + TPM;
+#             ai-clis: Antigravity CLI                                   (every Mac)
+#   dev     → mise: language runtimes
+#   ops     → packages: k8s / IaC CLIs
+# Prometheus side: one node-exporter job per Mac in `macs` + both OMLX Macs as targets of the
+# omlx-* jobs, + the macmon job (k8s/helm/values/kube-prometheus-stack.yaml).
 macs:
   hosts:
     mbp-m2-pro:
@@ -18,6 +22,15 @@ macs:
       ansible_user: matstudio       # NOT matthew — macOS short name on this machine
       # Desktop, no battery: a power cut leaves it off until someone presses the button.
       pmset_autorestart: true
+
+# The MacBook Pro M5 this repo is run from. Deliberately NOT in `macs`: that group gets
+# power (disablesleep) / os-update (unattended reboot) / node-exporter, none of which belong
+# on the machine you work on. Only the dev-env groups (base / dev / ops) include it.
+workstation:
+  hosts:
+    m5:
+      ansible_connection: local
+      ansible_python_interpreter: "{{ ansible_playbook_python }}"
 
 macbook:
   hosts:
@@ -34,3 +47,19 @@ macmon:
   hosts:
     mbp-m2-pro:
     mac-studio:
+
+base:
+  hosts:
+    m5:
+    mbp-m2-pro:
+    mac-studio:
+
+dev:
+  hosts:
+    m5:
+    mbp-m2-pro:
+
+ops:
+  hosts:
+    m5:
+    mbp-m2-pro:

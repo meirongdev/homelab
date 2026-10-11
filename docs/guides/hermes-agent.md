@@ -1,6 +1,9 @@
 # Hermes Agent — Profile 管理与 MCP 集成
 
-> Last updated: 2026-07-31
+> ⚠️ **Deprecated（2026-10-11）**：Hermes Agent 已不再使用，三台 Mac 都已卸载，
+> `macbook/ansible/playbooks/ai-clis.yaml` 也不再安装它。无替代文档，本文仅作历史保留。
+
+> Last updated: 2026-10-12
 > 适用版本：Hermes Agent v0.17.x（macbook，Homebrew 安装）
 
 ---
