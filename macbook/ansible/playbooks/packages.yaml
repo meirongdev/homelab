@@ -1,16 +1,39 @@
 ---
-# Ensure Homebrew + CLI packages on every Mac.
-# Runs as the login user (matthew / matstudio, see inventory) — Homebrew refuses to run as root, so NO become here.
-# Idempotent: already-installed packages report ok (no change).
-- name: Homebrew + CLI packages
-  hosts: macs
+# 开发环境里「装软件」的部分，每个 play 对应 inventory 里的一个层级组：
+#   base → 第 1 层：Homebrew + 基础 CLI + AWS/GCP CLI + oh-my-zsh/插件 + TPM（每台 Mac）
+#   ops  → 第 3 层：k8s / IaC 工具
+# 第 2 层（语言运行时）在 mise.yaml。
+#
+# 配置文件（~/.zshrc、~/.tmux.conf）不归这里管，归 chezmoi dotfiles 仓库：这里只把
+# oh-my-zsh 和插件克隆到位，**不跑 oh-my-zsh 的 install.sh**（它会改写 ~/.zshrc 并 chsh，
+# 跟 chezmoi 抢同一个文件）。所以一台还没有 .zshrc 的机器（如 Studio）跑完这里，
+# oh-my-zsh 在磁盘上但不生效，要等 chezmoi 写出 .zshrc。
+#
+# 以登录用户身份跑（matthew / matstudio，见 inventory）—— Homebrew 不能 root，所以没有 become。
+# 幂等，但只补装：已装的不升级（升级手动 `brew upgrade`），从列表里删掉一项也不会卸载它。
+- name: Homebrew + base CLI packages
+  hosts: base
   gather_facts: false
   vars:
     homebrew_prefix: /opt/homebrew          # Apple Silicon default prefix
+    # git 不在列表里：用 CLT 自带的。jq 也不在：macOS 15 起系统自带 /usr/bin/jq。
     homebrew_packages:
+      - age
+      - awscli                              # 云 CLI 每台都装，凭据归 chezmoi（按 role 下发）
+      - chezmoi
+      - fzf
+      - gh
+      - htop
+      - just
+      - lazygit
+      - mise                                # 第 2 层的运行时由 mise.yaml 装（只在 dev 组）
+      - ripgrep
       - tmux
       # omlx-metrics 的渲染器住在 mlx-learning 仓的 venv 里，建那个 venv 要 `uv sync`
       - uv
+      - yq
+    homebrew_casks:
+      - gcloud-cli
   tasks:
     - name: Check whether Homebrew is installed
       ansible.builtin.stat:
@@ -23,9 +46,10 @@
       when: not brew_bin.stat.exists
       # NOTE: first-time bootstrap creates {{ homebrew_prefix }} and calls sudo internally,
       # so on a fresh Mac run this once interactively (it prompts for the admin password).
-      # On this machine Homebrew already exists, so this task is skipped.
+      # Also install the Command Line Tools first (`xcode-select --install`): until they exist,
+      # /usr/bin/python3 is a stub that pops a GUI install dialog, so no Ansible module can run.
 
-    - name: Ensure CLI packages are present (idempotent)
+    - name: Ensure base CLI packages are present (idempotent)
       community.general.homebrew:
         name: "{{ homebrew_packages }}"
         state: present
@@ -33,3 +57,106 @@
         update_homebrew: false
       environment:
         PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Ensure base casks are present (idempotent)
+      community.general.homebrew_cask:
+        name: "{{ homebrew_casks }}"
+        state: present
+        path: "{{ homebrew_prefix }}/bin"
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+- name: oh-my-zsh + plugins + tmux plugin manager
+  hosts: base
+  gather_facts: false
+  vars:
+    # 只放 M5 和 M2 的 .zshrc 都启用的两个插件。M2 另外启用了 fast-syntax-highlighting /
+    # zsh-autocomplete（已在它磁盘上，这里不删）；统一 .zshrc 时再决定要不要加进来。
+    zsh_repos:
+      - repo: https://github.com/ohmyzsh/ohmyzsh.git
+        dest: ~/.oh-my-zsh
+      - repo: https://github.com/zsh-users/zsh-autosuggestions.git
+        dest: ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions
+      - repo: https://github.com/zsh-users/zsh-syntax-highlighting.git
+        dest: ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting
+      - repo: https://github.com/tmux-plugins/tpm
+        dest: ~/.tmux/plugins/tpm
+  tasks:
+    # update: false —— 已存在就不碰（.zshrc 里关了 omz 自动更新，这里也不替它拉新）。
+    # 也意味着不校验已有目录的 remote，目录在就算数。
+    - name: Clone oh-my-zsh, plugins and TPM (only if missing)
+      ansible.builtin.git:
+        repo: "{{ item.repo }}"
+        dest: "{{ item.dest }}"
+        depth: 1
+        update: false
+      loop: "{{ zsh_repos }}"
+      loop_control:
+        label: "{{ item.dest }}"
+
+- name: Ops CLI tools (k8s / IaC)
+  hosts: ops
+  gather_facts: false
+  vars:
+    homebrew_prefix: /opt/homebrew
+    ops_packages:
+      - ansible
+      - argocd
+      - cilium-cli
+      - gitleaks                            # 本仓库 `just check`（pre-push）的密钥扫描
+      - helm
+      - hubble
+      - k6
+      - k9s
+      - kind
+      - kubeconform
+      - kubectx                             # 含 kubens
+      - kubernetes-cli
+      - tilt
+    # HashiCorp 的 formula 只在它自己的 tap 里（homebrew-core 因 BSL 不再收）。
+    # ☠️ Homebrew 2026 起拒绝加载未信任的第三方 tap：`brew info` 只要碰到一个未信任的
+    #    formula 就整体失败，community.general.homebrew 正是把整份列表一次交给 `brew info`，
+    #    所以这些必须单独一个任务、并先 trust。按 formula 信任而不是整个 tap
+    #    （同 multica-daemon.yaml 文件头的考量：信任整个 tap 是无条件的）。
+    ops_tap: hashicorp/tap
+    ops_tap_packages:
+      - hashicorp/tap/terraform
+      - hashicorp/tap/vault
+  environment:
+    PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+  tasks:
+    - name: Ensure ops CLI packages are present (idempotent)
+      community.general.homebrew:
+        name: "{{ ops_packages }}"
+        state: present
+        path: "{{ homebrew_prefix }}/bin"
+        update_homebrew: false
+
+    - name: Ensure the HashiCorp tap is present
+      community.general.homebrew_tap:
+        name: "{{ ops_tap }}"
+        state: present
+        path: "{{ homebrew_prefix }}/bin"
+
+    - name: Read the Homebrew trust list
+      ansible.builtin.command: "{{ homebrew_prefix }}/bin/brew trust --json=v1"
+      register: brew_trust
+      changed_when: false
+      check_mode: false
+
+    - name: Work out which tap formulae are not trusted yet
+      ansible.builtin.set_fact:
+        ops_untrusted: "{{ ops_tap_packages | difference((brew_trust.stdout | from_json).formulae) }}"
+
+    - name: Trust the tap formulae (per formula, not the whole tap)
+      ansible.builtin.command: "{{ homebrew_prefix }}/bin/brew trust --formula {{ item }}"
+      loop: "{{ ops_untrusted }}"
+
+    # --check 下上一步不会真的 trust，`brew info` 必然失败，所以有未信任项时跳过。
+    - name: Ensure tap packages are present (idempotent)
+      community.general.homebrew:
+        name: "{{ ops_tap_packages }}"
+        state: present
+        path: "{{ homebrew_prefix }}/bin"
+        update_homebrew: false
+      when: not (ansible_check_mode and ops_untrusted | length > 0)

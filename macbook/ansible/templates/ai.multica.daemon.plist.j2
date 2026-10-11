@@ -27,7 +27,7 @@
              不含 /opt/homebrew/bin。不显式给 PATH 的话 daemon 起得来、
              但探测不到任何 AI CLI —— 表现为 UI 里 runtime 显示 0 个 agent，
              没有任何报错。claude/qwen 是 npm 全局（软链在 /opt/homebrew/bin），
-             codex/hermes 是 brew，都在同一目录。 -->
+             codex 是 brew，都在同一目录。 -->
         <key>PATH</key>
         <string>{{ ansible_facts.user_dir }}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         <key>MULTICA_DAEMON_DEVICE_NAME</key>

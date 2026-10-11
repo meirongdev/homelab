@@ -1,6 +1,6 @@
 # Runbook — Multica 安装与配置
 
-> Last updated: 2026-09-02
+> Last updated: 2026-10-12
 >
 > **触发条件**：首次部署 Multica，或 homelab 重建后恢复它、或把它迁到另一个集群。
 > **成功判定**：五条同时成立：
@@ -238,8 +238,8 @@ kubectl --context k3s-homelab -n personal-services annotate httproute multica re
    无头机器得先经 Screen Sharing 或接显示器做一次，否则 Ansible 连不上。
 2. **装好并登录 Tailscale**，且勾选 *Run Tailscale when logged out*：这台机是无头/合盖
    运行，只经 Tailscale 访问。
-3. `just packages`：Homebrew + 基础 CLI。⚠️ **Homebrew 首次安装需要交互式 admin 密码**，
-   无头 SSH 跑不过，重建机器时要单独手动跑一次。
+3. `just packages mbp-m2-pro`：Homebrew + 基础 CLI + 运维工具。⚠️ **Homebrew 首次安装需要交互式 admin 密码**，
+   无头 SSH 跑不过，重建机器时要单独手动跑一次（之前还得先 `xcode-select --install`）。
 4. **自动登录 + FileVault 关闭**：LaunchAgent 装在 GUI 域，没人登录就不会起。
    机器重启后若停在登录界面，daemon 静默不上线而服务端一切正常（就是本文开头那个陷阱）。
 5. `just ai-clis`：装 AI CLI，daemon 靠探测 PATH 发现它们

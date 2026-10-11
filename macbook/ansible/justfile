@@ -1,4 +1,5 @@
-# 管两台远程 Mac：M2 MacBook（mbp-m2-pro）与 Mac Studio（mac-studio），见 inventory.yaml。
+# 管两台远程 Mac：M2 MacBook（mbp-m2-pro）与 Mac Studio（mac-studio），外加本机 M5（m5，
+# 本地连接，只进开发环境的 base/dev/ops 组），见 inventory.yaml。
 # 带 `target` 参数的配方默认作用于该 playbook 的整个主机组，也可以传主机名或组名
 # （ansible --limit 语法）只跑一台：`just node-exporter mac-studio`。
 # 需要 sudo 的配方（power / site）逐台运行、逐台问密码 —— 两台的登录密码不同，
@@ -12,13 +13,21 @@ help:
 ping target="macs":
     ansible-playbook playbooks/ping.yaml --limit '{{target}}'
 
-# 确保 Homebrew + CLI 包（tmux / uv 等）就位（无需 sudo，幂等）
-packages target="macs":
+# base 组：Homebrew + 基础 CLI + oh-my-zsh/插件/TPM；ops 组另加 k8s/云/IaC 工具。
+# 只补装不升级。.zshrc 等配置文件归 chezmoi，这里不碰。
+# 开发环境的软件（base 层每台 + ops 层；无需 sudo，幂等）
+packages target="base":
     ansible-playbook playbooks/packages.yaml --limit '{{target}}'
 
-# 安装/确认 AI CLI 工具（claude/qwen/codex/hermes，仅 MacBook，无需 sudo，幂等）
-ai-clis:
-    ansible-playbook playbooks/ai-clis.yaml
+# 写 ~/.config/mise/config.toml 并装齐；shell 里要有 `mise activate` 才生效（归 chezmoi）。
+# 语言运行时（mise：node/pnpm/bun/go/python/java/maven/gradle/rust，仅 dev 组，无需 sudo，幂等）
+mise target="dev":
+    ansible-playbook playbooks/mise.yaml --limit '{{target}}'
+
+# claude/qwen/codex 只装 M2（macbook 组），Antigravity CLI（agy）装每台（base 组）。
+# 安装/确认 AI CLI 工具（无需 sudo，幂等）
+ai-clis target="all":
+    ansible-playbook playbooks/ai-clis.yaml --limit '{{target}}'
 
 # 顺带给它加 --collector.textfile.directory —— 那是 OMLX 指标的**读取端**，
 # 生产端是下面的 omlx-metrics。
@@ -83,7 +92,7 @@ power target="macs":
     done
 
 # site 会跑 omlx.yaml，所以同样从 Vault 取 OMLX key（见 omlx 配方）。
-# 一次跑全部 Ansible 能做的（包/AI CLI/multica/OMLX/node_exporter/OMLX 指标/macmon/电源；逐台问密码）
+# 一次跑全部 Ansible 能做的（包/运行时/AI CLI/multica/OMLX/node_exporter/OMLX 指标/macmon/电源；逐台问密码）
 site target="macs":
     #!/usr/bin/env bash
     set -euo pipefail
