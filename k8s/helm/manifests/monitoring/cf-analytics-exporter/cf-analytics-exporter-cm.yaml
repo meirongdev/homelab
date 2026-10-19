@@ -256,22 +256,47 @@ data:
     # ❌ 判断「这个 IP 属于数据中心还是住宅宽带」要 clientAsn/clientASNDescription，
     #    免费版直接 403（Bot Management 的 botScore 同理）—— 所以没有真正的「服务器 IP」判定，
     #    只有下面这套基于 UA + CF 验证爬虫名单的近似。
-    Q_HOST_DAY = """
-    query ($zone: String!, $day: Date!, $limit: Int!) {
+    # 2026-10-19 优化（方案 2）：先查当天有流量的 active hosts 列表，再按批次
+    # 以 GraphQL alias 并行发起单 host 查询。每个域名独立享有 ROW_LIMIT(10000) 行配额，
+    # 彻底解决单一大流量域名（如 trends）撑满全站 10000 行导致其他子域名被截断、独立 IP 被低估的问题。
+    Q_HOSTS_SUMMARY = """
+    query ($zone: String!, $day: Date!) {
       viewer {
         zones(filter: {zoneTag: $zone}) {
           httpRequestsAdaptiveGroups(
-            limit: $limit,
+            limit: 100,
             filter: {date_geq: $day, date_leq: $day},
             orderBy: [count_DESC]
           ) {
-            dimensions { clientIP clientRequestHTTPHost verifiedBotCategory userAgent }
+            dimensions { clientRequestHTTPHost }
             count
           }
         }
       }
     }
     """
+
+    HOST_BATCH_SIZE = int(os.environ.get("HOST_BATCH_SIZE", "8"))
+
+
+    def _build_batch_host_query(hosts_batch: list) -> str:
+        fields = []
+        for idx, h in enumerate(hosts_batch):
+            fields.append(f"""  h{idx}: httpRequestsAdaptiveGroups(
+        limit: $limit,
+        filter: {{date_geq: $day, date_leq: $day, clientRequestHTTPHost: {json.dumps(h)}}},
+        orderBy: [count_DESC]
+      ) {{
+        dimensions {{ clientIP clientRequestHTTPHost verifiedBotCategory userAgent }}
+        count
+      }}""")
+        return f"""query ($zone: String!, $day: Date!, $limit: Int!) {{
+      viewer {{
+        zones(filter: {{zoneTag: $zone}}) {{
+    {"\n".join(fields)}
+        }}
+      }}
+    }}"""
 
     # 博客文章的按 path 统计。三个维度都是免费版拿得到的（2026-09-06 实测，逐个试过来的）：
     #   clientRequestPath      —— reference 的「拿得到」清单里漏了它，实际可用（runbook §2
@@ -326,35 +351,53 @@ data:
     def fetch_host_day(day: str) -> dict:
         """某一完整 UTC 日的聚合结果，按 host（外加 __total__ 汇总）。
 
+        2026-10-19 优化（方案 2）：先查当天有流量的 active hosts 列表，再按批次
+        （HOST_BATCH_SIZE=8）以 GraphQL alias 批量发起单 host 查询。
+        每个域名独立享有 ROW_LIMIT(10000) 行配额，彻底解决单一大流量域名（如 trends）
+        撑满全站 10000 行导致其他子域名被截断、独立 IP 被低估的问题。
+
         ☠️ 每个「独立 IP 数」都是**从各自的集合单独 len() 出来的**，不是把别的数字加起来。
            同一个 IP 会同时落进多个 class（浏览器请求 + curl 请求），也会访问多个子域，
            所以 sum() 一定算错。这是本函数唯一需要小心的地方。
         """
-        rows = _zone_rows(
-            gql(Q_HOST_DAY, {"zone": ZONE_ID, "day": day, "limit": ROW_LIMIT}),
-            "httpRequestsAdaptiveGroups",
-        )
+        summary_data = gql(Q_HOSTS_SUMMARY, {"zone": ZONE_ID, "day": day})
+        summary_rows = _zone_rows(summary_data, "httpRequestsAdaptiveGroups")
+        active_hosts = [r["dimensions"]["clientRequestHTTPHost"] for r in summary_rows if r.get("count", 0) > 0]
 
         requests, req_by_class, bot_requests = {}, {}, {}
         ips, ips_human, ips_by_class = {}, {}, {}
+        truncated = False
 
-        for r in rows:
-            d = r["dimensions"]
-            host = d["clientRequestHTTPHost"]
-            ip = d["clientIP"]
-            bot = d["verifiedBotCategory"]
-            cls = classify(bot, d["userAgent"])
-            n = r.get("count", 0)
+        for i in range(0, len(active_hosts), HOST_BATCH_SIZE):
+            batch = active_hosts[i:i + HOST_BATCH_SIZE]
+            q_batch = _build_batch_host_query(batch)
+            res_data = gql(q_batch, {"zone": ZONE_ID, "day": day, "limit": ROW_LIMIT})
+            zones = res_data.get("viewer", {}).get("zones")
+            if not zones or not zones[0]:
+                continue
+            z = zones[0]
 
-            for h in (host, TOTAL):
-                requests[h] = requests.get(h, 0) + n
-                req_by_class[(h, cls)] = req_by_class.get((h, cls), 0) + n
-                ips.setdefault(h, set()).add(ip)
-                ips_by_class.setdefault((h, cls), set()).add(ip)
-                if cls in HUMANISH_CLASSES:
-                    ips_human.setdefault(h, set()).add(ip)
-            if bot:
-                bot_requests[bot] = bot_requests.get(bot, 0) + n
+            for idx, host in enumerate(batch):
+                rows = z.get(f"h{idx}") or []
+                if len(rows) >= ROW_LIMIT:
+                    truncated = True
+
+                for r in rows:
+                    d = r["dimensions"]
+                    ip = d["clientIP"]
+                    bot = d["verifiedBotCategory"]
+                    cls = classify(bot, d["userAgent"])
+                    n = r.get("count", 0)
+
+                    for h in (host, TOTAL):
+                        requests[h] = requests.get(h, 0) + n
+                        req_by_class[(h, cls)] = req_by_class.get((h, cls), 0) + n
+                        ips.setdefault(h, set()).add(ip)
+                        ips_by_class.setdefault((h, cls), set()).add(ip)
+                        if cls in HUMANISH_CLASSES:
+                            ips_human.setdefault(h, set()).add(ip)
+                    if bot:
+                        bot_requests[bot] = bot_requests.get(bot, 0) + n
 
         # ☠️ 给**每个有流量的 host** 都补一个 client_ips_human 条目（可能是 0）。
         # 不补的话，「昨天完全没有真人访问」的域名（实测 argocd/vault/auth 就是）
@@ -372,7 +415,7 @@ data:
             "client_ips_human": {h: len(s) for h, s in ips_human.items()},
             "client_ips_by_class": {k: len(s) for k, s in ips_by_class.items()},
             "bot_requests": bot_requests,
-            "truncated": len(rows) >= ROW_LIMIT,
+            "truncated": truncated,
         }
 
 
@@ -441,7 +484,10 @@ data:
                 continue
 
             data["host_window_days"] += 1
-            data["truncated"] |= int(got["truncated"])
+            # 只由最新自然日（offset == 1，昨天）决定当前是否需要发出告警，
+            # 避免历史某天的单日流量突发使得整个 8 天滑动窗口持续处于告警状态。
+            if offset == 1:
+                data["truncated"] = int(got["truncated"])
             for key in ("requests", "client_ips", "client_ips_human"):
                 for host, val in got[key].items():
                     data[key][(day, host)] = val

@@ -66,7 +66,7 @@ spec:
 
         # 数据质量：某天的 (clientIP, host) 组合数撞到了 API 的 10000 行上限，
         # 独立 IP 数因此被低估（请求数不受影响，它是分组求和）。
-        # 2026-08-15 实测本 zone 单日约 2500 行，真触发说明流量涨了 4 倍。
+        # 2026-10-19 已按 host 拆分批次查询，每个域名独立享有 10000 行配额。
         - alert: CFAnalyticsRowsTruncated
           expr: cf_analytics_rows_truncated == 1
           for: 1h
@@ -74,7 +74,7 @@ spec:
             severity: warning
           annotations:
             summary: "cf-analytics 独立 IP 数被 API 行数上限截断"
-            description: "某一天的 (clientIP, host) 分组数达到 ROW_LIMIT(10000)，独立 IP 数被低估。Cloudflare 的 limit 已是硬上限 10000，要继续拆分得改成按 host 逐个查询（域名数 × 天数 次调用）。"
+            description: "最新完整日某个域名的 (clientIP, host) 分组数达到 ROW_LIMIT(10000)，独立 IP 数被低估。已按 host 拆分批次查询，其余子域名不受影响；若持续触发需检查是否为特定子域名遭刷量或需进一步拆分 path。"
 
         # 同上，但是**按 path 那一问**撞了上限（两个查询共用 ROW_LIMIT，失真方式不同：
         # 这里丢的是页面明细，不是 IP 数）。2026-09-06 实测单日 962 行（html+200 过滤后），
