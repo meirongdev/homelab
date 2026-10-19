@@ -368,8 +368,7 @@ argocd_ctx := "oracle-k3s"
 calibre_ctx := "oracle-k3s"
 
 # ArgoCD chart version — 调整前先 helm search repo argo/argo-cd 看最新
-# 10.1.4 = appVersion v3.4.5（从 v3.3.9 升级，修 CVE-2025-68121 / CVE-2026-33186 Go 运行时 CVE）。
-#   v3.3 已无后继补丁，v3.4 是唯一修复路径；迁移风险由 --force-conflicts 兜底（见 deploy-argocd）。
+# 10.10.5 = appVersion v3.5.5（从 10.1.4 / v3.4.5 升级，修 CVE-2026-77459 权限绕过 CVE）。
 # ⚠️ 这是 GitOps 控制器自升级：deploy-argocd 时若 gateway health 字段 SSA 冲突，加 --force-conflicts 重跑。
 # ⚠️ 2026-08-02 实测的另一处 SSA 冲突（同样用 --force-conflicts 解）：
 #   application-controller 的 resources.{limits,requests}.memory 被 field manager
@@ -379,7 +378,7 @@ calibre_ctx := "oracle-k3s"
 #   已用 --force-conflicts 把所有权收回 helm；kubectl-patch 仍残留 requests.memory
 #   的共享所有权，下次改 request 若再冲突，同样加 --force-conflicts。
 #   教训：手工 kubectl patch 过的字段会永久劫持 helm 的声明，改完记得 helm 收回。
-argocd_chart_version := "10.1.4"
+argocd_chart_version := "10.10.5"
 
 # 一键安装 ArgoCD + 应用配置（幂等，可重复执行）
 # 改为官方 Helm chart 部署（k8s/helm/values/argocd.yaml）

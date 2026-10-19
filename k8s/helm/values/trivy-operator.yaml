@@ -285,6 +285,16 @@ trivy:
         statement: "PyJWT ≤2.13.0 非对称 PEM 识别绕过致 HS/RS 混淆(修复 2.14.0, 2026-09-29 发布); 触发需 jwt.decode 白名单混用 HMAC 与非对称算法, litellm v1.103.1 全部调用点无混用且未开 enable_jwt_auth, open_notebook 只经 mcp SDK 引入且仅 encode; litellm v1.103.2 仍锁 2.13.0 无已修镜像, 2026-11 复审"
       - id: GHSA-vcvr-r3jv-pc5j
         statement: "Next.js next/og ImageResponse(Node 版) RCE(修复 16.3.6, 2026-09-30 发布); 触发需应用用 next/og 生成图片且传入攻击者可控 SVG 值, open_notebook 1.14.0 / multica-web v0.4.28 源码零引用 next/og, 无已修镜像, 2026-11 复审"
+      # --- ASP.NET Core 9.x/10.x 安全功能绕过（2026-10-19 新增，Jellyfin）---
+      # 2026-10-17 17:48 homelab TrivyImageCriticalVulnerabilities 报 2 条 Critical，
+      # 命中 media/jellyfin 镜像内 .NET 9.0.16。
+      # ☠️ 无已修镜像（2026-10-19 实测 Docker Hub latest 仍为 .NET 10.0.12，修复需 10.0.13/9.0.21）：
+      #   Jellyfin 官方镜像尚未发布基于已修 .NET 运行时的版本。
+      # Jellyfin 运行在 homelab 内网受信环境，2026-11 复审。
+      - id: CVE-2026-70188
+        statement: "ASP.NET Core 安全功能绕过(修复 9.0.21/10.0.13); jellyfin 官方 latest 镜像内置 .NET 10.0.12 仍低于修复版本, 上游尚未重建无已修镜像, 内网受信运行, 2026-11 复审"
+      - id: CVE-2026-88092
+        statement: "ASP.NET Core 安全功能绕过(修复 9.0.21/10.0.13); 同 CVE-2026-70188, jellyfin 官方无已修镜像, 2026-11 复审"
   # 扫描 Job（client）资源
   resources:
     requests:
