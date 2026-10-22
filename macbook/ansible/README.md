@@ -139,8 +139,23 @@ just packages && just mise && just ai-clis            # 全部（按各自的组
    只能先经 Screen Sharing 或临时接显示器做这一次。同理需要先装好并登录 **Tailscale**
    （勾 *Run Tailscale when logged out*），否则重启后在登录前无隧道、SSH 也进不来。
 
-2. **Amphetamine "Allow display sleep"**（GUI）—— **停掉航拍壁纸 CPU 的关键**。Amphetamine 当前在 `PreventUserIdleDisplaySleep`，显示器永不空闲休眠，导致 `WallpaperAerialsExtension` 24h 解码视频。改成"保持系统唤醒但允许显示器休眠"后，10 分钟空闲即关屏、航拍归零，且远程访问不受影响。
-   - 经 Screen Sharing 进 GUI：菜单栏 Amphetamine → 当前会话/偏好 → 勾选 **Allow display sleep**。
+2. **Amphetamine 允许显示器休眠**（CLI 可做，不必进 GUI；**2026-10-22 已改**）—— **停掉航拍壁纸 CPU 的关键**。
+   Amphetamine 出厂默认 `Allow Display Sleep = 0`，又开着 `Start Session At Launch`（无限期），
+   于是每次登录都起一个同时挂 `PreventUserIdleSystemSleep` 和 `PreventUserIdleDisplaySleep` 的会话：
+   显示器永不空闲休眠（合盖也一样，系统照样认为屏是亮的），`WallpaperAerialsExtension` 24h 解码视频。
+   改之前整机功耗 24h 中位数 8.2W，关屏后 ~4W。
+   显示器开关**与 Wi‑Fi / 远程访问无关**：掉线只发生在整机睡眠，那由 `SleepDisabled 1`（`just power`）
+   和 Amphetamine 的 `Allow Closed-Display Sleep = 0` 管，这两项都别动。
+   改法是写沙盒容器里的偏好再重启 app（app 停的那几秒靠 `SleepDisabled 1` 保持唤醒）：
+   ```bash
+   D=~/Library/Containers/com.if.Amphetamine/Data/Library/Preferences/com.if.Amphetamine
+   killall Amphetamine; sleep 2
+   defaults write "$D" "Allow Display Sleep" -int 1
+   open -a Amphetamine; sleep 5
+   pmset -g assertions | grep Amphetamine   # 只剩 PreventUserIdleSystemSleep 才算生效
+   ```
+   改完后 `pmset -g` 的 `displaysleep 10` 后面不再带 `(display sleep prevented by Amphetamine)`。
+   要立刻关屏（不等 10 分钟空闲）：`pmset displaysleepnow`，无需 sudo。
 
 3. **自动登录**（`sysadminctl`，需登录密码；**已设置**，开机后无人值守自动进会话，Tailscale + node_exporter 才会随登录起来）：
    ```bash

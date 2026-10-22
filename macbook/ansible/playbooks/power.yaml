@@ -11,8 +11,10 @@
 # way, so it is left at the macOS default.
 #
 # NOTE: this does NOT stop the MacBook's aerial-wallpaper CPU burn. That requires the DISPLAY
-# to sleep, which is gated by Amphetamine's "Allow display sleep" toggle — a GUI-only setting
-# Ansible cannot change. See README ("Manual / GUI-only steps").
+# to sleep, which on the M2 is gated by Amphetamine's "Allow Display Sleep" preference
+# (factory default 0). It is not a GUI-only setting — `defaults write` into the app's sandbox
+# container + restart the app — but this playbook does not manage it; it was flipped by hand
+# on 2026-10-22. See README ("Manual / GUI-only steps", item 2).
 #
 # Needs root for pmset:  run via `just power <host>`  (adds --ask-become-pass).
 - name: macOS headless power policy

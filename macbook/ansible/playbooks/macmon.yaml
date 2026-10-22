@@ -9,9 +9,12 @@
 #
 # 口径（2026-10-05 两台都压测核过，都是 macOS 27.0.1 / macmon 0.8.2）：
 #                               Studio M5 Max（台式）        M2 Pro MacBook（合盖、插电）
-#   macmon_sys_power_watts      空闲 4.3W / CPU 满载 74W     空闲 7–9W / CPU 满载 37W
+#   macmon_sys_power_watts      空闲 4.3W / CPU 满载 74W     空闲 3–5W（关屏）/ CPU 满载 37W
 #                               / GPU 满载 104W              / GPU 满载 28W
 #     整机功耗 = SMC `PSTR`：SoC 侧读数、**不是墙插功率**（不含电源损耗），是采样时刻的点值。
+#     M2 的「空闲」以关屏为准：2026-10-22 之前 Amphetamine 挡着显示器休眠（合盖也是屏亮状态），
+#     当时测的 7–9W 是「屏亮 + 航拍壁纸」（24h 中位数 8.2W）；关屏后中位数 4.3W、p10 3.2W。
+#     M2 空闲读数跳回 7W 以上，先查 `pmset -g assertions` 是不是又有 PreventUserIdleDisplaySleep。
 #   macmon_gpu_power_watts      GPU 满载 81W                 GPU 满载 13W
 #     IOReport，整个采样区间的平均。
 #   macmon_gpu_temp_celsius     空闲 ~25°C，满载 51°C        空闲 ~39°C，满载 47°C

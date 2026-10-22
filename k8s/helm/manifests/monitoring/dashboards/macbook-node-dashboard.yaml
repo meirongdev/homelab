@@ -245,7 +245,7 @@ data:
         },
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "description": "SMC PSTR：SoC 侧整机功耗，采样时刻的点值。不是墙插功率（不含电源损耗，墙插更高）。实测 Studio 空闲 ~4W、CPU 满载 ~74W、GPU 满载 ~104W；M2 空闲 7–9W、CPU 满载 ~37W。",
+          "description": "SMC PSTR：SoC 侧整机功耗，采样时刻的点值。不是墙插功率（不含电源损耗，墙插更高）。实测 Studio 空闲 ~4W、CPU 满载 ~74W、GPU 满载 ~104W；M2 空闲 3–5W（关屏；屏亮时 7–9W）、CPU 满载 ~37W。",
           "fieldConfig": {
             "defaults": {
               "color": {"mode": "thresholds"},
