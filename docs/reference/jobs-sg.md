@@ -1,6 +1,6 @@
 # jobs-sg — 新加坡 SWE 岗位趋势周报（架构事实）
 
-> Last updated: 2026-10-04
+> Last updated: 2026-10-22
 > Status: 生效事实
 > Scope: jobs-sg 在 homelab 集群的部署形态、镜像固定方式、备份口径、首次上线依赖顺序
 > 本文是 source of truth。应用代码在 [meirongdev/jobs-sg](https://github.com/meirongdev/jobs-sg)。
@@ -102,7 +102,7 @@ vLLM 忽略；当时的模型 `deepseek-v4-flash`（1M ctx）返回的正是 enr
 ✅ 2026-10-04 用上游自带的实测用例复验（`LLM_LIVE_URL=http://100.97.87.120:8000
 LLM_LIVE_MODEL=qwen3.8-flash-next-tp2 go test ./internal/llm -run Live -v`，在 jobs-sg 仓库根目录）：
 PASS，`enable_thinking=false` 生效，1.02s 抽出 13 个词。即 `LLM_THINKING_KWARG` 保持默认值就对。
-上一栈的差异与复验记录在 git 历史里（`git show 9271654:docs/reference/jobs-sg.md`）。
+上一栈的差异与复验记录在 git 历史里（`git show 8214ee8:docs/reference/jobs-sg.md`）。
 ✅ 严格 JSON 这条契约已在新模型上复验（2026-09-03，直接打网关、用仓库里那份
 `ExtractPrompt`）：三种参数（默认 / `{"thinking":false}` / `{"enable_thinking":false}`）
 都回合法 JSON 且六个 key 齐全，reasoning 分别是 142 / 134 / 0。

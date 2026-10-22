@@ -330,7 +330,7 @@ trivy:
       #     :latest 指的正是报告里那个 digest（9534e5a8…，built 2026-09-01），且
       #     3.11/3.12/3.13/3.14-slim 出自同一 base（abc9cb88…）、同一晚构建 —— 官方 python
       #     镜像整体落后于 perl 这次更新，追 tag 不会让它消失。→ 换 `python:3.11-alpine`
-      #     **让漏洞包不复存在**（同 2026-09-13 krr 升 v1.30.0 那次，commit 38d84d2）：
+      #     **让漏洞包不复存在**（同 2026-09-13 krr 升 v1.30.0 那次，commit 0663d43）：
       #     alpine 基底不带 perl，amd64 与 arm64 两变体各自实测无 perl 包、无 /usr/bin/perl；
       #     脚本只用标准库 sqlite3，两架构实测 `import sqlite3` 正常（sqlite 3.53.4）。
       # 换基底之前的实际暴露面（当时那容器只装了 perl-base；逐条读公告原文 + 进镜像实测。

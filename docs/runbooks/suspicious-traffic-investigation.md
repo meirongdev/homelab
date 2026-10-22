@@ -6,7 +6,7 @@
 > **成功判定**：能回答三个问题：①是不是我自己的 ②有没有真读到东西 ③要不要拦。
 > **回滚**：§1–§3 是纯查询，无需回滚；§4 若改了 WAF，回滚 = revert 那次提交后重新
 > `just apply`（⚠️ apply 前必看 plan，见 §4 的告警框）。
-> Last updated: 2026-09-01
+> Last updated: 2026-10-22
 >
 > 口径、来源分类法、免费版能力边界、指标清单是
 > [reference/public-traffic-analysis.md](../reference/public-traffic-analysis.md) 的地盘，
@@ -180,7 +180,7 @@ for u in https://meirong.dev/ https://argocd.meirong.dev/api/version https://boo
 | 目标 | 全部打 apex `meirong.dev`（该域由 Cloudflare Pages 提供，不经隧道、不碰集群） |
 | 手法 | `terraform.tfstate` / `~/.aws/credentials` / `serviceAccount.json` / `s3.properties` / `settings/development.py` / `/etc/passwd` 目录穿越 / `web.config` |
 | 结果 | 642×404、147×200（**只有三个真实博客页**）、18×403（WAF 拦）、9×405、162×504（全落在 Early Hints 预取上） |
-| 处置 | 12 个 term 并进 WAF 第 2 条（commit `1776f06`），验收 12 条拦截路径 403、12 个真实端点无误伤 |
+| 处置 | 12 个 term 并进 WAF 第 2 条（commit `2507e27`），验收 12 条拦截路径 403、12 个真实端点无误伤 |
 | 结论 | **纯降噪**。路径规则一条都没命中过这次扫描；敏感内容一个都不存在 |
 
 > ⚠️ **本表 2026-08-26 更正**：原文把那 18 个 403 记成「威胁分规则拦下的」，**不可能**：

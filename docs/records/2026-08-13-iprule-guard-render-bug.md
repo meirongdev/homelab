@@ -5,14 +5,14 @@
 >       规则本身在位（setup 时一次性加对），**无实际断连**；但期间任何清扫都将无法自愈，
 >       等价于回到 8-11 那次 33h 静默失守的前夜。连带发现并修复控制面缺 5240
 >       规则（后者让 `hosts: k8s_masters` 的全部剧本坏了一天）。
-> 根因: `7abd676` 把断言行改成 Jinja `join('\n          ')`——在 YAML 块标量里
+> 根因: `e1c7406` 把断言行改成 Jinja `join('\n          ')`——在 YAML 块标量里
 >       Jinja 拿到的是**字面反斜杠+n**，整段 assert 渲染成一行；shell 把 `52\n` 吃成
 >       `52n`，`ip rule add` 每轮报 `invalid table ID`。
 > 定性者: `TailscaleIpRulePersistentlyMissing` 告警（8-12 加的那批）——**真阳性**。
 
 ## 时间线
 
-- 07:14 worker 入编（`7abd676` 首次把 assert 行模板化，worker 是第一个吃到新渲染的节点）。
+- 07:14 worker 入编（`e1c7406` 首次把 assert 行模板化，worker 是第一个吃到新渲染的节点）。
 - 07:14 起 `TailscaleIpRulePersistentlyMissing{instance="192.168.50.107:9100", priority="5200"}`
   开始 firing。
 - ~10:00 例行体检看到告警，上节点取证；10:04 修复上线三节点，告警恢复。

@@ -1,6 +1,6 @@
 # Identity — ZITADEL / OIDC 接入
 
-> Last updated: 2026-09-09
+> Last updated: 2026-10-22
 > Status: 生效事实
 >
 > 身份面的部署形态与各应用接入细节。安全视角的摘要在 [security.md §3](security.md)；
@@ -109,7 +109,7 @@
 **LLM 网关**（已退役）曾是样板（OSS admin UI / config-API 无认证 → per-app `oauth2-proxy` 反代 +
 ZITADEL OIDC；推理 API 直连 + virtual key 把关），2026-08-08 已随整个 ArgoCD
 App 退役；它当年那条 oauth2-proxy 的配置脚本也已于 2026-08-16 删除
-（commit `caab498`），仓库里不再有这个模板，要复用做法照下面 oauth2-proxy 的通用形态写。
+（commit `2380d6a`），仓库里不再有这个模板，要复用做法照下面 oauth2-proxy 的通用形态写。
 接替它的 LLM 网关是 **LiteLLM**（自带认证的 admin UI，不需要 oauth2-proxy），见
 [../decisions/litellm-llm-gateway.md](../decisions/litellm-llm-gateway.md)。
 

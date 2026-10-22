@@ -9,7 +9,7 @@
 >       启动时必须把窗口内全部文件重放完才监听 :9003。9 天累计 23,950 个文件（5.5GB），
 >       重放需约 3 分 43 秒，超过 startupProbe 预算（160 秒 + 30 秒宽限），
 >       因此每次启动都被杀掉重来
-> 结果: 调整采样间隔与保留窗口、提高探针预算、删除未使用的 PVC（commit d04593b）。
+> 结果: 调整采样间隔与保留窗口、提高探针预算、删除未使用的 PVC（commit f875b4f）。
 >       两集群已恢复：新 pod 启动 1.4 秒完成，opencost CPU 降至 0.6%
 
 ## 根因概述
@@ -65,7 +65,7 @@ opencost 的 collector 数据源用 WAL 文件在重启后重建内存中的统�
 - 排除 Prometheus 依赖：collector 模式不查询 Prometheus，env 中的
   `PROMETHEUS_SERVER_ENDPOINT` 是 chart 无条件写入的默认值，此模式下不使用。
 
-## 修复与验证（commit d04593b，两集群相同）
+## 修复与验证（commit f875b4f，两集群相同）
 
 | 配置 | 旧值 → 新值 | 说明 |
 |---|---|---|
@@ -96,11 +96,11 @@ opencost 的 collector 数据源用 WAL 文件在重启后重建内存中的统�
      Kubernetes 运行时对重复 env 确实取后者，但两个 opencost App 都启用
      ServerSideApply —— SSA 的 structured-merge 把 env 视为以 name 为键的 listMap，
      重复键使 ArgoCD 直接报 ComparisonError，App 卡在 sync=Unknown，rollout 不会发生
-     （2026-08-19 实测，commit cf5fa5d 引入、e1eed34 回退）。
+     （2026-08-19 实测，commit c071a58 引入、1a0ccc6 回退）。
    同时核实代价接近零：成本数据的全部消费方是 Grafana 看板，读中枢 Prometheus 的
    :9003 指标（独立留存 7 天）；opencost-ui 没有路由、没有使用者。
    复活条件：上游 chart 支持把 persistence 挂载到 configPath，或单独暴露 WAL 存储路径。
-2. **慢频崩溃循环告警 —— 已处置（commit cf5fa5d）。** 新增 `ContainerSlowCrashLoop`
+2. **慢频崩溃循环告警 —— 已处置（commit c071a58）。** 新增 `ContainerSlowCrashLoop`
    （prometheus-rules.yaml workloads 组）：改用无断流的 restarts_total 计数器，
    `increase[1h] >= 3` + `for: 90m`。7 天回放验证：本次事故连续满足 1,475 分钟
    （同类故障 1.5 小时内可告警）；4 个真实瞬时突发全部恰好滞留 60.0 分钟（1h 回看窗

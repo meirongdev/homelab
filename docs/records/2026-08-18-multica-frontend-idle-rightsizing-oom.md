@@ -6,13 +6,13 @@
 >       ⚠️ **对外仍是 HTTP 200**：崩循环期间从公网探 `/` 拿到的一直是 200
 >       （只是慢），所以任何「看状态码」的探测都不会变红。
 > 根因: 两条，同一个病因——**上限是按空载采样定的，而这个容器的负载是突发型的**。
->       ① memory：`5f9e4a0` 把 frontend 上限 768Mi→512Mi，依据写的是"空载 workingSet
+>       ① memory：`aa764ef` 把 frontend 上限 768Mi→512Mi，依据写的是"空载 workingSet
 >       177.1Mi，仍留 3 倍余量"。但 Next.js 的 `/_next/image` 优化器（sharp）单个并发任务
 >       实测 **+68Mi**（144Mi→212Mi，做完立刻释放），空载采样看不见这一段；静息 ~150Mi
->       上叠几个并发就过 512Mi。② CPU：上限 500m（初次部署 `fbb4502` 就带的，不是右尺寸
+>       上叠几个并发就过 512Mi。② CPU：上限 500m（初次部署 `814fe6d` 就带的，不是右尺寸
 >       改的）实测 **125 个周期里 82 个被 throttle（66%）**，单张图优化 2.3s，并发时把
 >       SSR 的 `/` 从 0.21s 拖到 0.77s。
-> 结果: 两个上限均回到 **chart 上游默认**（cpu 1000m / memory 1Gi），`96ee0c2`。
+> 结果: 两个上限均回到 **chart 上游默认**（cpu 1000m / memory 1Gi），`a65c395`。
 >       requests 不动（静息实测 113–150Mi）。postgres / backend 的 cgroup 查过，
 >       `max` 与 `oom_kill` 全 0，未动。
 
@@ -21,10 +21,10 @@
 | 时刻 | 事件 |
 |------|------|
 | 05:59 | frontend Deployment 建立（revision 1，上限 768Mi / 500m），运行 8 小时无 OOM |
-| ~14:20 | `5f9e4a0` 的 512Mi 经 ArgoCD 落地 → revision 2 滚出，pod 重建 |
+| ~14:20 | `aa764ef` 的 512Mi 经 ArgoCD 落地 → revision 2 滚出，pod 重建 |
 | 14:30–14:32 | 连续 3 次 OOMKilled（`BackOff` x3 over 2m16s），`memory.peak` 顶死 512Mi 整 |
 | 14:33 | 用户报「服务好像有问题」，开始排查 |
-| 14:5x | `96ee0c2` push，ArgoCD 同步回 1Gi / 1000m |
+| 14:5x | `a65c395` push，ArgoCD 同步回 1Gi / 1000m |
 
 ## 证据（都是这次实测，不是推断）
 

@@ -1,6 +1,6 @@
 # LiteLLM 网关（运维事实与坑）
 
-> Last updated: 2026-10-04
+> Last updated: 2026-10-22
 > Status: 生效事实
 > Scope: `llm.meirong.dev` 这个 LLM 网关的配置生效路径、鉴权分层、上游可用性边界，
 > 本文是 source of truth。为什么选 LiteLLM、上游怎么选、Mac 兜底为何换 Ornith，见
@@ -37,7 +37,7 @@
 [plans/2026-09-03-dgx-model-swap-optimizations.md](../plans/2026-09-03-dgx-model-swap-optimizations.md)
 （📐 未实施，所以本页的机制描述仍是现状，别照着它以为门禁已经存在）。
 
-⚠️ 2026-09-30 这次换栈只改了清单（`c4795ac`），本节与 jobs-sg / open-notebook 两页到
+⚠️ 2026-09-30 这次换栈只改了清单（`515b93b`），本节与 jobs-sg / open-notebook 两页到
 2026-10-04 才补上，期间写的一直是上一栈 SGLang `:8888`。SOP 里「改文档」那步漏掉就是这个样子。
 
 | | |
@@ -331,7 +331,7 @@ v2 的任务投递依赖 OpenAI 后端那边的线程状态，自建 vLLM 没有
 NVIDIA build.nvidia.com 曾是第四来源（`nvidia/*`），**2026-10-04 删除**：路由写成
 `openai/nvidia/*` 会给上游模型名多带一层前缀，自 2026-08-25 起全部 404，没有消费方，
 还给 `/v1/models` 灌进 200+ 个不存在的条目。当时的排查、修法与模型筛选（本机仓库根目录）：
-`git show 9271654:docs/reference/litellm-gateway.md`。
+`git show 8214ee8:docs/reference/litellm-gateway.md`。
 
 ### OpenRouter：按模型分免费/付费，公开 API 免鉴权可查
 

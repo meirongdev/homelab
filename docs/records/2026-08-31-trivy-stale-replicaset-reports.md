@@ -35,7 +35,7 @@ registry: index.docker.io
 ```
 
 python-ldap 的 `slapdtest` 模块自带的测试夹具证书，上游仓库里的公开测试数据，
-**没有任何可轮换的东西**。这与 [f068b24](https://github.com/meirongdev/homelab/commit/f068b24)
+**没有任何可轮换的东西**。这与 [32acc37](https://github.com/meirongdev/homelab/commit/32acc37)
 当时逐条读报告得出的结论一致。
 
 复核口径（两集群、不限严重度地把 `.report.secrets[]` 全量摊平）：**除这两条外没有第三种**。
@@ -45,7 +45,7 @@ python-ldap 的 `slapdtest` 模块自带的测试夹具证书，上游仓库里�
   报告里根本不会有。trivy 内置 secret 规则绝大多数是 HIGH/CRITICAL，但这不是"全量"。
 - ignoreFile 会抑制 finding。当前 3 条 secret 豁免（snakeoil / slapdtest / caixin）
   **全部按 path 限定、没有一条按 rule id 全局豁免**，所以它们挡不住别处的真泄漏——
-  这正是 f068b24 刻意选择的写法，别改成 `- id: private-key` 了事。
+  这正是 32acc37 刻意选择的写法，别改成 `- id: private-key` 了事。
 - trivy 扫的是**镜像文件系统**，不是 K8s Secret，也不是 pod 的环境变量。
 
 ## 二、指标曲线就是完整的病历
@@ -55,7 +55,7 @@ python-ldap 的 `slapdtest` 模块自带的测试夹具证书，上游仓库里�
 | 时刻 | 值 | 发生了什么 |
 |------|-----|-----------|
 | 08-29 13:24 | **43** | 稳态。此时告警**不可能响**——规则写的是不存在的 `trivy_exposedsecrets_findings` |
-| 08-30 10:51 | 43 | `f068b24` 提交：①改对指标名 ②加 secrets 豁免。ArgoCD 3 分钟内同步 |
+| 08-30 10:51 | 43 | `32acc37` 提交：①改对指标名 ②加 secrets 豁免。ArgoCD 3 分钟内同步 |
 | 08-30 11:11 | 43 | 过完 `for: 15m` → **告警首次 firing**，Telegram 开始每 30 分钟一条 |
 | 08-30 13:24 → 08-31 09:54 | 41 → 39 → … → **20** | 各 workload 陆续走到自己的 24h TTL，重扫后豁免生效、逐个归零 |
 | 08-31 09:54 → 12:54 | **20，平台化** | ☠️ 衰减停在这里不动了 |
