@@ -4,7 +4,7 @@
 #
 # Tool → method → hosts:
 #   claude (Claude Code)        npm @anthropic-ai/claude-code   macbook (M2)
-#   qwen   (Qwen Code)          npm @qwen-code/qwen-code        macbook
+#   qwen   (Qwen Code)          npm @qwen-code/qwen-code        qwen     (M2 + Studio; pinned version)
 #   codex  (OpenAI Codex)       brew cask codex                 macbook  (self-contained arm64 binary)
 #   agy    (Antigravity CLI)    brew cask antigravity-cli       base     (every Mac)
 #
@@ -15,12 +15,11 @@
   vars:
     homebrew_prefix: /opt/homebrew
     homebrew_formulas:
-      - node           # brings npm; required for claude + qwen
+      - node           # brings npm; required for claude (qwen has its own play below)
     homebrew_casks:
       - codex
     npm_global_packages:
       - "@anthropic-ai/claude-code"
-      - "@qwen-code/qwen-code"
 
   tasks:
     - name: Ensure AI CLI Homebrew formulas are present
@@ -46,6 +45,49 @@
         state: present
         executable: "{{ homebrew_prefix }}/bin/npm"
       loop: "{{ npm_global_packages }}"
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+# Qwen Code 钉版本，不用 state=present：present 只补装不升级，M2 上 brew node 下那份一直停在
+# 0.19.0，而 multica daemon 的 PATH 只有 /opt/homebrew/bin，用的正是这份旧的。版本不一致就装成
+# qwen_code_version，升级改这一个变量再重跑。要求 Node >= 22（npm 包的 engines）。
+# 装在 Homebrew 的 node 下：Studio 的交互 shell 里 node 是 mise 管的，但 mise 的 node 换版本就丢全局包。
+# M2 另有一份装在 fnm 的 node 下（交互 shell 里 fnm 排在 PATH 最前），不归这里管，升级时手动跟上。
+- name: Qwen Code
+  hosts: qwen
+  gather_facts: false
+  vars:
+    homebrew_prefix: /opt/homebrew
+    qwen_code_version: "0.26.0"
+  tasks:
+    - name: Ensure Homebrew node is present (brings npm)
+      community.general.homebrew:
+        name: node
+        state: present
+        path: "{{ homebrew_prefix }}/bin"
+        update_homebrew: false
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Read the installed Qwen Code version
+      ansible.builtin.command: "{{ homebrew_prefix }}/bin/qwen --version"
+      register: qwen_installed
+      changed_when: false
+      failed_when: false
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Install the pinned Qwen Code version
+      ansible.builtin.command: "{{ homebrew_prefix }}/bin/npm install -g @qwen-code/qwen-code@{{ qwen_code_version }}"
+      when: qwen_installed.stdout | trim != qwen_code_version
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Assert the pinned version is the one installed
+      ansible.builtin.command: "{{ homebrew_prefix }}/bin/qwen --version"
+      register: qwen_after
+      changed_when: false
+      failed_when: qwen_after.stdout | trim != qwen_code_version
       environment:
         PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 

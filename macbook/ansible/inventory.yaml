@@ -12,6 +12,7 @@
 #   dev     → mise: language runtimes
 #   ops     → packages: k8s / IaC CLIs
 #   herdr   → herdr server LaunchAgent + agent integrations               (Studio + M2: run M5's tasks)
+#   qwen    → ai-clis: Qwen Code, pinned version                          (Studio + M2)
 # Prometheus side: one node-exporter job per Mac in `macs` + both OMLX Macs as targets of the
 # omlx-* jobs, + the macmon job (k8s/helm/values/kube-prometheus-stack.yaml).
 macs:
@@ -73,3 +74,8 @@ herdr:
   hosts:
     mac-studio:
     mbp-m2-pro:                     # also runs multica + OMLX; herdr's hooks no-op outside herdr panes
+
+qwen:
+  hosts:
+    mbp-m2-pro:
+    mac-studio:
