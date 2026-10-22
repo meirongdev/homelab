@@ -1,7 +1,8 @@
 # Mac (M2 MacBook + Mac Studio + M5 工作站) — Ansible 配置归档
 
 对两台**远程无头 Apple Silicon Mac** 做可复现配置，都只经 **Tailscale** 访问、都被 homelab
-Prometheus 监控、都跑 OMLX 推理。另外管**本机 M5 的开发环境**（只装软件，见「开发环境」一节）：
+Prometheus 监控、都跑 OMLX 推理，2026-10-22 起也都是 M5 的 herdr agent 主机（替 M5 跑 agent 任务，
+见「把任务派给 Studio / M2」一节）。另外管**本机 M5 的开发环境**（只装软件，见「开发环境」一节）：
 
 | inventory 主机 | 机器 | 连接 | Prometheus job |
 |---|---|---|---|
@@ -11,8 +12,8 @@ Prometheus 监控、都跑 OMLX 推理。另外管**本机 M5 的开发环境**�
 
 - key `~/.ssh/vgio`（见 `ansible.cfg`；登录用户默认 matthew，Studio 在 inventory 里覆盖）。
 - **哪台跑哪些 playbook 由 [inventory.yaml](inventory.yaml) 的分组决定**：`macs`（两台远程机）·
-  `macbook`（只有 M2：AI CLI、multica）· `omlx`（两台远程机）· 开发环境三层 `base`（三台）/
-  `dev`、`ops`（M5 + M2）。⚠️ `m5` 刻意不在 `macs` 里：那个组会被 `power`（禁睡眠）、
+  `macbook`（只有 M2：AI CLI、multica）· `omlx`（两台远程机）· `herdr`（两台远程机）·
+  开发环境三层 `base` / `dev` / `ops`（三台）。⚠️ `m5` 刻意不在 `macs` 里：那个组会被 `power`（禁睡眠）、
   `os-update`（无人值守重启）、`node-exporter` 作用到。
 - 控制端依赖：`ansible-core` + 集合 `community.general` / `ansible.posix`（本机已装）。
 
@@ -22,8 +23,8 @@ Prometheus 监控、都跑 OMLX 推理。另外管**本机 M5 的开发环境**�
 
 ```bash
 just ping                    # 连通性检查（两台）
-just packages [host]         # 开发环境的软件：base 层（三台）+ ops 层（M5、M2）（无需 sudo，幂等）
-just mise [host]             # 语言运行时（mise，M5、M2）（无需 sudo，幂等）
+just packages [host]         # 开发环境的软件：base 层 + ops 层（三台）（无需 sudo，幂等）
+just mise [host]             # 语言运行时（mise，三台）（无需 sudo，幂等）
 just ai-clis [host]          # AI CLI：claude/qwen/codex 仅 M2，Antigravity CLI 三台（无需 sudo，幂等）
 just omlx [host]             # OMLX 本体：brew + LaunchAgent + settings.json 的 host/port/key（key 从 Vault 取）
 just node-exporter [host]    # 装/升级 node_exporter LaunchAgent（无需 sudo，幂等）
@@ -31,6 +32,7 @@ just omlx-metrics [host]     # 装/升级 OMLX 指标采集 LaunchAgent（无需
 just macmon [host]           # 装/升级 macmon 功耗/温度/风扇 exporter（:9090，两台，无需 sudo，幂等）
 just power [host]            # headless 电源策略（逐台问 sudo 密码）
 just multica-daemon          # 装/升级 Multica daemon LaunchAgent（仅 M2，认证全自动，从 Vault 取 PAT）
+just herdr [host]            # herdr：开机拉起 server 的 LaunchAgent + claude/codex integration（两台，无需 sudo，幂等）
 just site [host]             # 上面几个一起跑（逐台跑、逐台问 sudo 密码）
 
 just os-updates [host]       # 只读：列出待装的 macOS 更新 + 本次会装什么（不要密码，可一次看两台）
@@ -54,6 +56,7 @@ just os-upgrade-major <host> # 大版本升级（如 26 → 27），见下文风
 | `omlx-metrics.yaml` | omlx | OMLX 推理指标的**生产端**：LaunchAgent `com.meirongdev.omlx-textfile-collector` 每 60s 把 `~/.omlx/stats.json` 渲染成 `omlx.prom`，投进上面那个 textfile 目录。☠️ **StartInterval 不是 KeepAlive**（渲染器跑 0.03s 就退，KeepAlive 会变重启风暴）。☠️ 渲染器是 **`mlx-learning` 仓 venv 里的 console script**（跨仓依赖），缺了会明确失败并给出 `uv sync` 的修法。`stats.json` 还不存在（OMLX 没服务过请求）时装好 plist 但**不启动**。验收会一路查到 node_exporter 那端 | 否 |
 | `macmon.yaml` | macmon | 功耗 / 温度 / 风扇：`brew install macmon`（只 present）→ LaunchAgent `com.meirongdev.macmon` 跑 `macmon serve --port 9090 --interval 15000`（采样间隔与 Prometheus 抓取对齐）。Darwin 版 node_exporter 没有任何温度/功耗指标，靠它补。**不要 sudo**（读 IOReport + SMC）。☠️ macOS 27 上 CPU/内存/ANE 功耗恒为 0（不是空闲，CPU 满载时也是 0；两台都这样），抓取时已丢掉；☠️ M2 的 CPU 温度是坏的（P 核断电时探头读 0–8°C，均值乱跳），也已丢掉，M2 看 GPU 温度；整机功耗是 SMC `PSTR`，不是墙插功率。两台的口径与压测数字在 playbook 文件头。别用 `macmon serve --install`（另一个 label、抢同一端口、不能设采样间隔）。验收断言整机功耗与 GPU 温度非 0 | 否 |
 | `multica-daemon.yaml` | macbook | 装 `multica` CLI（**`darwin-arm64` 预编译包**，固定版本 + sha256，不走 Homebrew）→ 指向自建 service → 用 Vault 里的 PAT 认证 → LaunchAgent `ai.multica.daemon`。⚠️ 未认证时**刻意不 bootstrap**（否则 KeepAlive 会把必然失败的进程反复拉起）。这是 Multica「执行任务的那一半」，整体安装见 [docs/runbooks/multica-install.md](../../docs/runbooks/multica-install.md) | 否 |
+| `herdr.yaml` | herdr | M5 派活的远端：herdr 本体（官方安装器，只在缺失时装）→ `config.toml` 关掉首次引导 → LaunchAgent `com.meirongdev.herdr-server`，**跑的是一次性启动器 `herdr remote-client-bridge </dev/null`，不是 `herdr server`**（原因见下面「把任务派给 Studio / M2」）→ 断言 `detached_server_daemon: true` → 给已装的 claude/codex 装或刷新 integration。启动器重载不影响正在跑的 pane | 否 |
 | `power.yaml` | macs | `pmset -c disablesleep 1`——插电时保持**系统**唤醒，合盖也不睡，从而 Tailscale 远程常在线（让"保持唤醒"不依赖 Amphetamine GUI）。inventory 里 `pmset_autorestart: true` 的主机（Studio，无电池）另加 `pmset -a autorestart 1`：断电恢复后自己开机 | 是 |
 | `os-update.yaml` | macs | macOS 软件更新，需要重启时无人值守地重启并验收。**不在 `site` 里**（它会重启机器），见下节 | 是（自己问密码） |
 
@@ -71,9 +74,9 @@ just os-upgrade-major <host> # 大版本升级（如 26 → 27），见下文风
 
 | 层 | 组 | 主机 | 装什么 | playbook |
 |---|---|---|---|---|
-| 1 基础 | `base` | M5 · M2 · Studio | awscli、gcloud、gh、tmux、chezmoi、age、mise、uv、fzf、ripgrep、yq、htop、just、lazygit；oh-my-zsh + zsh-autosuggestions + zsh-syntax-highlighting；TPM | `packages.yaml` |
-| 2 运行时 | `dev` | M5 · M2 | mise 管：node、pnpm、bun、go、python、java（temurin）、maven、gradle、rust | `mise.yaml` |
-| 3 运维 | `ops` | M5 · M2 | kubectl、helm、kubectx、k9s、cilium-cli、hubble、argocd、ansible、gitleaks、kind、tilt、k6、kubeconform、terraform、vault | `packages.yaml` |
+| 1 基础 | `base` | M5 · M2 · Studio | awscli、gcloud、gh、glab、tmux、chezmoi、age、mise、uv、fzf、ripgrep、yq、htop、just、lazygit；oh-my-zsh + zsh-autosuggestions + zsh-syntax-highlighting；TPM | `packages.yaml` |
+| 2 运行时 | `dev` | M5 · M2 · Studio | mise 管：node、pnpm、bun、go、python、java（temurin）、maven、gradle、rust | `mise.yaml` |
+| 3 运维 | `ops` | M5 · M2 · Studio | kubectl、helm、kubectx、k9s、cilium-cli、hubble、argocd、ansible、gitleaks、kind、tilt、k6、kubeconform、terraform、vault | `packages.yaml` |
 
 Antigravity CLI（`agy`）也是三台都装，但归 `ai-clis.yaml`（和其它 AI CLI 放在一起）。
 
@@ -86,15 +89,16 @@ just packages && just mise && just ai-clis            # 全部（按各自的组
 含 age 加密的凭据）。`~/.zshrc`、`~/.tmux.conf` 都不在这里写，所以：
 
 - oh-my-zsh 是 `git clone` 下来的，**不跑它的 `install.sh`**（那个会改写 `~/.zshrc` 并 `chsh`）。
-  还没有 `.zshrc` 的机器（Studio）装完 oh-my-zsh 也不生效，要等 chezmoi 写出 `.zshrc`。
+  还没有 `.zshrc` 的机器装完 oh-my-zsh 也不生效，要等 chezmoi 写出 `.zshrc`（Studio 的那份由 chezmoi
+  `role=agent` 在 2026-10-22 写出；M2 和 M5 用各自手写的）。
 - mise 装好的运行时，要等 `.zshrc` 里有 `eval "$(mise activate zsh)"` 才会用上，在那之前
   PATH 上仍是 brew 的 node/go。brew 的 node 会一直在（`ai-clis.yaml` 和 qwen-code 等 formula 依赖它）。
 - ☠️ **mise 的 shim 不在默认位置**（`shims_dir = ~/.local/share/mise/shims-hidden`，写在 `mise.yaml` 管的全局配置里）。
   Orca 会无条件把默认的 `~/.local/share/mise/shims` 拼到它 daemon 的 PATH 最前面（排在 fnm/Homebrew 前），
   shim 一出现，Orca 拉起的所有会话就改用 mise 的 node/python/java。别改回默认，也别在这台机器上 `mise activate --shims`。
 - AWS/GCP CLI 装上≠能管资源。`~/.aws/config` 与 gcloud 配置由 chezmoi 按 role 下发，
-  `~/.aws/credentials` 目前只发 `workstation`（dotfiles README 里的「暂定」）；gcloud 的登录令牌
-  不在 chezmoi 里，每台要自己 `gcloud auth login --no-launch-browser`（无头机用这个）。
+  `~/.aws/credentials` 只发 `workstation` 和 `agent`（Studio、M2；dotfiles README 里的「暂定」）；gcloud 的登录令牌
+  不在 chezmoi 里：agent 主机是 2026-10-22 从 M5 一次性拷过去的，其他机器自己 `gcloud auth login --no-launch-browser`。
 
 **新机器从零开始**：先手动做 Ansible 做不了的两步，再跑上面两条命令。
 
@@ -104,6 +108,47 @@ just packages && just mise && just ai-clis            # 全部（按各自的组
 
 要在新机器上改这个仓库（密钥、kubeconfig、pre-push 钩子、要从旧机拷的 gitignored 文件），
 完整流程见 [docs/guides/dev-machine-bootstrap.md](../../docs/guides/dev-machine-bootstrap.md)。
+
+## 把任务派给 Studio / M2（herdr）
+
+2026-10-22 起两台远程 Mac 都是 M5 的 agent 主机：M5 用 [herdr](https://herdr.dev) 把 agent 任务派过去跑。
+三块分别归三个地方管：
+
+| 哪一块 | 归谁管 | 内容 |
+|---|---|---|
+| 远端常驻 | 本目录 `herdr.yaml`（`just herdr`） | herdr 本体、开机拉起 server 的 LaunchAgent、claude/codex 的 integration |
+| 凭据 | dotfiles 仓库，chezmoi `role=agent` | 和 M5 相同，只少 Terraform（state 只在 M5 上，有 token 没 state 时 `apply` 会把资源再建一份）。kubeconfig、gcloud 这类工具自己维护的登录状态是从 M5 一次性拷的，命令和 M2 的差异都写在 dotfiles README |
+| M5 这端 | `herdr machine add studio` / `herdr machine add m2`，一次性，存在 M5 的 herdr 配置里 | SSH 目标就是 `~/.ssh/config` 里的 `studio`、`m2` 两个 Host（也由 dotfiles 下发） |
+
+在 M5 上（`herdr` TUI 的侧栏里也能直接切到这两台）：
+
+```bash
+herdr machine status                     # 两台都应是 reachable
+herdr --machine studio workspace create --cwd /Users/matstudio/projects/homelab --label <任务名> --no-focus
+#   → 返回里的 .result.root_pane.pane_id
+herdr --machine studio agent start <名字> --kind claude --pane <pane_id>
+herdr --machine studio agent prompt <名字> "<任务>" --wait --timeout 600000
+herdr --machine studio agent read <名字> --source recent-unwrapped --lines 120
+herdr --machine studio workspace close <workspace_id>
+```
+
+- ⚠️ `--cwd` 写**远端**的绝对路径：Studio 的家目录是 `/Users/matstudio`，M2 是 `/Users/matthew`。代码要先在那台机器上
+  clone 好（herdr 不同步代码）。
+- ☠️ `herdr --machine` 的 CLI 转发**从不启动**远端 server，server 不在时只报连不上。开机由 LaunchAgent 拉起；
+  手动 `herdr server stop` 之后，在那台机器上 `launchctl kickstart gui/$(id -u)/com.meirongdev.herdr-server`
+  （或在 M5 打开 TUI，侧栏重连时也会拉起）。
+- ☠️ 远端 server 必须是 herdr **自己 detach 出来的**（`herdr status server --json` 的
+  `capabilities.detached_server_daemon` 为 `true`），否则 `machine add` 和侧栏只报一句
+  「remote server is not ready for saved machines」，不说原因。launchd 拉起的进程已经是进程组组长，
+  setsid 不了，所以 LaunchAgent 跑的是一次性启动器 `herdr remote-client-bridge </dev/null`（saved machine
+  经 SSH 调的就是这条），不是 `herdr server`。也别在这两台上手动跑 `herdr server`。
+- 升级：`herdr update` 只换二进制，跑着的 server 仍是旧版，等远端没有 agent 在跑时 `herdr server stop`
+  再 kickstart。之后重跑 `just herdr`，把显示 `outdated` 的 integration 刷新掉。
+- integration 的 hook 只在 herdr pane 里生效（脚本先查 `HERDR_ENV`），M2 上 multica 拉起的 claude/codex 不受影响。
+- 两台的 claude 登录的是个人 Pro 账号，不是 M5 的 Team 账号（2026-10-22），额度小得多，
+  首次派活就碰到了 usage limit。要换账号，在那台机器的 claude 里 `/login`。
+- 提交身份：agent 主机的 `~/.gitconfig` 按 remote 地址选个人/工作身份（dotfiles `role=agent`），
+  不会再出现 `matstudio@Matthews-Mac-Studio.local` 这种 git 自己凑的身份。
 
 ## 系统更新（`os-update.yaml`）
 

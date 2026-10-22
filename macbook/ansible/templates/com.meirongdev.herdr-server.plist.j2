@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Managed by Ansible (macbook/ansible/playbooks/herdr.yaml). Do not edit by hand. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{{ herdr_label }}</string>
+    <!-- 一次性的「启动器」，不是 server 本身：remote-client-bridge 就是 saved machine 经 SSH
+         调的那条命令，server 没在跑就由 herdr 自己 detach 出来，stdin 读到 EOF 就退出。
+         直接让 launchd 跑 `herdr server` 不行，原因见 playbook 文件头。 -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{ herdr_bin }}</string>
+        <string>remote-client-bridge</string>
+    </array>
+    <key>StandardInPath</key>
+    <string>/dev/null</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <!-- server 已 setsid 进了自己的进程组，这一条只是保险：启动器退出时 launchd 别去清理它派生的进程。 -->
+    <key>AbandonProcessGroup</key>
+    <true/>
+    <key>WorkingDirectory</key>
+    <string>{{ ansible_facts.user_dir }}</string>
+    <!-- server 和它的 pane 都继承这里的环境。launchd 默认只给 /usr/bin:/bin:/usr/sbin:/sbin、
+         不设 locale，不补的话 pane 里找不到 brew 装的 claude，中文输出也会乱。 -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{{ ansible_facts.user_dir }}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>SHELL</key>
+        <string>/bin/zsh</string>
+        <key>LANG</key>
+        <string>en_US.UTF-8</string>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>{{ ansible_facts.user_dir }}/.local/var/log/herdr-launcher.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{ ansible_facts.user_dir }}/.local/var/log/herdr-launcher.err.log</string>
+</dict>
+</plist>

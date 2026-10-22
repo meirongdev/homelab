@@ -11,6 +11,7 @@
 #             ai-clis: Antigravity CLI                                   (every Mac)
 #   dev     → mise: language runtimes
 #   ops     → packages: k8s / IaC CLIs
+#   herdr   → herdr server LaunchAgent + agent integrations               (Studio + M2: run M5's tasks)
 # Prometheus side: one node-exporter job per Mac in `macs` + both OMLX Macs as targets of the
 # omlx-* jobs, + the macmon job (k8s/helm/values/kube-prometheus-stack.yaml).
 macs:
@@ -58,8 +59,17 @@ dev:
   hosts:
     m5:
     mbp-m2-pro:
+    mac-studio:                     # 2026-10-22: herdr runs M5's tasks here, needs the same toolchain
 
 ops:
   hosts:
     m5:
     mbp-m2-pro:
+    mac-studio:
+
+# Machines M5 hands work to through herdr (`herdr --machine studio …`). Credentials come from
+# chezmoi with role=agent (dotfiles README), not from here.
+herdr:
+  hosts:
+    mac-studio:
+    mbp-m2-pro:                     # also runs multica + OMLX; herdr's hooks no-op outside herdr panes

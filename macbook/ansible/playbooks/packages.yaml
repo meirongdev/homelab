@@ -6,8 +6,8 @@
 #
 # 配置文件（~/.zshrc、~/.tmux.conf）不归这里管，归 chezmoi dotfiles 仓库：这里只把
 # oh-my-zsh 和插件克隆到位，**不跑 oh-my-zsh 的 install.sh**（它会改写 ~/.zshrc 并 chsh，
-# 跟 chezmoi 抢同一个文件）。所以一台还没有 .zshrc 的机器（如 Studio）跑完这里，
-# oh-my-zsh 在磁盘上但不生效，要等 chezmoi 写出 .zshrc。
+# 跟 chezmoi 抢同一个文件）。所以一台还没有 .zshrc 的机器跑完这里，oh-my-zsh 在磁盘上
+# 但不生效，要等 chezmoi 写出 .zshrc（Studio 的由 chezmoi role=agent 下发，2026-10-22 起）。
 #
 # 以登录用户身份跑（matthew / matstudio，见 inventory）—— Homebrew 不能 root，所以没有 become。
 # 幂等，但只补装：已装的不升级（升级手动 `brew upgrade`），从列表里删掉一项也不会卸载它。
@@ -23,6 +23,7 @@
       - chezmoi
       - fzf
       - gh
+      - glab                                # 公司 GitLab 的 CLI；登录状态不归这里
       - htop
       - just
       - lazygit

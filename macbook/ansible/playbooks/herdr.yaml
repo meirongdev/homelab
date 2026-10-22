@@ -1,0 +1,127 @@
+---
+# herdr（https://herdr.dev）的「被派活的那一端」：M5 用 `herdr --machine studio …` 或 herdr 侧栏
+# 把 agent 任务派到这台机器上跑。这里只管让远端 server 开机就在、认得出 agent，
+# M5 那端的 saved machine（`herdr machine add studio`）和凭据（chezmoi role=agent）不归这里。
+#
+# 为什么要 LaunchAgent：herdr 自己不装开机自启。M5 的 TUI 侧栏重连时会经 SSH 把 server 拉起来，
+# 但 `herdr --machine` 的 CLI 转发**从不**替你启动远端 server，只报连不上。所以机器一重启
+# （`just os-update` 会无人值守地重启），不开 TUI 就派不了活。
+#
+# ☠️ LaunchAgent 跑的是一次性启动器 `herdr remote-client-bridge </dev/null`，**不是** `herdr server`：
+#    saved machine 只认 herdr 自己 detach 出来的 server（状态里的 `detached_server_daemon`，
+#    判据是 server 进程 getsid(0)==getpid()）。launchd 拉起的进程已经是进程组组长，setsid 必然失败，
+#    于是直接托管 `herdr server` 时 `machine add` 只报一句「remote server is not ready for saved
+#    machines」，不说原因（2026-10-22 实测，读源码 src/remote/restart_policy.rs 才查到）。
+#    remote-client-bridge 正是 machine add / 侧栏经 SSH 调的那条命令：没 server 就按 herdr 自己的
+#    方式起一个，stdin 读到 EOF 就退出，server 留着。
+#    副作用是好的：这个 job 只是启动器，重载 plist **不会**结束任何 pane；server 崩了 launchd 也不管，
+#    要么 M5 侧栏重连时拉起，要么 `launchctl kickstart gui/$(id -u)/com.meirongdev.herdr-server`。
+#
+# herdr 本体用官方安装器装在 ~/.local/bin（只在缺失时装；升级用 `herdr update`，不归这里）。
+# 升级后 server 仍是旧版本，要等没 agent 在跑时 `herdr server stop` 再 kickstart 才换新。
+# NO sudo。幂等。
+- name: herdr server (remote end for M5's saved machine)
+  hosts: herdr
+  gather_facts: true            # 需要 ansible_facts.user_dir
+  vars:
+    herdr_label: com.meirongdev.herdr-server
+    herdr_bin: "{{ ansible_facts.user_dir }}/.local/bin/herdr"
+    herdr_plist: "{{ ansible_facts.user_dir }}/Library/LaunchAgents/{{ herdr_label }}.plist"
+    # 装了哪个就给哪个装 integration（状态上报 + server 重启后恢复会话）；没装的跳过。
+    herdr_integrations: [claude, codex]
+    herdr_path: "{{ ansible_facts.user_dir }}/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+  tasks:
+    - name: Install herdr with the official installer (only if missing)
+      ansible.builtin.shell: curl -fsSL https://herdr.dev/install.sh | sh
+      args:
+        creates: "{{ herdr_bin }}"
+
+    - name: Ensure log / LaunchAgents / config directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ ansible_facts.user_dir }}/.local/var/log"
+        - "{{ ansible_facts.user_dir }}/Library/LaunchAgents"
+        - "{{ ansible_facts.user_dir }}/.config/herdr"
+
+    # 只在没有配置文件时写：之后 TUI 里改的设置不被覆盖。
+    - name: Skip the first-run onboarding (nobody sits at this machine)
+      ansible.builtin.copy:
+        dest: "{{ ansible_facts.user_dir }}/.config/herdr/config.toml"
+        content: "onboarding = false\n"
+        force: false
+        mode: "0644"
+
+    - name: Install LaunchAgent plist
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/{{ herdr_label }}.plist.j2"
+        dest: "{{ herdr_plist }}"
+        mode: "0644"
+      notify: reload herdr launcher
+
+    - name: Ensure LaunchAgent is loaded (bootstrap into the GUI domain)
+      ansible.builtin.shell: |
+        uid=$(id -u)
+        if ! launchctl print "gui/${uid}/{{ herdr_label }}" >/dev/null 2>&1; then
+          launchctl bootstrap "gui/${uid}" "{{ herdr_plist }}"
+          echo BOOTSTRAPPED
+        fi
+      register: herdr_load
+      changed_when: "'BOOTSTRAPPED' in herdr_load.stdout"
+
+    - name: Apply pending launcher reloads before verifying
+      ansible.builtin.meta: flush_handlers
+
+    - name: Wait for the server to answer on its socket
+      ansible.builtin.command: "{{ herdr_bin }} status server --json"
+      register: herdr_status
+      changed_when: false
+      retries: 10
+      delay: 2
+      until: herdr_status.rc == 0 and (herdr_status.stdout | from_json).running
+
+    # 这就是 machine add 卡住的那一项，单独断言，失败时直接给出修法。
+    - name: Assert the server is one saved machines accept
+      ansible.builtin.assert:
+        that:
+          - (herdr_status.stdout | from_json).capabilities.detached_server_daemon
+        fail_msg: >-
+          server 在跑但 detached_server_daemon=false（多半是有人手动跑了 `herdr server`），
+          M5 的 saved machine 会拒绝它。确认 pane 里没有要保留的东西后，在这台机器上
+          `herdr server stop && launchctl kickstart gui/$(id -u)/{{ herdr_label }}`。
+        success_msg: "herdr {{ (herdr_status.stdout | from_json).version }} running, detached"
+
+    - name: Read integration status
+      ansible.builtin.command: "{{ herdr_bin }} integration status"
+      register: herdr_integration_status
+      changed_when: false
+
+    # `herdr update` 之后旧的 integration 显示 `outdated (v10 < v11)`，同样要重装。
+    - name: Install or refresh integrations for the agents present on this host
+      ansible.builtin.shell: |
+        command -v "{{ item }}" >/dev/null || { echo "SKIP: {{ item }} not installed"; exit 0; }
+        "{{ herdr_bin }}" integration install "{{ item }}"
+      environment:
+        PATH: "{{ herdr_path }}"
+      loop: "{{ herdr_integrations }}"
+      when: >-
+        herdr_integration_status.stdout is search('(?m)^' ~ item ~ ': (not installed|outdated)')
+      register: herdr_integration_install
+      changed_when: "'SKIP' not in herdr_integration_install.stdout"
+
+  handlers:
+    # 只重载启动器，server 不受影响。bootout 是异步的，没退干净就 bootstrap 会报
+    # "Bootstrap failed: 5: Input/output error"。
+    - name: reload herdr launcher
+      ansible.builtin.shell: |
+        uid=$(id -u)
+        label="{{ herdr_label }}"
+        launchctl bootout "gui/${uid}/${label}" 2>/dev/null || true
+        for _ in 1 2 3 4 5; do
+          launchctl print "gui/${uid}/${label}" >/dev/null 2>&1 || break
+          sleep 1
+        done
+        launchctl bootstrap "gui/${uid}" "{{ herdr_plist }}"
