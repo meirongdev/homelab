@@ -1,0 +1,125 @@
+---
+# 多 Mac 目录与工作区同步工具 (mac-sync) 部署与配置
+#
+# 架构：
+#   所有 Mac（base 组：M5 工作站 + M2 + Mac Studio + 未来新加入的 Mac）
+#   通过本 playbook 统一建立全网状免密 SSH 互信、分发通用同步工具 mac-sync、
+#   以及全局过滤规则。
+#
+# 隐私与数据面分离：
+#   具体的同步目录清单保存在各节点本地的 ~/.config/mac-sync/dirs.list，
+#   绝不提交进 git repo。本 playbook 仅在清单缺失时创建初始注释模板，
+#   绝不覆盖用户在本地维护的已有目录清单。
+#
+# 幂等：可重复执行。新机器加入或旧机器移除时，更新 mac_fleet 变量后重跑即可。
+- name: Deploy mac-sync across all development and remote Macs
+  hosts: base
+  gather_facts: true
+  vars:
+    # 舰队机器字典：新增 Mac 或下线 Mac 时在此统一增删
+    mac_fleet:
+      m5:
+        host_name: mbpm5
+        tailscale_ip: "100.114.53.49"
+        user: matthew
+        ssh_alias: m5
+      mac-studio:
+        host_name: mac-studio
+        tailscale_ip: "100.98.220.75"
+        user: matstudio
+        ssh_alias: studio
+      mbp-m2-pro:
+        host_name: mbp-m2-pro
+        tailscale_ip: "100.89.15.120"
+        user: matthew
+        ssh_alias: m2
+
+  tasks:
+    - name: Ensure required local directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ ansible_facts.user_dir }}/.local/bin"
+        - "{{ ansible_facts.user_dir }}/.config/mac-sync"
+        - "{{ ansible_facts.user_dir }}/Library/Logs"
+
+    - name: Ensure ~/.ssh exists with strict permissions
+      ansible.builtin.file:
+        path: "{{ ansible_facts.user_dir }}/.ssh"
+        state: directory
+        mode: "0700"
+
+    - name: Deploy mac-sync script
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/mac-sync.sh.j2"
+        dest: "{{ ansible_facts.user_dir }}/.local/bin/mac-sync"
+        mode: "0755"
+
+    - name: Deploy mac-sync exclude list
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/mac-sync-exclude.list.j2"
+        dest: "{{ ansible_facts.user_dir }}/.config/mac-sync/exclude.list"
+        mode: "0644"
+
+    - name: Check if local dirs.list exists
+      ansible.builtin.stat:
+        path: "{{ ansible_facts.user_dir }}/.config/mac-sync/dirs.list"
+      register: dirs_list_stat
+
+    - name: Initialize dirs.list template if missing (never overwrite)
+      ansible.builtin.copy:
+        dest: "{{ ansible_facts.user_dir }}/.config/mac-sync/dirs.list"
+        mode: "0644"
+        content: |
+          # Synced directories across Macs (relative to ~/)
+          # Edit this file locally. It is NEVER tracked in git.
+          # Add one directory per line, for example:
+          # projects/my-project
+          # documents/notes
+      when: not dirs_list_stat.stat.exists
+
+    - name: Ensure ~/.local/bin is in ~/.zshenv for non-interactive SSH sessions
+      ansible.builtin.lineinfile:
+        path: "{{ ansible_facts.user_dir }}/.zshenv"
+        line: 'export PATH="$HOME/.local/bin:$PATH"'
+        create: true
+        mode: "0644"
+
+    - name: Authorize vgio.pub in ~/.ssh/authorized_keys
+      ansible.posix.authorized_key:
+        user: "{{ ansible_user | default(ansible_facts.user_id) }}"
+        state: present
+        key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/vgio.pub') }}"
+
+    - name: Configure cross-Mac SSH config entries
+      ansible.builtin.blockinfile:
+        path: "{{ ansible_facts.user_dir }}/.ssh/config"
+        create: true
+        mode: "0644"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK: mac-fleet"
+        block: |
+          {% for k, v in mac_fleet.items() %}
+          Host {{ v.ssh_alias }}
+              HostName {{ v.tailscale_ip }}
+              User {{ v.user }}
+              IdentityFile ~/.ssh/vgio
+              IdentitiesOnly yes
+              StrictHostKeyChecking accept-new
+          {% endfor %}
+
+    - name: Deploy LaunchAgent plist template
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/com.meirongdev.mac-sync.plist.j2"
+        dest: "{{ ansible_facts.user_dir }}/.config/mac-sync/com.meirongdev.mac-sync.plist"
+        mode: "0644"
+
+    - name: Verify mac-sync status on host
+      ansible.builtin.command: "{{ ansible_facts.user_dir }}/.local/bin/mac-sync status"
+      register: sync_status
+      changed_when: false
+
+    - name: Display sync status summary
+      ansible.builtin.debug:
+        var: sync_status.stdout_lines

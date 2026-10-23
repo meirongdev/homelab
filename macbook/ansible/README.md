@@ -33,6 +33,7 @@ just macmon [host]           # 装/升级 macmon 功耗/温度/风扇 exporter�
 just power [host]            # headless 电源策略（逐台问 sudo 密码）
 just multica-daemon          # 装/升级 Multica daemon LaunchAgent（仅 M2，认证全自动，从 Vault 取 PAT）
 just herdr [host]            # herdr：开机拉起 server 的 LaunchAgent + claude/codex integration（两台，无需 sudo，幂等）
+just mac-sync [host]         # 多 Mac 目录与工作区同步：部署 mac-sync 脚本、建立 SSH 互信与 Host 别名（三台，无需 sudo，幂等）
 just site [host]             # 上面几个一起跑（逐台跑、逐台问 sudo 密码）
 
 just os-updates [host]       # 只读：列出待装的 macOS 更新 + 本次会装什么（不要密码，可一次看两台）
@@ -57,6 +58,7 @@ just os-upgrade-major <host> # 大版本升级（如 26 → 27），见下文风
 | `macmon.yaml` | macmon | 功耗 / 温度 / 风扇：`brew install macmon`（只 present）→ LaunchAgent `com.meirongdev.macmon` 跑 `macmon serve --port 9090 --interval 15000`（采样间隔与 Prometheus 抓取对齐）。Darwin 版 node_exporter 没有任何温度/功耗指标，靠它补。**不要 sudo**（读 IOReport + SMC）。☠️ macOS 27 上 CPU/内存/ANE 功耗恒为 0（不是空闲，CPU 满载时也是 0；两台都这样），抓取时已丢掉；☠️ M2 的 CPU 温度是坏的（P 核断电时探头读 0–8°C，均值乱跳），也已丢掉，M2 看 GPU 温度；整机功耗是 SMC `PSTR`，不是墙插功率。两台的口径与压测数字在 playbook 文件头。别用 `macmon serve --install`（另一个 label、抢同一端口、不能设采样间隔）。验收断言整机功耗与 GPU 温度非 0 | 否 |
 | `multica-daemon.yaml` | macbook | 装 `multica` CLI（**`darwin-arm64` 预编译包**，固定版本 + sha256，不走 Homebrew）→ 指向自建 service → 用 Vault 里的 PAT 认证 → LaunchAgent `ai.multica.daemon`。⚠️ 未认证时**刻意不 bootstrap**（否则 KeepAlive 会把必然失败的进程反复拉起）。这是 Multica「执行任务的那一半」，整体安装见 [docs/runbooks/multica-install.md](../../docs/runbooks/multica-install.md) | 否 |
 | `herdr.yaml` | herdr | M5 派活的远端：herdr 本体（官方安装器，只在缺失时装）→ `config.toml` 关掉首次引导 → LaunchAgent `com.meirongdev.herdr-server`，**跑的是一次性启动器 `herdr remote-client-bridge </dev/null`，不是 `herdr server`**（原因见下面「把任务派给 Studio / M2」）→ 断言 `detached_server_daemon: true` → 给已装的 claude/codex 装或刷新 integration。启动器重载不影响正在跑的 pane | 否 |
+| `mac-sync.yaml` | base | 多 Mac 目录与工作区增量同步：部署 `mac-sync` 脚本、配置全网状 SSH 互信与 Host 别名、分发过滤规则（清单不进 git，保存在本地 `~/.config/mac-sync/dirs.list`）。指南见 [mac-sync-setup.md](../../docs/guides/mac-sync-setup.md) | 否 |
 | `power.yaml` | macs | `pmset -c disablesleep 1`——插电时保持**系统**唤醒，合盖也不睡，从而 Tailscale 远程常在线（让"保持唤醒"不依赖 Amphetamine GUI）。inventory 里 `pmset_autorestart: true` 的主机（Studio，无电池）另加 `pmset -a autorestart 1`：断电恢复后自己开机 | 是 |
 | `os-update.yaml` | macs | macOS 软件更新，需要重启时无人值守地重启并验收。**不在 `site` 里**（它会重启机器），见下节 | 是（自己问密码） |
 

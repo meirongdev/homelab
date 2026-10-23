@@ -1,6 +1,6 @@
 ---
 # Everything Ansible can configure on the Macs, in order. Each play targets its own
-# group (macs / macbook / omlx / macmon / base / dev / ops / herdr, see inventory.yaml); plays with no matching host are skipped.
+# group (macs / macbook / omlx / macmon / base / dev / ops, see inventory.yaml); plays with no matching host are skipped.
 # Run with: just site [host]   (one host at a time, prompts for its sudo password — power.yaml)
 - import_playbook: packages.yaml
 # 紧跟 packages：mise 本体是 packages 的 base 层装的，缺了这里直接失败。
@@ -16,6 +16,5 @@
 # 反过来先跑本条的话，快照写出来没人读，而且两边都不报错。
 - import_playbook: omlx-metrics.yaml
 - import_playbook: macmon.yaml
-# 在 packages / ai-clis 之后：integration 只给已经装上的 agent 装。
-- import_playbook: herdr.yaml
+- import_playbook: mac-sync.yaml
 - import_playbook: power.yaml
