@@ -87,77 +87,54 @@ load_dirs() {
 }
 
 {% raw %}
-# 5. 推送目录到对端
+# 5. 初始化新机器：把清单里的目录整份（含 .git 与未提交改动）复制到对端
+#    只用于新机器，日常同步走 git push/pull。rsync 只比 mtime、不传删除，往已在用的
+#    机器上推会互相覆盖（2026-10-24 实测），所以对端已存在的目录整个跳过、从不写入。
+#    先复制到 <dir>.mac-sync-partial，传完才改名；中断后重跑会接着传。
 do_push() {
-    local target_peers=("$@")
-    if [[ ${#target_peers[@]} -eq 0 ]]; then
-        target_peers=($(get_default_peers))
+    local peer="${1:-}"
+    if [[ -z "${peer}" ]]; then
+        echo "❌ 请指定新机器，例如: mac-sync push m2（只用于初始化新机器，日常同步走 git）"
+        return 1
     fi
 
     local dirs=($(load_dirs))
     if [[ ${#dirs[@]} -eq 0 ]]; then
-        echo "ℹ️  清单为空，无需同步。"
+        echo "ℹ️  清单为空，无需复制。"
         return 0
     fi
 
-    echo "🚀 [${CURRENT_HOST}] 开始推送同步..."
-    for peer in "${target_peers[@]}"; do
-        echo -n "  📡 检查连接 ${peer} ... "
-        if ! is_peer_online "${peer}"; then
-            echo "❌ 离线/休眠（跳过）"
+    echo -n "📡 检查连接 ${peer} ... "
+    if ! is_peer_online "${peer}"; then
+        echo "❌ 离线/休眠"
+        return 1
+    fi
+    echo "✅ 在线"
+
+    echo "🚀 [${CURRENT_HOST}] 开始初始化 ${peer} ..."
+    for dir in "${dirs[@]}"; do
+        local src="${HOME}/${dir}/"
+        if [[ ! -d "${src}" ]]; then
+            echo "    ⚠️ 本地目录不存在: ${src} (跳过)"
             continue
         fi
-        echo "✅ 在线"
-
-        for dir in "${dirs[@]}"; do
-            local src="${HOME}/${dir}/"
-            if [[ ! -d "${src}" ]]; then
-                echo "    ⚠️ 本地目录不存在: ${src} (跳过)"
-                continue
-            fi
-            echo "    📦 [${peer}] 同步 ${dir} ..."
-            local parent_dir
-            parent_dir=$(dirname "${dir}")
-            ssh "${peer}" "mkdir -p ~/${parent_dir}" </dev/null
-            
-            rsync -au --partial \
-                --exclude-from="${EXCLUDE_FILE}" \
-                -e "ssh -o ConnectTimeout=10 -o ServerAliveInterval=15" \
-                "${src}" "${peer}:${dir}/" </dev/null
-        done
-        echo "  ✨ 完成对 ${peer} 的推送"
-    done
-    echo "🎉 全部推送任务完成！"
-}
-
-# 6. 从对端拉取目录
-do_pull() {
-    local src_peer="${1:-}"
-    if [[ -z "${src_peer}" ]]; then
-        echo "❌ 请指定要从哪台机器拉取，例如: mac-sync pull studio 或 mac-sync pull m2"
-        return 1
-    fi
-
-    local dirs=($(load_dirs))
-    echo "📥 [${CURRENT_HOST}] 开始从 ${src_peer} 拉取最新变更..."
-    if ! is_peer_online "${src_peer}"; then
-        echo "❌ 机器 ${src_peer} 离线或无法连接"
-        return 1
-    fi
-
-    for dir in "${dirs[@]}"; do
-        local dest="${HOME}/${dir}/"
-        mkdir -p "${dest}"
-        echo "    📦 拉取 ${dir} ..."
-        rsync -au --partial \
+        if ssh "${peer}" "test -e ~/${dir}" </dev/null; then
+            echo "    ⏭️  [${peer}] ~/${dir} 已存在，跳过（已在用的目录走 git 同步）"
+            continue
+        fi
+        echo "    📦 [${peer}] 复制 ${dir} ..."
+        local staging="${dir}.mac-sync-partial"
+        ssh "${peer}" "mkdir -p ~/$(dirname "${dir}")" </dev/null
+        rsync -a --partial \
             --exclude-from="${EXCLUDE_FILE}" \
             -e "ssh -o ConnectTimeout=10 -o ServerAliveInterval=15" \
-            "${src_peer}:${dir}/" "${dest}" </dev/null
+            "${src}" "${peer}:${staging}/" </dev/null
+        ssh "${peer}" "test ! -e ~/${dir} && mv ~/${staging} ~/${dir}" </dev/null
     done
-    echo "🎉 从 ${src_peer} 拉取完成！"
+    echo "🎉 ${peer} 初始化完成！"
 }
 
-# 7. 查看状态与连通性
+# 6. 查看状态与连通性
 do_status() {
     echo "🖥️  当前机器: ${CURRENT_HOST}"
     local peers=($(get_default_peers))
@@ -199,10 +176,6 @@ case "${1:-status}" in
         shift
         run_with_lock do_push "$@"
         ;;
-    pull)
-        shift
-        run_with_lock do_pull "$@"
-        ;;
     status)
         do_status
         ;;
@@ -211,13 +184,12 @@ case "${1:-status}" in
         ;;
     help|--help|-h)
         cat << 'USAGE'
-mac-sync - 跨 Mac 机器代码与工作区增量同步工具
+mac-sync - 新 Mac 初始化：把开发目录整份复制到新机器（日常同步走 git push/pull）
 
 用法:
   mac-sync status         检查当前机器状态、对端连通性与目录清单
-  mac-sync push [peer]    将本地目录变更推送到对端（不填 peer 则推给所有在线对端）
-  mac-sync pull <peer>    从指定的对端（如 studio 或 m2）拉取最新变更到本地
-  mac-sync list           查看当前同步的目录清单
+  mac-sync push <peer>    把清单里的目录复制到新机器（对端已存在的目录整个跳过，从不覆盖）
+  mac-sync list           查看目录清单
   mac-sync help           显示本帮助信息
 
 配置:

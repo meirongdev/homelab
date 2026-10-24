@@ -1,10 +1,10 @@
 ---
-# 多 Mac 目录与工作区同步工具 (mac-sync) 部署与配置
+# 新 Mac 初始化工具 (mac-sync) 部署与配置
 #
 # 架构：
 #   所有 Mac（base 组：M5 工作站 + M2 + Mac Studio + 未来新加入的 Mac）
-#   通过本 playbook 统一建立全网状免密 SSH 互信、分发通用同步工具 mac-sync、
-#   以及全局过滤规则。
+#   通过本 playbook 统一建立全网状免密 SSH 互信、分发 mac-sync、以及全局过滤规则。
+#   mac-sync 只负责把目录整份复制到新机器；日常跨机同步走 git push/pull。
 #
 # 隐私与数据面分离：
 #   具体的同步目录清单保存在各节点本地的 ~/.config/mac-sync/dirs.list，
@@ -109,11 +109,14 @@
               StrictHostKeyChecking accept-new
           {% endfor %}
 
-    - name: Deploy LaunchAgent plist template
-      ansible.builtin.template:
-        src: "{{ playbook_dir }}/../templates/com.meirongdev.mac-sync.plist.j2"
-        dest: "{{ ansible_facts.user_dir }}/.config/mac-sync/com.meirongdev.mac-sync.plist"
-        mode: "0644"
+    # 定时互推已退役：rsync 只比 mtime、不传删除，多台互推会互相覆盖（2026-10-24 实测）
+    - name: Remove retired periodic-push LaunchAgent plist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ ansible_facts.user_dir }}/.config/mac-sync/com.meirongdev.mac-sync.plist"
+        - "{{ ansible_facts.user_dir }}/Library/LaunchAgents/com.meirongdev.mac-sync.plist"
 
     - name: Verify mac-sync status on host
       ansible.builtin.command: "{{ ansible_facts.user_dir }}/.local/bin/mac-sync status"

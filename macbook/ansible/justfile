@@ -59,8 +59,8 @@ omlx-metrics target="omlx":
 macmon target="macmon":
     ansible-playbook playbooks/macmon.yaml --limit '{{target}}'
 
-# 多 Mac 目录与代码同步工具（mac-sync）部署与互信配置（无需 sudo，幂等）
-# 全量 Mac（base 组）自动分发脚本、同步排除规则、建立 SSH 互信与 Host 别名
+# 新 Mac 初始化工具（mac-sync）部署与互信配置（无需 sudo，幂等）；日常跨机同步走 git
+# 全量 Mac（base 组）自动分发脚本、复制排除规则、建立 SSH 互信与 Host 别名
 mac-sync target="base":
     ansible-playbook playbooks/mac-sync.yaml --limit '{{target}}'
 
