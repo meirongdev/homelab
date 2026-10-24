@@ -24,6 +24,7 @@
       - fzf
       - gh
       - htop
+      - hugo                                # meirongdev/blog 的主题要 extended 版，brew 的就是
       - just
       - lazygit
       - mise                                # 第 2 层的运行时由 mise.yaml 装（只在 dev 组）

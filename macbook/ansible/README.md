@@ -76,7 +76,7 @@ just os-upgrade-major <host> # 大版本升级（如 26 → 27），见下文风
 
 | 层 | 组 | 主机 | 装什么 | playbook |
 |---|---|---|---|---|
-| 1 基础 | `base` | M5 · M2 · Studio | awscli、gcloud、gh、glab、tmux、chezmoi、age、mise、uv、fzf、ripgrep、yq、htop、just、lazygit；oh-my-zsh + zsh-autosuggestions + zsh-syntax-highlighting；TPM | `packages.yaml` |
+| 1 基础 | `base` | M5 · M2 · Studio | awscli、gcloud、gh、glab、tmux、chezmoi、age、mise、uv、fzf、ripgrep、yq、htop、just、lazygit、hugo；oh-my-zsh + zsh-autosuggestions + zsh-syntax-highlighting；TPM | `packages.yaml` |
 | 2 运行时 | `dev` | M5 · M2 · Studio | mise 管：node、pnpm、bun、go、python、java（temurin）、maven、gradle、rust | `mise.yaml` |
 | 3 运维 | `ops` | M5 · M2 · Studio | kubectl、helm、kubectx、k9s、cilium-cli、hubble、argocd、ansible、gitleaks、kind、tilt、k6、kubeconform、terraform、vault | `packages.yaml` |
 
