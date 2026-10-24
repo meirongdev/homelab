@@ -1,6 +1,6 @@
 # ArgoCD Application Patterns
 
-> Last updated: 2026-09-27
+> Last updated: 2026-10-24
 > Status: 生效事实
 >
 > 当前 ArgoCD 管理模式分析、可选 pattern 对比与取舍建议。
@@ -163,9 +163,11 @@ Namespace 被 prune 会级联删光 ns 下一切，`Prune=false` 拦不住。
   （2026-08-14 退役 karakeep 时，`karakeep-data`/`meilisearch-data` 即按此手工删除）。
   ⚠️ CNPG 的卷（`apps-pg-1`、`zitadel-pg-1`）不在这个名单里，也不需要在：它们由 operator
   按 `Cluster` 生成，不是清单对象，ArgoCD 的 prune 根本看不到。删 `Cluster` 才会连带删卷。
-- **不入 git 的 bootstrap 依赖**: `argocd-manager` SA + cluster-admin 在
-  `cloud/oracle/bootstrap/argocd-manager.yaml`，手工 apply 一次、刻意留在 kustomize 树外；
-  `vault-token` Secret（`rss-system`）同为手工前置（不被 prune，见 `base/vault-store.yaml`）。
+- **不入 git 的 bootstrap 依赖**: `vault-token` Secret（`rss-system`），手工前置（不被 prune，见 `base/vault-store.yaml`）。
+  ⚠️ oracle 侧**已没有** `argocd-manager`：它是 08-02 之前 homelab 的 ArgoCD 纳管 oracle 用的，
+  控制面搬来后 ArgoCD 走集群内身份，那份 cluster-admin + 永不过期 token 闲置到 2026-10-24
+  才删（`legacy-token-last-used` 停在 08-02），清单 `cloud/oracle/bootstrap/` 同日删除。
+  现存唯一的 `argocd-manager` 在 homelab，是 oracle 纳管 homelab 的活凭据。
 - 记录: [首次纳管](../plans/2026-06-04-oracle-k3s-argocd-gitops.md) ·
   [控制面迁移/重装](../runbooks/argocd-control-plane-on-oracle.md) ·
   [整节点重建](../runbooks/oracle-k3s-rebuild.md)。

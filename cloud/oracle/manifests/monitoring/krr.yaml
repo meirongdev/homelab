@@ -181,8 +181,11 @@ spec:
                     exit 1
                   fi
                   D=$(date +%F)
+                  # ☠️ token 不能进 argv（homelab 的 Tetragon 会把完整命令行送进 Loki），
+                  # 写法与原因同 k8s/helm/manifests/monitoring/krr.yaml。
                   curl -sS --fail-with-body -X POST \
-                    "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
+                    --variable %BOT_TOKEN \
+                    --expand-url "https://api.telegram.org/bot{{BOT_TOKEN}}/sendDocument" \
                     -F "chat_id=${CHAT_ID}" \
                     -F "message_thread_id=${THREAD_ID}" \
                     -F "caption=📊 KRR 资源推荐 · ${CLUSTER} · ${D}

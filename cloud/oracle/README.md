@@ -1,6 +1,6 @@
 # Oracle K3s Cluster
 
-> Last updated: 2026-09-02
+> Last updated: 2026-10-24
 >
 > 本文只讲**这个目录里有什么、怎么跑**。架构事实不在这里：集群角色与对比见
 > [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md)，服务清单见
@@ -15,7 +15,6 @@ Oracle Cloud Free Tier 上的单节点 K3s（Ampere A1，arm64；shape 见 ARCHI
 ```
 cloud/oracle/
 ├── ansible/        # 节点预配：K3s、Tailscale、firewalld（playbooks/ + inventory/）
-├── bootstrap/      # argocd-manager.yaml：ArgoCD 纳管前必须先存在的 RBAC，手工 apply 一次，刻意不进 GitOps
 ├── cloudflare/     # 本集群的 Cloudflare Tunnel terraform（与 homelab 那份独立；DNS 记录不在这里，见下）
 ├── manifests/      # ArgoCD `oracle-k3s` App 同步的 kustomize 树。⚠️ 新文件必须登记进 kustomization.yaml
 │   ├── base/               # gateway、cloudflared、ClusterSecretStore、CoreDNS 扩展、PriorityClass、external-dns 的 ns 与密钥

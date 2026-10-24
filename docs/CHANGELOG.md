@@ -1,6 +1,6 @@
 # Homelab Changelog
 
-> Last updated: 2026-10-22
+> Last updated: 2026-10-24
 > 已经做完的事，一条一行，按阶段/时间倒着找。**这里只回答「做过什么」**——
 > 还剩什么没做看 [ROADMAP.md](ROADMAP.md)，现在是什么样看 [reference/](reference/README.md)。
 > 2026-09-02 从 ROADMAP 拆出：那份文件长到 23.8KB，9 条开放项被 65 条历史淹没，
@@ -118,6 +118,7 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-10-05 | **M2 MacBook 也接入 macmon**：同一 playbook / job / 面板。压测发现两处要更正：CPU/内存/ANE 功耗读 0 在 M2 Pro 上一样，是 **macOS 27** 的问题而不是 M5，drop 改为对所有 Mac；M2 的 CPU 温度是坏的（P 核断电时 SMC 探头读 0–8°C，macmon 拿它们一起平均，空闲时在 13↔29°C 间跳），只丢 M2 的，它的芯片温度看 GPU（空闲 ~39°C）。M2 空闲 7–9W、CPU 满载 37W，低负载下风扇真的停转 ([observability-multicluster.md](reference/observability-multicluster.md)) |
 | 2026-10-11 | **Mac 开发环境纳入 `macbook/ansible`，三台逐台跑通**：按层分组——`base`（M5/M2/Studio：基础 CLI、AWS/GCP CLI、oh-my-zsh 与两个插件、TPM）· `dev`（M5/M2：mise 管 node/pnpm/bun/go/python/java/maven/gradle/rust，版本写前缀不写 latest）· `ops`（M5/M2：k8s/IaC 工具 + gitleaks）；Antigravity CLI 三台都装（`ai-clis.yaml`）。本机作为 `m5`（本地连接）入 inventory，**刻意不进 `macs`**（那个组会被禁睡眠/无人值守重启/node-exporter 作用到）。边界：Ansible 只装软件，`.zshrc` 等配置与凭据归 chezmoi dotfiles 仓库，所以 oh-my-zsh 用 git 克隆、不跑 install.sh，mise 要等 `.zshrc` 里 `mise activate` 才生效。踩到的三处：① ☠️ Homebrew 7 拒绝加载未信任的第三方 tap，而 `community.general.homebrew` 把整份列表一次交给 `brew info`，一个未信任就整体失败（`--check` 也一样），terraform/vault 因此单独一个任务并先逐个 `brew trust --formula`；顺带发现 M5 的 `brew leaves` 一直在静默漏掉这两个 · ② M5 的 `installs/node/26.10.0` 是 10-02 一次没装完的残留，mise 每次都把它列为缺失，被装完后的断言抓到，`mise uninstall` 清掉 · ③ gcloud 在非交互 ssh 下回落到系统 Python 3.9 直接报错（登录 shell 正常），待 chezmoi 在 `.zshenv` 设 `CLOUDSDK_PYTHON`。 ④ ☠️ **跑完后两台 Orca 的 node 都变了**：Orca 会无条件把 `~/.local/share/mise/shims` 拼到 daemon PATH 最前面（排在 fnm/Homebrew 前），M2 的 Orca 会话 node 从 fnm 24 变成 mise 26，M5 上装在 mise 旧 node 25.9.0 下的 `pi` 报 `No version is set for shim`（M5 的 Orca 其实从 4 月起就一直在用 mise 的 node，只是没人发现）。修法：全局配置设 `shims_dir` 挪出默认位置并删掉旧目录（我们走 `mise activate`，不用 shim），M2 恢复 fnm 24，M5 改用与终端一致的 brew node 26.9 + pi 0.67.68。同日卸载 hermes（只有 M5 留着一个反复拉起不存在程序的 LaunchAgent），`ai-clis.yaml` 不再装它，指南标 Deprecated；`dev-machine-bootstrap.md` 的工具链一节改为指向 Ansible ([macbook/ansible/README.md](../macbook/ansible/README.md) · [新机器 bootstrap](guides/dev-machine-bootstrap.md)) |
 | 2026-10-22 | **M2 显示器恢复空闲休眠**：Amphetamine 出厂默认 `Allow Display Sleep = 0` 且登录即开无限期会话，M2 合盖后系统仍认为屏亮着，航拍壁纸 24h 解码视频。改沙盒偏好（CLI 可做，不是 GUI-only）后只剩阻止系统休眠的断言，整机功耗中位数 8.2W → ~4W；显示器开关与 Wi‑Fi/远程访问无关（掉线只在整机睡眠时发生，由 `SleepDisabled 1` 管）。`macmon.yaml` 里 M2「空闲 7–9W」的口径随之更正为关屏 3–5W ([macbook/ansible/README.md](../macbook/ansible/README.md)) |
+| 2026-10-24 | **双集群入侵排查 + P0 加固**：未发现入侵迹象（工作负载/RBAC/webhook/Falco/Tetragon/三节点 SSH 与持久化逐项核过）。处理三类：① oracle 节点卸掉 k3s 之前的手工遗留：无认证 Dante SOCKS `:10080`、两年没握过手的 WireGuard `wg0`、root 跑的 node_exporter `:19898`（文件挪进节点 `/root/decommissioned-2026-10-24/`，firewalld 规则未动）· ② 删 oracle 闲置的 `kube-system/argocd-manager`（cluster-admin + 永不过期 token，08-02 起没用过）及清单 `cloud/oracle/bootstrap/` · ③ Tetragon 把完整 argv 送进 Loki，在那里查到 Telegram bot token 与 SurrealDB 口令明文：krr ×2 与夜备改用 curl `--variable`，Tetragon 加 `redactionFilters` 兜底；已落盘的随 7 天保留期过期，bot token 未轮换 ([security.md](reference/security.md)) |
 ### 审计与清理（历史）
 
 | 时间 | 内容 |

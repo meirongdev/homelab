@@ -172,8 +172,12 @@ spec:
                     exit 1
                   fi
                   D=$(date +%F)
+                  # ☠️ token 不能进 argv：Tetragon 把每次 exec 的完整命令行送进 Loki，
+                  # 2026-10-24 在那里查到明文 bot token。--variable 让 curl 自己读环境变量，
+                  # 命令行里只剩占位符；变量缺失时 curl 直接报错退出，不会带空 token 发出去。
                   curl -sS --fail-with-body -X POST \
-                    "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
+                    --variable %BOT_TOKEN \
+                    --expand-url "https://api.telegram.org/bot{{BOT_TOKEN}}/sendDocument" \
                     -F "chat_id=${CHAT_ID}" \
                     -F "message_thread_id=${THREAD_ID}" \
                     -F "caption=📊 KRR 资源推荐 · ${CLUSTER} · ${D}

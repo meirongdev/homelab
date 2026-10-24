@@ -1,6 +1,6 @@
 # K3s 集群安全架构 (Security Architecture)
 
-> Last updated: 2026-09-27
+> Last updated: 2026-10-24
 > Status: 生效事实
 > Scope: 双集群（homelab + oracle-k3s）的纵深防御模型，本文是 source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
@@ -212,6 +212,13 @@
 eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异常外联）。**按集群硬件选型**：
 
 - **homelab → Tetragon**（`values/tetragon.yaml`，ns `tetragon`，Helm App）。Cilium 原生、内核态过滤只上报命中事件 → 省 CPU，适配热笔记本。v1：默认进程 exec/exit 可见性 → `export-stdout` → 现有 OTel→Loki（按 pod=tetragon 查，可见容器内 shell/kubectl exec/异常进程）+ Prometheus 指标(ServiceMonitor 带 release 标签)。自定义 TracingPolicy（敏感文件/提权检测）+ 基于其指标的告警为后续调优。
+  - ☠️ **进程事件带完整 argv，等于把每条命令行写进 Loki**：脚本里的密钥一律别放命令行。
+    2026-10-24 在 Loki 里查到两处明文：krr 的 Telegram bot token（拼在 curl URL 里）和
+    夜备的 SurrealDB 口令（`curl -u root:<口令>`，7 晚）。源头改成 curl 的
+    `--variable %VAR` + `--expand-*`（curl ≥ 8.3，命令行里只剩 `{{VAR}}` 占位符），
+    另在 `values/tetragon.yaml` 加了 `redactionFilters` 兜底（bot token / `-u` 口令 /
+    Bearer / URL 里的 `user:pass@`）。兜底不是正解：带空格且加引号的口令只能打掉一半。
+    oracle 没有 Tetragon，那边命令行里的密钥只在 `/proc` 可见、不进 Loki，但写法同样照改。
 - **oracle → Falco + Falcosidekick → Telegram**（`cloud/oracle/values/falco.yaml`，ns `falco`，Helm App 部署到 oracle 集群）。规则库开箱即用；oracle VM CPU 余量大。`driver: modern_ebpf`(CO-RE 无需内核模块)。**双出口**：① Falco JSON→stdout→OTel→Loki（always-on，零依赖）；② Falcosidekick→Telegram（原生 output，warning+，併入群 MatthewDaily「🚨 Homelab 告警」话题；2026-07 前曾经 Gotify 转发，已随其下线迁移，见 `decisions/alerting-telegram-migration.md`）。
   - **Telegram 推送前置（一次性）**：token 走 Vault `secret/homelab/telegram`（与 homelab Alertmanager 共用同一个 bot，跨集群读取）→ ESO(`cloud/oracle/manifests/falco/falcosidekick-secret.yaml`)生成 `falcosidekick-telegram` secret(key `TELEGRAM_TOKEN`)；chatid/messagethreadid 明文配在 `cloud/oracle/values/falco.yaml`。token 未配好不影响 Falco→Loki 检测，只是 falcosidekick 推送失败。
   - falco ns（含 PSA privileged 标签 + ESO secret）由 oracle-k3s kustomize App 拥有；Falco 工作负载由独立 `falco` Helm App 部署（`CreateNamespace=false`）。
@@ -265,6 +272,13 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
    它们目前只靠 OCI Security List 这一层挡在云边界，纵深只有一层厚。
    收口有真实风险（`enp0s3` 也在 `public` zone，误删可能切断节点自身到 API 的路径），
    需要先逐端口确认归属再动；在那之前**不要往 Security List 里新增任何 `0.0.0.0/0` 规则**。
+   ✅ 2026-10-24 先清掉了口子后面**真有进程在听**的三个 k3s 之前的手工遗留（仓库里从没有过）：
+   无认证的 Dante SOCKS 代理 `:10080`（`socksmethod: none` + 放行 `0.0.0.0/0`，tailnet 与所有
+   Pod 都能用它出网）、两年没握过手的 WireGuard `wg0 :51420`、root 跑的独立 node_exporter
+   `:19898`（哈希与上游 1.3.1 一致）。文件挪进节点的 `/root/decommissioned-2026-10-24/`
+   （0700），没删。firewalld 规则本身一条没动：`firewall-cmd --reload` 有冲掉 Cilium
+   iptables 的前科（[records/2026-10-01](../records/2026-10-01-oracle-firewalld-flushes-cilium-iptables.md)），
+   收口仍按上面的条件另做。
 7. **Nakama 管理控制台裸挂公网**（2026-08-25，有意接受，非疏忽）：
    `nakama-console.meirong.dev` → Nakama 内嵌 console(7351)，它能看/删账号、改任意存储数据、
    调用任意 RPC，而前面只有 Nakama 自带的用户名+口令，没有 ZITADEL OIDC、没有

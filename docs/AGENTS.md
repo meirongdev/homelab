@@ -16,7 +16,7 @@
 ```
 proxmox/{terraform,terraform-storage,ansible}/  # pve 上的 VM · 106 上的 worker VM · 两台宿主机
 k8s/{ansible,cilium,helm}/     # K3s 安装 · Cilium values(手动管理) · 应用部署(manifests/,values/=homelab)
-cloud/oracle/                  # Oracle K3s (terraform|ansible|manifests|values|cloudflare|bootstrap=手工 RBAC)
+cloud/oracle/                  # Oracle K3s (terraform|ansible|manifests|values|cloudflare)
 argocd/                        # GitOps (install|projects|applications/)
 cloudflare/terraform/          # Tunnel + DNS + WAF          tailscale/{terraform,ansible}/  # ACL · 节点 tailscale
 zitadel/                       # 身份/SSO                     backup/               # restic (kustomize)
