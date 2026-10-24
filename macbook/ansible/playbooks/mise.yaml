@@ -7,10 +7,10 @@
 #    brew 的 node 不会消失：ai-clis.yaml 和 qwen-code 等 formula 依赖它，与 mise 的并存。
 # ⚠️ Ansible 的 ssh 不加载 .zshrc，所以这里一律用 mise 的全路径。别的 playbook 要用
 #    mise 管的运行时，得 `mise exec -- <cmd>`。
-# ☠️ shim 刻意挪出默认位置（下面配置里的 shims_dir）：Orca 会**无条件**把
-#    ~/.local/share/mise/shims 拼到它 daemon 的 PATH 最前面，排在 fnm / Homebrew 之前，
-#    shim 一出现，mise 的全局版本就成了 Orca 拉起的所有会话的 node/python/java。2026-10-11
-#    首次跑完就这样：M2 的 Orca 会话 node 从 fnm 24 变成 mise 26，M5 上装在旧 node 下的 `pi`
+# ☠️ shim 刻意挪出默认位置（下面配置里的 shims_dir）：GUI 应用看不到 shell 的 PATH，有的会
+#    **无条件**把 ~/.local/share/mise/shims 拼到自己 PATH 的最前面，排在 fnm / Homebrew 之前，
+#    shim 一出现，mise 的全局版本就成了它拉起的所有进程的 node/python/java。2026-10-11
+#    首次跑完就撞上过：那类应用里的会话 node 被静默换掉，装在旧 node 下的 `pi`
 #    直接报 "No version is set for shim"。我们用 `mise activate`（改 PATH）不用 shim，挪走无损失。
 #
 # 版本写前缀不写 latest：latest 让每次跑都可能装一个新版本（不幂等），几台机器也会各停在
@@ -60,7 +60,7 @@
         content: |
           # 由 homelab 仓库 macbook/ansible/playbooks/mise.yaml 管理，手改会在下次运行时被覆盖。
           [settings]
-          # 别改回默认：Orca 会把默认的 ~/.local/share/mise/shims 塞到 PATH 最前面（见 playbook 文件头）。
+          # 别改回默认：有的 GUI 应用会把默认的 ~/.local/share/mise/shims 塞到 PATH 最前面（见 playbook 文件头）。
           shims_dir = "~/.local/share/mise/shims-hidden"
 
           [tools]
@@ -93,7 +93,7 @@
         fail_msg: "~/.local/share/mise/shims 里有不是 mise shim 的文件，手动处理后再跑：{{ foreign_shims.stdout_lines }}"
         quiet: true
 
-    - name: Remove the default shim dir (Orca puts it at the front of its PATH)
+    - name: Remove the default shim dir (some GUI apps put it at the front of their PATH)
       ansible.builtin.file:
         path: ~/.local/share/mise/shims
         state: absent
@@ -129,7 +129,7 @@
         quiet: true
       when: not ansible_check_mode
 
-    # 上面的 install 会触发 reshim；shims_dir 若没生效，shim 会回到 Orca 认的那个目录。
+    # 上面的 install 会触发 reshim；shims_dir 若没生效，shim 会回到默认目录。
     - name: Check the default shim dir stayed gone
       ansible.builtin.stat:
         path: ~/.local/share/mise/shims

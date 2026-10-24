@@ -96,8 +96,9 @@ just packages && just mise && just ai-clis            # 全部（按各自的组
 - mise 装好的运行时，要等 `.zshrc` 里有 `eval "$(mise activate zsh)"` 才会用上，在那之前
   PATH 上仍是 brew 的 node/go。brew 的 node 会一直在（`ai-clis.yaml` 和 qwen-code 等 formula 依赖它）。
 - ☠️ **mise 的 shim 不在默认位置**（`shims_dir = ~/.local/share/mise/shims-hidden`，写在 `mise.yaml` 管的全局配置里）。
-  Orca 会无条件把默认的 `~/.local/share/mise/shims` 拼到它 daemon 的 PATH 最前面（排在 fnm/Homebrew 前），
-  shim 一出现，Orca 拉起的所有会话就改用 mise 的 node/python/java。别改回默认，也别在这台机器上 `mise activate --shims`。
+  GUI 应用看不到 shell 的 PATH，有的会无条件把默认的 `~/.local/share/mise/shims` 拼到自己 PATH 的最前面（排在 fnm/Homebrew 前），
+  shim 一出现，它拉起的所有进程就静默改用 mise 的 node/python/java（2026-10-11 撞上过）。
+  我们走 `mise activate` 不用 shim，挪走无损失。别改回默认，也别在这台机器上 `mise activate --shims`。
 - AWS/GCP CLI 装上≠能管资源。`~/.aws/config` 与 gcloud 配置由 chezmoi 按 role 下发，
   `~/.aws/credentials` 只发 `workstation` 和 `agent`（Studio、M2；dotfiles README 里的「暂定」）；gcloud 的登录令牌
   不在 chezmoi 里：agent 主机是 2026-10-22 从 M5 一次性拷过去的，其他机器自己 `gcloud auth login --no-launch-browser`。
