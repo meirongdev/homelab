@@ -30,6 +30,7 @@ just omlx [host]             # OMLX 本体：brew + LaunchAgent + settings.json 
 just node-exporter [host]    # 装/升级 node_exporter LaunchAgent（无需 sudo，幂等）
 just omlx-metrics [host]     # 装/升级 OMLX 指标采集 LaunchAgent（无需 sudo，幂等）
 just macmon [host]           # 装/升级 macmon 功耗/温度/风扇 exporter（:9090，两台，无需 sudo，幂等）
+just orbstack [host]         # OrbStack 容器/虚拟化环境（cask + 无头免密 + 开机自启 + 启动服务；三台，无需 sudo，幂等）
 just power [host]            # headless 电源策略（逐台问 sudo 密码）
 just multica-daemon          # 装/升级 Multica daemon LaunchAgent（仅 M2，认证全自动，从 Vault 取 PAT）
 just herdr [host]            # herdr：开机拉起 server 的 LaunchAgent + claude/codex integration（两台，无需 sudo，幂等）
@@ -56,6 +57,7 @@ just os-upgrade-major <host> # 大版本升级（如 26 → 27），见下文风
 | `node-exporter.yaml` | macs | 下载校验 `darwin-arm64` 二进制 → `~/.local/bin/node_exporter`；写 LaunchAgent（`:9100`, KeepAlive, RunAtLoad, **`--collector.textfile.directory`**）→ `~/Library/LaunchAgents/com.prometheus.node_exporter.plist`；`launchctl bootstrap` 到 GUI 域；校验 `/metrics` 200 + `node_textfile_scrape_error == 0` | 否 |
 | `omlx-metrics.yaml` | omlx | OMLX 推理指标的**生产端**：LaunchAgent `com.meirongdev.omlx-textfile-collector` 每 60s 把 `~/.omlx/stats.json` 渲染成 `omlx.prom`，投进上面那个 textfile 目录。☠️ **StartInterval 不是 KeepAlive**（渲染器跑 0.03s 就退，KeepAlive 会变重启风暴）。☠️ 渲染器是 **`mlx-learning` 仓 venv 里的 console script**（跨仓依赖），缺了会明确失败并给出 `uv sync` 的修法。`stats.json` 还不存在（OMLX 没服务过请求）时装好 plist 但**不启动**。验收会一路查到 node_exporter 那端 | 否 |
 | `macmon.yaml` | macmon | 功耗 / 温度 / 风扇：`brew install macmon`（只 present）→ LaunchAgent `com.meirongdev.macmon` 跑 `macmon serve --port 9090 --interval 15000`（采样间隔与 Prometheus 抓取对齐）。Darwin 版 node_exporter 没有任何温度/功耗指标，靠它补。**不要 sudo**（读 IOReport + SMC）。☠️ macOS 27 上 CPU/内存/ANE 功耗恒为 0（不是空闲，CPU 满载时也是 0；两台都这样），抓取时已丢掉；☠️ M2 的 CPU 温度是坏的（P 核断电时探头读 0–8°C，均值乱跳），也已丢掉，M2 看 GPU 温度；整机功耗是 SMC `PSTR`，不是墙插功率。两台的口径与压测数字在 playbook 文件头。别用 `macmon serve --install`（另一个 label、抢同一端口、不能设采样间隔）。验收断言整机功耗与 GPU 温度非 0 | 否 |
+| `orbstack.yaml` | base | OrbStack 容器/虚拟化环境：检查 `/Applications/OrbStack.app` 是否存在，缺失时才通过 Homebrew cask 安装（避免强行覆盖已有的 app 触发 sudo 提示）；配置 `setup.use_admin false`（避免无头机弹窗要求管理员密码）、`app.start_at_login true` 开机自启；非运行状态自动 `orb start` 并断言状态为 `Running` | 否 |
 | `multica-daemon.yaml` | macbook | 装 `multica` CLI（**`darwin-arm64` 预编译包**，固定版本 + sha256，不走 Homebrew）→ 指向自建 service → 用 Vault 里的 PAT 认证 → LaunchAgent `ai.multica.daemon`。⚠️ 未认证时**刻意不 bootstrap**（否则 KeepAlive 会把必然失败的进程反复拉起）。这是 Multica「执行任务的那一半」，整体安装见 [docs/runbooks/multica-install.md](../../docs/runbooks/multica-install.md) | 否 |
 | `herdr.yaml` | herdr | M5 派活的远端：herdr 本体（官方安装器，只在缺失时装）→ `config.toml` 关掉首次引导 → LaunchAgent `com.meirongdev.herdr-server`，**跑的是一次性启动器 `herdr remote-client-bridge </dev/null`，不是 `herdr server`**（原因见下面「把任务派给 Studio / M2」）→ 断言 `detached_server_daemon: true` → 给已装的 claude/codex 装或刷新 integration。启动器重载不影响正在跑的 pane | 否 |
 | `mac-sync.yaml` | base | 新 Mac 初始化：部署 `mac-sync` 脚本（只把目录整份复制到新机器，对端已有的目录跳过；日常跨机同步走 git）、配置全网状 SSH 互信与 Host 别名、分发过滤规则（清单不进 git，保存在本地 `~/.config/mac-sync/dirs.list`）。指南见 [mac-sync-setup.md](../../docs/guides/mac-sync-setup.md) | 否 |

@@ -1,0 +1,86 @@
+---
+# Install and configure OrbStack on Apple Silicon Macs.
+# Target: base (m5, mbp-m2-pro, mac-studio)
+#
+# Runs as the login user (Homebrew cannot run as root, so NO become).
+# Idempotent:
+#   - If /Applications/OrbStack.app already exists (m5 and M2), cask install is skipped
+#     to avoid Homebrew prompting for sudo to adopt existing app files.
+#   - On machines missing OrbStack (e.g. mac-studio), Homebrew cask installs it cleanly.
+#   - Configures `setup.use_admin false` to prevent GUI admin password popups on headless machines.
+#   - Configures `app.start_at_login true` so it autostarts when user logs in.
+#   - Starts the daemon headlessly if not already Running.
+- name: OrbStack container and virtualization platform
+  hosts: base
+  gather_facts: true
+  vars:
+    homebrew_prefix: /opt/homebrew
+    orb_candidates:
+      - "{{ ansible_facts.user_dir }}/.orbstack/bin/orb"
+      - "{{ homebrew_prefix }}/bin/orb"
+      - /usr/local/bin/orb
+      - /Applications/OrbStack.app/Contents/MacOS/bin/orb
+
+  tasks:
+    - name: Check whether OrbStack.app is already installed
+      ansible.builtin.stat:
+        path: /Applications/OrbStack.app
+      register: orb_app_stat
+
+    - name: Install OrbStack via Homebrew Cask (only if missing)
+      community.general.homebrew_cask:
+        name: orbstack
+        state: present
+        path: "{{ homebrew_prefix }}/bin"
+      when: not orb_app_stat.stat.exists
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Locate orb CLI binary
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: "{{ orb_candidates }}"
+      register: orb_binary_checks
+
+    - name: Determine active orb binary path
+      ansible.builtin.set_fact:
+        active_orb_bin: "{{ (orb_binary_checks.results | selectattr('stat.exists') | map(attribute='item') | list | first) | default('/opt/homebrew/bin/orb') }}"
+
+    - name: Disable admin password prompts (rootless headless mode)
+      ansible.builtin.command:
+        cmd: "{{ active_orb_bin }} config set setup.use_admin false"
+      changed_when: false
+      environment:
+        PATH: "{{ ansible_facts.user_dir }}/.orbstack/bin:{{ homebrew_prefix }}/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Configure OrbStack to start at login
+      ansible.builtin.command:
+        cmd: "{{ active_orb_bin }} config set app.start_at_login true"
+      changed_when: false
+      environment:
+        PATH: "{{ ansible_facts.user_dir }}/.orbstack/bin:{{ homebrew_prefix }}/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Check OrbStack daemon status
+      ansible.builtin.command:
+        cmd: "{{ active_orb_bin }} status"
+      register: orb_status
+      changed_when: false
+      failed_when: false
+      environment:
+        PATH: "{{ ansible_facts.user_dir }}/.orbstack/bin:{{ homebrew_prefix }}/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Start OrbStack daemon if not running
+      ansible.builtin.command:
+        cmd: "{{ active_orb_bin }} start"
+      when: "'Running' not in (orb_status.stdout | default(''))"
+      environment:
+        PATH: "{{ ansible_facts.user_dir }}/.orbstack/bin:{{ homebrew_prefix }}/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Assert OrbStack is running
+      ansible.builtin.command:
+        cmd: "{{ active_orb_bin }} status"
+      register: orb_final_status
+      changed_when: false
+      failed_when: "'Running' not in orb_final_status.stdout"
+      environment:
+        PATH: "{{ ansible_facts.user_dir }}/.orbstack/bin:{{ homebrew_prefix }}/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"

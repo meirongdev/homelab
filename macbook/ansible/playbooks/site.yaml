@@ -6,6 +6,7 @@
 # 紧跟 packages：mise 本体是 packages 的 base 层装的，缺了这里直接失败。
 - import_playbook: mise.yaml
 - import_playbook: ai-clis.yaml
+- import_playbook: orbstack.yaml
 # 紧跟 ai-clis：multica daemon 靠探测 PATH 上的 claude/qwen/codex 来注册
 # 可用 runtime，CLI 没装齐时它起得来但一个 agent 都发现不了。
 - import_playbook: multica-daemon.yaml
