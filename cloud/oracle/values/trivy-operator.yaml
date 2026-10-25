@@ -387,6 +387,41 @@ trivy:
       # 两个上游镜像目前均无包含 proxy-addr >=2.0.8 的已修版本。
       - id: CVE-2026-90711
         statement: "proxy-addr <2.0.8 IPv4-mapped IPv6 trust 绕过(修复 2.0.8, 2026-09-15 发布); 触发需配置 trust proxy 带 IPv4-mapped IPv6 子网, excalidraw-room 纯 Socket.IO 中继无 IP 鉴权, uptime-kuma 不基于此类 IP 鉴权, 2.5.0-slim 与自建 excalidraw-room 均无已修版本, 2026-12 复审"
+      # --- certifi 中间 CA 私钥泄露（2026-10-25 新增，两集群同批）---
+      # 2026-10-21 起两集群 TrivyImageCriticalVulnerabilities firing，每 4h 往 Telegram 报警。
+      # 命中 krr(2024.2.2, 2026.6.17) / loki-sc-rules(2026.6.17) / calibre-web-automated(2026.6.17)，修复版 2026.10.19。
+      # 触发需针对 Python 进程出站 TLS 发起中间人攻击并使用 emSign 中间 CA 伪造证书。
+      # 集群出站均走主流顶级权威 CA 或 Tailscale 内网，各上游镜像均未更新到 2026.10.19。
+      - id: GHSA-6q48-6c7w-9gw2
+        statement: "certifi 根证书信任库中间 CA 私钥泄露(修复 2026.10.19, 2026-10-19 发布); 触发需中间人伪造证书, 集群出向全走主流权威 CA 或 Tailscale 节点, 上游镜像均未重建无已修版本, 2026-12 复审"
+      # --- Pillow 5 连 Critical 漏洞（2026-10-25 新增，两集群同批）---
+      # 命中 krr v1.30.0 与 calibre-web-automated，均为 Pillow 12.3.0，修复需大版本 13.0.0。
+      # krr 仅做 K8s 资源分析文本输出、运行时绝不调用图像解码；calibre-web 电子书元数据受控，无 FlashPix 解码。
+      # 上游镜像均未适配 Pillow 13.0.0，无已修镜像。
+      - id: CVE-2026-112393
+        statement: "Pillow <13.0.0 图像解码漏洞(修复 13.0.0, 2026-10-18 发布); krr 仅做资源分析不解码图片, calibre-web 电子书元数据受控无不受信输入, 无已修镜像, 2026-12 复审"
+      - id: CVE-2026-112398
+        statement: "Pillow <13.0.0 FlashPix 越界读写(修复 13.0.0, 2026-10-18 发布); 同 CVE-2026-112393, 业务不处理 FlashPix 格式, 2026-12 复审"
+      - id: CVE-2026-112403
+        statement: "Pillow <13.0.0 JPEG 解码整数溢出(修复 13.0.0, 2026-10-18 发布); 同 CVE-2026-112393, krr 与 CWA 无外部不受信输入, 2026-12 复审"
+      - id: CVE-2026-112900
+        statement: "Pillow <13.0.0 图像处理内存损坏(修复 13.0.0, 2026-10-18 发布); 同 CVE-2026-112393, 无已修镜像, 2026-12 复审"
+      - id: CVE-2026-96639
+        statement: "Pillow <13.0.0 多帧图像处理漏洞(修复 13.0.0, 2026-10-18 发布); 同 CVE-2026-112393, 无已修镜像, 2026-12 复审"
+      # --- Next.js 16.x 两个未授权 RCE（2026-10-25 新增，两集群同批）---
+      # 命中 homepage v2.3.0 (next 16.3.3) 与 zitadel-login v4.13.1 (next 16.1.6)，修复版 16.4.1/15.5.28。
+      # GHSA-2464-fhr4-w9xw: 需开放 /_next/image 且处理攻击者可控 SVG，homepage /_next/image 404 未启用，zitadel remotePatterns 为空且不支持 SVG 优化。
+      # GHSA-673q-mjm6-r5xr: 需应用使用实验性 use cache 指令返回 typed array，两应用源码均零使用 use cache。
+      # 上游镜像均未升到 16.4.1，无已修镜像。
+      - id: GHSA-2464-fhr4-w9xw
+        statement: "Next.js SVG 图片优化未授权 RCE(修复 16.4.1/15.5.28, 2026-10-21 发布); 触发需开放 /_next/image 处理可控 SVG, homepage 未启用图片优化(404), zitadel 不支持 SVG 优化, 上游无已修镜像, 2026-12 复审"
+      - id: GHSA-673q-mjm6-r5xr
+        statement: "Next.js use cache 缓存函数返回 typed array 未授权 RCE(修复 16.4.1, 2026-10-21 发布); 触发需应用使用实验性 use cache 指令, 源码均未启用, 上游无已修镜像, 2026-12 复审"
+      # --- Brotli 解码器越界写入 Node2Shell（2026-10-25 新增，命中 CWA 8 个工作负载）---
+      # 命中 crocodilestick/calibre-web-automated，修复版 1.2.1。
+      # 触发需解码恶意特制 Brotli 压缩流，CWA 出向连接仅向配置的合法元数据源拉取数据，上游镜像停更无已修版本。
+      - id: GHSA-9v8h-qqgm-4m35
+        statement: "Brotli <1.2.1 解码器越界写入 Node2Shell(修复 1.2.1, 2026-10-16 发布); 触发需解码恶意特制 Brotli 压缩流, calibre-web 出向连接仅向配置的合法元数据 API 通信, 上游镜像停更无已修版本, 2026-12 复审"
 
     # ---- 暴露密钥（exposed secrets）的既知假阳性（2026-08-30 新增）----
     # 背景：`TrivyExposedSecretFound` 自上线起引用的指标名 `trivy_exposedsecrets_findings`

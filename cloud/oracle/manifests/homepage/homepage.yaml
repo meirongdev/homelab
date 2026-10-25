@@ -343,6 +343,16 @@ spec:
       serviceAccountName: homepage
       containers:
         - name: homepage
+          # v2.7.0（2026-10-25 从 v2.3.0 的 digest f8202766… 升上来；内置 next 16.3.3 → **16.4.1**）。
+          # 动机是 GHSA-673q-mjm6-r5xr（`use cache` 返回类型化数组）：advisory 原文
+          # **no known workaround**，只能升到 16.4.1；而四个受影响 Next.js 镜像里只有本镜像
+          # 够得到（open_notebook 1.15.0 仍 16.2.6 / multica-web v0.7.0 仍 16.3.8 /
+          # zitadel-login v4.20.0 仍 16.3.6）——所以它不进取免清单，靠升级真修掉。
+          # 同批的 GHSA-2464-fhr4-w9xw 对本镜像不适用：advisory 前提 glibc，而本镜像是
+          # Alpine/musl（实测 /lib/ld-musl-x86_64.so.1，sharp 0.35.3）。
+          # ⚠️ v2.3.0 那次的两个结论对 v2.7.0 仍然成立，别删下面的记录：
+          #   ① 钉的必须是多架构 index digest（本 digest 实测含 linux/amd64 + linux/arm64）；
+          #   ② v2 起严格强制 HOMEPAGE_ALLOWED_HOSTS，与探针 Host 头的冲突见下。
           # v2.3.0（2026-09-10 从 v1.13.2 的 digest a0b71c8e… 升上来；原先是 :latest 钉的）。
           # ⚠️ 钉的是**多架构 index digest**（oci image index，含 linux/amd64 + linux/arm64）——
           #    oracle 是 arm64，钉成单架构那个会 ImagePullBackOff。
@@ -364,7 +374,7 @@ spec:
           #    而探针用的是 pod IP。「本地跑得起来」不覆盖「kubelet 探得通」。
           #    本地验证到的部分仍然有效：/ 200、/api/services 解析出 4 组 29 条、
           #    bookmarks/widgets 正常、日志无配置解析错误（"▲ Next.js 16.3.3 / ✓ Ready"）。
-          image: ghcr.io/gethomepage/homepage@sha256:f820276654539cdc2cf0169f28188d135919a7984fad76d83d8d5ff1383f3705
+          image: ghcr.io/gethomepage/homepage@sha256:19c5c09184458a41b7b5915e71463a39f36cd33540f41bdbed008791b8182d5f
           ports:
             - containerPort: 3000
               name: http
