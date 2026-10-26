@@ -1,0 +1,77 @@
+---
+# Install and configure Magpie across the Mac fleet.
+# Idempotent — safe to re-run.
+# Runs as the login user (NO become).
+- name: Magpie CLI & Homelab Gateway
+  hosts: macs
+  gather_facts: false
+  vars:
+    homebrew_prefix: /opt/homebrew
+    litellm_url: "https://llm.meirong.dev/v1"
+    # Virtual key per host in LiteLLM (key_alias: m2-magpie / studio-magpie)
+    litellm_keys:
+      mbp-m2-pro: "***REMOVED***"
+      mac-studio: "***REMOVED***"
+
+  tasks:
+    - name: Ensure ~/.local/bin exists
+      ansible.builtin.file:
+        path: "{{ ansible_env.HOME | default('~') }}/.local/bin"
+        state: directory
+        mode: "0755"
+
+    - name: Check if magpie CLI is already installed
+      ansible.builtin.command: "{{ ansible_env.HOME | default('~') }}/.local/bin/magpie version"
+      register: magpie_version_check
+      changed_when: false
+      failed_when: false
+      environment:
+        PATH: "{{ ansible_env.HOME | default('~') }}/.local/bin:{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Download and install Magpie via official installer
+      ansible.builtin.shell: "curl -fsSL https://usemagpie.ai/install.sh | sh"
+      when: magpie_version_check.rc != 0
+      environment:
+        PATH: "{{ ansible_env.HOME | default('~') }}/.local/bin:{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Verify magpie installation
+      ansible.builtin.command: "{{ ansible_env.HOME | default('~') }}/.local/bin/magpie version"
+      register: magpie_version
+      changed_when: false
+      environment:
+        PATH: "{{ ansible_env.HOME | default('~') }}/.local/bin:{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Configure homelab provider in Magpie
+      ansible.builtin.command: >
+        {{ ansible_env.HOME | default('~') }}/.local/bin/magpie provider add homelab
+        url={{ litellm_url }}
+        key={{ litellm_keys[inventory_hostname] }}
+      register: provider_add
+      changed_when: "'added homelab' in provider_add.stdout"
+      failed_when: provider_add.rc != 0 and 'already added' not in provider_add.stderr
+      environment:
+        PATH: "{{ ansible_env.HOME | default('~') }}/.local/bin:{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Remove custom_dgx from exposed models
+      ansible.builtin.command: >
+        {{ ansible_env.HOME | default('~') }}/.local/bin/magpie provider models homelab -custom_dgx/qwen3.8-flash-next-tp2
+      failed_when: false
+      environment:
+        PATH: "{{ ansible_env.HOME | default('~') }}/.local/bin:{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Configure qwen routing group (DGX primary, Studio fallback)
+      ansible.builtin.command: "{{ ansible_env.HOME | default('~') }}/.local/bin/magpie group add qwen models=homelab/qwen3.8-flash-next-tp2,homelab/studio/qwen3.8-27b routing=order"
+      failed_when: false
+      environment:
+        PATH: "{{ ansible_env.HOME | default('~') }}/.local/bin:{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Test homelab provider connection
+      ansible.builtin.command: "{{ ansible_env.HOME | default('~') }}/.local/bin/magpie provider test homelab"
+      register: test_result
+      changed_when: false
+      environment:
+        PATH: "{{ ansible_env.HOME | default('~') }}/.local/bin:{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Show provider test result
+      ansible.builtin.debug:
+        msg: "{{ test_result.stdout_lines | default([test_result.stdout]) }}"

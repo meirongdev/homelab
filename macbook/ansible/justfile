@@ -29,6 +29,11 @@ mise target="dev":
 ai-clis target="all":
     ansible-playbook playbooks/ai-clis.yaml --limit '{{target}}'
 
+# 安装/配置 Magpie 及 Homelab 网关路由（无需 sudo，幂等）
+magpie target="macs":
+    ansible-playbook playbooks/magpie.yaml --limit '{{target}}'
+
+
 # 顺带给它加 --collector.textfile.directory —— 那是 OMLX 指标的**读取端**，
 # 生产端是下面的 omlx-metrics。
 # 部署/升级 node_exporter LaunchAgent（无需 sudo）
