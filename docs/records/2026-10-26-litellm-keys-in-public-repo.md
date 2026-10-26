@@ -22,6 +22,7 @@
 | 01:15 | 改写那个提交并 force push |
 | 01:18 | 两把 key 在 LiteLLM 删除，之后拿它们调用一律 401 |
 | 01:21 | 重发并写入 Vault；M2 随即 `just magpie` 换上新 key，`provider test` 通过 |
+| 02:5x | Studio 的 magpie 不再卡死，`just magpie mac-studio` 换上新 key，`provider test` 通过 |
 
 ## 根因：三层各漏一次
 
@@ -63,12 +64,19 @@ generic-api-key，而那条要求同一行出现 key / token 一类的词。YAML
    M2、Studio 的 clone 从没拉到过它，tag 与唯一的 fork 也都不含它。
 
 ⚠️ **改写只是清理，不是补救。**key 公开过 7 小时 40 分，期间谁都可能拉走。改写后实测：GitHub 仍按
-SHA 返回旧提交和那个 blob，经 fork 的仓库地址也能取到（fork 网络共享对象），要在 GitHub 自己 GC
-之前清掉只能找 GitHub Support。真正让 key 失效的只有第 1 条。
+SHA 返回旧提交和那个 blob，经 fork 的仓库地址也能取到（fork 网络共享对象）。挂在旧提交上的 4 条
+CI 运行记录已删。**没有找 GitHub Support 清缓存**：官方文档写明只在「轮换凭据消除不了风险」时才
+处理，而这两把已吊销。真正让 key 失效的只有第 1 条。
 
 ## 留下的
 
 - 钩子仍然要每个 clone 手动启用，新机器、新 clone 会再次是空的。启用步骤在
   [dev-machine-bootstrap.md](../guides/dev-machine-bootstrap.md)，但这次说明「写在指南里」挡不住。
-- Studio 上的 magpie 自 10-26 起所有状态命令都会卡死（探测已装 agent 时一次 `open()` 不返回），
-  与 key 无关，但它让 Studio 拿不到新 key，playbook 也因此挂过 9 小时（现已加 `timeout`）。
+- Studio 上的 magpie 自 10-26 15:28 起所有状态命令都卡死（探测已装 agent 时一次 `open()` 不返回），
+  10-26 那次 playbook 因此挂了 9 小时。挂着的进程全部退出后（M5 上的孤儿 playbook 被结束，ssh 断开，
+  远端收到 SIGHUP）现象消失，用真实 HOME 跑只要 0.6s。**根因没查实**：排除了 OrbStack 的 NFS 挂载
+  （它也确实挂死了，但与此无关），只缩到 `~/Library`；最像的是 ssh 下触发的 macOS 隐私授权弹窗没人
+  应答，读不了 TCC 库无法证实。再卡住时 playbook 有 `timeout` 兜着，不会再挂几个小时。
+- 排查时的一个误判，记下以免再犯：`perl -e 'alarm N; exec …'` 给 Go 程序设不了超时，Go 运行时会
+  捕获并**忽略** SIGALRM，进程照样跑下去，不能据此推断「卡在不可中断的系统调用里」。远端探测用
+  `ssh -tt` 加本地超时，ssh 一断远端就收到 SIGHUP（Go 收到 SIGHUP 会退出）。
