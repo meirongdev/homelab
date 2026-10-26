@@ -2,18 +2,39 @@
 # Install and configure Magpie across the Mac fleet.
 # Idempotent — safe to re-run.
 # Runs as the login user (NO become).
+#
+# 每台一把 LiteLLM 虚拟 key（key_alias m2-magpie / studio-magpie），值在 Vault
+# secret/homelab/magpie，字段名 = inventory 主机名。由 `just magpie` 现取、经环境变量
+# MAGPIE_LITELLM_KEYS（JSON）传入：不进 git，带 key 的任务一律 no_log。
+# ☠️ 2026-10-26 这两把 key 曾明文写在本文件里推上公开仓库，10-27 已吊销重发、历史已改写，
+#    见 docs/records/2026-10-26-litellm-keys-in-public-repo.md。
+# 换 key：LiteLLM 发新 key → `vault kv patch secret/homelab/magpie <主机名>=sk-…` → `just magpie`。
+#
+# timeout：magpie 的状态命令（providers/group/provider models…）会先探测本机装了哪些
+# agent，Studio 上这一步曾卡在一次 open() 里不返回，10-26 那次 playbook 就挂了 9 小时。
 - name: Magpie CLI & Homelab Gateway
   hosts: macs
   gather_facts: false
+  timeout: 300
   vars:
     homebrew_prefix: /opt/homebrew
+    magpie_bin: "{{ ansible_env.HOME | default('~') }}/.local/bin/magpie"
     litellm_url: "https://llm.meirong.dev/v1"
-    # Virtual key per host in LiteLLM (key_alias: m2-magpie / studio-magpie)
-    litellm_keys:
-      mbp-m2-pro: "***REMOVED***"
-      mac-studio: "***REMOVED***"
+    litellm_keys: "{{ lookup('ansible.builtin.env', 'MAGPIE_LITELLM_KEYS') | default('{}', true) | from_json }}"
+    litellm_key: "{{ litellm_keys[inventory_hostname] | default('') }}"
+  environment:
+    PATH: "{{ ansible_env.HOME | default('~') }}/.local/bin:{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
   tasks:
+    - name: Require this host's LiteLLM key (from Vault via `just magpie`)
+      ansible.builtin.assert:
+        that: litellm_key is match('sk-')
+        fail_msg: >-
+          没拿到 {{ inventory_hostname }} 的 LiteLLM key。正常入口是 `just magpie`，它从 Vault
+          secret/homelab/magpie 取字段 {{ inventory_hostname }}；先确认
+          `vault kv get secret/homelab/magpie` 有这个字段（vault token 过期？）。
+        quiet: true
+
     - name: Ensure ~/.local/bin exists
       ansible.builtin.file:
         path: "{{ ansible_env.HOME | default('~') }}/.local/bin"
@@ -21,56 +42,59 @@
         mode: "0755"
 
     - name: Check if magpie CLI is already installed
-      ansible.builtin.command: "{{ ansible_env.HOME | default('~') }}/.local/bin/magpie version"
+      ansible.builtin.command: "{{ magpie_bin }} version"
       register: magpie_version_check
       changed_when: false
       failed_when: false
-      environment:
-        PATH: "{{ ansible_env.HOME | default('~') }}/.local/bin:{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
     - name: Download and install Magpie via official installer
       ansible.builtin.shell: "curl -fsSL https://usemagpie.ai/install.sh | sh"
       when: magpie_version_check.rc != 0
-      environment:
-        PATH: "{{ ansible_env.HOME | default('~') }}/.local/bin:{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
     - name: Verify magpie installation
-      ansible.builtin.command: "{{ ansible_env.HOME | default('~') }}/.local/bin/magpie version"
+      ansible.builtin.command: "{{ magpie_bin }} version"
       register: magpie_version
       changed_when: false
-      environment:
-        PATH: "{{ ansible_env.HOME | default('~') }}/.local/bin:{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
-    - name: Configure homelab provider in Magpie
+    # 只拿来判断 changed：`providers` 里的 key 是掩码（前 4 + … + 后 4），对上就是同一把
+    - name: Read current provider keys (masked)
+      ansible.builtin.command: "{{ magpie_bin }} providers"
+      register: magpie_providers
+      changed_when: false
+
+    # ☠️ 换 key 只能用 `provider key`。`provider add` 遇到已有的 homelab：同 key 报
+    #    "already added with that key"，不同 key 会静默新建 homelab-2，旧 key 原样留着
+    #    （2026-10-27 实测）。所以先 key，provider 不存在（"no provider"）才 add。
+    - name: Set homelab provider key
+      ansible.builtin.command: "{{ magpie_bin }} provider key homelab {{ litellm_key }}"
+      register: provider_key
+      changed_when: >-
+        provider_key.rc == 0 and
+        (litellm_key[:4] ~ '…' ~ litellm_key[-4:]) not in magpie_providers.stdout
+      failed_when: provider_key.rc != 0 and 'no provider' not in (provider_key.stderr ~ provider_key.stdout)
+      no_log: true
+
+    - name: Add homelab provider (first run on this Mac)
       ansible.builtin.command: >
-        {{ ansible_env.HOME | default('~') }}/.local/bin/magpie provider add homelab
+        {{ magpie_bin }} provider add homelab
         url={{ litellm_url }}
-        key={{ litellm_keys[inventory_hostname] }}
-      register: provider_add
-      changed_when: "'added homelab' in provider_add.stdout"
-      failed_when: provider_add.rc != 0 and 'already added' not in provider_add.stderr
-      environment:
-        PATH: "{{ ansible_env.HOME | default('~') }}/.local/bin:{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        key={{ litellm_key }}
+      when: provider_key.rc != 0
+      no_log: true
 
     - name: Remove custom_dgx from exposed models
       ansible.builtin.command: >
-        {{ ansible_env.HOME | default('~') }}/.local/bin/magpie provider models homelab -custom_dgx/qwen3.8-flash-next-tp2
+        {{ magpie_bin }} provider models homelab -custom_dgx/qwen3.8-flash-next-tp2
       failed_when: false
-      environment:
-        PATH: "{{ ansible_env.HOME | default('~') }}/.local/bin:{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
     - name: Configure qwen routing group (DGX primary, Studio fallback)
-      ansible.builtin.command: "{{ ansible_env.HOME | default('~') }}/.local/bin/magpie group add qwen models=homelab/qwen3.8-flash-next-tp2,homelab/studio/qwen3.8-27b routing=order"
+      ansible.builtin.command: "{{ magpie_bin }} group add qwen models=homelab/qwen3.8-flash-next-tp2,homelab/studio/qwen3.8-27b routing=order"
       failed_when: false
-      environment:
-        PATH: "{{ ansible_env.HOME | default('~') }}/.local/bin:{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
     - name: Test homelab provider connection
-      ansible.builtin.command: "{{ ansible_env.HOME | default('~') }}/.local/bin/magpie provider test homelab"
+      ansible.builtin.command: "{{ magpie_bin }} provider test homelab"
       register: test_result
       changed_when: false
-      environment:
-        PATH: "{{ ansible_env.HOME | default('~') }}/.local/bin:{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
     - name: Show provider test result
       ansible.builtin.debug:

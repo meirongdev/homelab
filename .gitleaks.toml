@@ -1,4 +1,4 @@
-# gitleaks 配置 —— 在默认规则集上只加一条放行：文档里的 `<占位符>`。
+# gitleaks 配置 —— 在默认规则集上加一条放行（文档里的 `<占位符>`）和一条规则（LiteLLM 虚拟 key）。
 #
 # 为什么引入（2026-09-26）：这是**公开仓库**，此前 CI 只拦公网 IP（check-public-ips.py），
 # 对 token / 私钥 / 口令没有任何机器检查，全靠「Vault + ESO，Git 里不放明文」这条约定自觉。
@@ -13,6 +13,8 @@
 #
 # 本地：`just check`（pre-push 钩子也跑它）；CI：.github/workflows/secret-scan.yml。
 # ⚠️ 本地那一道才是真正的防线：CI 在 push **之后**才跑，那时密钥已经公开了。
+# ⚠️ 钩子要每个 clone 自己启用（`git config core.hooksPath .githooks`），不启用就静默不跑：
+#    2026-10-26 推出泄露提交的那台就没启用。
 
 [extend]
 useDefault = true
@@ -21,3 +23,15 @@ useDefault = true
 description = "文档里的 <占位符>（如 root:<pw>、<ORACLE_PUBLIC_IP>），不是真值"
 regexTarget = "secret"
 regexes = ['''<[A-Za-z][A-Za-z0-9_-]*>''']
+
+# 默认规则集认不出 LiteLLM 虚拟 key（`sk-` + 22 位 base64url）：它没有 OpenAI key 那种固定
+# 标记，generic-api-key 又要求同一行出现 key/token 一类的词，而 YAML 写成
+# `mbp-m2-pro: "sk-…"` 整行都没有。2026-10-26 两把这样的 key 明文推上了公开仓库，本地与
+# CI 两道扫描全绿（docs/records/2026-10-26-litellm-keys-in-public-repo.md）。
+# 加上后全量扫描（1400+ 个提交）只命中那两把，没有误报；那个提交随后已改写（换成 ***REMOVED***）。
+[[rules]]
+id = "litellm-virtual-key"
+description = "LiteLLM 虚拟 key（sk- + 22 位 base64url）"
+regex = '''\bsk-[A-Za-z0-9_-]{22}\b'''
+entropy = 3.5
+keywords = ["sk-"]

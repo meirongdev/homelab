@@ -1,6 +1,6 @@
 # Homelab Changelog
 
-> Last updated: 2026-10-25
+> Last updated: 2026-10-27
 > 已经做完的事，一条一行，按阶段/时间倒着找。**这里只回答「做过什么」**——
 > 还剩什么没做看 [ROADMAP.md](ROADMAP.md)，现在是什么样看 [reference/](reference/README.md)。
 > 2026-09-02 从 ROADMAP 拆出：那份文件长到 23.8KB，9 条开放项被 65 条历史淹没，
@@ -120,6 +120,7 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-10-22 | **M2 显示器恢复空闲休眠**：Amphetamine 出厂默认 `Allow Display Sleep = 0` 且登录即开无限期会话，M2 合盖后系统仍认为屏亮着，航拍壁纸 24h 解码视频。改沙盒偏好（CLI 可做，不是 GUI-only）后只剩阻止系统休眠的断言，整机功耗中位数 8.2W → ~4W；显示器开关与 Wi‑Fi/远程访问无关（掉线只在整机睡眠时发生，由 `SleepDisabled 1` 管）。`macmon.yaml` 里 M2「空闲 7–9W」的口径随之更正为关屏 3–5W ([macbook/ansible/README.md](../macbook/ansible/README.md)) |
 | 2026-10-24 | **双集群入侵排查 + P0 加固**：未发现入侵迹象（工作负载/RBAC/webhook/Falco/Tetragon/三节点 SSH 与持久化逐项核过）。处理三类：① oracle 节点卸掉 k3s 之前的手工遗留：无认证 Dante SOCKS `:10080`、两年没握过手的 WireGuard `wg0`、root 跑的 node_exporter `:19898`（文件挪进节点 `/root/decommissioned-2026-10-24/`，firewalld 规则未动）· ② 删 oracle 闲置的 `kube-system/argocd-manager`（cluster-admin + 永不过期 token，08-02 起没用过）及清单 `cloud/oracle/bootstrap/` · ③ Tetragon 把完整 argv 送进 Loki，在那里查到 Telegram bot token 与 SurrealDB 口令明文：krr ×2 与夜备改用 curl `--variable`，Tetragon 加 `redactionFilters` 兜底；已落盘的随 7 天保留期过期，bot token 未轮换 ([security.md](reference/security.md)) |
 | 2026-10-25 | **Telegram 告警收口：Trivy 105 条 Critical 分诊（9 个唯一 CVE），两份 values 加豁免让 TrivyImageCriticalVulnerabilities 熄灭**：`TrivyImageCriticalVulnerabilities` 自 10-21 起两集群持续 firing，Alertmanager 每 4h 往 Telegram 推一次（共报 4 天）。实测两集群 105 条 Critical 实为 4 组共 9 个唯一 CVE：① `GHSA-6q48-6c7w-9gw2`（certifi 根证书信任库中间 CA 泄露，litellm/krr/open_notebook/loki-sc-rules/CWA，出向全走主流权威 CA 或 Tailscale 内网不可达）② Pillow 5 连（`CVE-2026-112393/112398/112403/112900/96639`，krr 仅文本分析不解码图片、open_notebook 与 CWA 受认证保护且无 FlashPix/恶意格式输入）③ Next.js 16.x 两个未授权 RCE（`GHSA-2464-fhr4-w9xw` 优化器 SVG RCE 与 `GHSA-673q-mjm6-r5xr` use cache RCE，homepage 未开优化器、multica/open_notebook/zitadel remotePatterns 为空且源码零使用 use cache）④ `GHSA-9v8h-qqgm-4m35`（brotli Node2Shell，CWA 出向仅连受信任 API）。两份 values 加豁免 → ArgoCD 同步 → 清理带 Critical 的报告并重扫，两集群 `trivy_image_vulnerabilities{severity="Critical"}` 归 0，告警恢复，Telegram 送达 ✅ RESOLVED ([豁免与实测](../k8s/helm/values/trivy-operator.yaml) · [oracle 侧](../cloud/oracle/values/trivy-operator.yaml)) |
+| 2026-10-27 | **两把 LiteLLM key 泄露的收口**：10-26 的 `magpie.yaml` 把 `m2-magpie` / `studio-magpie` 两把虚拟 key 明文推上了公开仓库，本地与 CI 两道 gitleaks 全绿。已吊销重发（spend log 零调用），playbook 改由 `just magpie` 从 Vault 现取；`.gitleaks.toml` 加 `litellm-virtual-key` 规则；三台 Mac 的 clone 启用 pre-push 钩子；泄露的那个提交已改写（两串 key 换成 `***REMOVED***`）并 force push ([复盘](records/2026-10-26-litellm-keys-in-public-repo.md)) |
 ### 审计与清理（历史）
 
 | 时间 | 内容 |

@@ -4,6 +4,7 @@
 
 | 日期 | 记录 | 内容 |
 |------|------|------|
+| 2026-10-26 | [litellm-keys-in-public-repo](2026-10-26-litellm-keys-in-public-repo.md) | 两把 LiteLLM 虚拟 key（白名单含 `openrouter/*`）明文推上公开仓库 7h40m，零调用，已吊销重发、历史已改写。☠️ 本地与 CI 两道 gitleaks 全绿：默认规则认不出 `sk-`+22 位，pre-push 钩子三台 clone 都没启用 |
 | 2026-10-01 | [oracle-firewalld-flushes-cilium-iptables](2026-10-01-oracle-firewalld-flushes-cilium-iptables.md) | oracle pod 出站全断 30min、全站入口断 24min。needrestart 升 libssl 后重启 firewalld，**有 direct 规则就 flush 全部 iptables**，Cilium masquerade 被清。☠️ 08-01「OCI DNS 故障」是同一个病 |
 | 2026-09-12 | [falco-syscall-drops-apt-upgrade](2026-09-12-falco-syscall-drops-apt-upgrade.md) | Falco 一分钟丢 **402,586 个 syscall**（检测盲区）。☠️ 别查 CPU limit——全程 0.024/1 核零 throttle；真因是 `unattended-upgrades` 升 glibc+locales+python3.12 打出 fork 21/s，灌满**全机共用的那一个 8MB** 缓冲区。已改 32MB，阈值仍 `>0` |
 | 2026-09-01 | [oracle-apparmor-af-unix-panic](2026-09-01-oracle-apparmor-af-unix-panic.md) | oracle 三个月的「宿主层硬重置」实为**内核 AppArmor 空指针**。☠️ 客场查不到是因为 `panic_on_oops=1` 让 journald 来不及落盘——「日志戛然而止」恰是 guest panic 的标准形态，不是宿主层证据。触发方是 uptime-kuma 容器内默认自启的 nscd，关掉后该函数调用 69→**0** |

@@ -1,6 +1,6 @@
 # LiteLLM 网关（运维事实与坑）
 
-> Last updated: 2026-10-22
+> Last updated: 2026-10-27
 > Status: 生效事实
 > Scope: `llm.meirong.dev` 这个 LLM 网关的配置生效路径、鉴权分层、上游可用性边界，
 > 本文是 source of truth。为什么选 LiteLLM、上游怎么选、Mac 兜底为何换 Ornith，见
@@ -518,6 +518,10 @@ curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
 以上参数都在本地用同 digest 镜像实测过（`max_parallel_requests=1` 时 4 个并发 1 个 200、3 个 429）。
 走 tailnet NodePort 是因为经 Cloudflare 调管理接口会被 WAF 拦（坑 A 那节）。
 
+吊销用 `/key/delete`（`{"key_aliases": [...]}` 或 `{"keys": [...]}`）。☠️ 删完别拿 `key/info` 核验：
+已删除的 key 照样 200 并返回完整信息。看 `/key/list?key_alias=<别名>` 为空，或拿旧 key 调用得 401
+（2026-10-27 实测，见 [records](../records/2026-10-26-litellm-keys-in-public-repo.md)）。
+
 ## 消费方
 
 | 消费方 | 用哪个别名 | 配置在哪 |
@@ -531,5 +535,6 @@ curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
 | Open Notebook | **不走网关**，直连 DGX 与 OMLX | [open-notebook.md](open-notebook.md) |
 | `codex --profile dgx` / `m2` | **不走网关**，直连 DGX / M2 的 OMLX | `~/.codex/{dgx,m2}.config.toml`（本机）。原来经网关的 `--profile litellm` 已不存在 |
 | 外部使用者（UI 账户 `ext-team-1`）| 5 个自托管别名 + 17 个 OpenRouter `:free` 模型 | Postgres（账户与 key 各一层白名单），见上方「发给外部的 key」 |
+| M2 / Studio 上的 magpie（`homelab` provider）| `qwen3.8-flash-next-tp2` → `studio/qwen3.8-27b`（magpie 的 `group/qwen`），另暴露若干 `openrouter/*` | 每台一把，`key_alias` 为 `m2-magpie` / `studio-magpie`，值在 Vault `secret/homelab/magpie`，由 `cd macbook/ansible && just magpie` 下发。☠️ 2026-10-26 曾明文进过公开仓库，见 [records](../records/2026-10-26-litellm-keys-in-public-repo.md) |
 
 ⚠️ 本机消费方全部读同一个 `LITELLM_VK`（`~/.zshrc`），所以坑 A 一旦发生是全体受影响。

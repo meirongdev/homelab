@@ -149,6 +149,7 @@ kube-bench → 节点 CIS → 网络 → Tetragon/Falco → restic。逐层状�
 
 - ⚠️ **第 9 层网络基本只到「可见性」**：两集群 `CiliumNetworkPolicy` 为 0；唯一自建管控是
   readlist 两个短命 Job 的标准 `NetworkPolicy`（不是 CNP）。集群级默认拒绝刻意延后，别当已生效。
+- 🚫 **不提交任何密钥**（gitleaks 全量扫）：放 Vault，配方现取经 env 传入（范例 `just omlx`）。
 - 🚫 **不提交任何公网 IP**（CI 强制 `check-public-ips.py`，全量跑）。节点一律用 Tailscale
   （`100.64/10`）或内网地址；文档写 `<ORACLE_PUBLIC_IP>` 占位符，真值现取
   `cd cloud/oracle/terraform && terraform output -raw instance_public_ip`。

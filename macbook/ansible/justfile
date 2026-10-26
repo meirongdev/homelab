@@ -29,8 +29,17 @@ mise target="dev":
 ai-clis target="all":
     ansible-playbook playbooks/ai-clis.yaml --limit '{{target}}'
 
+# 每台的 LiteLLM 虚拟 key 从 Vault 现取（secret/homelab/magpie，字段名 = inventory 主机名），
+# 整份 JSON 经环境变量 MAGPIE_LITELLM_KEYS 传给 playbook：不上命令行、不落盘、不进 git。
+# 取不到时 playbook 第一步就失败，不会去碰 magpie。
 # 安装/配置 Magpie 及 Homelab 网关路由（无需 sudo，幂等）
 magpie target="macs":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export VAULT_ADDR="${VAULT_ADDR:-https://vault.meirong.dev}"
+    MAGPIE_LITELLM_KEYS="$(vault kv get -format=json secret/homelab/magpie 2>/dev/null | jq -c '.data.data // empty' || true)"
+    [ -n "$MAGPIE_LITELLM_KEYS" ] || echo "⚠️  Vault 里取不到 secret/homelab/magpie（vault token 过期？）" >&2
+    export MAGPIE_LITELLM_KEYS
     ansible-playbook playbooks/magpie.yaml --limit '{{target}}'
 
 
