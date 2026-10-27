@@ -1,6 +1,6 @@
 # 成本归因与资源右尺寸
 
-> Last updated: 2026-09-13
+> Last updated: 2026-10-28
 > Status: 生效事实
 
 两套互补的工具：**OpenCost** 回答「钱花在哪」（常驻，出指标 → Grafana），
@@ -15,57 +15,40 @@
 | 是否改集群 | 否 | 否（ClusterRole 全 get/list/watch） |
 
 数据源选型的取舍见 [decisions/opencost-krr-data-sources.md](../decisions/opencost-krr-data-sources.md)。
+实际数值（单价、retention、资源）以 values 与清单为准，本文只写原则与判据。
 
 ## OpenCost
 
 ### 部署拓扑
 
-```
-homelab OpenCost ──(ServiceMonitor)───────────────┐
-   ↑ 直读本地 kubelet                              ├─→ 中枢 Prometheus ─→ Grafana
-oracle OpenCost ──(otel prometheus/opencost)─────┘        按 cluster 聚合
-   ↑ 直读本地 kubelet    经 Tailscale remote-write
-```
+两边各自直读本地 kubelet，指标汇进中枢 Prometheus，Grafana 按 `cluster` 聚合：
 
 | 项 | homelab | oracle-k3s |
 |---|---|---|
 | Application | `argocd/applications/opencost.yaml` | `argocd/applications/opencost-oracle.yaml` |
 | values | `k8s/helm/values/opencost.yaml` | `cloud/oracle/values/opencost.yaml` |
 | namespace | `opencost`（App 自建） | `opencost`（由 oracle kustomize 树持有） |
-| 指标进中枢 | ServiceMonitor（需 `release: kube-prometheus-stack` 标签） | otel `prometheus/opencost` receiver |
+| 指标进中枢 | ServiceMonitor（需 `release: kube-prometheus-stack` 标签） | otel `prometheus/opencost` receiver，经 Tailscale remote-write |
 
 **collector 数据源**（`collectorDataSource.enabled: true`）经 apiserver proxy 读
 `/api/v1/nodes/<node>/proxy/stats/summary`，chart 的 ClusterRole 已含 `nodes/proxy`。
-自带 10m/1h/1d 三级 rollup（保留 6h / 2d / 15d），状态落在 2Gi PVC 上跨重启保留。
+自带 10m/1h/1d 三级 rollup，状态是 emptyDir 里的 WAL，重建即归零。☠️ 启动时要全量重放 WAL 才
+bind :9003，重放窗口 = 最长那档 retention（`retention1d`），所以 retention、抓取间隔与 startupProbe
+预算是联动的，改之前读两份 values 的注释与
+[复盘](../records/2026-08-19-opencost-bingen-replay-crashloop.md)。
 
 ### 定价模型（`provider: custom`）
 
-两个集群都不在 OpenCost 的云账单集成范围内，全部手工定价。
+两个集群都不在 OpenCost 的云账单集成范围内，全部手工定价，单价写在各自 values 的
+`customPricing.costModel`：homelab 按实测功耗 + 硬件摊销，oracle 按 OCI Ampere A1 牌价影子定价（实付 $0）。
 **定价值必须写成 YAML 字符串**，否则会被渲染成科学计数法（`0.0000018` → `"1.8e-06"`）。
 
-| | homelab | oracle-k3s |
-|---|---|---|
-| 依据 | 实测功耗 + 硬件摊销 | OCI Ampere A1 牌价的影子定价 |
-| CPU | `0.0018` /vCPU-hr | `0.01` /vCPU-hr |
-| RAM | `0.00024` /GiB-hr | `0.0015` /GiB-hr |
-| 月度合计 | ~$18.7（两个节点：`k8s-node` ~$15.4 + worker `k8s-worker-106` ~$3.3） | ~$27.4（实付 $0） |
-
-oracle 用牌价而非 0：看板的价值是「工作负载该放哪个集群」的比较决策，填 0 会让 oracle 永远赢。
-
-> **homelab 合计随节点数变**：2026-08-13 加入 worker 后从 ~$12.7 涨到 ~$18.7（单价没变，
-> 多了一台机器）。**别把这里的合计当常量**，现取：
-> `sum by (cluster)(node_total_hourly_cost) * 730`。
-
-> **单价不随 shape 变，月度合计变**：2026-08-05 缩容 4 OCPU/24GB → 2/12 后，
-> oracle 影子成本从 ~$54.8 腰斩到 ~$27.4（`2×0.01×730 + 11.7×0.0015×730`）。
-> 看板上 oracle 的「工作负载该放哪」优势因此缩水一半，这是有意的：那台机器
-> 的余量确实少了一半。缩容始末见
-> [runbooks/oracle-k3s-shape-downsize.md](../runbooks/oracle-k3s-shape-downsize.md)。
-
-> ⚠️ 当前 homelab 单价是占位推导值（按整机 45W 估算，偏保守）。2026-08-09 已实测空闲功耗：
-> CPU RAPL ~5W + iGPU ~4W + 外设/风扇 ~15–20W ≈ 整机空闲 ~25W（满载会更高）。
-> 功耗/散热细节见 [homelab-host-power-thermal.md](homelab-host-power-thermal.md)。
-> 校准步骤见下方「运维操作」。
+- oracle 用牌价而非 0：看板的价值是「工作负载该放哪个集群」的比较决策，填 0 会让 oracle 永远赢。
+- 单价不随节点数或 shape 变，**月度合计会变**（oracle 缩 shape 后看板上它的优势跟着缩水，这是有意的：
+  余量确实少了，见 [runbooks/oracle-k3s-shape-downsize.md](../runbooks/oracle-k3s-shape-downsize.md)）。
+  别把合计当常量，现取：`sum by (cluster)(node_total_hourly_cost) * 730`。
+- ⚠️ homelab 单价是占位推导值（按整机 45W 估算，偏保守；实测空闲功耗更低，见
+  [homelab-host-power-thermal.md](homelab-host-power-thermal.md)）。校准步骤见下方「运维操作」。
 
 ### 指标语义（写 PromQL 前必读）
 
@@ -101,8 +84,7 @@ uid `opencost-multicluster-overview`。
 `$cluster` 变量取自 `label_values(node_total_hourly_cost, cluster)`，天然只返回跑了
 OpenCost 的两个集群，不会混入 `dgx-spark` / `macbook` 这类外部 node-exporter 目标。
 
-> 小集群闲置率天然偏高（实测两边都约 63–64%；该次实测时两边都还是单节点，homelab 于 2026-08-13 加了 worker，数字待重测）。闲置容量确实在烧电/占额度，
-> 属真实情况而非归因失败。
+小集群闲置率天然偏高。闲置容量确实在烧电/占额度，属真实情况而非归因失败。
 
 ## KRR
 
@@ -118,8 +100,8 @@ OpenCost 的两个集群，不会混入 `dgx-spark` / `macbook` 这类外部 nod
 每集群各跑一个，因为 KRR 需要同时访问 Prometheus（历史用量）和 K8s API
 （枚举工作负载与当前 requests），而 K8s API 只能看本集群。
 
-Pod 结构 `initContainers: [krr]` → `containers: [notify]`：同 Pod 的多个 container
-是并行启动的，不能当流水线用，必须用 initContainer 保证 KRR 先跑完。
+Pod 结构 `initContainers: [krr, mem-profile]` → `containers: [notify]`：同 Pod 的多个 container
+是并行启动的，不能当流水线用，必须用 initContainer 保证报告先生成完。
 
 ### 依赖的指标
 
@@ -131,7 +113,6 @@ max(container_memory_working_set_bytes{namespace=…,pod=~…,container=…})   
 ```
 
 始终按真实 container 名过滤，所以 cAdvisor 的 `container=""` Pod 级汇总序列用不到。
-
 oracle 的这两个指标由 otel `prometheus/cadvisor` receiver 提供（见
 [observability-multicluster.md](observability-multicluster.md#metrics-pipeline)）。
 
@@ -155,47 +136,45 @@ KRR 的内存基准 `working_set` **含页缓存**，定 request 时会系统性
 > （含实测的高报幅度对照表）。本节只讲它怎么产生的。
 
 - 列：WS / RSS / PSS / USS / 页缓存占比 / 按 RSS 重算的建议值 / Δ
-- 排序按「要改动的绝对量」，**不按页缓存占比** —— 后者会把 2Mi 的容器顶到最前
-- 只列**当前存在**的容器（与 `kube_pod_container_info` 取交集）：不过滤的话
-  `max_over_time[7d]` 会把已消亡的 Trivy 扫描 Job 算进来，而它们的容器名取自
-  被扫的工作负载（`trivy-system/jellyfin`…）。首版实测 113 行里 60 行是这种残影
+- 排序按「要改动的绝对量」，**不按页缓存占比**（后者会把 2Mi 的容器顶到最前）
+- 只列**当前存在**的容器（与 `kube_pod_container_info` 取交集）：不过滤的话 `max_over_time[7d]`
+  会把已消亡的 Trivy 扫描 Job 算进来，而它们的容器名取自被扫的工作负载（`trivy-system/jellyfin`…），
+  残影能占到一半行数
 - **fail-open**：查不到指标只留一行说明，绝不让周报发不出去
 - 跑在 KRR 自己的镜像里（它本来就是 python 镜像）→ 零新镜像、零新 registry 拉取
 
 ### PSS/USS 采集器
 
-cAdvisor **不导出 PSS/USS**，由 `node-mem-profile` DaemonSet 补
-（两集群 `manifests/monitoring/node-mem-profile.yaml`，读 `/proc/<pid>/smaps_rollup`
-→ 写 node-exporter 的 textfile 目录）。两集群 node-exporter 都已开着
-`--collector.textfile.directory`，**不需要改它**。
+cAdvisor **不导出 PSS/USS**，由 `node-mem-profile` DaemonSet 补（两集群
+`manifests/monitoring/node-mem-profile.yaml`，读 `/proc/<pid>/smaps_rollup` → 写 node-exporter 的
+textfile 目录；两集群 node-exporter 都已开着 `--collector.textfile.directory`，**不需要改它**）。
+开销可忽略（一轮全扫百毫秒级 CPU，5 分钟一轮）。
 
-☠️ 三个必须的条件，缺任何一个都是**静默漏采**（表里显示 `—`，不报错不告警）：
+☠️ 三个必须的条件，缺任何一个都是**静默漏采**（表里显示 `—`，不报错不告警；实测数字在清单注释里）：
 
-| 条件 | 缺了会怎样（k8s-node 实测，共 47 个容器） |
-|---|---|
-| `hostPID: true` | 只看得见采集器自己那几个进程 |
-| `runAsUser: 0` + `CAP_SYS_PTRACE` | 383 个进程只读到 19 个。**root 单独不够** —— 容器 root 默认不带这个 capability |
-| `appArmorProfile: Unconfined` | 采到 43/47；privileged 容器（cilium-agent / tetragon / falco）跑在 unconfined 下，受限 profile 的进程 ptrace 不了它们。加上后 46/47（差的是采集器自己）|
+- `hostPID: true`：缺了只看得见采集器自己那几个进程。
+- `runAsUser: 0` + `CAP_SYS_PTRACE`：**root 单独不够**，容器 root 默认不带这个 capability，大部分进程读不到。
+- `appArmorProfile: Unconfined`：privileged 容器（cilium-agent / tetragon / falco）跑在 unconfined 下，
+  受限 profile 的进程 ptrace 不了它们。
 
-⚠️ 指标标签是 `k8s_namespace` / `k8s_pod_name` / `k8s_container_name`，
-**刻意不叫** `namespace`/`pod`/`container`：后者会与抓取 node-exporter 时注入的目标标签
-撞名，被改写成 `exported_*`（首版就这么栽过 —— series 数正确、表里却全是 `—`）。
+⚠️ 指标标签是 `k8s_namespace` / `k8s_pod_name` / `k8s_container_name`，**刻意不叫**
+`namespace`/`pod`/`container`：后者会与抓取 node-exporter 时注入的目标标签撞名，被改写成
+`exported_*`，表现为 series 数正确、表里却全是 `—`。
 
-成本实测：一轮全扫 237ms CPU，5 分钟一轮 = 一个核的 0.079%。
-自身健康看 `node_mem_profile_last_success_timestamp_seconds` /
-`node_mem_profile_containers`（textfile 的旧值会一直被吐出去，进程活着 ≠ 在采）。
+自身健康看 `node_mem_profile_last_success_timestamp_seconds` / `node_mem_profile_containers`
+（textfile 的旧值会一直被吐出去，进程活着 ≠ 在采）。
 
 ## 运维操作
 
 ### 校准 homelab 定价（首次上线后 / 硬件变更后）
 
-> ✅ 2026-08-12 起下方查询**有数据了**（此前空是 RAPL `energy_uj` 的 root-only 权限，
-> 不是没开 collector；根因与修法见
-> [homelab-host-power-thermal.md](homelab-host-power-thermal.md) 的「监控」节）。
-> ⚠️ 但 `[7d:]` 的均值要等积够 7 天历史才有意义，在那之前用短窗口。
+RAPL 查询为空时先看 `node_scrape_collector_success{collector="rapl"}`（`energy_uj` 是 root-only，
+修法见 [homelab-host-power-thermal.md](homelab-host-power-thermal.md) 的「监控」节）；
+历史不足 7 天时 `[7d:]` 换短窗口。
 
 ```bash
 # 1. 取近 7 天 RAPL 实测功耗（CPU package + DRAM）
+#    cluster="homelab" 同时命中两台宿主，按 nodename（proxmox-pve / storage-106）区分
 kubectl --context k3s-homelab -n monitoring port-forward svc/kube-prometheus-stack-prometheus 9090:9090 &
 curl -s --get --data-urlencode \
   'query=avg_over_time(rate(node_rapl_package_joules_total{cluster="homelab"}[5m])[7d:])' \
@@ -218,16 +197,12 @@ RAM 单价 = 节点小时成本 × 0.175 / 12.66
 ### 采纳 KRR 推荐
 
 KRR 只读不改，采纳需手工改 git（`krr-enforcer` 刻意未部署，原因见 decisions）。
-
-推荐值的两条口径（影响怎么读，故留在本文）：
-
-- CPU 取 p95；内存取窗口内 max + 15%，可反推峰值 `峰值 ≈ 推荐 ÷ 1.15`
-- 内存有 100Mi 地板、CPU 有 10m 地板，**恰好等于地板的推荐不是测量结果**
-- 内存窗口 7d（对齐 Prometheus retention），跨周尖峰会落在窗外（如每周备份 CronJob），
-  这类工作负载要自行留余量
+推荐值口径：CPU 取 p95；内存取窗口内 max + 15%（`峰值 ≈ 推荐 ÷ 1.15`）；内存 100Mi、CPU 10m 有地板，
+**恰好等于地板的推荐不是测量结果**。内存窗口 7d（对齐 Prometheus retention），跨周尖峰会落在窗外
+（如每周备份 CronJob），这类工作负载要自行留余量。
 
 **拿到报告之后怎么处理 → [runbooks/krr-report-triage.md](../runbooks/krr-report-triage.md)**
-（五类分诊、哪些刻意不采纳、改哪里怎么下发、改完怎么验证真的生效）。
+（口径详解、五类分诊、哪些刻意不采纳、改哪里怎么下发、改完怎么验证真的生效）。
 
 ### 手工触发一次 KRR
 
@@ -238,25 +213,12 @@ kubectl --context k3s-homelab create job --from=cronjob/krr krr-manual -n monito
 
 ## 排障
 
-### 看板 `sum by (cluster)` 出现空标签序列
-
-采集侧没打上 `cluster`。homelab 检查 `prometheusSpec.scrapeClasses` 默认类是否还在；
-oracle 检查 otel `prometheus/opencost` receiver 的 `static_configs[].labels`。
-
-### oracle 的成本/用量指标消失
-
-八成是 otel-collector 跑着旧配置：改 ConfigMap **不会**触发 DaemonSet 重启，
-且 ArgoCD 全程显示 Synced/Healthy。见
-[observability-multicluster.md](observability-multicluster.md#otel-collector-配置改了不生效)。
-
-### KRR 报 `Label =xxx does not exist`
-
-`-l=xxx` 写法错误（值里混进了 `=`）。拆成两个 argv 项。
-
-### KRR 大量 `(Not enough data)`
-
-窗口内没有足够历史。oracle 侧的 cAdvisor 采集自 2026-07-30 才启用，
-上线后约 7 天推荐值才有意义。
+| 症状 | 原因与处理 |
+|---|---|
+| 看板 `sum by (cluster)` 出现空标签序列 | 采集侧没打上 `cluster`。homelab 查 `prometheusSpec.scrapeClasses` 默认类是否还在；oracle 查 otel `prometheus/opencost` receiver 的 `static_configs[].labels` |
+| oracle 的成本/用量指标消失 | 八成是 otel-collector 跑着旧配置：改 ConfigMap **不会**触发 DaemonSet 重启，且 ArgoCD 全程 Synced/Healthy。见 [observability-multicluster.md](observability-multicluster.md#otel-collector-配置改了不生效) |
+| KRR 报 `Label =xxx does not exist` | `-l=xxx` 写法错误（值里混进了 `=`），拆成两个 argv 项 |
+| KRR 大量 `(Not enough data)` | 窗口内历史不足（新工作负载，或 cAdvisor 采集刚启用），约 7 天后推荐值才有意义 |
 
 ## 相关文档
 

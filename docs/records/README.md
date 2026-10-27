@@ -7,6 +7,8 @@
 | 2026-10-26 | [litellm-keys-in-public-repo](2026-10-26-litellm-keys-in-public-repo.md) | 两把 LiteLLM 虚拟 key（白名单含 `openrouter/*`）明文推上公开仓库 7h40m，零调用，已吊销重发、历史已改写。☠️ 本地与 CI 两道 gitleaks 全绿：默认规则认不出 `sk-`+22 位，pre-push 钩子三台 clone 都没启用 |
 | 2026-10-24 | [intrusion-sweep-argv-secrets-in-loki](2026-10-24-intrusion-sweep-argv-secrets-in-loki.md) | 双集群入侵排查未见入侵；Tetragon 把 argv 里 4 处密钥送进 Loki（bot token / SurrealDB 口令 / 隧道 token / 备份 Vault token），两轮移出命令行 + redactionFilters 兜底；oracle 停用 3 个手工遗留 |
 | 2026-10-01 | [oracle-firewalld-flushes-cilium-iptables](2026-10-01-oracle-firewalld-flushes-cilium-iptables.md) | oracle pod 出站全断 30min、全站入口断 24min。needrestart 升 libssl 后重启 firewalld，**有 direct 规则就 flush 全部 iptables**，Cilium masquerade 被清。☠️ 08-01「OCI DNS 故障」是同一个病 |
+| 2026-09-30 | [uptime-kuma-telegram-happy-eyeballs](2026-09-30-uptime-kuma-telegram-happy-eyeballs.md) | oracle Kuma 9 月 61/118 次 Telegram 通知没发出去（含死人开关那条），监控全绿。Node ≥20 的 Happy Eyeballs 给 IPv4 只留 250ms，建连要 252–268ms；关 autoselection 修复。☠️ 别改回只剩 `ipv4first` |
+| 2026-09-29 | [omlx-07-no-api-key-crashloop](2026-09-29-omlx-07-no-api-key-crashloop.md) | OMLX 悄悄升到 0.7 后没 API key 拒绝监听非回环地址，M2 重启后 launchd 崩溃循环 34h（11,233 次）。修法 key + `allow_unauthenticated_inference`；☠️ `TargetDown @ macbook` 响了就是真故障，别当睡眠抖动 |
 | 2026-09-26 | [render-check-red-on-main](2026-09-26-render-check-red-on-main.md) | 渲染检查在 main 上红了 18 天没人看：去掉 `skipCrds` 后 CRD 里的裸 `=` 被 PyYAML 按 YAML 1.1 解析失败，整个 App 渲染挂；修法 `RenderedLoader`。☠️ 本地复现要用空 helm 环境 |
 | 2026-09-19 | [litellm-fallbacks-never-active](2026-09-19-litellm-fallbacks-never-active.md) | 网关兜底链从 08-01 落地起七周没生效：`fallbacks` 写在 `litellm_params` 里被当 SDK kwarg，主上游一挂就 500。☠️ LiteLLM 不按错误类型跳过兜底，判据看日志 `run_async_fallback`；key 白名单不挡兜底 |
 | 2026-09-12 | [falco-syscall-drops-apt-upgrade](2026-09-12-falco-syscall-drops-apt-upgrade.md) | Falco 一分钟丢 **402,586 个 syscall**（检测盲区）。☠️ 别查 CPU limit——全程 0.024/1 核零 throttle；真因是 `unattended-upgrades` 升 glibc+locales+python3.12 打出 fork 21/s，灌满**全机共用的那一个 8MB** 缓冲区。已改 32MB，阈值仍 `>0` |
@@ -15,6 +17,7 @@
 | 2026-09-01 | [oracle-apparmor-af-unix-panic](2026-09-01-oracle-apparmor-af-unix-panic.md) | oracle 三个月的「宿主层硬重置」实为**内核 AppArmor 空指针**。☠️ 客场查不到是因为 `panic_on_oops=1` 让 journald 来不及落盘——「日志戛然而止」恰是 guest panic 的标准形态，不是宿主层证据。触发方是 uptime-kuma 容器内默认自启的 nscd，关掉后该函数调用 69→**0** |
 | 2026-08-31 | [trivy-stale-replicaset-reports](2026-08-31-trivy-stale-replicaset-reports.md) | `TrivyExposedSecretFound` 烧 25h／42 条 Telegram，**没有任何真泄漏**：报告挂在 `replicas=0` 的 ReplicaSet 上，**24h TTL 只重扫有副本的**，指标衰减到 20 就平台化，永不自愈 |
 | 2026-08-30 | [memory-alert-page-cache-false-alarm](2026-08-30-memory-alert-page-cache-false-alarm.md) | `ContainerMemoryNearLimit` 报 99.45%，峰值 87% 是页缓存（RSS 口径 26.4%），顶死 limit 却没有 OOM。☠️ 对照实验：同容器同 limit 重启三次，峰值 99.45%/70.1%/23.7%——读数由**节点页缓存冷热**决定 |
+| 2026-08-26 | [cloudflared-zombie-connections-530](2026-08-26-cloudflared-zombie-connections-530.md) | homelab 隧道公网 530 共 15 分钟，`ha_connections` 全程恒为 4（僵尸连接），只有 oracle 的跨集群黑盒探测抓到；升 2026.8.2 不是已证实的修复 |
 | 2026-08-24 | [jobs-sg-tech-alias-false-positives](2026-08-24-jobs-sg-tech-alias-false-positives.md) | 规则层别名撞普通英文词：`express` 精度 25%，`go` 靠假阳性进周报 top-30。☠️ 删别名对已有库是空操作（`Seed()` 只 upsert、运行时读表）；词义门 + `retech` 重放 + 逐周重算 |
 | 2026-08-22 | [podcast-tts-unload-pending](2026-08-22-podcast-tts-unload-pending.md) | 播客整集败于 Mac 换模型时的 `is busy`：重试只等 15s；☠️ 并发被实测否掉（5 路比串行快一倍），病因是耐心不是并发 |
 | 2026-08-19 | [opencost-bingen-replay-crashloop](2026-08-19-opencost-bingen-replay-crashloop.md) | collector WAL 积 5.5GB，启动全量重放 3m43s > 探针预算 160s → 节点重启后永久崩循环烧 1.1/2 核 24h；retention 参数就是重放窗口 |
@@ -36,9 +39,11 @@
 | 2026-08-05 | [clustermesh-up-but-stuck](2026-08-05-clustermesh-up-but-stuck.md) | ClusterMesh 双向断开零告警：clustermesh-apiserver 卡死不自愈，配置从未丢。根因先后判错三次（secret endpoint / pod startTime / --reset-values），以 helm release 历史为准；补 kvstoremesh 告警 |
 | 2026-08-03 | [namespace-prune-cascade](2026-08-03-namespace-prune-cascade.md) | Namespace 内嵌清单 → 删文件 prune 掉整个 ns → 级联删光同 ns 数据（`Prune=false` 拦不住）；已从 restic 恢复 |
 | 2026-08-03 | [jobs-sg-launch-defects](2026-08-03-jobs-sg-launch-defects.md) | jobs-sg 上线当天七个缺陷：scratch 镜像无 zoneinfo 致 panic、字段建模错致整页解码失败、归档每条重扫、超时 60s < 66.5s、ESO 引用空路径告警、只读挂载开不了 WAL、`/tmp` 不可写致 500 |
+| 2026-08-03 | [trivy-scan-queue-stall](2026-08-03-trivy-scan-queue-stall.md) | oracle 首扫停在 7/46、零报错零告警：Complete 的扫描 Job 在 TTL 回收前占着并发槽，吞吐 = limit ÷ TTL（1h 时只有 2 个镜像/小时）。两集群 scanJobTTL 1h→5m，别改回 |
 | 2026-08-02 | [oracle-otel-config-not-reloaded](2026-08-02-oracle-otel-config-not-reloaded.md) | oracle otel-collector 改 ConfigMap 后 DaemonSet 不滚动（collector 只在启动时读配置）→ 迁移当天日志仍发往 homelab 旧 NodePort，ArgoCD 全程 Synced/Healthy。改 `configMapGenerator` 根治 |
 | 2026-08-01 | [oracle-k3s-dns-outage](2026-08-01-oracle-k3s-dns-outage.md) | cloudflared 崩溃 → meirong.dev 不可达 ~20min。⚠️ 原定性「OCI DNS 上游故障」是**错的**，真因见 2026-10-01 |
 | 2026-07-12 | [pve-screen-backlight-always-on](2026-07-12-pve-screen-backlight-always-on.md) | pve 屏幕常亮（`setterm powersave` 静默失败） |
+| 2026-07-04 | [grafana-prometheus-nfs-crashloop](2026-07-04-grafana-prometheus-nfs-crashloop.md) | Grafana 的 sqlite 在 NFS 上被 NLM 锁拖住、叠加启动期联网，CrashLoop 8 天；Prometheus 重启时 WAL 重放挂在僵死的 NFS client 上。两者迁 local-path，sqlite/PG 从此不许上 NFS |
 | 2026-06-07 | [zitadel-console-grpc-404](2026-06-07-zitadel-console-grpc-404.md) | ZITADEL Console v1 gRPC 经网关 404 → Cilium `enableAppProtocol` |
 | 2026-03-15 | [cilium-hubble-tls-issue](2026-03-15-cilium-hubble-tls-issue.md) | Hubble TLS 证书问题排查 |
 | 2026-03-09 | [oracle-k3s-outage-report](2026-03-09-oracle-k3s-outage-report.md) | oracle-k3s 宕机复盘 |
