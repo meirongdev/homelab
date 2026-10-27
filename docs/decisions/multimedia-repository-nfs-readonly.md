@@ -46,7 +46,7 @@ provisioner 卸载。那次退役的结论被反复引用成一句话：**「NFS
    真正拦写的是 export 的 `ro`。**k8s 负载永远没有 106 的写权**：所有写路径
    （上传 / 下载 / 整理）走非 k8s 侧（直接写 106 的 SMB/ssh）。
 2. **只有顺序读的大文件。** 当初退役 NFS 的根因是 sqlite 的 `fcntl` 锁 + 小写入 fsync
-   在 NLM 上能阻塞分钟级（[storage.md](../reference/storage.md) 有 Grafana CrashLoop 8 天
+   在 NLM 上能阻塞分钟级（[records](../records/2026-07-04-grafana-prometheus-nfs-crashloop.md) 有 Grafana CrashLoop 8 天
    的实例）。媒体是顺序流，恰是 NFS 能安全兜住的那类。
    **任何 sqlite / PG 都不许回 NFS**，这条没有例外。
 3. **不重装 provisioner。** 动态供给一旦回来，"下一个 PVC 顺手用 NFS" 就会重演，

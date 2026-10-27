@@ -4,8 +4,8 @@
 #
 # 数据源选型：collector（**不查 Prometheus**）。理由见
 # docs/plans/2026-07-30-opencost-multicluster.md
-#   - oracle 侧 otel 未采 OpenCost 需要的 cAdvisor 指标（后来为 KRR 加的 cadvisor job
-#     只 keep 了 2 个指标，不含 container_fs_* / container_network_*），
+#   - oracle 侧 otel 未采 OpenCost 需要的 cAdvisor 指标（为 KRR 加的 cadvisor job 的 keep 正则
+#     不含 container_fs_* / container_network_*），
 #     中枢 Prometheus 无法支撑 oracle 的 Prometheus 数据源
 #   - collector 直读 kubelet stats/summary（经 apiserver proxy，chart 已含 nodes/proxy RBAC），
 #     自带 7d 日粒度（2026-08-19 起收窄，见下），不给 5Gi/7d 的 TSDB 加压，且 oracle 不必依赖 homelab 存活

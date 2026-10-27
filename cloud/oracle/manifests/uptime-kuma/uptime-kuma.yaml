@@ -122,7 +122,9 @@ spec:
               # （16:04:35→16:05:00），把冷启整体拖到 39s 才 listening，正是探针
               # 误杀的土壤。requests 不动（20m）→ 不占节点可调度额度（当前 76%），
               # 只抬 limits 的超卖比（1111%→约 1128%），代价可忽略。
-              # ⚠️ oracle 侧没有节流计数器（container_cpu_cfs_throttled_*，homelab 41 条 /
+              # ⚠️ 下面这段写于 2026-08-10。2026-08-30 起 oracle 的 otel-collector 已放行
+              # container_cpu_cfs_{,throttled_}periods_total，现在可以直接实测节流率。当时
+              # oracle 侧没有节流计数器（container_cpu_cfs_throttled_*，homelab 41 条 /
               # oracle 0 条）：两集群都没独立部署 cAdvisor，container_* 全来自 kubelet 内嵌
               # cAdvisor；oracle 的 otel-collector 只 keep container_(cpu_usage_seconds_total|
               # memory_working_set_bytes) 两个指标（为 KRR），节流计数器不进中枢 Prometheus

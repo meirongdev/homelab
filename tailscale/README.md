@@ -1,6 +1,7 @@
 # Tailscale — 跨集群网络 + 远程访问
 
-Tailscale 承载 cross-cluster 数据面路由（Pod CIDR）与节点间直连（Vault、ClusterMesh、restic→106），
+Tailscale 只做节点级 underlay：节点间直连（NodePort 上的 Vault / 监控 / ClusterMesh 控制面、ClusterMesh 的
+VXLAN 外层包、restic→106；Pod CIDR 不通告），
 以及无公网节点的远程访问。**集群内**数据面与网关是 Cilium（见 `k8s/cilium/`）。
 
 ## 目录

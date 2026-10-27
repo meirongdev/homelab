@@ -11,7 +11,7 @@
 #   - 这是「服务实际接到的请求」（入口 Envoy 层，Cloudflare 之后的量），
 #     不含 Cloudflare 边缘缓存命中/WAF 拦截的请求。
 #   - 服务名维度（ns_svc），非域名；服务→URL 对照见 docs/reference/services.md。
-#   - 保留期 = 中枢 Prometheus retention（7d），更久历史需先提 retention。
+#   - 保留期 = 中枢 Prometheus retention（14d），更久历史需先提 retention。
 #   - 刻意排除非业务路由：/envoy-admin、ingress/egress-cluster*、xds-grpc-cilium
 #     （用 envoy_cluster_name 的 cilium-gateway 前缀天然过滤）。
 #

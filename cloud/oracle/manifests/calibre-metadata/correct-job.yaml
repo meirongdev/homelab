@@ -12,7 +12,7 @@
 # ☠️ **本作业会覆盖已有值**（与只填空的 backfill 不同）。跑写入模式前先备份：
 #   kubectl --context oracle-k3s -n personal-services exec deploy/calibre-web -c calibre-web -- \
 #     sh -c 'sqlite3 /calibre-library/metadata.db ".backup /calibre-library/metadata.db.bak-$(date +%Y%m%d-%H%M%S)"'
-# 回滚用 scripts 里同款的按-id 还原法（见 docs/reference/calibre-metadata.md）。
+# 回滚就用上面这份 .bak 整库还原。仓库里没有逐条按 id 还原的脚本（旧注释指向的说明从未存在过）。
 apiVersion: batch/v1
 kind: CronJob
 metadata:

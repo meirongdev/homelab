@@ -360,7 +360,8 @@ oracle 的指标是推过来的，查 collector：
 
 1. `kubectl --context oracle-k3s -n monitoring logs daemonset/otel-collector --tail=30`；`Failed to scrape Prometheus endpoint` = pod 内够不着那个 target。
 2. Grafana Explore → Prometheus：`count by (cluster, job) ({cluster="oracle-k3s"})`
-3. Tailscale 连通：`kubectl --context oracle-k3s exec -n monitoring daemonset/otel-collector -- wget -qO- http://100.94.186.7:31090/api/v1/status/runtimeinfo 2>/dev/null | head`
+3. Tailscale 连通：`kubectl --context oracle-k3s run tailnet-check --rm -i --restart=Never --image=busybox:1.36 -- wget -qO- -T 10 http://100.94.186.7:31090/api/v1/status/runtimeinfo`
+   （⚠️ 别 exec 进 otel-collector 跑：contrib 镜像是 distroless，没有 wget 也没有 sh，加了 `2>/dev/null` 就只剩空输出，像是网不通）
 
 ### homelab 指标缺 `cluster` 标签
 

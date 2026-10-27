@@ -1,6 +1,6 @@
 # Security Hardening Runbook — 集群内部安全（Phase 0 + 1）
 
-> Last updated: 2026-10-02
+> Last updated: 2026-10-28
 >
 > **触发条件**：部署/验证/回滚集群内部安全组件（PSA / kube-bench / Trivy / Kyverno / 节点加固 / Hubble）。
 > **成功判定**：各层验证步骤通过（每 Phase 内嵌验证命令与冒烟/巡检判据）。
@@ -92,7 +92,7 @@ kubectl --context k3s-homelab logs -n kube-bench job/kube-bench-once | less
 ```bash
 kubectl --context k3s-homelab run kb --rm -it --image=docker.io/aquasec/kube-bench:v0.15.6 --command -- ls /opt/kube-bench/cfg/
 ```
-结果经 OTel→Loki，按 `{namespace="kube-bench"}` 查阅。
+结果经 OTel→Loki，按 `{k8s_namespace_name="kube-bench"}` 查阅（标签是 OTel 风格，写 `namespace=` 查不到）。
 
 ### 3. Trivy Operator
 

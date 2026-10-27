@@ -125,11 +125,11 @@ BACKUP_EXEMPT = {
     "calibre-books-local": "23G 书库，由 backup-script.yaml 的 BOOKS_DIR 整目录纳入 restic，不走 sqlite 白名单",
     # litellm-pg-data-local 于 2026-08-25 随 litellm-pg 退役（库并入共享实例 apps-pg），
     # 故移除其豁免条目 —— 同 miniflux-db-pvc 的先例：留着会让将来任何同名 PVC 被静默豁免。
-    # homelab 的共享实例（2026-08-25 起承载 litellm + multica 两个租户）。
+    # homelab 的共享实例（租户以 apps-pg.yaml 的 initdb 为准：litellm / multica / nakama / blogstats）。
     # ⚠️ 同 CNPG 那两个：**这条豁免只保住"卷不用进 restic"，保不住"库有没有被 dump"。**
     #    实例里加一个库，就必须去 backup/overlays/homelab/backup-script.yaml 加一行
     #    pg_dump —— 本检查器看不见"多了个库"，漏了只会静默不备份。
-    "apps-pg-data-local": "homelab 共享 Postgres（databases/apps-pg，租户 litellm+multica），由 backup-script.yaml 的 2c)/2d) 两段逐库 pg_dump 覆盖；数据目录不能原样拷贝（无 WAL 自恢复）",
+    "apps-pg-data-local": "homelab 共享 Postgres（databases/apps-pg，租户 litellm/multica/nakama/blogstats），由 backup-script.yaml 的 2c)–2f) 四段逐库 pg_dump 覆盖；数据目录不能原样拷贝（无 WAL 自恢复）",
     # 多媒体仓库的媒体是**只读 NFS**（media-movie/tv/anime/music/podcast）——数据真相源在 NAS
     # 106 的 ZFS（raidz1 + sanoid 快照保护），serving 层读的是只读副本；restic 目标也是 106，
     # 跨机冗余本就做不到，媒体再进 restic 无意义。决策与取舍见

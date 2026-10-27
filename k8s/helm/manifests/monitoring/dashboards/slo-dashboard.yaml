@@ -6,7 +6,7 @@
 #    （见 records/2026-08-12-slo-nan-poisoning.md）。这句"非故障"的注解恰好把故障解释
 #    成了正常，是它潜伏一个多月没被发现的一半原因。修复后空闲窗口稳定产出 0，
 #    **N/A 一律代表 SLI 异常**，并由 SLOSLIProducingNaN 告警兜底。
-# ⚠️ 面板标的 30d 是 SLO 周期，不是实际窗口：Prometheus retention=7d，
+# ⚠️ 面板标的 30d 是 SLO 周期，不是实际窗口：Prometheus retention=14d，
 #    sum_over_time([30d]) 只读得到 ~7 天。刻意不改，理由见 manifests/monitoring/slos.yaml。
 # Auto-loaded via kube-prometheus-stack grafana-sc-dashboard sidecar。
 ---
@@ -25,7 +25,7 @@ data:
       "annotations": {
         "list": []
       },
-      "description": "homelab 服务可用性 SLO（Sloth，99%/30d，基于 Cilium Gateway Envoy 一手请求指标）。⚠️ 30d 是 SLO 周期；Prometheus retention=7d，预算类面板实际窗口约 7 天。N/A = SLI 异常（非'无流量'），见 SLOSLIProducingNaN 告警。",
+      "description": "homelab 服务可用性 SLO（Sloth，99%/30d，基于 Cilium Gateway Envoy 一手请求指标）。⚠️ 30d 是 SLO 周期；Prometheus retention=14d，预算类面板实际窗口约 14 天。N/A = SLI 异常（非'无流量'），见 SLOSLIProducingNaN 告警。",
       "editable": true,
       "graphTooltip": 1,
       "links": [],
@@ -45,7 +45,7 @@ data:
         {
           "type": "bargauge",
           "id": 2,
-          "title": "错误预算剩余（30d 周期 · 实际窗口 ≈7d）",
+          "title": "错误预算剩余（30d 周期 · 实际窗口 ≈14d）",
           "description": "slo:period_error_budget_remaining:ratio。1=预算全满，0=耗尽，<0=已超支(违反 SLO)。⚠️ N/A = SLI 产出 NaN，是**故障**不是无流量：空闲窗口现在会正常产出 0。整列 N/A 通常意味着 0/0 毒死了 30d 汇总规则（2026-08-12 复盘）；SLOSLIProducingNaN 会在 30 分钟内告警。",
           "datasource": {
             "type": "prometheus",
@@ -268,7 +268,7 @@ data:
         {
           "type": "table",
           "id": 5,
-          "title": "SLO 错误预算剩余明细（30d 周期 · 实际 ≈7d，升序，最差在上）",
+          "title": "SLO 错误预算剩余明细（30d 周期 · 实际 ≈14d，升序，最差在上）",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"

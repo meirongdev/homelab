@@ -49,7 +49,8 @@
   新集群入编 = 新 project 文件 + 登记 `PROJECT_FOR_SERVER`（集群表的唯一副本）。
 - 查不到：manual-helm 的 values 由 justfile `--values` 直接给，不经 Application（如 ArgoCD 本体的
   `k8s/helm/values/argocd.yaml` + `argocd-oracle.yaml`，装在 oracle，配方在 `k8s/helm/justfile`）。
-  判断归谁管：`kubectl --context <ctx> -n <ns> get secret -l owner=helm`。
+  判断归谁管看 `argocd.argoproj.io/tracking-id` 注解（非空即 ArgoCD 管），别用 `get secret -l owner=helm`：
+  采纳进 ArgoCD 的 release 刻意留着 Helm 存档，会被误判（见 [argocd-app-patterns.md](argocd-app-patterns.md)）。
 
 ### H3：`ReferenceGrant` 必须声明 `v1beta1`
 

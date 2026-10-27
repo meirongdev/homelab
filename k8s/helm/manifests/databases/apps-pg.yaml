@@ -1,5 +1,5 @@
 ---
-# homelab 的共享应用 Postgres —— 一个实例、三个租户（litellm / multica / nakama）。
+# homelab 的共享应用 Postgres —— 一个实例、四个租户（litellm / multica / nakama / blogstats）。
 # 2026-08-25 由 litellm ns 的 litellm-pg + personal-services 的 multica-postgres 合并而来。
 #
 # ☠️ **与 oracle 的 `databases/apps-pg` 同名、同角色，但形态完全不同**：

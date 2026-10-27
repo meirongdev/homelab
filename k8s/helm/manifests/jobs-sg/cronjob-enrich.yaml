@@ -7,17 +7,16 @@
 # 模型 id 是后端相关的 —— 网关路由用带 provider 前缀的名字
 # （`custom_dgx/qwen3.8-flash-next-tp2`），裸引擎提供的是 `qwen3.8-flash-next-tp2`，
 # 写前缀名会 404。上游 2026-08-03 (d833623) 把模型链改成读 LLM_MODELS 后才可配。
-# ⚠️ 2026-09-19 DGX 又换了主力栈（Qwen3.8-Flash-Next → Qwen3.8-27B-Uncensored + SGLang），
-#    ☠️ **这次连端点一起变**：:8000(k3s/vLLM) → :8888(docker/SGLang)，旧端口已不监听。
-#    本作业**直连** DGX，端点与模型名都不在 git 的网关清单里，只能靠改这里跟着换。
-# ☠️ SGLang **接受任意 model 名并原样回显**（上游 gotcha #10），不像 vLLM 会 404：
-#    模型名写错在这里是**静默**的，判据只能是 `/v1/models` 报的 served name。
+# ☠️ DGX 换栈时端点可能和模型名一起变（:8000 / :8888 都被不同的栈用过，旧端口会直接不监听）。
+#    本作业**直连** DGX，端点与模型名都不在网关清单里，只能靠改这里跟着换。
+#    现状（2026-09-30 起 vLLM 双机 TP=2，:8000）见 docs/reference/litellm-gateway.md「DGX 主力栈」。
+# ☠️ 若换成 SGLang 栈：它**接受任意 model 名并原样回显**（上游 gotcha #10），不像 vLLM 会 404，
+#    模型名写错是**静默**的，判据只能是 `/v1/models` 报的 served name。
 # 实测（2026-08-03，jobs-sg ns 内的 pod）：DGX 可达、无需认证、`x-bf-vk` 头被忽略。
 #
-# 代价：没有网关的 custom_m2 回退，也没有用量计量；DGX 是跨 tailnet 共享的
+# 代价：不经网关就没有网关的兜底链和用量计量；DGX 是跨 tailnet 共享的
 # 境内机器（RTT 66–83ms），不可用时 enrich fail-open 退回纯规则模式。
-# 直连 DGX 是目前唯一形态（曾走 LLM 网关，已于 2026-08-08 随网关退役一并失效），
-# 后续换路由时另行规划。
+# （2026-08-08 退役的是旧网关；现在的 LiteLLM 网关可以接，要另配 virtual key。）
 #
 # 网关的 virtual key 环境变量不在此处：走 DGX 时它是空值且无害（vLLM 忽略该头）。
 # Vault 未写时也不会 CreateContainerConfigError 卡死（见 external-secret.yaml）。
@@ -39,8 +38,8 @@
 # 就是那轮超时的 3 条），所以"几个晚上收敛"这类排空预算从此不再适用。
 # 进度逐条落库，中途被 activeDeadlineSeconds 杀掉不丢。
 #
-# 想更快只能加并发（现在 CPU 是空的，加并发确实有效）—— 但 DGX 是跨 tailnet 共享的
-# 境内机器，同时在给 Open Notebook 供交互式推理，往上加会挤占它。8 是刻意保守的。
+# 别指望加并发提速：旧模型实测 8× 并发只换来 3.3× 吞吐，DGX 已接近饱和，再加只会加深排队，
+# 还会挤占同时在给 Open Notebook 供交互式推理的 DGX。8 是刻意保守的（见 docs/reference/jobs-sg.md）。
 apiVersion: batch/v1
 kind: CronJob
 metadata:

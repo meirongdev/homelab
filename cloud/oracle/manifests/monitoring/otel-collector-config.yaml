@@ -161,8 +161,9 @@ receivers:
   # manifests/monitoring/alerts/clustermesh-alerts.yaml。
   #
   # 抓 kvstoremesh 而非 cilium-agent：agent 的同类指标要 `prometheus.enabled`，那需要对
-  # Cilium 做 helm upgrade —— 而 oracle 侧 ClusterMesh peer 配置**未固化在仓库**，升级会
-  # 静默抹掉它（见 docs/reference/tailscale-network.md）。kvstoremesh 容器本来就带
+  # Cilium 做 helm upgrade —— peer 的 endpoint 已固化在 values，但 connect 交换来的跨集群
+  # CA 信任固化不了，每次 deploy-cilium（--reset-values）都会冲掉它、必须重跑 connect-clustermesh
+  # （见 docs/reference/tailscale-network.md）。kvstoremesh 容器本来就带
   # `--prometheus-serve-addr=:9964`，且它正是真正跨 Tailscale 的那一跳。
   #
   # 端口写 9964 是安全的：`clustermesh-apiserver-metrics` 同样是 **headless

@@ -156,12 +156,20 @@ kubectl --context k3s-homelab get pods -A -o custom-columns=\
 ## 检测 CPU Throttling
 
 ```bash
-# CFS 配额统计（节点上）
-cat /sys/fs/cgroup/cpu,cpuacct/kubepods/burstable/<cgroup-id>/cpu.stat
-# PromQL
-rate(container_cpu_cfs_throttled_seconds_total[5m])
-  / rate(container_cpu_cfs_periods_total[5m])
+# 节点上（ssh 到 pod 所在节点）。三台节点都是纯 cgroup v2，没有 v1 的 cpu,cpuacct 目录；
+# 按进程反查 cgroup，不用管 driver（homelab 是 systemd：/kubepods.slice/…/cri-containerd-<id>.scope）
+pid=$(pgrep -x <进程名> | head -1)
+cg=/sys/fs/cgroup$(cut -d: -f3 /proc/$pid/cgroup)
+cat $cg/cpu.max     # 配额 周期，如 `20000 100000` = 200m
+cat $cg/cpu.stat    # nr_periods / nr_throttled / throttled_usec
+
+# PromQL：被节流的周期占比，与告警 ContainerCPUThrottlingSustained 同口径（prometheus-rules.yaml）
+sum by (cluster, namespace, pod, container) (increase(container_cpu_cfs_throttled_periods_total{container!=""}[1h]))
+  / sum by (cluster, namespace, pod, container) (increase(container_cpu_cfs_periods_total{container!=""}[1h]))
 ```
+
+- ⚠️ 别拿 `container_cpu_cfs_throttled_seconds_total` 去除 `periods_total`：一个是秒、一个是次数，
+  比值没有意义；oracle 也只采 periods 这两个计数器。
 
 - ⚠️ 查询返回空结果与「节流为 0」外观一致。先 `count by (cluster) (container_cpu_cfs_periods_total)`
   确认该集群有这个 series：oracle 的 `container_*` 要靠 otel-collector 的 keep 正则放行

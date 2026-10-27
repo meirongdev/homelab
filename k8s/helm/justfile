@@ -384,7 +384,7 @@ argocd_chart_version := "10.10.5"
 # 改为官方 Helm chart 部署（k8s/helm/values/argocd.yaml）
 # 该 values 关闭了 dex/notifications/applicationSet 三个未使用组件、给所有组件加了 resources
 deploy-argocd: add-repos
-    # 1. 安装/升级 ArgoCD（oracle-k3s；argocd-oracle.yaml 只覆盖 crds.install=true）
+    # 1. 安装/升级 ArgoCD（oracle-k3s；argocd-oracle.yaml 是 oracle 增量：crds.install/keep、global.priorityClassName）
     helm upgrade --install argocd argo/argo-cd \
         --namespace {{argocd_ns}} \
         --create-namespace \

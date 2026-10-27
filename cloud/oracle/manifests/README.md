@@ -22,7 +22,7 @@
 | `personal-services/` | **`oracle-personal-services`** | 目录源 | 最大一组；含 5 个 PVC（均 `Prune=false`） |
 | `monitoring/` | **`oracle-monitoring`** | **kustomize**（本目录有 `kustomization.yaml`） | ☠️ 不能改成目录源，见下 |
 | `zitadel/` | **`oracle-zitadel`** | 目录源 | 全舰队 SSO |
-| `calibre-metadata/` | `calibre-metadata` | 目录源 | 早就是独立 App（一次性 Job 需要专门的 `ignoreDifferences`） |
+| `calibre-metadata/` | `calibre-metadata` | kustomize（目录里有 `kustomization.yaml`） | 早就是独立 App（一次性 Job 需要专门的 `ignoreDifferences`） |
 
 ## ☠️ 三条改这棵树前必须知道的
 

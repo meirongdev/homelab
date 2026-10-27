@@ -38,7 +38,7 @@ node-exporter:
 node-exporter-storage:
     ansible-playbook playbooks/node-exporter-deploy.yaml --limit storage
 
-# 106 的 ZFS ARC 上限 4G→2G（给同机那台 VM 让内存；只跑 arc 标签，不碰 NFS/ZFS 其它任务）
+# 106 的 ZFS ARC 上限（现 1G，值在 storage-playbook.yaml 的 zfs_arc_max；给同机那台 VM 让内存；只跑 arc 标签，不碰 NFS/ZFS 其它任务）
 # 那台 VM 现在是 homelab 的 worker k8s-worker-106，让出的内存等于给 prod 用。
 storage-arc-limit:
     ansible-playbook storage-playbook.yaml --tags arc

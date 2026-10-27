@@ -1,6 +1,6 @@
 # 强制两套文档纪律：
 #   1. docs/RULES.md 的组织规则 R1-R7（能自动查的那几条）—— check-docs.py
-#   2. docs/reference/terminology.md 的术语正典 T1-T3 —— check-terminology.py
+#   2. docs/reference/terminology.md 的术语正典 T1-T4 —— check-terminology.py
 #
 # 为什么需要它：2026-07-31 把规则写下来并让全库符合，但规则没有强制手段就会重新腐化——
 # 上一次腐化的表现是 reference/ 混进带日期的建议快照、plans/ 类别目录没索引、四处死链。
@@ -60,9 +60,9 @@ jobs:
       - name: 检查文档组织规则 R1-R7
         run: python3 scripts/check-docs.py
 
-      - name: 检查术语正典 T1-T3
-        # 正典全文 docs/reference/terminology.md。只拦"判错就是事实错误"的三类：
-        # 不存在的 context 名（曾让脚本默认打错集群）、拼写正典、以及 reference/+runbooks/
-        # 里把 homelab 说成单节点（2026-08-13 起是双节点）。
+      - name: 检查术语正典 T1-T4
+        # 正典全文 docs/reference/terminology.md。只拦"判错就是事实错误"的四类：
+        # 不存在的 context 名（曾让脚本默认打错集群）、拼写正典、reference/+runbooks/
+        # 里把 homelab 说成单节点（2026-08-13 起是双节点），以及用 `master` 指控制面节点。  terminology-ok: 描述 T4 规则本身
         # 风格类变体（K3s/K8s 语义、App/Application、106 简称）故意不查——写成规则必然误报。
         run: python3 scripts/check-terminology.py

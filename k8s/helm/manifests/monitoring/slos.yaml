@@ -25,10 +25,10 @@
 #      不可达" 属外部视角，由 Uptime Kuma 的公网探测负责，不指望这里的 5xx 比率。
 #      → 复发哨兵见 alerts/prometheus-rules.yaml 的 SLOSLIProducingNaN。
 #
-# ⚠️ 周期写 30d，但 Prometheus retention=7d（kube-prometheus-stack.yaml），
-#    sum_over_time([30d]) 实际只读得到 ~7 天 → "30d 错误预算剩余" 实为 ~7d 平均。
-#    刻意不改：告警用的全是 ≤3d 窗口、在 7d 内完全有效，而 sloth 内置窗口目录只有
-#    30d/28d，换 7d 要自带 catalog 并重标定全部燃尽率系数，不值当。面板已注明。
+# ⚠️ 周期写 30d，但 Prometheus retention=14d（kube-prometheus-stack.yaml，另受 retentionSize 限制），
+#    sum_over_time([30d]) 实际只读得到 ~14 天 → "30d 错误预算剩余" 实为 ~14d 平均。
+#    刻意不改：告警用的全是 ≤3d 窗口、在 retention 内完全有效，而 sloth 内置窗口目录只有
+#    30d/28d，换成与 retention 一致的周期要自带 catalog 并重标定全部燃尽率系数，不值当。面板已注明。
 #
 # ⚠️ metadata.labels.release=kube-prometheus-stack：经 sloth.extraLabels 也会打到生成的
 #    PrometheusRule，确保被 operator 的 ruleSelector 选中。

@@ -16,9 +16,10 @@ spec:
   groups:
     - name: storage-nodes
       rules:
-        # 2026-07-11 起 106 降级为纯冷备份目标（restic 夜备 + vzdump 周备），
-        # 无运行时依赖（NFS PVC 已全部迁 local-path）——宕机不影响在线服务，
-        # 只影响备份窗口，故 warning + for 15m（原 NFSStorageNodeDown critical/2m）。
+        # 2026-07-11 起 106 不再承载读写 NFS PVC（全迁 local-path），当时定为 warning + for 15m
+        # （原 NFSStorageNodeDown critical/2m）。⚠️ 但它已不是纯冷备份目标：2026-08-13 起跑着
+        # worker k8s-worker-106 的 VM，2026-08-16 起 media ns 的 5 个只读 NFS PV 也挂它。
+        # 宕机 = 少一个节点 + 媒体服务无数据 + 备份失败。severity/for 仍是冷备份时代的值。
         - alert: BackupTargetNodeDown
           expr: up{job="node-exporter-metal-nodes", instance="192.168.50.106:9100"} == 0
           for: 15m
@@ -29,7 +30,8 @@ spec:
             summary: "Backup target 192.168.50.106 is unreachable"
             description: |
               node-exporter on storage-node-1 (192.168.50.106) has been down for more than 15 minutes.
-              该机仅作冷备份目标：homelab/oracle restic 夜备与 pve vzdump 周备会失败，在线服务不受影响。
+              该机是 worker k8s-worker-106 的宿主、media 只读 NFS（jellyfin/navidrome/podcast）的来源，
+              也是 restic 夜备与 pve vzdump 周备的目标：worker 上的 pod 会掉、媒体库无数据、备份失败。
               Check: `ping 192.168.50.106` from k8s-node, then SSH and ZFS pool on the storage host.
 
         - alert: ProxmoxHostDown

@@ -2,9 +2,9 @@
 # Chart: oci://ghcr.io/multica-ai/charts/multica   App: argocd/applications/multica.yaml
 # 入口: https://multica.meirong.dev   路由: k8s/helm/manifests/gateway/route-multica.yaml
 #
-# ☠️ 本服务是**两半**的，这份 values 只部署 service 端（frontend + backend + Postgres）。
-#    真正执行 agent 的是 daemon（`multica computer`），它**不在 k8s 里** ——
-#    跑在 M2 MacBook 上，见 macbook/ansible/playbooks/multica-daemon.yaml。
+# ☠️ 本服务是**两半**的，这份 values 只部署 service 端（frontend + backend；库在共享的
+#    databases/apps-pg，2026-08-25 起）。真正执行 agent 的是 daemon（`multica computer`），
+#    它**不在 k8s 里**，跑在 M2 与 Mac Studio 上，见 macbook/ansible/playbooks/multica-daemon*.yaml。
 #    daemon 只做 outbound 注册，不需要任何入站端口，所以它在 NAT 后面也无所谓。
 
 # ESO 生成的 Secret（k8s/helm/manifests/personal-services/multica-secret.yaml）。

@@ -1,6 +1,6 @@
 # KRR 报告分诊与采纳
 
-> Last updated: 2026-09-09
+> Last updated: 2026-10-28
 > Status: 生效 SOP
 > 触发条件：周一收到 KRR 推送到 Telegram 的两份报告（homelab 09:00 / oracle-k3s 09:15）；
 > 或改 shape、加服务、扩容之后主动跑一次核对。
@@ -152,11 +152,9 @@ curl -s --data-urlencode 'query=sum by (namespace,container) (rate(container_cpu
   | jq -r '.data.result[] | select((.value[1]|tonumber)>0.02) | "\((.value[1]|tonumber*100)|floor)% \(.metric.namespace)/\(.metric.container)"' | sort -rn
 ```
 
-> ⚠️ 同 §2-F：**这条查询在 oracle 上返回空结果**：oracle 的 otel-collector 只 keep
-> `container_(cpu_usage_seconds_total|memory_working_set_bytes)` 两个 kubelet cAdvisor 指标，
-> 节流计数器不进中枢 Prometheus（见
-> [k8s-qos-resource-management.md](../reference/k8s-qos-resource-management.md)），
-> 与「节流率为 0」外观完全一致。oracle 上补 CPU limit 无法用这个方法验证。
+> oracle 也能用这条查询（把 `cluster=` 换成 `oracle-k3s`）：2026-08-30 起 oracle 的 otel-collector 放行了
+> `container_cpu_cfs_{,throttled_}periods_total`（`cloud/oracle/manifests/monitoring/otel-collector-config.yaml`）。
+> ⚠️ 返回空结果与「节流率为 0」外观一致，先 `count by (cluster) (container_cpu_cfs_periods_total)` 确认有数据。
 
 ⚠️ **补完 BestEffort 后节点的 requests 百分比会上涨，这是正确的**，不是变差。
 那些 Pod 本来就在用这些资源，只是之前对调度器隐身。2026-08-10 oracle 实测
@@ -225,12 +223,9 @@ curl -s --data-urlencode 'query=sum by (namespace,container) (rate(container_cpu
   http://localhost:19090/api/v1/query | jq -r '.data.result[] | select((.value[1]|tonumber)>0.02) | "\((.value[1]|tonumber*100)|floor)% \(.metric.namespace)/\(.metric.container)"'
 ```
 
-> ⚠️⚠️ **oracle 上这个查询会骗你**：oracle 的 otel-collector 只 keep
-> `container_(cpu_usage_seconds_total|memory_working_set_bytes)` 两个 kubelet cAdvisor 指标，
-> **节流计数器不进中枢 Prometheus**（`container_cpu_cfs_throttled_*` homelab 41 条 /
-> oracle **0 条**），查询返回**空结果**，与「节流率为 0」外观完全一致。2026-08-10
-> 就据此误下过「oracle 无节流」的结论。在 oracle 上只能看 limit 与 p95 的比值 +
-> 应用日志时序。
+> ⚠️ oracle 自 2026-08-30 起也采节流计数器，把 `cluster=` 换成 `oracle-k3s` 即可。在那之前 oracle 上这条查询
+> 恒为空结果，2026-08-10 曾据此误下「oracle 无节流」的结论：**空结果先查有没有数据**
+> （`count by (cluster) (container_cpu_cfs_periods_total)`），再下「节流为 0」的结论。
 
 ---
 

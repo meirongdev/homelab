@@ -18,7 +18,7 @@
 #      cloud/oracle/manifests/monitoring/otel-collector-config.yaml。
 #
 #   2. scanJobsConcurrentLimit 从 1 抬到 **2**：homelab 那个 1 是为「5600H 笔记本
-#      idle 74°C」的热约束设的，oracle 是 4 核云实例、实测 CPU 9%，没有该约束。
+#      idle 74°C」的热约束设的，oracle 是云实例（现 2 OCPU），没有该热约束。
 #      ⚠️ 原先以为抬并发能"顺带缓解 Complete 滞留 Job 占槽"——2026-08-03 首次部署
 #      实测证否：滞留 Job 一样占满 limit=2，队列照样停摆（33 分钟零动静、零报错，
 #      46 个负载只出 7 份报告）。抬并发只是把停摆门槛从 1 个滞留抬到 2 个。

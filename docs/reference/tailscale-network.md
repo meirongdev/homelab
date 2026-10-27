@@ -14,9 +14,9 @@
 
 ## 三层分工
 
-1. **Tailscale（underlay）**：节点间可达。生产东西向一律走 `节点 TS IP + NodePort`：oracle→homelab
-   Loki `:31080` / Prometheus `:31090` / Tempo `:31317` / Vault `:31952`；homelab→oracle ArgoCD `:6443`；
-   ClusterMesh 控制面 `:32379` 双向。
+1. **Tailscale（underlay）**：节点间可达。生产东西向一律走 `节点 TS IP + NodePort`：homelab→oracle
+   Loki `:31080` / Tempo `:31317`（Grafana 查 Tempo 走 `:31320`）；oracle→homelab Prometheus remote-write `:31090` /
+   Vault `:31952`（ESO）/ K8s API `:6443`（ArgoCD 控制面在 oracle）；ClusterMesh 控制面 `:32379` 双向。
 2. **ClusterMesh（pod 数据面）**：跨集群 pod↔pod 是两节点 IP 之间的 VXLAN（udp/8472），外层包走 Tailscale。
 3. **Cloudflare Tunnel（南北向）**：各集群 cloudflared → 本集群 Cilium Gateway，不经 Tailscale。
 
@@ -110,8 +110,9 @@ tcpdump -ni any host <100.x 目标>
 kubectl --context <ctx> -n <ns> label pod <p> x=1
 ```
 
-☠️ **别去 grep Tailscale 的 netfilter 规则找「谁打的 mark」**：本舰队用 `--netfilter-mode=off`（见两个
-`setup-tailscale.yaml` 的 `tailscale_up_extra_args`），它一条 netfilter 规则都不装，但照样装 ip rule。
+☠️ **别去 grep Tailscale 的 netfilter 规则找「谁打的 mark」**：两个节点的 tailscaled 都是 netfilter off
+（`tailscale debug prefs` 的 `NetfilterMode: 0`），一条 netfilter 规则都不装，但照样装 ip rule。⚠️ 只有 homelab
+在 playbook 里写死了 `--netfilter-mode=off`；oracle 的 playbook 没写，重建 oracle 时会拿到默认的 on。
 
 **修法**：5200（早于 5210）把 `100.64.0.0/10` 钉死到 table 52，对所有 pod 一次性免疫。安全：
 `netfilter-mode=off` 下没有任何东西会合法设置 `0x80000`，5210–5250 在这里只会误伤。⚠️ 别改用「给中签的
@@ -184,11 +185,16 @@ flush 全部 iptables 表，连 Cilium 的 masquerade 链一起清，pod 出站�
 |-------------|------|---------------|
 | `tag:oracle` + meirongdev@gmail.com | node0 | 10.0.0.26/32 |
 | meirongdev@gmail.com（**无 tag**） | k8s-node | 无（不许通告） |
+| `tag:homelab` | k8s-worker-106 | 无（不许通告） |
 | meirongdev@gmail.com | pve | 10.10.10.0/24, 192.168.50.0/24（控制台手工批准） |
 
 ⚠️ `k8s-node` 某次重注册时没带 `tag:homelab`，是用户设备，按 tag 的 autoApprovers 匹配不到它，所以 ACL
 在 node0 那条路由的 autoApprovers 里保留了用户账号。ACL（`tailscale/terraform/main.tf`）：成员与两个 tag
 都能访问 `*:*`。
+
+☠️ **worker 是 tagged 设备，看不见共享进来的 DGX**（下节同一个机制，`tailscale status` 里 0 台 Spark；k8s-node
+是用户设备，看得见）。worker 没有 taint，普通负载会被调度上去，所以连 DGX 的负载必须留在 k8s-node：LiteLLM
+用 `nodeSelector` 钉控制面，jobs-sg 与 open-notebook 靠 local-path 卷的节点亲和间接钉住。新加连 DGX 的负载照此办理。
 
 ### ☠️ Tagged devices cannot reach *shared* nodes
 
@@ -210,7 +216,7 @@ homelab k8s-node → curl 100.97.87.120:8888/v1/models   → 200
   （另含 `cluster.id` 冲突与 DERP-only 2.28 MB/s 链路）。
 - ⚠️ 对共享节点 `tailscale ping` 成功时真实 TCP 可能照样失败（对 homelab `:32379` 验证过）：它是路径层探测，
   不经 ACL 包过滤，别拿它当端口可达的证据。
-- homelab 消费 DGX 用普通 Service + 手写 `Endpoints` 指向 Spark 的 Tailscale IP，不涉及 CNI。
+- homelab 消费 DGX 是各负载按 Spark 的 Tailscale IP 直连（如 LiteLLM 的 `api_base`），不涉及 CNI；只有 k8s-node 上的 pod 连得到，见上节。
 - ⚠️ **把 node0 去 tag 不是小改动**：OAuth client 只能创建 tagged 设备，node0 用的是 `tags = ["tag:oracle"]`
   的预授权 key。改用户设备要用户 key 重认证，期间掉出 tailnet（ClusterMesh underlay 断）；用户设备有
   **180 天 key 过期**，必须到控制台关掉，漏了就是几个月后静默掉线。autoApprovers 不受影响
@@ -257,8 +263,9 @@ kubectl --context k3s-homelab run t1 --rm -i --restart=Never --image=busybox:1.3
 kubectl --context oracle-k3s  run t2 --rm -i --restart=Never --image=busybox:1.36 -- ping -c3 -s 1202 $HL
 
 # 节点 IP + NodePort 的生产路径（在对应的源节点上跑）
-nc -z 100.107.166.37 6443    # homelab → oracle K3s API (ArgoCD)
+nc -z 100.94.186.7  6443     # oracle → homelab K3s API (ArgoCD)
 nc -z 100.94.186.7  31090    # oracle → homelab Prometheus remote-write
+nc -z 100.107.166.37 31080   # homelab → oracle Loki
 ```
 
 ## ClusterMesh Reconnect After Rebuild
@@ -272,8 +279,8 @@ just connect-clustermesh 100.94.186.7:32379 100.107.166.37:32379
 
 原因：重建的集群会自签新 Cilium CA；残留的 `cilium-clustermesh` remote config 可能让 `kvstoremesh` 断着而
 节点级 ClusterMesh 仍显示 connected；本环境必须 `--allow-mismatching-ca`，把对端 CA 追加进信任 bundle 而不是
-拒掉。健康输出必须同时有 `All 1 nodes are connected to all clusters` 与
-`All 1 KVStoreMesh replicas are connected to all clusters`。
+拒掉。健康输出（`cilium clustermesh status --context <ctx>`）必须同时有 `All N nodes are connected to all clusters`
+（homelab 双节点是 2，oracle 是 1）与 `All 1 KVStoreMesh replicas are connected to all clusters`。
 
 ### 两个 secret，别把正常的当成配错了
 
@@ -354,6 +361,9 @@ just apply   # 生成新密钥，已在线的节点不受影响
 cd k8s/ansible
 just setup-tailscale $(cd ../../tailscale/terraform && just homelab-authkey)
 
+cd k8s/ansible   # worker 用单独一把 key
+just setup-tailscale-worker $(cd ../../tailscale/terraform && just homelab-worker-authkey)
+
 cd cloud/oracle/ansible
 just setup-tailscale $(cd ../../../tailscale/terraform && just oracle-authkey)
 ```
@@ -369,7 +379,8 @@ just setup-tailscale $(cd ../../../tailscale/terraform && just oracle-authkey)
    ```
 2. **`tailscale up --authkey=...` 无输出挂住**，`tailscale status` 报 `node nodekey:... already exists`：旧 key
    还注册在控制面上，新 auth key 盖不掉。清本地状态当新设备注册：
-   `just setup-tailscale <authkey> -e tailscale_force_reregister=true`，等价于节点上
+   `cd k8s/ansible && ansible-playbook playbooks/setup-tailscale.yaml -e tailscale_authkey=<key> -e tailscale_force_reregister=true --private-key ~/.ssh/vgio`
+   （`just setup-tailscale` 只收一个参数，带不上 `-e`；oracle 在 `cloud/oracle/ansible` 下同样写法），等价于节点上
    `systemctl stop tailscaled && rm -rf /var/lib/tailscale && systemctl start tailscaled` 后重跑 `tailscale up`。
 3. **`tailscale up` 被中断，`--accept-routes` 没生效**（`AllowedIPs` 有对端路由，`ip route show table 52` 没有）：
    在该节点上 `tailscale set --accept-routes`。

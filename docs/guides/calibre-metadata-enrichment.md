@@ -145,11 +145,10 @@ D 类那条判据不能省：本库尾括号有三种互斥含义（作者名 / 
 `calibre-metadata-llm`：只用于**外部数据库里根本没有**的书：自出版、Kindle 独占、
 zine（如 wizardzines）。前三层都查不到它们，因为它们客观上不在任何公开书目库里。
 
-**前置：DGX vLLM 必须活着，且跨集群入口已恢复。** oracle 直连不到 DGX，此前走
-`dgx-proxy`（**2026-08-08 已随网关退役**，`calibre-metadata-llm` 已 suspend，
-其 `LLM_URL` 曾指向已随网关退役的 dgx-proxy）。恢复步骤：LiteLLM 网关落地 →
-把 `calibre-metadata-llm` 的 `LLM_URL` 指到新网关 → 解除 suspend → 先跑一轮
-`DRY_RUN=1`（见下节）。**入口没恢复前不要直接 create job**，这条链路跑不了。
+**前置：DGX 必须活着。** oracle 直连不到 DGX，作业经 homelab 的 LiteLLM 网关（tailnet NodePort
+`100.94.186.7:31400`）调用，2026-08-29 起已接通（见 `metadata-llm.yaml` 文件头）。`calibre-metadata-llm`
+是挂起的手动模板（`suspend: true` 是设计如此），用 `create job --from` 派生；第一次跑或改了依赖后先跑一轮
+`DRY_RUN=1`（见下节）。
 
 原委见 [reference/tailscale-network.md](../reference/tailscale-network.md)
 的「Tagged devices cannot reach shared nodes」。

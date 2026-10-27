@@ -1,6 +1,6 @@
 # Homelab Roadmap
 
-> Last updated: 2026-10-02
+> Last updated: 2026-10-28
 > 本文只回答两件事：**还剩什么没做**，和**为什么不做**。做过什么在
 > [CHANGELOG.md](CHANGELOG.md)（2026-09-02 拆出，原因见那里）。
 > **实施细节不写在这里**：每条压到一句话，展开看链接指向的 `reference/`（事实）、
@@ -39,7 +39,7 @@
 
 ### 已知问题（不阻塞，无人认领）
 
-- **ClusterMesh 是纯待命能力，缺自愈**（监测缺口已闭环）。2026-08-05 曾静默断开约一个月，
+- **ClusterMesh 是纯待命能力，缺自愈**（监测缺口已闭环）。2026-08-05 曾静默断开（可证窗口约 2 天，早先「约一个月」是误判），
   根因是 apiserver up-but-stuck 且不自愈，配置从未丢过；重建靠
   `just connect-clustermesh <homelab-ts>:32379 <oracle-ts>:32379`。告警兜底与 oracle 侧 peer
   固化均已补齐。仍未做的是自愈：两集群 `service.cilium.io/global` Service 都是 0，

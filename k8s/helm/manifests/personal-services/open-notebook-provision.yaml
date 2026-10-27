@@ -42,13 +42,14 @@ data:
     PW = os.environ["OPEN_NOTEBOOK_PASSWORD"]
 
     # ---- 期望状态（改这里 + git push = 改配置）----
-    # api_key 都是 "dummy"：vLLM 与 OMLX 均未开启鉴权，esperanto 只是需要非空值。
+    # api_key 都是 "dummy"：vLLM 不设鉴权，OMLX 0.7 起有 key 但开着 allow_unauthenticated_inference；
+    # esperanto 只是需要非空值。
     CREDENTIALS = [
-        # ⚠️ 凭据名 `dgx-vllm` 与引擎已经名实不符（2026-09-19 起是 SGLang，不是 vLLM），
+        # ⚠️ 凭据名 `dgx-vllm` 只是个标识符（2026-09-19 那一栈曾是 SGLang，2026-09-30 起又是 vLLM），
         #    **刻意不改名**：本 provisioner 只增不删，改名只会在 UI 里多出一条新凭据、
         #    旧那条变成没人用的死条目，还得手动删。它只是个标识符，不参与路由。
-        # ☠️ base_url 这次**必须**改：上游从 k3s 的 :8000 换到了 docker 的 :8888，
-        #    旧端口已经不监听（connection refused）。
+        # ☠️ DGX 换栈时 base_url 的端口可能跟着变（:8000 / :8888 都被不同的栈用过，旧端口会
+        #    直接 connection refused）。现状 :8000，见 docs/reference/litellm-gateway.md「DGX 主力栈」。
         {"name": "dgx-vllm", "provider": "openai_compatible",
          "modalities": ["language"],
          "api_key": "dummy", "base_url": "http://100.97.87.120:8000/v1"},

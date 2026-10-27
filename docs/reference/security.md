@@ -33,7 +33,7 @@
 | 5 | 准入：策略即代码 | Kyverno（3 Audit + 1 Enforce，§5.2）| ✅ 生产 | `values/kyverno.yaml`, `manifests/kyverno-policies/` | homelab |
 | 6 | 供应链/CVE | Trivy Operator（运行中镜像）| ✅ 生产 | 两集群各自的 `values/trivy-operator.yaml` | 双 |
 | 7 | CIS 合规 | kube-bench（周巡检，钉 control-plane；worker node 级未覆盖，有意接受） | ✅ 生产 | `manifests/kube-bench/kube-bench.yaml` | homelab |
-| 8 | 节点加固 | k3s `protect-kernel-defaults` + sysctl | ⏳ 待重启生效 | `k8s/ansible/playbooks/setup-k3s.yaml` | homelab |
+| 8 | 节点加固 | k3s `protect-kernel-defaults` + sysctl | ✅ 生效（两节点 k3s 都在配置之后重启过，2026-10-28 核） | `k8s/ansible/playbooks/setup-k3s.yaml` | homelab |
 | 9 | 网络 | Cilium NetworkPolicy + Hubble 可见性 | 🟡 仅可见性 | Cilium（默认拒绝刻意延后） | 双 |
 | 10 | 运行时检测 | Tetragon(homelab) / Falco+Falcosidekick(oracle) | ✅ 已实现 | `values/{tetragon,falco}.yaml` | 双（分别选型） |
 | 11 | 备份/恢复 | restic（106 ZFS 加密仓库）| 🟡 Phase1（每夜备份 + 恢复演练通过；**离站副本待做**）| `runbooks/backup-recovery.md` | 双 |
@@ -113,7 +113,7 @@
 - 系统 ns 由默认 resourceFilters 排除（CNI/控制面绝不 gate）；ClusterPolicy 的服务端默认字段经 App `ignoreDifferences` 消除 OutOfSync。
 
 ### 5.3 LimitRange 资源护栏
-- `manifests/namespace-guardrails/namespace-guardrails.yaml`（App `namespace-guardrails`）给轻量应用 ns（external-secrets/zitadel/argocd/vault/default）注入默认 `requests`(cpu25m/mem64Mi) + `limits.memory` 1Gi（宽松，避免 request>limit 被拒；不设 cpu limit，避免节流）。personal-services 用自带的 `personal-services-limits.yaml`。
+- `manifests/namespace-guardrails/namespace-guardrails.yaml`（App `namespace-guardrails`）给轻量应用 ns（external-secrets/vault/default；zitadel、argocd 已迁去 oracle）注入默认 `requests`(cpu25m/mem64Mi) + `limits.memory` 1Gi（宽松，避免 request>limit 被拒；不设 cpu limit，避免节流）。personal-services 用自带的 `personal-services-limits.yaml`。
 - 作用：未声明资源的容器不再无界；LimitRanger 先于 Kyverno 注入默认值，新 Pod 自动满足 require-requests-limits。monitoring/kube-system 刻意不加，避免拒绝风险。
 
 ## 6. 供应链与漏洞扫描 (Supply chain / CVE) — Trivy Operator
@@ -124,7 +124,7 @@
 
 ## 7. CIS 合规与节点加固
 
-- **kube-bench**：每周日 05:00 UTC CronJob，k3s 基准（`k3s-cis-*`，通用基准会满屏假 FAIL），结果 stdout→Loki（`{namespace="kube-bench"}`）。专用 ns 标 privileged（hostPID + host 挂载）。
+- **kube-bench**：每周日 05:00 UTC CronJob，k3s 基准（`k3s-cis-*`，通用基准会满屏假 FAIL），结果 stdout→Loki（`{k8s_namespace_name="kube-bench"}`，标签是 OTel 风格，写 `namespace=` 查不到）。专用 ns 标 privileged（hostPID + host 挂载）。
   - ⚠️ 必须钉 control-plane（`nodeSelector: node-role.kubernetes.io/control-plane`）：控制面检查项只在控制面节点上有意义，排到 `k8s-worker-106` 会「看起来通过」而实际没审控制面。
   - 残余缺口（有意接受）：worker 的 node 级检查项（kubelet 文件权限等）无覆盖。要补就改 DaemonSet 式逐节点审计，或给 worker 加一个 `--targets node` 的第二 CronJob。
 - **节点加固**（`setup-k3s.yaml`）：先落盘 `/etc/sysctl.d/31-k8s-protect-kernel.conf`，再在 config.yaml 开 `protect-kernel-defaults:true`。**现网需维护窗口 `systemctl restart k3s` 才生效**。API 审计日志刻意延后（磁盘紧）。
@@ -139,7 +139,7 @@
 
 eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异常外联），按集群硬件选型：
 
-- **homelab → Tetragon**（`values/tetragon.yaml`，ns `tetragon`，Helm App）。Cilium 原生，内核态过滤只上报命中事件，省 CPU。v1 = 默认进程 exec/exit 可见性 → `export-stdout` → OTel → Loki（按 pod=tetragon 查）+ Prometheus 指标（ServiceMonitor 带 release 标签）。TracingPolicy 与基于其指标的告警未做（§11 第 1 条）。
+- **homelab → Tetragon**（`values/tetragon.yaml`，ns `tetragon`，Helm App）。Cilium 原生，内核态过滤只上报命中事件，省 CPU。v1 = 默认进程 exec/exit 可见性 → `export-stdout` → OTel → Loki（`{k8s_namespace_name="tetragon"}`）+ Prometheus 指标（ServiceMonitor 带 release 标签）。TracingPolicy 与基于其指标的告警未做（§11 第 1 条）。
   - ☠️ **进程事件带完整 argv，命令行里的密钥会进 Loki**。密钥改用 env，或 curl 的 `--variable %VAR` + `--expand-*`（curl ≥ 8.3，命令行只剩 `{{VAR}}`）。exit 事件也带 argv，Tetragon 重启时还会给存量进程补发 exec 事件（`flags=procFS`），所以长期运行的进程同样会漏。
   - `redactionFilters` 兜底 6 条：bot token / `-u` 口令 / Bearer / URL 里的 `user:pass@` / `-token`、`--token` 的参数值 / `…Token:` 请求头的值。兜底不是正解：带空格且加引号的口令只能打掉一半。
   - oracle 没有 Tetragon，argv 只在 `/proc` 可见、不进 Loki，写法同样照改。泄露经过与未轮换项见 [records/2026-10-24](../records/2026-10-24-intrusion-sweep-argv-secrets-in-loki.md)。
@@ -169,7 +169,7 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 | 镜像用 :latest | Kyverno disallow-latest-tag（digest-aware） | ✅ Enforce |
 | 配置劣化（无 limits/probes/不可信仓库） | Kyverno Audit + LimitRange 护栏 | 🟡 Audit + 护栏 |
 | 镜像已知 CVE | Trivy（HIGH/CRITICAL）→ Telegram + 看板 | ✅ |
-| 节点/控制面配置不合规 | kube-bench 周巡检 + protect-kernel-defaults | 🟡 待重启 |
+| 节点/控制面配置不合规 | kube-bench 周巡检 + protect-kernel-defaults | ✅ |
 | 容器内运行时入侵 | Tetragon（homelab，进程可见性→Loki）/ Falco（oracle，规则→Loki+Telegram） | ✅ v1 可见性，调优持续 |
 | 东西向横向移动 | 网络默认拒绝 | ❌ 延后（仅 Hubble 可见性） |
 | 数据丢失 | restic 双集群 CronJob（Vault raft / pg_dump / sqlite）→ 106 ZFS + 恢复演练通过 | 🟡 本地单副本，无离站 |
@@ -182,7 +182,7 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 4. **Kyverno Audit→Enforce**：逐条清理存量违规后提升；restrict-image-registries 最久保持 Audit。
 5. **离站备份**：restic 仓库只有 106 本地 ZFS 单副本，未同步到云端（OCI always-free / B2）。见 [backup-recovery.md](../runbooks/backup-recovery.md)、[ROADMAP.md](../ROADMAP.md)。
 6. **oracle 节点 OS 层防火墙口子过多**（未处理）：firewalld `public` zone 开着 `10250 / 2380 / 4240 / 4244 / 32379 / 16443 / 25000 / 19001 / 12379 / 10248-10259 / 7800 / 1338 / …`，多为早期 CNI（`cali+`、`flannel.1`、`cni0` 仍挂在 `trusted` zone）与 microk8s 试验残留，只靠 OCI Security List 一层挡。收口前逐端口确认归属：`enp0s3` 也在 `public` zone，误删可能切断节点到 API 的路径；`firewall-cmd --reload` 会冲掉 Cilium iptables（[records/2026-10-01](../records/2026-10-01-oracle-firewalld-flushes-cilium-iptables.md)）。在那之前**别往 Security List 加任何 `0.0.0.0/0` 规则**。背后真在监听的 3 个手工遗留（Dante SOCKS `:10080`、WireGuard `wg0 :51420`、root 的 node_exporter `:19898`）已停用，文件在节点 `/root/decommissioned-2026-10-24/`（0700）（[records/2026-10-24](../records/2026-10-24-intrusion-sweep-argv-secrets-in-loki.md)）。
-7. **Nakama 管理控制台裸挂公网**（有意接受）：`nakama-console.meirong.dev` → console(7351)，能看/删账号、改任意存储、调任意 RPC，只有 Nakama 自带口令（无 ZITADEL / oauth2-proxy / Cloudflare Access），是唯一公网可达却不过第 2 层身份的管理面（Grafana/ArgoCD/Vault 都在 OIDC 后面）。缓解：口令 32 字节随机（Vault `secret/homelab/nakama` → `console_password`），6 个带不安全默认值的 key 全已换掉。⚠️ 收紧要在 HTTPRoute（`k8s/helm/manifests/gateway/route-nakama-console.yaml`）前加 oauth2-proxy 或 Cloudflare Access，改口令不减暴露面。
+7. **Nakama 管理控制台裸挂公网**（有意接受）：`nakama-console.meirong.dev` → console(7351)，能看/删账号、改任意存储、调任意 RPC，只有 Nakama 自带口令（无 ZITADEL / oauth2-proxy / Cloudflare Access），是公网可达却不过第 2 层身份的管理面之一（另一个是 Timeslot `/admin/`，见第 10 条；Grafana/ArgoCD 在 OIDC 后面，Vault 用自带认证）。缓解：口令 32 字节随机（Vault `secret/homelab/nakama` → `console_password`），6 个带不安全默认值的 key 全已换掉。⚠️ 收紧要在 HTTPRoute（`k8s/helm/manifests/gateway/route-nakama-console.yaml`）前加 oauth2-proxy 或 Cloudflare Access，改口令不减暴露面。
 8. **git 历史里的旧对象**：公网 IP 与两个已失效的 ZITADEL 凭据已从全历史抹除并 force-push，但 GitHub 上重写前的悬空对象**仍可按 commit SHA 访问**，直到向 GitHub Support 申请 GC。替代手段是轮换 OCI 公网 IP，让旧值失去意义。
 9. **公网集群上的 ArgoCD 持有 homelab 的 cluster-admin**（有意接受）：控制面在暴露面最大的 oracle-k3s，经 ESO 从 Vault 拿 homelab 的 `argocd-manager` 凭据，ArgoCD 被攻破 = 两个集群一起丢。AppProject 按集群拆分（[决策](../decisions/argocd-project-per-cluster.md)）只收窄「误投」，不收窄凭据；真收窄要给 homelab 侧 SA 降权到实际需要的资源类型，另评。现有缓解：ArgoCD 在 ZITADEL OIDC 之后、token 在 Vault、oracle 节点有 firewalld。
 10. **Timeslot 管理面只有 Basic Auth**：`slot.meirong.dev/admin/` 无 OIDC（[app-native-oidc-sso](../decisions/app-native-oidc-sso.md) 的已知代价），口令是 Vault `secret/oracle-k3s/timeslot` 的 32 位随机值，经 ESO 下发（原为公开 chart 默认值，2026-09-03 已修，helm 遗留的 `timeslot-secrets` 已删）。☠️ 别用 `--set x=$(vault kv get …)` 给 helm 喂密钥：路径不存在时 shell 给空串，helm 照样成功、chart 用默认值兜底，零报错；这类配置只能读一次线上值来确认生效。

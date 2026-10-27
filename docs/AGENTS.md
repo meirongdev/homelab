@@ -35,7 +35,7 @@ docs/                          # 见下方「Documentation Rules」
 | `just deploy-argocd-apps` | ☠️ destination 未重写时，会把 homelab 全套负载装到 oracle |
 | `just deploy-argocd` | ⚠️ 控制面在 oracle-k3s；本配方不含 Application 注册 |
 | `just deploy-gateway-api-crds` | ⚠️ 升 Cilium 必跑（见下 Ingress 条）|
-| `just connect-clustermesh <homelab-ts>:32379 <oracle-ts>:32379` | 需两个端点参数 |
+| `just connect-clustermesh <homelab-ts>:32379 <oracle-ts>:32379` | ☠️ 任一侧 deploy-cilium 后必跑 |
 
 - **GitOps**：`git push` → ArgoCD 3 分钟轮询自动同步，**不可手动 `kubectl apply` 覆盖**。
   LGTM/otel/external-dns/backup 全 GitOps。
@@ -62,8 +62,8 @@ docs/                          # 见下方「Documentation Rules」
   `Required GatewayAPI resources are not found` 是故障信号，有输出就是坏了；
   健康集群什么都不打（实测两集群皆无），所以「grep 得到」不能当健康证据。
   唯一的正向判据是新建一条 HTTPRoute 能拿到 `.status`（旧路由 curl 200 也不算）。→ [records/2026-08-11-gateway-api-crd-stall.md](records/2026-08-11-gateway-api-crd-stall.md)
-- **跨集群**：Tailscale 只做节点级 underlay（各节点自己的 /32 + NodePort），pod↔pod 走
-  ClusterMesh VXLAN。⚠️ `AdvertiseRoutes` 只该有本节点 /32（Pod CIDR 子网路由 2026-07-07 已移除）。
+- **跨集群**：Tailscale 只做节点级 underlay（节点 IP + NodePort），pod↔pod 走
+  ClusterMesh VXLAN。⚠️ 只有 node0 通告自己的 /32，k8s-node/worker 什么都不通告（会投毒路由）。
   → [tailscale-network.md](reference/tailscale-network.md)
 - **外部流量**：Internet → Cloudflare DNS → Tunnel → Cilium Gateway → Service
 - ☠️ **跨仓库边界（2026-08-23）**：`stack.meirong.dev` 不是本仓库的东西。它是
@@ -135,7 +135,7 @@ GitOps/App `argocd-app-patterns.md` · 入口/DNS `networking-ingress.md` · 跨
 **H2** Application 的 `path` 与 `destination` 同集群 · **H3** ReferenceGrant 声明 `v1beta1` ·
 **H4** 新增 PVC 必须有备份归属 · **H5** Namespace 必须显式写 PSA 等级（漏写 = 静默吃默认
 `privileged`）。另有 `scripts/check-embedded-scripts.py` 的 **E1**：ConfigMap 内嵌的脚本必须与
-同目录的 `.py` 源一致，且 pod 模板带它的 checksum 注解。改了 `.py` 就得在 `k8s/helm/` 跑
+`.py` 源一致，且 pod 模板带它的 checksum 注解。改了 `.py` 就得在 `k8s/helm/` 跑
 `just gen-embedded-scripts`，否则要么部署的是旧副本、要么 ConfigMap 变了 **pod 根本不重启**。
 规则全文 + 静态查不出、只能靠人的那几类 →
 [manifest-safety-checks.md](reference/manifest-safety-checks.md)。

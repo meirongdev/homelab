@@ -18,7 +18,8 @@ metadata:
   namespace: litellm
 data:
   # ⚠️ api_base 必须带 /v1 后缀 —— LiteLLM 不会自动补。
-  # api_key: dummy 不是机密（DGX SGLang 与 Mac OMLX 都忽略鉴权，"any token works"），因此可留在 git。
+  # api_key: dummy 不是机密（DGX vLLM 不设鉴权；Mac OMLX 0.7 起配了 key，但开着
+  # allow_unauthenticated_inference，推理接口不验 key），因此可留在 git。
   # ☠️ SGLang 与 vLLM 在这里有个要命的差别：**SGLang 接受任意 model 名并原样回显**
   #    （上游 gotcha #10），vLLM 才会 404。所以「请求成功了」不能证明别名指对了栈，
   #    判据只能是 `/v1/models` 报的 served name。
@@ -26,15 +27,11 @@ data:
   config.yaml: |
     model_list:
       # ── DGX（主；custom_dgx/ 前缀是历史约定，保留）──
-      # 2026-09-19 DGX 换栈：Qwen3.8-Flash-Next → Qwen3.8-27B-Uncensored NVFP4 + SGLang
-      # + DFlash2 投机解码，**单节点**（只用 S1，S2 完全空闲）。
-      # ☠️ 这次**端点也变了**：k3s 的 :8000 → docker 的 :8888，且 :8000 已经完全不监听
-      #    （实测 connection refused，不是 404）。上游仓库的
-      #    nv-dgx-spark/docs/stack-switch-cn.md §3.1 记着同一个坑：只改模型名、
-      #    不改 base_url，等于把消费方指向一个空端口。
-      # ⚠️ 端口区分不了后端（:8888 被三个栈轮流用过），改之前先
-      #    `curl -s http://100.97.87.120:8000/v1/models` 看 served name 再动手。
-      # max_model_len 仍是 262144（与上一栈相同，这次长上下文规划不用重算）。
+      # 现状（2026-09-30 起）：Qwen3.8-Flash-Next，vLLM 双机 TP=2，端点 100.97.87.120:8000。
+      # 历次换栈与各栈参数见 docs/reference/litellm-gateway.md「DGX 主力栈」。
+      # ☠️ 换栈时端口可能跟着变（:8000 / :8888 都被不同的栈用过，旧端口会直接不监听），
+      #    只改模型名不改 api_base = 把消费方指向空端口。端口也区分不了后端，改之前先
+      #    `curl -s http://100.97.87.120:<port>/v1/models` 看 served name 再动手。
       - model_name: custom_dgx/qwen3.8-flash-next-tp2
         litellm_params:
           model: openai/qwen3.8-flash-next-tp2
@@ -46,7 +43,7 @@ data:
       #    fallback，拿裸字符串 `mac/ornith` 去找 provider，于是主上游一挂就回
       #    `LLM Provider NOT provided ... You passed model=mac/ornith` 的 500，
       #    而不是切到 Mac。**连接级失败与参数级失败表现完全一样**，所以过去看到这条报错
-      #    很容易误判成"Mac 睡着了"。复现与对照见 decisions/litellm-llm-gateway.md 的 2026-09-19 修订。
+      #    很容易误判成"Mac 睡着了"。复现与对照见 docs/records/2026-09-19-litellm-fallbacks-never-active.md。
       # 与裸引擎同名是刻意的（下游改 base_url 即可绕过网关），代价是换模型时两边都得动。
       # ☠️ 改别名必须同步改 Postgres 里各虚拟 key 的 models 白名单，否则「清单正确 + Synced + 调用全 403」。
       #    2026-09-19 实测受影响的是 **16 把里的 8 把**（与 09-03 那次同一数量级）。
@@ -149,7 +146,7 @@ spec:
         #    ⇒ ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按**旧路由表**继续跑。
         #    2026-08-25 实际踩过一次（改了 mac/ornith 后必须手动 rollout restart 才生效）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py 的 STAMP_ONLY），别手改。
-        checksum/config: "0fdfb8082afe27bf"
+        checksum/config: "7c6d1b9e8acdde43"
         # 同理，但盯的是 codex_compat.py（litellm-codex-compat ConfigMap）：
         # 也是 subPath 挂载 + 只在启动时 import，改了不重启就是静默跑旧代码。
         checksum/codex-compat-py: "e5da4a39d90243d4"
@@ -165,7 +162,8 @@ spec:
         node-role.kubernetes.io/control-plane: "true"
       containers:
         - name: litellm
-          # litellm/litellm:v1.94.1 @ 2026-08-01（官方 Python proxy；Rust 网关当前仅 /v1/realtime）
+          # 官方 Python proxy（Rust 网关当前仅 /v1/realtime）。这个 digest 是 litellm 1.103.1
+          # （2026-10-28 在 pod 内用 importlib.metadata 核过；旧注释写的 v1.94.1 是错的）。
           image: litellm/litellm@sha256:df15400b5b80925c45d3fd53f8f7a6c0eaa8a25a86833e1b358002e129018943
           args: ["--config", "/app/config.yaml", "--port", "4000"]
           ports:

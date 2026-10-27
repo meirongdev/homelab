@@ -1,16 +1,16 @@
 # Backup & Recovery Runbook
 
-> Last updated: 2026-09-09
+> Last updated: 2026-10-28
 > 设计与执行: [../plans/2026-07-06-storage-local-migration-and-backup-redesign.md](../plans/2026-07-06-storage-local-migration-and-backup-redesign.md)
 >
 > **触发条件**：备份/恢复运维（含月度恢复演练）、或数据丢失/损坏后需要从 restic 恢复。
-> **成功判定**：恢复后数据可用（按 § 恢复逐类验证）；演练则 8 条判据全过（见「演练失败怎么办」）。
+> **成功判定**：恢复后数据可用（按 § 恢复逐类验证）；演练则全部判据通过（判据清单以 `restore-drill-script.yaml` 为准，见「演练失败怎么办」）。
 > **回滚**：豁免：本文本身就是恢复类操作，恢复到哪个快照由你选的快照决定，无额外回滚路径。
 
 ## Status
 
 **🟢 restic 备份已上线并验证（2026-07-06，Phase 1）。** 双集群每夜逻辑 dump → 106 ZFS 加密仓库 `881fb124bf`。恢复演练通过（Vault snapshot + 两 PG dump + sqlite integrity_check 全 OK）。
-**月度恢复演练已自动化（2026-08-13）**：`restic-restore-drill` CronJob 每月 1 日 04:00 CST 真恢复 + 跑 8 条判据，
+**月度恢复演练已自动化（2026-08-13）**：`restic-restore-drill` CronJob 每月 1 日 04:00 CST 真恢复 + 跑全部判据，
 见下方「演练失败怎么办」与 [reference/storage.md](../reference/storage.md#月度恢复演练2026-08-13-上线)。
 **离站（Phase 5）仍待做**：当前仅本地仓库（raidz1 + sanoid 保护），无异地副本；屋内灾难仍是敞口，属计划 Phase 5。
 

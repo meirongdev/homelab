@@ -34,7 +34,9 @@ oracle 独有的文件连后缀都没有，「values 属于哪个集群」纯靠
 ⚠️ **manual-helm 的例外**（改 values 必须手动 `helm upgrade`，**提交 ≠ 部署**）：
 Cilium（`just deploy-cilium`）· Vault（`just deploy-vault`）· ESO（`just deploy-eso`）·
 ArgoCD 本体（`just deploy-argocd`，装到 oracle-k3s）。
-判断某个东西归谁管：`kubectl -n <ns> get secret -l owner=helm`，有 Helm release 存档的就是 manual-helm。
+判断某个东西归谁管：看对象的 `argocd.argoproj.io/tracking-id` 注解，非空即 ArgoCD 管。别用
+`get secret -l owner=helm`：从 manual-helm 采纳进 ArgoCD 的 release（如 kube-prometheus-stack）刻意留着
+Helm 存档，会被误判成 manual-helm。命令见 [argocd-app-patterns.md](../../docs/reference/argocd-app-patterns.md)。
 
 ## 常用命令
 

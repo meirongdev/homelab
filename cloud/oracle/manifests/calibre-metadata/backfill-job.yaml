@@ -9,7 +9,7 @@
 # 最后分批推进 LIMIT。用裸 Job 等于每改一次就要 `kubectl delete job` —— 而删掉重建
 # 会让它**从头再跑一遍**。CronJob 的 jobTemplate 是可变的，改完 git push 即可。
 #
-# suspend: true —— 永不自动触发。每次要跑就手动派生一个 Job：
+# 每周日 06:00 UTC 自动跑新书（见下方 suspend/schedule）。要临时多跑一轮就手动派生一个 Job：
 #   kubectl --context oracle-k3s -n personal-services create job backfill-dry-1 \
 #     --from=cronjob/calibre-metadata-backfill
 # 看日志：

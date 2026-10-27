@@ -2,12 +2,12 @@
 #
 # 为什么非要补：2026-08-05 缩容验收时发现 ClusterMesh 双向断开，而**没有任何告警**，
 # 事后连"断了多久"都查不出来（Prometheus 里 `cilium_kvstoremesh_*` 一条都没有）。
-# 详见 docs/reference/tailscale-network.md 与 ROADMAP 已知问题。
+# 详见 docs/records/2026-08-05-clustermesh-up-but-stuck.md。
 #
 # 为什么抓 kvstoremesh 而不是 cilium-agent：
 #   cilium-agent 的 `cilium_clustermesh_remote_cluster_readiness` 需要 `prometheus.enabled`，
-#   那要对 Cilium 做 helm upgrade —— 而 oracle 侧的 ClusterMesh peer 配置**没有固化在
-#   仓库里**（见 tailscale-network.md 的警告），升级会把它抹掉、且不报错。风险不值得。
+#   那要对 Cilium 做 helm upgrade —— peer 的 endpoint 已固化在 values，但跨集群 CA 信任
+#   固化不了，升级会冲掉它、且不报错，之后必须重跑 connect-clustermesh（见 tailscale-network.md）。风险不值得。
 #   kvstoremesh 容器**本来就带** `--prometheus-serve-addr=:9964`（无需改 Cilium），
 #   而且它恰好就是 2026-08-05 真正断掉的那一跳（agent 只连本集群缓存）。
 #

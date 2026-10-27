@@ -38,7 +38,7 @@ config-ssh-key:
 install-node-exporter:
     ansible-playbook playbooks/install-node-exporter.yaml
 
-# Install Tailscale daemon and join tailnet as subnet router (advertises 10.42/10.43)
+# Install Tailscale daemon and join tailnet; advertises nothing (k8s-node must not advertise its own /32)
 # Usage: just setup-tailscale <authkey>
 setup-tailscale authkey:
     ansible-playbook playbooks/setup-tailscale.yaml \
