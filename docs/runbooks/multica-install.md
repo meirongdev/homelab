@@ -67,6 +67,7 @@ vault kv put secret/homelab/multica \
   jwt_secret="$(openssl rand -hex 32)" \
   postgres_password="$(openssl rand -hex 16)" \
   vcs_secret_key="$(openssl rand -base64 32)" \
+  telegram_secret_key="$(openssl rand -base64 32)" \
   resend_api_key="" \
   smtp_host="smtp.gmail.com" \
   smtp_port="465" \
@@ -85,6 +86,10 @@ property 时，**整个 Secret 都不生成**，会连 `JWT_SECRET` 一起没掉
   base64 解码后恰好 32 字节；hex 串只含合法 base64 字符，能解码但得 48 字节，
   于是失败。而后端把**所有** LoadKey 错误都打成同一句
   `MULTICA_VCS_SECRET_KEY not set`，看着像 ESO 没注入。
+- **`telegram_secret_key` 同样是 `-base64 32`，而且要长期不变。** 它加密库里存着的
+  Telegram Bot token（2026-10-27 起，渠道本身 v0.4.31 起有）；丢了或换了，已连接的
+  每个 Bot 都得重连。☠️ 重建时 Vault 里已经有值就**别重跑上面这条**：`kv put` 是整份覆盖，
+  会给它和 `jwt_secret` 换上新值（后者让所有登录会话失效）。只补缺的 key 用 `kv patch`。
 - **`smtp_from_email` 必须等于 `smtp_username`。** Gmail 只接受认证账号本身（或已验证
   别名）当 From，所以这里写不了 `noreply@meirong.dev`；邮件是自己发给自己。
 - **`smtp_ehlo_name` 必须显式给。** 默认 EHLO `localhost` 被严格 relay 拒，而代码兜底是
