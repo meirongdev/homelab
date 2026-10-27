@@ -16,10 +16,10 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "homelab" {
   tunnel_id  = var.tunnel_id
 
   config = {
-    origin_request = {
-      no_tls_verify = true
-    }
-
+    # No origin_request.no_tls_verify, on purpose (removed 2026-10-27). The origin below is plain
+    # http://, so it never did anything; Cloudflare's eMudhra advisory (cloudflared >= 2026.10.2)
+    # explicitly warns against using it to paper over origin certificate errors. If an https://
+    # origin is ever added, fix its certificate instead of turning verification off.
     ingress = [
       {
         hostname = "*.meirong.dev"

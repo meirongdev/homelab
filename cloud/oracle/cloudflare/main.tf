@@ -16,10 +16,9 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "oracle" {
   tunnel_id  = var.tunnel_id
 
   config = {
-    origin_request = {
-      no_tls_verify = true
-    }
-
+    # No origin_request.no_tls_verify, on purpose (removed 2026-10-27) — same reasoning as the
+    # homelab tunnel in cloudflare/terraform/main.tf: the origin is plain http://, and the eMudhra
+    # advisory warns against turning off origin certificate verification.
     ingress = [
       {
         hostname = "*.meirong.dev"
