@@ -108,7 +108,8 @@ multica-daemon:
 
 # Studio 上的受限 Multica daemon：专用用户 multica，只读 kubeconfig，没有 git/ssh/Vault 凭据。
 # 四份凭据现取，写进 0600 临时 vars 文件传给 playbook（不上命令行，退出即删）。
-# 前置：Vault secret/homelab/multica → studio_claude_oauth_token（`claude setup-token` 生成）。
+# 模型默认只有本机 OMLX 的 Qwen；想加 Claude Code 就先在 Vault 放
+# secret/homelab/multica → studio_claude_oauth_token（`claude setup-token` 生成），再重跑。
 # 部署/升级 Studio 受限 Multica daemon（会问 Studio 登录用户 matstudio 的 sudo 密码，幂等）
 multica-studio:
     #!/usr/bin/env bash
@@ -118,9 +119,8 @@ multica-studio:
     MR_PAT="$(vault kv get -field=daemon_pat secret/homelab/multica)"
     MR_CLAUDE_TOKEN="$(vault kv get -field=studio_claude_oauth_token secret/homelab/multica 2>/dev/null || true)"
     if [ -z "$MR_CLAUDE_TOKEN" ]; then
-      echo "⚠️  Vault 里没有 secret/homelab/multica → studio_claude_oauth_token。" >&2
-      echo "    先 \`claude setup-token\`，再 \`vault kv patch secret/homelab/multica studio_claude_oauth_token=-\`（从 stdin 粘贴）。" >&2
-      exit 1
+      echo "ℹ️  Vault 里没有 studio_claude_oauth_token：不装 Claude Code，这台只跑 Qwen（本机 OMLX）。" >&2
+      echo "    以后要加：\`claude setup-token\` → \`vault kv patch secret/homelab/multica studio_claude_oauth_token=-\` → 重跑本配方。" >&2
     fi
     MR_KUBE_TOKEN="$(kubectl --context "$ctx" -n personal-services get secret multica-agent-token -o jsonpath='{.data.token}' | base64 -d)"
     MR_KUBE_CA="$(kubectl --context "$ctx" -n personal-services get secret multica-agent-token -o jsonpath='{.data.ca\.crt}')"

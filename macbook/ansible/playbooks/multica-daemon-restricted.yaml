@@ -9,8 +9,10 @@
 #   入口更多，所以凭据只给这些：
 #     ✅ homelab 只读 kubeconfig（SA multica-agent：view + 只读查 Prometheus，
 #        k8s/helm/manifests/personal-services/multica-agent-rbac.yaml）
-#     ✅ Claude Code 长效 OAuth token（`claude setup-token` 生成，个人 Pro 额度）
-#     ✅ Qwen Code → 本机 OMLX（allow_unauthenticated_inference，无密钥）
+#     ✅ Qwen Code → 本机 OMLX 的 Qwen3.8-27B（allow_unauthenticated_inference，无密钥）
+#     ✅（可选）Claude Code 长效 OAuth token（`claude setup-token` 生成，个人 Pro 额度）。
+#        Vault 里没有 studio_claude_oauth_token 就不装 Claude Code，这台只跑 Qwen；
+#        以后补上 token 重跑即可。
 #     ✅ multica PAT（见下 ☠️）
 #     ❌ 没有 gh token / ssh key / Vault token / git 写权限 / oracle 集群
 #   ☠️ 已知并接受的缺口（2026-10-27 的选择）：PAT 是你自己账号的那把（Vault daemon_pat，
@@ -30,7 +32,7 @@
 #
 # 凭据由 justfile 从 Vault / 集群现取，经 0600 临时 vars 文件传进来（不上命令行）：
 #   mr_pat            Vault secret/homelab/multica → daemon_pat
-#   mr_claude_token   Vault secret/homelab/multica → studio_claude_oauth_token
+#   mr_claude_token   Vault secret/homelab/multica → studio_claude_oauth_token（可为空）
 #   mr_kube_token     Secret personal-services/multica-agent-token → token
 #   mr_kube_ca        同上 → ca.crt（保持 base64）
 #
@@ -61,13 +63,15 @@
     mr_tarball: "/tmp/multica-cli-{{ md_version }}-darwin-arm64.tar.gz"
     mr_stage: "/tmp/multica-cli-{{ md_version }}-restricted"
     as_mr: "sudo -u {{ mr_user }} -H"
+    mr_with_claude: "{{ (mr_claude_token | default('')) | length > 0 }}"
+    # sudo 不带上 /opt/homebrew/bin，而 qwen 是 `#!/usr/bin/env node` 脚本，得显式给 PATH。
+    mr_path: "{{ mr_home }}/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
   pre_tasks:
     - name: Require the credentials passed in by `just multica-studio`
       ansible.builtin.assert:
         that:
           - mr_pat | default('') | length > 0
-          - mr_claude_token | default('') | length > 0
           - mr_kube_token | default('') | length > 0
           - mr_kube_ca | default('') | length > 0
         fail_msg: 缺凭据。别直接跑本 playbook，用 `just multica-studio`（它从 Vault 和集群现取）。
@@ -225,9 +229,13 @@
     # 别的用户用不了，所以这个用户自己装一份。原生安装会自我更新，不钉版本。
     # qwen 不用装：/opt/homebrew/bin/qwen（ai-clis.yaml 的 qwen 组）对所有用户可执行。
     - name: Install Claude Code for the dedicated user (official native installer)
+      when: mr_with_claude | bool
       ansible.builtin.command: "{{ as_mr }} /bin/bash -c 'curl -fsSL https://claude.ai/install.sh | bash'"
       args:
         creates: "{{ mr_claude }}"
+        # sudo -u 沿用当前工作目录；它若落在已收成 0700 的 matstudio home 里，这个用户
+        # 读不到 cwd，安装脚本和 Node 都会直接报错。下面的 qwen 冒烟测试同理。
+        chdir: "{{ mr_home }}"
 
     - name: Point Qwen Code at the local OMLX
       # 与 matstudio 手写的那份同构（见 docs 里 mac-studio 的说明）；key 是占位符，
@@ -282,14 +290,21 @@
           current-context: homelab
       no_log: true
 
-    - name: Write the daemon env file (Claude Code OAuth token)
+    # 没配 Claude 时也写这个文件（runner 要 source 它）。⚠️ 从「有 token」改成「没 token」
+    # 时 Claude Code 本体不会被卸掉：daemon 仍会注册 claude runtime，但它没认证、跑不起来，
+    # 别把 agent 绑在它上面。
+    - name: Write the daemon env file (Claude Code OAuth token, if configured)
       ansible.builtin.copy:
         dest: "{{ mr_env_file }}"
         owner: "{{ mr_user }}"
         group: "{{ mr_user }}"
         mode: "0600"
         content: |
+          {% if mr_with_claude | bool %}
           CLAUDE_CODE_OAUTH_TOKEN={{ mr_claude_token }}
+          {% else %}
+          # Claude Code 未配置（Vault 里没有 studio_claude_oauth_token），这台只跑 Qwen。
+          {% endif %}
       no_log: true
       notify: reload restricted multica daemon
 
@@ -393,9 +408,30 @@
       changed_when: false
       failed_when: mr_peek.rc == 0
 
+    # daemon 冷启动第一轮 status 偶尔会把 qwen 列进 skipped（M2 上见过，下一轮心跳就正常），
+    # 所以重试着等它出现，而不是看一眼就判。
+    - name: Verify Qwen Code registered as a runtime
+      ansible.builtin.command: "{{ as_mr }} {{ mr_bin }} daemon status --output json"
+      register: mr_agents
+      changed_when: false
+      retries: 10
+      delay: 6
+      until: "'qwen' in ((mr_agents.stdout | default('{}') | from_json).get('agents') | default([]))"
+
+    # 整条链路实测一次：这个用户 → Qwen Code → 127.0.0.1:8000 的 OMLX → 回答。
+    # 配置写错、OMLX 没模型、权限不对，都只会在这里暴露（daemon 注册 runtime 时不调模型）。
+    - name: Smoke-test Qwen Code against the local OMLX as the dedicated user
+      ansible.builtin.command: "{{ as_mr }} env PATH={{ mr_path }} /opt/homebrew/bin/qwen -p '只回复两个字母：ok'"
+      args:
+        chdir: "{{ mr_home }}"
+      register: mr_qwen_smoke
+      changed_when: false
+      timeout: 180
+      failed_when: mr_qwen_smoke.rc != 0 or 'ok' not in (mr_qwen_smoke.stdout | lower)
+
     - name: Show which runtimes the daemon registered
       ansible.builtin.debug:
-        msg: "{{ (mr_status.stdout | from_json).get('agents') }}"
+        msg: "{{ (mr_agents.stdout | from_json).get('agents') }}"
 
   handlers:
     # bootout 是异步的：没等它退干净就 bootstrap 会报 "Bootstrap failed: 5"（同 multica-daemon.yaml）。
