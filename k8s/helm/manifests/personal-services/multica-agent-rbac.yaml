@@ -1,0 +1,71 @@
+---
+# Multica 受限 agent 的只读集群身份 —— Studio 上专用 macOS 用户 `multica` 的 kubeconfig 用它。
+# 生成 kubeconfig：macbook/ansible 的 `just multica-studio`（从下面那个 token Secret 现取）。
+#
+# ☠️ 为什么非得是独立身份：Multica 无人值守跑 agent（Claude Code 是
+#    `--permission-mode bypassPermissions`），上游文档原话「the boundary is the daemon user」——
+#    任务能用 daemon 用户能拿到的一切凭据。所以那个用户手里的 kubeconfig 只能是这一份。
+#
+# 权限面（2026-10-27）：
+#   · ClusterRole `view`：get/list/watch 绝大多数资源 + pods/log。**不含 Secret**，
+#     也不含 pods/exec、pods/portforward（都是 create 动词），所以进不了容器、开不了隧道。
+#   · monitoring 里只给 Prometheus 一个 Service 的 services/proxy get：
+#       kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=up'
+#     Prometheus 的写/管理接口都是 POST（且没开 --web.enable-admin-api），GET 代理只能查询。
+#   · 只在 homelab 集群。oracle 上的 Loki/Tempo 没给，要排查日志得另开（别顺手复用这把 token）。
+#
+# ⚠️ token 是长期有效的（kubernetes.io/service-account-token），轮换 = 删掉 Secret 让 ArgoCD
+#    重建，再跑一遍 `just multica-studio`。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: multica-agent
+  namespace: personal-services
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: multica-agent-token
+  namespace: personal-services
+  annotations:
+    kubernetes.io/service-account.name: multica-agent
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: multica-agent-view
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: ServiceAccount
+    name: multica-agent
+    namespace: personal-services
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: multica-agent-prometheus-query
+  namespace: monitoring
+rules:
+  - apiGroups: [""]
+    resources: ["services/proxy"]
+    resourceNames: ["kube-prometheus-stack-prometheus:9090", "kube-prometheus-stack-prometheus"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: multica-agent-prometheus-query
+  namespace: monitoring
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: multica-agent-prometheus-query
+subjects:
+  - kind: ServiceAccount
+    name: multica-agent
+    namespace: personal-services

@@ -1,0 +1,355 @@
+---
+# Multica 受限 daemon —— Studio 上以专用 macOS 用户 `multica` 跑的那一份执行端。
+# 入口：`cd macbook/ansible && just multica-studio`（会问 Studio 登录用户 matstudio 的密码）。
+#
+# 为什么要专用用户（2026-10-27）：Multica 无人值守跑 agent —— Claude Code 带
+#   `--permission-mode bypassPermissions`，审批全部自动放行 —— 上游 security-model 文档原话
+#   "the boundary is the daemon user"：任务能用 daemon 用户拿得到的一切凭据。
+#   M2 那份跑在 matthew 下（2026-08-18 接受的取舍）；这份要接 Telegram 和告警 webhook，
+#   入口更多，所以凭据只给这些：
+#     ✅ homelab 只读 kubeconfig（SA multica-agent：view + 只读查 Prometheus，
+#        k8s/helm/manifests/personal-services/multica-agent-rbac.yaml）
+#     ✅ Claude Code 长效 OAuth token（`claude setup-token` 生成，个人 Pro 额度）
+#     ✅ Qwen Code → 本机 OMLX（allow_unauthenticated_inference，无密钥）
+#     ✅ multica PAT（见下 ☠️）
+#     ❌ 没有 gh token / ssh key / Vault token / git 写权限 / oracle 集群
+#   ☠️ 已知并接受的缺口（2026-10-27 的选择）：PAT 是你自己账号的那把（Vault daemon_pat，
+#      与 M2 共用）。任务读得到 ~/.multica/config.json，于是能经 Multica API 把活转派给
+#      M2 上带全部凭据的 runtime —— 这份隔离防的是「任务直接拿凭据」，防不住这条转派。
+#      要堵上就换成一个 member 账号的 PAT（M2 的 runtime 是 private，member 派不动）。
+#
+# 和 multica-daemon.yaml 的三处不同，都是「专用用户」带来的：
+#   1. LaunchDaemon（system 域 + UserName）而不是 LaunchAgent：这个用户从不 GUI 登录，
+#      没有 gui/<uid> 域可 bootstrap。
+#   2. Claude Code 认证走 env CLAUDE_CODE_OAUTH_TOKEN：不 GUI 登录 = 登录钥匙串不解锁，
+#      `/login` 存进钥匙串的凭据在 daemon 里读不到。token 放在 0600 的 env 文件里，由
+#      启动脚本 source；跑起来的任务照样能读到它（这是 token 落在这个用户下的代价）。
+#   3. 要 sudo（建用户、写 /Library/LaunchDaemons）。以 multica 身份执行的命令一律
+#      `sudo -u multica -H`，**不用 become_user**：Ansible 切到非特权用户要靠 ACL 共享
+#      临时文件，macOS 上不可靠。
+#
+# 凭据由 justfile 从 Vault / 集群现取，经 0600 临时 vars 文件传进来（不上命令行）：
+#   mr_pat            Vault secret/homelab/multica → daemon_pat
+#   mr_claude_token   Vault secret/homelab/multica → studio_claude_oauth_token
+#   mr_kube_token     Secret personal-services/multica-agent-token → token
+#   mr_kube_ca        同上 → ca.crt（保持 base64）
+#
+# 幂等：重复跑安全。升级 CLI：改 vars/multica.yaml 后重跑。
+- name: Multica restricted daemon (dedicated user, LaunchDaemon)
+  hosts: multica_restricted
+  gather_facts: false
+  become: true
+  vars_files:
+    - ../vars/multica.yaml
+  vars:
+    mr_user: multica
+    mr_home: /Users/multica
+    mr_label: ai.multica.daemon.restricted
+    mr_plist: "/Library/LaunchDaemons/{{ mr_label }}.plist"
+    mr_bin: "{{ mr_home }}/.local/bin/multica"
+    mr_claude: "{{ mr_home }}/.local/bin/claude"
+    mr_runner: "{{ mr_home }}/.local/bin/multica-daemon-run"
+    mr_env_file: "{{ mr_home }}/.config/multica-daemon/env"
+    mr_log_dir: "{{ mr_home }}/.local/var/log"
+    mr_server_url: https://multica.meirong.dev
+    mr_device_name: mac-studio
+    # 和 OMLX 推理、herdr 派来的活共用一台机器；Qwen 走的是同一块 GPU，并发多了互相拖慢。
+    mr_max_concurrent: "2"
+    mr_workspaces_root: "{{ mr_home }}/multica_workspaces"
+    # 与 M5 的 k3s-homelab context 同一入口（Tailscale），证书 SAN 覆盖这个地址。
+    mr_kube_server: https://100.94.186.7:6443
+    mr_tarball: "/tmp/multica-cli-{{ md_version }}-darwin-arm64.tar.gz"
+    mr_stage: "/tmp/multica-cli-{{ md_version }}-restricted"
+    as_mr: "sudo -u {{ mr_user }} -H"
+
+  pre_tasks:
+    - name: Require the credentials passed in by `just multica-studio`
+      ansible.builtin.assert:
+        that:
+          - mr_pat | default('') | length > 0
+          - mr_claude_token | default('') | length > 0
+          - mr_kube_token | default('') | length > 0
+          - mr_kube_ca | default('') | length > 0
+        fail_msg: 缺凭据。别直接跑本 playbook，用 `just multica-studio`（它从 Vault 和集群现取）。
+        quiet: true
+
+  tasks:
+    # ── 用户 ────────────────────────────────────────────────────────────────
+    - name: Check whether the dedicated user exists
+      ansible.builtin.command: "id -u {{ mr_user }}"
+      register: mr_id
+      changed_when: false
+      failed_when: false
+
+    # 口令随机且不落盘：这个用户只由 launchd 拉起进程，从不交互登录。
+    # 标准用户（不带 -admin），sudo 不了。
+    - name: Create the dedicated user (standard, not admin)
+      when: mr_id.rc != 0
+      ansible.builtin.command: >-
+        sysadminctl -addUser {{ mr_user }}
+        -fullName "Multica agent (restricted)"
+        -shell /bin/zsh
+        -home {{ mr_home }}
+        -password {{ lookup('ansible.builtin.password', '/dev/null', length=32, chars=['ascii_letters', 'digits']) }}
+      no_log: true
+      changed_when: true
+
+    - name: Create its home directory
+      ansible.builtin.command: "createhomedir -c -u {{ mr_user }}"
+      args:
+        creates: "{{ mr_home }}/Library"
+
+    - name: Hide it from the login window
+      ansible.builtin.command: "dscl . -create /Users/{{ mr_user }} IsHidden 1"
+      when: mr_id.rc != 0
+      changed_when: true
+
+    # 默认 home 是 0755（Public/Sites 要给别人看）。这里放着 kubeconfig 和 token，收成 0700。
+    - name: Lock down the home directory
+      ansible.builtin.file:
+        path: "{{ mr_home }}"
+        state: directory
+        owner: "{{ mr_user }}"
+        mode: "0700"
+
+    - name: Ensure directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ mr_user }}"
+        group: staff
+        mode: "0700"
+      loop:
+        - "{{ mr_home }}/.local/bin"
+        - "{{ mr_log_dir }}"
+        - "{{ mr_home }}/.kube"
+        - "{{ mr_home }}/.qwen"
+        - "{{ mr_home }}/.config/multica-daemon"
+        - "{{ mr_workspaces_root }}"
+
+    # ── multica CLI（版本与 sha256 在 vars/multica.yaml）────────────────────
+    - name: Check installed multica CLI version
+      ansible.builtin.command: "{{ as_mr }} {{ mr_bin }} version"
+      register: mr_ver
+      changed_when: false
+      failed_when: false
+
+    - name: Install multica CLI binary (when missing or version mismatch)
+      when: md_version not in (mr_ver.stdout | default(''))
+      notify: reload restricted multica daemon
+      block:
+        - name: Download tarball (sha256-verified)
+          ansible.builtin.get_url:
+            url: "https://github.com/multica-ai/multica/releases/download/v{{ md_version }}/multica-cli-{{ md_version }}-darwin-arm64.tar.gz"
+            dest: "{{ mr_tarball }}"
+            checksum: "sha256:{{ md_sha256 }}"
+            mode: "0644"
+
+        - name: Create a staging dir for extraction
+          ansible.builtin.file:
+            path: "{{ mr_stage }}"
+            state: directory
+            mode: "0755"
+
+        # 不用 unarchive，原因同 multica-daemon.yaml（macOS 上它要 GNU tar）。
+        - name: Extract the binary
+          ansible.builtin.command:
+            cmd: "/usr/bin/tar -xzf {{ mr_tarball }} -C {{ mr_stage }} multica"
+          changed_when: true
+
+        - name: Install binary
+          ansible.builtin.copy:
+            src: "{{ mr_stage }}/multica"
+            dest: "{{ mr_bin }}"
+            owner: "{{ mr_user }}"
+            group: staff
+            mode: "0755"
+            remote_src: true
+
+        - name: Strip Gatekeeper quarantine xattr
+          ansible.builtin.command: "xattr -dr com.apple.quarantine {{ mr_bin }}"
+          changed_when: false
+          failed_when: false
+
+        - name: Clean up tarball + extracted binary
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "{{ mr_tarball }}"
+            - "{{ mr_stage }}"
+
+    # ── agent CLI ───────────────────────────────────────────────────────────
+    # matstudio 的 claude 是装在它自己 home 里的原生安装（/Users/matstudio 是 0750），
+    # 别的用户用不了，所以这个用户自己装一份。原生安装会自我更新，不钉版本。
+    # qwen 不用装：/opt/homebrew/bin/qwen（ai-clis.yaml 的 qwen 组）对所有用户可执行。
+    - name: Install Claude Code for the dedicated user (official native installer)
+      ansible.builtin.command: "{{ as_mr }} /bin/bash -c 'curl -fsSL https://claude.ai/install.sh | bash'"
+      args:
+        creates: "{{ mr_claude }}"
+
+    - name: Point Qwen Code at the local OMLX
+      # 与 matstudio 手写的那份同构（见 docs 里 mac-studio 的说明）；key 是占位符，
+      # OMLX 开着 allow_unauthenticated_inference。
+      ansible.builtin.copy:
+        dest: "{{ mr_home }}/.qwen/settings.json"
+        owner: "{{ mr_user }}"
+        group: staff
+        mode: "0600"
+        content: "{{ mr_qwen_settings | to_nice_json }}\n"
+      vars:
+        mr_qwen_settings:
+          "$version": 4
+          security: { auth: { selectedType: openai, baseUrl: "http://127.0.0.1:8000/v1" } }
+          model:
+            name: Qwen3.8-27B-MLX-4bit
+            baseUrl: "http://127.0.0.1:8000/v1"
+            generationConfig: { contextWindowSize: 262144 }
+          modelProviders:
+            openai:
+              - id: Qwen3.8-27B-MLX-4bit
+                name: Qwen3.8-27B MLX 4bit (Studio OMLX)
+                envKey: OMLX_LOCAL_API_KEY
+                baseUrl: "http://127.0.0.1:8000/v1"
+                generationConfig: { contextWindowSize: 262144, timeout: 900000, maxRetries: 8 }
+          env: { OMLX_LOCAL_API_KEY: dummy }
+
+    # ── 凭据 ────────────────────────────────────────────────────────────────
+    - name: Write the read-only kubeconfig
+      ansible.builtin.copy:
+        dest: "{{ mr_home }}/.kube/config"
+        owner: "{{ mr_user }}"
+        group: staff
+        mode: "0600"
+        content: |
+          # Managed by Ansible (macbook/ansible/playbooks/multica-daemon-restricted.yaml).
+          # SA personal-services/multica-agent：view + 只读查 Prometheus，看不到 Secret。
+          apiVersion: v1
+          kind: Config
+          clusters:
+            - name: homelab
+              cluster:
+                server: {{ mr_kube_server }}
+                certificate-authority-data: {{ mr_kube_ca }}
+          users:
+            - name: multica-agent
+              user:
+                token: {{ mr_kube_token }}
+          contexts:
+            - name: homelab
+              context: { cluster: homelab, user: multica-agent }
+          current-context: homelab
+      no_log: true
+
+    - name: Write the daemon env file (Claude Code OAuth token)
+      ansible.builtin.copy:
+        dest: "{{ mr_env_file }}"
+        owner: "{{ mr_user }}"
+        group: staff
+        mode: "0600"
+        content: |
+          CLAUDE_CODE_OAUTH_TOKEN={{ mr_claude_token }}
+      no_log: true
+      notify: reload restricted multica daemon
+
+    - name: Install the daemon runner script
+      ansible.builtin.copy:
+        dest: "{{ mr_runner }}"
+        owner: "{{ mr_user }}"
+        group: staff
+        mode: "0700"
+        content: |
+          #!/bin/zsh
+          # Managed by Ansible (macbook/ansible/playbooks/multica-daemon-restricted.yaml).
+          # token 不进 plist（/Library/LaunchDaemons 下的文件谁都能读），从 0600 的 env 文件取。
+          set -eu
+          set -a; source {{ mr_env_file }}; set +a
+          exec {{ mr_bin }} daemon start --foreground
+      notify: reload restricted multica daemon
+
+    # ── multica 认证 ────────────────────────────────────────────────────────
+    - name: Read current CLI config
+      ansible.builtin.command: "{{ as_mr }} {{ mr_bin }} config show"
+      register: mr_config
+      changed_when: false
+      failed_when: false
+
+    - name: Point the CLI at the self-hosted service
+      ansible.builtin.command: "{{ as_mr }} {{ mr_bin }} config set {{ item }} {{ mr_server_url }}"
+      loop: [server_url, app_url]
+      when: mr_server_url not in (mr_config.stdout | default(''))
+      changed_when: true
+      notify: reload restricted multica daemon
+
+    # ☠️ `auth status` 未登录时也 rc=0，只认输出文本（同 multica-daemon.yaml）。
+    - name: Check whether the CLI is authenticated
+      ansible.builtin.command: "{{ as_mr }} {{ mr_bin }} auth status"
+      register: mr_auth
+      changed_when: false
+      failed_when: false
+
+    - name: Authenticate with the PAT when not logged in
+      when: "'Not authenticated' in ((mr_auth.stdout | default('')) ~ (mr_auth.stderr | default('')))"
+      ansible.builtin.command: "{{ as_mr }} {{ mr_bin }} login --token {{ mr_pat }}"
+      no_log: true
+      changed_when: true
+      notify: reload restricted multica daemon
+
+    # ── LaunchDaemon ────────────────────────────────────────────────────────
+    - name: Install LaunchDaemon plist
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/{{ mr_label }}.plist.j2"
+        dest: "{{ mr_plist }}"
+        owner: root
+        group: wheel
+        mode: "0644"
+      notify: reload restricted multica daemon
+
+    - name: Ensure LaunchDaemon is loaded (system domain)
+      ansible.builtin.shell: |
+        if ! launchctl print "system/{{ mr_label }}" >/dev/null 2>&1; then
+          launchctl bootstrap system "{{ mr_plist }}"
+          echo BOOTSTRAPPED
+        fi
+      register: mr_load
+      changed_when: "'BOOTSTRAPPED' in mr_load.stdout"
+
+    - name: Flush handlers so the checks below see the new daemon
+      ansible.builtin.meta: flush_handlers
+
+    # ☠️ 判据是 status 字段，不是 rc（`daemon status` 没起来时也 rc=0）。
+    - name: Verify the daemon actually reached running state
+      ansible.builtin.command: "{{ as_mr }} {{ mr_bin }} daemon status --output json"
+      register: mr_status
+      changed_when: false
+      retries: 10
+      delay: 3
+      until: (mr_status.stdout | default('{}') | from_json).get('status') == 'running'
+
+    # 隔离是否成立要实测，不能只看 RBAC 清单：能看 pod、看不到 Secret、进不了容器。
+    - name: Verify the kubeconfig is read-only
+      ansible.builtin.command: "{{ as_mr }} /opt/homebrew/bin/kubectl auth can-i {{ item.verb }}"
+      loop:
+        - { verb: "list pods -A", want: "yes" }
+        - { verb: "get secrets -A", want: "no" }
+        - { verb: "create pods/exec -n personal-services", want: "no" }
+        - { verb: "delete deployments -A", want: "no" }
+      register: mr_cani
+      changed_when: false
+      failed_when: mr_cani.stdout | trim != item.want
+
+    - name: Show which runtimes the daemon registered
+      ansible.builtin.debug:
+        msg: "{{ (mr_status.stdout | from_json).get('agents') }}"
+
+  handlers:
+    # bootout 是异步的：没等它退干净就 bootstrap 会报 "Bootstrap failed: 5"（同 multica-daemon.yaml）。
+    - name: reload restricted multica daemon
+      ansible.builtin.shell: |
+        label="{{ mr_label }}"
+        launchctl bootout "system/${label}" 2>/dev/null || true
+        for _ in 1 2 3 4 5; do
+          launchctl print "system/${label}" >/dev/null 2>&1 || break
+          sleep 1
+        done
+        launchctl bootstrap system "{{ mr_plist }}"

@@ -101,7 +101,8 @@ ArgoCD hook 报 Succeeded，无处可查。现已改为「等所有声明的监�
 
 ### Multica — 服务是两半的
 
-☠️ **这里只有 service 端，执行任务的 daemon 跑在 M2 MacBook 上**。daemon 离线时页面照常
+☠️ **这里只有 service 端，执行任务的 daemon 在 k8s 外**：M2 上以登录用户跑（凭据齐全），
+Studio 上以专用用户 `multica` 跑（只读 kubeconfig，2026-10-27 起）。daemon 离线时页面照常
 200、Uptime Kuma 全绿、任务静默堆积。安装/重建见 [runbooks/multica-install.md](../runbooks/multica-install.md)。
 
 2026-08-18 上线；官方 OCI Helm chart，本仓库唯一的 OCI chart 源。

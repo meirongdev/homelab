@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Managed by Ansible (macbook/ansible/playbooks/multica-daemon-restricted.yaml). Do not edit by hand. -->
+<!-- ⚠️ 本文件在 /Library/LaunchDaemons 下、谁都能读：这里不放任何凭据（token 在 runner 读的 env 文件里）。 -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{{ mr_label }}</string>
+    <!-- system 域 + UserName：专用用户从不 GUI 登录，没有 gui/<uid> 域可用。 -->
+    <key>UserName</key>
+    <string>{{ mr_user }}</string>
+    <key>GroupName</key>
+    <string>staff</string>
+    <key>ProgramArguments</key>
+    <array>
+        <!-- runner 最后 exec `multica daemon start --foreground`（--foreground 的理由见 M2 那份 plist） -->
+        <string>{{ mr_runner }}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>Umask</key>
+    <integer>63</integer>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- LaunchDaemon 不会替 UserName 补 HOME：不给的话 multica/claude/kubectl 都找不到自己的配置。 -->
+        <key>HOME</key>
+        <string>{{ mr_home }}</string>
+        <key>USER</key>
+        <string>{{ mr_user }}</string>
+        <key>LOGNAME</key>
+        <string>{{ mr_user }}</string>
+        <!-- /opt/homebrew/bin 里还有 agy / gh：这个用户没登录过它们，探测得到也用不了。 -->
+        <key>PATH</key>
+        <string>{{ mr_home }}/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>MULTICA_DAEMON_DEVICE_NAME</key>
+        <string>{{ mr_device_name }}</string>
+        <key>MULTICA_DAEMON_MAX_CONCURRENT_TASKS</key>
+        <string>{{ mr_max_concurrent }}</string>
+        <key>MULTICA_WORKSPACES_ROOT</key>
+        <string>{{ mr_workspaces_root }}</string>
+        <!-- 版本只由 vars/multica.yaml 决定，别让 daemon 自己追 GitHub 最新版。 -->
+        <key>MULTICA_DAEMON_AUTO_UPDATE</key>
+        <string>false</string>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>{{ mr_log_dir }}/multica-daemon.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{ mr_log_dir }}/multica-daemon.err.log</string>
+</dict>
+</plist>

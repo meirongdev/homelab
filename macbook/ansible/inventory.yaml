@@ -13,6 +13,7 @@
 #   ops     → packages: k8s / IaC CLIs
 #   herdr   → herdr server LaunchAgent + agent integrations               (Studio + M2: run M5's tasks)
 #   qwen    → ai-clis: Qwen Code, pinned version                          (Studio + M2)
+#   multica_restricted → multica-daemon-restricted (dedicated user `multica`) (Studio)
 # Prometheus side: one node-exporter job per Mac in `macs` + both OMLX Macs as targets of the
 # omlx-* jobs, + the macmon job (k8s/helm/values/kube-prometheus-stack.yaml).
 macs:
@@ -78,4 +79,10 @@ herdr:
 qwen:
   hosts:
     mbp-m2-pro:
+    mac-studio:
+
+# Multica executor running as a dedicated, credential-poor macOS user (read-only kubeconfig,
+# no git/ssh/Vault). Not the `macbook` group: that one runs as the login user with everything.
+multica_restricted:
+  hosts:
     mac-studio:

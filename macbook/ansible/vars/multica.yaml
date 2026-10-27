@@ -1,0 +1,21 @@
+---
+# multica CLI（= daemon）的版本，两个 playbook 共用：
+#   playbooks/multica-daemon.yaml             M2，登录用户 matthew，LaunchAgent
+#   playbooks/multica-daemon-restricted.yaml  Studio，专用用户 multica，LaunchDaemon
+#
+# 预编译 darwin-arm64 二进制，固定版本 + sha256 校验，**不走 Homebrew**
+# （同 node-exporter.yaml 的做法）。两个理由：
+#  1. Homebrew 2026 起拒绝加载未信任的第三方 tap，要么 `brew trust multica-ai/tap`
+#     —— 那是对整个 tap 的无条件信任，且既不固定版本也不校验产物；
+#  2. CLI 版本必须能与 service 端的 chart 版本对齐（见下）。
+# 升级步骤：改这里的 md_version + md_sha256（取自 release 的 checksums.txt），
+# 然后 `just multica-daemon` + `just multica-studio` 各跑一遍。
+#
+# ⚠️ 与 argocd/applications/multica.yaml 的 chart targetRevision 保持同版本。
+#    CLI 与 server 出自同一个 monorepo 的同一个 tag，对齐是安全默认值。
+#    （未验证过实际的兼容窗口有多宽 —— 所以这里不是 CI 断言，只是约定。
+#      升级时两处一起改，`/api/config` 的 server_version 可用来核对现网。）
+# ⚠️ daemon 的自我更新在两份 plist 里都显式关掉了（MULTICA_DAEMON_AUTO_UPDATE=false），
+#    否则它会自己追 GitHub 最新版，绕过这里的钉死，跑到 service 端前面去。
+md_version: "0.7.0"
+md_sha256: 0e42f2387829a7137ff2cf7278731282b75f691272a02e4c7f958b5ac104b865

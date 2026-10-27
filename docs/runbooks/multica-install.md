@@ -1,6 +1,6 @@
 # Runbook — Multica 安装与配置
 
-> Last updated: 2026-10-12
+> Last updated: 2026-10-27
 >
 > **触发条件**：首次部署 Multica，或 homelab 重建后恢复它、或把它迁到另一个集群。
 > **成功判定**：五条同时成立：
@@ -41,7 +41,7 @@ chart 自己的文档。
 | 组件 | 内容 | 跑在哪 |
 |------|------|--------|
 | **service** | Next.js frontend + Go backend(API/WS) + Postgres 17 (pgvector) | homelab k3s |
-| **daemon**（`multica computer`） | 探测本机 AI CLI、注册为 runtime、实际执行任务 | M2 MacBook，**不在 k8s 里** |
+| **daemon**（`multica computer`） | 探测本机 AI CLI、注册为 runtime、实际执行任务 | M2 MacBook（登录用户）+ Mac Studio（专用用户 `multica`，受限），**不在 k8s 里** |
 
 daemon 只做 outbound 注册，不监听端口、不需要入站放行：所以它在 NAT/Tailscale
 后面完全没问题。它不进 k8s 的原因是：它需要一台装好并登录了 AI CLI 的真实机器。
@@ -55,6 +55,9 @@ running the daemon."* 本部署按既有约定跑在 M2 的登录用户 `matthew
 **明确接受的取舍**，代价是任务能读写该用户能读写的一切（含 `~/.ssh`、各 AI CLI 凭据）。
 要收紧就改用专用 Unix 用户或 VM，见
 [playbook 文件头](../../macbook/ansible/playbooks/multica-daemon.yaml)。
+Studio 上那份（2026-10-27 起）就是专用用户的做法：只读 kubeconfig、没有 git/ssh/Vault，
+见 [multica-daemon-restricted.yaml](../../macbook/ansible/playbooks/multica-daemon-restricted.yaml)
+的文件头。☠️ 它用的仍是你账号的 PAT，任务可以借 Multica API 把活转派给 M2 那份。
 
 ## 步骤 1 — 写 Vault（必须最先做）
 
@@ -301,10 +304,22 @@ kubectl --context k3s-homelab -n backup get secret restic-backup \
 chart 与 CLI 出自同一个 monorepo 的同一个 tag，**两处一起改**：
 
 1. `argocd/applications/multica.yaml` 的 `targetRevision`
-2. `macbook/ansible/playbooks/multica-daemon.yaml` 的 `md_version` + `md_sha256`
-   （sha256 取自 release 的 `checksums.txt`），然后重跑 `just multica-daemon`
+2. `macbook/ansible/vars/multica.yaml` 的 `md_version` + `md_sha256`
+   （sha256 取自 release 的 `checksums.txt`），然后在 `macbook/ansible` 下重跑
+   `just multica-daemon`（M2）和 `just multica-studio`（Studio 受限那份）
 
-核对现网版本：`curl -s https://multica.meirong.dev/api/config` 的 `server_version`。
+升级前先手工 `pg_dump` 一份（夜备之外的保险；backend 启动时会跑迁移）：
+
+```bash
+kubectl --context k3s-homelab -n databases exec deploy/apps-pg -- \
+  pg_dump -U postgres -Fc multica > multica-pre-upgrade.dump
+```
+
+☠️ daemon 默认会定期从 GitHub **自我更新到最新版**，绕过上面的钉死、跑到 service 前面去。
+两份 plist 都设了 `MULTICA_DAEMON_AUTO_UPDATE=false`（2026-10-27 发现 M2 钉 0.4.28 却跑着 0.4.29）。
+
+核对现网版本：`curl -s https://multica.meirong.dev/api/config` 的 `server_version`；
+daemon 侧看 `multica daemon status --output json` 的 `cli_version`。
 
 ## 退役
 

@@ -106,6 +106,33 @@ multica-daemon:
       ansible-playbook playbooks/multica-daemon.yaml -e "md_pat=$pat"
     fi
 
+# Studio 上的受限 Multica daemon：专用用户 multica，只读 kubeconfig，没有 git/ssh/Vault 凭据。
+# 四份凭据现取，写进 0600 临时 vars 文件传给 playbook（不上命令行，退出即删）。
+# 前置：Vault secret/homelab/multica → studio_claude_oauth_token（`claude setup-token` 生成）。
+# 部署/升级 Studio 受限 Multica daemon（会问 Studio 登录用户 matstudio 的 sudo 密码，幂等）
+multica-studio:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export VAULT_ADDR="${VAULT_ADDR:-https://vault.meirong.dev}"
+    ctx="${KUBE_CONTEXT:-k3s-homelab}"
+    MR_PAT="$(vault kv get -field=daemon_pat secret/homelab/multica)"
+    MR_CLAUDE_TOKEN="$(vault kv get -field=studio_claude_oauth_token secret/homelab/multica 2>/dev/null || true)"
+    if [ -z "$MR_CLAUDE_TOKEN" ]; then
+      echo "⚠️  Vault 里没有 secret/homelab/multica → studio_claude_oauth_token。" >&2
+      echo "    先 \`claude setup-token\`，再 \`vault kv patch secret/homelab/multica studio_claude_oauth_token=-\`（从 stdin 粘贴）。" >&2
+      exit 1
+    fi
+    MR_KUBE_TOKEN="$(kubectl --context "$ctx" -n personal-services get secret multica-agent-token -o jsonpath='{.data.token}' | base64 -d)"
+    MR_KUBE_CA="$(kubectl --context "$ctx" -n personal-services get secret multica-agent-token -o jsonpath='{.data.ca\.crt}')"
+    if [ -z "$MR_KUBE_TOKEN" ] || [ -z "$MR_KUBE_CA" ]; then
+      echo "⚠️  集群里还没有 personal-services/multica-agent-token（ArgoCD 还没同步 multica-agent-rbac.yaml？）。" >&2
+      exit 1
+    fi
+    export MR_PAT MR_CLAUDE_TOKEN MR_KUBE_TOKEN MR_KUBE_CA
+    vars="$(mktemp)"; chmod 600 "$vars"; trap 'rm -f "$vars"' EXIT
+    jq -n '{mr_pat: env.MR_PAT, mr_claude_token: env.MR_CLAUDE_TOKEN, mr_kube_token: env.MR_KUBE_TOKEN, mr_kube_ca: env.MR_KUBE_CA}' > "$vars"
+    ansible-playbook playbooks/multica-daemon-restricted.yaml --ask-become-pass -e "@$vars"
+
 # 应用 headless 电源策略（disablesleep；Studio 另加断电恢复自动开机；逐台问 sudo 密码）
 power target="macs":
     #!/usr/bin/env bash

@@ -40,21 +40,11 @@
 - name: Multica daemon (LaunchAgent)
   hosts: macbook
   gather_facts: true            # 需要 ansible_facts.user_dir
+  # md_version / md_sha256（及为什么钉死、怎么升级）在这里，Studio 的受限 daemon 共用。
+  vars_files:
+    - ../vars/multica.yaml
   vars:
     homebrew_prefix: /opt/homebrew
-    # 预编译 darwin-arm64 二进制，固定版本 + sha256 校验，**不走 Homebrew**
-    # （同 node-exporter.yaml 的做法）。两个理由：
-    #  1. Homebrew 2026 起拒绝加载未信任的第三方 tap，要么 `brew trust multica-ai/tap`
-    #     —— 那是对整个 tap 的无条件信任，且既不固定版本也不校验产物；
-    #  2. CLI 版本必须能与 service 端的 chart 版本对齐（见下 md_version 注释）。
-    # 升级步骤：改 md_version + md_sha256（取自 release 的 checksums.txt），重跑本 playbook。
-    #
-    # ⚠️ 与 argocd/applications/multica.yaml 的 chart targetRevision 保持同版本。
-    #    CLI 与 server 出自同一个 monorepo 的同一个 tag，对齐是安全默认值。
-    #    （未验证过实际的兼容窗口有多宽 —— 所以这里不是 CI 断言，只是约定。
-    #      升级时两处一起改，`/api/config` 的 server_version 可用来核对现网。）
-    md_version: "0.7.0"
-    md_sha256: 0e42f2387829a7137ff2cf7278731282b75f691272a02e4c7f958b5ac104b865
     md_tarball: "/tmp/multica-cli-{{ md_version }}-darwin-arm64.tar.gz"
     md_stage: "/tmp/multica-cli-{{ md_version }}"
     md_label: ai.multica.daemon
