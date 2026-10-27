@@ -14,6 +14,11 @@
              立刻返回，launchd 会把「父进程退出」当成服务挂了，配合 KeepAlive
              变成无限重启风暴（而真正的 daemon 每轮都被留下成为孤儿）。 -->
         <string>--foreground</string>
+{% if md_profile %}
+        <!-- 命名 profile：同机还有另一份 daemon 占着默认 profile 的 19514（见 playbook 文件头 ☠️）。 -->
+        <string>--profile</string>
+        <string>{{ md_profile }}</string>
+{% endif %}
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -32,8 +37,8 @@
         <string>{{ ansible_facts.user_dir }}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         <key>MULTICA_DAEMON_DEVICE_NAME</key>
         <string>{{ md_device_name }}</string>
-        <!-- 这台 M2 只有它自己在跑任务，20 个并发对一台笔记本过量（每个任务
-             可能拉起一个 agent CLI + 一份 repo 副本）。压到 {{ md_max_concurrent }}。 -->
+        <!-- 默认 20 个并发对一台 Mac 过量（每个任务可能拉起一个 agent CLI + 一份
+             repo 副本，Studio 上的 Qwen 还和 OMLX 的其它用户抢同一块 GPU）。压到 {{ md_max_concurrent }}。 -->
         <key>MULTICA_DAEMON_MAX_CONCURRENT_TASKS</key>
         <string>{{ md_max_concurrent }}</string>
         <!-- 任务工作区根目录。默认就是 ~/multica_workspaces，显式写出来是因为

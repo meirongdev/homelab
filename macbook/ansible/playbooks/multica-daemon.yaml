@@ -3,18 +3,28 @@
 #
 # 架构：service 端（web/API/Postgres）跑在 homelab k3s 上
 #   （k8s/helm/values/multica.yaml + argocd/applications/multica.yaml），
-#   daemon 跑在这里。daemon **只做 outbound 注册**到 service，
-#   不监听任何端口、不需要入站放行，所以它在 NAT/Tailscale 后面完全没问题。
+#   daemon 跑在这里（组 `multica`：M2 + Studio，各以登录用户身份）。daemon 对 service
+#   **只做 outbound 连接**，不需要入站放行，所以它在 NAT/Tailscale 后面完全没问题。
+#   它只在 127.0.0.1 上开一个本地健康检查/API 端口，给任务里的 `multica` CLI 用。
 #   —— 这也是它不该进 k3s 的原因：它要的是一台装好并登录了 AI CLI 的真实机器。
+#
+# ☠️ 一台机器跑两份 daemon 必须用不同的 CLI profile：本地端口由 profile 名决定
+#   （默认 profile 固定 19514，命名 profile = 19514 + 1 + 名字字节和 % 1000，
+#   源码 cmd_daemon.go 的 healthPortForProfile），没有单独改端口的参数。Studio 上
+#   专用用户 multica 的受限 daemon 已占着 19514，所以这里给 Studio 用 profile `full`
+#   （19950），见 inventory 的 multica_profile。M2 只有一份，用默认 profile。
 #
 # ⚠️ 安全边界（上游文档原话："Tasks run with the full permissions of the user
 #   running the daemon — they can read and write everything that user can."）：
-#   本 playbook 按既有约定跑在登录用户 matthew 下，这是**明确接受**的取舍
-#   （2026-08-18 决定），不是疏忽。代价是被派发的任务能读写 matthew 能读写的一切，
-#   包括 ~/.ssh、各 AI CLI 的凭据、以及本仓库。上游建议的隔离做法是专用 Unix 用户
-#   或 VM；若日后要收紧，改这里的 hosts/become 与 LaunchAgent 的用户域即可。
+#   本 playbook 跑在登录用户（M2 的 matthew、Studio 的 matstudio）下，这是**明确接受**
+#   的取舍（M2 2026-08-18、Studio 2026-10-27 决定），不是疏忽。代价是被派发的任务能读写
+#   该用户能读写的一切，包括 ~/.ssh、各 AI CLI 的凭据、以及本仓库。所以接 Telegram /
+#   告警这类不可信输入的 agent 绑在 Studio 的受限 daemon 上
+#   （multica-daemon-restricted.yaml），不绑在这里注册的 runtime 上。
 #
-# 前置：ai-clis.yaml 已装好 claude/qwen/codex（daemon 靠探测 PATH 发现它们）。
+# 前置：AI CLI 已装好并登录（daemon 靠探测 PATH 发现它们）。M2 的 claude/qwen/codex 来自
+#   ai-clis.yaml；Studio 的 claude 是 matstudio 自己的原生安装（~/.local/bin，钥匙串登录，
+#   LaunchAgent 在 GUI 域里读得到），qwen 来自 ai-clis.yaml 的 qwen 组，没有 codex。
 # hermes 2026-10-11 起不再安装（三台都已卸载），下面 08-18 的实测记录里那一行仅作历史。
 #
 # 实测哪些 agent 真能注册（2026-08-18，`multica daemon status --output json` +
@@ -38,7 +48,7 @@
 #
 # 幂等：重复跑安全（已认证时不会重复 login）。
 - name: Multica daemon (LaunchAgent)
-  hosts: macbook
+  hosts: multica
   gather_facts: true            # 需要 ansible_facts.user_dir
   # md_version / md_sha256（及为什么钉死、怎么升级）在这里，Studio 的受限 daemon 共用。
   vars_files:
@@ -54,7 +64,13 @@
     # 所以 server_url 与 app_url 是**同一个源**，不需要单独的 api.* 子域。
     md_server_url: https://multica.meirong.dev
     md_app_url: https://multica.meirong.dev
-    md_device_name: mbp-m2-pro
+    # 主机差异只有这两项，在 inventory 的 macs 主机变量里（没设就用默认）：
+    #   multica_device_name  默认 inventory 主机名（M2 = mbp-m2-pro，与 2026-08-18 起的一致）
+    #   multica_profile      默认空 = 默认 profile；Studio 是 `full`（见文件头 ☠️）
+    md_device_name: "{{ multica_device_name | default(inventory_hostname) }}"
+    md_profile: "{{ multica_profile | default('') }}"
+    # 所有要落到某个 profile 上的 CLI 调用（config/auth/login/daemon status）都用它。
+    md_cli: "{{ md_bin }}{{ (' --profile ' ~ md_profile) if md_profile else '' }}"
     md_max_concurrent: "4"
     md_workspaces_root: "{{ ansible_facts.user_dir }}/multica_workspaces"
 
@@ -127,7 +143,7 @@
     # `multica config set` 写的是 ~/.multica/config.json。先读回来比对，
     # 避免每次跑都报 changed（也避免在已登录实例上无谓地改配置）。
     - name: Read current CLI config
-      ansible.builtin.command: "{{ md_bin }} config show"
+      ansible.builtin.command: "{{ md_cli }} config show"
       register: md_config
       changed_when: false
       failed_when: false
@@ -135,7 +151,7 @@
         PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
     - name: Point the CLI at the self-hosted service
-      ansible.builtin.command: "{{ md_bin }} config set {{ item.key }} {{ item.value }}"
+      ansible.builtin.command: "{{ md_cli }} config set {{ item.key }} {{ item.value }}"
       loop:
         - { key: server_url, value: "{{ md_server_url }}" }
         - { key: app_url, value: "{{ md_app_url }}" }
@@ -152,7 +168,7 @@
     #    "not authenticated: run 'multica login' first"）。所以只认输出文本。
     #    （文档里列的 `multica whoami` 在 0.4.28 里不存在，别拿它当探针。）
     - name: Check whether the CLI is authenticated
-      ansible.builtin.command: "{{ md_bin }} auth status"
+      ansible.builtin.command: "{{ md_cli }} auth status"
       register: md_auth
       changed_when: false
       failed_when: false
@@ -180,7 +196,7 @@
       when:
         - not (md_logged_in | bool)
         - md_pat | default('') | length > 0
-      ansible.builtin.command: "{{ md_bin }} login --token {{ md_pat }}"
+      ansible.builtin.command: "{{ md_cli }} login --token {{ md_pat }}"
       register: md_pat_login
       changed_when: true
       no_log: true          # 别让 PAT 进 ansible 输出
@@ -189,7 +205,7 @@
       when:
         - not (md_logged_in | bool)
         - md_pat | default('') | length > 0
-      ansible.builtin.command: "{{ md_bin }} auth status"
+      ansible.builtin.command: "{{ md_cli }} auth status"
       register: md_auth2
       changed_when: false
       failed_when: false
@@ -243,12 +259,17 @@
       register: md_load
       changed_when: "'BOOTSTRAPPED' in md_load.stdout"
 
+    # 先让重载 handler 跑完再验收。没有这一步时，升级二进制后的验收读到的是**旧进程**
+    # 的状态（2026-10-27 实测：升到 0.7.0 那次，验收打出的是 uptime 673h、cli 0.4.29）。
+    - name: Flush handlers so the checks below see the reloaded daemon
+      ansible.builtin.meta: flush_handlers
+
     # ☠️ 判据必须是 status 字段本身，不能是 rc。`daemon status` 在 daemon 根本
     #    没起来时照样 rc=0 并输出 {"status":"stopped"} —— 用 rc 当判据等于
     #    「没报错就算成功」，实测会让一个 crash-loop 的部署报绿。
     - name: Verify the daemon actually reached running state
       when: md_logged_in | bool
-      ansible.builtin.command: "{{ md_bin }} daemon status --output json"
+      ansible.builtin.command: "{{ md_cli }} daemon status --output json"
       register: md_status
       changed_when: false
       retries: 10

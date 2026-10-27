@@ -41,9 +41,9 @@ chart 自己的文档。
 | 组件 | 内容 | 跑在哪 |
 |------|------|--------|
 | **service** | Next.js frontend + Go backend(API/WS) + Postgres 17 (pgvector) | homelab k3s |
-| **daemon**（`multica computer`） | 探测本机 AI CLI、注册为 runtime、实际执行任务 | M2 MacBook（登录用户）+ Mac Studio（专用用户 `multica`，受限），**不在 k8s 里** |
+| **daemon**（`multica computer`） | 探测本机 AI CLI、注册为 runtime、实际执行任务 | 三份，**都不在 k8s 里**：M2（登录用户 matthew）· Studio（登录用户 matstudio，profile `full`）· Studio（专用用户 `multica`，只读） |
 
-daemon 只做 outbound 注册，不监听端口、不需要入站放行：所以它在 NAT/Tailscale
+daemon 对 service 只做 outbound 连接、不需要入站放行（本机只在 127.0.0.1 开一个健康检查端口）：所以它在 NAT/Tailscale
 后面完全没问题。它不进 k8s 的原因是：它需要一台装好并登录了 AI CLI 的真实机器。
 
 ⚠️ **daemon 离线时 service 端一切正常**：页面 200、Uptime Kuma 全绿、ArgoCD Healthy，

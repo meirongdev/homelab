@@ -92,7 +92,7 @@ mac-sync target="base":
 #
 # PAT 轮换：web UI 生成新的 → `vault kv patch secret/homelab/multica daemon_pat=mul_...`
 #
-# 部署/升级 Multica daemon LaunchAgent（仅 MacBook，无需 sudo，幂等，认证全自动）
+# 部署/升级 Multica daemon LaunchAgent（M2 + Studio 的登录用户，全权限；无需 sudo，幂等，认证全自动）
 multica-daemon:
     #!/usr/bin/env bash
     set -euo pipefail

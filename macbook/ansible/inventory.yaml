@@ -4,7 +4,8 @@
 # Host vars live ONLY under `macs` / `workstation`; the role groups below just name the hosts.
 # Playbooks target a role group, so a Mac gets exactly the roles it is listed in:
 #   macs    → ping / node-exporter / power / os-update                  (remote headless fleet)
-#   macbook → ai-clis (claude/qwen/codex) / multica-daemon               (M2 only)
+#   macbook → ai-clis (claude/qwen/codex)                                (M2 only)
+#   multica → multica-daemon, as the login user with its full credentials (M2 + Studio)
 #   omlx    → omlx / omlx-metrics                                        (OMLX inference nodes)
 #   macmon  → macmon (power / temperature / fans, :9090)                 (both remote Macs)
 #   base    → packages: Homebrew + base CLI + AWS/GCP CLI + oh-my-zsh/plugins + TPM;
@@ -23,6 +24,10 @@ macs:
     mac-studio:
       ansible_host: 100.98.220.75   # Tailscale IP; job node-exporter-mac-studio
       ansible_user: matstudio       # NOT matthew — macOS short name on this machine
+      # Second multica daemon on this host (the restricted one, user `multica`, holds the
+      # default profile's port 19514), so this one needs its own profile + device name.
+      multica_profile: full
+      multica_device_name: mac-studio-full
       # Desktop, no battery: a power cut leaves it off until someone presses the button.
       pmset_autorestart: true
 
@@ -38,6 +43,13 @@ workstation:
 macbook:
   hosts:
     mbp-m2-pro:
+
+# Multica executors running as the login user (all of that user's credentials). Agents fed by
+# untrusted input (Telegram, alert webhooks) belong on `multica_restricted`, not on these.
+multica:
+  hosts:
+    mbp-m2-pro:
+    mac-studio:
 
 omlx:
   hosts:
