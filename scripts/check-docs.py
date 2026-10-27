@@ -187,6 +187,23 @@ def is_item_cont(line, cur):
     return cur.startswith("- [") and line.startswith("  ") and line.strip()
 
 
+def check_changelog_rows():
+    """R8 —— CHANGELOG 一条一行，表格行同样不得超过 INDEX_ROW_MAX 字符。
+
+    它的文首写着「一条一行，细节在链接里」，可 2026-10-28 盘点时 105 条里 38 条超过 300 字符、
+    最长 1821：过程、数值、编号清单整段搬了进来，而这些在链接的 records/decisions/reference
+    里本来就有一份。和索引行是同一个病，用同一个上限。
+    """
+    p = DOCS / "CHANGELOG.md"
+    if not p.exists():
+        return
+    for i, ln in enumerate(p.read_text().splitlines(), 1):
+        if ln.startswith("| ") and not ln.startswith("|---") and len(ln) > INDEX_ROW_MAX:
+            fail("R8", p,
+                 f"CHANGELOG 行 {len(ln)} 字符 > {INDEX_ROW_MAX}——一条一行，"
+                 f"过程与数值留在链接的文档里: {ln[:60]}…", i)
+
+
 def check_agents_budget():
     """AGENTS.md 的字节预算 —— 常驻上下文越长越稀释，且它自己不会喊疼。"""
     p = DOCS / "AGENTS.md"
@@ -356,8 +373,8 @@ RULES_COVERED = [
     ("R2", "命名（日期前缀 / 常青不带日期 / 小写 kebab-case）", "✅ 自动"),
     ("R3", "H1 在首行 + 各目录文首必填字段", "✅ 自动"),
     ("R4", "plans/decisions 状态带枚举标记", "✅ 自动"),
-    ("R5", "目录 README 索引双向完整 + plans/README.md 份数与实际一致", "✅ 自动"),
-    ("R8", f"索引行 ≤{INDEX_ROW_MAX} 字符 + AGENTS.md ≤{AGENTS_MAX_BYTES} 字节", "✅ 自动"),
+    ("R5", "目录 README 索引双向完整", "✅ 自动"),
+    ("R8", f"索引行与 CHANGELOG 行 ≤{INDEX_ROW_MAX} 字符 + AGENTS.md ≤{AGENTS_MAX_BYTES} 字节", "✅ 自动"),
     ("--", "docs 内相对链接 + 非 docs 文件对 docs/ 的引用", "✅ 自动"),
     ("--", "非 docs README 的目录树只画真实存在的子目录", "✅ 自动"),
     ("--", "`Last updated:` 不早于最后一次内容提交（浅克隆时跳过）", "✅ 自动"),
@@ -386,6 +403,7 @@ def main():
         check_links(md, text)
     check_indexes()
     check_index_rows()
+    check_changelog_rows()
     check_agents_budget()
     check_readme_trees()
     check_external_refs()
