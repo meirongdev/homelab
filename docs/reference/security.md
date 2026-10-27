@@ -1,6 +1,6 @@
 # K3s 集群安全架构 (Security Architecture)
 
-> Last updated: 2026-10-24
+> Last updated: 2026-10-27
 > Status: 生效事实
 > Scope: 双集群（homelab + oracle-k3s）的纵深防御模型，本文是 source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
@@ -213,11 +213,17 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 
 - **homelab → Tetragon**（`values/tetragon.yaml`，ns `tetragon`，Helm App）。Cilium 原生、内核态过滤只上报命中事件 → 省 CPU，适配热笔记本。v1：默认进程 exec/exit 可见性 → `export-stdout` → 现有 OTel→Loki（按 pod=tetragon 查，可见容器内 shell/kubectl exec/异常进程）+ Prometheus 指标(ServiceMonitor 带 release 标签)。自定义 TracingPolicy（敏感文件/提权检测）+ 基于其指标的告警为后续调优。
   - ☠️ **进程事件带完整 argv，等于把每条命令行写进 Loki**：脚本里的密钥一律别放命令行。
+    而且不只在进程启动时记一次：Tetragon 自己重启时，会给所有存量进程补发 exec 事件
+    （`flags=procFS`）；进程退出的 exit 事件也带 argv。所以长期运行、从没重启过的进程，
+    argv 里的密钥照样会在每次 Tetragon 重启时进一次 Loki。
     2026-10-24 在 Loki 里查到两处明文：krr 的 Telegram bot token（拼在 curl URL 里）和
-    夜备的 SurrealDB 口令（`curl -u root:<口令>`，7 晚）。源头改成 curl 的
-    `--variable %VAR` + `--expand-*`（curl ≥ 8.3，命令行里只剩 `{{VAR}}` 占位符），
-    另在 `values/tetragon.yaml` 加了 `redactionFilters` 兜底（bot token / `-u` 口令 /
-    Bearer / URL 里的 `user:pass@`）。兜底不是正解：带空格且加引号的口令只能打掉一半。
+    夜备的 SurrealDB 口令（`curl -u root:<口令>`，7 晚）。10-27 又查到两处：cloudflared 的
+    隧道 token（`--token`，各写进去一份），以及夜备的 Vault token（`curl -H "X-Vault-Token: …"`，
+    7 晚 × 2 条；10-24 只改了同一脚本里 SurrealDB 那条）。源头分别改成 env `TUNNEL_TOKEN`，
+    以及 curl 的 `--variable %VAR` + `--expand-*`（curl ≥ 8.3，命令行里只剩 `{{VAR}}` 占位符）。
+    `values/tetragon.yaml` 的 `redactionFilters` 兜底现有 6 条：bot token / `-u` 口令 /
+    Bearer / URL 里的 `user:pass@` / `-token`、`--token` 的参数值 / `…Token:` 请求头的值。
+    兜底不是正解：带空格且加引号的口令只能打掉一半。
     oracle 没有 Tetragon，那边命令行里的密钥只在 `/proc` 可见、不进 Loki，但写法同样照改。
 - **oracle → Falco + Falcosidekick → Telegram**（`cloud/oracle/values/falco.yaml`，ns `falco`，Helm App 部署到 oracle 集群）。规则库开箱即用；oracle VM CPU 余量大。`driver: modern_ebpf`(CO-RE 无需内核模块)。**双出口**：① Falco JSON→stdout→OTel→Loki（always-on，零依赖）；② Falcosidekick→Telegram（原生 output，warning+，併入群 MatthewDaily「🚨 Homelab 告警」话题；2026-07 前曾经 Gotify 转发，已随其下线迁移，见 `decisions/alerting-telegram-migration.md`）。
   - **Telegram 推送前置（一次性）**：token 走 Vault `secret/homelab/telegram`（与 homelab Alertmanager 共用同一个 bot，跨集群读取）→ ESO(`cloud/oracle/manifests/falco/falcosidekick-secret.yaml`)生成 `falcosidekick-telegram` secret(key `TELEGRAM_TOKEN`)；chatid/messagethreadid 明文配在 `cloud/oracle/values/falco.yaml`。token 未配好不影响 Falco→Loki 检测，只是 falcosidekick 推送失败。

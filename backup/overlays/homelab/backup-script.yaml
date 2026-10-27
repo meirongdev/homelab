@@ -37,9 +37,14 @@ data:
 
     # --- 1) Vault raft snapshot（token 先 renew-self，尽力）---
     echo "[backup] vault raft snapshot..."
-    VT="$(cat /creds/VAULT_TOKEN)"
-    curl -sf -X POST -H "X-Vault-Token: $VT" http://vault.vault.svc:8200/v1/auth/token/renew-self >/dev/null 2>&1 || echo "[warn] vault token renew-self failed (continuing)"
-    curl -sf -H "X-Vault-Token: $VT" http://vault.vault.svc:8200/v1/sys/storage/raft/snapshot -o /work/vault.snap
+    # ☠️ token 不能进 argv，原因同下面 SurrealDB 那段。2026-10-27 在 Loki 里查到 7 晚
+    # × 2 条 `-H "X-Vault-Token: <token>"` 明文（10-24 只改了 SurrealDB 的 curl，漏了这两条）。
+    # 这把 token 的 period 是 720h，每晚 renew-self，所以永不过期。必须 export：
+    # --variable %VT 读的是环境变量，没 export 就报错退出。renew 那条的报错会被下面的
+    # `|| echo` 吞掉，但同写法的 snapshot 那条随即失败，set -e 会让夜备整个挂掉，所以不会静默。
+    export VT="$(cat /creds/VAULT_TOKEN)"
+    curl -sf -X POST --variable %VT --expand-header "X-Vault-Token: {{VT}}" http://vault.vault.svc:8200/v1/auth/token/renew-self >/dev/null 2>&1 || echo "[warn] vault token renew-self failed (continuing)"
+    curl -sf --variable %VT --expand-header "X-Vault-Token: {{VT}}" http://vault.vault.svc:8200/v1/sys/storage/raft/snapshot -o /work/vault.snap
     echo "[backup]   vault.snap = $(wc -c < /work/vault.snap) bytes"
 
     # （ZITADEL pg_dump 与 gotify 已于 2026-07-06 迁 oracle，改由 oracle 侧脚本备份；

@@ -52,18 +52,30 @@ tetragon:
     {"binary_regex":["^/proc/self/fd/[0-9]+$"],"parent_binary_regex":["/runc$"],"arguments_regex":["^init$"]}
     {"namespace":["databases"],"binary_regex":["^/usr/bin/pg_isready$"],"arguments_regex":["^/usr/bin/pg_isready -U postgres$"]}
     {"namespace":["databases"],"event_set":["PROCESS_EXIT"],"binary_regex":["^/usr/lib/postgresql/[0-9]+/bin/postgres$"],"parent_binary_regex":["^/usr/lib/postgresql/[0-9]+/bin/postgres$"]}
-  # --- argv 脱敏（2026-10-24）---
+  # --- argv 脱敏（2026-10-24，10-27 补两条）---
   # 进程事件带完整命令行，经 export-stdout → Loki 落盘，任何能查 Loki 的人都看得到。
   # 当日在 Loki 里查到两处明文：krr 的 Telegram bot token（URL 里）与夜备的
   # SurrealDB 口令（`curl -u root:<口令>`），已在源头改成 curl --variable。
   # 这里是兜底：捕获组被替换为 *****。依次是 Telegram bot token · curl -u/--user 的口令 ·
-  # Bearer token · URL 里的 user:pass@。RE2 语法，已用 Go regexp 对样例验过。
+  # Bearer token · URL 里的 user:pass@ · `-token`/`--token` 参数值 · `…Token:` 请求头的值。
+  # RE2 语法，已用 Go regexp 对样例验过。
+  # ☠️ 别以为进程只在启动时被记一次：Tetragon 自己重启时会给所有存量进程补发 exec 事件
+  # （flags=procFS），进程退出时的 exit 事件也带完整 argv。
+  # 10-27 补的两条，来由：
+  #   ⑤ `--token`：cloudflared 带着 `--token <隧道 token>` 跑了 58 天，10-24 本文件改动触发的
+  #      重启补发了一份，10-27 升级换 pod 时的 exit 事件又写了一份。源头已改成 env
+  #      TUNNEL_TOKEN。`--token-file <路径>` 不匹配，路径不算密钥。
+  #   ⑥ `token:`：为 ⑤ 查 Loki 时顺带查到，夜备每晚 `curl -H "X-Vault-Token: …"`，把那把
+  #      period 720h、每晚自续期的备份 token 写了进来（7 天 28 行）。所有 `…Token:` 请求头
+  #      一起盖住，误伤的只会是 `seed-token: kept` 这类提示文字。
   # ⚠️ 只是兜底：带空格且加引号的口令只能打掉一半，密钥别放进 argv 才是正解。
   redactionFilters: |-
     {"redact": ["bot[0-9]{6,}:([A-Za-z0-9_-]{20,})"]}
     {"redact": ["(?:^|\\s)(?:-u|--user)(?:\\s+|=)\"?[^:\\s\"]*:([^\\s\"]+)"]}
     {"redact": ["(?i)authorization:\\s*bearer\\s+([^\\s\"]+)"]}
     {"redact": ["://[^:/\\s@]+:([^@/\\s]+)@"]}
+    {"redact": ["(?:^|\\s)\"?--?token(?:\\s+|=)\"?([^\\s\"]+)"]}
+    {"redact": ["(?i)token:\\s*([^\\s\"]+)"]}
   # --- agent DaemonSet 资源（热节点严格受限）---
   # 实测 7d 峰值 181Mi（超过原先想给的 128Mi request），故 request 给到 224Mi、
   # limit 384Mi。CPU 维持 50m/500m：沿用上面那条注释的原意，这次是真的生效了。
