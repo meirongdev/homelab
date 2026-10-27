@@ -40,6 +40,12 @@
              它会被 GC 按 TTL 清理，位置得让人一眼看见。 -->
         <key>MULTICA_WORKSPACES_ROOT</key>
         <string>{{ md_workspaces_root }}</string>
+        <!-- ☠️ daemon 默认定期轮询 GitHub 并**自我更新到最新 release**：2026-10-27 发现
+             playbook 钉的是 0.4.28，跑着的 daemon 却自报 0.4.29。这会绕过下面的版本
+             钉死与 sha256 校验，还可能跑到 service 端版本前面去。版本只由 playbook 的
+             md_version 决定。 -->
+        <key>MULTICA_DAEMON_AUTO_UPDATE</key>
+        <string>false</string>
     </dict>
     <key>StandardOutPath</key>
     <string>{{ ansible_facts.user_dir }}/.local/var/log/multica-daemon.log</string>
