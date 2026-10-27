@@ -82,6 +82,10 @@ backend:
     #        字段压根不存在 → 恒为空 → 误判成「没生效」。）
     disableWorkspaceCreation: true
 
+    # 自建版每天往上游发一份匿名部署快照（版本 + 分桶计数，v0.4.44 起有）。
+    # 单人实例没有理由上报，关掉。chart 0.7.0 渲染成 env DO_NOT_TRACK。
+    doNotTrack: "1"
+
     # 自建 VCS 集成（Forgejo/Gitea/GitLab）。密钥 MULTICA_VCS_SECRET_KEY 由
     # multica-secret.yaml 经 envFrom 注入；没有它这个开关打开也连不上。
     vcsIntegrationEnabled: true
@@ -190,12 +194,8 @@ ingress:
   #    真正的入口在 k8s/helm/manifests/gateway/route-multica.yaml。
   enabled: false
 
-monitoring:
-  prometheusRule:
-    # 刻意不开，且这是**实测结论不是保守起见**：backend 的 `/metrics` 返回
-    # **404**（2026-08-18 从集群内 curl `multica-backend:8080/metrics` 确认），
-    # 它压根不暴露 Prometheus 指标。开了就是一组永不触发的告警规则 ——
-    # 比没有告警更糟，因为它让人以为这个服务已被监控。
-    # 存活探测由 Uptime Kuma 的公网探测覆盖（cloud/oracle/.../uptime-kuma/provisioner.yaml）。
-    # ⚠️ 那条探测只证明 service 端活着；执行任务的 daemon 在 M2 上，它挂了探测**依然全绿**。
-    enabled: false
+# monitoring.prometheusRule：chart 0.7.0 已删掉这一节（0.4.28 时刻意设 false）。
+# 当时不开是实测结论：backend 的 `/metrics` 返回 **404**（2026-08-18 从集群内
+# curl `multica-backend:8080/metrics` 确认），开了只会是一组永不触发的告警规则。
+# 存活探测由 Uptime Kuma 的公网探测覆盖（cloud/oracle/.../uptime-kuma/provisioner.yaml）。
+# ⚠️ 那条探测只证明 service 端活着；执行任务的 daemon 在 M2 上，它挂了探测**依然全绿**。

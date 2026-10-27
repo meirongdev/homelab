@@ -20,7 +20,7 @@ spec:
   sources:
     - repoURL: ghcr.io/multica-ai/charts
       chart: multica
-      targetRevision: "0.4.28"
+      targetRevision: "0.7.0"
       helm:
         valueFiles:
           - $values/k8s/helm/values/multica.yaml
