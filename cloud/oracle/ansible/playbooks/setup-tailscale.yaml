@@ -81,7 +81,7 @@
     # 守一条不变量：5200 `to 100.64.0.0/10 lookup 52`。挡的是 Cilium identity-mark
     # 撞 Tailscale fwmark（2026-08-09 定性）：`identity & 0xFF == 0x08` 的 pod（1/256
     # 抽签）出向被劫进 main 表，到整个 100.64/10 黑洞。取证全文见
-    # docs/reference/tailscale-network.md；homelab 侧对应
+    # docs/records/2026-08-09-cilium-identity-fwmark-collision.md；homelab 侧对应
     # k8s/ansible/playbooks/setup-tailscale.yaml（它多守一条 5260 LAN 直通）。
     #
     # ☠️ 为什么从"开机 oneshot"改成"收敛器"（2026-08-12 review 发现两台节点全线失守）：

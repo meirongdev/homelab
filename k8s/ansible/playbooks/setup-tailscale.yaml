@@ -41,7 +41,8 @@
     - tailscale_node
   tasks:
     # --- Tailscale 相关 ip rule 收敛器（2026-08-12 重构，取代两只 boot-oneshot）---
-    # 守两条不变量（各自的取证全文在 docs/reference/tailscale-network.md）：
+    # 守两条不变量（现状与判据见 docs/reference/tailscale-network.md；5200 的取证全文见
+    # docs/records/2026-08-09-cilium-identity-fwmark-collision.md）：
     #   5200  to 100.64.0.0/10 lookup 52      Cilium identity-mark 撞 Tailscale fwmark
     #         （2026-08-09 定性）：Cilium 把 identity 编进 skb->mark 高 16 位；Tailscale
     #         即使 netfilter-mode=off 也装 `fwmark 0x80000/0xff0000` 的 ip rule，掩码

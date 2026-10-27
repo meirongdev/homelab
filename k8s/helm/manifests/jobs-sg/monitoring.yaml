@@ -85,7 +85,7 @@ spec:
             # `max(page.Total)` 这个全程峰值去比逐页累加的 scanned，量纲不对，
             # 扫描 25 分钟里任何瞬时抬升都被永久固化 —— 那轮其实已翻到最后一页。
             # 根因全文与实测数据（含平静时段 865×100+10=86510=total 的精确核对）
-            # → docs/reference/jobs-sg.md「全量 reconcile 从来没成功过」。
+            # → docs/records/2026-08-09-jobs-sg-reconcile-never-succeeded.md。
             # 阈值维持 36h：修好后 reconcile 能落成功戳，min without(kind) 自然补上
             # 周日那格；JobsSgReconcileStale(10d) 仍专盯 reconcile 长期失败。
             #

@@ -1,463 +1,243 @@
 # 清单安全规则 (Manifest Safety Checks)
 
-> Last updated: 2026-09-30
+> Last updated: 2026-10-28
 > Status: 生效事实
 > Scope: CI 强制的仓库规则，本文是 source of truth。四个检查器：
 > `scripts/check-manifests.py` 的 **H1-H5**（清单结构）、
-> `scripts/check-version-pairs.py` 的 **V1-V4**（版本配对，2026-08-13 加，V4 于 2026-09-02 加）、
-> `scripts/check-embedded-scripts.py` 的 **E1**（内嵌脚本一致性，2026-08-15 加）与
-> `scripts/render-manifests.py` 的**渲染检查**（2026-09-02 加，见下方专节）。
-> 每条规则都对应一次**真实发生过的事故或静默失效**，不是风格偏好。
-> 三者都由 [static-checks.yml](../../.github/workflows/static-checks.yml) 在 PR 与 main 上运行。
+> `scripts/check-version-pairs.py` 的 **V1-V4**（版本配对）、
+> `scripts/check-embedded-scripts.py` 的 **E1**（内嵌脚本一致性）与
+> `scripts/render-manifests.py` 的**渲染检查**。
+> 每条规则都对应一次真实发生过的事故或静默失效，不是风格偏好。
+> 全部由 [static-checks.yml](../../.github/workflows/static-checks.yml) 在 PR 与 main 上运行。
 
-## 为什么有这份文档
-
-repo 里已经有大量「⚠️ 别踩这个坑」的注释和复盘。问题是**注释不拦人**：
-2026-08-03 那次级联删除，`calibre-web.yaml` 顶部并没有写「这里内嵌了 Namespace」，
-而即便写了，删文件的人也未必会去读被删文件的注释。
-
-所以这里的规则都满足两个条件：
-
-1. **已经发生过**（或已经在静默发生），不是假想风险
-2. **能被静态检查抓住**：写进 CI，而不是写进注释指望下次有人记得
-
-> ⚠️ 与 [docs/RULES.md](../RULES.md) 的 R1-R8 关系：那套管文档组织（由
-> `scripts/check-docs.py` 强制），这套管清单结构。两者同一哲学：
-> 规则没有强制手段就会腐化。
-
-**设计原则：本文档写的规则，和 `scripts/check-manifests.py` 能查的必须一一对应。**
-文档比检查器严，规则就是摆设；检查器比文档严，就会误伤。改任何一边都要同步另一边。
+注释不拦人，所以这里只收「已经发生过（或正在静默发生）」且「能被静态检查抓住」的规则。
+⚠️ 本文与检查器必须一一对应：文档比检查器严，规则是摆设；检查器比文档严，就会误伤。改一边就同步另一边。
+文档组织规则另见 [RULES.md](../RULES.md) 的 R1-R8。
 
 ## 规则
 
 ### H1：`Namespace` / `CustomResourceDefinition` 必须独占文件
 
-ArgoCD 按目录整体同步，**删掉一个文件 = prune 掉文件里的全部对象**。当文件里内嵌了
-作用域大于本应用的资源，删除的爆炸半径就远超预期：
-
-| 内嵌的资源 | 删文件时连带删掉 |
-|---|---|
-| `Namespace` | 该 ns 下其它应用的全部对象，含它们的 PVC |
-| `CustomResourceDefinition` | 集群内该类型的全部 CR |
-
-☠️ **PVC 上的 `Prune=false` 拦不住这个**：被 prune 的是 Namespace，不是 PVC。
-2026-08-03 就是这样：`git rm` 掉 `calibre-web.yaml`（Namespace 内嵌在它顶部）→
-prune 掉整个 `personal-services` ns → 级联删光同 ns 的 open-notebook 数据。
-完整复盘见 [../records/2026-08-03-namespace-prune-cascade.md](../records/2026-08-03-namespace-prune-cascade.md)。
-
-**做法**：Namespace 单独放 `namespace.yaml`（或 `namespace-<name>.yaml`）。
-仓库已按此整改（commit `983ce90`，当时全仓有 4 处内嵌）。
-
-**刻意不管 `ClusterRole` / `ClusterRoleBinding`**：它们通常就是本应用自己的 RBAC，
-与应用同生共死是正确的。把它们列进来会在 5 个文件上制造误报，而误报会让整个检查被无视，
-那比没有检查更糟。
+- 判据：GitOps 同步树（`k8s/helm/manifests`、`cloud/oracle/manifests`、`backup`、`argocd`）里，文件含
+  `Namespace` 或 CRD 且还有别的 kind，即违规。
+- 为什么：ArgoCD 按目录同步，删文件 = prune 文件里的全部对象。内嵌 Namespace 会连带删光该 ns 下其它应用（含 PVC），
+  内嵌 CRD 会删光集群内该类型的全部 CR。2026-08-03 真删过一次：[records](../records/2026-08-03-namespace-prune-cascade.md)。
+- ☠️ PVC 上的 `Prune=false` 拦不住：被 prune 的是 Namespace，不是 PVC。
+- 修法：Namespace 单独放 `namespace.yaml`（或 `namespace-<name>.yaml`）。
+- 刻意不管 `ClusterRole` / `ClusterRoleBinding`：通常是本应用自己的 RBAC，同生共死是对的；列进来只会误报。
 
 ### H2：Application 的 `source.path` / `$values` / `project` 与 `destination` 必须同集群；AppProject 只许一条 destination
 
-2026-08-02 起 ArgoCD 控制面在 oracle-k3s，于是 `destination.server` 的
-`https://kubernetes.default.svc` 指的是 oracle。homelab 的负载必须显式写
-`https://100.94.186.7:6443`。
+控制面在 oracle-k3s，`https://kubernetes.default.svc` 指 oracle，homelab 负载必须显式写 `https://100.94.186.7:6443`。
+☠️ 写错 = 把 homelab 全套负载装到 oracle。迁移期顺序见 [argocd-control-plane-on-oracle.md](../runbooks/argocd-control-plane-on-oracle.md)。
 
-**① `source.path` ↔ `destination`**
+判据（表在 `check-manifests.py` 的 `PATH_CLUSTER` / `VALUES_CLUSTER` / `PROJECT_FOR_SERVER`）：
 
-| `source.path` 前缀 | 必须的 `destination.server` |
-|---|---|
-| `k8s/helm/manifests/…` | `https://100.94.186.7:6443`（homelab） |
-| `backup/overlays/homelab` | `https://100.94.186.7:6443`（homelab） |
-| `cloud/oracle/manifests/…` | `https://kubernetes.default.svc`（oracle） |
-| `backup/overlays/oracle` | `https://kubernetes.default.svc`（oracle） |
-| `argocd/…`（root / projects 元 App） | `https://kubernetes.default.svc`（oracle） |
+| | homelab | oracle |
+|---|---|---|
+| `destination.server` | `https://100.94.186.7:6443` | `https://kubernetes.default.svc` |
+| ① `source.path` 前缀 | `k8s/helm/manifests/…` · `backup/overlays/homelab` | `cloud/oracle/manifests/…` · `backup/overlays/oracle` · `argocd/…` |
+| ② `$values/…` 的 valueFiles 前缀 | `k8s/helm/values/…` | `cloud/oracle/values/…` |
+| ③ `project` | `homelab` | `oracle-k3s` |
 
-☠️ 写错的后果不是「一个应用装错地方」，而是**把 homelab 全套负载装到 oracle**
-（`AGENTS.md` 里那条 ☠️ 说的就是这个）。迁移期的正确顺序见
-[../runbooks/argocd-control-plane-on-oracle.md](../runbooks/argocd-control-plane-on-oracle.md)。
-
-**② `$values` 引用 ↔ `destination`（2026-09-04 加）**
-
-chart 型 source（`sources[]` 里只有 chart + `$values` 引用）没有 `path`，它唯一带集群归属的
-东西是 values 文件的路径，所以 values 必须一棵集群一棵树：
-
-| `valueFiles` 路径前缀 | 必须的 `destination.server` |
-|---|---|
-| `k8s/helm/values/…` | `https://100.94.186.7:6443`（homelab） |
-| `cloud/oracle/values/…` | `https://kubernetes.default.svc`（oracle） |
-
-此前两集群的 values 挤在同一棵 `k8s/helm/values/` 树里，oracle 的靠 `-oracle` 后缀区分，而
-falco / loki / tempo / cnpg-operator 四个 oracle 独有的文件连后缀都没有——**values 属于哪个
-集群纯靠文件名猜，放错树 CI 看不见、`Synced` 照绿**。后缀那套还有个隐藏失败模式：
-`<app>.yaml` 与 `<app>-oracle.yaml` 成对（external-dns / opencost / trivy-operator），改了
-一边忘另一边 = 两集群配置静默分叉。表在 `scripts/check-manifests.py` 的 `VALUES_CLUSTER`。
-
-> **本条查不到的**：manual-helm 的 values 由 justfile 的 `--values` 直接给出，不经
-> Application——ArgoCD 本体的 `values/argocd.yaml` + `values/argocd-oracle.yaml` 就是这类
-> （装在 oracle，配方在 `k8s/helm/justfile`）。判断归谁管：`kubectl -n <ns> get secret -l owner=helm`。
-
-**③ `project` ↔ `destination`（2026-09-02 加，[决策](../decisions/argocd-project-per-cluster.md)）**
-
-| `destination.server` | 必须的 `project` |
-|---|---|
-| `https://100.94.186.7:6443` | `homelab` |
-| `https://kubernetes.default.svc` | `oracle-k3s` |
-| （source 在 `argocd/` 下的元 App，不论 destination） | `default` |
-
-每集群一个 AppProject，各自只允许一条 destination，所以 project ↔ destination 脱节时 ArgoCD
-服务端会直接拒绝同步（`destination server ... is not permitted`，响亮）。本规则的意义是在
-push 之前就拦住，并给 chart 型 App 补上静态兜底。`default` 是内置全放行 project，只许 root /
-projects 两个元 App 用，其它 App 挂它会被本规则拦。
-
-**④ AppProject 必须且只能有一条 destination**，且必须是该 project 名字对应的那台集群
-（表在 `scripts/check-manifests.py` 的 `PROJECT_FOR_SERVER`，是集群表的唯一副本）。
-多列或通配会让服务端那半兜底静默失守。新集群入编 = 新 project 文件 + 登记进这张表。
+- ① chart 型 source 没有 `path`，由 ② ③ 兜住。
+- ② values 一棵集群一棵树（放错树时 `Synced` 照绿）；不在已知树里也报错，新树先登记 `VALUES_CLUSTER`。
+  ⚠️ 两集群成对的 values（external-dns / opencost / trivy-operator）改一边忘另一边会静默分叉，本条不查。
+- ③ 脱节时 ArgoCD 服务端也会拒绝同步（`destination server ... is not permitted`），本条在 push 前就拦。
+  内置全放行的 `default` 只许 `argocd/` 下的 root / projects 两个元 App 用。[ADR](../decisions/argocd-project-per-cluster.md)
+- ④ AppProject 必须且只能有一条 destination，且是 project 名对应的集群；多列或通配会让服务端兜底静默失守。
+  新集群入编 = 新 project 文件 + 登记 `PROJECT_FOR_SERVER`（集群表的唯一副本）。
+- 查不到：manual-helm 的 values 由 justfile `--values` 直接给，不经 Application（如 ArgoCD 本体的
+  `k8s/helm/values/argocd.yaml` + `argocd-oracle.yaml`，装在 oracle，配方在 `k8s/helm/justfile`）。
+  判断归谁管：`kubectl --context <ctx> -n <ns> get secret -l owner=helm`。
 
 ### H3：`ReferenceGrant` 必须声明 `v1beta1`
 
-声明集群里没有提供的版本，不会只让这一个对象失败，而是整个 App 报
-`ComparisonError: unable to resolve parseableType`，App 级不可用。
-
-```yaml
-apiVersion: gateway.networking.k8s.io/v1beta1   # ← 不是 v1
-kind: ReferenceGrant
-```
-
-> **2026-08-11 更正理由（规则不变，原因变了）**：本节原写「ReferenceGrant 至今未晋升到
-> `v1`」，这已经不成立：Gateway API 早已把它提升到 `v1`，而且 **Cilium 1.20 反过来
-> *要求* 该 CRD 提供 `v1`**，否则 operator 的 Gateway API 控制器整个不初始化
-> （两集群因此静默瘫痪 30 小时，见 [records/2026-08-11-gateway-api-crd-stall.md](../records/2026-08-11-gateway-api-crd-stall.md)）。
->
-> 集群现装 Gateway API v1.6.1，其 referencegrants CRD **同时 served `v1` 与 `v1beta1`，
-> 且 `v1beta1` 仍是 storage 版本**。所以：
-> - 继续写 `v1beta1` 是对的（仍受支持、是 storage，改成 v1 是无谓的 churn）；
-> - 但**别再把理由说成「v1 不存在」**，它存在。真正的判据永远是
->   「集群里这个 CRD 提供哪些版本」：
->   `kubectl get crd referencegrants.gateway.networking.k8s.io -o jsonpath='{.spec.versions[*].name}'`
-
-> ☠️ **规则有效，但仓库现存的 7 个 grant 其实一个都没在起作用**（2026-09-06 实测）：
-> 它们全是同 ns 的（HTTPRoute 与 Service 在一个 ns），而 ReferenceGrant 只管**跨 ns 的
-> `backendRefs`**；全仓 29 条 backendRef 无一跨 ns。让 `kube-system` 的 Gateway 接管别的
-> ns 的路由的是 listener 的 `allowedRoutes`。所以 H3 该留着（真写 grant 时它救命），
-> 但**新增服务不必写 grant**——判据与实测见
-> [networking-ingress.md](networking-ingress.md)。
->
-> 相关但不由 CI 检查的一条：本仓库的 ReferenceGrant 的 `to[]` 都不限定 `name`，
-> 即「授权网关访问该 ns 下全部 Service」。这是刻意的简化，不是缺陷，见下方
-> 「查不出来的那些」里的 ReferenceGrant 寄生条目。
+- 判据：每个 ReferenceGrant 的 `apiVersion` 必须是 `gateway.networking.k8s.io/v1beta1`。
+- 为什么：声明集群没提供的版本，整个 App 报 `ComparisonError: unable to resolve parseableType`，不只是这一个对象。
+- 为什么是 v1beta1：现装 Gateway API v1.6.1 的 CRD 同时 served `v1` 与 `v1beta1`，`v1beta1` 仍是 storage 版本，
+  改 v1 是无谓 churn。⚠️ 别说成「v1 不存在」：它存在，且 Cilium 1.20 要求 CRD 提供 v1
+  （[records](../records/2026-08-11-gateway-api-crd-stall.md)）。判据永远是集群实际提供的版本：
+  `kubectl --context <ctx> get crd referencegrants.gateway.networking.k8s.io -o jsonpath='{.spec.versions[*].name}'`
+- ☠️ 同 ns 后端不需要 grant：它只管跨 ns 的 `backendRefs`，Gateway 接管别的 ns 的路由靠 listener 的 `allowedRoutes`。
+  2026-09-06 实测仓库现存 grant 全是同 ns 的，一个都没在起作用；H3 留给真写跨 ns grant 时用。见
+  [networking-ingress.md](networking-ingress.md)。
+- 本仓库 grant 的 `to[]` 不限定 `name`（授权整个 ns），是刻意简化；位置风险见「查不出来的那些」。
 
 ### H4：清单里声明的每个 PVC 都必须有备份归属
 
-两个 overlay 的备份脚本都是**显式白名单**（`for pat in …`），新增有状态应用
-不往里加就静默地不备份：没有告警，没有报错，只有需要恢复时才会发现。
+- 判据：清单树里每个 PVC，名字须被对应备份脚本白名单（`for pat in …;`）的某个模式子串命中（脚本用
+  `/localpath/*"$pat"*` 匹配目录名），或在 `check-manifests.py` 的 `BACKUP_EXEMPT` 里写明靠什么保住。
+  `k8s/helm/manifests/` 对 `backup/overlays/homelab/backup-script.yaml`，`cloud/oracle/manifests/` 对
+  `backup/overlays/oracle/backup-script.yaml`。
+- 为什么：备份是显式白名单，漏加就静默不备份，恢复时才发现。上线即抓到 `trends-data` 漏备约两个月。
+- 白名单直接从脚本解析（锚定行首 `for pat in`，多个循环取并集），不维护副本；解析不到就报错。
+- 修法：加进白名单，或加 `BACKUP_EXEMPT` 条目。豁免是数据合法不进 restic 的唯一出口，必须写清替代保护。
+- ⚠️ worker 夜备（`worker-backup-script.yaml`）整目录扫、不看白名单，但 H4 只解析控制面那份：钉到
+  `k8s-worker-106` 的 PVC 也要写进控制面白名单。
 
-检查逻辑：清单树里每个 `PersistentVolumeClaim`，必须满足其一
-
-1. 名字被对应 overlay 的白名单模式子串命中（脚本用 `/localpath/*"$pat"*` 匹配目录名）
-2. 或在 `check-manifests.py` 的 `BACKUP_EXEMPT` 里写明它靠什么保住
-
-| 清单树 | 备份脚本 |
-|---|---|
-| `k8s/helm/manifests/…` | `backup/overlays/homelab/backup-script.yaml` |
-| `cloud/oracle/manifests/…` | `backup/overlays/oracle/backup-script.yaml` |
-
-当前豁免（每条都必须说清替代保护手段，这是数据合法地不进 restic 的唯一出口）。
-⚠️ **真相源是 `check-manifests.py` 的 `BACKUP_EXEMPT`**，下表是给人读的摘要，
-以那里为准（2026-08-25 核过一遍，此前这张表只列了前两条、漏了 6 条）：
+当前豁免（真相源 `BACKUP_EXEMPT`）：
 
 | PVC | 靠什么保住 |
 |---|---|
-| `open-notebook-surreal-local` | SurrealDB，由 HTTP `/export` 逻辑导出覆盖 |
-| `calibre-books-local` | 23G 书库，由 `BOOKS_DIR` 整目录纳入 restic，不走 sqlite 白名单 |
-| `apps-pg-data-local` | homelab 共享 Postgres（租户 litellm+multica），由逐库 `pg_dump` 覆盖；数据目录无 WAL 自恢复，不能原样拷贝 |
-| `media-{movie,tv,anime,music,podcast}`（5 个） | 只读 NFS，真身在 106 的 ZFS（raidz1+sanoid）；restic 目标也是 106，再进一遍没有跨机冗余意义 |
+| `open-notebook-surreal-local` | SurrealDB HTTP `/export` 逻辑导出 |
+| `calibre-books-local` | `BOOKS_DIR` 整目录纳入 restic |
+| `apps-pg-data-local` | homelab 共享 Postgres 逐库 `pg_dump`（数据目录无 WAL 自恢复，不能原样拷贝） |
+| `media-{movie,tv,anime,music,podcast}` | 只读 NFS，真身在 106 的 ZFS（raidz1+sanoid），再进 restic 无跨机冗余意义（[ADR](../decisions/multimedia-repository-nfs-readonly.md)） |
 
-☠️ **逻辑 dump 类的豁免有个共同盲区**：豁免保的是"卷不用进 restic"，
-保不住"库有没有被 dump"。共享实例里加一个库、CNPG 里加一个租户，H4 都看不见
-（它只扫清单里的 PVC），必须手工去备份脚本加一行 `pg_dump`。
-
-**这条规则上线即抓到一个真实缺口**：`trends-data`（45MB SQLite，且 PVC 带
-`Prune=false`，本就是当作要紧数据对待的）自 2026-06-05 起静默未备份约两个月，
-2026-08-03 补入白名单。
-
-白名单直接从脚本正则解析，不维护副本：副本会漂移，而漂移的检查器比没有更糟。
-解析不到就报错，宁可吵也不静默放行。
+- ☠️ 逻辑 dump 类豁免只保「卷不用进 restic」，保不住「库有没有被 dump」：共享实例或 CNPG 加库/租户，H4 看不见，
+  必须手工在备份脚本加一行 `pg_dump`。
+- ⚠️ H4 也查不出「有归属但文件名模式对不上」，见 [storage.md](storage.md)。
 
 ### H5：每个 `Namespace` 必须显式声明 PSA 等级
 
-**没有 PSA 标签不是「没定级」，是定成了最宽的那档**：PSA 内置默认 `enforce=privileged`，
-而且 `warn`/`audit` 一并为空，既不拦，也不记，连事后审计的线索都没有。
-这比一个写着 `privileged` 的显式豁免更危险：后者至少有人能在 review 里看见。
-
-```yaml
-metadata:
-  name: <ns>
-  labels:
-    pod-security.kubernetes.io/enforce: baseline   # ← 三档任选，privileged 也行（显式豁免）
-```
-
-**这条规则来自一次真实的静默失效**：`zitadel` ns（oracle，装着 SSO 与身份库 `zitadel-pg`）
-自 2026-07-06 迁入起清单里一个 PSA 标签都没有，敞了一个多月到 2026-08-10。
-期间实测 `kubectl apply --dry-run=server` 一个 `hostPID + hostNetwork + privileged + hostPath:/`
-的 Pod，**在该 ns 建得成，且不产生任何 warning**；同一个 Pod 打到 `databases` ns 直接 Forbidden。
-`security.md` 的等级矩阵旁边一直挂着「⚠️ zitadel 没标签」的注释，又一次印证注释不拦人。
-
-三个等级都算通过（`privileged` 是显式豁免，写出来就有人能审），写错值（拼错、写成 `restrict`）
-同样报错：PSA 对无法识别的等级值不会报错，它只是**不生效**。
-
-> 收紧前先问准入自己，别靠读 values 猜：
-> ```bash
-> kubectl label ns <ns> pod-security.kubernetes.io/enforce=restricted --overwrite --dry-run=server
-> ```
-> 它会把现存违规 Pod 连同缺失字段一起列出来。⚠️ 只评估当下存在的 Pod：
-> 周期性 Job（trivy 的 node-collector 要 hostPath）当时不在场，dry-run 干净 ≠ 收紧安全。
+- 判据：每个 Namespace 必须有 `pod-security.kubernetes.io/enforce` 标签，值为 `privileged` / `baseline` /
+  `restricted` 之一。`privileged` 算通过（显式豁免，有人能审）；写错值同样报错，因为 PSA 对不认识的值不报错、只是不生效。
+- 为什么：没标签 = 静默吃内置默认 `enforce=privileged`，且 `warn`/`audit` 全空，连审计线索都没有，比显式写
+  `privileged` 更危险。`zitadel` ns 曾这样敞了一个多月，见 [records](../records/2026-08-10-zitadel-ns-without-psa-labels.md)。
+- 收紧前先问准入（会列出现存违规 Pod）：
+  `kubectl --context <ctx> label ns <ns> pod-security.kubernetes.io/enforce=restricted --overwrite --dry-run=server`
+  ⚠️ 只评估当下存在的 Pod：周期性 Job（trivy 的 node-collector 要 hostPath）不在场，dry-run 干净 ≠ 收紧安全。
 
 ### V1：同一 chart 出现在多个 Application 里必须同版本
 
-**为什么**：三对 App 是跨集群镜像部署同一个 chart（`external-dns` / `opencost` /
-`trivy-operator` 各两份）。升级时只改一侧，另一侧就静默留在旧版本，直到某天两集群行为
-不一致才被发现。
-
-自动发现、不需要维护名单：检查器扫 `argocd/applications/*.yaml`，把同名 `chart` 的
-`targetRevision` 两两比对。刻意的灰度（单侧先行）写行内豁免：
-
-```yaml
-targetRevision: "2.5.27"   # version-pair-ok: 灰度先行 oracle，2026-09 对齐
-```
+- 判据：扫 `argocd/applications/*.yaml`，同名 `chart` 的 `targetRevision` 必须一致，自动发现，不维护名单。
+- 为什么：跨集群镜像部署的 chart 对（external-dns / opencost / trivy-operator）只升一侧，另一侧静默留在旧版。
+- 豁免：刻意灰度在版本行写 `# version-pair-ok: <理由>`，任一处带豁免则整组跳过。
 
 ### V2：声明为「同一事实」的版本变量组必须取值一致
 
-**为什么**：`gateway_api_version` 同一个事实写在三处（`k8s/helm/justfile`、
-`cloud/oracle/justfile`、`cloud/oracle/ansible/playbooks/setup-k3s.yaml`）。
-2026-08-13 实测：前两处已是 1.6.1，剧本里**还钉着 1.2.1**，注释却写"与 homelab 一致"。
-而这处漏改只在重建集群时才爆，等于埋了一颗定时炸弹。
-
-配对组是人工声明的（`DECLARED_PAIRS`），不做"同名变量一律必须相等"的推断。加组前
-先问：改了一处不改另一处，会不会出事？会才加。当前三组：
-
-| 组 | 为什么必须相等 |
-|---|---|
-| `gateway_api_version`（3 处）| 两集群装同一版本 CRD；oracle 的 justfile 与剧本描述的更是同一批 CRD |
-| `cilium_version`（2 处）| ClusterMesh 要求两端版本一致；且各自的 Gateway API 版本由同一张兼容表推出 |
-| `k3s_version`（3 处，2026-08-30 加）| homelab 控制面与 worker 是同一个集群（agent 不保证能新于 server）；oracle 按舰队惯例同步升 |
-
-`k3s_version` 这组补的是同一类洞的另一半：2026-08-30 核查发现两个 server 剧本
-（`k8s/ansible/playbooks/setup-k3s.yaml`、`cloud/oracle/ansible/playbooks/setup-k3s.yaml`）
-压根没钉版本，是裸的 `curl -sfL https://get.k3s.io | sh -`，装的是 stable 频道当天的值。
-当时现网跑 v1.34.5、stable 已是 v1.36.4，而 worker 那份偏偏钉死在 v1.34.5。
-后果同 08-13 的 CRD：**只在重建那天才爆**，且爆出来的是「重建完的集群和原来不是一个 minor」。
-三处现已全部钉死并纳入本组。⚠️ 这些值描述的是现网正在跑什么，不是想升到什么，
-升级流程见 [runbooks/k3s-cluster-upgrade.md](../runbooks/k3s-cluster-upgrade.md)，
-升完节点再回来改 pin。分阶段升级（一侧先行）在先行那侧行尾写 `version-pair-ok: <理由>`。
-
-⚠️ **刻意不收** `node_exporter_version`（三套 ansible 各一份，实测 1.11.1 / 1.10.0 /
-1.11.1）与 `eso_version`（两集群独立安装）：那是三个独立机队/两个独立安装，不一致是
-"该升级了"而不是"配置错了"。把它算违规就会制造一条谁都不看的红灯，
-这类漂移靠升级时人工对齐。
+- 判据：`check-version-pairs.py` 的 `DECLARED_PAIRS` 里每组变量在所列文件中取值必须一致；找不到变量也报错。
+  组与各组理由见 `DECLARED_PAIRS` 的 `why`。
+- 为什么：同一版本事实散在多处，漏改的那处只在重建集群时才爆（oracle 剧本曾钉旧 `gateway_api_version` 而注释写
+  「与 homelab 一致」；server 剧本曾根本没钉 k3s 版本）。
+- 组是人工声明的，不推断「同名变量一律相等」。加组前先问：改一处不改另一处会不会出事？会才加。
+- ⚠️ 刻意不收 `node_exporter_version`（三个独立机队）与 `eso_version`（两集群独立安装）：不一致是「该升级了」，
+  不是「配置错了」，算违规只会造一条没人看的红灯。
+- ⚠️ `k3s_version` 描述现网在跑什么，不是想升到什么：升完节点再改 pin（[k3s-cluster-upgrade.md](../runbooks/k3s-cluster-upgrade.md)）；
+  分阶段升级在先行那侧行尾写 `version-pair-ok: <理由>`。
 
 ### V3：`cilium_version` 与 `gateway_api_version` 必须符合兼容表
 
-**为什么**：2026-08-11 的 30 小时静默 stall。缺 CRD 时 Cilium operator 的 Gateway API
-控制器**整个不初始化**，而旧路由照常 200、无任何告警，只有新增路由静默 503
-（[复盘](../records/2026-08-11-gateway-api-crd-stall.md)）。
-
-检查器里有一张 `CILIUM_GATEWAY_API` 表（当前只有 `1.20 → 1.6.1`）。
-☠️ **升 Cilium 时表里查不到对应 minor 会直接报错，这是特意的**：它强迫升级者去读一遍
-上游的 Gateway API 前置条件，而不是假设旧 CRD 还能用，后者正是 08-11 的死法。
+- 判据：`versions.just` 的 `cilium_version` 按 major.minor 查 `CILIUM_GATEWAY_API`，`gateway_api_version` 必须等于表值
+  （当前只有 `1.20 → 1.6.1`）。
+- 为什么：缺 CRD 时 Gateway API 控制器整个不初始化，旧路由照常 200，只有新增路由静默 503
+  （[records](../records/2026-08-11-gateway-api-crd-stall.md)）。
+- ☠️ 升 Cilium 时表里查不到对应 minor 直接报错，是特意的：逼升级者读上游前置条件，而不是假设旧 CRD 还能用。
 
 ### V4：`versions.just` 的共享变量不得被 import 方重新定义
 
-2026-09-02 起 `cilium_version` 与 `gateway_api_version` 收敛到仓库根的
-[`versions.just`](../../versions.just)，`k8s/helm/justfile` 与 `cloud/oracle/justfile` 各
-`import` 一份 —— 这两个值是**同一个事实**（ClusterMesh 要求两端 Cilium 同版本；
-Gateway API CRD 两集群装同一批），此前各写一份，靠注释说「必须一致」，实测漂过两次。
-
-☠️ **`just import` 允许 import 方重新定义同名变量并静默胜出**。那正好复刻了这次收敛要
-消灭的漂移，而且更隐蔽：文件里明明写着 `import`，读的人会以为值来自共享文件。
-所以 V4 查两件事：
-
-1. 两个 justfile 都必须真的 `import versions.just`（删掉 import 就退回各写一份的老路）
-2. 它们里面不得再出现 `versions.just` 已定义的变量名
-
-分阶段升级（一侧先行）在那行行尾写 `version-pair-ok: <理由>` 豁免，同 V2 的约定。
-
-**不进 `versions.just` 的**：`eso_version`（两集群各自独立装 ESO，无耦合，同步是假约束）、
-`vault_version` / `argocd_chart_version`（只有 homelab 一处）、各 chart 的 `targetRevision`
-（唯一真相源是 `argocd/applications/<app>.yaml`）。V2 仍然管着 justfile 之外的副本 ——
-`gateway_api_version` 在 oracle 的 ansible 剧本里还有第三份（YAML 变量，`import` 不进来），
-而它正是 2026-08-13 被抓到钉着旧值、注释却写「与 homelab 一致」的那份。
+- 判据：`k8s/helm/justfile` 与 `cloud/oracle/justfile` 必须 `import` [`versions.just`](../../versions.just)，
+  且不得再定义它已有的变量名。
+- 为什么：`cilium_version` / `gateway_api_version` 是两集群同一个事实（ClusterMesh 要求两端同版本；两集群装同一批 CRD）。
+  ☠️ `just import` 允许 import 方重新定义同名变量并静默胜出，读的人还以为值来自共享文件。
+- 豁免：分阶段升级在那行行尾写 `version-pair-ok: <理由>`。
+- 不进 `versions.just`：`eso_version`（两集群独立装）、`vault_version` / `argocd_chart_version`（只有 homelab 一处）、
+  chart 的 `targetRevision`（真相源是 `argocd/applications/<app>.yaml`）。
+- ⚠️ oracle ansible 剧本里的 `gateway_api_version` 是 YAML 变量、`import` 不进来，仍归 V2 管。
 
 ### E1：ConfigMap 内嵌的脚本必须与同目录的源文件一致，且 pod 模板带它的 checksum
 
-**适用对象**：跑「通用镜像 + ConfigMap 挂脚本」的负载。目前只有
-`k8s/helm/manifests/monitoring/cf-analytics-exporter/`（`exporter.py` ↔ `-cm.yaml`）。
+适用于「通用镜像 + ConfigMap 挂脚本」的负载，目标清单见 `check-embedded-scripts.py` 的 `TARGETS`。
 
-**为什么**：这种布局天生有两份副本，一份 `.py` 供编辑器/linter 当代码看，一份嵌在 YAML
-里供 ArgoCD 部署。两个失效模式都是静默的，且长得一模一样（git 干净、ArgoCD Synced、
-pod Running、行为是旧的）：
+- 判据：(a) ConfigMap 的 `data[<key>]` 逐字节等于源文件；(b) pod 模板注解 `checksum/<...>` 等于源文件 sha256 前 16 位。
+- 为什么：两份副本（`.py` 给编辑器/linter，YAML 内嵌给 ArgoCD）的两种失效都静默且同形（git 干净、Synced、Running、
+  行为是旧的）：改了 `.py` 忘了重新生成；或重新生成了，但 ConfigMap 变更不重启 pod。(b) 让脚本一变 pod 模板就变，
+  ArgoCD 自然滚动重启。
+- 修法：`cd k8s/helm && just gen-embedded-scripts`（= `--write`），同时重写 ConfigMap 与注解。别手改 ConfigMap 里的 Python。
+- 加新目标：`TARGETS` 加一项。ConfigMap 的 `data` 只能有那一个 key 且位于文件末尾（生成器按「`key: |` 之后到文件尾」
+  整段替换，以保住文件头注释）。
 
-1. 改了 `.py` 忘了重新生成 ConfigMap → 部署的还是旧代码。
-2. 重新生成了 ConfigMap，但 **ConfigMap 变更不会重启 pod** → 进程还跑着启动时读进内存的
-   旧脚本。这条不是假想：`查不出来的那些` 表里 oracle otel-collector 那行就是同一种死法。
+#### E1 的半个变体：`STAMP_ONLY`（只查 checksum）
 
-所以 E1 查两件事：`data[<key>]` 逐字节等于源文件，且 pod 模板注解
-`checksum/<...>` 等于源文件 sha256 的前 16 位。第二条让脚本一变 pod 模板就变，
-ArgoCD 自然滚动重启。
+没有、也不该有外部源文件的内嵌配置只查 (b)。例：LiteLLM 路由表抽成外部 `.yaml` 会落进同步目录被当清单 apply 而失败。
+出事机制相同：subPath 挂载不接收 ConfigMap 更新，进程只在启动时读配置。
 
-**怎么修**：`cd k8s/helm && just gen-embedded-scripts`（= `check-embedded-scripts.py --write`），
-它同时重写 ConfigMap 与 checksum 注解。**不要手改 ConfigMap 里的 Python**。
+- 用 YAML 解析器取 `data[key]`（即 Kubernetes 实际看到的值）：块不必在文件末尾、`key: ""` 空标量也能取到，
+  ConfigMap 与 Deployment 可同文件。⚠️ 因此依赖 pyyaml，必须 `uv run --with pyyaml python` 跑。
+- `key` 可写成列表，多个 key 合成一个注解。哈希只覆盖值（按列表顺序、`\0` 分隔），不含 key 名：改 key 名必然连带改
+  `subPath`，模板本身就变了。
+- 当前目标（真相源 `STAMP_ONLY`）：litellm 的 `config.yaml`（[litellm-gateway.md](litellm-gateway.md)）、homepage 的
+  6 个配置块、json-exporter 的 `config.yml`，注解都是 `checksum/config`。
+- ⚠️ 不用 subPath 不等于免疫：json-exporter 是整目录挂载、文件会刷新，但 json_exporter 只在启动时读 `--config.file`。
 
-**加新目标**：在 `check-embedded-scripts.py` 的 `TARGETS` 里加一项。要求 ConfigMap 的
-`data` 只有那一个 key 且位于文件末尾：生成器按「`key: |` 之后到文件尾」整段替换，
-以保住文件头的注释。
-
-#### E1 的半个变体：`STAMP_ONLY`（只查 checksum，2026-08-25 加）
-
-有些内嵌内容压根没有、也不该有外部源文件：LiteLLM 的路由表只存在于 ConfigMap 里，
-抽成外部 `.yaml` 会落在 ArgoCD 同步目录里被当清单 apply 然后失败。这类目标进
-`STAMP_ONLY`，不查 (a)「两份副本一致」，只查 (b)「hash 进 pod 模板」，
-因为让它出事的是同一个机制：**subPath 挂载不接收 ConfigMap 更新，且进程只在启动时读配置**。
-
-`STAMP_ONLY` 只读不写，所以直接用 YAML 解析器取 `data[key]`，取到的就是
-Kubernetes 实际看到的值。不像 `TARGETS` 那样按缩进硬读（那条路要求块位于文件末尾，
-且对 `docker.yaml: ""` 这种空标量直接找不到，2026-08-25 踩到）。因此 ConfigMap
-和消费它的 Deployment 可以留在同一个文件里，加保护不需要拆清单。
-
-⚠️ 也因此 `check-embedded-scripts.py` 依赖 pyyaml，
-[static-checks.yml](../../.github/workflows/static-checks.yml) 里它必须用
-`uv run --with pyyaml python` 跑（原来是裸 `uv run python`）。
-
-`key` 可以写成列表：一个 ConfigMap 的多个 key 合成一个注解。哈希只覆盖值
-（按列表顺序、`\0` 分隔），不含 key 名：重命名 key 必然同时改 pod 模板里的 `subPath`，
-模板本身就变了，不需要哈希再兜一遍。
-
-当前目标：
-
-| 清单 | key | 注解 | 踩过的坑 |
-|---|---|---|---|
-| `litellm.yaml` | `config.yaml` | `checksum/config` | 2026-08-25：改完 `mac/ornith` 后 ConfigMap 同步成功、ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按旧路由表继续跑，必须手动 `rollout restart` |
-| `homepage/homepage.yaml` | 6 个（settings/bookmarks/services/widgets/kubernetes/docker）| `checksum/config` | 同款机制：改配置后仪表盘静默不变 |
-| `json-exporter/json-exporter-cm.yaml` → `json-exporter.yaml` | `config.yml` | `checksum/config` | 2026-09-30 加。⚠️ 这条是**整目录挂载**，文件会刷新，只中了后一半：json_exporter 只在启动时读 `--config.file`、没有 reload（v0.8.0 `--help` 核过）。所以「不用 subPath」不等于免疫 |
-
-**验哈希对不对**，别只看 CI 绿：拿集群里 ConfigMap 的真实 data 反算一遍，应与注解相等：
+验哈希别只看 CI 绿，拿集群里的真实 data 反算，应与注解相等（任意目录执行）：
 ```bash
 kubectl --context oracle-k3s -n homepage get cm homepage-config -o json \
   | python3 -c 'import sys,json,hashlib; d=json.load(sys.stdin)["data"]; \
     print(hashlib.sha256(b"\0".join(d[k].encode() for k in ["settings.yaml","bookmarks.yaml","services.yaml","widgets.yaml","kubernetes.yaml","docker.yaml"])).hexdigest()[:16])'
 ```
 
-**「ConfigMap 变了 pod 不重启」目前有两种合法的解**，加新负载时挑一个：
+「ConfigMap 变了 pod 不重启」的两种合法解：已走 kustomize 的目录用 `configMapGenerator`（名字带内容哈希，如 oracle
+otel-collector，见 [observability-multicluster.md](observability-multicluster.md)）；裸 manifest 用 `checksum/*` 注解 +
+`STAMP_ONLY`（如 litellm）。⚠️ 仍未覆盖：`k8s/helm/manifests/media/podcast.yaml` 的 nginx `default.conf`（subPath），
+改它静默不生效，加进 `STAMP_ONLY` 只需一条目 + 一个注解。
 
-| 手段 | 适用 | 本仓库实例 |
-|---|---|---|
-| kustomize `configMapGenerator`（名字带内容哈希，自动重写引用） | 该目录已走 kustomize | oracle otel-collector（`cloud/oracle/manifests/kustomization.yaml`）|
-| pod 模板 `checksum/*` 注解 + `STAMP_ONLY` | 裸 manifest，不走 kustomize | litellm |
+## 渲染检查（`scripts/render-manifests.py`）
 
-⚠️ **仍未覆盖**（subPath 挂 ConfigMap、既无哈希名也无 checksum 注解）：
-`k8s/helm/manifests/media/podcast.yaml`（nginx `default.conf`）。
-改它会静默不生效，加进 `STAMP_ONLY` 只需一条目 + 一个注解。
+H/V/E 查文件与归属，读不到「ArgoCD 最终会 apply 出什么」。只活在渲染层的三类静默失效：values 写错嵌套层级
+（chart 静默忽略，如 Tempo 的 `persistence` 写在 `tempo.` 下 → 一直跑 emptyDir）；多源 `$values` 渲染成空操作
+（见 [argocd-app-patterns.md](argocd-app-patterns.md)「Synced 也可能是空操作」）；kustomize 漏登记 / 目录源混进非清单
+（如 calibre-metadata 漏登记 `metadata-enrich.yaml`）。
 
-## 渲染检查（`scripts/render-manifests.py`，2026-09-02 加）
+判据：以 `argocd/applications/*.yaml` 为唯一输入，目录源照 ArgoCD 的 recurse/exclude 拼接、kustomize 源走
+`kubectl kustomize`、chart 源走 `helm template`（带 `--version` pin 与 `$values` 文件），再 `kubeconform -strict` 逐对象校验。
 
-H1-H5 / V1-V4 / E1 查的都是**文件与归属**：谁独占文件、版本副本一不一致、内嵌脚本有没有漂。
-它们全都读不到「ArgoCD 最终会 apply 出什么对象」。而本仓库有三类静默失效恰好只活在渲染层：
-
-| 失效 | 表现 | 本仓库实例 |
-|---|---|---|
-| values 写错嵌套层级 | chart 静默忽略多余的键，ArgoCD 照样 Synced | Tempo 的 `persistence` 写在 `tempo.` 之下 → 一直跑在 emptyDir；2026-08-10 KRR 分诊一次照出 3 处同类 |
-| 多源 `$values` 渲染成空操作 | map 键保留 chart 默认（`{}` 不覆盖）、list 整体替换 | 见 `argocd-app-patterns.md`「Synced 也可能是空操作」 |
-| kustomize 漏登记 / 目录源混进非清单 | 对象静默缺席，或整个 App 同步失败 | 2026-07 calibre-metadata 漏登记 `metadata-enrich.yaml` |
-
-**做法**：以 `argocd/applications/*.yaml` 为唯一输入（那就是现网会部署的清单，不另列一份），
-按 source 类型分别渲染 —— 目录源照 ArgoCD 的 recurse/exclude 规则拼接、kustomize 源走
-`kubectl kustomize`、chart 源走 `helm template` 并带上 `--version` pin 与 `$values` 文件，
-然后 `kubeconform -strict` 逐对象校验。
-
-两个容易判错的点：
-
-- ☠️ **必须传 `--kube-version` 与 `--api-versions`**。ArgoCD 渲染时会把目标集群的 API 组喂给
-  helm；不传则 `.Capabilities.APIVersions.Has` 全为 false，ServiceMonitor / PrometheusRule /
-  HTTPRoute 一类模板**直接不渲染**——校验通过的是一份与现网不同的清单，比不校验更危险。
-  脚本里的 `API_VERSIONS` 是两集群 `kubectl api-versions` 的并集，装了新 operator 要补它的 group。
-- **「跳过」不是「通过」**。没有 schema 的类型（CRD 本体、`CiliumGatewayClassConfig` 等）
-  由 `-ignore-missing-schemas` 放行，脚本按 kind 打印出来，让覆盖缺口可见。
-  当前跳过的只有 `CustomResourceDefinition` 与 `CiliumGatewayClassConfig`。
-- ⚠️ **它要出网**（16 个 chart 仓库），所以会遇到网络抖动。2026-09-02 首次在 CI 上跑就有一个
-  仓库 DNS 超时，整个检查因此变红 —— 而「偶尔红」的检查很快会被无视，比没有检查更糟。
-  脚本现在只对**网络形状**的错误重试 3 次（5s/10s 退避）并把每次重试打印出来：
-  仓库真坏掉仍然响亮失败，版本不存在这类真错误**不重试、立即失败**（两种都实测过）。
-- ☠️ **2026-09-08 → 09-26 它在 main 上一直是红的，且没人发现**：去掉 kube-prometheus-stack 的
-  `skipCrds` 后，prometheus-operator CRD 里的 enum `- =` 进了渲染结果，PyYAML 按 YAML 1.1 把裸 `=`
-  当成 `value` 类型、SafeLoader 无构造器，整个 App 渲染失败。修法是渲染结果改用 `RenderedLoader`
-  （把该类型当字符串，与 K8s/kubeconform 的 YAML 1.2 语义对齐）。
-  教训两条：① 本地复现要用**干净的 helm 环境**（`HELM_CONFIG_HOME`/`HELM_CACHE_HOME`/
-  `HELM_DATA_HOME` 指向空目录）——本机 `repositories.yaml` 里有条目但缓存缺失时，**每个** chart
-  都会报 `no cached repo found`，把真错误淹掉；② CI 红了没人看 = 没有这道检查，
-  Actions 的 step 日志要登录才能读，未登录只能从 run 页面看出是哪一步挂的。
-
-⚠️ **它证明的是「渲染得出来 + 每个对象结构合法」，证明不了值是对的**：resources 填 1Mi
-一样合法。与下一节的「查不出来的那些」并不重叠——那些是连渲染都看不出的。
+- ☠️ 必须传 `--kube-version` 与 `--api-versions`：不传则 `.Capabilities.APIVersions.Has` 全为 false，ServiceMonitor /
+  PrometheusRule / HTTPRoute 一类模板直接不渲染，校验的是一份与现网不同的清单。`API_VERSIONS` 是两集群
+  `kubectl api-versions` 的并集，装了新 operator 要补它的 group。
+- 「跳过」不是「通过」：无 schema 的类型由 `-ignore-missing-schemas` 放行并按 kind 打印。当前只跳过
+  `CustomResourceDefinition` 与 `CiliumGatewayClassConfig`。
+- ⚠️ 要出网拉 chart。只对网络形状的错误重试 3 次（5s/10s 退避）并打印；版本不存在这类真错误立即失败。
+- ☠️ 渲染结果必须用 `RenderedLoader` 解析（裸 `=` 按 YAML 1.2 当字符串）；本地复现要让 `HELM_CONFIG_HOME` /
+  `HELM_CACHE_HOME` / `HELM_DATA_HOME` 指向空目录，否则缺缓存的 repo 条目让每个 chart 都报 `no cached repo found`。
+  它曾在 main 上红了 18 天没人看：[records](../records/2026-09-26-render-check-red-on-main.md)。
+- ⚠️ 只证明「渲染得出来 + 结构合法」，证明不了值对（resources 填 1Mi 一样合法）。
 
 ```bash
-uv run --with pyyaml python scripts/render-manifests.py                  # 全部（约 2 分钟，要联网拉 chart）
+# 仓库根目录；需 kubectl / helm / kubeconform + 联网
+uv run --with pyyaml python scripts/render-manifests.py                  # 全部（约 2 分钟）
 uv run --with pyyaml python scripts/render-manifests.py --app loki       # 只跑一个
 uv run --with pyyaml python scripts/render-manifests.py --out /tmp/r     # 渲染结果落盘，人工 diff
 ```
 
-`KUBE_VERSION` 跟着现网走（当前 `1.35.8`，两集群同版本）；升 k3s 时同步改，它同时喂给
-`helm --kube-version` 与 `kubeconform -kubernetes-version`。
+`KUBE_VERSION`（当前 `1.35.8`）跟现网走，升 k3s 时同步改，它同时喂给 `helm --kube-version` 与 `kubeconform -kubernetes-version`。
 
 ### 同批加的 `terraform validate`
 
-terraform root 此前只有 `fmt`（缩进），没有任何语义校验，引用了不存在的变量要到
-`plan` 时才炸。CI 现在逐 root 跑 `init -backend=false` + `validate`（不碰 state）。
+CI 逐 root 跑 `init -backend=false` + `validate`（不碰 state），拦引用不存在的变量这类到 `plan` 才炸的错误。
+root 随增减而变，判据：`find . -name '*.tf' -not -path '*/.terraform/*' -exec dirname {} \; | sort -u`（仓库根目录）。
 
-> 逐 root 的数量随 root 增减而变（2026-09-17 起 8 个，含 `aiven/terraform`），判据是
-> `find . -name '*.tf' -not -path '*/.terraform/*' -exec dirname {} \; | sort -u`；
-> 这里不写死数字，写死就会漂。
-
-☠️ **lock 文件必须覆盖 CI 的平台**：`.terraform.lock.hcl` 里的 `h1:` 只是**本机那个平台**的
-哈希，跨平台校验靠 registry 签名的 `zh:` 一组。`proxmox/terraform-storage` 的 lock 当初只
-记了 `h1:`（其余 6 个 root 都有 `zh:`），于是 CI 在 linux/amd64 上报
-`doesn't match any of the checksums previously recorded`。补齐办法：
-
+☠️ lock 文件必须覆盖 CI 平台：`.terraform.lock.hcl` 的 `h1:` 只是本机平台的哈希，跨平台靠 registry 签名的 `zh:`。
+只有 `h1:` 时 CI 报 `doesn't match any of the checksums previously recorded`，本地复现不出来。新增 root 或升 provider 后补：
 ```bash
-terraform -chdir=<root> providers lock -platform=linux_amd64 -platform=darwin_arm64
+terraform -chdir=<root> providers lock -platform=linux_amd64 -platform=darwin_arm64   # 仓库根目录
 ```
-
-新增 root 或升 provider 后都要这么补一次，否则 CI 会在一台你本地复现不出来的机器上红。
 
 ## 查不出来的那些（仍需人判断）
 
 写下来是为了不让「CI 绿了」被误当成「安全了」。
 
-| 失效模式 | 为什么静态查不了 | 真实案例 |
+| 失效模式 | 为什么静态查不了 | 案例与对策 |
 |---|---|---|
-| 配置值写错嵌套层级 | 语法完全合法，多余的键静默忽略 | Tempo 的 `persistence` 是 chart 顶层键，写在 `tempo.` 之下 → 一直跑在 emptyDir，每次重启丢光 trace，而 values 里宣称保留 7 天 |
-| 改了配置但 Pod 不重启 | 清单本身没错，错在下发机制 | oracle otel-collector 是裸 manifest，ConfigMap 更新不改 DaemonSet spec → Pod 不重启，而 Collector 只在启动时读一次配置。**此前对该配置的任何修改都是静默无效的**。已改用 kustomize `configMapGenerator`。2026-08-25 litellm 又踩一次同款（改完路由表网关仍按旧表跑），已由 E1 的 `STAMP_ONLY` 覆盖。⚠️ 不再是通例但仍有缺口：podcast 一处 subPath 挂载至今无保护（homepage 已于同日纳管），见 E1 章节末尾的表 |
-| ReferenceGrant 寄生在别人的文件里 | 语法与作用都正确，问题是位置 | `allow-gateway-to-calibre` 没限定 Service 名（作用于整个 ns），却住在 `route-calibre-web.yaml` 里 → 删 calibre 路由会连带断掉 `notebook.meirong.dev`。现改为每个 route 文件各带一条自己的 grant（Gateway API 是累加式授权），删任一文件都不影响另一个 |
-| 文档与集群漂移 | 文档格式可以完美而内容全错 | 2026-07-31 那次 NFS 描述格式合规、内容过期，是 `kubectl` 照出来的 |
-| **operator 动态创建的 PVC 逃出 H4** | H4 只扫清单里声明的 PVC；CNPG 的卷由 operator 按 `Cluster` 的 `instances` 生成，仓库里没有对应的 PVC 对象 | `apps-pg-1` / `zitadel-pg-1` 两个库的备份归属完全靠 `backup/overlays/oracle/backup-script.yaml` 里的逐库 `pg_dump` 行。**apps-pg 上加一个租户就必须手工加一行**，H4 不会提醒。性质等同于 sqlite 白名单，而那份白名单曾让 `trends-data` 静默漏备两个月。见 [decisions/shared-postgres-platform.md](../decisions/shared-postgres-platform.md) |
-| **清单外创建的 ns 逃出 H5** | H5 只扫清单里声明的 Namespace；Helm chart 自带的 ns、ArgoCD 的 `CreateNamespace=true`、operator 自建的 ns 在仓库里根本没有对象 | oracle 的 `external-secrets` / `cnpg-system` / `trivy-system` / `default` / `cilium-secrets` 至今无 PSA 标签，CI 全绿也照样查不到。**只能靠 `kubectl get ns -L pod-security.kubernetes.io/enforce` 眼看**（`just psa-status` 打的就是这条，但它固定 `k3s-homelab` 上下文，oracle 要手工加 `--context`）。⚠️ 当前没有开放项跟踪这几个 ns 的补齐（此处原写"见 ROADMAP 开放项 #13"，而 ROADMAP 从来没有 #13，2026-08-13 更正）；PSA 逐层状态见 [security.md](security.md) |
-| CRD 字段放错层级 | `kubectl apply --validate=strict` 对 CRD 照样放行，多余的键要到 ArgoCD 用 ServerSideApply 建 typed patch 时才炸 | 2026-08-06 把 `postImportApplicationSQL` 写在 `bootstrap.initdb` 下（正确位置是 `initdb.import`）→ 客户端校验通过，同步时报 `field not declared in schema` 并进入重试（重试会钉住 revision，修复 commit 得先 terminate operation）。预检要用 `kubectl apply --server-side --dry-run=server`，字段位置以 `kubectl explain` 为准 |
+| 配置值写错嵌套层级 | 语法合法，多余的键静默忽略 | Tempo 的 `persistence` 写在 `tempo.` 下 → 一直跑 emptyDir，重启丢光 trace，而 values 宣称保留 7 天 |
+| 改了配置但 Pod 不重启 | 清单没错，错在下发机制 | oracle otel-collector（已改 `configMapGenerator`）、litellm（已由 `STAMP_ONLY` 覆盖）都踩过；podcast 仍无保护，见 E1 |
+| ReferenceGrant 寄生在别人的文件里 | 语法与作用都对，错在位置 | 不限定 Service 名的 grant 住在另一个服务的 route 文件里，删那条路由会断掉同 ns 的其它域名（[records](../records/2026-08-03-namespace-prune-cascade.md)）。现每个 route 文件各带自己的 grant（累加式授权） |
+| 文档与集群漂移 | 格式可以完美而内容全错 | 改了架构就手动核对，用 `kubectl` 照 |
+| operator 动态创建的 PVC 逃出 H4 | CNPG 的卷由 operator 按 `instances` 生成，仓库里没有 PVC 对象 | `apps-pg-1` / `zitadel-pg-1` 的备份全靠 `backup/overlays/oracle/backup-script.yaml` 的逐库 `pg_dump` 行，**apps-pg 加租户必须手工加一行**（[ADR](../decisions/shared-postgres-platform.md)） |
+| 清单外创建的 ns 逃出 H5 | Helm chart 自带、`CreateNamespace=true`、operator 自建的 ns 在仓库里没有对象 | oracle 的 `external-secrets` / `cnpg-system` / `trivy-system` / `default` / `cilium-secrets` 至今无 PSA 标签。只能 `kubectl --context <ctx> get ns -L pod-security.kubernetes.io/enforce` 眼看（`just psa-status` 固定 `k3s-homelab` context）。无开放项跟踪；逐层状态见 [security.md](security.md) |
+| CRD 字段放错层级 | `--validate=strict` 对 CRD 照样放行，到 ArgoCD SSA 建 typed patch 才报 `field not declared in schema`，且重试会钉住 revision | 如 CNPG `postImportApplicationSQL`（[ADR](../decisions/shared-postgres-platform.md)）。预检 `kubectl --context <ctx> apply --server-side --dry-run=server -f <file>`，字段位置以 `kubectl explain` 为准 |
 
-**删任何清单文件前**，先 `grep '^kind:' <file>`，确认没有作用域大于该文件的资源
-（H1 覆盖了 Namespace/CRD，但 ReferenceGrant 这类「语法对、位置错」的仍要靠眼睛）。
+**删任何清单文件前**先 `grep '^kind:' <file>`：H1 只覆盖 Namespace/CRD，ReferenceGrant 这类「语法对、位置错」的仍靠眼睛。
 
 ## 运行
 
 ```bash
 # 仓库根目录
-uv run --with pyyaml python scripts/check-manifests.py             # H1-H5
-uv run --with pyyaml python scripts/check-manifests.py --list      # 只看规则与出处
+uv run --with pyyaml python scripts/check-manifests.py             # H1-H5（--list 看规则与出处）
+uv run --with pyyaml python scripts/check-version-pairs.py         # V1-V4（--list 同上）
+uv run --with pyyaml python scripts/check-embedded-scripts.py      # E1（--write 修复 = cd k8s/helm && just gen-embedded-scripts）
 uv run --with pyyaml python scripts/render-manifests.py            # 渲染检查（需 kubectl/helm/kubeconform + 联网）
-uv run --with pyyaml python scripts/check-version-pairs.py         # V1-V4
-uv run --with pyyaml python scripts/check-version-pairs.py --list
-uv run --with pyyaml python scripts/check-embedded-scripts.py      # E1
-uv run --with pyyaml python scripts/check-embedded-scripts.py --write   # E1 修复 = just gen-embedded-scripts
 ```
 
-CI 里由 `.github/workflows/static-checks.yml` 在改动 `*.yaml` / `justfile` / `*.just` /
-`k8s/helm/manifests/**/*.py` / 检查器自身时自动运行。
-
-⚠️ **改规则必须同步改这份文档**（两边不一致的话，要么规则是摆设，要么检查器在误伤）。
-V1-V3 的敏感度在上线当天逐条实测过：故意把 oracle 剧本改回 1.2.1、把两集群 cilium 版本
-拆开、把 Cilium 升到表外的 minor、把变量改名，六个场景全部按预期判红，行内豁免按预期转绿。
-`k3s_version` 组加入时同样实测过：把 oracle 那处改成 v1.35.8 判红、补上行内
-`version-pair-ok:` 转绿。
+CI 触发路径见 [static-checks.yml](../../.github/workflows/static-checks.yml) 的 `paths`。

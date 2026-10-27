@@ -119,7 +119,7 @@ resources:
 #
 # **不要回滚**：早于 738cb98 的镜像按每条岗位重扫整个归档（规则层 14 分钟只处理
 # 75 条、CPU 顶满）；早于 2d7b9ad 的镜像 ingest 一律 panic。
-# 三个坑的实测数据都在 docs/reference/jobs-sg.md。
+# 三个坑的实测数据都在 docs/records/2026-08-03-jobs-sg-launch-defects.md。
 images:
   - name: ghcr.io/meirongdev/jobs-sg
     # 0632049 (2026-09-03, tag sha-0632049388ae)：上游把**模型相关参数全部下沉到 LLM_***
@@ -141,7 +141,7 @@ images:
     # 只动了 internal/view/market.go 一行模板文案，行为中性；顺带带上
     # ab87d4e（/simplify 行为中性重构，全量 go test 绿）。
     # 2026-08-24/26 的历史重放与逐周重算（retech --apply + report --week +
-    # W31 补重算）已执行并记录在 docs/reference/jobs-sg.md —— 旧注释里
+    # W31 补重算）已执行，过程见 docs/records/2026-08-24-jobs-sg-tech-alias-false-positives.md；旧注释里
     # fba4fcf 的「两步收尾」不再是待办。
     #
     # 其前身 fba4fcf (2026-08-24)：规则层技术栈假阳性收口（8b3040a + 73aa949 + fba4fcf

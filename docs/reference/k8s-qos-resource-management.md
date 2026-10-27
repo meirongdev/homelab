@@ -1,232 +1,182 @@
 # K8s 资源管理与 QoS 策略
 
-> Last updated: 2026-09-09
+> Last updated: 2026-10-28
 > Status: 生效事实（本文只定原则，不存具体数值）
 
-本文档记录 Homelab 中 CPU/Memory requests & limits 的设定原则。
-**具体数值不在本文维护**，以 `k8s/helm/values/`（homelab）、`cloud/oracle/values/`（oracle）与集群实际为准
-（`kubectl -n <ns> get deploy -o yaml`）。2026-07-06 那轮调整的推导过程见
-[plans/archive/2026-07-06-resource-optimization.md](../plans/archive/2026-07-06-resource-optimization.md)（历史快照）。
+本文定 CPU/Memory requests & limits 与 Pod Priority 的原则和判据。**具体数值不在本文维护**，
+以 `k8s/helm/values/`（homelab）、`cloud/oracle/values/`（oracle）与集群实际为准
+（`kubectl --context <ctx> -n <ns> get deploy -o yaml`）。
 
 > 延伸阅读：[K8s CPU 配置：QoS、Throttling 与驱逐策略](https://meirong.dev/posts/k8s-cpu-qos-resource-management/)
 
----
+## 背景与目标
 
-## 背景
+- **homelab**（控制面 `k8s-node` + worker `k8s-worker-106`，规格与宿主分配链见
+  [homelab-host-power-thermal.md](homelab-host-power-thermal.md)）：有状态/数据面服务
+- **oracle-k3s**（A1.Flex 2 OCPU / 12GB，单节点）：公网无状态 + 告警面
+- 日常用户约 1–2 人，偶发突发至 ~10 人
 
-Homelab 由两个集群组成：
-- **homelab**（Proxmox K3s, 5600H, 13312MB VM；宿主分配链见 [homelab-host-power-thermal.md](homelab-host-power-thermal.md)）— 有状态/数据面服务
-- **oracle-k3s**（Oracle Cloud A1.Flex 2 OCPU / 12GB，2026-08-05 由 4/24 缩容）— 公网无状态 + 告警面
-
-日常用户约 1–2 人，偶发突发至 ~10 人。
-
-### 目标
-
-- **节省资源**：requests 反映常态负载，不过度预留
-- **支撑突发**：limits 给足 burst 空间
-- **防止饥饿**：补全所有缺失的 CPU limit，避免单 pod 独占 CPU
-
----
+目标：requests 反映常态负载，不过度预留；limits 给足 burst 空间；补全缺失的 CPU limit，
+避免单 pod 独占 CPU。
 
 ## QoS 类别
 
-所有工作负载使用 Burstable（requests ≤ limits）：
+所有工作负载使用 **Burstable**（设了 requests 或 limits 但不完全相等），兼顾稳态预留和空闲时 burst。
+跨类驱逐次序：BestEffort（均未设置）最先，Guaranteed（requests == limits）最后。
 
-| 类别 | 条件 | 驱逐优先级 |
-|------|------|-----------|
-| **Guaranteed** | requests == limits | 最后被驱逐 |
-| **Burstable** | 设置了 requests 或 limits，但不完全相等 | 中等 |
-| **BestEffort** | 均未设置 | 最先被驱逐 |
+### ⚠️ QoS 只排到类，类内看 Pod Priority
 
-`Burstable` 兼顾稳态预留和空闲时 burst，适合本项目这种小规模家用集群。
+两集群绝大多数 pod 都是 Burstable，所以节点内存压力下起决定作用的是 kubelet 的类内判据：
+先按「用量是否超 request」分桶，桶内再按 Pod Priority，最后看超出幅度。
 
-### ⚠️ QoS 只排到类，类内排序看 Pod Priority
+- ☠️ **声明了 `priorityClassName` 就必须同时声明 resources。**BestEffort 的 request 恒为 0，
+  永远落在「超」那一桶，排在守规矩的 `bulk`(-10) 应用前面被驱逐，那行 priority 只是装饰
+  （external-dns 曾标着 `high` 却是 BestEffort）。
+- 带 `system-node-critical` / `system-cluster-critical`（约 2e9）的 pod 即使 BestEffort 也排在最后。
+  oracle 的 cilium-agent/envoy/operator 属此类，刻意不补 requests（补了只把该节点内存 requests
+  账面推高约 10 个点，收益接近零）。`priority: 0` 且无 class 的 BestEffort 才是真裸奔。
 
-上表决定的是跨类次序。两集群绝大多数运行 pod 都是 `Burstable`，所以真到节点内存
-压力时，起决定作用的是 kubelet 的**类内**判据：先看 Pod Priority，再看
-「用量超出 request 的幅度」。
+### PriorityClass 四档
 
-> **2026-08-10 补两条实测推论**，处理 KRR 报告时反复用到：
->
-> 1. **BestEffort 的危害取决于 Pod Priority**。kubelet 先按「用量是否超 request」分桶
->    （BestEffort 的 request 恒为 0，永远在"超"那一桶），桶内下一个键才是 Priority。
->    所以带 `system-node-critical`(2000001000) / `system-cluster-critical`(2000000000)
->    的 Pod 即使是 BestEffort 也排在最后。oracle 的 cilium-agent/envoy/operator 属此类，
->    刻意不补 requests（补了会把该节点内存 requests 从 85% 推到 95%，收益却接近零）。
->    反过来，`priority: 0` 且无 class 的 BestEffort 才是真裸奔。
->
-> 2. **BestEffort 会让 `priorityClassName` 完全失效**。2026-08-10 实测：external-dns 的
->    values 里写着 `priorityClassName: high`(900)，但它没有 resources → BestEffort →
->    落在"超 request"桶，而守规矩、用量在 request 之内的 `bulk`(-10) 应用落在另一桶，
->    结果 high 的先死。**声明了优先级就必须同时声明 resources，否则那行是装饰。**
+定义在 `k8s/helm/manifests/namespace-guardrails/priorityclasses.yaml`（homelab）与
+`cloud/oracle/manifests/base/priorityclasses.yaml`（oracle）。☠️ 两份必须逐字段同步：
+values 引用了只在一侧定义的 class，那一侧滚动时旧 pod 已删、新 pod 被 API server 拒绝，
+静默下线，ArgoCD 照样显示 Synced（[records/2026-08-06-priorityclass-missing-pods-rejected.md](../records/2026-08-06-priorityclass-missing-pods-rejected.md)）。
 
-四档（定义：`cloud/oracle/manifests/base/priorityclasses.yaml` 与 homelab 侧
-`k8s/helm/manifests/namespace-guardrails/priorityclasses.yaml`，两边取值一致）：
-
-> **2026-08-06 改名（已完成）**：`meirong-critical/high/bulk` → 无前缀的
-> `critical`/`high`/`bulk`。三步走：加新 class → 改全部引用（33 处）→ 删旧 class。
->
-> 分步是必须的：PriorityClass 与引用它的工作负载分属不同 ArgoCD App，同步无先后
-> 保证；引用先于 class 生效时 API server 直接拒绝建 pod，而旧 pod 已被滚动删除 →
-> 静默下线。当天 21:57 就这样让 homelab 的 opencost/trivy 下线 25 分钟。
->
-> 收尾时有三处不跟着 GitOps 滚，各需单独处理（均已完成）：
->
-> | 对象 | 为什么不滚 | 怎么切的 |
-> |---|---|---|
-> | `vault-0` + `vault-agent-injector` | Vault 是 manual-helm，**且 STS 是 `OnDelete`**：`helm upgrade` 只改 spec，pod 不动 | `just deploy-vault` 后手动删 pod；重启后 lifecycle hook 从 `vault-auto-unseal` 自动解封（实测 Sealed=false） |
-> | ArgoCD 全家 ×5 | 刻意不自管自己 | `just deploy-argocd`（STS 是 RollingUpdate，自动滚完） |
-> | `zitadel-pg-1` | Cluster spec 已改，但 CNPG 不把 `priorityClassName` 变更当作需要滚动的理由 | 删 pod，operator 按当前 spec 重建 |
->
-> ⚠️ **遗留影响**：改名前创建的 ReplicaSet 修订版本里仍写着 `meirong-*`
-> （`revisionHistoryLimit` 保留的历史，desired 均为 0，实测 homelab 5 个 / oracle 25 个）。
-> 对这些 Deployment 执行 `kubectl rollout undo` 回滚到那些修订会**建不出 pod**。
-> 往前修，别回滚；这些旧 RS 也会随后续发布自然淘汰出保留窗口。
->
-> ⚠️ 为什么必须分步：PriorityClass 与引用它的工作负载分属不同的 ArgoCD App，同步无先后
-> 保证。引用先于 class 生效时 API server 直接拒绝建 pod，而旧 pod 已被滚动删除 →
-> 静默下线。2026-08-06 21:57 就这样让 homelab 的 opencost/trivy 下线 25 分钟
-> （当时是 homelab 侧漏了 `meirong-bulk` 定义），ArgoCD 全程显示 Synced、只有 health
-> 是 Degraded。恢复后 ReplicaSet 的失败退避还会再拖几分钟，删掉卡住的 RS 可立即重置。
-
-| 档 | 值 | 谁在里面 |
+| 档 | 值 | 例 |
 |---|---|---|
 | `critical` | 1000 | Vault、ArgoCD 全家、zitadel-pg |
-| `high` | 900 | external-dns、cloudflared、otel-collector（两集群）+ Prometheus、Alertmanager（2026-08-10 补，homelab 侧） |
+| `high` | 900 | external-dns、cloudflared、otel-collector（两集群）、Prometheus、Alertmanager |
 | （默认） | 0 | 其余，含 ZITADEL 应用本身、Grafana、ESO、kube-state-metrics、node-exporter |
-| `bulk` | -10 | 可牺牲的个人应用（calibre-web/bentopdf/browserless/open-notebook/jobs-sg-web 等）+ 非关键观测/扫描组件（opencost、trivy-operator，2026-08-06 补；tetragon ×2、kyverno ×4，2026-08-10 补） |
+| `bulk` | -10 | 可牺牲的个人应用（calibre-web/bentopdf/browserless/open-notebook/jobs-sg-web 等）、非关键观测/扫描组件（opencost、trivy-operator、tetragon、kyverno） |
 
-**Prometheus/Alertmanager 归 high、Grafana 留默认的理由**（2026-08-10）：前两者分别是
-指标源与告警投递，掉了不只是丢图，是所有告警一起哑（dead-man's switch 也走同一条路）；
-Grafana 只是 UI，真出事可以直接查 Prometheus。而 Prometheus 本身是 monitoring ns 里内存
-最大的一个，因此它也是这一层最值得先动的对象：2026-08-18 的处理方式是**砍 series 而不是
-继续抬 limit**（k3s 单进程让 apiserver/etcd 指标被两个 job 重复采集）。判据、被否决的选项
-与三层验证方法见 [decisions/prometheus-series-reduction.md](../decisions/prometheus-series-reduction.md)，
-本文只定原则，具体数值都在那边。
+当前归属在仓库根跑 `grep -rn 'priorityClassName' k8s/helm cloud/oracle` 为准。分档判据是「掉了会怎样」：
 
-**kyverno 全家归 bulk 的理由**（2026-08-10）：实测 webhook failurePolicy：唯一管
-工作负载准入的 `kyverno-resource-validating-webhook-cfg` 是 `Ignore`，其余 `Fail` 的
-只管 Kyverno 自己的 CR（policy/exception/cleanup）。所以它掉线**不会挡住 pod 创建**，
-是真 fail-open，与 trivy-operator 同理。tetragon 同此判据。
+- **high 给告警链路**：Prometheus 是指标源、Alertmanager 是投递，掉了是所有告警一起哑
+  （dead-man's switch 也走同一条路）；Grafana 只是 UI，留默认档。Prometheus 内存吃紧时优先砍
+  series 而不是抬 limit，见 [decisions/prometheus-series-reduction.md](../decisions/prometheus-series-reduction.md)。
+- **bulk 给 fail-open 组件**：opencost 掉线只丢一段成本采样，trivy-operator 掉线只是报告变旧。
+  kyverno 唯一管工作负载准入的 `kyverno-resource-validating-webhook-cfg` 是 `failurePolicy: Ignore`
+  （其余 `Fail` 的只管 Kyverno 自己的 CR），掉线不挡 pod 创建；tetragon 同理。被驱逐正是
+  fail-open，符合「所有安全组件 fail-open + 控 CPU」的硬约束。
+- 没标 class 的组件落在 0，反而比 `bulk` 的个人应用高。
 
-**opencost / trivy-operator 归 bulk 的理由**（2026-08-06）：两者此前无 `priorityClassName`，
-落在默认档 0，比标了 `bulk`(-10) 的个人应用还高，与「谁该先被牺牲」的直觉相反。
-opencost 是纯观测组件，掉线只丢一段成本采样；trivy-operator 掉线只是报告变旧，
-不影响任何运行时管控，这与 CLAUDE.md「所有安全组件 fail-open + 控 CPU」的硬约束一致：
-被驱逐正是 fail-open。
+⚠️ trivy-operator 有三个层级不同的键，漏一个就留一个 priority 0 的缺口：
 
-⚠️ trivy-operator 有三个互不相干的键，层级各不相同，漏一个就留一个 priority 0 的缺口
-（chart 0.33.1 逐键确认 + `helm template` 实证，2026-08-06）：
-
-| 键 | 作用对象 | 渲染到哪 |
+| 键 | 作用对象 | 渲染到 |
 |---|---|---|
 | 顶层 `priorityClassName` | operator 本体（常驻，内存小头） | Deployment |
-| `trivyOperator.scanJobPodPriorityClassName` | 扫描 Job pod，真正的瞬时内存消费者 | **ConfigMap** |
-| `trivy.priorityClassName` | trivy-server（builtInTrivyServer 的 StatefulSet） | StatefulSet |
+| `trivyOperator.scanJobPodPriorityClassName` | 扫描 Job pod，真正的瞬时内存消费者 | **ConfigMap**（`scanJob.podPriorityClassName`） |
+| `trivy.priorityClassName` | trivy-server（StatefulSet） | StatefulSet |
 
-- 第二个渲染进 ConfigMap 的 `scanJob.podPriorityClassName`，**不在任何 Deployment 里**，
-  `kubectl get deploy -o yaml` 看不到，别据此判断没生效，要看实际 Job pod 的 `.spec.priority`。
-- 第三个最容易漏：只设前两个的话，一个纯粹为 operator 服务的组件反而比 operator 优先级高。
-- ⚠️ `trivy:` 段在两份 values 里都已存在（装着 severity / ignoreUnfixed / accepted-risk 列表），
-  必须插进现有段内。另起一个 `trivy:` 块 = YAML 重复键 = 后者静默覆盖前者，
-  那批 CVE 抑制会无声消失。
+- 第二个不在任何 Deployment 里，`get deploy -o yaml` 看不到；验证看实际 Job pod 的 `.spec.priority`。
+- ☠️ `trivy:` 段在两份 values 里已存在（装着 severity / ignoreUnfixed / accepted-risk 列表），
+  必须插进现有段。另起一个 `trivy:` 块 = YAML 重复键，后者静默覆盖前者，那批 CVE 抑制无声消失。
 
-⚠️ **三处设不了，不是漏配**：
+⚠️ **三处设不了，不是漏配**。chart 没有这个键时写进去会被 Helm 静默忽略，看着像配了，比不配更危险；
+加之前先用 `helm template` 确认真的渲染出来。
 
-- **ZITADEL 应用**：chart 9.34.1 没有 `priorityClassName` 这个 values 键（逐键确认过），
-  写进 `valuesContent` 会被 Helm 静默忽略：看起来像配了，实际没有，比不配更危险。
-  改用相对次序保证：`bulk`(-10) 把可牺牲的应用压到它下面。
-- **timeslot**：本仓库之外的手工 Helm release（chart `timeslot-0.1.0`，无 ArgoCD
-  tracking-id），只能靠 ns 的 LimitRange 给默认 request，动不了它的 pod spec。
-- **sloth**（2026-08-10 补）：chart 0.16.0 里顶层与 `sloth.` 下都不存在
-  `priorityClassName`（逐键确认 + `helm template --set` 双重实证），写进去被静默忽略。
-  代偿同 ZITADEL：把可牺牲的应用压到 `bulk`(-10)，sloth 留在默认档 0 已在它们之上。
+- **ZITADEL 应用**（chart 9.34.1）、**sloth**（chart 0.16.0）：代偿是把可牺牲的应用压到 `bulk`，
+  它们留在 0 已在其上。
+- **timeslot**：仓库外的手工 Helm release（无 ArgoCD tracking-id），只能靠 ns 的 LimitRange
+  给默认 request。
 
-`bulk` 是 2026-08-05 oracle 缩容到 12GB 时加的：内存峰值从占 24GB 的 43%
-变成占 12GB 的 ~70% 后，「谁先死」第一次成为真问题。
+⚠️ 改 class 的两条约束：
+
+- 改名或删除 PriorityClass 要三步走：加新 class → 改全部引用 → 删旧 class。
+- 下面几类对象的 `priorityClassName` 改了不会跟着 GitOps 滚：
+
+| 对象 | 原因 | 做法 |
+|---|---|---|
+| `vault-0`、`vault-agent-injector` | manual-helm，且 STS 是 `OnDelete` | `cd k8s/helm && just deploy-vault`，再 `kubectl --context k3s-homelab -n vault delete pod vault-0`；lifecycle hook 从 `vault-auto-unseal` 自动解封 |
+| ArgoCD 全家 | manual-helm（刻意不自管） | `cd k8s/helm && just deploy-argocd` |
+| `zitadel-pg-1` | CNPG 不把 `priorityClassName` 变更当作滚动理由 | `kubectl --context oracle-k3s -n zitadel delete pod zitadel-pg-1`，operator 按当前 spec 重建 |
+
+⚠️ 2026-08-06 改名（`meirong-*` → 无前缀）之前的 ReplicaSet 修订仍引用已删除的旧名，
+`kubectl rollout undo` 回到那些修订建不出 pod。往前修，别回滚。
 
 ### 节点级预留：调度器看不见的那一块
 
-kubelet 的 `allocatable` = `capacity` − `kube-reserved` − `system-reserved` −
-`eviction-hard`。**不声明 reserved，调度器就认为整机内存都能分给 pod**，而
-k3s-server 进程自己就要 ~2GiB（实测 RSS 2021Mi）+ containerd 240Mi。
+`allocatable` = `capacity` − `kube-reserved` − `system-reserved` − `eviction-hard`。
+**不声明 reserved，调度器就认为整机内存都能分给 pod**，而 k3s-server 进程自己就要 ~2GiB。
+现值在各集群 playbook 的 `kubelet-arg`：oracle `cloud/oracle/ansible/playbooks/setup-k3s.yaml`，
+homelab `k8s/ansible/playbooks/setup-k3s.yaml`（控制面）与 `setup-k3s-worker.yaml`（worker）。
 
-oracle-k3s 在 2026-08-05 之前一条都没配（`capacity − allocatable` 的差额恰好等于
-那 2GiB hugepages，是巧合不是预留），24GB 上没暴露问题，缩到 12GB 就是必然 OOM。
-现值在 `cloud/oracle/ansible/playbooks/setup-k3s.yaml` 的 `kubelet-arg`。
+⚠️ OCI Ubuntu 镜像的 microk8s 装机残留 `/etc/sysctl.d/20-microk8s-hugepages.conf` 把 2GiB 锁成
+hugetlb 并从 allocatable 扣掉，集群里却没有 pod 申请 hugepages（oracle 的 `setup-k3s.yaml` 会清掉它）。
+残留的判据：`kubectl --context oracle-k3s get node oracle-k3s -o jsonpath='{.status.capacity.hugepages-2Mi}'`
+非 0，且节点上 `grep HugePages_Free /proc/meminfo` 等于 Total。
 
-> 另一类静默损耗：OCI Ubuntu 镜像带的 microk8s 装机残留
-> `/etc/sysctl.d/20-microk8s-hugepages.conf` 把 2GiB 锁成 hugetlb 并直接从
-> allocatable 扣掉，而集群里没有任何 pod 申请 hugepages。查法：
-> `kubectl get node <n> -o jsonpath='{.status.capacity.hugepages-2Mi}'` 非 0
-> 且 `grep HugePages_Free /proc/meminfo` == Total。
+## CPU limit 档位
 
----
-
-## CPU Limit 档位
-
-| 类型 | CPU Limit | 代表服务 |
+| 类型 | CPU limit | 代表服务 |
 |------|-----------|---------|
-| 入口流量（cloudflared，单副本）| `200m` | cloudflared（2026-07-06 下调；2026-08-13 由 2 副本降为 1） |
+| 入口流量（cloudflared，单副本）| `200m` | cloudflared |
 | 用户 Web 服务 | `500m–1000m` | calibre-web |
 | 数据库 | `500m` | postgres |
 | 可观测性 | `300m–500m` | Loki, Tempo, Prometheus, Grafana |
 | 后台/轻量服务 | `100m–200m` | alertmanager, kube-state-metrics, oauth2-proxy |
-| 极轻量 sidecar（常驻低速）| `10–100m` | —（log-exporter 2026-08-29 已删，见 observability-multicluster.md）|
-| 突发型单线程 sidecar | `1000m` | permission-fixer。⚠️ **不是给多了**：每 5 分钟扫一次库（约 0.2 CPU-秒）然后睡，limit <1 core 时配额小于单线程跑满一个 100ms 周期所需，结构上必被节流，占空比越低 `throttled/periods` 越难看（500m 实测仍 66.7%），CPUThrottlingHigh 反复复燃。requests 仍是 `1m`，不占调度额度 |
+| 极轻量 sidecar（常驻低速）| `10–100m` | （当前无） |
+| 突发型单线程 sidecar | `1000m` | permission-fixer（见下） |
 | Batch/CronJob | `200m–300m` | restic-backup, kube-bench |
 | 元数据处理 | `1000m` | calibre-metadata（每日凌晨） |
 
----
+⚠️ 突发型单线程容器的 limit 别低于 1 core，这不是给多了。每轮只跑零点几 CPU-秒然后长睡的负载，
+limit <1 core 时配额小于单线程跑满一个 100ms 周期所需，结构上必被节流；占空比越低
+`throttled/periods` 越难看（permission-fixer 在 500m 时仍有 66.7%），节流告警反复复燃。
+requests 留在 `1m`，不占调度额度。
 
-## 管理方式
+## 改 resources 前先判是谁管
 
-| 方式 | 范围 | 同步策略 |
-|------|------|---------|
-| ArgoCD（raw YAML）| `k8s/helm/manifests/` 下的个人服务 | auto-sync / 120s reconciliation |
-| ArgoCD（Helm chart）| 安全/可观测组件（kyverno、tetragon、trivy、falco、loki、tempo、sloth、kube-prometheus-stack、external-dns ×2） | auto-sync / 120s reconciliation |
-| `just deploy-X`（Helm）| 基础设施层（vault、cilium、external-secrets、ArgoCD 自身）| 手动触发（bootstrapping/恢复场景） |
+GitOps 托管的改 values 后 `git push` 即可；manual-helm（Vault、Cilium、ESO、ArgoCD 本体）
+提交 ≠ 部署，要手动 `just deploy-X`。分工见 [argocd-app-patterns.md](argocd-app-patterns.md)。
 
-> **2026-08-10 修正**：kube-prometheus-stack 早已迁入 ArgoCD（`argocd/applications/kube-prometheus-stack.yaml`，
-> 多源 chart+values），本表却仍把它列在「手动 helm」那行。判据别看 `helm list`，ArgoCD 接管前
-> 装过的 release 会一直留在那里；看对象上的 tracking-id：
-> `kubectl -n <ns> get deploy <name> -o jsonpath='{.metadata.annotations.argocd\.argoproj\.io/tracking-id}'`
-> 非空即 ArgoCD 管（改 values 后 `git push` 即可，别手动 `helm upgrade`）。
+判据别看 `helm list`（ArgoCD 接管前装过的 release 会一直留在那里），看对象上的 tracking-id，非空即 ArgoCD 管：
 
-loki、tempo、sloth、restic-backup 已从 Helm/kubectl 管理迁入 ArgoCD（2026-07-06）。
-
----
+```bash
+kubectl --context <ctx> -n <ns> get deploy <name> \
+  -o jsonpath='{.metadata.annotations.argocd\.argoproj\.io/tracking-id}'
+```
 
 ## 验证 QoS
 
 ```bash
-# 查看某 pod 的 QoS
-kubectl get pod <pod-name> -n <namespace> -o jsonpath='{.status.qosClass}'
+# 单个 pod 的 QoS（--context 换 oracle-k3s 查另一集群）
+kubectl --context k3s-homelab -n <namespace> get pod <pod-name> -o jsonpath='{.status.qosClass}'
 
-# 批量查看所有 pod
-kubectl get pods -A -o custom-columns=\
+# 全部 pod
+kubectl --context k3s-homelab get pods -A -o custom-columns=\
 'NAMESPACE:.metadata.namespace,NAME:.metadata.name,QOS:.status.qosClass'
 ```
+
+下文的 PromQL 都在中枢 Prometheus（homelab，含两集群序列）上跑：
+`kubectl --context k3s-homelab -n monitoring port-forward svc/kube-prometheus-stack-prometheus 19090:9090`，
+然后开 `http://localhost:19090`。
 
 ## 检测 CPU Throttling
 
 ```bash
-# CFS 配额统计
+# CFS 配额统计（节点上）
 cat /sys/fs/cgroup/cpu,cpuacct/kubepods/burstable/<cgroup-id>/cpu.stat
 # PromQL
 rate(container_cpu_cfs_throttled_seconds_total[5m])
   / rate(container_cpu_cfs_periods_total[5m])
 ```
 
+- ⚠️ 查询返回空结果与「节流为 0」外观一致。先 `count by (cluster) (container_cpu_cfs_periods_total)`
+  确认该集群有这个 series：oracle 的 `container_*` 要靠 otel-collector 的 keep 正则放行
+  （`cloud/oracle/manifests/monitoring/otel-collector-config.yaml`）。
+- ⚠️ cAdvisor 只为设了 CPU quota 的容器吐 cfs 指标。给容器去掉 CPU limit，它就从节流告警的视野里
+  整个消失，那是无数据，不是节流为 0。
+
 ## 检测 OOMKill（容器顶爆自身 limit）
 
-在大节点上更常咬人的不是节点驱逐，而是单个容器撞到自己的 memory limit 被内核杀掉
-（`exitCode 137`）。它**不影响邻居**，也因此很容易长期没人发现。
+大节点上更常咬人的不是节点驱逐，而是单个容器撞到自己的 memory limit 被内核杀掉（`exitCode 137`）。
+它不影响邻居，所以容易长期没人发现。
 
-⚠️ 这条判断在 2026-08-13 加入的 `k8s-worker-106` 上不成立：它是全场最小节点，
-allocatable 只有 ~3254Mi（2026-08-16 VM 由 3G 抬到 4G 前是 2311Mi），且 eviction 阈值收得很紧
-（`memory.available<150Mi` hard / `<250Mi` soft）。排在它上面的负载，节点驱逐是实打实的风险，
-两种都要看。
+- ⚠️ `KubePodCrashLooping` 抓不到：容器 OOM 后干净重启，从不进 `CrashLoopBackOff`。
+- ⚠️ worker `k8s-worker-106` 是全场最小节点（allocatable 约 3Gi，eviction 阈值收得很紧，见
+  `setup-k3s-worker.yaml`），排在它上面的负载节点驱逐和 OOMKill 两种都要看。
 
 ```bash
 # 谁最近被 OOM 杀过（--context 换 oracle-k3s 查另一集群）
@@ -235,260 +185,119 @@ kubectl --context k3s-homelab get pods -A -o json | jq -r '
   select(.lastState.terminated.reason=="OOMKilled") |
   "\($m.namespace)/\($m.name) [\(.name)] restarts=\(.restartCount) at \(.lastState.terminated.finishedAt)"'
 
-# 逼近 limit 的容器（>80% 就该抬 limit 或查泄漏）—— 双集群一起出
-# ⚠️ 两侧都必须先 max by(...) 聚合掉 id/image/job 等多余标签，否则
-#    直接除会报 "many-to-one matching must be explicit"；分组键要带 cluster，
-#    否则两集群同名 ns/pod 会串味
+# 逼近 limit 的容器（>80% 就该抬 limit 或查泄漏），双集群一起出（PromQL）
+# ⚠️ 两侧都必须先 max by(...) 聚合掉 id/image/job 等多余标签，否则报
+#    "many-to-one matching must be explicit"；分组键要带 cluster，否则两集群同名 ns/pod 会串味
 max by (cluster,namespace,pod,container) (max_over_time(container_memory_working_set_bytes{container!=""}[2d]))
   / on (cluster,namespace,pod,container)
 max by (cluster,namespace,pod,container) (kube_pod_container_resource_limits{resource="memory"})
 ```
 
-`max_over_time` 是关键：尖峰型负载看瞬时值会整个漏掉（`argocd-application-controller`
-被杀时的瞬时读数只有 0.67G，2d 窗口才照出 94%）。
+- `max_over_time` 是关键：尖峰型负载看瞬时值会整个漏掉（ArgoCD controller 被 OOM 杀时瞬时读数
+  只有 0.67G，2d 窗口才照出 94%）。
+- 这条排查查询**故意**用 `working_set`（含页缓存），线上 `ContainerMemoryNearLimit` 用 `rss`：
+  排查时两个数对照，才能判断是不是下面的形状 ④。
+- 窗口用 2d 不用 7d：窗口越长，一次瞬态尖峰把告警钉住越久，且 `for` 起不到去抖作用
+  （分子已是窗口 max，顶上去就是平台期）。
 
-✅ **2026-08-30 已统一**：线上 `ContainerMemoryNearLimit` 原先用 `[7d]`，现已改成 `[2d]`，
-与上面这条排查查询一致。窗口越长，一次瞬态尖峰把告警钉住的时间越长：7d 窗口下一个 60 秒的
-重启尖峰会连报 7 天，且 `for` 完全起不到去抖作用（分子已是窗口 max，顶上去就是平台期）。
-⚠️ 同批把线上规则的分子从 `working_set` 换成了 `rss`、阈值 85%→80%（理由见下面第四种形状）。
-上面这条排查查询仍用 `working_set`，是**故意的**：排查时要先看到含页缓存的那个数，
-才能与 rss 对照判断属不属于第四种形状。
+OOM 相关告警的表达式、阈值与标定过程以 `k8s/helm/manifests/monitoring/alerts/prometheus-rules.yaml`
+为准。表达式里看不出来的约束：
 
-⚠️ **`KubePodCrashLooping` 抓不到这类事件**：容器 OOM 后干净重启，从不进
-`CrashLoopBackOff`。
+- `ContainerMemoryNearLimit` 的分母是工作负载**当前**的 limit（按 `(cluster,namespace,container)` 取 max，
+  `group_left`）。CronJob 旧 pod 的 spec 不可变，按 pod join 会让每次抬 limit 都连报 2~3 晚假阳性。
+  代价是调小 limit 时短暂漏报，认这个取舍，别改回按 pod join。
+- 80% 阈值是回放标定的，落在已知真阳性（multica frontend，约 85%）与全舰队常态最高（约 71%）之间。
+  别升回 85%（真阳性变掷硬币），也别降到 75%（常态最高的那个会常亮）。
+- `rss` 口径的取舍：它只是 `memory.stat.anon`，不含 kernel/tmpfs/mlocked，且会漏掉形状 ③
+  （那一类看 GC 指标，不归这条告警管）。
+- ☠️ **改依赖某个指标的规则前，先确认两集群都有该 series。**`container_*` 全来自 kubelet 内嵌
+  cAdvisor（没有独立部署）：homelab 经 kube-prometheus-stack 全量入库，oracle 靠 otel-collector
+  的 keep 正则放行。没放行的指标查询返回空，规则在那一侧恒不触发，外观与「没超阈值」一致。
+  顺序是硬的：先放行、确认 series 到货，再改规则，再照 `ContainerMemoryRssAbsent` 加 `absent()` 守卫。
 
-> **2026-08-10 更新**（本段原先说「集群没有任何规则引用 OOMKilled，补告警是 ROADMAP #4」，
-> 两处都已过期）：`ContainerOOMKilled` 早在 2026-08-02 就补上了
-> （`manifests/monitoring/alerts/prometheus-rules.yaml`），ROADMAP #4 现在指的是
-> prometheus-operator CRD 补升，与 OOM 无关。同日新增两条补齐剩下的缺口：
->
-> | 规则 | 时机 | 覆盖 |
-> |---|---|---|
-> | `ContainerOOMKilled` | 事后 | 双集群（kube-state-metrics） |
-> | `ContainerOOMKilledCadvisor` | 事后 | 仅 homelab（kubelet 内嵌 cAdvisor 的 OOM 计数器；oracle 侧该指标未被采集），用来交叉验证上一条的标签值拼写 |
-> | `ContainerMemoryNearLimit` | 事前（2d `rss` 峰值 >80% limit，2026-08-30 改口径） | 双集群 |
-> | `ContainerMemoryRssAbsent` | 元规则（守卫上一条的分子来源） | 双集群 |
->
-> ⚠️ `ContainerOOMKilled` 的 `reason="OOMKilled"` **至今未经实测证实**：30d 窗口内
-> 两集群只出现过 `Unknown`/`Error`/`Completed`，没有任何 OOMKilled 样本。第一次真实
-> OOM 时务必确认它真的响了；没响就查 `count by (cluster,reason) (kube_pod_container_status_last_terminated_reason == 1)`。
->
-> ⚠️ **没有独立部署 cAdvisor**，`container_*` 指标全部来自 kubelet 内嵌 cAdvisor：
-> homelab 经 kube-prometheus-stack 全量入库；oracle 的 otel-collector
-> `prometheus/cadvisor` receiver 的 keep 正则只保留 `container_(cpu_usage_seconds_total|
-> memory_working_set_bytes|memory_rss)`（前两个为 KRR，`memory_rss` 是 2026-08-30 为
-> `ContainerMemoryNearLimit` 换口径补的）。所以 `container_oom_events_total`（homelab 116 条 /
-> oracle 0 条）与 `container_cpu_cfs_throttled_*`（homelab 41 条 / oracle 0 条）
-> 在 oracle 侧**不进入中枢 Prometheus**，查询返回空结果，与「值为 0」外观完全一致，
-> 2026-08-10 就据此误下过「oracle 无 CPU 节流」的结论。在 oracle 上判断 CPU 是否吃紧，
-> 只能看 limit 与 p95 的比值 + 应用日志时序。
+### 判读：先分清是哪种形状再动手
 
-> **2026-08-11 更新**：`ContainerMemoryNearLimit` 的口径从「每个 pod 的峰值 ÷ **该 pod 自己的**
-> limit」改成「每个 pod 的峰值 ÷ 该工作负载当前的 limit」（分母降到
-> `(cluster,namespace,container)` 取 max，`group_left` 多对一）。
->
-> 起因：CronJob 每晚换新 pod，改 limit 只影响新 pod，旧 pod 的 spec 不可变，
-> 老 limit 会继续参与计算直到 `successfulJobsHistoryLimit` 把它挤掉。backup 的 768Mi
-> 08-10 已生效（新 pod 峰值 148Mi = 19%），告警却仍按 08-09 那个 512Mi 的残留 pod
-> 报 90.03%。**每次给 CronJob 抬 limit 都会复现 2~3 晚假阳性**，不是偶然。
->
-> ⚠️ 反向代价：limit 调小时会对着旧的大 limit 比，短暂漏报（Deployment 滚完即恢复，
-> CronJob 最多 3 晚）。抬 limit 远比压 limit 常见，认这个取舍；**别为了修漏报改回按 pod
-> join**，那样 CronJob 假阳性立刻回来。
+先看 7d 曲线：
 
-**判读**：先看 7d 曲线形状再动手。稳定爬升是泄漏（该查代码），
-在基线上下震荡加偶发尖峰是头寸不够（该抬 limit）。
-2026-08-02 的 `argocd-application-controller` 属后者：基线 0.54–0.68G、尖峰 0.85G+、limit 1Gi
-（[ROADMAP #3](../ROADMAP.md)）。控制面组件的峰值随被管对象规模增长（App 数、CRD 大小），
-不随流量，扩容后要回头复查这类 limit。
+| 形状 | 怎么认 | 结论 |
+|---|---|---|
+| ① 稳定爬升 | 曲线持续上行 | 泄漏，查代码 |
+| ② 基线震荡 + 偶发尖峰 | 在基线上下震荡，偶有尖峰 | 头寸不够，抬 limit |
+| ③ 峰值跟着 limit 走 | Go 程序，chart 把 `GOMEMLIMIT` 接成 `limits.memory` | 调 GOGC，抬 limit 无效 |
+| ④ 峰值由页缓存撑起 | `rss` 平稳、`cache` 撑起峰值 | 不构成 OOM 风险；抬/降 limit 有没有用无定论 |
 
-> ☠️ **2026-08-24 补第三种形状：峰值跟着 limit 走，抬 limit 是无效动作。**
->
-> Go 程序如果拿到 `GOMEMLIMIT`，GC 目标就由它决定；若某个 chart 把 `GOMEMLIMIT`
-> 硬接成 `limits.memory` 本身，那么每次抬 limit 都等量抬高 GC 目标，
-> 7d 峰值/limit 的比值几乎不动，`ContainerMemoryNearLimit` 必然在几天内回来。
-> grafana 就是这样连抬两次都没解决：
->
-> | limit | 7d 峰值 | 比值 | 动作 |
-> |---|---|---|---|
-> | 512Mi | 503Mi | 98% | 2026-08-10 抬到 768Mi |
-> | 768Mi | 725Mi | 94% | 2026-08-18 抬到 1Gi |
-> | 1Gi | 931Mi | 91% | 2026-08-24 改按 GOGC 处理 |
->
-> **先分清是哪个约束在绑定**，再决定动哪个旋钮：
->
-> - 取 `go_gc_gogc_percent` / `go_gc_gomemlimit_bytes` / `go_memstats_next_gc_bytes`；
-> - **GC 频率是判据**：`rate(go_gc_cycles_total_gc_cycles_total[5m])` 很低（grafana 峰值
->   0.059/s ≈ 17s 一次、进程 CPU 峰值 0.04 核）说明 Go 毫无内存压力，绑定约束是
->   GOGC 的「活跃堆翻倍」，让它早点回收即可，且 CPU 有余量。真被 GOMEMLIMIT 钳住时
->   GC 会连轴转，频率高一两个数量级，那才是真的头寸不够、该抬 limit。
-> - GOGC 取值可以推导而不是拍：活跃堆 ≈ `next_gc`/2，非堆 ≈ working_set 峰值 −
->   `heap_alloc` 峰值；`GOGC = ((目标峰值 − 非堆)/活跃堆 − 1) × 100`。
->
-> ⚠️ **想覆盖 chart 的 `GOMEMLIMIT` 之前先看 env 渲染顺序**：多数 chart 的
-> `.Values.env` 渲染在内置 env 之后，同名会造成 env 列表重复键；开了
-> `ServerSideApply` 的 App 会直接 ComparisonError 卡在 `sync=Unknown`
-> （见 [records/2026-08-19-opencost-bingen-replay-crashloop.md](../records/2026-08-19-opencost-bingen-replay-crashloop.md)）。
-> grafana chart 12.7.2 就没有比例开关，只能改 GOGC 绕过去。
-> 正常口径可参照 otel-collector：`GOMEMLIMIT` 307MiB / limit 384Mi = 80%。
->
-> ⚠️ **改完不能拿「告警灭了」当验收**：规则分子是 `max_over_time(...[7d])`，
-> 旧 pod 的历史峰值会一直被读到，要等它滚出 7d 窗口才可能自己灭
-> （与 [observability-alerting-slo.md](observability-alerting-slo.md) 里「换 pod 后旧
-> `instance` 的陈旧值仍在回看窗内」是同一类陷阱）。真验收看**新 pod** 的
-> `next_gc` 与 working_set 峰值。
->
-> ⚠️ 同样把 `GOMEMLIMIT` 接成 `limits.memory` 的还有两集群的 `cilium-agent`
-> （chart 默认）。它今天没报，但一旦报，别按「抬 limit」处理；且改它要重跑
-> `just deploy-cilium` + `just connect-clustermesh`。
+控制面组件（ArgoCD 等）的峰值随被管对象规模（App 数、CRD 大小）增长，不随流量，扩容后要回头复查这类 limit。
 
-> ☠️ **2026-08-30 补第四种形状：峰值由页缓存主导，告警在测一个不构成 OOM 风险的量。**
->
-> `container_memory_working_set_bytes = memory.current − inactive_file`，**它包含页缓存**。
-> 对 mmap/顺序读文件重的负载（TSDB、对象存储缓存、大 SQLite），working_set 里可能大半
-> 是 file cache，而干净的 file page 永远先于 OOM 被回收，所以「working_set 逼近 limit」
-> 对这类容器不蕴含 OOM 风险。
->
-> 2026-08-29 Prometheus 重启后 WAL replay 的实测（limit 3Gi = 3072Mi）：
->
-> | 时刻 | working_set | **rss** | **cache** | usage |
-> |---|---|---|---|---|
-> | 重启前稳态 | 990 Mi | 631 Mi | 1160 Mi | 1829 Mi |
-> | **峰值** | **3055 Mi (99.45%)** | **408 Mi (13.3%)** | **2652 Mi** | **3072 Mi (=limit)** |
->
-> `usage` 精确等于 `memory.max`（顶了两次），内核回收缓存了事，容器
-> `exitCode 0 / Completed`，顶死上限但没被杀。
-> ⚠️ **别把这两个数混成一个**（2026-08-30 订正）：峰值那一刻的 rss 408Mi 只占 limit 的 13.3%；
-> 而把规则分子换成 `container_memory_rss`、其余不动，同一个 7d 窗口算出来是 26.4%
-> （rss 的 7d 峰值 810Mi，出现在别的时刻）。**同一容器换 RSS 口径是 26.4%，不是 99.45%。**
->
-> ☠️ **「working_set 塌下去」≠「内存被回收」**。同日第二次重启是对照组，它没顶到 limit
-> 却同样断崖：
->
-> | 时刻 | working_set | rss | cache | usage |
-> |---|---|---|---|---|
-> | 峰值 | **2054 Mi** | 651 Mi | 1425 Mi | 2084 Mi |
-> | +30s | **660 Mi** | 652 Mi | 1396 Mi | 2055 Mi |
->
-> working_set 掉 1394Mi 而 `usage` 只掉 29Mi，什么都没被回收，掉的是 `active_file`：
-> 刚读进来的文件页先挂 active LRU，约两分钟无人再引用就降级到 `inactive_file`，
-> 而 working_set 把 `inactive_file` 扣掉了。**别拿 working_set 回落推断压力解除。**
->
-> **怎么分辨**：取 `container_memory_rss` 与 `container_memory_cache`。
-> rss 平稳而 cache 撑起峰值 → 属本形状。
->
-> ☠️ **这个读数主要由节点页缓存冷热决定，不是由容器内存需求决定。**
-> 2026-08-30 对照实验：同容器、同数据、同 limit（3Gi）重启三次：
->
-> | 重启时机 | 节点页缓存 | 峰值 `usage` | %limit | 该容器 `file` |
-> |---|---|---|---|---|
-> | 刚开机 | 全冷 | 3072 Mi | **99.45%** | 2652 Mi |
-> | +29 分钟 | 半热 | 2153 Mi | 70.1% | ~1425 Mi |
-> | +7 小时 | 全热 | 728 Mi | **23.70%** | 218 Mi |
->
-> `anon` 三次都在 400–550Mi，唯一变的是 `file`。跨度 5 倍，85% 阈值被穿过两次方向。
-> 机制：cgroup v2 只对自己从磁盘 fault 进来的页计费；旧容器死后其页缓存不立刻消失，
-> 新容器读已常驻的页是搭便车、不重复计费，越晚重启、缓存越热，账面越小。
-> **拿 `max_over_time` 抓这种读数，抓到的是节点缓存状态。**
->
-> ⚠️ **别照搬第三种形状的处置。** 第三种（`GOMEMLIMIT` 硬接 limit）已确证「抬 limit 无效」；
-> 本形状没有那种绑定关系，「抬/降 limit 有没有用」目前无定论，
-> 上面三次实验都没动过 limit。真想压只能降 limit，但收益本就是假的：
-> 页缓存本就计入节点 `MemAvailable`。
->
-> ☠️ **容器重启后 5 分钟内，`max by (...)` 读到的是上一个容器的值。** 容器 ID 变了 =
-> 新序列，旧序列在 staleness 回看窗内仍被计入聚合（实测同时刻 2035Mi vs 720Mi）。
-> 规则把 `id` 聚合掉了，所以看不出来，排查时务必按 `id` 拆开。
->
-> ⚠️ **别把「机制普遍」当成「一堆容器在误报」**。当前 homelab 有 8 个容器的
-> `cache/working_set` > 130%（vault 258%、coredns 254%…），但 7d 峰值/limit 的排名里
-> 只有 prometheus 一个 >85%（第二名 83.7%）。前者说明这类假阳性随时可能在别处复现，
-> 不等于现在有一堆误报。
->
-> ⚠️ **cgroup v2 上别用 `container_memory_failcnt` 取证**：那是 v1 的
-> `memory.failcnt`，v2 无对应文件、cAdvisor 恒报 0，与「真的没触到上限」外观一致。
-> v2 判据：容器活着时读 `memory.events` 的 `max`/`oom`/`oom_kill`，
-> 或用可回溯的 `container_memory_max_usage_bytes`（2026-08-30 起两集群都采集）。
->
-> ☠️ **改这条规则前先看 oracle 有没有那个指标**，这是本次最容易踩的坑。
-> 2026-08-30 处置前的实测：`rss` / `cache` / `usage` / `max_usage` 在中枢 Prometheus 里
-> 全是 homelab 162 条 / oracle 0 条，因为
-> `cloud/oracle/manifests/monitoring/otel-collector-config.yaml` 的 keep 正则只留了
-> `container_(cpu_usage_seconds_total|memory_working_set_bytes)`：
-> **oracle 唯一入库的容器内存指标，恰好就是有误导性的那一个**。
-> 直接把 RSS 判据加进规则会让 oracle 侧该告警恒不触发，外观与「没超阈值」完全一致。
->
-> ✅ **处置（2026-08-30）**：keep 正则已加 `memory_rss`（+58 条 series），规则分子随后改成
-> `container_memory_rss`。**改动顺序是硬的**：先上 keep 正则、确认 series 到货，再改规则。
-> 另加 `ContainerMemoryRssAbsent`（`absent()` 判别）守卫这个依赖：keep 正则将来被改窄或
-> 回滚时，它会响，而不是让内存预警在那一侧静默关闭。
-> ✅ 同日补齐容器内存全族（`max_usage` + `cache` + `usage`，共 +174 条 series）：
-> 至此 oracle 与 homelab 在这一族上完全对齐，本节这套拆解两边都能直接查；
-> 此前 oracle 只能 SSH 上节点读 `memory.stat`，而容器一销毁 cgroup 就没了、事后无从查起。
-> `max_usage` 尤其关键：cgroup v2 的 `memory.events` 随容器一起消失，它是唯一能事后
-> 回看「有没有顶死 limit」的证据。
-> ⚠️ 这三个都没有规则消费、纯取证，删掉不会静默废掉任何告警（与 `rss` 不同）。
-> ⚠️ oracle 这三个的历史都从 2026-08-30 起算，此前的高水位/页缓存占比无法回溯。
-> ⚠️ **CPU 节流是两步走，当前停在第一步**（2026-08-30）：keep 正则已补
-> `container_cpu_cfs_{throttled_,}periods_total`，但 `ContainerCPUThrottlingSustained`
-> 的表达式仍硬写着 `cluster="homelab"`，指标到货前放开会让 oracle 侧因分子无
-> series 而恒不触发，外观与「没节流」完全一致（同 `rss` 那次立下的顺序）。
-> 第二步：确认 series 到货 → 去掉 `cluster="homelab"` → 照 `ContainerMemoryRssAbsent`
-> 加一条 absent 守卫。
-> ⚠️ 这一族的基数与内存族不同：cAdvisor 只为设了 CPU quota 的容器吐它
-> （homelab 同口径 38 条 vs 内存族 58 条）。推论是**给容器去掉 CPU limit，它就从节流
-> 告警的视野里整个消失**，那不是「节流为 0」，是无数据。
-> ⚠️ oracle 的 rss 历史从 keep 正则上线那天起算，`max_over_time[2d]` 在头两天内只会少报。
->
-> ✅ **换口径后的阈值是回放标定的，不是拍的**（2026-08-30）：
->
-> | 用途 | 容器 | `rss` 峰值 / limit |
-> |---|---|---|
-> | 真阳性锚点 | `personal-services/frontend`（multica 08-25，`memory.events max=69` 且 `memory.peak == memory.max`） | 870Mi / 当时 1024Mi = 85.0% |
-> | 当前全舰队最高 | `litellm/litellm` | 71.1% |
-> | 次高 | `trivy-system/trivy-operator` | 62.3% |
-> | 换口径前的假阳性 | `monitoring/prometheus` | 25.7%（working_set 口径是 99.4%） |
->
-> **80% 落在 71.1 与 85.0 中间**，两侧各留 9 / 5 个点。⚠️ 别升回 85%（正好压在 multica
-> 那次的读数上，真阳性变掷硬币），也别降到 75%（litellm 常态 71.1%，会变常亮）。
-> ⚠️ **认下的取舍**：`rss` 只是 `memory.stat.anon`，不含 kernel/tmpfs/mlocked，
-> 且会漏掉第三种形状（`GOMEMLIMIT` 硬接 limit 的 Go 应用是 GC 加班而不是 OOM，
-> rss 未必到 80%），那一类的判据是 `next_gc` / GC 频率，不归这条告警管。
->
-> > 完整现场与判据 → [records/2026-08-30-memory-alert-page-cache-false-alarm.md](../records/2026-08-30-memory-alert-page-cache-false-alarm.md)
+#### ☠️ ③ `GOMEMLIMIT` 硬接 limit：抬 limit 是无效动作
 
----
+Go 程序拿到 `GOMEMLIMIT` 时 GC 目标由它决定。chart 把它接成 `limits.memory` 本身，每次抬 limit
+都等量抬高 GC 目标，峰值/limit 比值几乎不动，告警几天内回来。grafana 连抬两次（98% → 94% → 91%）
+都没解决，现场读数与 GOGC 推导见 `k8s/helm/values/kube-prometheus-stack.yaml` 的 grafana `resources` 注释。
+
+- 先取 `go_gc_gogc_percent` / `go_gc_gomemlimit_bytes` / `go_memstats_next_gc_bytes`。**GC 频率是判据**：`rate(go_gc_cycles_total_gc_cycles_total[5m])` 很低（十几秒一次）且 CPU 有余量，
+  说明绑定约束是 GOGC 的「活跃堆翻倍」，调低 GOGC 即可。真被 GOMEMLIMIT 钳住时 GC 连轴转，
+  频率高一两个数量级，那才是头寸不够、该抬 limit。
+- GOGC 可推导：活跃堆 ≈ `next_gc`/2，非堆 ≈ working_set 峰值 − `heap_alloc` 峰值；
+  `GOGC = ((目标峰值 − 非堆)/活跃堆 − 1) × 100`。正常口径是 `GOMEMLIMIT` ≈ limit 的 80%（otel-collector）。
+- ⚠️ 别用 `env: GOMEMLIMIT` 覆盖 chart 那份：多数 chart 的 `.Values.env` 渲染在内置 env 之后，
+  同名即 env 列表重复键，开了 `ServerSideApply` 的 App 直接 ComparisonError 卡在 `sync=Unknown`
+  （见 [records/2026-08-19-opencost-bingen-replay-crashloop.md](../records/2026-08-19-opencost-bingen-replay-crashloop.md)）。
+- ⚠️ 验收别看「告警灭了」：规则分子是窗口内的 `max_over_time`，旧 pod 的历史峰值要滚出窗口才消失
+  （与 [observability-alerting-slo.md](observability-alerting-slo.md) 里换 pod 后旧 `instance`
+  陈旧值仍在回看窗内是同一类陷阱）。看**新 pod** 的 `next_gc` 与 working_set 峰值。
+- ⚠️ 两集群的 `cilium-agent` 也把 `GOMEMLIMIT` 接成 limit（chart 默认）。它报了别按抬 limit 处理；
+  改它要重跑 `deploy-cilium`（`cd k8s/helm && just deploy-cilium` / `cd cloud/oracle && just deploy-cilium`）
+  再 `cd k8s/helm && just connect-clustermesh <homelab-ts>:32379 <oracle-ts>:32379`。
+
+#### ☠️ ④ 页缓存撑起峰值：告警在测一个不构成 OOM 风险的量
+
+`container_memory_working_set_bytes = memory.current − inactive_file`，**它包含页缓存**。
+mmap/顺序读文件重的负载（TSDB、对象存储缓存、大 SQLite），working_set 可能大半是 file cache，
+而干净的 file page 永远先于 OOM 被回收。usage 顶死 `memory.max` 也只是内核回收缓存了事
+（Prometheus 顶死 3Gi 仍 `exitCode 0 / Completed`）。完整现场与对照实验见
+[records/2026-08-30-memory-alert-page-cache-false-alarm.md](../records/2026-08-30-memory-alert-page-cache-false-alarm.md)。
+
+- **怎么分辨**：取 `container_memory_rss` 与 `container_memory_cache`，rss 平稳而 cache 撑起峰值即本形状。
+- ☠️ **读数主要由节点页缓存冷热决定，不是由容器内存需求决定。**cgroup v2 只对自己从磁盘 fault
+  进来的页计费，新容器读已常驻的页是搭便车、不计费。同容器、同数据、同 limit，只是重启时机不同，
+  峰值能差 5 倍。拿 `max_over_time` 抓这种读数，抓到的是节点缓存状态。
+- ☠️ **working_set 塌下去 ≠ 内存被回收。**刚读进来的文件页先挂 active LRU，约两分钟无人引用就降到
+  `inactive_file`，被 working_set 扣掉，而 `usage` 几乎不动。别拿 working_set 回落推断压力解除。
+- ⚠️ 别照搬形状 ③ 的处置，本形状没有那种绑定关系。真想压只能降 limit，而页缓存本就计入节点
+  `MemAvailable`，收益是假的。
+- ☠️ 容器重启后 5 分钟内，`max by (...)` 读到的是上一个容器的值：容器 ID 变了 = 新序列，旧序列仍在
+  staleness 回看窗内。规则把 `id` 聚合掉了所以看不出来，排查时务必按 `id` 拆开。
+- ⚠️ cache/working_set 比值高的容器很多，同类假阳性随时可能在别处复现，但不等于现在有一堆误报。
+- ⚠️ cgroup v2 上别用 `container_memory_failcnt` 取证：那是 v1 的 `memory.failcnt`，v2 无对应文件，
+  cAdvisor 恒报 0，与「真的没触到上限」外观一致。v2 判据：容器活着时读 `memory.events` 的
+  `max`/`oom`/`oom_kill`；事后用 `container_memory_max_usage_bytes`（两集群都采集）。`memory.events`
+  随容器一起消失，`max_usage` 是唯一能回看「有没有顶死 limit」的证据。
 
 ## requests/limits 该填多少？
 
-不靠拍脑袋：**KRR 每周一出推荐报告**推到 Telegram（CPU 取 p95，内存取窗口内 max + 15%）。
-双集群均已部署，见 [cost-and-rightsizing.md](cost-and-rightsizing.md#krr)。
+- 依据是 **KRR 每周一推到 Telegram 的推荐**（CPU 取 p95，内存取窗口内 max + 15%），双集群均已部署，
+  见 [cost-and-rightsizing.md](cost-and-rightsizing.md#krr)。KRR 只读不改（`krr-enforcer` 刻意未部署，
+  会与 ArgoCD selfHeal 死循环），看完报告手工改 git 里的 `resources`。
+- 分诊 SOP（含系统性误读与改完怎么实测确认）→ [runbooks/krr-report-triage.md](../runbooks/krr-report-triage.md)。
+- 标 `(No data)` / `(Not enough data)` 的是当前没有运行 Pod 的 Job/CronJob，忽略即可。
+- 内存推荐取 7 天窗口内的 max（对齐 Prometheus retention），跨周尖峰（如每周备份 CronJob）
+  可能落在窗口外，这类工作负载要自行留余量。
+- ⚠️ 突发型容器别按空载采样定 limits：按请求分配大块内存的路径（图片/PDF 转码、模板编译）空载时看不见。
+  低于上游 chart 默认要有负载下的实测 →
+  [records/2026-08-18-multica-frontend-idle-rightsizing-oom.md](../records/2026-08-18-multica-frontend-idle-rightsizing-oom.md)。
 
-采纳流程：KRR 只读不改（`krr-enforcer` 刻意未部署，会与 ArgoCD selfHeal 死循环），
-看完报告手工改 git 里的 `resources`。
+### ⚠️ 内存余量别看 `kubectl top node`
 
-**完整分诊 SOP → [runbooks/krr-report-triage.md](../runbooks/krr-report-triage.md)**：
-五类分诊（忽略 / BestEffort / 逼近 limit / CPU 回收 / 不采纳）、两类系统性误读
-（100Mi–10m 地板值、oracle 空结果冒充零值）、报告照不出但会间接暴露的三种
-「配置在 git 里却从未生效」，以及改完怎么实测确认。
-
-两个读数注意事项：
-
-- 标 `(No data)` / `(Not enough data)` 的是当前没有运行 Pod 的 Job/CronJob，忽略即可
-- 内存推荐取 7 天窗口内的 max（对齐 Prometheus retention），跨周尖峰
-  （如每周备份 CronJob）可能落在窗口外，这类工作负载要自行留余量
-
-⚠️ **内存余量别看 `kubectl top node`**：它报的是 workingSet（含可回收页缓存），会虚高到 90%+
-让人误判要驱逐。判余量看节点 `free -m` 的 available（或 Prometheus 按容器 `rssBytes`
-聚合）。2026-08-06 实测 top 报 92% 时 available 还有 4.3GB / 11.9GB、requests 仅 69%，
-离驱逐阈值很远。
-
----
+- 它报的是 workingSet（含可回收页缓存），会虚高到 90%+ 让人误判要驱逐（实测 top 报 92% 时
+  available 仍有三分之一以上）。判余量看节点上 `free -m` 的 available，或 Prometheus 按容器
+  `rssBytes` 聚合。
+- requests 只反映申报、不反映实占（两者可差数百 Mi）。requests 占 allocatable 的比例只说明排程账面
+  （满了新 pod 会 Pending），与真实内存压力无关。
 
 ## 相关文档
 
-- [cost-and-rightsizing.md](cost-and-rightsizing.md) — OpenCost 成本归因 + KRR 右尺寸
-- [runbooks/oracle-k3s-shape-downsize.md](../runbooks/oracle-k3s-shape-downsize.md) — 改 A1 shape 的 SOP（本文那套原则的一次实战应用）
-- [plans/archive/2026-07-06-resource-optimization.md](../plans/archive/2026-07-06-resource-optimization.md) — 2026-07-06 那轮调整的推导（历史快照，非当前值）
-- [observability-multicluster.md](observability-multicluster.md) — 多集群监控架构
+- [cost-and-rightsizing.md](cost-and-rightsizing.md)：OpenCost 成本归因 + KRR 右尺寸
+- [runbooks/oracle-k3s-shape-downsize.md](../runbooks/oracle-k3s-shape-downsize.md)：改 A1 shape 的 SOP（本文原则的一次实战应用）
+- [plans/archive/2026-07-06-resource-optimization.md](../plans/archive/2026-07-06-resource-optimization.md)：2026-07-06 那轮调整的推导（历史快照，非当前值）
+- [observability-multicluster.md](observability-multicluster.md)：多集群监控架构
 - [Kubernetes QoS 官方文档](https://kubernetes.io/docs/tasks/configure-pod-container/quality-service-pod/)
