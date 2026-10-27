@@ -81,6 +81,28 @@
       changed_when: false
       failed_when: false
 
+    # ☠️ 主组必须是独立的组，不能是 sysadminctl 默认的 staff（GID 20）。macOS 的
+    #    家目录默认 0750 + 属组 staff：留在 staff 里，这个用户就能进 matstudio 的 home，
+    #    读到里面所有 0644 的文件 —— 2026-10-27 实测 Studio 上就有
+    #    ~/projects/homelab/k8s/helm/vault-keys.json（**有效的 Vault root token** + unseal key）
+    #    和 cloudflare/terraform/.env，隔离等于没做。下面还会把登录用户的 home 收成 0700
+    #    并实测读不到，两道一起。
+    - name: Check whether the dedicated group exists
+      ansible.builtin.command: "dscl . -read /Groups/{{ mr_user }} PrimaryGroupID"
+      register: mr_group
+      changed_when: false
+      failed_when: false
+
+    - name: Create the dedicated group
+      when: mr_group.rc != 0
+      ansible.builtin.command: "dseditgroup -o create -r 'Multica agent (restricted)' {{ mr_user }}"
+      changed_when: true
+
+    - name: Read the dedicated group's GID
+      ansible.builtin.command: "dscl . -read /Groups/{{ mr_user }} PrimaryGroupID"
+      register: mr_group_gid
+      changed_when: false
+
     # 口令随机且不落盘：这个用户只由 launchd 拉起进程，从不交互登录。
     # 标准用户（不带 -admin），sudo 不了。
     - name: Create the dedicated user (standard, not admin)
@@ -104,20 +126,39 @@
       when: mr_id.rc != 0
       changed_when: true
 
+    - name: Read the user's current primary group
+      ansible.builtin.command: "dscl . -read /Users/{{ mr_user }} PrimaryGroupID"
+      register: mr_user_gid
+      changed_when: false
+
+    - name: Move the user off staff onto its own primary group
+      when: (mr_user_gid.stdout.split() | last) != (mr_group_gid.stdout.split() | last)
+      ansible.builtin.command: "dscl . -create /Users/{{ mr_user }} PrimaryGroupID {{ mr_group_gid.stdout.split() | last }}"
+      changed_when: true
+
     # 默认 home 是 0755（Public/Sites 要给别人看）。这里放着 kubeconfig 和 token，收成 0700。
     - name: Lock down the home directory
       ansible.builtin.file:
         path: "{{ mr_home }}"
         state: directory
         owner: "{{ mr_user }}"
+        group: "{{ mr_user }}"
         mode: "0700"
+
+    # 第二道：登录用户（matstudio）的 home 从 0750 收成 0700，不再靠属组挡人。
+    # 本机只有这两个真人/服务用户，收掉组权限不影响 matstudio 自己的任何东西。
+    - name: Close the login user's home to other users
+      ansible.builtin.file:
+        path: "/Users/{{ ansible_user }}"
+        state: directory
+        mode: "go-rwx"
 
     - name: Ensure directories exist
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
         owner: "{{ mr_user }}"
-        group: staff
+        group: "{{ mr_user }}"
         mode: "0700"
       loop:
         - "{{ mr_home }}/.local/bin"
@@ -162,7 +203,7 @@
             src: "{{ mr_stage }}/multica"
             dest: "{{ mr_bin }}"
             owner: "{{ mr_user }}"
-            group: staff
+            group: "{{ mr_user }}"
             mode: "0755"
             remote_src: true
 
@@ -194,7 +235,7 @@
       ansible.builtin.copy:
         dest: "{{ mr_home }}/.qwen/settings.json"
         owner: "{{ mr_user }}"
-        group: staff
+        group: "{{ mr_user }}"
         mode: "0600"
         content: "{{ mr_qwen_settings | to_nice_json }}\n"
       vars:
@@ -219,7 +260,7 @@
       ansible.builtin.copy:
         dest: "{{ mr_home }}/.kube/config"
         owner: "{{ mr_user }}"
-        group: staff
+        group: "{{ mr_user }}"
         mode: "0600"
         content: |
           # Managed by Ansible (macbook/ansible/playbooks/multica-daemon-restricted.yaml).
@@ -245,7 +286,7 @@
       ansible.builtin.copy:
         dest: "{{ mr_env_file }}"
         owner: "{{ mr_user }}"
-        group: staff
+        group: "{{ mr_user }}"
         mode: "0600"
         content: |
           CLAUDE_CODE_OAUTH_TOKEN={{ mr_claude_token }}
@@ -256,7 +297,7 @@
       ansible.builtin.copy:
         dest: "{{ mr_runner }}"
         owner: "{{ mr_user }}"
-        group: staff
+        group: "{{ mr_user }}"
         mode: "0700"
         content: |
           #!/bin/zsh
@@ -337,6 +378,20 @@
       register: mr_cani
       changed_when: false
       failed_when: mr_cani.stdout | trim != item.want
+
+    # 本机文件层面的隔离同样要实测：不在 staff 里、进不了登录用户的 home。
+    # 任一条失败 = 任务能读到 matstudio 名下的凭据（见上面建组那段的 ☠️）。
+    - name: Verify the user is not in staff
+      ansible.builtin.command: "dsmemberutil checkmembership -U {{ mr_user }} -G staff"
+      register: mr_staff
+      changed_when: false
+      failed_when: "'is not a member' not in mr_staff.stdout"
+
+    - name: Verify the login user's home is closed to it
+      ansible.builtin.command: "{{ as_mr }} /bin/ls /Users/{{ ansible_user }}"
+      register: mr_peek
+      changed_when: false
+      failed_when: mr_peek.rc == 0
 
     - name: Show which runtimes the daemon registered
       ansible.builtin.debug:
