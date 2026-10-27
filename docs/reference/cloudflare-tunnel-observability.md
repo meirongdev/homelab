@@ -1,6 +1,6 @@
 # Cloudflare Tunnel Observability
 
-> Last updated: 2026-09-01
+> Last updated: 2026-10-27
 > Status: 生效事实
 
 当前架构的入口路径为：`Cloudflare DNS -> Cloudflare Tunnel -> Cilium Gateway API -> Services`。
@@ -60,6 +60,11 @@ cloudflared:2000 -> Prometheus / OTel Collector -> Grafana
 要恢复 PDB 必须先把 replicas 提回 ≥2。
 
 ## 当前采集路径
+
+> ⚠️ `:2000` 上不只有 `/metrics`，还挂着 `/ready` 和 `/debug/*`，而且整个集群内都能访问
+> （两集群都没有 NetworkPolicy）。2026.10.4 之前，`/debug/vars` 会原样吐出进程的 argv，
+> 当时 token 就写在 argv 里。2026-10-27 起两侧都升到 2026.10.5，token 改由环境变量
+> `TUNNEL_TOKEN` 注入，不再进 argv。原因见两份 `cloudflare-tunnel.yaml` 清单里的注释。
 
 ### homelab
 

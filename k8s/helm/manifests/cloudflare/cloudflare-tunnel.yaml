@@ -43,6 +43,18 @@ spec:
                     operator: Exists
       containers:
         - name: cloudflared
+          # 2026-10-27 digest 刷新：2026.8.2 → **2026.10.5**（`:2026.10.5` 的多架构 index
+          # digest，两个集群共用；amd64/arm64 两个二进制 `--version` 都实测报 2026.10.5）。
+          # 动因是 Cloudflare 的安全通告，要求所有 connector 升到 ≥2026.10.2：
+          #   ① 2026.10.2 起不再信任 eMudhra(emSign) 那 8 张私钥过弱的中间证书。
+          #      通告里「HTTPS 源站证书链到 eMudhra 会被新版拒绝」与本隧道无关：
+          #      源站是 http://cilium-gateway…:80（cloudflare/terraform 的 gateway_service）。
+          #   ② 2026.10.4 修的 VULN-176088 对我们更要命：:2000 metrics 端口的 `/debug/vars`
+          #      会原样吐出 os.Args，而 token 当时就在 argv 里。2026-10-27 实测两集群的
+          #      2026.8.2 都是 200 且含 `--token`（`/debug/pprof/cmdline` 已是 403）。
+          #      两集群 NetworkPolicy/CNP 皆为 0，任何 pod（含 ClusterMesh 对端）都读得到。
+          #   ③ 2026.10.5 修 VULN-183456（go-chi）。
+          #
           # 2026-08-26 digest 刷新：2026.7.2 → **2026.8.2**（当前 :latest 的多架构
           # index digest，实测含 linux/amd64 + linux/arm64，两个集群共用同一个 digest）。
           # 动因：当天 04:52Z 与 06:06–06:21Z 两次公网 530（Cloudflare 1033），
@@ -57,7 +69,16 @@ spec:
           #    `Your version 2026.7.2 is outdated`。复发判据：再出现「530 期间
           #    ha_connections 仍为 4」就说明升级没解决，那时再评估换 `--protocol quic`
           #    （QUIC 对路径失效的探测比 http2 快，但会改变入口传输层，别顺手改）。
-          image: cloudflare/cloudflared@sha256:0aa26e284f05e6c77ae375b8c9c11d9eb6a448fb7bcd8d40f31cb6176189eb38
+          image: cloudflare/cloudflared@sha256:1b1d34d0a9c0bfca9de72db8460d328db3f19edd2b96169114e3e893a97bbe53
+          # ☠️ token 不进 argv，**别把 `--token $(TUNNEL_TOKEN)` 加回来**。`tunnel run` 的
+          # `--token` 绑定了环境变量 TUNNEL_TOKEN（上游 subcommands.go 的 EnvVars），
+          # 下面的 env 注入就够了。2026-10-27 用本镜像实测：有这个变量时报 "token is not valid"
+          # （说明读到了），没有时报缺 tunnel ID。argv 会从三个地方漏出去：
+          #   · /proc/<pid>/cmdline，节点上任何人都能读；
+          #   · Tetragon 把完整 argv 送进 Loki，而且**它重启时会给存量进程补发 exec 事件**
+          #     （flags=procFS）。2026-10-24 06:00Z Tetragon 重启，就这样把本隧道的 token
+          #     明文写进了 Loki。它的 redactionFilters 不认 `--token`；
+          #   · 2026.10.4 之前的 :2000/debug/vars（见上）。
           args:
             - tunnel
             - --no-autoupdate
@@ -66,8 +87,6 @@ spec:
             - --metrics
             - 0.0.0.0:2000
             - run
-            - --token
-            - $(TUNNEL_TOKEN)
           env:
             - name: TUNNEL_TOKEN
               valueFrom:

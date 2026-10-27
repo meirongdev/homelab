@@ -50,7 +50,14 @@ spec:
           # ⚠️ oracle 侧**当天并没有出问题**（本次 530 只发生在 homelab 隧道）；
           #    一起升是为了让两侧版本对齐 —— 版本分叉会让下次比对「是不是版本差异」
           #    这件事失去对照组。arm64 由该 index 覆盖，实测确认。
-          image: cloudflare/cloudflared@sha256:0aa26e284f05e6c77ae375b8c9c11d9eb6a448fb7bcd8d40f31cb6176189eb38  # 2026.8.2 多架构 index digest
+          # 2026-10-27 再刷新：2026.8.2 → **2026.10.5**，仍与 homelab 同一个 digest。动因是
+          # Cloudflare 的安全通告（eMudhra 中间证书，要求 ≥2026.10.2），外加 2026.10.4 修掉的
+          # `/debug/vars` 泄露 argv（也就是泄露 token），本侧同样实测中招。
+          # 详细经过写在 homelab 那份清单里。
+          image: cloudflare/cloudflared@sha256:1b1d34d0a9c0bfca9de72db8460d328db3f19edd2b96169114e3e893a97bbe53  # 2026.10.5 多架构 index digest
+          # ☠️ token 不进 argv，**别把 `--token $(TUNNEL_TOKEN)` 加回来**。`tunnel run`
+          # 会自己读环境变量 TUNNEL_TOKEN（即下面的 env），argv 会从 /proc/<pid>/cmdline
+          # 和旧版的 /debug/vars 漏出去。本集群没装 Tetragon，但两侧保持同一个写法，理由同 homelab 清单。
           args:
             - tunnel
             - --no-autoupdate
@@ -59,8 +66,6 @@ spec:
             - --metrics
             - 0.0.0.0:2000
             - run
-            - --token
-            - $(TUNNEL_TOKEN)
           env:
             - name: TUNNEL_TOKEN
               valueFrom:
