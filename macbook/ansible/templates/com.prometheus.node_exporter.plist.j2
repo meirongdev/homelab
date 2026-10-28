@@ -8,7 +8,9 @@
     <key>ProgramArguments</key>
     <array>
         <string>{{ ne_bin }}</string>
-        <string>--web.listen-address={{ ne_listen }}</string>
+{% for addr in ne_listen %}
+        <string>--web.listen-address={{ addr }}</string>
+{% endfor %}
         <!-- ☠️ 没有这个 flag，textfile collector 是**启用但目录为空**的状态：
              omlx-metrics.yaml 每 60s 老老实实写 omlx.prom，node_exporter 一个字节
              都不读，Prometheus 那边表现为「指标从来没出现过」而不是任何报错。

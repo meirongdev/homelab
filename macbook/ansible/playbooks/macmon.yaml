@@ -1,7 +1,10 @@
 ---
 # Mac 的功耗 / 温度 / 风扇：macmon（https://github.com/vladkens/macmon）以 LaunchAgent
 # 常驻跑 `macmon serve`，:9090 直接吐 Prometheus 格式，homelab Prometheus 的 `macmon` job
-# 经 Tailscale 来抓。node_exporter 的 Darwin 版**没有**任何温度/功耗指标（thermal 那个
+# 经 Tailscale 来抓。**只听 Tailscale IP**（2026-10-28 前是 0.0.0.0，局域网谁都能抓）：
+#   `--host` 只收一个地址（逗号列表同样静默不监听），所以没有回环，验收也走 Tailscale IP；
+#   ☠️ 绑不上地址时进程不退出、也不监听，plist 里先等地址出现再 exec（实测过）。
+# node_exporter 的 Darwin 版**没有**任何温度/功耗指标（thermal 那个
 # collector 在 Apple Silicon 上什么都不吐），这是补这一块的唯一来源。
 #
 # 为什么是 macmon：它读 IOReport + SMC，**不要 sudo**（powermetrics/asitop 都要 root，
@@ -50,9 +53,20 @@
     # 与 k8s/helm/values/kube-prometheus-stack.yaml 的 `macmon` job 对齐（端口 + 15s）。
     macmon_port: 9090
     macmon_interval_ms: 15000
+    macmon_host: "{{ ansible_host }}"         # inventory 里两台都写的 Tailscale IP
     macmon_plist: "{{ ansible_facts.user_dir }}/Library/LaunchAgents/{{ macmon_label }}.plist"
 
   tasks:
+    - name: Refuse to listen on an address this Mac does not have
+      ansible.builtin.assert:
+        that:
+          - macmon_host is match('^100\.')
+          - macmon_host in ansible_facts.all_ipv4_addresses
+        fail_msg: >-
+          {{ macmon_host }} 不是这台机器的 Tailscale 地址（本机 IPv4：
+          {{ ansible_facts.all_ipv4_addresses | join(', ') }}）。plist 会一直等这个地址出现，macmon 永远不起来。
+        quiet: true
+
     - name: Install macmon (present only — never upgrades)
       community.general.homebrew:
         name: macmon
@@ -99,7 +113,7 @@
     - name: Wait for the first sample
       ansible.builtin.shell: |
         set -o pipefail
-        curl -sf --max-time 5 http://127.0.0.1:{{ macmon_port }}/metrics \
+        curl -sf --max-time 5 http://{{ macmon_host }}:{{ macmon_port }}/metrics \
           | awk '/^macmon_(sys_power_watts|gpu_temp_celsius|gpu_power_watts)\{/{n=$0; sub(/\{.*/, "", n); print n"="$NF}'
       args:
         executable: /bin/bash
@@ -118,6 +132,15 @@
           macmon 起来了，但整机功耗或 GPU 温度是 0（实际: {{ macmon_sample.stdout_lines }}）。
           新芯片/新系统常见：先在机器上跑 `macmon debug` 看 SMC 的 PSTR 与温度探头能不能读。
         success_msg: "{{ macmon_sample.stdout_lines }}"
+
+    # curl 退出码 7 = connection refused。绑定只看目的地址，打本机自己的 LAN IP 就够了。
+    - name: Verify the LAN address refuses connections
+      ansible.builtin.command: >-
+        /usr/bin/curl -s -o /dev/null -m 5
+        http://{{ ansible_facts.default_ipv4.address }}:{{ macmon_port }}/metrics
+      register: macmon_lan
+      changed_when: false
+      failed_when: macmon_lan.rc != 7
 
   handlers:
     # bootout 是异步的，没退干净就 bootstrap 会报 "Bootstrap failed: 5: Input/output error"。

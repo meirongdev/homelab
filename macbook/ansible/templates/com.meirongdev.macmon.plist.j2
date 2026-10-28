@@ -5,18 +5,16 @@
 <dict>
     <key>Label</key>
     <string>{{ macmon_label }}</string>
+    <!-- ☠️ 先等 Tailscale IP 出现在网卡上再 exec：macmon 绑不上地址时只打一行
+         "server error: ... (os error 49)"，进程照活、不监听，KeepAlive 救不回来。
+         开机早于 Tailscale 时不等就是永久不监听。
+         interval 与 Prometheus 抓取间隔对齐：GPU 功耗是整个采样区间的能耗均值，
+         间隔比抓取短就只看得到其中一段。 -->
     <key>ProgramArguments</key>
     <array>
-        <string>{{ macmon_bin }}</string>
-        <string>serve</string>
-        <string>--host</string>
-        <string>0.0.0.0</string>
-        <string>--port</string>
-        <string>{{ macmon_port }}</string>
-        <!-- 与 Prometheus 抓取间隔对齐：GPU 功耗是整个采样区间的能耗均值，
-             间隔比抓取短就只看得到其中一段。 -->
-        <string>--interval</string>
-        <string>{{ macmon_interval_ms }}</string>
+        <string>/bin/sh</string>
+        <string>-c</string>
+        <string>until /sbin/ifconfig | grep -qF "inet {{ macmon_host }} "; do sleep 5; done; exec {{ macmon_bin }} serve --host {{ macmon_host }} --port {{ macmon_port }} --interval {{ macmon_interval_ms }}</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
