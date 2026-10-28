@@ -61,8 +61,8 @@ Mac 这个源（与 litellm 同一约束）。调度到 worker 的表现是 targ
 - `GET /admin/api/stats`（更细：内存压力档位、队列深度）**未采集**：`/admin/api/*` 只认 admin 会话 cookie
   （`omlx/admin/auth.py::require_admin` 没有 Bearer 通路）。
 
-☠️ **不要为它去开 `skip_api_key_verification`**：`server.host` 是 `0.0.0.0` 且 `cors_origins` 是 `["*"]`，
-等于把整个 admin 面板（改设置、下载/删除模型、清缓存、重启服务）开放给 LAN 和整个 tailnet；0.7 起非回环
+☠️ **不要为它去开 `skip_api_key_verification`**：`server.host` 含 Tailscale IP 且 `cors_origins` 是 `["*"]`，
+等于把整个 admin 面板（改设置、下载/删除模型、清缓存、重启服务）开放给整个 tailnet；0.7 起非回环
 监听下开它也会被启动校验拒绝。
 
 ## 鉴权（OMLX 0.7 起）
@@ -84,6 +84,15 @@ OMLX 0.7 起**不再允许无 API key 监听非回环地址**，没有跳过开�
 |---|---|---|---|
 | `/v1/models`、`/v1/chat/completions`、`/v1/embeddings`、audio | 200 | 200 | LiteLLM `mac/*` 与 `studio/*`、Open Notebook（都填 `api_key: dummy`）|
 | `/api/status`、`/v1/models/status`（管理端点，`verify_api_key`）| 401 | 200 | 链路 A 的 json-exporter |
+
+**监听地址**（2026-10-28 起，同样由 `just omlx` 维护）：`server.host = <Tailscale IP>,127.0.0.1`。
+之前是 `0.0.0.0`，推理又免 key，同一局域网的任何设备都能直接调模型。现在局域网 IP 连 TCP 都被拒
+（playbook 验收实测 curl 退出码 7），上表「无认证 200」的范围只剩 tailnet + 本机。消费方本来就走
+Tailscale（LiteLLM / Open Notebook / json-exporter）或回环（本机 qwen / multica），一个都不用改。
+☠️ **Tailscale IP 必须排第一**：OMLX 只在第一个地址绑不上时退出（`Errno 49`，launchd 10s 后重试直到
+Tailscale 起来）；后面的地址不在网卡上会被**静默跳过**、照常启动。排反了，开机早于 Tailscale 时就只剩
+回环，进程活着、不报错、不自愈（两种顺序都用临时 base path 实测过）。要收紧到 tailnet 上也得有 key，
+就关掉 `allow_unauthenticated_inference`，并给下面这几处换真 key。
 
 ☠️ **`dummy` 能用全靠 `allow_unauthenticated_inference: true` 这一个开关**。重装 OMLX、在 admin 面板里重置
 设置或有人把它关掉，`mac/*` 别名和 Open Notebook 的对话/嵌入/TTS/STT 会一起 401。修法：开关开回来，或给

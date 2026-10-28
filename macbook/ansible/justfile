@@ -51,7 +51,7 @@ node-exporter target="macs":
 
 # key 从 Vault 现取（secret/homelab/omlx → api_key），经环境变量传给 playbook，
 # 不上命令行、不落盘。取不到时：已配过 key 的机器照常，新机器会在启动服务前失败。
-# OMLX 推理服务本体（brew + LaunchAgent + settings.json 的 host/port/鉴权；不升级、不碰模型）
+# OMLX 推理服务本体（brew + LaunchAgent + settings.json 的 host/port/鉴权；不升级但会重启落后的进程、不碰模型）
 omlx target="omlx":
     #!/usr/bin/env bash
     set -euo pipefail

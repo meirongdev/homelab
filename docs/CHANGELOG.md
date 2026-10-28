@@ -124,6 +124,7 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-10-27 | **cloudflared 2026.8.2 → 2026.10.5（双集群），token 移出 argv**：应 eMudhra 中间证书通告（connector 须 ≥2026.10.2），同时堵上 VULN-176088（旧版 `:2000/debug/vars` 吐出含 `--token` 的 argv）；token 改由 `TUNNEL_TOKEN` 注入 ([清单](../k8s/helm/manifests/cloudflare/cloudflare-tunnel.yaml)) |
 | 2026-10-27 | **argv 泄密收口第二轮：夜备 Vault token 移出命令行，Tetragon 脱敏补两条**：夜备的 `X-Vault-Token` 头每晚进 Loki，源头改 curl `--variable`；拿 7 天真实 argv 回放，密钥形态 30 条 → 0。备份 token 未轮换 ([security.md](reference/security.md)) |
 | 2026-10-27 | **两条隧道去掉 `no_tls_verify`**：eMudhra 通告点名别靠它绕过源站证书错误。两边源站都是 `http://` 的 Cilium gateway，这个开关从没起过作用，但留着它，将来加 https 源站时就会静默不校验证书。两个 root 的 plan 都只有这一处原地更新，其余资源无漂移 ([main.tf](../cloudflare/terraform/main.tf)) |
+| 2026-10-28 | **两台 Mac 的 OMLX 不再对局域网开放，升到 0.7.3rc1**：原先监听 `0.0.0.0` 且推理免 key，同网段谁都能直接调模型；改为只听 Tailscale IP + 回环，消费方不用改。两台跑的都是几周前的旧进程，M2 的 embedding/TTS/STT 因此失败；`just omlx` 现在会重启落后的进程 ([鉴权](reference/omlx-inference-metrics.md)) |
 ### 审计与清理（历史）
 
 | 时间 | 内容 |

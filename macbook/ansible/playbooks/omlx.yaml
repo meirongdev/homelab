@@ -4,7 +4,15 @@
 #
 # 只**合并**下面四个键，从不重写整个文件。其余设置（内存天花板、并发、模型目录、TTL…）
 # 归 OMLX admin 面板管，每台机器各不相同：
-#   server.host = 0.0.0.0     json-exporter / LiteLLM 经 Tailscale 来连
+#   server.host = <Tailscale IP>,127.0.0.1
+#                             只听 Tailscale 与回环，局域网连 TCP 都连不上（2026-10-28 前是 0.0.0.0，
+#                             推理又免 key，同一局域网的任何设备都能直接调模型）。json-exporter / LiteLLM /
+#                             Open Notebook 走 Tailscale，本机 qwen / multica 走 127.0.0.1。
+#                             Tailscale IP 取 inventory 的 ansible_host。
+#                             ☠️ 顺序不能换：OMLX 只在**第一个**地址绑不上时退出，后面的地址不在网卡上就
+#                             静默跳过、照常启动。Tailscale 放第一个，开机时它还没起来 → Errno 49 退出 →
+#                             KeepAlive 10s 后重试直到起来；放第二个就只剩回环、进程活着、永远不自愈
+#                             （2026-10-28 用临时 base path 两种顺序都实测过）。
 #   server.port = 8000        抓取配置与 LiteLLM 的 api_base 都写死了这个端口
 #   auth.api_key              ☠️ 0.7 起非回环监听**没 key 就起不来**：启动时等「Press Enter」，
 #                             launchd 下 stdin 是 EOF → 退出码 1 → KeepAlive 每 10s 拉起，
@@ -12,7 +20,7 @@
 #                             所有 OMLX 节点共用一把（json-exporter 只挂一个 key 文件）。
 #   auth.allow_unauthenticated_inference = true
 #                             推理端点免 key：LiteLLM `mac/*` 与 Open Notebook 填的都是 dummy。
-#                             关掉它这两处会一起 401。
+#                             关掉它这两处会一起 401。免 key 的边界就是上面的监听地址：tailnet + 本机。
 # 口径与鉴权边界 → docs/reference/omlx-inference-metrics.md「鉴权」
 #
 # key 由 `just omlx` 从 Vault 现取、经环境变量 OMLX_API_KEY 传入（不上命令行、不落盘）。
@@ -22,9 +30,12 @@
 # 不做的事：
 #   - 升级 OMLX：state=present。升级是有意识的动作（`brew upgrade jundot/omlx/omlx`），
 #     0.6 → 0.7 那次就是悄悄升上去、等到重启才炸。
+#     但**升级后没重启**这件事归这里管：运行版本 ≠ brew 已链接版本就重启。brew 不重启服务，
+#     旧进程一直跑到下次重启，期间旧 keg 被 cleanup 删掉，懒加载的模块就 import 失败。
+#     2026-10-28 两台都这样跑了几周（brew 0.7.2，进程 0.7.0rc1 / 0.7.0），M2 的 embedding/TTS/STT 全挂。
 #   - 下载模型：admin 面板（http://<host>:8000/admin）。
 #
-# NO sudo。幂等：四个键都对时什么都不改、不重启。
+# NO sudo。幂等：四个键都对、运行版本 = 已装版本时什么都不改、不重启。
 - name: OMLX inference server
   hosts: omlx
   gather_facts: true            # 需要 ansible_facts.user_dir / user_uid
@@ -37,11 +48,24 @@
     omlx_formula: jundot/omlx/omlx
     omlx_label: sh.brew.omlx                  # `brew services` 生成的 LaunchAgent label
     omlx_port: 8000
+    omlx_tailscale_ip: "{{ ansible_host }}"   # inventory 里两台都写的 Tailscale IP
+    omlx_bind_host: "{{ omlx_tailscale_ip }},127.0.0.1"
     omlx_settings_path: "{{ ansible_facts.user_dir }}/.omlx/settings.json"
     omlx_api_key: "{{ lookup('ansible.builtin.env', 'OMLX_API_KEY') }}"
     omlx_log: "{{ homebrew_prefix }}/var/log/omlx.log"
 
   tasks:
+    - name: Refuse to bind an address this Mac does not have
+      ansible.builtin.assert:
+        that:
+          - omlx_tailscale_ip is match('^100\.')
+          - omlx_tailscale_ip in ansible_facts.all_ipv4_addresses
+        fail_msg: >-
+          {{ omlx_tailscale_ip }} 不是这台机器的 Tailscale 地址（本机 IPv4：
+          {{ ansible_facts.all_ipv4_addresses | join(', ') }}）。OMLX 绑不上第一个地址就退出，
+          launchd 下会每 10s 拉起一次。
+        quiet: true
+
     - name: Tap OMLX (formula lives in the main repo)
       community.general.homebrew_tap:
         name: "{{ omlx_tap }}"
@@ -86,7 +110,7 @@
         omlx_current: "{{ omlx_now }}"
         omlx_desired: >-
           {{ omlx_now | combine({
-               'server': {'host': '0.0.0.0', 'port': omlx_port},
+               'server': {'host': omlx_bind_host, 'port': omlx_port},
                'auth': {'api_key': (omlx_api_key or omlx_now.get('auth', {}).get('api_key')),
                         'allow_unauthenticated_inference': true}
              }, recursive=true) }}
@@ -130,6 +154,32 @@
       register: omlx_start
       changed_when: "'STARTED' in omlx_start.stdout"
 
+    - name: Read the installed (linked) OMLX version
+      ansible.builtin.shell: |
+        set -o pipefail
+        {{ homebrew_prefix }}/bin/brew info --json=v2 {{ omlx_formula }} \
+          | /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin)["formulae"][0]["linked_keg"] or "")'
+      args:
+        executable: /bin/bash
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        HOMEBREW_NO_AUTO_UPDATE: "1"
+      register: omlx_installed
+      changed_when: false
+
+    # 「changed」= 进程比 brew 里的旧（升级后没重启），触发重启。服务刚起来/key 刚换时读不到就不管，
+    # 那两种情况本来就会重启或刚启动。
+    - name: Restart if the running process predates the installed version
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ omlx_port }}/api/status"
+        headers:
+          Authorization: "Bearer {{ omlx_desired.auth.api_key }}"
+      register: omlx_running
+      failed_when: false
+      changed_when: omlx_running.status == 200 and omlx_running.json.version != omlx_installed.stdout
+      notify: restart omlx
+      no_log: true
+
     - name: Apply a pending restart before verifying
       ansible.builtin.meta: flush_handlers
 
@@ -155,14 +205,37 @@
         url: "http://127.0.0.1:{{ omlx_port }}/api/status"
         headers:
           Authorization: "Bearer {{ omlx_desired.auth.api_key }}"
+      register: omlx_status
       no_log: true
+
+    - name: Verify the running process is the installed version
+      ansible.builtin.assert:
+        that: omlx_status.json.version == omlx_installed.stdout
+        fail_msg: "运行中 {{ omlx_status.json.version }}，brew 已装 {{ omlx_installed.stdout }}：重启没换上新版本"
+        quiet: true
+
+    # 消费方（LiteLLM / Open Notebook / json-exporter）走的那条路。
+    - name: Verify the Tailscale address answers
+      ansible.builtin.uri:
+        url: "http://{{ omlx_tailscale_ip }}:{{ omlx_port }}/v1/models"
+        return_content: false
+
+    # 局域网地址必须连不上：curl 退出码 7 = connection refused。打本机自己的 LAN IP 就够了，
+    # 绑定只看目的地址，从局域网哪台设备连都是同一个结果。
+    - name: Verify the LAN address refuses connections
+      ansible.builtin.command: >-
+        /usr/bin/curl -s -o /dev/null -m 5
+        http://{{ ansible_facts.default_ipv4.address }}:{{ omlx_port }}/v1/models
+      register: omlx_lan
+      changed_when: false
+      failed_when: omlx_lan.rc != 7
 
     - name: Report
       ansible.builtin.shell: |
         set -o pipefail
-        v=$({{ homebrew_prefix }}/bin/brew list --versions omlx | awk '{print $2}')
         runs=$(launchctl print "gui/$(id -u)/{{ omlx_label }}" | awk '$1=="runs"{print $3}')
-        echo "OMLX ${v} · launchd runs=${runs} · /v1/models 200 免 key · /api/status 401 无 key / 200 带 key"
+        listen=$(lsof -nP -iTCP:{{ omlx_port }} -sTCP:LISTEN | awk 'NR>1{print $9}' | sort -u | paste -sd' ' -)
+        echo "OMLX {{ omlx_status.json.version }} · launchd runs=${runs} · 监听 ${listen} · LAN {{ ansible_facts.default_ipv4.address }} 拒绝连接 · /v1/models 200 免 key · /api/status 401 无 key / 200 带 key"
       args:
         executable: /bin/bash
       register: omlx_report

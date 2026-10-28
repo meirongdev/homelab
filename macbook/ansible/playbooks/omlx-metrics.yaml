@@ -13,8 +13,8 @@
 #
 # 数据源：~/.omlx/stats.json —— **免鉴权**，OMLX 每 300s 原子重写一次。
 #   ☠️ 不要为了拿更细的 /admin/api/stats 去开 skip_api_key_verification：
-#      server.host 是 0.0.0.0 且 cors_origins 是 "*"，那等于把「改设置、删模型、
-#      重启服务」的整个 admin 面板开放给 LAN 和整个 tailnet。
+#      server.host 含 Tailscale IP 且 cors_origins 是 "*"，那等于把「改设置、删模型、
+#      重启服务」的整个 admin 面板开放给整个 tailnet。
 #
 # ☠️ **跨仓依赖**：渲染器 `omlx-textfile-collector` 不在本仓，它是
 #    ~/projects/meirongdev/mlx-learning 的 venv 里的 console script
