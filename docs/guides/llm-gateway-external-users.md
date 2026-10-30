@@ -1,6 +1,6 @@
 # LLM API 使用说明（给拿到 key 的外部使用者）
 
-> Last updated: 2026-10-29
+> Last updated: 2026-10-30
 >
 > 这份文档是公开的，**不含任何密钥**。你的 API key 会单独私下发给你。
 > 文档中的所有示例、配置与错误码均在公网端点经过实测验证。
@@ -11,19 +11,21 @@
 
 - [速览](#速览)
 - [1. 快速验证：确认 key 可用](#1-快速验证确认-key-可用)
-- [2. 可用模型清单](#2-可用模型清单)
-- [3. 在终端 CLI 工具中使用](#3-在终端-cli-工具中使用)
-  - [通用环境变量（各类 AI 终端工具）](#31-通用环境变量各类-ai-终端工具)
-  - [Qwen Code CLI](#32-qwen-code-cli)
-  - [Claude Code CLI](#33-claude-code-cli)
-  - [Codex CLI](#34-codex-cli)
-  - [Magpie CLI](#35-magpie-cli)
+- [2. 模型选型与最佳配置推荐](#2-模型选型与最佳配置推荐)
+  - [2.1 模型特性与选型推荐](#21-模型特性与选型推荐)
+  - [2.2 核心配置与避坑指南（为什么觉得慢 & 怎么配最合理）](#22-核心配置与避坑指南为什么觉得慢--怎么配最合理)
+- [3. 在终端 CLI 工具中指定与配置模型](#3-在终端-cli-工具中指定与配置模型)
+  - [3.1 通用环境变量（各类 AI 终端工具）](#31-通用环境变量各类-ai-终端工具)
+  - [3.2 Qwen Code CLI](#32-qwen-code-cli)
+  - [3.3 Claude Code CLI](#33-claude-code-cli)
+  - [3.4 Codex CLI](#34-codex-cli)
+  - [3.5 Magpie CLI](#35-magpie-cli)
 - [4. 在代码中调用（Python SDK 示例）](#4-在代码中调用python-sdk-示例)
-  - [基础对话](#41-基础对话)
-  - [思考（推理）模式控制](#42-思考推理模式控制)
-  - [流式输出](#43-流式输出)
-  - [图片视觉输入](#44-图片视觉输入)
-  - [生成速度参考](#45-生成速度参考)
+  - [4.1 基础对话（指定模型）](#41-基础对话指定模型)
+  - [4.2 思考（推理）模式控制](#42-思考推理模式控制)
+  - [4.3 流式输出（推荐）](#43-流式输出推荐)
+  - [4.4 图片视觉输入](#44-图片视觉输入)
+  - [4.5 生成速度基准参考](#45-生成速度基准参考)
 - [5. 常见错误与排查](#5-常见错误与排查)
 - [6. 使用约定与限制](#6-使用约定与限制)
 
@@ -57,21 +59,44 @@ curl -s https://llm.meirong.dev/v1/models \
 
 ---
 
-## 2. 可用模型清单
+## 2. 模型选型与最佳配置推荐
 
-网关提供两类自托管主力模型，根据具体使用场景按需选择：
+### 2.1 模型特性与选型推荐
 
-| 模型名（调用时填写的 ID） | 适用场景 | 核心特性与说明 |
-|---|---|---|
-| `qwen3.8-flash-next-tp2` | 极速对话 / 日常代码生成与补全 | DGX 双机 TP=2 主力，NVFP4 投机解码，生成速度极快；带自动兜底机制 |
-| `studio/qwen3.8-27b` | 深度推理 / 复杂任务 / 视觉看图 | Mac Studio M5 Max 承载，262k 超长上下文，支持图片输入；**默认启用思维链思考** |
+网关当前提供两套自托管主力模型，特性与硬件算力不同，应根据使用场景合理指定：
 
-> [!NOTE]
-> 你的 key 不一定包含上述所有模型，具体可调用的模型以 `/v1/models` 返回的实际清单为准。
+| 模型名（调用时填写的 ID） | 物理承载硬件 | 吞吐速度 (tok/s) | 上下文窗口 | 适用场景与推荐 |
+|---|---|---|---|---|
+| **`qwen3.8-flash-next-tp2`**（默认推荐）| DGX 双机 TP=2 (NVFP4 投机解码) | **~90–110** | 262k | **日常写代码、代码补全、Agent 多轮工具调用、日常快速问答**。延迟极低，首字毫秒级响应，推荐作为首选模型。 |
+| **`studio/qwen3.8-27b`** | Mac Studio M5 Max (128G 统一内存) | **~30–45** | 262k | **复杂架构设计、深度逻辑推理、长文本深度归纳、图片/视觉多模态输入**。参数规模更大，逻辑更强。 |
 
 ---
 
-## 3. 在终端 CLI 工具中使用
+### 2.2 核心配置与避坑指南（为什么觉得慢 & 怎么配最合理）
+
+走网关使用 Key 访问时，网络与鉴权层的纯转发耗时仅增加 **~0.2 秒**（几乎不可感）。如果感觉响应明显缓慢或等待长达数秒，请对照以下三项核心配置进行优化：
+
+#### ① 务必开启流式传输（Streaming）
+* **原理**：大模型生成一段完整回答可能需要 3–8 秒。如果不开启流式传输（`stream: false`），客户端必须等待所有文字完全生成后才一次性返回，造成“界面卡死”的错觉。
+* **最佳做法**：终端 CLI 工具（如 Qwen Code / Codex）默认均开启流式；若使用 SDK 或第三方应用，**务必确保启用 `stream: true`**，首字只需 0.5 秒左右即可实时打字输出。
+
+#### ② 合理控制“思考（Thinking）模式”
+* **原理**：这两个模型**默认都开启了深思（CoT 推理）模式**。模型在回答前会先在底层进行几十到数百个 Token 的思考，并输出在 `reasoning_content` 中。如果你的客户端界面没有实时渲染思考过程，你就会看着光标“空白发呆”好几秒。
+* **最佳做法**：
+  - **需要严谨推理/复杂重构时**：保留思考模式，但**务必保证 `max_tokens` 足够宽裕（建议 $\ge 1024$）**。若配额过小，配额全在思考阶段被耗光，会导致最终返回的答案为空。
+  - **追求极速响应/代码补全/结构化输出时**：**显式关闭思考模式**。关闭后模型会跳过内心推导直奔主题，首字立刻输出：
+    - Python SDK：在请求中传入 `extra_body={"chat_template_kwargs": {"enable_thinking": False}}`
+    - 原生 HTTP 请求：在 JSON 顶层加入 `"chat_template_kwargs": {"enable_thinking": false}`
+
+#### ③ 警惕超大 Prompt 预处理（Prefill）耗时
+* **原理**：在终端代码工具中，客户端会将你工作区的上下文代码自动打包发送。大模型在吐出第一个字前，必须把输入的全部代码“读完一遍”（Prompt Prefill 阶段）。在读取数万 Token 的海量代码时，即使是 DGX 也需要 1–3 秒，Mac Studio 则需要数秒。
+* **最佳做法**：确保项目根目录拥有完善的 `.gitignore`，避免把 `node_modules/`、`target/`、`.git/` 等构建产物和海量无关文件一并注入给模型。
+
+---
+
+## 3. 在终端 CLI 工具中指定与配置模型
+
+以下是在常用终端 AI 编程助手工具中**指定模型**与**推荐配置**的说明：
 
 ### 3.1 通用环境变量（各类 AI 终端工具）
 
@@ -80,6 +105,7 @@ curl -s https://llm.meirong.dev/v1/models \
 ```bash
 export OPENAI_BASE_URL="https://llm.meirong.dev/v1"
 export OPENAI_API_KEY="<你的 key>"
+export OPENAI_MODEL="qwen3.8-flash-next-tp2"   # 指定默认模型
 ```
 
 可将上述配置追加到你的 Shell 配置文件中（`~/.zshrc` 或 `~/.bashrc`）。
@@ -95,14 +121,18 @@ export OPENAI_API_KEY="<你的 key>"
 ```bash
 export OPENAI_BASE_URL="https://llm.meirong.dev/v1"
 export OPENAI_API_KEY="<你的 key>"
-export OPENAI_MODEL="qwen3.8-flash-next-tp2"   # 或 studio/qwen3.8-27b
+export OPENAI_MODEL="qwen3.8-flash-next-tp2"   # 日常极速编程
+
+# 若需切换为 27B 深度推理模型：
+# export OPENAI_MODEL="studio/qwen3.8-27b"
 
 qwen
 ```
 
-#### 方法 B：单次启动命令行参数
+#### 方法 B：单次启动命令行参数指定模型
 
 ```bash
+# 启动时使用 -m 指定模型
 qwen --openai-base-url "https://llm.meirong.dev/v1" \
      --openai-api-key "<你的 key>" \
      -m "qwen3.8-flash-next-tp2"
@@ -110,7 +140,7 @@ qwen --openai-base-url "https://llm.meirong.dev/v1" \
 
 #### 方法 C：配置文件持久化（`~/.qwen/settings.json`）
 
-在 `~/.qwen/settings.json` 中配置（需同时提供 `modelProviders` 与 `security.auth`）：
+在 `~/.qwen/settings.json` 中配置，这样无需每次设置环境变量：
 
 ```json
 {
@@ -122,12 +152,12 @@ qwen --openai-base-url "https://llm.meirong.dev/v1" \
     "openai": [
       {
         "id": "qwen3.8-flash-next-tp2",
-        "name": "Qwen 3.8 Flash Next",
+        "name": "Qwen 3.8 Flash Next (DGX TP2)",
         "baseUrl": "https://llm.meirong.dev/v1"
       },
       {
         "id": "studio/qwen3.8-27b",
-        "name": "Qwen 3.8 27B",
+        "name": "Qwen 3.8 27B (Mac Studio)",
         "baseUrl": "https://llm.meirong.dev/v1"
       }
     ]
@@ -142,8 +172,6 @@ qwen --openai-base-url "https://llm.meirong.dev/v1" \
 }
 ```
 
-*(也可以直接运行 `qwen`，在交互提示符下输入 `/auth`，选择 Custom Provider 交互式录入)*
-
 ---
 
 ### 3.3 Claude Code CLI
@@ -154,18 +182,18 @@ qwen --openai-base-url "https://llm.meirong.dev/v1" \
 export ANTHROPIC_BASE_URL="https://llm.meirong.dev"
 export ANTHROPIC_API_KEY="<你的 key>"
 
-# 启动并指定目标模型
+# 启动并通过 --model 指定目标模型
 claude --model "qwen3.8-flash-next-tp2"
 ```
 
 > [!NOTE]
-> Claude Code 启动时可能会提示该模型 ID 为非官方模型，并默认回退到 200k 上下文窗口，不影响正常的代码交互与执行。
+> Claude Code 启动时可能会提示该模型 ID 为非官方 Anthropic 模型，并自动设定为 200k 上下文窗口，这属于正常现象，不影响代码交互与执行。
 
 ---
 
 ### 3.4 Codex CLI
 
-在 `~/.codex/config.toml` 中增加网关 Provider（注意：新版 Codex 必须使用 `wire_api = "responses"`）：
+在 `~/.codex/config.toml` 中配置网关 Provider（注意：新版 Codex 必须使用 `wire_api = "responses"`）：
 
 ```toml
 [model_providers.litellm]
@@ -175,18 +203,21 @@ wire_api = "responses"
 env_key = "LLM_KEY"
 ```
 
-在自定义 profile（如 `~/.codex/litellm.config.toml`）中指定：
+在自定义 profile（如 `~/.codex/litellm.config.toml`）中指定模型：
 
 ```toml
 model = "qwen3.8-flash-next-tp2"
 model_provider = "litellm"
 ```
 
-执行时注入 key 并运行：
+运行与启动：
 
 ```bash
 export LLM_KEY="<你的 key>"
 codex --profile litellm
+
+# 也可以通过命令行参数动态切换模型：
+# codex --profile litellm -m studio/qwen3.8-27b
 ```
 
 ---
@@ -215,7 +246,7 @@ magpie provider test homelab
 pip install openai
 ```
 
-### 4.1 基础对话
+### 4.1 基础对话（指定模型）
 
 ```python
 import os
@@ -226,6 +257,7 @@ client = OpenAI(
     api_key=os.environ.get("LLM_KEY", "<你的 key>"),
 )
 
+# 指定调用 DGX 主力极速模型
 resp = client.chat.completions.create(
     model="qwen3.8-flash-next-tp2",
     messages=[{"role": "user", "content": "用三句话解释什么是 LRU 缓存。"}],
@@ -239,27 +271,34 @@ print(resp.choices[0].message.content)
 
 ### 4.2 思考（推理）模式控制
 
-`studio/qwen3.8-27b` 及部分自托管模型默认开启推理模式：
-
-- **内容分流**：思考过程在 `message.reasoning_content`，**最终答案在 `content`**。仅读取 `content` 的常规客户端不受影响。
-- **额度预留**：开启思考时需保证 `max_tokens` 足够宽裕（建议 $\ge 1024$）。若配额用尽思考未闭合，可能导致最终答案不完整。
-- **关闭思考**：针对分类、严格 JSON 格式输出或要求极低延迟的场景，可显式关闭思考模式：
+`studio/qwen3.8-27b` 及自托管模型默认开启推理思考：
 
 ```python
-resp = client.chat.completions.create(
+# 1. 深度思考场景：保留思考，max_tokens 必须预留充分
+resp_deep = client.chat.completions.create(
+    model="studio/qwen3.8-27b",
+    messages=[{"role": "user", "content": "分析分布式系统中使用两阶段提交有哪些劣势？"}],
+    max_tokens=2048,  # 留足思考与正文配额
+)
+# 思考过程在 reasoning_content，答案在 content
+print("思考:", getattr(resp_deep.choices[0].message, "reasoning_content", None))
+print("回答:", resp_deep.choices[0].message.content)
+
+# 2. 极速场景：显式关闭思考，消除延迟
+resp_fast = client.chat.completions.create(
     model="studio/qwen3.8-27b",
     messages=[{"role": "user", "content": "17 乘以 23 等于多少？直接输出数字。"}],
     max_tokens=64,
     extra_body={"chat_template_kwargs": {"enable_thinking": False}},
 )
-print(resp.choices[0].message.content)  # 391
+print("直接回答:", resp_fast.choices[0].message.content)  # 391
 ```
-
-*(非 SDK 原生 HTTP 请求：直接在 POST JSON 顶层加入 `"chat_template_kwargs": {"enable_thinking": false}`)*
 
 ---
 
-### 4.3 流式输出
+### 4.3 流式输出（推荐）
+
+强烈建议在所有客户端启用流式输出，彻底消除等待感：
 
 ```python
 stream = client.chat.completions.create(
@@ -305,11 +344,11 @@ print(resp.choices[0].message.content)
 
 ---
 
-### 4.5 生成速度参考
+### 4.5 生成速度基准参考
 
-自托管节点实测基准速度如下（随任务复杂度浮动）：
-- **代码补全与短应答**：约 90–110 tok/s，首字延迟（TTFT）通常在 0.5 秒内。
-- **长文本分析**：超长提示词（如 1.5 万 token）预处理约需 10–15 秒，随后持续输出。
+在开启流式输出的前提下，自托管节点实测基准速度如下：
+- **`qwen3.8-flash-next-tp2`**：约 90–110 tok/s，首字延迟（TTFT）通常在 0.4–0.5 秒内。
+- **`studio/qwen3.8-27b`**：约 30–45 tok/s，大模型推理及超长提示词（如 1.5 万 token）预处理约需 5–10 秒。
 
 ---
 
