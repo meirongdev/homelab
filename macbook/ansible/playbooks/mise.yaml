@@ -2,9 +2,17 @@
 # 第 2 层：语言运行时，全部交给 mise（替代 sdkman / fnm / brew 的 go·node·python 那一套）。
 # mise 本体由 packages.yaml 的 base 层装；这里只写全局配置 ~/.config/mise/config.toml 并 `mise install`。
 #
-# ⚠️ 装好≠生效：shell 里要有 `eval "$(mise activate zsh)"` 才会用到这些版本。那一行属于
-#    chezmoi 管的 ~/.zshrc，不在这里写；没有它，PATH 上照样是 brew 的 node/go。
-#    brew 的 node 不会消失：ai-clis.yaml 和 qwen-code 等 formula 依赖它，与 mise 的并存。
+# ⚠️ 装好≠生效：shell 里要有 `eval "$(mise activate zsh)"` 才会用到这些版本。那一行不在这里写：
+#    Studio 的 ~/.zshrc 来自 chezmoi 的 create_dot_zshrc，M5 / M2 的 ~/.zshrc 是手改的
+#    （chezmoi 不碰）。没有它，PATH 上照样是 brew 的 node/go；2026-11-01 前 M5 和 M2 就是这样，
+#    mise 装了三台、只有 Studio 在用。所以末尾有一步断言：交互 login shell 里的 node
+#    必须落在 mise 的 installs/ 下，没激活就在这里失败，而不是静默通过。
+#    brew 的 node 不会消失：ai-clis.yaml 的 claude / qwen 和 multica / herdr 的 LaunchAgent
+#    （PATH 只有 /opt/homebrew/bin，不经过 mise activate）都靠它，与 mise 的并存。
+# ⚠️ 不归 mise 管的：rustup（`rust = "stable"` 只是让 mise 指向 ~/.rustup，不要再装 brew 的
+#    rust，它在 PATH 上排在 ~/.cargo/bin 前面，会让项目的 rust-toolchain.toml 失效）、
+#    uv（管项目自己的 .python-version + uv.lock）、brew 的 python@3.x（是 ansible / awscli /
+#    omlx 等的依赖，不是开发用的运行时）。
 # ⚠️ Ansible 的 ssh 不加载 .zshrc，所以这里一律用 mise 的全路径。别的 playbook 要用
 #    mise 管的运行时，得 `mise exec -- <cmd>`。
 # ☠️ shim 刻意挪出默认位置（下面配置里的 shims_dir）：GUI 应用看不到 shell 的 PATH，有的会
@@ -62,6 +70,10 @@
           [settings]
           # 别改回默认：有的 GUI 应用会把默认的 ~/.local/share/mise/shims 塞到 PATH 最前面（见 playbook 文件头）。
           shims_dir = "~/.local/share/mise/shims-hidden"
+          # 读项目里已有的 .nvmrc / .node-version / .sdkmanrc / .ruby-version，取代 fnm 的
+          # --use-on-cd 和 sdkman 的 sdkmanrc。python 刻意不开：项目的 .python-version 归 uv，
+          # 开了 mise 会再装一份重复的解释器。
+          idiomatic_version_file_enable_tools = ["node", "java", "ruby"]
 
           [tools]
           node = "26"
@@ -72,7 +84,12 @@
           java = "temurin-25"
           maven = "3.9"
           gradle = "9"
+          kotlin = "2"            # M2 原来用 sdkman 装的 2.2.21
           rust = "stable"
+          # 全局 npm CLI：之前装在 M2 的 fnm node v24 下，换 node 就丢。写成 mise 的 npm: 工具，
+          # 跟 node 大版本无关。claude / qwen 仍由 ai-clis.yaml 装在 brew node 下（daemon 要用）。
+          "npm:@google/gemini-cli" = "0.65"
+          "npm:@kilocode/cli" = "7.8"
 
     # 旧目录里只该有 mise 自己的 shim（指向 mise 二进制的软链）；有别的东西就停下，别连带删掉。
     - name: Find anything in the default shim dir that is not a mise shim
@@ -140,5 +157,22 @@
       ansible.builtin.assert:
         that: not default_shims.stat.exists
         fail_msg: "mise 又在 ~/.local/share/mise/shims 建了 shim：config.toml 里的 shims_dir 没生效？"
+        quiet: true
+      when: not ansible_check_mode
+
+    # 没有激活就装了运行时，是这个 playbook 最容易静默失效的地方（见文件头）。
+    # 用交互 login shell，和人打开终端时的 PATH 一致；Ansible 自己的 ssh 不读 .zshrc。
+    - name: Resolve node as an interactive login shell would
+      ansible.builtin.shell: "/bin/zsh -ilc 'print -r -- ${commands[node]}' 2>/dev/null | tail -n 1"
+      register: shell_node
+      changed_when: false
+      check_mode: false
+
+    - name: Assert mise is activated in ~/.zshrc
+      ansible.builtin.assert:
+        that: "'/.local/share/mise/installs/' in shell_node.stdout"
+        fail_msg: >-
+          交互 shell 里的 node 是 {{ shell_node.stdout | default('(空)') }}，不在 mise 下：
+          ~/.zshrc 缺 `eval "$(mise activate zsh)"`，或前面有别的版本管理器（fnm / sdkman）排在它前面
         quiet: true
       when: not ansible_check_mode

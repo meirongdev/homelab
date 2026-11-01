@@ -53,7 +53,7 @@ just os-upgrade-major <host> # 大版本升级（如 26 → 27），见下文风
 |---|---|---|---|
 | `packages.yaml` | base · ops | base：Homebrew(`/opt/homebrew`)+ 基础 CLI + AWS/GCP CLI（`awscli` + `gcloud-cli` cask）+ 克隆 oh-my-zsh/两个插件/TPM；ops：k8s/IaC 工具，HashiCorp 的 terraform/vault **先逐个 `brew trust` 再装**。以登录用户身份跑(brew 不能 root)，只补装不升级。Homebrew 缺失才跑官方安装器——**首次安装需交互式 admin 密码**,故重建机器时单独手动跑一次。包清单与理由见 playbook 本身和下面「开发环境」 | 否 |
 | `mise.yaml` | dev | 写 `~/.config/mise/config.toml`（整份覆盖，版本写前缀不写 latest）→ `mise ls --missing` 有缺才 `mise install` → 再查一遍断言全部装齐。缺 mise 本体时提前失败并指向 `just packages` | 否 |
-| `ai-clis.yaml` | macbook · qwen · base | base（三台）：`agy`（`antigravity-cli` brew cask，`auto_updates`，brew 不升级它）。macbook 只有 M2：`claude`(`@anthropic-ai/claude-code` npm)、`codex`(brew cask, 自含 arm64 二进制)，只补装不升级。qwen 组（M2 + Studio）：`qwen`(`@qwen-code/qwen-code`，装在 Homebrew node 下)**钉版本**（`qwen_code_version`，版本不一致就装成它；原来的 present 让 M2 停在 0.19.0，multica daemon 用的就是这份），要求 Node ≥ 22。⚠️ M2 另有一份 qwen 装在 fnm 的 node 下，交互 shell 里排在前面，不归 playbook 管，升级时手动 `npm install -g @qwen-code/qwen-code@<版本>` 跟上。hermes 2026-10-11 起不再安装（三台都已卸载） | 否 |
+| `ai-clis.yaml` | macbook · qwen · base | base（三台）：`agy`（`antigravity-cli` brew cask，`auto_updates`，brew 不升级它）。macbook 只有 M2：`claude`(`@anthropic-ai/claude-code` npm)、`codex`(brew cask, 自含 arm64 二进制)，只补装不升级。qwen 组（M2 + Studio）：`qwen`(`@qwen-code/qwen-code`，装在 Homebrew node 下)**钉版本**（`qwen_code_version`，版本不一致就装成它；原来的 present 让 M2 停在 0.19.0，multica daemon 用的就是这份），要求 Node ≥ 22。（M2 原来另有一份装在 fnm 下，2026-11-01 fnm 已移除。）hermes 2026-10-11 起不再安装（三台都已卸载） | 否 |
 | `omlx.yaml` | omlx | OMLX 本体：tap（☠️ formula 在 `jundot/omlx` 主仓，不带 URL 的 `brew tap` 会去拉不存在的 `homebrew-omlx`，报的却是「could not read Username」）→ `brew install`（**只 present，不升级**）→ 往 `~/.omlx/settings.json` **合并**四个键（`server.host=<Tailscale IP>,127.0.0.1`：局域网连不上，☠️ Tailscale 必须排第一，排反了开机早于 Tailscale 时静默只剩回环 · `server.port=8000` · `auth.api_key`=Vault `secret/homelab/omlx` · `auth.allow_unauthenticated_inference=true`），其余设置不碰 → `brew services` 的 LaunchAgent `sh.brew.omlx`。没 key 时在启动前失败（0.7 起没 key 就 crash-loop）。运行版本落后于 brew 已装版本（升级后没重启）就重启。验收：`/v1/models` 免 key 200、`/api/status` 无 key 401 / 带 key 200、Tailscale IP 200、本机 LAN IP 拒绝连接、运行版本 = 已装版本 | 否 |
 | `node-exporter.yaml` | macs | 下载校验 `darwin-arm64` 二进制 → `~/.local/bin/node_exporter`；写 LaunchAgent（只听 `<Tailscale IP>:9100` + `127.0.0.1:9100`，任一地址绑不上就退出、KeepAlive 重试；KeepAlive, RunAtLoad, **`--collector.textfile.directory`**）→ `~/Library/LaunchAgents/com.prometheus.node_exporter.plist`；`launchctl bootstrap` 到 GUI 域；校验 `/metrics` 200（回环 + Tailscale）、本机 LAN IP 拒绝连接、`node_textfile_scrape_error == 0` | 否 |
 | `omlx-metrics.yaml` | omlx | OMLX 推理指标的**生产端**：LaunchAgent `com.meirongdev.omlx-textfile-collector` 每 60s 把 `~/.omlx/stats.json` 渲染成 `omlx.prom`，投进上面那个 textfile 目录。☠️ **StartInterval 不是 KeepAlive**（渲染器跑 0.03s 就退，KeepAlive 会变重启风暴）。☠️ 渲染器是 **`mlx-learning` 仓 venv 里的 console script**（跨仓依赖），缺了会明确失败并给出 `uv sync` 的修法。`stats.json` 还不存在（OMLX 没服务过请求）时装好 plist 但**不启动**。验收会一路查到 node_exporter 那端 | 否 |
@@ -82,7 +82,7 @@ just os-upgrade-major <host> # 大版本升级（如 26 → 27），见下文风
 | 层 | 组 | 主机 | 装什么 | playbook |
 |---|---|---|---|---|
 | 1 基础 | `base` | M5 · M2 · Studio | awscli、gcloud、gh、glab、tmux、chezmoi、age、mise、uv、fzf、ripgrep、yq、htop、just、lazygit、hugo；oh-my-zsh + zsh-autosuggestions + zsh-syntax-highlighting；TPM | `packages.yaml` |
-| 2 运行时 | `dev` | M5 · M2 · Studio | mise 管：node、pnpm、bun、go、python、java（temurin）、maven、gradle、rust | `mise.yaml` |
+| 2 运行时 | `dev` | M5 · M2 · Studio | mise 管：node、pnpm、bun、go、python、java（temurin）、maven、gradle、kotlin、rust（rustup）、gemini-cli、kilocode；读 `.nvmrc` / `.node-version` / `.sdkmanrc` / `.ruby-version` | `mise.yaml` |
 | 3 运维 | `ops` | M5 · M2 · Studio | kubectl、helm、kubectx、k9s、cilium-cli、hubble、argocd、ansible、gitleaks、kind、tilt、k6、kubeconform、terraform、vault | `packages.yaml` |
 
 Antigravity CLI（`agy`）也是三台都装，但归 `ai-clis.yaml`（和其它 AI CLI 放在一起）。
@@ -99,7 +99,16 @@ just packages && just mise && just ai-clis            # 全部（按各自的组
   还没有 `.zshrc` 的机器装完 oh-my-zsh 也不生效，要等 chezmoi 写出 `.zshrc`（Studio 的那份由 chezmoi
   `role=agent` 在 2026-10-22 写出；M2 和 M5 用各自手写的）。
 - mise 装好的运行时，要等 `.zshrc` 里有 `eval "$(mise activate zsh)"` 才会用上，在那之前
-  PATH 上仍是 brew 的 node/go。brew 的 node 会一直在（`ai-clis.yaml` 和 qwen-code 等 formula 依赖它）。
+  PATH 上仍是 brew 的 node/go。三台各自的写法：Studio 来自 chezmoi 的 `create_dot_zshrc`；M5 在文件**末尾**
+  （要排在 markitdown venv 等 PATH 导出之后）；M2 在 `go env GOPATH` **之前**（那行要用 mise 的 go）。
+  `mise.yaml` 末尾有断言：交互 login shell 里的 node 不在 mise 下就失败，不再「装了三台只有一台在用」。
+- 2026-11-01 起三台的 node / java·maven·gradle / go / bun 都只走 mise：sdkman（M5、M2）、fnm（M2）已从 `.zshrc` 摘掉，
+  brew 的 `go` / `rust` / `bun` / `fnm` / `pnpm` / `maven` 已卸。**别再装回来**：brew 的 `rust` 在 PATH 上排在
+  `~/.cargo/bin` 前面，会让项目的 `rust-toolchain.toml` 静默失效。**不归 mise 的**：rustup（`rust = "stable"` 只是指向它）、
+  uv（项目自己的 `.python-version` + `uv.lock`）、brew 的 `python@3.x`（ansible / awscli / omlx 的依赖）、
+  brew 的 `node`（claude / qwen 和 multica / herdr 的 LaunchAgent 靠它，PATH 不经过 `mise activate`）。
+- 项目要的版本 mise 没装时只报一行 `mise WARN missing: node@18.18.2`、然后用全局版本继续跑，**不会失败**；
+  进项目先 `mise install`。
 - ☠️ **mise 的 shim 不在默认位置**（`shims_dir = ~/.local/share/mise/shims-hidden`，写在 `mise.yaml` 管的全局配置里）。
   GUI 应用看不到 shell 的 PATH，有的会无条件把默认的 `~/.local/share/mise/shims` 拼到自己 PATH 的最前面（排在 fnm/Homebrew 前），
   shim 一出现，它拉起的所有进程就静默改用 mise 的 node/python/java（2026-10-11 撞上过）。
