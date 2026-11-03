@@ -15,7 +15,7 @@
 #
 # 需要 root：  just firewall <host>  （带 --ask-become-pass）
 - name: macOS application firewall (on, with service binaries allowed)
-  hosts: macs
+  hosts: base
   gather_facts: true
   gather_subset: ["!all", "min"]
   vars:

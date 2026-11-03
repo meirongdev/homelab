@@ -33,6 +33,8 @@ just omlx-metrics [host]     # 装/升级 OMLX 指标采集 LaunchAgent（无需
 just macmon [host]           # 装/升级 macmon 功耗/温度/风扇 exporter（:9090，两台，无需 sudo，幂等）
 just orbstack [host]         # OrbStack 容器/虚拟化环境（cask + 无头免密 + 开机自启 + 启动服务；三台，无需 sudo，幂等）
 just power [host]            # headless 电源策略（逐台问 sudo 密码）
+just firewall [host]         # 应用防火墙：开启并放行常驻服务二进制（三台，逐台问 sudo 密码，幂等）
+just ssh-key-only [host]     # SSH 只允许公钥登录（三台，防自锁，逐台问 sudo 密码，幂等）
 just multica-daemon          # 装/升级 Multica daemon LaunchAgent（仅 M2，认证全自动，从 Vault 取 PAT）
 just herdr [host]            # herdr：开机拉起 server 的 LaunchAgent + claude/codex integration（两台，无需 sudo，幂等）
 just mac-sync [host]         # 新 Mac 初始化工具：部署 mac-sync 脚本、建立 SSH 互信与 Host 别名（三台，无需 sudo，幂等；日常同步走 git）
@@ -65,6 +67,8 @@ just os-upgrade-major <host> # 大版本升级（如 26 → 27），见下文风
 | `herdr.yaml` | herdr | M5 派活的远端：herdr 本体（官方安装器，只在缺失时装）→ `config.toml` 关掉首次引导 → LaunchAgent `com.meirongdev.herdr-server`，**跑的是一次性启动器 `herdr remote-client-bridge </dev/null`，不是 `herdr server`**（原因见下面「把任务派给 Studio / M2」）→ 断言 `detached_server_daemon: true` → 给已装的 claude/codex 装或刷新 integration。启动器重载不影响正在跑的 pane | 否 |
 | `mac-sync.yaml` | base | 新 Mac 初始化：部署 `mac-sync` 脚本（只把目录整份复制到新机器，对端已有的目录跳过；日常跨机同步走 git）、配置全网状 SSH 互信与 Host 别名、分发过滤规则（清单不进 git，保存在本地 `~/.config/mac-sync/dirs.list`）。指南见 [mac-sync-setup.md](../../docs/guides/mac-sync-setup.md) | 否 |
 | `power.yaml` | macs | `pmset -c disablesleep 1`——插电时保持**系统**唤醒，合盖也不睡，从而 Tailscale 远程常在线（让"保持唤醒"不依赖 Amphetamine GUI）。inventory 里 `pmset_autorestart: true` 的主机（Studio，无电池）另加 `pmset -a autorestart 1`：断电恢复后自己开机 | 是 |
+| `ssh-key-only.yaml` | base | 写 sshd drop-in `/etc/ssh/sshd_config.d/050-key-only.conf`，关密码/键盘交互/root 登录，仅留公钥认证；前置检查 authorized_keys 防自锁，`sshd -T` 校验生效 | 是 |
+| `firewall.yaml` | base | 开启 macOS 应用防火墙并放行 `node_exporter` / `macmon` / `omlx` / `herdr` 等常驻服务二进制，先放行后开启避免无头弹窗阻断；保持 block-all 与 stealth mode 关闭 | 是 |
 | `os-update.yaml` | macs | macOS 软件更新，需要重启时无人值守地重启并验收。**不在 `site` 里**（它会重启机器），见下节 | 是（自己问密码） |
 
 升级 node_exporter：改 `node-exporter.yaml` 里的 `node_exporter_version` + `node_exporter_sha256`，再 `just node-exporter`。

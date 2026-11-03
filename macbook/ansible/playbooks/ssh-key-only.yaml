@@ -1,5 +1,5 @@
 ---
-# SSH 只允许公钥登录（所有 `macs` 主机：M2 + Studio）。
+# SSH 只允许公钥登录（所有 `base` 主机：M5 工作站 + M2 + Studio）。
 #
 # 写一个 sshd drop-in：/etc/ssh/sshd_config.d/050-key-only.conf。
 # ⚠️ 文件名必须排在系统自带的 100-macos.conf 之前 —— sshd 对同一个选项取**先读到**的值，
@@ -7,15 +7,15 @@
 # Studio 在 2026-11-03 已手工写过同名同内容的文件，所以对它是 no-op（changed=0）。
 #
 # 防自锁：写之前先确认登录用户的 authorized_keys 里至少有一把公钥，否则直接失败，
-# 不动 sshd。注意这只证明「文件里有 key」，不证明那把 key 是你手上这把 —— 本 playbook
-# 本身就是用 ~/.ssh/vgio 连进来的，所以能跑到这里就说明这把 key 可用。
+# 不动 sshd。注意这只证明「文件里有 key」，不证明那把 key 是你手上这把 —— 远程连接时
+# 本身就是用 key 连进来的，所以能跑到这里就说明这把 key 可用。
 # macOS 的 sshd 每个新连接都会重读配置，不需要重启服务，已有会话不受影响。
 #
 # 不影响「屏幕共享」「文件共享(SMB)」：它们不走 sshd，仍可用密码。
 #
 # 需要 root 写 /etc：  just ssh-key-only <host>  （带 --ask-become-pass）
 - name: SSH key-only (no password / keyboard-interactive / root login)
-  hosts: macs
+  hosts: base
   become: true
   gather_facts: false
   vars:

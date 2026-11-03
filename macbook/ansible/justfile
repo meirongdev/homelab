@@ -143,7 +143,7 @@ power target="macs":
     done
 
 # 开启应用防火墙并放行 node_exporter/macmon/omlx/herdr（逐台问 sudo 密码）
-firewall target="macs":
+firewall target="base":
     #!/usr/bin/env bash
     set -euo pipefail
     for h in $(ansible '{{target}}' --list-hosts | awk 'NR>1{print $1}'); do
@@ -153,7 +153,7 @@ firewall target="macs":
 
 # 先对一台试：`just ssh-key-only mbp-m2-pro`，另开窗口用 key 登录确认能进，再跑别的。
 # SSH 只允许公钥登录（关密码/键盘交互/root；逐台问 sudo 密码）
-ssh-key-only target="macs":
+ssh-key-only target="base":
     #!/usr/bin/env bash
     set -euo pipefail
     for h in $(ansible '{{target}}' --list-hosts | awk 'NR>1{print $1}'); do

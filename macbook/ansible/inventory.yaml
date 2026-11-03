@@ -9,7 +9,7 @@
 #   omlx    → omlx / omlx-metrics                                        (OMLX inference nodes)
 #   macmon  → macmon (power / temperature / fans, :9090)                 (both remote Macs)
 #   base    → packages: Homebrew + base CLI + AWS/GCP CLI + oh-my-zsh/plugins + TPM;
-#             ai-clis: Antigravity CLI                                   (every Mac)
+#             ai-clis: Antigravity CLI; firewall / ssh-key-only          (every Mac)
 #   dev     → mise: language runtimes
 #   ops     → packages: k8s / IaC CLIs
 #   herdr   → herdr server LaunchAgent + agent integrations               (Studio + M2: run M5's tasks)
