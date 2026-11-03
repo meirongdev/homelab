@@ -19,3 +19,7 @@
 - import_playbook: macmon.yaml
 - import_playbook: mac-sync.yaml
 - import_playbook: power.yaml
+- import_playbook: ssh-key-only.yaml
+# 放在 node-exporter / macmon / omlx 之后：放行名单里的路径要先存在才会被加进去，
+# 反过来先跑本条，那些程序装好后仍不在白名单里，防火墙一开就被静默挡掉。
+- import_playbook: firewall.yaml

@@ -142,6 +142,25 @@ power target="macs":
       ansible-playbook playbooks/power.yaml --limit "$h" --ask-become-pass
     done
 
+# 开启应用防火墙并放行 node_exporter/macmon/omlx/herdr（逐台问 sudo 密码）
+firewall target="macs":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for h in $(ansible '{{target}}' --list-hosts | awk 'NR>1{print $1}'); do
+      echo "── ${h}：输入它的登录密码"
+      ansible-playbook playbooks/firewall.yaml --limit "$h" --ask-become-pass
+    done
+
+# 先对一台试：`just ssh-key-only mbp-m2-pro`，另开窗口用 key 登录确认能进，再跑别的。
+# SSH 只允许公钥登录（关密码/键盘交互/root；逐台问 sudo 密码）
+ssh-key-only target="macs":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for h in $(ansible '{{target}}' --list-hosts | awk 'NR>1{print $1}'); do
+      echo "── ${h}：输入它的登录密码"
+      ansible-playbook playbooks/ssh-key-only.yaml --limit "$h" --ask-become-pass
+    done
+
 # site 会跑 omlx.yaml，所以同样从 Vault 取 OMLX key（见 omlx 配方）。
 # 一次跑全部 Ansible 能做的（包/运行时/AI CLI/multica/OMLX/node_exporter/OMLX 指标/macmon/电源；逐台问密码）
 site target="macs":

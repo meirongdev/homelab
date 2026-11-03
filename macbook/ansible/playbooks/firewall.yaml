@@ -1,0 +1,86 @@
+---
+# macOS 应用防火墙（Application Firewall）：开启 + 给对外提供服务的程序放行。
+#
+# 为什么必须「先放行、后开启」：Homebrew / ~/.local/bin 里的二进制多是 ad-hoc 签名，
+# 不算 macOS 说的「已签名软件」，防火墙一开，它们接入连接时会弹「是否允许」。
+# Mac 无人值守（合盖 / 无显示器）没人点 = 默认拒绝 → Prometheus 抓不到
+# node_exporter(:9100) / macmon(:9090)，OMLX(:8000) 也进不来，而且**没有任何报错**。
+#
+# 只管**入站**。不开 block-all、不开隐身模式（隐身会挡 ping 和 mDNS，我们靠
+# `<主机名>.local` 在 Tailscale 掉线时找机器）。sshd 走系统内建放行，不受影响。
+#
+# ⚠️ 这个 play **不在 play 级别 become**：`ansible_facts.user_dir` 在提权下是 root 的
+#    家目录（/var/root），会把 ~/.local/bin 下的二进制路径算错，放行了一个不存在的路径
+#    而真正的程序仍被挡。所以只有改防火墙的任务单独 become。
+#
+# 需要 root：  just firewall <host>  （带 --ask-become-pass）
+- name: macOS application firewall (on, with service binaries allowed)
+  hosts: macs
+  gather_facts: true
+  gather_subset: ["!all", "min"]
+  vars:
+    fw: /usr/libexec/ApplicationFirewall/socketfilterfw
+    # 与对应 playbook 里的路径一致（node-exporter.yaml / herdr.yaml 在 user_dir/.local/bin，
+    # macmon.yaml 在 Homebrew 前缀）。不存在的路径会被跳过，所以对没装某个服务的机器无害。
+    firewall_allow_apps:
+      - "{{ ansible_facts.user_dir }}/.local/bin/node_exporter"
+      - "{{ ansible_facts.user_dir }}/.local/bin/herdr"
+      - /opt/homebrew/bin/macmon
+      - /opt/homebrew/bin/node_exporter
+      - /opt/homebrew/bin/omlx
+    # 单台额外放行：在 inventory 里给该主机设 firewall_extra_apps: [ /path, … ]
+    firewall_extra_apps: []
+  tasks:
+    - name: Which of the allow-list binaries exist on this host
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: "{{ firewall_allow_apps + firewall_extra_apps }}"
+      register: fw_app_stat
+
+    - name: Read the current firewall app list (readable without root)
+      ansible.builtin.command: "{{ fw }} --listapps"
+      register: fw_apps
+      changed_when: false
+      # 只读命令在 --check 下也必须真跑：否则 Ansible 会跳过它，后面的幂等判断拿空输出
+      # 在算，预演结果看起来合理但其实不可信。
+      check_mode: false
+
+    - name: Add each existing binary to the firewall and allow its incoming connections
+      become: true
+      ansible.builtin.shell: |
+        {{ fw }} --add {{ item.item | quote }} && {{ fw }} --unblockapp {{ item.item | quote }}
+      loop: "{{ fw_app_stat.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when:
+        - item.stat.exists
+        # 已在列表且是 Allow 就不动（幂等）；在列表但被 Block 也要重新放行。
+        - not (fw_apps.stdout is regex(item.item | regex_escape ~ '\s*\n\s*\(Allow incoming connections\)'))
+      changed_when: true
+
+    - name: Read the global firewall state
+      ansible.builtin.command: "{{ fw }} --getglobalstate"
+      register: fw_state
+      changed_when: false
+      check_mode: false
+
+    - name: Turn the firewall on (after the allow-list is in place)
+      become: true
+      ansible.builtin.command: "{{ fw }} --setglobalstate on"
+      when: "'enabled' not in fw_state.stdout"
+
+    - name: Read back the final state
+      ansible.builtin.command: "{{ fw }} --getglobalstate --getblockall --getstealthmode"
+      register: fw_final
+      changed_when: false
+      check_mode: false
+
+    - name: Assert it is on, and we did not accidentally turn on block-all / stealth
+      # --check 下上面的改动没有真的发生，断言必然不成立，跳过。
+      when: not ansible_check_mode
+      ansible.builtin.assert:
+        that:
+          - "'Firewall is enabled' in fw_final.stdout"
+          - "'block all state set to disabled' in fw_final.stdout"
+          - "'stealth mode is off' in fw_final.stdout"
+        fail_msg: "防火墙最终状态不对：{{ fw_final.stdout_lines }}"
