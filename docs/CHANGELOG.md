@@ -127,6 +127,7 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-10-28 | **两台 Mac 的 OMLX 不再对局域网开放，升到 0.7.3rc1**：原先监听 `0.0.0.0` 且推理免 key，同网段谁都能直接调模型；改为只听 Tailscale IP + 回环，消费方不用改。两台跑的都是几周前的旧进程，M2 的 embedding/TTS/STT 因此失败；`just omlx` 现在会重启落后的进程 ([鉴权](reference/omlx-inference-metrics.md)) |
 | 2026-10-28 | **两台 Mac 的 node_exporter（:9100）和 macmon（:9090）也只听 Tailscale**：此前全网卡监听，局域网里别的 Prometheus 正在抓 Studio。node_exporter 另留回环；☠️ macmon 地址不在时不退出也不监听，plist 先等 Tailscale IP 出现再启动 ([README](../macbook/ansible/README.md)) |
 | 2026-11-06 | **Trivy 告警降噪与自动化**：Critical 告警按 CVE ID 拆开并给厂商 7 天宽限，取代每 4h 重发的聚合告警；汇总/重扫做成 `just helm trivy-critical`/`trivy-rescan`；Renovate 改自托管、只管镜像；agent 分诊只起草不合并 ([决策](decisions/trivy-cve-automation.md)) |
+| 2026-11-06 | **Trivy Stale CVE 自动分诊**：`TrivyCriticalCVEStale` webhook 到 Multica autopilot，建 issue 派给只读的「Homelab 排障」agent，产出结论 + 可 `git apply` 的 diff，人审后提交。webhook 投递失败是静默的 ([runbook §7](runbooks/trivy-cve-alert-triage.md)) |
 ### 审计与清理（历史）
 
 | 时间 | 内容 |

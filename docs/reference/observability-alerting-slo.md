@@ -1,6 +1,6 @@
 # Observability — 告警、看板组织与 SLO
 
-> Last updated: 2026-10-28
+> Last updated: 2026-11-06
 > Status: 生效事实
 >
 > 遥测的消费侧：告警路由与覆盖盲区、Grafana 看板组织约定、SLI/SLO 体系。
@@ -16,7 +16,8 @@
 - `severity: critical|warning` 由 `telegram` AlertmanagerConfig
   （`k8s/helm/manifests/monitoring/alerts/alertmanager-config.yaml`）经原生 `telegramConfigs`
   直投群 MatthewDaily 的「🚨 Homelab 告警」话题（`chatID: -1003981213530` + `messageThreadID: 2`），
-  critical 每 30m 重复、warning 每 4h；`info` 不进 Telegram。bot token：Vault
+  critical 每 30m 重复、warning 每 4h（Trivy 的两条 CVE 告警例外，见 [trivy-cve-ops.md](trivy-cve-ops.md)）；
+  `info` 不进 Telegram。bot token：Vault
   `secret/homelab/telegram` → ESO（`alertmanager-telegram-secret.yaml`）。
   取舍见 [decisions/alerting-telegram-migration.md](../decisions/alerting-telegram-migration.md)。
 - `Watchdog` 由 `watchdog` AlertmanagerConfig 每 30s webhook 到 oracle Uptime Kuma 的 push monitor
@@ -24,6 +25,9 @@
   uptime-kuma 下线）时它静默失明，`DeadMansSwitchReceiverDown` 只让失明可见。细节只在
   [dead-mans-switch.md](dead-mans-switch.md) 维护，事故见
   [records/2026-08-14-…](../records/2026-08-14-oracle-reboot-loop-and-blind-dead-mans-switch.md)。
+- `TrivyCriticalCVEStale` 另由 `trivy-triage` AlertmanagerConfig（`alertmanager-trivy-triage.yaml`）
+  webhook 到 Multica autopilot，自动建分诊 issue；URL 含 token，走 Vault → ESO。⚠️ 它的投递失败被
+  watchdog 那条 `integration="webhook"` 的 null 路由一并静默（Telegram 照常到），见该文件头。
 - oracle 的 Falco 告警走 Falcosidekick 原生 Telegram output（同 bot 同话题，与 Alertmanager
   互不依赖），见 [security.md §8.5](security.md)。
 

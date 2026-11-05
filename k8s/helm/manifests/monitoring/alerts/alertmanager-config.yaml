@@ -69,8 +69,9 @@ spec:
       # (只捞持续 5 分钟以上的全量失败,alertname 不同故不受本路由影响)。
       #
       # ⚠️ 只按 `integration="webhook"` 收窄(告警标签里没有 receiver 名,这已是最细粒度)。
-      # 当前 **watchdog-webhook 是唯一的 webhook 接收器** —— 将来若再加 webhook 接收器,
-      # 它的投递失败会被这条一并静默,那时必须改成别的判别方式。
+      # 2026-11-06 起有第二个 webhook 接收器:alertmanager-trivy-triage.yaml 的
+      # multica-trivy-triage(Stale CVE → Multica autopilot)。它的投递失败也被这条一并静默,
+      # 评估后接受,理由与判据写在那个文件头。再加第三个之前先重新评估这条路由。
       # `integration="telegram"` 的失败**不受影响**,照常按 critical/warning 报。
       - receiver: "null"
         matchers:

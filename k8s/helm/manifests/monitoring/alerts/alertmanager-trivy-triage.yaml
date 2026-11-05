@@ -1,0 +1,69 @@
+---
+# TrivyCriticalCVEStale → Multica autopilot「Trivy Stale CVE 分诊」（2026-11-06）。
+# 某个 Critical CVE 挂满 7 天（厂商没重建）时，除了 Telegram 每天提醒，再自动建一个 Multica
+# issue 派给「Homelab 排障」agent（Studio 上受限用户 multica 的 Qwen：homelab 只读 kubeconfig、
+# 无 git 写权限）。agent 只在 issue 里给结论、证据和可 git apply 的 diff，人审过再提交。
+# 取舍见 docs/decisions/trivy-cve-automation.md；autopilot 的 prompt 与重建命令见
+# docs/runbooks/trivy-cve-alert-triage.md §7。
+#
+# webhook URL 里的 token 就是凭据（Multica 不另设签名），所以走 Vault → ESO：
+#   Vault secret/homelab/multica  property=trivy_autopilot_webhook_url
+#   值是集群内地址 http://multica-backend.personal-services.svc:8080/api/webhooks/autopilots/awt_…
+#   不走 multica.meirong.dev：省掉 Cloudflare 边缘那一跳（BIC 会拦非浏览器 UA，见 LiteLLM 那次）。
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: alertmanager-multica-trivy
+  namespace: monitoring
+spec:
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: alertmanager-multica-trivy
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: url
+      remoteRef:
+        key: homelab/multica
+        property: trivy_autopilot_webhook_url
+---
+# 独立成一个 AlertmanagerConfig：operator 给每个对象的顶层路由都加 continue: true，
+# 所以它和 telegram 那份并行生效，Telegram 的 Stale 提醒不受影响。
+#
+# ⚠️ 投递失败是静默的：alertmanager-config.yaml 里有一条按 integration="webhook" 丢弃
+#    AlertmanagerFailedToSendAlerts 的 null 路由（为 watchdog 心跳的抖动设的），Alertmanager
+#    0.33 的失败指标没有 receiver 标签，分不出是哪个 webhook，这里的失败也被一并吞掉。
+#    接受它的理由：Telegram 的 Stale 提醒是独立路由，照样每天到；最坏情况只是 agent 没被叫起来。
+#    判据：收到 Stale 的 Telegram 却没有新的 Multica issue → 查 Multica 该 autopilot 的投递记录。
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: trivy-triage
+  namespace: monitoring
+  labels:
+    alertmanagerConfig: homelab
+spec:
+  route:
+    receiver: multica-trivy-triage
+    # 两集群并成一个 issue：同一个 CVE 常常两边都有，分开建会让 agent 查两遍
+    groupBy: ["alertname"]
+    groupWait: 1m
+    groupInterval: 5m
+    # 新的 Stale CVE 进组 → 5m 内再建一个 issue；组不变时 120h 才重发（通知日志只留 120h，
+    # 写更长也照样重发）。Multica 侧按投递去重，但每次重发都会新开一次 run。
+    repeatInterval: 120h
+    matchers:
+      - name: alertname
+        value: TrivyCriticalCVEStale
+  receivers:
+    - name: multica-trivy-triage
+      webhookConfigs:
+        - urlSecret:
+            name: alertmanager-multica-trivy
+            key: url
+          sendResolved: false
+          # Multica 收件上限 256 KiB，几十条告警远到不了；封顶是防 prompt 被撑爆
+          maxAlerts: 30
