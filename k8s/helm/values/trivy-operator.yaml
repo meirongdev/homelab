@@ -40,6 +40,11 @@ operator:
   # KubeJobFailed（for 15m）也永远等不到。grafana 自 10-02 起再没有报告，就是这么丢的
   # （10-29 与 11-05 两次 DeadlineExceeded）。现在由 TrivyScanJobFailed 告警兜。
   # 代价：并发只有 1，一个扫不完的 Job 最多占槽 20m。
+  # ⚠️ 超时有两层，只放这一层没用：Trivy 自己还有 --timeout（下面 trivy.timeout，chart 默认
+  # 也是 5m）。两层都是 5m 时外层先到（Job 计时含拉镜像和 init），所以看到的是 DeadlineExceeded；
+  # 只把外层放到 20m 后，xiaogpt 在 11-05 22:57 改死在里层：Trivy 打 FATAL「context deadline
+  # exceeded」、Job BackoffLimitExceeded（卡在 secret 扫描它那个巨大的 volcengine SDK venv）。
+  # 里层 15m，留 5m 给拉镜像和 init，Trivy 自己先超时至少会留一行 FATAL 日志。
   scanJobTimeout: "20m"
   metricsFindingsEnabled: true          # 暴露 trivy_image_vulnerabilities 等 findings 指标
   # 按 CVE ID 的 trivy_vulnerability_id（2026-11-06）：TrivyCriticalCVE / Stale 告警的唯一输入。
@@ -70,6 +75,8 @@ trivy:
   mode: ClientServer                    # 配合 builtInTrivyServer
   ignoreUnfixed: true                   # 只报有修复版本的 CVE
   severity: "HIGH,CRITICAL"             # 只扫高危
+  # Trivy 自身的扫描时限，chart 默认 5m0s。必须小于 operator.scanJobTimeout，理由见那里。
+  timeout: "15m0s"
 
   # trivy-server（builtInTrivyServer 的 StatefulSet，共享漏洞库）。2026-08-06 补。
   # ⚠️ 这是**第三个**位置：顶层 priorityClassName 管 operator、

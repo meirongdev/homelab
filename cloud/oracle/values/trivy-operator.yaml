@@ -49,6 +49,8 @@ operator:
   scanJobTTL: "5m"
   # 扫描 Job 的执行时限，chart 默认 5m（2026-11-06 两集群同批改 20m）。超时被杀的扫描
   # 不打日志、不重试，过去 7 天本集群也有 1 次 DeadlineExceeded。理由与告警见 homelab 那份。
+  # ⚠️ 必须和下面 trivy.timeout（Trivy 自己的时限）一起放：只放这层的话，rsshub-browserless
+  # 11-05 22:57 改死在里层的 5m（FATAL「walk dir error: context deadline exceeded」）。
   scanJobTimeout: "20m"
   metricsFindingsEnabled: true
   # 按 CVE ID 的 trivy_vulnerability_id（2026-11-06，两集群同批）：TrivyCriticalCVE / Stale
@@ -79,6 +81,8 @@ trivy:
   mode: ClientServer
   ignoreUnfixed: true
   severity: "HIGH,CRITICAL"
+  # Trivy 自身的扫描时限，chart 默认 5m0s。必须小于 operator.scanJobTimeout，见 homelab 那份。
+  timeout: "15m0s"
 
   # trivy-server（builtInTrivyServer 的 StatefulSet，共享漏洞库）。2026-08-06 补。
   # ⚠️ 这是**第三个**位置：顶层 priorityClassName 管 operator、
