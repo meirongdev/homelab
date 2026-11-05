@@ -34,6 +34,13 @@ operator:
   # 但**已存在的 Job 不受影响**：ttlSecondsAfterFinished 在创建时就写进 Job spec，
   # 旧 Job 仍按旧 TTL 滞留，要等它们自然回收后吞吐才真正提上来。
   scanJobTTL: "5m"                      # 完成后 5m 回收，及时释放并发槽
+  # ☠️ 扫描 Job 的执行时限（= activeDeadlineSeconds），chart 默认 5m（2026-11-06 改）。
+  # 扫描 Job 钉在 k8s-worker-106（J4105，2c/4G），大镜像在 5m 内扫不完就被 Job 控制器杀掉：
+  # 没有容器错误 → operator **一行日志都不打、也不重试**；失败的 Job 5m 后被 TTL 收走，
+  # KubeJobFailed（for 15m）也永远等不到。grafana 自 10-02 起再没有报告，就是这么丢的
+  # （10-29 与 11-05 两次 DeadlineExceeded）。现在由 TrivyScanJobFailed 告警兜。
+  # 代价：并发只有 1，一个扫不完的 Job 最多占槽 20m。
+  scanJobTimeout: "20m"
   metricsFindingsEnabled: true          # 暴露 trivy_image_vulnerabilities 等 findings 指标
   # 按 CVE ID 的 trivy_vulnerability_id（2026-11-06）：TrivyCriticalCVE / Stale 告警的唯一输入。
   # 每条漏洞 × 每份报告一条序列，High 也会出（本集群约 1.7k 条），所以下面 serviceMonitor

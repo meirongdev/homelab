@@ -128,6 +128,7 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-10-28 | **两台 Mac 的 node_exporter（:9100）和 macmon（:9090）也只听 Tailscale**：此前全网卡监听，局域网里别的 Prometheus 正在抓 Studio。node_exporter 另留回环；☠️ macmon 地址不在时不退出也不监听，plist 先等 Tailscale IP 出现再启动 ([README](../macbook/ansible/README.md)) |
 | 2026-11-06 | **Trivy 告警降噪与自动化**：Critical 告警按 CVE ID 拆开并给厂商 7 天宽限，取代每 4h 重发的聚合告警；汇总/重扫做成 `just helm trivy-critical`/`trivy-rescan`；Renovate 改自托管、只管镜像；agent 分诊只起草不合并 ([决策](decisions/trivy-cve-automation.md)) |
 | 2026-11-06 | **Trivy Stale CVE 自动分诊 + agent 修复**：Stale 告警 webhook 到 Multica，只读的「Homelab 排障」出结论与 diff；人审后指派给「个人工程师」实测、开 PR，人合并。webhook 投递失败是静默的 ([runbook §7](runbooks/trivy-cve-alert-triage.md)) |
+| 2026-11-06 | **Trivy 第六类静默失败：扫描超时被杀**：扫描 Job 超过默认 5m 被 `DeadlineExceeded` 杀掉，operator 不打日志、不重试，grafana 因此一个多月没有报告。两集群改 20m，加 `TrivyScanJobFailed` ([trivy-cve-ops ⑥](reference/trivy-cve-ops.md)) |
 ### 审计与清理（历史）
 
 | 时间 | 内容 |

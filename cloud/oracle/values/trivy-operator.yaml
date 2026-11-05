@@ -47,6 +47,9 @@ operator:
   # 门槛从 1 个滞留抬到 2 个，并没有解决问题。5m 才是真正的解法。
   # 不要改回 1h —— 那等于把吞吐锁死在 2 个镜像/小时（46 个负载要 23 小时扫完）。
   scanJobTTL: "5m"
+  # 扫描 Job 的执行时限，chart 默认 5m（2026-11-06 两集群同批改 20m）。超时被杀的扫描
+  # 不打日志、不重试，过去 7 天本集群也有 1 次 DeadlineExceeded。理由与告警见 homelab 那份。
+  scanJobTimeout: "20m"
   metricsFindingsEnabled: true
   # 按 CVE ID 的 trivy_vulnerability_id（2026-11-06，两集群同批）：TrivyCriticalCVE / Stale
   # 告警的唯一输入。本集群不过滤约 5k 条（含 High），由 otel-collector 抓取时只留 Critical，

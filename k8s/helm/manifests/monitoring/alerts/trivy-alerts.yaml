@@ -104,6 +104,21 @@ spec:
             summary: "{{ $labels.cluster }} 有 {{ $value }} 个 Critical，但按 CVE ID 的指标缺失"
             description: "TrivyCriticalCVE / TrivyCriticalCVEStale 依赖 trivy_vulnerability_id，现在它们是瞎的。查 values 里 operator.metricsVulnIdEnabled，以及抓取侧（homelab ServiceMonitor / oracle otel-collector）的 severity 过滤正则。"
 
+        # 扫描 Job 失败（2026-11-06）。失败的扫描不会重试，对应的镜像从此没有报告，按 0 计，
+        # 上面所有告警都看不见它。最常见的是 DeadlineExceeded（超过 scanJobTimeout 被杀，
+        # operator 不打任何日志），其次是 Docker Hub 匿名限流。
+        # 失败的 Job 5m 后就被 scanJobTTL 收走，序列随之消失，所以不能写 for:15m（那正是
+        # KubeJobFailed 永远不响的原因）；keep_firing_for 让它别 5 分钟后就发 RESOLVED。
+        # 7 天回放：homelab 2 次、oracle 1 次，全是 DeadlineExceeded。
+        - alert: TrivyScanJobFailed
+          expr: max by (cluster, job_name) (kube_job_status_failed{namespace="trivy-system"}) > 0
+          keep_firing_for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.cluster }} Trivy 扫描失败：{{ $labels.job_name }}"
+            description: "失败的扫描不会自动重试，这个镜像的 CVE 现在看不见。原因看 kube_job_status_failed 的 reason 标签（DeadlineExceeded = 超过 scanJobTimeout）；缺哪个容器：just helm trivy-critical 末尾的覆盖率；重新排队：just helm trivy-rescan 0（会重启 operator）。"
+
         # 镜像内硬编码密钥被扫出——最高信号，几乎总是配置事故。
         # ☠️ 2026-08-30 修正指标名：原先写的 `trivy_exposedsecrets_findings` **在任何集群
         #    都不存在**（真名 `trivy_image_exposedsecrets`），所以这条 critical 自上线起

@@ -85,6 +85,8 @@
   `kubectl --context oracle-k3s -n trivy-system rollout restart deploy/trivy-operator`。
   ⚠️ 在此之前 `TrivyCriticalCVE` 读到的「没有」不覆盖这个镜像（告警只看现存
   报告，缺报告按 0 计入）。根治办法（给扫描 Job 配 Docker Hub 认证）已评估但刻意没做。
+  ⚠️ 2026-11-06 补充：过去 7 天 oracle 唯一一次扫描失败是 `DeadlineExceeded`（属主未核实），这个镜像
+  可能同属超时（静默失败 ⑥），`scanJobTimeout` 已调到 20m，部署后看它能否回填再定因。
   → [reference/trivy-cve-ops.md](reference/trivy-cve-ops.md)
 
 - **trivy-operator 的报告 TTL 删除器只对 `VulnerabilityReport` 生效，成因未查**。
