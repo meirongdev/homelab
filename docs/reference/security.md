@@ -1,6 +1,6 @@
 # K3s 集群安全架构 (Security Architecture)
 
-> Last updated: 2026-10-28
+> Last updated: 2026-11-06
 > Status: 生效事实
 > Scope: 双集群（homelab + oracle-k3s）的纵深防御模型，本文是 source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
@@ -31,7 +31,7 @@
 | 3 | 密钥 | Vault + ESO + 健康告警 | ✅ 生产 | `k8s/helm/values/vault-*`, `eso-alerts.yaml` | 双 |
 | 4 | 准入：Pod 基线 | Pod Security Admission | ✅ 生产 | `just harden-psa` / ns 清单 | 双 |
 | 5 | 准入：策略即代码 | Kyverno（3 Audit + 1 Enforce，§5.2）| ✅ 生产 | `values/kyverno.yaml`, `manifests/kyverno-policies/` | homelab |
-| 6 | 供应链/CVE | Trivy Operator（运行中镜像）| ✅ 生产 | 两集群各自的 `values/trivy-operator.yaml` | 双 |
+| 6 | 供应链/CVE | Trivy Operator（运行中镜像）+ Renovate（镜像 digest/版本 PR，🚧 待配 token）| ✅ 生产 | 两集群各自的 `values/trivy-operator.yaml` · `.github/renovate.json5` | 双 |
 | 7 | CIS 合规 | kube-bench（周巡检，钉 control-plane；worker node 级未覆盖，有意接受） | ✅ 生产 | `manifests/kube-bench/kube-bench.yaml` | homelab |
 | 8 | 节点加固 | k3s `protect-kernel-defaults` + sysctl | ✅ 生效（两节点 k3s 都在配置之后重启过，2026-10-28 核） | `k8s/ansible/playbooks/setup-k3s.yaml` | homelab |
 | 9 | 网络 | Cilium NetworkPolicy + Hubble 可见性 | 🟡 仅可见性 | Cilium（默认拒绝刻意延后） | 双 |

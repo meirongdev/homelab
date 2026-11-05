@@ -1,6 +1,6 @@
 # jobs-sg — 新加坡 SWE 岗位趋势周报（架构事实）
 
-> Last updated: 2026-10-28
+> Last updated: 2026-11-06
 > Status: 生效事实
 > Scope: jobs-sg 在 homelab 集群的部署形态、镜像固定方式、备份口径、首次上线依赖顺序
 > 本文是 source of truth。应用代码在 [meirongdev/jobs-sg](https://github.com/meirongdev/jobs-sg)。
@@ -263,8 +263,8 @@ kubectl --context k3s-homelab -n jobs-sg apply -f <一次性 Job yaml>
 Kyverno `disallow-latest-tag` 在 homelab 是 Enforce，策略 digest-aware（digest 与明确 tag 放行，
 只拦 `:latest`）。本应用按 digest 固定，且必须用 **manifest-list（OCI index）digest**，不是
 amd64 单架构 digest，否则换架构拉不到。升级只改 `kustomization.yaml` 的 `images[0].digest`，
-命令见该文件注释。没有镜像自动升级（ArgoCD Image Updater 已退役，见
-[argocd-app-patterns.md](argocd-app-patterns.md)），digest 手动改。
+命令见该文件注释。digest 手动改：Renovate 只管清单里的 `image:` 与 chart 版本，不管 kustomization 的
+`images[]`（见 [argocd-app-patterns.md](argocd-app-patterns.md)）。
 
 - ☠️ **「只改 digest 一行」不总是够**。上游挪了端口或指标时清单要同批改，否则 ServiceMonitor
   继续抓旧端口，指标全断且不报错，所有告警一起变瞎（`90cd4e8` 把 `/metrics` 挪到 9090 就是这种）。

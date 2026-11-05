@@ -1,6 +1,6 @@
 # ArgoCD Application Patterns
 
-> Last updated: 2026-10-28
+> Last updated: 2026-11-06
 > Status: 生效事实
 >
 > GitOps 现状：App 结构与源写法、控制面形态、Application 清单、新增 App 的坑；文末是未采用的备选 pattern。
@@ -116,7 +116,9 @@ Namespace 被 prune 会级联删光 ns 下一切，`Prune=false` 拦不住（[�
 - **`multica`**: OCI chart（坑 1）。库在共享的 `databases/apps-pg`（`postgres.external.enabled: true`）；
   chart 生成的 `multica-backend-uploads` PVC，CI 的 H4 看不见（备份见 [storage.md](storage.md)）。执行任务的
   daemon 在 M2 MacBook 上，离线时集群侧一切正常（[runbook](../runbooks/multica-install.md)）。
-- 没有任何镜像自动升级：`argocd-image-updater` 已退役（[存档](../decisions/argocd-image-updater.md)）。
+- 镜像不会自动进集群：Renovate（自托管，2026-11-06）只开 PR，合并 push 后才经 ArgoCD 同步；
+  `argocd-image-updater` 已退役（[存档](../decisions/argocd-image-updater.md)）。Renovate 的范围、
+  以及只钉 digest 的引用为什么默认不管，见 [决策](../decisions/trivy-cve-automation.md)。
 
 ## Prune 与 bootstrap 依赖
 

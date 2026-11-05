@@ -1,6 +1,6 @@
 # Tech Stack — 技术栈全景
 
-> Last updated: 2026-10-28
+> Last updated: 2026-11-06
 > Status: 生效事实
 >
 > 这套系统由哪些技术组成、每个是干什么的、为什么是它、配置和版本钉在哪。
@@ -170,7 +170,7 @@ Service → Pod ────── 网络由 Cilium eBPF 承载；跨集群走 C
 
 ## 5. 故意没有的东西
 
-Cert-Manager（TLS 在边缘终结）· Crossplane · Vault HA · Thanos/Mimir · 镜像自动升级 ·
+Cert-Manager（TLS 在边缘终结）· Crossplane · Vault HA · Thanos/Mimir · 镜像自动合并（Renovate 只开 PR）·
 集群级网络默认拒绝（延后不是取消）。理由与重评条件在 [ROADMAP.md「不做 / 已取消」](../ROADMAP.md#不做--已取消)。
 
 ## 6. 真相源地图（配置和版本钉在哪）

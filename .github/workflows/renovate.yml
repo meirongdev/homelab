@@ -1,0 +1,50 @@
+# 自托管 Renovate：每天跑一次，只开 PR、从不合并。配置在 .github/renovate.json5，
+# 取舍见 docs/decisions/trivy-cve-automation.md。
+#
+# 为什么自托管而不是 Mend 的 GitHub App：2026-09 装过 App，20 分钟没动静就整体移除了。
+# 自己跑的好处是失败看得见（Actions 日志），代价是要一把 token。
+#
+# 一次性前置（仓库设置，不在 git 里）：Actions secret `RENOVATE_TOKEN`，fine-grained PAT，
+# 只授权本仓库：Contents / Pull requests / Issues 读写（Issues 给 Dependency Dashboard 用）。
+# 不需要 Workflows 权限，配置里没开 github-actions manager。
+# ⚠️ 不能用内置的 GITHUB_TOKEN：它开的 PR 不会触发其它 workflow，static-checks / docs-check
+#    都不会在 Renovate 的 PR 上跑。
+# 没配 secret 时整个 job 跳过，不会每天红一次。
+name: renovate
+
+on:
+  schedule:
+    # 每天 18:00 UTC = 02:00 Asia/Shanghai。版本升级只在周一这次开 PR（schedule 在配置里），
+    # digest 刷新（厂商重建）每天都会更新。
+    - cron: '0 18 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: renovate
+  cancel-in-progress: false
+
+jobs:
+  renovate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HAS_TOKEN: ${{ secrets.RENOVATE_TOKEN != '' }}
+    steps:
+      - name: 缺 RENOVATE_TOKEN 时跳过
+        if: env.HAS_TOKEN != 'true'
+        run: echo "::notice::未配置 RENOVATE_TOKEN secret，跳过。见本文件头的一次性前置。"
+
+      - uses: renovatebot/github-action@v46.3.12
+        if: env.HAS_TOKEN == 'true'
+        with:
+          token: ${{ secrets.RENOVATE_TOKEN }}
+          renovate-version: '44'
+        env:
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+          # 配置已在仓库里，不要 onboarding PR；仓库里没有配置文件就什么都不做
+          RENOVATE_ONBOARDING: 'false'
+          RENOVATE_REQUIRE_CONFIG: 'required'
+          LOG_LEVEL: info

@@ -1,0 +1,111 @@
+// Renovate（自托管，2026-11-06）—— 把「厂商已重建镜像」自动变成 PR。
+//
+// 为什么回来：Trivy 的 Critical 大多是发行版底层包的 CVE，修复路径是厂商重建镜像；
+// 重建之后还得有人发现并改 digest，这一步之前全靠人。决策与取舍见
+// docs/decisions/trivy-cve-automation.md（9 月那次用 Mend 托管 App，装上 20 分钟没动静就整体
+// 移除了；这次由 .github/workflows/renovate.yml 自己跑，不依赖 App）。
+//
+// 范围刻意收窄到「镜像」：
+//   kubernetes  GitOps 清单里的 image:（digest 刷新是重点）
+//   argocd      Application 的 chart 版本（chart 里带的镜像只能靠升 chart 换）
+// 不管 justfile / ansible 的版本变量、不管 values 里的 image tag、不管 github-actions，
+// 理由写在 ADR 里。
+//
+// ☠️ 自我约束（沿用 9 月那份的结论）：
+//   ① 永不 automerge：manual-helm 组件合并 ≠ 部署；镜像升级要人看多架构 / 探针 / Host 头。
+//   ② 不开 pinDigests：已有 digest 的会被自动刷新，没有的不强加。
+//   ③ 不管 docs/：plans/ 是冻结快照。
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: ["config:recommended"],
+  timezone: "Asia/Shanghai",
+  enabledManagers: ["kubernetes", "argocd"],
+  ignorePaths: ["docs/**"],
+  automerge: false,
+  pinDigests: false,
+  prConcurrentLimit: 5,
+  commitMessagePrefix: "chore(deps):",
+  labels: ["dependencies"],
+
+  kubernetes: {
+    managerFilePatterns: [
+      "/^k8s/helm/manifests/.+\\.yaml$/",
+      "/^cloud/oracle/manifests/.+\\.yaml$/",
+      "/^backup/.+\\.yaml$/",
+    ],
+  },
+  argocd: {
+    managerFilePatterns: ["/^argocd/applications/.+\\.yaml$/"],
+  },
+
+  packageRules: [
+    {
+      // 默认：版本升级每周一一批（workflow 每天跑，只有周一凌晨这次会开/更新这类 PR）
+      matchManagers: ["kubernetes", "argocd"],
+      schedule: ["* 0-6 * * 1"],
+    },
+    {
+      // ☠️ digest 更新默认关。只钉 digest、不带 tag 的引用（`repo@sha256:…`），Renovate 一律
+      // 当成 `:latest` 去比，而本仓库这种写法一半是「钉某个版本」：litellm 1.103.1、
+      // bentopdf v1.15.4（注释明写别 pin latest）、podcast 的 nginx 跟的是 stable-alpine。
+      // 2026-11-06 本地 dry-run 实测它会把这几个都提成 latest 的 digest，等于悄悄换版本。
+      matchManagers: ["kubernetes"],
+      matchUpdateTypes: ["digest"],
+      enabled: false,
+    },
+    {
+      // 厂商重建（tag 不变、digest 变）：这就是 Trivy 底层包 CVE 的修复路径。
+      // `tag@sha256:…` 写法带着 tag，Renovate 比的就是同一个 tag，安全。
+      // 全部并成一个 PR、随时更新，合并前逐个看 Trivy 报告有没有真清掉。
+      matchManagers: ["kubernetes"],
+      matchUpdateTypes: ["digest"],
+      matchCurrentValue: "/.+/",
+      enabled: true,
+      groupName: "镜像 digest 刷新（厂商重建）",
+      groupSlug: "image-digest-refresh",
+      schedule: ["at any time"],
+      labels: ["dependencies", "security"],
+      prBodyNotes: [
+        "⚠️ 合并前：`docker buildx imagetools inspect <镜像>@<新 digest>` 确认仍是多架构 index（oracle 是 arm64）。",
+        "合并 push 后 ArgoCD 3 分钟内同步；Trivy 侧回查用 `just helm trivy-critical`，不要看告警（告警有 6h 平滑）。",
+      ],
+    },
+    {
+      // 只钉 digest、但本意就是跟 `:latest` 的（清单注释里写明了；Kyverno 的
+      // disallow-latest-tag 是 Enforce，所以只能这么钉）。对它们「按 latest 比」恰好是对的。
+      // ⚠️ 名单之外的 digest-only 镜像不会有 PR。想让 Renovate 管，把引用改成 `tag@sha256:…`
+      // （改引用会滚动 pod，等下次本来就要动它时顺手改）。
+      matchManagers: ["kubernetes"],
+      matchUpdateTypes: ["digest"],
+      matchDepNames: [
+        "jellyfin/jellyfin",
+        "busybox",
+        "deluan/navidrome",
+        "excalidraw/excalidraw",
+        "diygod/rsshub",
+        "miniflux/miniflux",
+        "browserless/chrome",
+        "docker.io/yihong0618/xiaogpt",
+      ],
+      enabled: true,
+      groupName: "镜像 digest 刷新（厂商重建）",
+      groupSlug: "image-digest-refresh",
+      schedule: ["at any time"],
+      labels: ["dependencies", "security"],
+    },
+    {
+      // 大版本：只在 Dependency Dashboard 里列出，勾选才开 PR
+      matchManagers: ["kubernetes", "argocd"],
+      matchUpdateTypes: ["major"],
+      dependencyDashboardApproval: true,
+    },
+    {
+      // chart 升级动静大（CRD、values 结构变化），一律先进 Dashboard，勾选才开 PR。
+      // 同名 chart 两集群各一份（external-dns / opencost / trivy-operator），分组成一个 PR，
+      // 天然满足 check-version-pairs 的 V1。
+      matchManagers: ["argocd"],
+      groupName: "{{depName}}（两集群同版本）",
+      dependencyDashboardApproval: true,
+    },
+  ],
+}
