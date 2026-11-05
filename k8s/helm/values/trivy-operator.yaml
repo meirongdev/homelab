@@ -45,6 +45,8 @@ operator:
   # 只把外层放到 20m 后，xiaogpt 在 11-05 22:57 改死在里层：Trivy 打 FATAL「context deadline
   # exceeded」、Job BackoffLimitExceeded（卡在 secret 扫描它那个巨大的 volcengine SDK venv）。
   # 里层 15m，留 5m 给拉镜像和 init，Trivy 自己先超时至少会留一行 FATAL 日志。
+  # 实测（11-05 23:17，放宽后首轮）：xiaogpt 6m20s（158 个 Critical 的报告），grafana 13s。
+  # 最慢的那个离里层还有 2 倍多余量；哪天逼近了，先看是不是又多了个 Python 依赖大的镜像。
   scanJobTimeout: "20m"
   metricsFindingsEnabled: true          # 暴露 trivy_image_vulnerabilities 等 findings 指标
   # 按 CVE ID 的 trivy_vulnerability_id（2026-11-06）：TrivyCriticalCVE / Stale 告警的唯一输入。
