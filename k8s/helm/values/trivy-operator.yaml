@@ -35,6 +35,10 @@ operator:
   # 旧 Job 仍按旧 TTL 滞留，要等它们自然回收后吞吐才真正提上来。
   scanJobTTL: "5m"                      # 完成后 5m 回收，及时释放并发槽
   metricsFindingsEnabled: true          # 暴露 trivy_image_vulnerabilities 等 findings 指标
+  # 按 CVE ID 的 trivy_vulnerability_id（2026-11-06）：TrivyCriticalCVE / Stale 告警的唯一输入。
+  # 每条漏洞 × 每份报告一条序列，High 也会出（本集群约 1.7k 条），所以下面 serviceMonitor
+  # 抓取时只留 Critical。⚠️ 与 oracle otel-collector 的过滤正则必须一致。
+  metricsVulnIdEnabled: true
   vulnerabilityScannerEnabled: true
   vulnerabilityScannerScanOnlyCurrentRevisions: true   # 只扫当前 ReplicaSet，省重复
   configAuditScannerEnabled: true
@@ -354,6 +358,16 @@ serviceMonitor:
   enabled: true
   labels:
     release: kube-prometheus-stack
+  # 只留 Critical 的 trivy_vulnerability_id（见上面 metricsVulnIdEnabled）。
+  # severity 的取值是 operator 映射后的首字母大写形式（Critical/High/…，v0.31.1 源码
+  # pkg/metrics/types.go 的 NewSeverityLabel），不是报告里的 CRITICAL。
+  # 写成「丢掉其余」而不是「只留 Critical」：keep 会把同一端点的其它指标一起丢光。
+  # ⚠️ 与 cloud/oracle/manifests/monitoring/otel-collector-config.yaml 的同名过滤保持同一正则。
+  endpointAdditionalProperties:
+    metricRelabelings:
+      - sourceLabels: [__name__, severity]
+        regex: "trivy_vulnerability_id;(High|Medium|Low|Unknown|)"
+        action: drop
 
 # 2026-08-06：此前无 priorityClass，落在默认档 0 —— 比标了 bulk(-10) 的个人应用
 # 还高。CLAUDE.md 的硬约束写着「所有安全组件 fail-open + 控 CPU」，而被驱逐正是 fail-open：

@@ -27,6 +27,7 @@
 | [slo-availability-targets](slo-availability-targets.md) | 99% 推导 + 两维判据；☠️ 实测揭穿分母（vault/argocd 真实流量≈0）；预算只做信号不做闸门 |
 | [cf-analytics-custom-exporter](cf-analytics-custom-exporter.md) | 按域名访问 IP 数自写 exporter：官方/lablabs 实测在 Free zone 全废（`httpRequests1mGroups` 403），且**都只有 zone 级 uniques** |
 | [cronjob-and-job-hygiene](cronjob-and-job-hygiene.md) | CronJob 只强制两个 deadline（`activeDeadlineSeconds` 断卡死 + `startingDeadlineSeconds` 防 100-missed 永久停摆）；配额改用 `pods` 而非 `count/pods`；**否决**强制 TTL（与 history limit 重复）与 Kyverno `require-job-ttl`（Enforce 会炸 5 个 Helm hook、Audit 无告警消费） |
+| [trivy-cve-automation](trivy-cve-automation.md) | Trivy Critical 告警按 CVE ID 拆开 + 7 天宽限；Renovate 自托管只管镜像（只钉 digest 的默认不管）；LLM 只起草分诊、豁免不自动合并 |
 | [litellm-llm-gateway](litellm-llm-gateway.md) | 旧 LLM 网关 → **LiteLLM**：配置进 git + 自带认证 + Postgres；双自托管来源 DGX 主 + Mac 兜底 fallback |
 | [studio-image-generation](studio-image-generation.md) | ❌ 已退役（同日）：Studio 文生图（mflux + 自写 OpenAI 转接层）。生成时把同机对话从 111 压到 18–26 tok/s，内存按分辨率泄漏 |
 | [multimedia-repository-nfs-readonly](multimedia-repository-nfs-readonly.md) | 媒体 serving 重新引入 NFS，但**只读 + 只媒体 + 不装 provisioner**：2026-07-11 退役后的唯一例外；☠️ 副作用是 106 从此不再是"非运行时依赖" |

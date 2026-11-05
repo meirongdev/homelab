@@ -79,6 +79,22 @@ spec:
             value: "AlertmanagerFailedToSendAlerts|AlertmanagerClusterFailedToSendAlerts"
           - name: integration
             value: webhook
+      # Trivy Critical CVE(2026-11-06):安全态势告警,不是事故,4h 重发只会把人训练成忽略它。
+      # 规则侧按 CVE ID 一条告警(见 trivy-alerts.yaml),组仍按 alertname+cluster 聚:
+      # **新 CVE ID 进组 → groupInterval(5m) 内立刻发一条**,组成员不变时才按下面的 repeat。
+      #   TrivyCriticalCVE       120h:宽限期内的知会,不催。⚠️ 不能写更长 —— Alertmanager
+      #                          的通知日志只留 120h(spec.retention),过期后照样重发,写 7d 是假的。
+      #   TrivyCriticalCVEStale  24h:厂商一周没重建,该处置了,每天提醒一次。
+      - receiver: telegram
+        matchers:
+          - name: alertname
+            value: TrivyCriticalCVE
+        repeatInterval: 120h
+      - receiver: telegram
+        matchers:
+          - name: alertname
+            value: TrivyCriticalCVEStale
+        repeatInterval: 24h
       # Critical → 更快重复(30m vs 4h)。同一 telegram 接收器,模板按 severity 标记
       # 🆘/⚠️(Telegram 无 Gotify 那种数字优先级,用 emoji + 更快 repeat 区分紧急度)。
       - receiver: telegram
@@ -87,6 +103,16 @@ spec:
             value: critical
         groupWait: 10s
         repeatInterval: 30m
+  # 同一 CVE 升级成 Stale 后,宽限期那条就别再出现在 TrivyCriticalCVE 的组里。
+  # 被抑制只是从组里拿掉、不算 resolved,所以不会因此多发一条消息。
+  inhibitRules:
+    - sourceMatch:
+        - name: alertname
+          value: TrivyCriticalCVEStale
+      targetMatch:
+        - name: alertname
+          value: TrivyCriticalCVE
+      equal: ["cluster", "vuln_id"]
   receivers:
     - name: "null"
     - name: telegram
@@ -114,10 +140,13 @@ spec:
           # 它们一直没暴露,只因为这几条恰好都还没真正触发过 —— 属于"首次触发即静默失败"
           # 的埋雷,已全部改成 `$dgx` / `$key`。加新规则时别把这个模式带回来。
           # 注:裸 `&`(如 `a && b`)Telegram 容忍,今天 NodeRebooted 就带 `&&` 正常投递了。
+          # 2026-11-06:逐条前缀按各自状态打 ✅/▸。标题按整组状态,组里只要还有一条 firing
+          # 就是 WARNING;此前同组里已恢复的那条也印成 ▸,看起来像还在烧。按 CVE ID
+          # 拆开的 TrivyCriticalCVE 一组常有多条,修好一个、其余还在是常态,必须分得出来。
           message: |-
             {{ if eq .Status "resolved" }}✅ <b>RESOLVED</b>{{ else if eq .CommonLabels.severity "critical" }}🆘 <b>CRITICAL</b>{{ else }}⚠️ <b>WARNING</b>{{ end }} · <b>{{ .CommonLabels.alertname }}</b>{{ if .CommonLabels.cluster }} @ {{ .CommonLabels.cluster }}{{ end }}
             {{ range .Alerts }}
-            ▸ {{ .Annotations.summary }}{{ if .Annotations.description }}
+            {{ if eq .Status "resolved" }}✅{{ else }}▸{{ end }} {{ .Annotations.summary }}{{ if .Annotations.description }}
             {{ .Annotations.description }}{{ end }}
             {{ end }}
 

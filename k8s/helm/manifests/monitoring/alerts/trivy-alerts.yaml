@@ -27,16 +27,82 @@ spec:
   groups:
     - name: trivy-operator
       rules:
-        # 运行中的镜像存在 Critical CVE（可修复版本——values 里 ignoreUnfixed=true）。
-        # 这是标准的"安全态势"告警：会持续 firing 直到镜像被升级修复。
-        - alert: TrivyImageCriticalVulnerabilities
-          expr: sum by (cluster) (trivy_image_vulnerabilities{severity="Critical"}) > 0
+        # ── Critical CVE：按 CVE ID 拆开，先给厂商 7 天宽限（2026-11-06 重写）────────────
+        # 取代原来的 `TrivyImageCriticalVulnerabilities`（`sum by (cluster) (...) > 0`，4h 重发）。
+        # 旧写法量的其实是「上游厂商重建镜像的滞后」，不是可行动的风险：
+        #   · 发行版底层包一出 CVE 就同时点亮一片镜像（2026-11-05 实测：两集群 35 份报告带
+        #     Critical，只对应 3 个 CVE ID，libbrotli 一个就命中 19 个镜像）；
+        #   · `ignoreUnfixed` 的「可修复」= 发行版出了修复包，不等于你用的厂商镜像已重建，
+        #     这段时间只能等或豁免（两份 values 现有 66 条豁免，8 月以来真升镜像只有十来次）；
+        #   · 不分新旧，剩一个就一直 firing，10-28 起连烧 9 天、每 4h 一条。
+        # 新语义：
+        #   TrivyCriticalCVE       新 CVE ID 出现 → 通知一次（新 ID 进组才再发，route 上 repeat 5d）
+        #   TrivyCriticalCVEStale  同一 ID 6~7 天前就在、现在还在 → 厂商没重建，该人动手，每天提醒
+        #   Stale 在 Alertmanager 里抑制同 (cluster, vuln_id) 的 TrivyCriticalCVE，不重复报。
+        # 指标前提：两集群 values 开了 `operator.metricsVulnIdEnabled`，且抓取侧只留 Critical
+        # （homelab ServiceMonitor metricRelabelings / oracle otel-collector metric_relabel_configs，
+        # 两侧必须同一正则）。不过滤时 homelab ~1.7k、oracle ~5k 条，过滤后各几十条。
+        # 处置 SOP：docs/runbooks/trivy-cve-alert-triage.md
+
+        # 每个 (cluster, CVE ID) 一条序列，值 = 受影响的不同镜像仓库数。
+        # 只留这两个标签：下面的 max_over_time / offset 才不会被报告名、版本号这类
+        # 会变的标签拆成多条（见 PromQL 陷阱 #5）。
+        - record: trivy:critical_cve:images
+          expr: |
+            count by (cluster, vuln_id) (
+              count by (cluster, vuln_id, image_repository) (
+                trivy_vulnerability_id{severity="Critical"}
+              )
+            )
+
+        # [6h] 平滑是必须的：强制重扫（删报告 → 重启 operator）、报告 24h TTL 删除后排队重扫、
+        # operator 重启，都会让序列断开几十分钟到几小时。不平滑的话每次重扫都会先发一遍
+        # RESOLVED、再发一遍新告警。代价是修好后 RESOLVED 晚到最多 6h，验收看报告不看告警。
+        - alert: TrivyCriticalCVE
+          expr: max_over_time(trivy:critical_cve:images[6h])
           for: 30m
           labels:
             severity: warning
           annotations:
-            summary: "{{ $labels.cluster }} 存在 {{ $value }} 个 Critical 镜像漏洞"
-            description: "运行中工作负载的镜像含可修复的 Critical CVE。查看：`kubectl get vulnerabilityreports -A -o wide`，按 Critical 计数排序后升级对应镜像。"
+            summary: '{{ $labels.vuln_id }}（{{ $value }} 个镜像）'
+            # ⚠️ Telegram 走 parseMode=HTML：这里不许出现尖括号（见 alertmanager-config.yaml）。
+            # 模板里的查询也套 last_over_time[6h]：断档时告警靠平滑还在，列表不能跟着变空。
+            description: >-
+              {{ with query (printf "count by (resource, installed_version, fixed_version) (last_over_time(trivy_vulnerability_id{cluster=%q,vuln_id=%q}[6h]))" $labels.cluster $labels.vuln_id) }}{{ with first . }}{{ .Labels.resource }} {{ .Labels.installed_version }} → {{ .Labels.fixed_version }}；{{ end }}{{ end }}镜像：{{ range $i, $s := query (printf "count by (image_repository) (last_over_time(trivy_vulnerability_id{cluster=%q,vuln_id=%q}[6h]))" $labels.cluster $labels.vuln_id) | sortByLabel "image_repository" }}{{ if lt $i 8 }}{{ if $i }}, {{ end }}{{ $s.Labels.image_repository }}{{ end }}{{ end }}{{ if gt $value 8.0 }} …{{ end }}。
+              先等厂商重建，7 天后仍在会升级成 TrivyCriticalCVEStale。
+
+        # 「现在还在」且「6~7 天前某个时刻也在」。故意不用 `for: 7d`：重扫/TTL 造成的断档
+        # 会把 for 计时清零，用 offset 只看两头，对中间断档免疫。
+        # ⚠️ 上线后前 6 天没有历史可比，这条不会响（从 vuln-id 指标首次入库那天算起）。
+        # ⚠️ 依赖 Prometheus 保留期 ≥ 7d（现为 14d / 10GiB，先到先裁）。
+        - alert: TrivyCriticalCVEStale
+          expr: |
+            max_over_time(trivy:critical_cve:images[6h])
+              and on (cluster, vuln_id)
+            max_over_time(trivy:critical_cve:images[1d] offset 6d)
+          labels:
+            severity: warning
+          annotations:
+            summary: '{{ $labels.vuln_id }} 已挂 7 天以上（{{ $value }} 个镜像）'
+            description: >-
+              厂商一周内没有重建，需要人工处置：升级到已修复的多架构 digest，或核实不可达后豁免。
+              清单：just helm trivy-critical；SOP：docs/runbooks/trivy-cve-alert-triage.md
+
+        # 元告警：报告里有 Critical，按 CVE ID 的序列却一条都没有。
+        # 上面两条只读 trivy_vulnerability_id；它没了（values 被改回、抓取正则写错把 Critical
+        # 也丢了、oracle collector 漏了这段配置），两条就同时哑火，外观与「没有 Critical」一样。
+        # 两边出自同一次抓取、同一批 VulnerabilityReport，正常时不会一边有一边没有。
+        - alert: TrivyVulnIdMetricsMissing
+          expr: |
+            sum by (cluster) (trivy_image_vulnerabilities{severity="Critical"}) > 0
+              unless on (cluster)
+            count by (cluster) (trivy_vulnerability_id{severity="Critical"})
+          for: 2h
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.cluster }} 有 {{ $value }} 个 Critical，但按 CVE ID 的指标缺失"
+            description: "TrivyCriticalCVE / TrivyCriticalCVEStale 依赖 trivy_vulnerability_id，现在它们是瞎的。查 values 里 operator.metricsVulnIdEnabled，以及抓取侧（homelab ServiceMonitor / oracle otel-collector）的 severity 过滤正则。"
 
         # 镜像内硬编码密钥被扫出——最高信号，几乎总是配置事故。
         # ☠️ 2026-08-30 修正指标名：原先写的 `trivy_exposedsecrets_findings` **在任何集群

@@ -194,6 +194,14 @@ receivers:
             - targets: ['trivy-operator.trivy-system.svc.cluster.local:8080']
               labels:
                 cluster: oracle-k3s
+          # 2026-11-06：values 开了 metricsVulnIdEnabled，trivy_vulnerability_id 每条漏洞一条
+          # 序列、High 也出，本集群约 5k 条。告警只用 Critical（几十条），其余在这里丢掉，
+          # 不跨 Tailscale remote-write。⚠️ 与 homelab 的 ServiceMonitor metricRelabelings
+          # （k8s/helm/values/trivy-operator.yaml）必须同一正则，否则告警只在一侧成立。
+          metric_relabel_configs:
+            - source_labels: [__name__, severity]
+              regex: 'trivy_vulnerability_id;(High|Medium|Low|Unknown|)'
+              action: drop
 
   # readlist 数据新鲜度 → homelab Prometheus (cluster=oracle-k3s)。2026-08-05 随上线新增。
   #
