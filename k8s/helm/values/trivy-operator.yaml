@@ -35,11 +35,11 @@ operator:
   # 旧 Job 仍按旧 TTL 滞留，要等它们自然回收后吞吐才真正提上来。
   scanJobTTL: "5m"                      # 完成后 5m 回收，及时释放并发槽
   # ☠️ 扫描 Job 的执行时限（= activeDeadlineSeconds），chart 默认 5m（2026-11-06 改）。
-  # 扫描 Job 钉在 k8s-worker-106（J4105，2c/4G），大镜像在 5m 内扫不完就被 Job 控制器杀掉：
-  # 没有容器错误 → operator **一行日志都不打、也不重试**；失败的 Job 5m 后被 TTL 收走，
-  # KubeJobFailed（for 15m）也永远等不到。grafana 自 10-02 起再没有报告，就是这么丢的
-  # （10-29 与 11-05 两次 DeadlineExceeded）。现在由 TrivyScanJobFailed 告警兜。
-  # 代价：并发只有 1，一个扫不完的 Job 最多占槽 20m。
+  # 从 Job 启动算起，**Pending 的时间也算**。扫描 Job 钉在 k8s-worker-106（J4105，2c/4G），
+  # 大镜像在 5m 内扫不完就被 Job 控制器以 DeadlineExceeded 杀掉：没有容器错误，operator
+  # **一行日志都不打**；失败的 Job 5m 后被 TTL 收走，KubeJobFailed（for 15m）也永远等不到。
+  # 现在由 TrivyScanJobFailed 告警兜。代价：并发只有 1，一个扫不完的 Job 最多占槽 20m。
+  # grafana 那个缺口不是这个原因，是调度不上，见下面 trivy.resources。
   # ⚠️ 超时有两层，只放这一层没用：Trivy 自己还有 --timeout（下面 trivy.timeout，chart 默认
   # 也是 5m）。两层都是 5m 时外层先到（Job 计时含拉镜像和 init），所以看到的是 DeadlineExceeded；
   # 只把外层放到 20m 后，xiaogpt 在 11-05 22:57 改死在里层：Trivy 打 FATAL「context deadline
@@ -350,7 +350,16 @@ trivy:
   resources:
     requests:
       cpu: 100m
-      memory: 256Mi
+      # ☠️ 2026-11-06 256Mi → 128Mi。扫描 pod 给被扫工作负载的**每个容器**起一个 Trivy 容器，
+      # 并行跑，requests 按容器数相加。grafana（主容器 + 2 sidecar + 1 init）要 4 × 256 = 1024Mi，
+      # 而 worker-106 按 requests 算只剩 1004Mi（可分配 3254Mi，已请求 2250Mi）：**永远调度不上**。
+      # 过去 14 天它被 operator 重排了约 100 次（每天 7 次左右），每次都 Pending 约 5 分钟后被
+      # scanJobTimeout 杀掉，一次都没跑起来，所以 grafana 自 10-02 起没有报告。
+      # 实测（14d 扫描容器 working set 峰值）：多数不到 80Mi，最重的 xiaogpt / browserless 约
+      # 350Mi；无 OOM。cAdvisor 30s 采样会漏短峰值，所以 limit 不动。节点真实余量看
+      # MemAvailable（7d 最低约 1.6Gi），按 requests 算的 1004Mi 比实际紧。
+      # 判据：再加 sidecar 或 worker-106 上 requests 再涨，先算「最多容器数 × 本值」能否装下。
+      memory: 128Mi
     limits:
       cpu: 500m
       memory: 512Mi

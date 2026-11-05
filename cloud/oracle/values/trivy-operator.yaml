@@ -48,7 +48,7 @@ operator:
   # 不要改回 1h —— 那等于把吞吐锁死在 2 个镜像/小时（46 个负载要 23 小时扫完）。
   scanJobTTL: "5m"
   # 扫描 Job 的执行时限，chart 默认 5m（2026-11-06 两集群同批改 20m）。超时被杀的扫描
-  # 不打日志、不重试，过去 7 天本集群也有 1 次 DeadlineExceeded。理由与告警见 homelab 那份。
+  # 不打日志，本集群的 rsshub-browserless 也中过。理由与告警见 homelab 那份。
   # ⚠️ 必须和下面 trivy.timeout（Trivy 自己的时限）一起放：只放这层的话，rsshub-browserless
   # 11-05 22:57 改死在里层的 5m（FATAL「walk dir error: context deadline exceeded」）。
   scanJobTimeout: "20m"
