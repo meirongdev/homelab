@@ -127,6 +127,7 @@
 - **kube-bench**：每周日 05:00 UTC CronJob，k3s 基准（`k3s-cis-*`，通用基准会满屏假 FAIL），结果 stdout→Loki（`{k8s_namespace_name="kube-bench"}`，标签是 OTel 风格，写 `namespace=` 查不到）。专用 ns 标 privileged（hostPID + host 挂载）。
   - ⚠️ 必须钉 control-plane（`nodeSelector: node-role.kubernetes.io/control-plane`）：控制面检查项只在控制面节点上有意义，排到 `k8s-worker-106` 会「看起来通过」而实际没审控制面。
   - 残余缺口（有意接受）：worker 的 node 级检查项（kubelet 文件权限等）无覆盖。要补就改 DaemonSet 式逐节点审计，或给 worker 加一个 `--targets node` 的第二 CronJob。
+- **主机 SSH 与防火墙**：全舰队 sshd 只认 key。三台 Ubuntu 节点（k8s-node / worker / oracle）cloud-init 出厂即如此；两台 PVE 宿主（pve-1 / storage-106）由 `proxmox/ansible` 的 `just sshd-harden` 落 drop-in `00-homelab-hardening.conf`，盖掉 PVE 安装器写死的 `PermitRootLogin yes`（2026-11-06 起，此前宿主可被局域网爆破 root 密码）。8006 网页的 root 密码走 pveproxy+PAM，不受影响，是 SSH 进不去时的后门。⚠️ 主机防火墙只有 oracle 开着（firewalld + fail2ban，公网实测只通 22）；homelab 四台全关（pve-firewall disabled、k8s 节点的 ufw 被 `setup-k3s.yaml` 故意关），靠「NAT 后无公网入站」挡，局域网与 tailnet 内全端口可达。
 - **节点加固**（`setup-k3s.yaml`）：先落盘 `/etc/sysctl.d/31-k8s-protect-kernel.conf`，再在 config.yaml 开 `protect-kernel-defaults:true`。**现网需维护窗口 `systemctl restart k3s` 才生效**。API 审计日志刻意延后（磁盘紧）。
 
 ## 8. 网络安全 (Network) — Cilium + Hubble

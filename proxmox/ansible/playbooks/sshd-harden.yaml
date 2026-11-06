@@ -1,0 +1,68 @@
+---
+# 两台 PVE 宿主（pve-1 / storage-106）的 sshd：只认 key，root 不许用密码。
+#
+# 为什么只管这两台：k8s-node / k8s-worker-106 / oracle 是 Ubuntu cloud-init 装的，
+# 出厂就是 PasswordAuthentication no + PermitRootLogin without-password。PVE 安装器
+# 在 sshd_config 主文件里写死了 PermitRootLogin yes，Debian 的密码登录默认开着，
+# 于是两台宿主（拿下 = 拿下上面的 VM）反而是全舰队唯一能被局域网任何设备爆破 root 的。
+#
+# 写法：放 drop-in，不改主文件。主文件第 12 行就 Include sshd_config.d/*.conf，
+# sshd 对同一关键字「先读到的生效」，drop-in 盖得住主文件后面的 PermitRootLogin yes，
+# 且 PVE 升级重写主文件时不会把它冲掉。文件名用 00- 开头，排在其它 drop-in 前面。
+#
+# 不受影响的：所有 key 登录（vg-gitlab、restic-backup 那把 ed25519、PVE 节点间互信）；
+# PVE 网页 8006 的 root 密码登录走的是 pveproxy + PAM，跟 sshd 无关，仍是断网时的后门。
+#
+# 验收（跑完自动做一半，另一半在 Mac 上）：
+#   sshd -T 显示 permitrootlogin without-password / passwordauthentication no
+#   ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password root@<host>
+#     → 必须是 "Permission denied (publickey)."，括号里不再有 password
+- name: Harden sshd on Proxmox hosts (key-only)
+  hosts: proxmox
+  gather_facts: false
+  tasks:
+    - name: Deploy sshd hardening drop-in
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/00-homelab-hardening.conf
+        content: |
+          # Managed by homelab proxmox/ansible/playbooks/sshd-harden.yaml — do not edit by hand.
+          PermitRootLogin prohibit-password
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload sshd
+
+    - name: Validate full sshd config before reloading
+      ansible.builtin.command: sshd -t
+      changed_when: false
+      check_mode: false   # 只读，--check 时也照跑
+
+  handlers:
+    # reload 不断已有会话；配置先经 sshd -t 校验，坏了不会走到这一步
+    - name: Reload sshd
+      ansible.builtin.systemd:
+        name: ssh
+        state: reloaded
+
+- name: Assert effective sshd settings
+  hosts: proxmox
+  gather_facts: false
+  # --check 时 drop-in 没真落盘，断言必挂，跳过
+  tasks:
+    - name: Read effective sshd config
+      ansible.builtin.command: sshd -T
+      register: sshd_effective
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Effective values must be key-only
+      ansible.builtin.assert:
+        that:
+          - "'permitrootlogin without-password' in sshd_effective.stdout_lines"
+          - "'passwordauthentication no' in sshd_effective.stdout_lines"
+          - "'kbdinteractiveauthentication no' in sshd_effective.stdout_lines"
+        fail_msg: "sshd 实际生效值不对：有别的 drop-in 或 Match 块抢先了，查 /etc/ssh/sshd_config.d/"
+        quiet: true
+      when: not ansible_check_mode
