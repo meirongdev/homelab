@@ -6,7 +6,18 @@
 # Idempotent:
 #   - If /Applications/OrbStack.app already exists (m5 and M2), cask install is skipped
 #     to avoid Homebrew prompting for sudo to adopt existing app files.
-#   - On machines missing OrbStack (e.g. mac-studio), Homebrew cask installs it cleanly.
+#   - On machines missing OrbStack (e.g. mac-studio), Homebrew cask installs it.
+#   - Every orb call has a timeout: the failure mode seen here is a silent hang, not an error.
+#     2026-11-06 on Studio: after the 11-03 reboot the GUI was up but the engine never
+#     started; every orb/docker call over ssh sat at `_dyld_start` (0% CPU, no output, no
+#     sockets — `sample <pid> 1` shows it), i.e. the binary never began executing. One
+#     `docker info` waited ~55 min before it went through and auto-started the engine.
+#     The app still carries the cask's com.apple.quarantine (0181), so Gatekeeper's
+#     first-launch check is the prime suspect, but the engine came up with the flag still
+#     on, so that is NOT proven. Stripping the flag can't be automated anyway: over ssh,
+#     `xattr -dr` on /Applications/OrbStack.app fails with "Operation not permitted"
+#     (macOS App Management protection; sshd lacks that grant).
+#     Check after any Studio reboot: `ssh studio /opt/homebrew/bin/orb status` → Running.
 #   - Configures `setup.use_admin false` to prevent GUI admin password popups on headless machines.
 #   - Configures `app.start_at_login true` so it autostarts when user logs in.
 #   - Starts the daemon headlessly if not already Running.
@@ -49,6 +60,7 @@
     - name: Disable admin password prompts (rootless headless mode)
       ansible.builtin.command:
         cmd: "{{ active_orb_bin }} config set setup.use_admin false"
+      timeout: 60   # 挂死时变成失败，而不是让整个 play 无限等
       changed_when: false
       environment:
         PATH: "{{ ansible_facts.user_dir }}/.orbstack/bin:{{ homebrew_prefix }}/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -56,6 +68,7 @@
     - name: Configure OrbStack to start at login
       ansible.builtin.command:
         cmd: "{{ active_orb_bin }} config set app.start_at_login true"
+      timeout: 60   # 挂死时变成失败，而不是让整个 play 无限等
       changed_when: false
       environment:
         PATH: "{{ ansible_facts.user_dir }}/.orbstack/bin:{{ homebrew_prefix }}/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -63,6 +76,7 @@
     - name: Check OrbStack daemon status
       ansible.builtin.command:
         cmd: "{{ active_orb_bin }} status"
+      timeout: 60   # 挂死时变成失败，而不是让整个 play 无限等
       register: orb_status
       changed_when: false
       failed_when: false
@@ -72,6 +86,7 @@
     - name: Start OrbStack daemon if not running
       ansible.builtin.command:
         cmd: "{{ active_orb_bin }} start"
+      timeout: 180   # 挂死时变成失败，而不是让整个 play 无限等
       when: "'Running' not in (orb_status.stdout | default(''))"
       environment:
         PATH: "{{ ansible_facts.user_dir }}/.orbstack/bin:{{ homebrew_prefix }}/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -79,6 +94,7 @@
     - name: Assert OrbStack is running
       ansible.builtin.command:
         cmd: "{{ active_orb_bin }} status"
+      timeout: 60   # 挂死时变成失败，而不是让整个 play 无限等
       register: orb_final_status
       changed_when: false
       failed_when: "'Running' not in orb_final_status.stdout"
