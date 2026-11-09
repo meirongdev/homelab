@@ -1,9 +1,10 @@
 # Local .terraform directories
 **/.terraform/*
 
-# .tfstate files
+# .tfstate files（state 本体在 R2；本地只剩迁移前的备份与 scripts/tf-r2.sh 拍的快照，均含明文密钥）
 *.tfstate
 *.tfstate.*
+.tfstate-snapshots/
 
 # Crash log files
 crash.log

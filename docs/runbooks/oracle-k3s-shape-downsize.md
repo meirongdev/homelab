@@ -1,6 +1,6 @@
 # oracle-k3s 缩容到 2 OCPU / 12GB
 
-> Last updated: 2026-09-06
+> Last updated: 2026-11-09
 > Status: 生效事实 + 切换 SOP
 > 触发条件：需要改 `VM.Standard.A1.Flex` 的 shape（vendor 回收额度、腾额度开第二台、
 > 或事后要涨回去）。任何改 `ocpus` / `memory_gb` 的动作都走本文。
@@ -178,7 +178,7 @@ just apply
 ```bash
 cd /Users/matthew/projects/homelab/cloud/oracle/terraform
 just plan     # plan 每次都 refresh，所以会显示"零基础设施变更"，看着像没事
-terraform state show oci_core_instance.k3s | grep -E "ocpus|memory_in_gbs"
+just tf state show oci_core_instance.k3s | grep -E "ocpus|memory_in_gbs"
 #   ← 这里才照出真相：refresh 是**内存里**的，不落盘。手工改完这里仍是旧值 4/24
 just apply    # 0 added, 0 changed, 0 destroyed —— 只把 refresh 结果和 outputs 落盘
 ```

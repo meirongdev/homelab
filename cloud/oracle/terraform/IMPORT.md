@@ -2,6 +2,11 @@
 
 This document walks through importing the existing OCI resources into Terraform state.
 
+> Since 2026-11-09 the state lives in R2 ([docs/reference/terraform-state.md](../../../docs/reference/terraform-state.md)),
+> so a new machine does **not** need this — `just init` and it reads the remote state.
+> Use this guide only if the R2 copy itself is lost. The `just import` recipe already
+> goes through the backend-credential wrapper.
+
 ## Step 1: Collect OCIDs from OCI Console
 
 Open **OCI Console** and collect the following OCIDs:

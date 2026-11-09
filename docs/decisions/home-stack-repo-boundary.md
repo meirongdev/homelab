@@ -51,6 +51,7 @@
 | 隧道 `cloudflared` 配置 | **homelab** | 与 home-stack 无关（Workers 不经隧道）|
 | zone 设置 / WAF / 限流 | **homelab 独占** | 站点要 WAF 例外 → 改动落在 homelab（见后果）|
 | R2 桶 `terraform-backend` 本体与生命周期 | **homelab** | home-stack 只拥有 `home-stack/` 这个 key 前缀 |
+| R2 桶 `homelab-tfstate`（homelab 全部 state，2026-11-09 起） | **homelab 独占** | ☠️ home-stack 的任何 token 都不授权到这个桶：R2 token 最细只到桶，而 homelab state 含明文密钥 → [terraform-state.md](../reference/terraform-state.md) |
 | 部署凭据 | **各自一枚最小权限 token** | ☠️ 不把 homelab 的宽 token 放进 home-stack 的 CI secret |
 | 可用性监控（Uptime Kuma、Homepage 磁贴） | **homelab** | home-stack 只管应用层正确性（内容校验、渲染一致性）|
 | 文档 | zone/入口的事实在 homelab `reference/`；部署 SOP 在 home-stack 的 runbook | 互链不复制。⚠️ homelab 是私有仓库 → home-stack 的文档必须自成一体，不能依赖读者点进 homelab |

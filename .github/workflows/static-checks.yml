@@ -139,7 +139,7 @@ jobs:
 
       - name: terraform validate（每个 root）
         # fmt 只管缩进；validate 才查引用了不存在的变量 / 属性名写错 / provider 参数不合法。
-        # -backend=false：不碰 state（7 个 root 全是本地 state，CI 里根本没有），只装 provider。
+        # -backend=false：不碰 state（state 在 R2，CI 刻意没有它的凭据），只装 provider。
         # 版本按各 root 的 .terraform.lock.hcl 钉死，所以这里下载的就是现网用的那一版。
         # 2026-09-02 加；此前 7 个 root 都没有任何语义校验，写错只在 plan 时才炸。
         run: |

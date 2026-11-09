@@ -61,6 +61,10 @@
 
 - [storage.md](storage.md) — 全 `local-path` 布局、NFS 退役事实与故障签名、PVC 清单与迁移程序、restic 备份设计
 
+### 基础设施即代码（Terraform）
+
+- [terraform-state.md](terraform-state.md) — 全部 root 的 state 在 R2 桶 `homelab-tfstate`（S3 backend + `use_lockfile`），凭据经 `scripts/tf-r2.sh` 从 Vault 现取。☠️ 裸敲 `terraform` 会因缺凭据失败；Vault 不在时的 break-glass、改动前快照与恢复
+
 ### GitOps
 
 - [argocd-app-patterns.md](argocd-app-patterns.md) — 控制面部署形态、Application 清单（按 project 分组）与备注、pattern 对比、新增 Application 的 4 个坑

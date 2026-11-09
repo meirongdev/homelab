@@ -41,7 +41,9 @@ git config core.hooksPath .githooks   # 一次性：让 just check 在 push 前�
 
 ## Quick Start Summary
 
-1. **Infrastructure**: `cd proxmox/terraform && just init && just apply`
+1. **Infrastructure**: `cd proxmox/terraform && just init && just plan && just apply`
+   （terraform 的 state 在 R2，凭据平时从 Vault 取；从零搭建时 Vault 还不存在，先按
+   [break-glass](docs/reference/terraform-state.md) export 三个 R2 变量）
 2. **Kubernetes**: `cd k8s/ansible && just setup-k8s && just fetch-kubeconfig`
 3. **Secrets**: `cd k8s/helm && just deploy-vault && just vault-init && just vault-unseal && just deploy-eso`
 4. **GitOps**: `cd k8s/helm && just deploy-argocd`（装控制面到 **oracle-k3s**）然后

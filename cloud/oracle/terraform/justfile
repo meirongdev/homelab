@@ -7,24 +7,33 @@
 # ⚠️ 刻意不提供 `destroy`：销毁 OCI 基础设施只该手敲一次并逐字读过输出。
 #    整集群退役的顺序与残余清扫见 docs/runbooks/oracle-k3s-rebuild.md。
 #
-# state 在本地（ROADMAP 开放项 #2），且 `terraform.tfvars` 被 gitignore：
-# 换机器要先按 IMPORT.md 把已有资源 import 回来。
+# state 在 R2（docs/reference/terraform-state.md），换机器不必再 import；但 `terraform.tfvars`
+# （OCI 认证）仍被 gitignore，新机器要先补回它。IMPORT.md 只在 R2 那份 state 也丢了时才用得上。
+
+# 所有 terraform 调用都经这个包装：它从 Vault 取 R2 后端凭据（state 在 R2，见
+# docs/reference/terraform-state.md）。裸敲 terraform 会因缺凭据失败。
+terraform := source_directory() / "../../../scripts/tf-r2.sh"
 
 init:
-    terraform init
+    {{terraform}} init
 
 plan:
-    terraform plan
+    {{terraform}} plan
 
 apply:
-    terraform apply
+    {{terraform}} apply
 
 # 导入已有 OCI 资源；六个参数按位置 = VCN/网关/路由表/安全列表/子网/实例 的 OCID（见 IMPORT.md）
 import vcn igw rt sl subnet instance:
-    terraform import oci_core_vcn.main {{vcn}}
-    terraform import oci_core_internet_gateway.main {{igw}}
-    terraform import oci_core_route_table.public {{rt}}
-    terraform import oci_core_security_list.main {{sl}}
-    terraform import oci_core_subnet.public {{subnet}}
-    terraform import oci_core_instance.k3s {{instance}}
+    {{terraform}} import oci_core_vcn.main {{vcn}}
+    {{terraform}} import oci_core_internet_gateway.main {{igw}}
+    {{terraform}} import oci_core_route_table.public {{rt}}
+    {{terraform}} import oci_core_security_list.main {{sl}}
+    {{terraform}} import oci_core_subnet.public {{subnet}}
+    {{terraform}} import oci_core_instance.k3s {{instance}}
     @echo "导入完成 —— 跑 just plan 核对漂移（预期见 IMPORT.md Step 5）"
+
+# 任意 terraform 子命令，带上 R2 后端凭据：如 `tf state list`、`tf output`
+[positional-arguments]
+tf *args:
+    @{{terraform}} "$@"

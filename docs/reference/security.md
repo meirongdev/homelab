@@ -1,6 +1,6 @@
 # K3s 集群安全架构 (Security Architecture)
 
-> Last updated: 2026-11-06
+> Last updated: 2026-11-09
 > Status: 生效事实
 > Scope: 双集群（homelab + oracle-k3s）的纵深防御模型，本文是 source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
@@ -61,6 +61,9 @@
 - **Vault 是所有 app 密钥的唯一真相源**，ESO 同步到 K8s Secret。路径约定：homelab `secret/homelab/<svc>`，oracle `secret/oracle-k3s/<svc>`。
 - **静默陈旧防护**：`externalsecret`/`(cluster)secretstore` `Ready=False` 经 Telegram 告警（`manifests/monitoring/alerts/eso-alerts.yaml`），防 Vault 封印/token 过期后 app 静默用旧值。
 - 本地 `.env` 仅用于 bootstrap token（gitignore）。
+- **Terraform state 是 Vault 之外另一处成规模的明文密钥**（两台 VM 的 cloud-init 用户密码、Tailscale 预授权 key、Aiven 服务的连接信息与密码；Cloudflare/Oracle 那三个 root 没有）：
+  放在 R2 私有桶 `homelab-tfstate`，token 只授权这一个桶，☠️ 不与公开仓库 home-stack 的 CI 共用桶；
+  执行机本地另有改动前快照 `.tfstate-snapshots/`（0600、gitignored）→ [terraform-state.md](terraform-state.md)。
 - ☠️ 密钥别进命令行：argv 会被 Tetragon 送进 Loki（§8.5）。
 - **不留常驻明文 Vault 清单**：`vault_values.md` 一类 dump 按需生成、用完即删，`.gitignore` 的 `**/vault_values.md` 作护栏。陈旧 dump 比没有更糟（死路径与漏掉的活路径并存）。
 

@@ -1,6 +1,6 @@
 # Networking & Ingress — 入口链路与 DNS 自动化
 
-> Last updated: 2026-10-28
+> Last updated: 2026-11-09
 > Status: 生效事实
 >
 > 南北向入口（Cloudflare → Cilium Gateway）与 DNS 自动化（external-dns）。
@@ -79,7 +79,8 @@ Security List 另有 3 条管理入站，见 [security.md §2](security.md)（WA
 - **Cloudflare token**：两集群共用同一把 Zone 级 API Token（Vault `secret/homelab/external-dns` → ESO）。
   ⚠️ `cloudflare/terraform/` 的有效 token 在 gitignored 的 `.env`，由 justfile（`set dotenv-load`）经
   `-var` 注入，必须 `cd cloudflare/terraform && just plan`/`just apply`；裸跑 `terraform plan` 读到
-  `terraform.tfvars` 里的无效值而报错，看着像 token 失效，其实不是。
+  `terraform.tfvars` 里的无效值而报错，看着像 token 失效，其实不是（且如今会先因缺 R2 后端凭据失败，
+  见 [terraform-state.md](terraform-state.md)）。
 
 ## 不走这条链的 meirong.dev 主机名（集群外托管）
 

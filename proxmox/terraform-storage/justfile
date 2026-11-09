@@ -1,6 +1,10 @@
 # storage-106 terraform tasks
 # ⚠️ 本机直连两台 PVE 的 :8006 均不通（SSH 22 正常）——所以 plan/apply 依赖 _tunnel。
 
+# 所有 terraform 调用都经这个包装：它从 Vault 取 R2 后端凭据（state 在 R2，见
+# docs/reference/terraform-state.md）。裸敲 terraform 会因缺凭据失败。
+terraform := source_directory() / "../../scripts/tf-r2.sh"
+
 # Show help
 help:
     @just --list --unsorted
@@ -21,15 +25,15 @@ init:
       echo "Creating terraform.tfvars from example (记得填 api token，见 provider.tf 注释)..."; \
       cp terraform.tfvars.example terraform.tfvars; \
     fi
-    terraform init
+    {{terraform}} init
 
 # Plan all changes
 plan: _tunnel
-    terraform plan -out=terraform.plan
+    {{terraform}} plan -out=terraform.plan
 
 # Apply the plan
 apply: _tunnel
-    terraform apply terraform.plan
+    {{terraform}} apply terraform.plan
 
 # ☠️ 这台 VM 自 2026-08-13 起是 **homelab 集群的 worker `k8s-worker-106`**，
 #    不再是「随便拆」的实验田。destroy 会让 prod 集群 node NotReady。
@@ -38,4 +42,9 @@ apply: _tunnel
 #      kubectl --context k3s-homelab delete node k8s-worker-106
 #    决策：docs/decisions/storage106-as-homelab-worker.md
 destroy: _tunnel
-    terraform destroy
+    {{terraform}} destroy
+
+# 任意 terraform 子命令，带上 R2 后端凭据：如 `tf state list`、`tf output`
+[positional-arguments]
+tf *args:
+    @{{terraform}} "$@"

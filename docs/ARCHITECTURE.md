@@ -1,7 +1,7 @@
 # Homelab Architecture
 
 > 单页架构总览，双集群 homelab（homelab + oracle-k3s）。
-> Last updated: 2026-11-06
+> Last updated: 2026-11-09
 
 ## Network Topology
 
@@ -77,5 +77,5 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 
 ## Current Active Work
 
-开放项（离站备份、Terraform state → R2、prometheus-operator CRD 补升、DGX Spark 入编 等）
+开放项（离站备份、prometheus-operator CRD 补升、DGX Spark 入编 等）
 统一维护在 [`ROADMAP.md`](ROADMAP.md)，此处不复制。

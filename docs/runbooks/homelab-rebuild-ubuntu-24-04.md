@@ -8,7 +8,7 @@
 > ⚠️ **Phase 4 不要照抄**：其中的保守模式（`kubeProxyReplacement: false`、`gatewayAPI.enabled: false`）
 > 是当年为绕开那个 BPF bug 的临时手段。**标准配置是 `kubeProxyReplacement: true` + Cilium Gateway API**，
 > 见 `k8s/cilium/README.md` 与 `just deploy-cilium`。
-> Last updated: 2026-09-01
+> Last updated: 2026-11-09
 
 ## Goal
 
@@ -91,27 +91,36 @@ This downloads:
 
 ## Phase 2: Destroy and Recreate the Proxmox VM
 
-Destroy only the K3s VM:
+☠️ **First carry the R2 backend credentials into this shell.** Vault runs on this very VM, so
+once it is destroyed `just` can no longer fetch the terraform backend credentials
+([terraform-state.md](../reference/terraform-state.md) break-glass). Run every step below in this
+same shell:
 
 ```bash
-cd /Users/matthew/projects/homelab/proxmox/terraform
-just destroy-vm
+export VAULT_ADDR=https://vault.meirong.dev
+eval "$(vault kv get -format=json secret/homelab/terraform-r2 | jq -r '.data.data | @sh "export AWS_ACCESS_KEY_ID=\(.access_key_id) AWS_SECRET_ACCESS_KEY=\(.secret_access_key) AWS_ENDPOINT_URL_S3=\(.endpoint)"')"
 ```
 
-Recreate it from the 24.04 image:
+The VM has `protection = true`, so the PVE API refuses to delete it. Lift it on pve, then destroy
+(the root has one VM, so a full `destroy` is "destroy only the K3s VM"):
 
 ```bash
-cd /Users/matthew/projects/homelab/proxmox/terraform
-just apply-vm
-```
-
-If you prefer a full Terraform cycle instead:
-
-```bash
+ssh -i ~/.ssh/vgio root@192.168.50.4 qm set 100 --protection 0
 cd /Users/matthew/projects/homelab/proxmox/terraform
 just destroy
+```
+
+Recreate it from the 24.04 image (`apply` applies the saved plan, so `plan` comes first;
+`protection` returns to `true` with it):
+
+```bash
+cd /Users/matthew/projects/homelab/proxmox/terraform
+just plan
 just apply
 ```
+
+(Before 2026-09-09 this section used `just destroy-vm` / `just apply-vm`; those recipes no
+longer exist.)
 
 Validate the VM on Proxmox:
 

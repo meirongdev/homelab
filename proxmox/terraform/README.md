@@ -16,6 +16,10 @@ just plan    # 自动起 SSH 隧道（本机直连 :8006 不通）
 just apply
 ```
 
+⚠️ state 在 R2，`just` 每次从 Vault 取后端凭据。☠️ **重建这台 VM 时 Vault 也不在**（它就跑在这台
+VM 上的集群里）：先按 [break-glass](../../docs/reference/terraform-state.md) 从 Cloudflare 控制台另建
+token、export 三个变量，再跑上面的配方。
+
 ☠️ `terraform plan` 出现 `-/+`（replace）就停：VM 盘上有 homelab 全部 local-path PVC。
 VM 已设 `protection = true`，PVE API 会拒绝删 VM/删盘，`just destroy` 也会被挡。
 

@@ -2,11 +2,20 @@ set dotenv-load
 
 export CLOUDFLARE_API_TOKEN := env_var_or_default("CLOUDFLARE_API_TOKEN", "")
 
+# 所有 terraform 调用都经这个包装：它从 Vault 取 R2 后端凭据（state 在 R2，见
+# docs/reference/terraform-state.md）。裸敲 terraform 会因缺凭据失败。
+terraform := source_directory() / "../../scripts/tf-r2.sh"
+
 init:
-    terraform init
+    {{terraform}} init
 
 plan:
-    terraform plan -var="cloudflare_api_token=${CLOUDFLARE_API_TOKEN}"
+    {{terraform}} plan -var="cloudflare_api_token=${CLOUDFLARE_API_TOKEN}"
 
 apply:
-    terraform apply -auto-approve -var="cloudflare_api_token=${CLOUDFLARE_API_TOKEN}"
+    {{terraform}} apply -auto-approve -var="cloudflare_api_token=${CLOUDFLARE_API_TOKEN}"
+
+# 任意 terraform 子命令，带上 R2 后端凭据：如 `tf state list`、`tf output`
+[positional-arguments]
+tf *args:
+    @{{terraform}} "$@"

@@ -52,12 +52,13 @@ Crossplane v2（2025-08 GA，评估时 v2.3：MR/XR 全面 namespaced、composit
 | 痛点 | Crossplane 路线 | 实际采用的更轻解 | 落地 |
 |---|---|---|---|
 | 子域名两步走 | CF provider（已死） | **external-dns**（~20MB 控制器） | ✅ 2026-07-19/20 两集群全量，见 [ADR](external-dns-adoption.md) |
-| Terraform 缺 GitOps 感 | provider-terraform 套娃 | **R2 state backend + `use_lockfile`** | 🚧 未做，ROADMAP 开放项 #2 · [方案](../plans/2026-08-03-tf-state-r2.md) |
+| Terraform 缺 GitOps 感 | provider-terraform 套娃 | **R2 state backend + `use_lockfile`** | ✅ 2026-11-09 全部 root 迁入 · [现状](../reference/terraform-state.md) · [方案](../plans/2026-08-03-tf-state-r2.md) |
 | 学习/履历动机 | — | 在 oracle-k3s 装官方 OCI provider 管一个非关键 bucket 当沙箱，**不迁生产路径** | 未做 |
 
 ## Consequences
 
 - 云面继续由 Terraform 管，**接受**"state 在本地、无锁"这个已知缺口，直到 R2 backend 落地（ROADMAP #2）。
+  （2026-11-09 已落地，这个缺口已关闭。）
 - 子域名 toil 已被 external-dns 单独消除，**不需要**为它引入控制面：这是本决策成立的关键前提之一：
   痛点被逐个拆掉后，"统管"的剩余收益不足以支付上面三条成本。
 - 不获得跨云统一 API / 自助式资源申请能力。单人场景下这不是损失。

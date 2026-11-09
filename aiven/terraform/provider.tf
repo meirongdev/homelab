@@ -6,11 +6,23 @@ terraform {
     }
   }
 
-  # Backend intentionally omitted = local state, same as every other root here.
-  # Moving state to R2 is ONE decision for ALL roots (docs/ROADMAP.md, 开放项 #2,
-  # plan docs/plans/2026-08-03-tf-state-r2.md). Do not migrate this root alone:
-  # "one remote, seven local" is the kind of silent split this repo keeps
-  # having to clean up.
+  # state 在 R2 桶 homelab-tfstate，key = 本 root 的仓库相对路径（2026-11-09 迁入）。
+  # 凭据与端点经环境变量给，由 scripts/tf-r2.sh 从 Vault 现取：走 just，别敲裸 terraform。
+  # → docs/reference/terraform-state.md
+  backend "s3" {
+    bucket       = "homelab-tfstate"
+    key          = "aiven/terraform/terraform.tfstate"
+    region       = "auto"
+    use_lockfile = true
+
+    # R2 不是真 S3：这几个 AWS 专属的校验步骤必须关。
+    skip_credentials_validation = true
+    skip_region_validation      = true
+    skip_requesting_account_id  = true
+    skip_metadata_api_check     = true
+    skip_s3_checksum            = true
+    use_path_style              = true
+  }
 }
 
 # Auth is an Aiven API key. Scope it as narrowly as the console allows (Project,

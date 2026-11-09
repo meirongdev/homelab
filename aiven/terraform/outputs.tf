@@ -1,7 +1,8 @@
 # What an app needs to connect. Everything sensitive is `sensitive`, which keeps
 # it out of `terraform plan`'s human output — but note it is STILL stored in
-# terraform.tfstate in plaintext, exactly like the PVE password in
-# proxmox/terraform. That is the known gap behind docs/ROADMAP.md (开放项 #2).
+# the state in plaintext, exactly like the VM's cloud-init password in proxmox/terraform.
+# The state lives in a private R2 bucket whose token is scoped to it alone
+# (docs/reference/terraform-state.md) — still a secret at rest, not a public one.
 #
 # ☠️ Do not wire these straight into a Kubernetes manifest. Connection details
 #    reach the clusters through Vault + ESO like every other secret here

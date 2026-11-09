@@ -32,7 +32,7 @@ cp terraform.tfvars.example terraform.tfvars
 # Edit terraform.tfvars: set cloudflare_account_id and tunnel_id
 # (terraform_managed_dns stays empty — external-dns owns subdomain DNS, see below)
 
-# 3. Initialize Terraform
+# 3. Initialize Terraform (connects to the R2 backend; needs Vault, see State Management)
 just init
 ```
 
@@ -182,9 +182,15 @@ The API token needs these permissions:
 
 ## State Management
 
-Terraform state is stored **locally** (`terraform.tfstate`). This file is gitignored.
+State lives in Cloudflare R2 since 2026-11-09 (bucket `homelab-tfstate`, key
+`cloudflare/terraform/terraform.tfstate`, locked with `use_lockfile`). Run terraform
+through `just` (`just plan`, `just tf <subcommand>`): the recipes fetch the backend
+credentials from Vault, so a bare `terraform` fails with `No valid credential sources found`.
+Details, break-glass and snapshots: [docs/reference/terraform-state.md](../../docs/reference/terraform-state.md).
 
-> **Future**: The `provider.tf` contains a commented-out S3 backend configuration for Cloudflare R2 (`terraform-backend` bucket, already created). Enable it once the local TLS handshake issue with `*.r2.cloudflarestorage.com` is resolved.
+> The old commented-out backend pointed at the `terraform-backend` bucket and was shelved
+> over a "LibreSSL TLS handshake" issue. That bucket now belongs to the public home-stack
+> repo's CI token, and the TLS issue never applied to terraform (a Go binary with its own TLS).
 
 ## File Structure
 
@@ -194,10 +200,10 @@ cloudflare/terraform/
 ├── .env.example             # Template for .env
 ├── main.tf                  # Tunnel config + DNS records
 ├── waf.tf                   # WAF rules + zone security settings
-├── provider.tf              # Cloudflare provider + backend config
+├── provider.tf              # Cloudflare provider + R2 backend config
 ├── variables.tf             # Variable definitions
 ├── terraform.tfvars         # Actual values (gitignored)
 ├── terraform.tfvars.example # Template for terraform.tfvars
-├── justfile                 # just init/plan/apply
+├── justfile                 # just init/plan/apply/tf (via scripts/tf-r2.sh)
 └── README.md                # This file
 ```

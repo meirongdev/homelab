@@ -94,9 +94,9 @@ variable "pg_databases" {
 # the provider marks `aiven_pg_user.password` Computed + Sensitive, and
 # `sensitive` hides a value from output, not from the state file. An earlier
 # version of this comment claimed the opposite. Treat state as a secret at rest
-# (same as the PVE password in proxmox/terraform — docs/ROADMAP.md 开放项 #2).
+# (same as the VM's cloud-init password in proxmox/terraform — docs/reference/terraform-state.md).
 #
-# Read a password once (Console, or `terraform output`/`terraform show`) and put
+# Read a password once (Console, or `just tf output`/`just tf show`) and put
 # it in Vault like every other secret here. The provider does offer `password_wo`
 # (write-only, never persisted), but it takes a password you supply — it removes
 # the state copy only by making this root the place the password is authored,

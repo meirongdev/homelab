@@ -1,6 +1,6 @@
 # Tailscale Cross-Cluster Networking
 
-> Last updated: 2026-10-28
+> Last updated: 2026-11-09
 > Status: 生效事实
 
 ## 速览
@@ -374,7 +374,7 @@ just setup-tailscale $(cd ../../../tailscale/terraform && just oracle-authkey)
    自定义 ACL，先 import 再 apply：
    ```bash
    cd tailscale/terraform && export $(grep -v '^#' .env | xargs)
-   terraform import -var="tailscale_oauth_client_id=$TAILSCALE_OAUTH_CLIENT_ID" \
+   just tf import -var="tailscale_oauth_client_id=$TAILSCALE_OAUTH_CLIENT_ID" \
      -var="tailscale_oauth_client_secret=$TAILSCALE_OAUTH_CLIENT_SECRET" tailscale_acl.main acl
    ```
 2. **`tailscale up --authkey=...` 无输出挂住**，`tailscale status` 报 `node nodekey:... already exists`：旧 key
@@ -395,9 +395,9 @@ just setup-tailscale $(cd ../../../tailscale/terraform && just oracle-authkey)
      ssh -i ~/.ssh/vgio -o ProxyCommand="ssh -i ~/.ssh/vgio -W %h:%p ubuntu@100.107.166.37" root@10.10.10.10
      ```
      tailnet 整个不可用时才换成 oracle 公网 IP。它不进仓库（`scripts/check-public-ips.py`），现取不落盘；
-     新克隆没有 terraform state 时去 OCI 控制台看：
+     Vault 不可用（取不到 [R2 后端](terraform-state.md)凭据）时去 OCI 控制台看：
      ```bash
-     ORACLE_PUB=$(cd cloud/oracle/terraform && terraform output -raw instance_public_ip)
+     ORACLE_PUB=$(cd cloud/oracle/terraform && just tf output -raw instance_public_ip)
      ssh -i ~/.ssh/vgio -o ProxyCommand="ssh -i ~/.ssh/vgio -W %h:%p ubuntu@$ORACLE_PUB" root@10.10.10.10
      ```
    - 经 Proxmox QEMU agent（pve `192.168.50.4` 在 LAN 上，`k8s-node` 的 VM ID 是 `100`）：

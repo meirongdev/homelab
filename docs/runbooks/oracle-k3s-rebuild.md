@@ -10,7 +10,7 @@
 > 数据一律从 restic 恢复（见 [backup-recovery.md](backup-recovery.md)），
 > 无更早状态可退。注豁免。
 >
-> Last updated: 2026-09-06
+> Last updated: 2026-11-09
 > Status: 生效 SOP
 
 ## 现状（一句话）
@@ -54,8 +54,8 @@ just plan    # 核对实例形状/是否保留 boot volume
 just apply
 ```
 
-- ⚠️ terraform state 在本地（ROADMAP 开放项 #2，未离站）：这台 Mac 丢了 state 就得
-  按 `cloud/oracle/terraform/IMPORT.md` 重新 import。
+- terraform state 在 R2（[terraform-state.md](../reference/terraform-state.md)），换机器也读得到；
+  只有 R2 那份也丢了，才需要按 `cloud/oracle/terraform/IMPORT.md` 重新 import。
 - 若 VM 还在、只是 OS 层损坏：跳过本步，`cd cloud/oracle/ansible && just cleanup-k3s`
   后直接进第 2 步。
 

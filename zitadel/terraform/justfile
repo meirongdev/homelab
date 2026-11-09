@@ -6,26 +6,35 @@ export SMTP_USER := env_var_or_default("SMTP_USER", "")
 export SMTP_PASSWORD := env_var_or_default("SMTP_PASSWORD", "")
 export SMTP_FROM := env_var_or_default("SMTP_FROM", "")
 
+# 所有 terraform 调用都经这个包装：它从 Vault 取 R2 后端凭据（state 在 R2，见
+# docs/reference/terraform-state.md）。裸敲 terraform 会因缺凭据失败。
+terraform := source_directory() / "../../scripts/tf-r2.sh"
+
 init:
-    terraform init
+    {{terraform}} init
 
 plan:
-    terraform plan \
+    {{terraform}} plan \
         -var="zitadel_token=${ZITADEL_TOKEN}" \
         -var="smtp_user=${SMTP_USER}" \
         -var="smtp_password=${SMTP_PASSWORD}" \
         -var="smtp_from=${SMTP_FROM}"
 
 apply:
-    terraform apply -auto-approve \
+    {{terraform}} apply -auto-approve \
         -var="zitadel_token=${ZITADEL_TOKEN}" \
         -var="smtp_user=${SMTP_USER}" \
         -var="smtp_password=${SMTP_PASSWORD}" \
         -var="smtp_from=${SMTP_FROM}"
 
 destroy:
-    terraform destroy \
+    {{terraform}} destroy \
         -var="zitadel_token=${ZITADEL_TOKEN}" \
         -var="smtp_user=${SMTP_USER}" \
         -var="smtp_password=${SMTP_PASSWORD}" \
         -var="smtp_from=${SMTP_FROM}"
+
+# 任意 terraform 子命令，带上 R2 后端凭据：如 `tf state list`、`tf output`
+[positional-arguments]
+tf *args:
+    @{{terraform}} "$@"

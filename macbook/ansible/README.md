@@ -138,7 +138,7 @@ just packages && just mise && just ai-clis            # 全部（按各自的组
 | 哪一块 | 归谁管 | 内容 |
 |---|---|---|
 | 远端常驻 | 本目录 `herdr.yaml`（`just herdr`） | herdr 本体、开机拉起 server 的 LaunchAgent、claude/codex 的 integration |
-| 凭据 | dotfiles 仓库，chezmoi `role=agent` | 和 M5 相同，只少 Terraform（state 只在 M5 上，有 token 没 state 时 `apply` 会把资源再建一份）。kubeconfig、gcloud 这类工具自己维护的登录状态是从 M5 一次性拷的，命令和 M2 的差异都写在 dotfiles README |
+| 凭据 | dotfiles 仓库，chezmoi `role=agent` | 和 M5 相同，只少 Terraform（当初的理由是 state 只在 M5 上、有 token 没 state 时 `apply` 会把资源再建一份；2026-11-09 state 已迁 R2，这条理由不再成立，但仍未下发）。kubeconfig、gcloud 这类工具自己维护的登录状态是从 M5 一次性拷的，命令和 M2 的差异都写在 dotfiles README |
 | M5 这端 | `herdr machine add studio` / `herdr machine add m2`，一次性，存在 M5 的 herdr 配置里 | SSH 目标就是 `~/.ssh/config` 里的 `studio`、`m2` 两个 Host（也由 dotfiles 下发） |
 
 在 M5 上（`herdr` TUI 的侧栏里也能直接切到这两台）：

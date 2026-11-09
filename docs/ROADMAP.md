@@ -1,6 +1,6 @@
 # Homelab Roadmap
 
-> Last updated: 2026-11-06
+> Last updated: 2026-11-09
 > 本文只回答两件事：**还剩什么没做**，和**为什么不做**。做过什么在
 > [CHANGELOG.md](CHANGELOG.md)（2026-09-02 拆出，原因见那里）。
 > **实施细节不写在这里**：每条压到一句话，展开看链接指向的 `reference/`（事实）、
@@ -24,7 +24,6 @@
 | # | 项目 | 说明 |
 |---|------|------|
 | 1 | **离站备份** | restic 仓库 → 云（OCI always-free / B2）。当前只有 106 本地副本，**火灾/失窃即全损**。恢复演练已自动化，但只证明「106 上那份能恢复」。需人工先开云桶；rclone 同步段刻意等开桶时一并做。（[方案](plans/2026-08-03-offsite-backup.md) · [Phase 5](plans/2026-07-06-storage-local-migration-and-backup-redesign.md) · [演练](reference/storage.md)，母文档 P0-1） |
-| 2 | **Terraform state → R2** | **root 数量会漂，动手前现算**：`find . -name '*.tf' -not -path '*/.terraform/*' -exec dirname {} \; \| sort -u`（2026-09-17 实测 8 个，含 `aiven/terraform`；下表停在 5 个，写在两个 root 存在之前）。全本地 state：笔记本单点、无锁、含明文密钥。顺带可评估 OpenTofu + `use_lockfile`。（[方案](plans/2026-08-03-tf-state-r2.md) · [演进路线 Phase A](plans/2026-07-07-tech-debt-and-evolution.md)） |
 | 3 | **DGX ×2 文件系统指标（待重部署）** | `node-exporter-deploy.yml` 已含 `--path.rootfs=/host`，但 **live 跑的仍是修复前的旧容器**（2026-08-03 实测 `up==1` 却无 `node_filesystem_size_bytes`）。动作 = 在 `nv-dgx-spark` 对两台重跑 `make node-exporter-deploy`。macbook 缺 `node_memory_MemAvailable_bytes` 是 darwin 固有限制，不可修。 |
 | 5 | **DGX Spark 入编** | 推理服务 IaC + GPU 指标（dcgm）+ 双机 fallback + SLO。2026-09-20 上游把两台 GB10 的 k3s 彻底移除（docker 成唯一运行时）；当前两引擎指标均已接入 `dgx-inference` job（S1 SGLang `:8888` `sglang:*` / S2 vLLM `:18300` `vllm:*`，2026-09-21 双引擎化）。⚠️ 网络对接已有结论：**不接 ClusterMesh**，走 Tailscale + 手写 Endpoints（[决策](decisions/dgx-clustermesh-not-adopted.md)）。剩余开放：dcgm GPU 指标、双机 fallback（S2 `fndgx` 栈尚未入 LiteLLM 网关，无别名 / 白名单）、SLO。（母文档 P1-5） |
 | 9 | **jobs-sg 收尾** | 均不阻塞服务：① 周报 Telegram 已接好，只差端到端实测一次推送；② Grafana 面板未做（`jobs_sg_*` 已在采，可用 Explore）；③ `closed` 寿命口径 A/B 待观察 2–3 周再定；④ 推理封顶后两个旋钮待实测：`LLM_CONCURRENCY=8` 高于引擎 KV 上限 5.34（降到 5 是省排队还是把同一批活拉得更长，未测不改），以及封顶后若仍有残留超时则 `LLM_RETRIES` 0→1（那时一次重试只值约 20s）。（[jobs-sg.md](reference/jobs-sg.md)） |

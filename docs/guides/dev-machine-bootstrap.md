@@ -1,6 +1,6 @@
 # 新机器开发环境 bootstrap（配到能改 homelab repo）
 
-> Last updated: 2026-10-12
+> Last updated: 2026-11-09
 > 面向「换了一台 Mac，要把本机环境配到能 clone、改、验证这个 repo」的流程。
 > 排障/恢复类走 [runbooks/](../runbooks/README.md)；AI 助手上下文见 [../AGENTS.md](../AGENTS.md)（唯一上下文文件，细节按域在 [reference/](../reference/README.md)）。
 
@@ -40,10 +40,9 @@ cd macbook/ansible && just packages m5 && just mise m5 && just ai-clis m5   # m5
   （106 上的 worker VM，2026-08-15 新增）、`cloudflare/terraform`、`tailscale/terraform`、
   `zitadel/terraform`、`cloud/oracle/terraform`、`cloud/oracle/cloudflare`、
   `aiven/terraform`（Aiven free-tier PostgreSQL，2026-09-17 新增——唯一不在自己 VPC
-  里的一个，见 `aiven/README.md`）。
-  （⚠️ `2026-08-03-tf-state-r2.md` 的迁移表只列了当时存在的 5 个 root：写在
-  `proxmox/terraform-storage` 存在之前，也没覆盖 `zitadel/terraform`；`aiven/terraform`
-  更不在里面。迁 R2 时按上面这条 `find` 现算清单，别照那张表抄。）
+  里的一个，见 `aiven/README.md`）。清单会漂，以
+  `find . -name '*.tf' -not -path '*/.terraform/*' -exec dirname {} \; | sort -u` 为准。
+  全部经 `just` 调用（state 在 R2，见 §5）。
 - `kubectl`：context 名固定为 `k3s-homelab` 与 `oracle-k3s`。
 
 ☠️ **macOS 本地网络授权（TCC）会让 terraform/kubectl 连内网 100% `no route to host`**。
@@ -108,18 +107,13 @@ git config core.hooksPath .githooks
   `just aiven plan` 从根跑也会读到 —— `mod` 会切到该目录再找 `.env`）。☠️ 换机时
   **别顺手拷 `~/.config/aiven/`**：那是**公司**账号的 CLI 凭据，与本仓库无关，
   混用的后果是在公司账号上建资源。→ `aiven/README.md`
-- **本机 `terraform.tfstate*`**：判据永远是这条 `find`，不是下面这份名单 ——
-  名单会随 apply/destroy 变，而"有 state"跟"root 存在"是两件事：
-  `find . -name terraform.tfstate -not -path '*/.terraform/*'`。
-  2026-09-17 实测 8 个：`proxmox/terraform`、`proxmox/terraform-storage`、
-  `cloudflare/terraform`、`tailscale/terraform`、`zitadel/terraform`、
-  `cloud/oracle/terraform`、`cloud/oracle/cloudflare`、`aiven/terraform`。
-  ⚠️ `aiven/terraform` 这份 state 是 **`terraform import` 出来的**，不是 apply 建的
-  （服务本身在 Console 早于本 root 存在）。换机时若没拷到，恢复动作也是重新 import
-  而不是 apply —— 判据：`just aiven plan` 若报 "1 to add" 就说明 state 丢了，此时
-  apply 会去建**第二个**服务。
-  **state 只在本地**（ROADMAP 开放项 #2，未离站）：漏拷哪个，那个 root 就只能
-  `terraform import` 重建（见 `cloud/oracle/terraform/IMPORT.md`）。
+- **terraform state 不用拷**：2026-11-09 起全部 root 的 state 在 R2，新机器只要
+  `vault` CLI 能读 `secret/homelab/terraform-r2`（`~/.vault-token`），再在每个 root
+  跑一次 `just init` 即可。验收：`cd aiven/terraform && just plan` 不报 "1 to add"
+  （报了就是没接上远端 state，此时 apply 会去建**第二个**服务）。
+  → [terraform-state.md](../reference/terraform-state.md)
+  旧机器上的 `terraform.tfstate.pre-r2*.backup` 与 `.tfstate-snapshots/` 是本地历史副本，
+  含明文密钥，不必带走。
 - 各 terraform root 的 `terraform.tfvars`（含明文密钥，勿提交）：对着
   `terraform.tfvars.example` 重建或直接拷。
 

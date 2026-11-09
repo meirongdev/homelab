@@ -77,6 +77,12 @@ provider active) or send yourself a test, and confirm the
 
 - **Not** under ArgoCD — like the Cloudflare and Tailscale modules, this is a
   non-K8s resource applied manually with `just`.
-- State is local (`terraform.tfstate`, gitignored). The only managed resource is
-  `zitadel_email_provider_smtp.default`.
+- State is in R2 (key `zitadel/terraform/terraform.tfstate`; run terraform through
+  `just`, see [docs/reference/terraform-state.md](../../docs/reference/terraform-state.md)).
+  The only declared resource is `zitadel_email_provider_smtp.default`.
+- ⚠️ **The state was empty when it moved to R2 (2026-11-09)**: the local file had sat at
+  serial 1 with 0 resources since 2026-06-07, so nothing was copied and `just plan` says
+  `1 to add`. Either SMTP was never applied from this root, or it was set up some other
+  way. Before `just apply`, check the Console (Instance → Notifications → SMTP): if a
+  provider already exists, `just tf import` it rather than creating a second one.
 - Rotating the App Password or PAT: update Vault + `.env`/tfvars, re-run `just apply`.

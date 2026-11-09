@@ -1,6 +1,6 @@
 # Tech Stack — 技术栈全景
 
-> Last updated: 2026-11-06
+> Last updated: 2026-11-09
 > Status: 生效事实
 >
 > 这套系统由哪些技术组成、每个是干什么的、为什么是它、配置和版本钉在哪。
@@ -60,7 +60,7 @@ Service → Pod ────── 网络由 Cilium eBPF 承载；跨集群走 C
 
 | 组件 | 是什么 · 在这里的特殊之处 |
 |------|------|
-| **Terraform** | 声明式管理 VM、DNS、Tunnel、Tailscale ACL。多个独立 root（`find . -name '*.tf'` 现查），互不共享 state；state 在本地，迁 R2 是开放项 |
+| **Terraform** | 声明式管理 VM、DNS、Tunnel、Tailscale ACL。多个独立 root（`find . -name '*.tf'` 现查），互不共享 state；state 在 R2，入口一律 `just`（[terraform-state.md](terraform-state.md)） |
 | **Ansible** | 管理机器内部（K3s、内核参数、Tailscale）。Terraform 造壳，Ansible 装内容 |
 | **just** | 任务运行器。根 `justfile` 用 `mod` 聚合子 justfile，文档不抄命令表 |
 

@@ -1,7 +1,7 @@
 # 技术债盘点与演进路线（含 Crossplane 评估）
 
 > 状态: ⚠️ **部分落地** —— 盘点快照，非现状。Phase C（ZITADEL DB → CNPG）、Phase D（external-dns）、
-> Phase E（存储本地化）已完成；Phase A（Terraform state → R2）仍开放，见 [ROADMAP](../ROADMAP.md)。
+> Phase E（存储本地化）已完成；Phase A（Terraform state → R2）2026-11-09 完成，见 [terraform-state.md](../reference/terraform-state.md)。
 > **Crossplane 不引入的结论仍然有效，但已于 2026-08-13 拆成独立 ADR**：
 > [decisions/crossplane-not-adopted.md](../decisions/crossplane-not-adopted.md)——引用指那里，
 > §三 只留原始评估证据。

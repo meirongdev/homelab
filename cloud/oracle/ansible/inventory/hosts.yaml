@@ -11,7 +11,7 @@ all:
               #    必须在 setup-k3s.yaml 的 tls-san 列表里，否则 kubectl 会 TLS SAN 不匹配。
               # 破窗（tailnet 整个不可用）时临时覆盖，公网 IP 现取不落盘：
               #   ansible-playbook -i inventory/hosts.yaml playbooks/<x>.yaml \
-              #     -e ansible_host=$(cd ../terraform && terraform output -raw instance_public_ip)
+              #     -e ansible_host=$(cd ../terraform && just tf output -raw instance_public_ip)
               ansible_host: 100.107.166.37
           vars:
             ansible_user: ubuntu

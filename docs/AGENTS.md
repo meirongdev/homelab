@@ -21,14 +21,14 @@ argocd/                        # GitOps (install|projects|applications/)
 cloudflare/terraform/          # Tunnel + DNS + WAF          tailscale/{terraform,ansible}/  # ACL · 节点 tailscale
 zitadel/                       # 身份/SSO                     backup/               # restic (kustomize)
 macbook/ansible/               # 无头M2+Studio · M5开发环境  images/               # 自研镜像(各一条 build workflow)
-scripts/                       # CI 的 6 个检查器（just check 跑的就是这些）+ oracle 巡检
+scripts/                       # just check 的 6 个检查器 · tf-r2.sh · 运维脚本
 docs/                          # 见下方「Documentation Rules」
 根 justfile · versions.just    # 根 justfile 聚合全部子 justfile；versions.just = 两集群共享的版本
 ```
 
 ## Key Commands
 
-完整清单跑根目录 `just --list`（聚合全部子 justfile）。下表配方属 homelab 应用层，从根跑要加前缀：`just helm deploy-cilium` ≡ `cd k8s/helm && just deploy-cilium`。**只列带坑的**：
+完整清单跑根目录 `just --list`。下表配方属 homelab 应用层，从根跑要加前缀：`just helm deploy-cilium` ≡ `cd k8s/helm && just deploy-cilium`。**只列带坑的**：
 
 | 命令 | 坑 |
 |------|-----|
@@ -92,7 +92,7 @@ GitOps/App `argocd-app-patterns.md` · 入口/DNS `networking-ingress.md` · 跨
 `observability-multicluster.md` · 告警/SLO
 `observability-alerting-slo.md` · 公网访问分析（谁在访问、真人/爬虫/自建监控）
 `public-traffic-analysis.md` · 成本 `cost-and-rightsizing.md` · 资源/QoS
-`k8s-qos-resource-management.md`。
+`k8s-qos-resource-management.md` · TF state `terraform-state.md`（走 `just tf`）。
 
 ## Working Conventions
 
@@ -152,7 +152,7 @@ kube-bench → 节点 CIS → 网络 → Tetragon/Falco → restic。逐层状�
 - 🚫 **不提交任何密钥**（gitleaks 全量扫）：放 Vault，配方现取经 env 传入（范例 `just omlx`）。
 - 🚫 **不提交任何公网 IP**（CI 强制 `check-public-ips.py`，全量跑）。节点一律用 Tailscale
   （`100.64/10`）或内网地址；文档写 `<ORACLE_PUBLIC_IP>` 占位符，真值现取
-  `cd cloud/oracle/terraform && terraform output -raw instance_public_ip`。
+  `cd cloud/oracle/terraform && just tf output -raw instance_public_ip`。
   只放行第三方 anycast DNS，豁免写行内 `public-ip-ok: <理由>`。
 - **硬约束**：homelab 控制面 `k8s-node` 是 Ryzen 5600H 热笔记本（空闲 ~60–62°C，抬温有实际代价 →
   [homelab-host-power-thermal.md](reference/homelab-host-power-thermal.md)）。2026-08-13 起

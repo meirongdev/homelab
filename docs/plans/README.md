@@ -20,7 +20,7 @@
 | 2026-08-16 | [多媒体仓库（音乐 / 自录 podcast / 视频）](2026-08-16-multimedia-repository.md) | ⚠️ 部分完成（Jellyfin/Navidrome/podcast 已上线） |
 | 2026-08-16 | [多媒体目录重组（storage-106 `/storage/tv` 清理去重）](2026-08-16-media-directory-reorganization.md) | ✅ 已完成（回收 ~146G） |
 | 2026-08-08 | [jobs-sg 三处问题诊断](2026-08-08-jobs-sg-three-defect-diagnosis.md) | ✅ 已完成（两处真缺陷已修复并部署） |
-| 2026-08-03 | [Terraform state → R2](2026-08-03-tf-state-r2.md)（5 个 root 迁远程后端） | 📐 设计（等 R2 桶 + token） |
+| 2026-08-03 | [Terraform state → R2](2026-08-03-tf-state-r2.md)（root 迁远程后端） | ✅ 已完成（2026-11-09，8 个 root；现状见 [terraform-state.md](../reference/terraform-state.md)） |
 | 2026-08-03 | [离站备份（restic copy → 云）](2026-08-03-offsite-backup.md) | 📐 设计（等开云桶） |
 | 2026-08-02 | [homelab → oracle 负载迁移](2026-08-02-homelab-to-oracle-workload-migration.md)（Loki/Tempo + ArgoCD + calibre 全迁完，含残余清扫；**推翻 2026-07-04 的两条结论**。可复用 SOP 已提炼为 [runbook](../runbooks/stateful-service-cross-cluster-migration.md)） | ✅ 已完成（Vault 仍为剩余候选） |
 | 2026-08-01 | [LiteLLM LLM 网关迁移（替换旧网关）](2026-08-01-litellm-gateway-migration.md) | ✅ 已完成（2026-08-16 上线；现状见 [decisions/litellm-llm-gateway.md](../decisions/litellm-llm-gateway.md)） |

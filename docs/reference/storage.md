@@ -1,6 +1,6 @@
 # Storage & Backup — 存储与备份
 
-> Last updated: 2026-10-28
+> Last updated: 2026-11-09
 > Status: 生效事实
 >
 > 双集群存储布局（可写卷全 `local-path` + 媒体只读 NFS）、NFS 退役的确切范围、
@@ -110,6 +110,7 @@ CI 的 H4（`scripts/check-manifests.py`，见 [manifest-safety-checks.md](manif
 | `multica-backend-uploads` | 上游 OCI chart `multica` 生成 | `backup/overlays/homelab/backup-script.yaml` 整目录纳入；失败只 warn 不中断夜备，要定期核 `restic ls` 里真有它 |
 | homelab `apps-pg` 的 `litellm`/`multica`/`nakama`/`blogstats` 四个库 | 清单里的 `apps-pg-data-local`（走 `BACKUP_EXEMPT`） | 同一脚本 2c)–2f) 逐库 `pg_dump`，加库必须手工加一行。`nakama`、`blogstats` 没有 PVC，那两行是唯一备份；`blogstats` 丢了不能重算（上游 Cloudflare 按 path 只留 8 天） |
 | `aiven/terraform` 的 free-tier PostgreSQL | 外部托管，不在任何集群 | 无，默认可丢弃；真要存东西之前先在本表登记归属 → [aiven/README.md](../../aiven/README.md) |
+| 全部 terraform root 的 state | R2 私有桶 `homelab-tfstate`，不在任何集群 | 不进 restic；R2 没有对象版本，只有执行机本地的改动前快照 `.tfstate-snapshots/`。丢了就是逐资源 import → [terraform-state.md](terraform-state.md) |
 
 ☠️ worker 上的 PVC 比控制面少一层：VM 200 的盘在 106 的 `local-lvm`（LVM-thin，与 PVE 的 `local`
 同在 238G 启动盘），不在 `mrstorage` 里，sanoid 对它无效。兜底是整机周备

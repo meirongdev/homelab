@@ -27,7 +27,7 @@ the console created it first and `terraform import` adopted it.
 | `termination_protection` | **false in the cloud** — the service is deletable right now; config wants `true` |
 | `ip_filter` | **`0.0.0.0/0` and `::/0`** — reachable from the entire internet, set by the console quick-create. Still true; the config now plans to remove both (see below), but nothing has been applied. |
 | Default database | `defaultdb`, owner `avnadmin` (read off the service URI, not off the service name) |
-| Local state | exists, from `import`; `*.tfstate*` is gitignored |
+| State | in R2 since 2026-11-09 (`aiven/terraform/terraform.tfstate` in bucket `homelab-tfstate`); originally from `import` |
 | Pending diff | `0 to add, 1 to change, 0 to destroy`, all on that one resource: `termination_protection false→true`, `service_log false→true`, `ip_filter` **losing `0.0.0.0/0` and `::/0`**, `+ public_access { pg = true }`, and a `+ timeouts` block. `public_access` asserts the endpoint the service already exposes; it does not open a new one. `timeouts` is config-only and changes nothing at Aiven. |
 
 ⚠️ **The first apply closes the database to everyone, including this laptop.**
@@ -44,7 +44,7 @@ backed up" below.
 
 The Console would do it in four clicks, and Terraform then earns its keep the way
 it does everywhere else in this repo: `ip_filter` edits become reviewable,
-`terraform state list` is the inventory, and a rebuild is `just aiven apply`.
+`just aiven tf state list` is the inventory, and a rebuild is `just aiven apply`.
 
 What Terraform does **not** buy: the account, the API key, or the project. All
 three are made in the console first, and the project's **name can never be
@@ -64,7 +64,7 @@ here would talk to company infrastructure, not to these free-tier resources.
 That is not a cosmetic mistake either — the CLI is not installed on this machine
 as of 2026-09-17, so the first person to install it gets the company creds
 silently. Either pass the token explicitly or set `AIVEN_PROJECT`, and prefer
-`terraform output` / the Console for reading state.
+`just aiven tf output` / the Console for reading state.
 
 ⚠️ Like every other terraform root here, the justfile passes the key on the
 child command line (`-var="aiven_api_token=..."`), so it is briefly readable from
@@ -112,13 +112,13 @@ on 2026-09-17 while wiring this up.
 
    ```bash
    cd aiven/terraform
-   terraform import 'aiven_pg.this' meirongdev-homelab/pg-3cb9cb09
+   just tf import 'aiven_pg.this' meirongdev-homelab/pg-3cb9cb09
    ```
 
    Do the import instead of applying if state is ever lost. Applying with no
    state plans `1 to add` and would create a **second** service — which the free
    allowance may refuse, or may not, and either outcome is worse than importing.
-   Undo a wrong import with `terraform state rm 'aiven_pg.this'`; that detaches
+   Undo a wrong import with `just tf state rm 'aiven_pg.this'`; that detaches
    from state without touching the service.
 
 ## Day 2
@@ -160,10 +160,10 @@ into a billed one, which `plan` itself will not catch.
    so the mistake fails the plan instead of running; retiring a database on
    purpose means commenting that out in the same commit that removes the name.
    To stop managing a database while keeping it, use
-   `terraform state rm 'aiven_pg_database.this["<name>"]'`.
+   `cd aiven/terraform && just tf state rm 'aiven_pg_database.this["<name>"]'`.
 2. `aiven_pg_user` generates its password. ⚠️ **That password is in
-   `terraform.tfstate` in plaintext** — `sensitive` keeps it out of command
-   output, not out of the file — so read it with `terraform output` or from the
+   the state in plaintext** — `sensitive` keeps it out of command
+   output, not out of the file — so read it with `just aiven tf output` or from the
    Console, whichever is handier, and treat the state file itself as a secret at
    rest either way. Store it under `secret/oracle-k3s/<service>` or
    `secret/homelab/<service>` — the same paths every other service uses
@@ -203,7 +203,7 @@ Add each caller's **egress** address, which is not the address you might expect:
 |--------|----------------|
 | homelab control plane `k8s-node` | behind pve NAT on `10.10.10.0/24` — the laptop's ISP address, **changes** |
 | `k8s-worker-106` | the LAN's NAT address at 106 |
-| oracle-k3s `10.0.0.26` | OCI public IP; read it with `cd cloud/oracle/terraform && terraform output -raw instance_public_ip` |
+| oracle-k3s `10.0.0.26` | OCI public IP; read it with `cd cloud/oracle/terraform && just tf output -raw instance_public_ip` |
 
 ⚠️ Do not commit any of those into a tracked file —
 `scripts/check-public-ips.py` blocks public IPs repo-wide, and it is right to.
@@ -285,15 +285,15 @@ From <https://aiven.io/pricing> and <https://aiven.io/free-tier>, as of 2026-09:
 
 ## State
 
-Local `terraform.tfstate` in this directory, like the other seven roots. The
-move to an R2 backend is **one decision for all of them**
-([docs/ROADMAP.md](../docs/ROADMAP.md), 开放项 #2,
-[plan](../docs/plans/2026-08-03-tf-state-r2.md)); do not migrate this root on its
-own — "one remote, seven local" is a new drift, not less drift.
+In the R2 backend with every other root since 2026-11-09 (key
+`aiven/terraform/terraform.tfstate`, bucket `homelab-tfstate`); run terraform
+through `just`, a bare `terraform` fails for lack of backend credentials. How it
+works, break-glass and snapshots: [docs/reference/terraform-state.md](../docs/reference/terraform-state.md).
 
-Until then, be aware state holds the admin password, every `aiven_pg_user`
-password this root creates, and the CA, all in plaintext (`sensitive` hides a
-value from output, not from the file). `*.tfstate*` is gitignored.
+State still holds the admin password, every `aiven_pg_user` password this root
+creates, and the CA, all in plaintext (`sensitive` hides a value from output,
+not from the file). The bucket is private and its token is scoped to it alone,
+which is why it is not the `terraform-backend` bucket a public repo's CI can read.
 
 ## Plan names: the one edit that starts a bill
 
