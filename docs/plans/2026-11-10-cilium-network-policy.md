@@ -456,6 +456,15 @@ homelab 的 10 条先放在分支上，等每个 agent 都确认是 `PolicyAudit
 - conntrack 扫描里唯一「会被拒」的是 vault-agent-injector → `10.10.10.10:6443`，是误报：节点 IP 是 host 身份（identity 1），CIDR 选择器选不到它。
 所以上面「滚动重启长连接客户端」可以省掉大半；ESO 重启被权限拦了，但上面的命中计数已经给出同样的答案。
 
+**oracle soak 记录**：2026-11-11 00:14（UTC+8）12 条 CNP 同步完成（6 个 App 在 `67471ea` 上 Synced / Healthy，全部 `Valid=True`，
+目标 ns 的 21 个 endpoint 都处于 audit），soak 从这时算起，**最早 2026-11-19 可翻，且排在 homelab 翻 enforce 之后**。
+oracle 的 Hubble 指标已带 `cluster=oracle-k3s` 进 homelab Prometheus，指标名没被 otel 改（没有多出 `_total`），两条告警自动覆盖。
+上线当天的 BPF 命中计数：apps-pg ← miniflux、zitadel-pg ← zitadel、rsshub-redis ← rsshub 都在走；私网 deny 条目全是 0；
+browserless ← rsshub 的条目已就位、等 rsshub 下次渲染页面；restic-backup 要等 03:30 自然跑。
+⚠️ 这次 `connect-clustermesh` 在 oracle 侧的 helm upgrade（rev 22）**滚了 agent**（homelab 侧没有）。滚完仍是 `PolicyAuditMode: Enabled`
+（来自 ConfigMap），但翻 enforce 那天不能假设 connect 不会动 agent，跑完要再逐个核一遍。
+待手动触发（会改书库元数据，先问用户）：`calibre-metadata-{correct,covers,llm}`。
+
 **通过标准**：最近 72 小时零 audit 判决；整个窗口内出现过的每一条 audit 都有解释，并已补规则或确认属于该拦的流量。
 
 ### 7.4 翻 enforce
