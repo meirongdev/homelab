@@ -1,0 +1,33 @@
+# cloudflare ns（oracle 的 cloudflared）的网络策略（2026-11-10）
+#
+# 阶段 1 护栏：cloudflared 只连 Cloudflare 边缘和 Gateway ClusterIP（后者走 Envoy 重定向，
+# 不经 pod 出口策略），用不到 LAN / tailnet。由根 kustomization.yaml 收编。
+#
+# 写法约定见 docs/plans/2026-11-10-cilium-network-policy.md §3.3。
+# audit 窗口（cloud/oracle/values/cilium.yaml 的 policyAuditMode=true）期间只记录不拦截，
+# 有新判决时 CiliumPolicyAuditVerdicts 推 Telegram；也可 `just helm netpol-audit 24h oracle-k3s`。
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: guard-private-egress
+  namespace: cloudflare
+spec:
+  description: 公网负载不得访问 LAN / tailnet / 链路本地；例外写在 except 里
+  log:
+    value: guard-private-egress
+  endpointSelector: {}
+  # ☠️ 只写 deny 的策略必须显式写 false：不写时 egressDeny 会让整个 ns 的出口（包括 DNS）进入默认拒绝。
+  enableDefaultDeny:
+    ingress: false
+    egress: false
+  egressDeny:
+    - toCIDRSet:
+        - cidr: 10.0.0.0/8
+          except:
+            - 10.52.0.0/16     # Pod CIDR
+            - 10.53.0.0/16     # Service CIDR：防御性保留。homelab PoC 实测 Gateway ClusterIP 走 Envoy 重定向，不经 pod 出口策略
+        - cidr: 172.16.0.0/12
+        - cidr: 192.168.0.0/16
+        - cidr: 169.254.0.0/16  # 含 IMDS；DNS 走 CoreDNS 10.53.0.10，不受影响（§3.3-8）
+        - cidr: 100.64.0.0/10

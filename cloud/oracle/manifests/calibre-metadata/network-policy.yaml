@@ -1,0 +1,45 @@
+# calibre-metadata 各 Job 的网络策略（2026-11-10）
+#
+# 阶段 3：按书名去外部元数据源（Google Books 等）抓，出口收成白名单。选的是 app=calibre-metadata，
+# 即 backfill / correct / covers / llm 四个（enrich 与 updater 的 pod 没有标签，只受 ns 护栏约束）。
+# litellm 那条只对 llm 生效：其余三个同时受 personal-services 的护栏约束，护栏 deny 100.64/10，
+# deny 压过 allow；llm 被护栏的 endpointSelector 排除，所以只靠这里的白名单。
+#
+# 写法约定见 docs/plans/2026-11-10-cilium-network-policy.md §3.3。
+# audit 窗口（cloud/oracle/values/cilium.yaml 的 policyAuditMode=true）期间只记录不拦截，
+# 有新判决时 CiliumPolicyAuditVerdicts 推 Telegram；也可 `just helm netpol-audit 24h oracle-k3s`。
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: calibre-metadata-egress
+  namespace: personal-services
+spec:
+  description: calibre-metadata 只能出公网；llm job 另可访问 homelab litellm 的 NodePort
+  log:
+    value: calibre-metadata-egress
+  endpointSelector:
+    matchLabels:
+      app: calibre-metadata
+  enableDefaultDeny:
+    ingress: false
+    egress: true
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY   # 纯 L4，不启用 DNS 代理
+    # ☠️ homelab litellm 的 Tailscale NodePort（metadata-llm.yaml 的 LLM 地址）。改那边的地址或端口时连这里一起改。
+    - toCIDR:
+        - 100.94.186.7/32
+      toPorts:
+        - ports:
+            - port: "31400"
+              protocol: TCP
+    - toCIDRSet:
+        - cidr: 0.0.0.0/0
+          except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10]

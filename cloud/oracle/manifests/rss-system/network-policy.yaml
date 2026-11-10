@@ -1,0 +1,122 @@
+# rss-system 的网络策略（2026-11-10）
+#
+# 为什么：这是两集群里头号 SSRF 面。miniflux 按 feed 抓任意 URL，rsshub 抓各站点，
+# browserless 是无头 Chrome，会执行它打开的网页里的 JS（网页可以让它去请求内网，配合
+# DNS rebinding 还能读到响应）。应用层校验 URL 防不住这些，只有按真实目的 IP 判的网络层能防。
+# 节点的 Tailscale ACL 是 *:*，pod 出口经节点 SNAT 后能访问 tailnet 全部设备（homelab 的
+# Prometheus :31090、两台 Mac、DGX、pve）。
+#
+# 写法约定见 docs/plans/2026-11-10-cilium-network-policy.md §3.3。
+# audit 窗口（cloud/oracle/values/cilium.yaml 的 policyAuditMode=true）期间只记录不拦截，
+# 有新判决时 CiliumPolicyAuditVerdicts 推 Telegram；也可 `just helm netpol-audit 24h oracle-k3s`。
+---
+# 阶段 1：禁止访问私网段（与下面的出口白名单叠加，deny 压过 allow）。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: guard-private-egress
+  namespace: rss-system
+spec:
+  description: 公网负载不得访问 LAN / tailnet / 链路本地；例外写在 except 里
+  log:
+    value: guard-private-egress
+  endpointSelector: {}
+  # ☠️ 只写 deny 的策略必须显式写 false：不写时 egressDeny 会让整个 ns 的出口（包括 DNS）进入默认拒绝。
+  enableDefaultDeny:
+    ingress: false
+    egress: false
+  egressDeny:
+    - toCIDRSet:
+        - cidr: 10.0.0.0/8
+          except:
+            - 10.52.0.0/16     # Pod CIDR
+            - 10.53.0.0/16     # Service CIDR：防御性保留。homelab PoC 实测 Gateway ClusterIP 走 Envoy 重定向，不经 pod 出口策略
+        - cidr: 172.16.0.0/12
+        - cidr: 192.168.0.0/16
+        - cidr: 169.254.0.0/16  # 含 IMDS；DNS 走 CoreDNS 10.53.0.10，不受影响（§3.3-8）
+        - cidr: 100.64.0.0/10
+---
+# 阶段 3：出口白名单。整个 ns 一条：只能出公网、访问同 ns 和 miniflux 的库。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: rss-system-egress
+  namespace: rss-system
+spec:
+  description: 抓取类负载只能出公网和自身依赖，碰不到集群内其它服务
+  log:
+    value: rss-system-egress
+  endpointSelector: {}
+  enableDefaultDeny:
+    ingress: false
+    egress: true
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY   # 纯 L4，不启用 DNS 代理
+    - toEndpoints:
+        - {}                  # 同 ns：miniflux → rsshub → browserless / redis
+    # miniflux 的库（secrets.yaml 的 database-url）。
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: databases
+            cnpg.io/cluster: apps-pg
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    # 公网：feed、各站点、ZITADEL（miniflux 的 OIDC 走 https://auth.meirong.dev，经 Cloudflare 绕回）。
+    # 访问自家域名也出公网、过 WAF，这正好让 SSRF 绕不开 WAF。
+    - toCIDRSet:
+        - cidr: 0.0.0.0/0
+          except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10]
+---
+# browserless 没有 TOKEN：集群里任何 pod 都能连 ws://rsshub-browserless:3000 开一个 Chrome 随便用。
+# 入口只留给 rsshub（PUPPETEER_WS_ENDPOINT）。kubelet 探针来自本机 host，Cilium 默认放行。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: browserless-ingress
+  namespace: rss-system
+spec:
+  description: browserless 只接受 rsshub
+  log:
+    value: browserless-ingress
+  endpointSelector:
+    matchLabels:
+      app: rsshub-browserless
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: rsshub
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
+---
+# redis 无密码，同理只留给 rsshub（REDIS_URL）。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: rsshub-redis-ingress
+  namespace: rss-system
+spec:
+  description: rsshub-redis 只接受 rsshub
+  log:
+    value: rsshub-redis-ingress
+  endpointSelector:
+    matchLabels:
+      app: rsshub-redis
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: rsshub
+      toPorts:
+        - ports:
+            - port: "6379"
+              protocol: TCP

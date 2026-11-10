@@ -12,6 +12,8 @@ resources:
   - base/coredns-custom.yaml
   # 所有 pod 禁止访问 OCI IMDS 的 :80（同一地址的 :53 是 VCN DNS，不能拦；原因见文件头）
   - base/deny-oci-imds.yaml
+  # cloudflare ns 的私网出口护栏（网络策略阶段 1，2026-11-10）
+  - base/cloudflare-network-policy.yaml
   # PriorityClasses（控制面驱逐优先级，见 base/priorityclasses.yaml）
   - base/priorityclasses.yaml
   # external-dns: ns + Cloudflare token ExternalSecret (chart is ArgoCD-managed, see
@@ -25,6 +27,8 @@ resources:
   - databases/namespace.yaml
   - databases/apps-pg-secrets.yaml
   - databases/apps-pg-cluster.yaml
+  # apps-pg 入口白名单（网络策略阶段 2）。☠️ 加租户时连同这里的 :5432 来源一起改
+  - databases/network-policy.yaml
   # RSS system —— 工作负载已于 2026-09-08 拆给独立 App `oracle-rss`
   # （argocd/applications/oracle-rss.yaml，目录源 cloud/oracle/manifests/rss-system）。
   # ☠️ `namespace.yaml` 刻意**留在本树**：Namespace 被 prune 会级联删光 ns 下一切，
@@ -36,6 +40,7 @@ resources:
   # Homepage
   - homepage/namespace.yaml
   - homepage/homepage.yaml
+  - homepage/network-policy.yaml
   # Uptime Kuma —— 工作负载已于 2026-09-08 拆给 `oracle-uptime-kuma` App。
   # ☠️ 这一行 namespace.yaml 声明的是 **personal-services**（不是 uptime-kuma），
   #    而且是**整个 personal-services ns 的唯一来源** —— calibre-web / readlist /

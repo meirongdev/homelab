@@ -1,0 +1,75 @@
+# oracle personal-services 的网络策略（2026-11-10）
+#
+# 阶段 1 护栏覆盖整个 ns（calibre-web、readlist、excalidraw、trends、timeslot 等），两个例外用
+# endpointSelector 排除（deny 压过 allow，except 又不能限定端口）：
+#   - uptime-kuma：本职就是探测内部服务；
+#   - calibre-metadata 的 llm job（role=llm）：要访问 homelab litellm 的 Tailscale NodePort，
+#     交给 calibre-metadata/network-policy.yaml 的出口白名单按端口精确放行。
+# 阶段 3：readlist-ingest 按外部 API 返回的数据去抓，出口收成白名单。
+# readlist 的 snapshot / score 另有 no-egress（readlist.yaml），保持不动。
+# 没有任何标签的 CronJob（calibre-metadata-updater、ebook-sync-monitor、open-notebook-ingest）只受护栏约束。
+#
+# 写法约定见 docs/plans/2026-11-10-cilium-network-policy.md §3.3。
+# audit 窗口（cloud/oracle/values/cilium.yaml 的 policyAuditMode=true）期间只记录不拦截，
+# 有新判决时 CiliumPolicyAuditVerdicts 推 Telegram；也可 `just helm netpol-audit 24h oracle-k3s`。
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: guard-private-egress
+  namespace: personal-services
+spec:
+  description: 公网负载不得访问 LAN / tailnet / 链路本地；例外写在 except 里
+  log:
+    value: guard-private-egress
+  endpointSelector:
+    matchExpressions:
+      - key: app
+        operator: NotIn
+        values: [uptime-kuma]
+      - key: role
+        operator: NotIn
+        values: [llm]
+  # ☠️ 只写 deny 的策略必须显式写 false：不写时 egressDeny 会让整个 ns 的出口（包括 DNS）进入默认拒绝。
+  enableDefaultDeny:
+    ingress: false
+    egress: false
+  egressDeny:
+    - toCIDRSet:
+        - cidr: 10.0.0.0/8
+          except:
+            - 10.52.0.0/16     # Pod CIDR
+            - 10.53.0.0/16     # Service CIDR：防御性保留。homelab PoC 实测 Gateway ClusterIP 走 Envoy 重定向，不经 pod 出口策略
+        - cidr: 172.16.0.0/12
+        - cidr: 192.168.0.0/16
+        - cidr: 169.254.0.0/16  # 含 IMDS；DNS 走 CoreDNS 10.53.0.10，不受影响（§3.3-8）
+        - cidr: 100.64.0.0/10
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: readlist-ingest-egress
+  namespace: personal-services
+spec:
+  description: readlist-ingest 只能出公网（Google Books、Open Library、HN 等）
+  log:
+    value: readlist-ingest-egress
+  endpointSelector:
+    matchLabels:
+      app: readlist
+      readlist.role: ingest
+  enableDefaultDeny:
+    ingress: false
+    egress: true
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY   # 纯 L4，不启用 DNS 代理
+    - toCIDRSet:
+        - cidr: 0.0.0.0/0
+          except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10]

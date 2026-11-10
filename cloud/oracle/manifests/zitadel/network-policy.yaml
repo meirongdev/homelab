@@ -1,0 +1,73 @@
+# zitadel 的网络策略（2026-11-10）
+#
+# 阶段 1 护栏：ZITADEL 对公网开放（auth.meirong.dev）。它和 zitadel-pg 都要访问 k8s API
+# （CNPG 实例管理器连 10.0.0.26:6443），那是 host / kube-apiserver 身份，CIDR 规则匹配不到，护栏不影响。
+# 阶段 2：zitadel-pg 是皇冠资产（全部 SSO 身份），入口只留给本 ns、备份和 CNPG operator。
+#
+# 写法约定见 docs/plans/2026-11-10-cilium-network-policy.md §3.3。
+# audit 窗口（cloud/oracle/values/cilium.yaml 的 policyAuditMode=true）期间只记录不拦截，
+# 有新判决时 CiliumPolicyAuditVerdicts 推 Telegram；也可 `just helm netpol-audit 24h oracle-k3s`。
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: guard-private-egress
+  namespace: zitadel
+spec:
+  description: 公网负载不得访问 LAN / tailnet / 链路本地；例外写在 except 里
+  log:
+    value: guard-private-egress
+  endpointSelector: {}
+  # ☠️ 只写 deny 的策略必须显式写 false：不写时 egressDeny 会让整个 ns 的出口（包括 DNS）进入默认拒绝。
+  enableDefaultDeny:
+    ingress: false
+    egress: false
+  egressDeny:
+    - toCIDRSet:
+        - cidr: 10.0.0.0/8
+          except:
+            - 10.52.0.0/16     # Pod CIDR
+            - 10.53.0.0/16     # Service CIDR：防御性保留。homelab PoC 实测 Gateway ClusterIP 走 Envoy 重定向，不经 pod 出口策略
+        - cidr: 172.16.0.0/12
+        - cidr: 192.168.0.0/16
+        - cidr: 169.254.0.0/16  # 含 IMDS；DNS 走 CoreDNS 10.53.0.10，不受影响（§3.3-8）
+        - cidr: 100.64.0.0/10
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: zitadel-pg-ingress
+  namespace: zitadel
+spec:
+  description: zitadel-pg 只接受本 ns、备份和 CNPG operator
+  log:
+    value: zitadel-pg-ingress
+  endpointSelector:
+    matchLabels:
+      cnpg.io/cluster: zitadel-pg
+  ingress:
+    # zitadel 本体，以及 helm 的 init / setup Job（标签各不相同，按 ns 放行）。
+    - fromEndpoints:
+        - {}
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    # 每晚 03:30 的 pg_dump（backup/overlays/oracle/backup-script.yaml）。
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: backup
+            app: restic-backup
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    # CNPG operator 查实例状态。kubelet 探针也打 :8000，来自本机 host，默认放行。
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: cnpg-system
+            app.kubernetes.io/name: cloudnative-pg
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP

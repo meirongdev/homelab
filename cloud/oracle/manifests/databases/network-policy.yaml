@@ -1,0 +1,44 @@
+# databases ns（oracle 的 apps-pg）的网络策略（2026-11-10）
+#
+# 阶段 2：apps-pg 是皇冠资产，入口只留给已知客户端。只写 ingress，出口不受影响。
+# ☠️ apps-pg 新加租户时，在 :5432 那条里加它的 matchLabels，否则 audit 窗口外会立即被拒、
+#    CiliumPolicyDrops 会响；备份脚本也要同时加一行 pg_dump（backup/overlays/oracle/backup-script.yaml）。
+# 由根 kustomization.yaml 收编。
+#
+# 写法约定见 docs/plans/2026-11-10-cilium-network-policy.md §3.3。
+# audit 窗口（cloud/oracle/values/cilium.yaml 的 policyAuditMode=true）期间只记录不拦截，
+# 有新判决时 CiliumPolicyAuditVerdicts 推 Telegram；也可 `just helm netpol-audit 24h oracle-k3s`。
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: apps-pg-ingress
+  namespace: databases
+spec:
+  description: apps-pg 只接受 miniflux、备份和 CNPG operator
+  log:
+    value: apps-pg-ingress
+  endpointSelector:
+    matchLabels:
+      cnpg.io/cluster: apps-pg
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: rss-system
+            app: miniflux
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: backup
+            app: restic-backup      # 每晚 03:30 的 pg_dump
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    # CNPG operator 查实例状态。kubelet 探针也打 :8000，来自本机 host，默认放行。
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: cnpg-system
+            app.kubernetes.io/name: cloudnative-pg
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
