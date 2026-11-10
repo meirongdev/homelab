@@ -1,13 +1,10 @@
 # Homelab Roadmap
 
-> Last updated: 2026-11-09
+> Last updated: 2026-11-10
 > 本文只回答两件事：**还剩什么没做**，和**为什么不做**。做过什么在
 > [CHANGELOG.md](CHANGELOG.md)（2026-09-02 拆出，原因见那里）。
 > **实施细节不写在这里**：每条压到一句话，展开看链接指向的 `reference/`（事实）、
-> `decisions/`（取舍）、`records/`（复盘）、`plans/`（当时的执行过程）。
->
-> 相关：[技术债盘点与演进路线](plans/2026-07-07-tech-debt-and-evolution.md)（工具链层，含 Crossplane 否决结论）·
-> [机器与集群架构优化](plans/2026-07-04-fleet-architecture-optimization.md)（物理层，编号 P0-x/P1-x/P2-x 出自这里）
+> `decisions/`（取舍）、`records/`（复盘）、`plans/`（未做完的方案）。
 
 ---
 
@@ -23,13 +20,13 @@
 
 | # | 项目 | 说明 |
 |---|------|------|
-| 1 | **离站备份** | restic 仓库 → 云（OCI always-free / B2）。当前只有 106 本地副本，**火灾/失窃即全损**。恢复演练已自动化，但只证明「106 上那份能恢复」。需人工先开云桶；rclone 同步段刻意等开桶时一并做。（[方案](plans/2026-08-03-offsite-backup.md) · [Phase 5](plans/2026-07-06-storage-local-migration-and-backup-redesign.md) · [演练](reference/storage.md)，母文档 P0-1） |
+| 1 | **离站备份** | restic 仓库 → 云（OCI always-free / B2）。当前只有 106 本地副本，**火灾/失窃即全损**。恢复演练已自动化，但只证明「106 上那份能恢复」。需人工先开云桶；rclone 同步段刻意等开桶时一并做。（[方案](plans/2026-08-03-offsite-backup.md) · [演练](reference/storage.md)） |
 | 3 | **DGX ×2 文件系统指标（待重部署）** | `node-exporter-deploy.yml` 已含 `--path.rootfs=/host`，但 **live 跑的仍是修复前的旧容器**（2026-08-03 实测 `up==1` 却无 `node_filesystem_size_bytes`）。动作 = 在 `nv-dgx-spark` 对两台重跑 `make node-exporter-deploy`。macbook 缺 `node_memory_MemAvailable_bytes` 是 darwin 固有限制，不可修。 |
-| 5 | **DGX Spark 入编** | 推理服务 IaC + GPU 指标（dcgm）+ 双机 fallback + SLO。2026-09-20 上游把两台 GB10 的 k3s 彻底移除（docker 成唯一运行时）；当前两引擎指标均已接入 `dgx-inference` job（S1 SGLang `:8888` `sglang:*` / S2 vLLM `:18300` `vllm:*`，2026-09-21 双引擎化）。⚠️ 网络对接已有结论：**不接 ClusterMesh**，走 Tailscale + 手写 Endpoints（[决策](decisions/dgx-clustermesh-not-adopted.md)）。剩余开放：dcgm GPU 指标、双机 fallback（S2 `fndgx` 栈尚未入 LiteLLM 网关，无别名 / 白名单）、SLO。（母文档 P1-5） |
+| 5 | **DGX Spark 入编** | 推理服务 IaC + GPU 指标（dcgm）+ 双机 fallback + SLO。2026-09-20 上游把两台 GB10 的 k3s 彻底移除（docker 成唯一运行时）；当前两引擎指标均已接入 `dgx-inference` job（S1 SGLang `:8888` `sglang:*` / S2 vLLM `:18300` `vllm:*`，2026-09-21 双引擎化）。⚠️ 网络对接已有结论：**不接 ClusterMesh**，走 Tailscale + 手写 Endpoints（[决策](decisions/dgx-clustermesh-not-adopted.md)）。剩余开放：dcgm GPU 指标、双机 fallback（S2 `fndgx` 栈尚未入 LiteLLM 网关，无别名 / 白名单）、SLO。 |
 | 9 | **jobs-sg 收尾** | 均不阻塞服务：① 周报 Telegram 已接好，只差端到端实测一次推送；② Grafana 面板未做（`jobs_sg_*` 已在采，可用 Explore）；③ `closed` 寿命口径 A/B 待观察 2–3 周再定；④ 推理封顶后两个旋钮待实测：`LLM_CONCURRENCY=8` 高于引擎 KV 上限 5.34（降到 5 是省排队还是把同一批活拉得更长，未测不改），以及封顶后若仍有残留超时则 `LLM_RETRIES` 0→1（那时一次重试只值约 20s）。（[jobs-sg.md](reference/jobs-sg.md)） |
 | 10 | **readlist 公开面缺准入过滤** | 公开面已多轮收窄（v0.3.0 catalog 收敛、v0.4.0 公开榜三份、v0.5.0 修两个「静默为 0」缺陷）。**仍未做修法①**：`internal/calibre` 读 tags 但不据此筛选，非书文档照样参与打分，碰巧上榜则 title+author 上公网，判据只有人眼。⚠️ 做 catalog SSR/sitemap 前应先补①，否则偶发泄漏会被搜索引擎收录固化。 |
 | 11 | **readlist 边缘限流（Cloudflare Free 限制）** | Free 只允许 1 条 rate limiting 规则，已被 auth 端点 + Excalidraw collab relay 占用且共享计数器（见 [`waf.tf`](../cloudflare/terraform/waf.tf) 注释），"分档"做不到。**当前选择：先不做**，v0.2.0 已在应用侧堵掉自伤路径（published_run 缓存、ETag/304、不碰库的 `/livez`、读写超时），站点只读且单副本 500m 上限，剩余风险可接受。 |
-| 12 | **低优先 / 可选** | MacBook `TargetDown` 静默规则 · Vault Dynamic Secrets（规模不需要）· Cloudflare Pro WAF。（母文档 P2） |
+| 12 | **低优先 / 可选** | MacBook `TargetDown` 静默规则 · Vault Dynamic Secrets（规模不需要）· Cloudflare Pro WAF。 |
 | 16 | **Proxmox 宿主层收尾**（2026-09-09 体检留下的） | 六件互不阻塞、都要人拍板或动凭据：① pve 的 terraform root 从 root 密码换专属 API token（三步写在 `proxmox/terraform/provider.tf` 注释里，涉及新建凭据刻意没自动化）；② 两台 `root@pam` 都没开 TFA、PVE 防火墙为空而 Web UI 在 LAN 上，先 TOTP 再考虑 datacenter 级只放行 LAN 与 tailnet；③ **sanoid 配置不在 IaC**（106 上的手工文件）+ VM 100 的 vzdump 目标落在 `mrstorage` 根数据集、被递归快照钉着 9 份归档而 keep-last 写的是 3（[storage.md](reference/storage.md)）：要么单独建数据集并从 sanoid 排除，要么明确接受「快照也在保护备份本身」，是策略决定不是 bug；④ pve 宿主的网桥、`10.10.10.1/24` 第二地址、MASQUERADE、apt 源、token 全是手工配置，重建靠记忆，该有一份 `pve-baseline.yaml`（顺带删掉 `/etc/network/interfaces` 注释里的 Wi-Fi 明文密码）；⑤ bpg provider 0.85.1 → 0.112.x，单独升、别混进配置改动，升完拿「既有盘的 discard/ssd/iothread 改动能否送达 PVE」做回归（0.85.1 送不出去，2026-09-09 实测，见 `proxmox/terraform/main.tf`）；⑥ 106 的 CPU governor 是 `performance`（`power-optimize.yaml` 从未在它上面生效），J4105 空闲封装才 3.8W，收益小，顺手改 `schedutil` 即可 |
 | 17 | **k8s-node 挪到 LAN，退役 pve 的 NAT 子网** | 控制面躲在 pve 的 `10.10.10.0/24` NAT 后面而 worker 直挂 LAN，是 ip rule 5240、经 pve 转发的静态路由、pve→k8s-node 单向 TCP 不通等一整类复杂度的根源（[tailscale-network.md](reference/tailscale-network.md)）。要动 tls-san、Cilium 的 `k8sServiceHost`、worker 的 `K3S_URL`、oracle 借道 pve 的 10.10.10.0/24 路由通告，是停机变更，先立 ADR 再做 |
 | 18 | **Aiven 库的收尾（root 已 init+import，从未 apply）** | 2026-09-17 review 后重排，剩下的都是"用之前"的判断题：① `termination_protection` 云上仍是 **false**（服务现在可被删），config 要 true，未 apply；② 证书链是自签的 `Project CA`，默认校验直接失败，接之前要么 `ca_model = "letsencrypt"`（free 计划能不能用未测，且要 apply）要么带 `sslrootcert`；③ 数据**不在任何备份面内**（H4 只查清单 PVC），要存东西先在 storage.md 登记归属；④ 服务已自行进入 **POWEROFF**（free 计划的空闲关机），Terraform 开不回来，要用就得先去 Console 开机。☠️ **首次 apply 会把库关严**：`pg_ip_filter` 默认 `[]`，而 root 现在驱动的是真正生效的 `ip_filter` 字段，所以那条 plan 是 `- "0.0.0.0/0"` / `- "::/0"`——先把调用方出口地址填进 `terraform.tfvars` 再 apply，且 apply 后回读 API 验收（从前那份配置写的是 `ip_filter_string`，与云上对不上，plan 恒不报这条差异，2026-09-17 已修）。当前待 apply：0 add / 1 change / 0 destroy（`termination_protection`、`service_log`、`ip_filter` 清空、`public_access.pg=true`，外加一个只在本地的 `timeouts` 块） ([README](../aiven/README.md)) |
@@ -108,7 +105,7 @@
 | Cert-Manager (Let's Encrypt + DNS-01) | TLS 在 Cloudflare 边缘终结、集群内 HTTP，无内网直连 TLS 需求 → 纯负担 |
 | Vault HA / auto-unseal | 单节点无 HA 意义；sealed 已被 ESO 告警覆盖 + 恢复路径已文档化，transit auto-unseal 要再养一个 Vault |
 | Crossplane | 2026-07-07 否决：CF provider 已死 2 年、问题规模不匹配（单人静态云面）、控制面鸡生蛋、单节点内存开销。重评条件见 [ADR](decisions/crossplane-not-adopted.md) |
-| Cilium External Workloads（NAS 入网） | 2026-03-19 取消：CRD 与 CLI 已从 Cilium 1.15+ 移除。若要限制 NFS 访问改用 `CiliumNetworkPolicy` + `fromCIDR`（[原方案](plans/archive/2026-03-15-cilium-external-workload-nas.md)） |
+| Cilium External Workloads（NAS 入网） | 2026-03-19 取消：CRD 与 CLI 已从 Cilium 1.15+ 移除。若要限制 NFS 访问改用 `CiliumNetworkPolicy` + `fromCIDR` |
 | 集群级网络默认拒绝 | **刻意延后**（非取消）：单用户威胁模型下横向移动收益边际低、debug 成本高。Hubble 已开做可见性，作为日后单 ns 灰度的前置。见 [security.md](reference/security.md) |
 | homelab 多节点 HA / etcd 三节点 | 2026-07-04 否决：硬件不支持、单用户收益为零。正确形态是单节点 + 快速重建（`just homelab-recover` + restic）。加第二台 worker 时重评 |
 | Thanos / Mimir / 指标对象存储长期化 | 2026-07-04 否决：双写复杂、搬迁窗口长，`retention` + `retentionSize` 够用。⚠️ 同批"LGTM 整体不搬"那半条**已被推翻**：Loki/Tempo 于 2026-08-02 迁 oracle，Prometheus/Grafana/Alertmanager 仍在 homelab |

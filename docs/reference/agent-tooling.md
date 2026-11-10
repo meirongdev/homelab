@@ -1,6 +1,6 @@
 # Agent 工具链与仓库边界 (Agent Tooling)
 
-> Last updated: 2026-10-28
+> Last updated: 2026-11-10
 > Status: 生效事实
 > 本文回答三件事：**AI 助手的上下文从哪里进来**、**哪些 agent 文件是仓库内容（进 git）**、
 > **哪些是本机每套 agent 各装一份的工具（不进 git）**，以及这两条边界上已知的重复与代价。
@@ -65,7 +65,6 @@
 2. 再建 `.claude/skills/<name>/SKILL.md` 壳：只留 frontmatter（`name` / `description` / `argument-hint` /
    `allowed-tools`）+ 指向 `docs/` 的一段 + 最易漏的几条硬约束。
 3. 壳里写一句「改流程改 runbook，不要改本文件」，否则壳会变成真相源：`add-service` 的流程曾只存在于
-   `.claude/skills/`，带着两条错误指令没人发现（见
-   [plans/2026-08-01-open-notebook-homelab.md](../plans/2026-08-01-open-notebook-homelab.md)），
+   `.claude/skills/`，带着两条错误指令没人发现（2026-08-01 部署 Open Notebook 时才撞出来），
    现已移到 [runbooks/add-service.md](../runbooks/add-service.md)。
 4. 第三方技能用安装器装进 `.agents/skills/`，让 `skills-lock.json` 记账，别手工拷贝。

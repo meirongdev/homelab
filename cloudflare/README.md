@@ -11,8 +11,7 @@ cloudflare/
 ```
 
 > 这里只剩 terraform 一个子目录。曾有过的 `workers/`（Sink 短链，submodule）
-> 已于 2026-05-27 整体退役，方案存档见
-> [plans/archive/2026-03-03-sink-cloudflare-worker.md](../docs/plans/archive/2026-03-03-sink-cloudflare-worker.md)。
+> 已于 2026-05-27 整体退役。
 
 ## 快速上手
 

@@ -1,6 +1,6 @@
 # Homelab 文档组织规则 (R1–R8)
 
-> Last updated: 2026-10-28
+> Last updated: 2026-11-10
 > 2026-08-14 从 [docs/README.md](README.md)（门户）拆出：门户只做导航，写文档的规则集中在本页。
 >
 > 以下 8 条是强制的。新增或改动文档前先对照，违反的按下面的处理方式修。
@@ -49,23 +49,24 @@ CI 在每次 PR 与 push to main 时跑（`.github/workflows/docs-check.yml`）�
 | `runbooks/` | 出事了怎么办？ | 针对本基础设施、可照抄执行的 SOP | 一次性迁移记录、非基础设施的工具说明 |
 | `guides/` | 这个跨领域任务怎么走？ | 非故障处置的流程（含本地工具） | 单组件故障 SOP |
 | `records/` | 那次到底怎么回事？ | 已发生的故障/排障复盘 | 计划、建议 |
-| `plans/` | 当时打算怎么做？ | 带日期的方案，**写完即冻结** | 需要长期维护的事实 |
-| `plans/archive/` | 当初为什么考虑过 X，后来为什么没做？ | 不存在于当前系统的方案 | 已完成的方案（见下） |
+| `plans/` | 打算怎么做？ | **还没做完**的带日期方案 | 已完成 / 已放弃的方案（见下）· 需要长期维护的事实 |
 | `ROADMAP.md` | 还剩什么没做？为什么不做？ | 唯一的开放项清单 + 不做的结论 + 待重评表 | 实施细节（链到 decisions/plans）· **已完成的条目**（进 `CHANGELOG.md`） |
 | `CHANGELOG.md` | 做过什么？ | 已完成条目，一条一行 | 开放项 · 展开的实施细节 |
 
 `plans/` 自 2026-09-09 起**不分类别子目录**：按类别归档的收益抵不上六份索引的维护成本，
 且多数方案本来就横跨两三个类别。
 
-什么时候移进 `archive/`：一份方案记录的东西从未存在，或者已被整体移除，
-状态是 `❌ 未实施` / `❌ 已取消` / `⚠️ 已被取代` / 前提已消失。判据只有一句：
-**读它对理解当前系统有没有帮助？** 没有就归档。
-⚠️ **`✅ 已完成`且东西还在跑的一律不归档。**它正是当前架构的依据（`cilium-mesh-installation`
-就是 CNI 选型的唯一记录），归档等于把依据藏起来。
-但"完成后又被整体退役"的要归档（旧 LLM 网关、ArgoCD Image Updater 都是这样），判据是东西
-还在不在，不是当初做没做成。这类归档时状态从 `✅` 改成 `❌ 已退役（日期）`，并写明有没有
-接替者：一份挂着"✅ 生产运行"的死方案曾经误导了 5 天。**归档是移动，不是删除**，
-且必须在 `archive/README.md` 写明「为什么死了 / 被谁取代」。
+**plan 做完即删，不归档**（2026-11-09 起；此前的 `plans/archive/` 与 30 份已完成方案同日删除）。
+删之前做三件事，顺序不能反：
+1. 稳定结论回写：事实进 `reference/`，「为什么选 A 不选 B」进 `decisions/`，会复现的坑进
+   `records/` 或对应 runbook。**删除的前提是常青文档里已经有它的全部有用结论**，plan 不得是唯一副本。
+2. `git grep <plan 文件名>` 把仓库里所有指向它的链接（含清单与脚本注释）改指常青文档。
+3. 删文件、更新 `plans/README.md`。
+放弃的方案同样删除；「为什么不做」值得留的，进 ROADMAP「不做 / 已取消」表或否决 ADR。
+历史只在 git 里：`git log --diff-filter=D --name-only -- docs/plans/`。
+
+背景：留着的已完成方案不会被维护，却会被 agent 当成现状读（一份挂着"✅ 生产运行"的死方案
+曾经误导了 5 天），而它的有用部分按 R6 本来就该已经在常青文档里了。
 
 判据：一篇文档如果需要「随架构变化持续更新」，它属于 `reference/`；如果它「记录某一天的
 判断」，它属于 `plans/` 或 `decisions/`。建议不等于事实。
@@ -74,7 +75,7 @@ CI 在每次 PR 与 push to main 时跑（`.github/workflows/docs-check.yml`）�
 
 | 位置 | 格式 | 例 |
 |------|------|-----|
-| `plans/`、`plans/archive/`、`records/` | `YYYY-MM-DD-<topic>.md` | `2026-07-06-resource-optimization.md` |
+| `plans/`、`records/` | `YYYY-MM-DD-<topic>.md` | `2026-08-03-offsite-backup.md` |
 | `reference/`、`decisions/`、`runbooks/`、`guides/` | `<topic>.md`，文件名不带日期 | `tailscale-network.md` |
 
 全部小写 kebab-case。常青文档的文件名带日期是 R1 违规的信号，说明它其实是快照。
@@ -117,7 +118,7 @@ CI 在每次 PR 与 push to main 时跑（`.github/workflows/docs-check.yml`）�
 
 ## R5 每个目录的 README 是完整索引
 
-`reference/` `decisions/` `runbooks/` `guides/` `records/` `plans/` `plans/archive/` 都必须有 README，
+`reference/` `decisions/` `runbooks/` `guides/` `records/` `plans/` 都必须有 README，
 **列出该目录的全部文档**，且只列自己目录的（不跨目录索引）。加文档就更新索引。
 
 ## R8 索引行有长度上限，AGENTS.md 有字节预算
@@ -155,7 +156,8 @@ Application」时实际已经是 32 个。
 ## R7 命令必须可执行
 
 写明执行目录与集群 context（`cd k8s/helm && just …`、`kubectl --context oracle-k3s …`），
-避免「思路型」描述。过期内容不删除：标 `Deprecated` 并链到替代文档。
+避免「思路型」描述。过期内容：仍有用的结论先挪进常青文档，再**删除**并改掉指向它的链接，
+不留 `Deprecated` 墓碑（git 历史可查）。例外是否决 / 退役的 ADR，见 `decisions/README.md`。
 
 ---
 

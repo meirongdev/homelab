@@ -1,11 +1,10 @@
 # Terraform state — R2 远程后端
 
-> Last updated: 2026-11-09
+> Last updated: 2026-11-10
 > Status: 生效事实（2026-11-09 起全部 root 的 state 在 R2）
 >
 > 全部 terraform root 的 state 放在 Cloudflare R2 的私有桶 `homelab-tfstate`，S3 backend +
 > `use_lockfile` 做锁。凭据在 Vault，由 `scripts/tf-r2.sh` 现取；**入口一律走 `just`**。
-> 迁移时的方案见 [plans/2026-08-03-tf-state-r2.md](../plans/2026-08-03-tf-state-r2.md)（已冻结）。
 
 ## 布局
 

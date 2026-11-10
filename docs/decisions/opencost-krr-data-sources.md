@@ -122,5 +122,3 @@ enforcer patch requests → ArgoCD 判 OutOfSync → selfHeal 改回 git 里的�
 ## 相关文档
 
 - [reference/cost-and-rightsizing.md](../reference/cost-and-rightsizing.md) — 落地架构与运维操作
-- plans: [OpenCost](../plans/2026-07-30-opencost-multicluster.md) ·
-  [KRR](../plans/2026-07-30-krr-rightsizing.md)

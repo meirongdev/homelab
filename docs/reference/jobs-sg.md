@@ -1,6 +1,6 @@
 # jobs-sg — 新加坡 SWE 岗位趋势周报（架构事实）
 
-> Last updated: 2026-11-06
+> Last updated: 2026-11-10
 > Status: 生效事实
 > Scope: jobs-sg 在 homelab 集群的部署形态、镜像固定方式、备份口径、首次上线依赖顺序
 > 本文是 source of truth。应用代码在 [meirongdev/jobs-sg](https://github.com/meirongdev/jobs-sg)。
@@ -132,8 +132,6 @@ busy handler（在那儿睡可能死锁）。
 - 这条值得修是因为代价不对称：partial 的 reconcile 会整个跳过关闭逻辑（`ingest.go:280`），
   周日那轮撞一次锁就静默损失一周的岗位寿命数据。
 - `/ops/2026-08-08` 01:09 那行 `partial` / `errors=1` 保留不动：它是当时的事实，改库等于篡改记录。
-
-诊断见 [plans/2026-08-08-jobs-sg-three-defect-diagnosis.md](../plans/2026-08-08-jobs-sg-three-defect-diagnosis.md)。
 
 ## LLM 富化：直连 DGX，不经 LLM 网关
 
@@ -507,8 +505,6 @@ MCF 的 `flexibleWorkArrangements` 回答的是什么时候上班，不是在哪
   周日 reconcile 走全 board，一次刷新所有在架岗位；已下架的要 `reclassify`。
 - 生产库全表 0 条 `Onsite`（2026-08-24 `reclassify --apply` 后），W31–W34 已按新口径重算。
 
-诊断见 [plans/2026-08-08-jobs-sg-three-defect-diagnosis.md](../plans/2026-08-08-jobs-sg-three-defect-diagnosis.md) §3。
-
 ## 相关记录
 
 - [records/2026-08-03-jobs-sg-launch-defects.md](../records/2026-08-03-jobs-sg-launch-defects.md)：
@@ -517,5 +513,3 @@ MCF 的 `flexibleWorkArrangements` 回答的是什么时候上班，不是在哪
 - [records/2026-08-09-jobs-sg-reconcile-never-succeeded.md](../records/2026-08-09-jobs-sg-reconcile-never-succeeded.md)
 - [records/2026-08-24-jobs-sg-tech-alias-false-positives.md](../records/2026-08-24-jobs-sg-tech-alias-false-positives.md)（含历史重放）
 - [records/2026-09-04-jobs-sg-enrich-runaway-reasoning.md](../records/2026-09-04-jobs-sg-enrich-runaway-reasoning.md)
-- [plans/2026-08-08-jobs-sg-three-defect-diagnosis.md](../plans/2026-08-08-jobs-sg-three-defect-diagnosis.md)：
-  `closed` 恒为 0、`JobsSgReconcileStale` 盲点、work_mode

@@ -120,9 +120,9 @@ GitOps/App `argocd-app-patterns.md` · 入口/DNS `networking-ingress.md` · 跨
 
 - **架构事实**进 `reference/`（唯一真相源），别在 plan 里留唯一副本；
   **决策**进 `decisions/`；**可重复 SOP** 进 `runbooks/`；**故障复盘**进 `records/`。
-- `plans/` 是**写完即冻结的历史快照，不代表现状**（扁平目录，不分类别；东西已不存在的
-  在 `plans/archive/`），查现状永远看 `reference/`。被取代时不删文件，标状态 + 链到取代者。
-- 命令步骤必须可执行，避免思路型描述；过期内容标 `Deprecated` 并链到替代文档。
+- `plans/` 只放**还没做完**的方案，**做完即删**：先把结论回写 `reference/`/`decisions/`、
+  `git grep` 改掉所有指向它的链接，再删文件（不归档，历史在 git）。
+- 命令步骤必须可执行，避免思路型描述；过期内容挪走有用部分后删除，不留 `Deprecated` 墓碑。
 
 ## Manifest Safety (CI 强制)
 

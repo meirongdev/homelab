@@ -2,8 +2,7 @@
 
 > 日期: 2026-03-06（决策与实施）· 2026-09-02 补写本 ADR
 > 状态: ✅ 已实施，双集群统一
-> 关联：[执行过程与停机步骤](../plans/2026-03-06-cilium-mesh-installation.md)（当时的快照，路径与版本已变）·
-> [reference/tailscale-network.md](../reference/tailscale-network.md)（当前网络模型的**唯一真相源**）·
+> 关联：[reference/tailscale-network.md](../reference/tailscale-network.md)（当前网络模型的**唯一真相源**）·
 > [gateway-controller-evaluation](gateway-controller-evaluation.md)（入口层，比本决策晚）
 
 > ⚠️ **本文是 2026-09-02 补写的**。此前 CNI 选型的唯一记录是上面那份 plan，而按 R1，

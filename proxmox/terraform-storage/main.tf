@@ -8,7 +8,7 @@
 #    → 名字改不了：rename 会触发 recreate，不值得（inventory 与文档里都注明了这层错位）。
 #
 # 定位与历史：
-#   · 原始决策（独立实验田，已被取代）docs/decisions/storage106-experiment-vm.md
+#   · 内存分配的历次调整见 variables.tf 的 vm_memory 注释
 #   · 现行决策 docs/decisions/storage106-as-homelab-worker.md
 #   · 入编流程在 k8s/ansible/：`just setup-tailscale-worker <key>` + `just join-worker`
 #   · 备份：worker 侧 restic 夜备（backup/overlays/homelab/worker-cronjob.yaml）

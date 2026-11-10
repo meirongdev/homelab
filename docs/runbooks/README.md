@@ -1,7 +1,7 @@
 # Runbooks
 
 > 可直接执行的运维操作手册（SOP）。**只收针对本 homelab 基础设施、可照抄执行的流程。**
-> Last updated: 2026-11-06
+> Last updated: 2026-11-10
 
 | Runbook | 什么时候用 |
 |---------|-----------|
@@ -26,8 +26,7 @@
 | [suspicious-traffic-investigation.md](suspicious-traffic-investigation.md) | cf-analytics 面板出现认不出来的流量：按 UA/IP 下钻到 path 与状态码、判读四条经验、加白名单还是加 WAF 规则 |
 | [trivy-cve-alert-triage.md](trivy-cve-alert-triage.md) | 收到 `TrivyCriticalCVEStale`（某 CVE 挂满 7 天）：`just helm trivy-critical` 汇总 → 四步分诊（真升 vs 豁免）→ `just helm trivy-rescan` 重扫验收；§7 是交给 agent 时的边界 |
 
-> 故障复盘见 [records/](../records/README.md)；非基础设施的工具流程见 [guides/](../guides/README.md)
-> （`hermes-agent.md` 于 2026-07-31 按此规则迁去 guides/）。
+> 故障复盘见 [records/](../records/README.md)；非基础设施的工具流程见 [guides/](../guides/README.md)。
 
 ## Runbook Standard
 

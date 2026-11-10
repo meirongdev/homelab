@@ -1,6 +1,6 @@
 # ArgoCD Application Patterns
 
-> Last updated: 2026-11-06
+> Last updated: 2026-11-10
 > Status: 生效事实
 >
 > GitOps 现状：App 结构与源写法、控制面形态、Application 清单、新增 App 的坑；文末是未采用的备选 pattern。
@@ -128,8 +128,7 @@ Namespace 被 prune 会级联删光 ns 下一切，`Prune=false` 拦不住（[�
 - CNPG 的卷（`apps-pg-1`、`zitadel-pg-1`）由 operator 按 `Cluster` 生成，不是清单对象，prune 看不到，
   不需要这个注解；删 `Cluster` 才会连带删卷。
 - 不入 git 的 bootstrap 依赖：`vault-token` Secret（`rss-system`），手工前置（见 `cloud/oracle/manifests/base/vault-store.yaml`）。
-- 相关: [首次纳管](../plans/2026-06-04-oracle-k3s-argocd-gitops.md) ·
-  [控制面迁移/重装](../runbooks/argocd-control-plane-on-oracle.md) · [整节点重建](../runbooks/oracle-k3s-rebuild.md)。
+- 相关: [控制面迁移/重装](../runbooks/argocd-control-plane-on-oracle.md) · [整节点重建](../runbooks/oracle-k3s-rebuild.md)。
 
 ## 不由 ArgoCD 管理的组件
 

@@ -16,9 +16,8 @@
 partial 的，所以排查方向不该从「抓取停了」开始。
 
 症状：`jobs_sg_last_success_timestamp_seconds{kind="full_reconcile"}` 这条 series 从来不存在；
-`ingest_run` 全表只有一次 reconcile（08-08，partial）。关闭流程一次都没跑过（前一天的诊断见
-[plans/2026-08-08-jobs-sg-three-defect-diagnosis.md](../plans/2026-08-08-jobs-sg-three-defect-diagnosis.md)
-§1：`closed` 恒为 0 是因为只有周日那轮关岗位）。
+`ingest_run` 全表只有一次 reconcile（08-08，partial）。关闭流程一次都没跑过（前一天的诊断：
+`closed` 恒为 0 是因为只有周日那轮关岗位，见 [reference/jobs-sg.md](../reference/jobs-sg.md)）。
 
 告警时间点对得上到秒，可以当排查模板：最后一次 incremental 成功 `08-07T18:19:53Z` + 36h =
 `08-09T06:19:53Z` + `for: 30m` = `08-09T06:49:53Z`，实际 `startsAt` = `08-09T06:49:57Z`

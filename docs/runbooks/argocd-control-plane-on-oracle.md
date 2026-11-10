@@ -1,6 +1,6 @@
 # ArgoCD 控制面运行在 oracle-k3s
 
-> Last updated: 2026-09-09
+> Last updated: 2026-11-10
 > Status: 生效事实 + 迁移 SOP
 > 触发条件：重装/升级 ArgoCD、集群凭据过期、需要回滚到 homelab 控制面、
 > 或要完成 2026-08-02 迁移的收尾步骤。
@@ -173,6 +173,5 @@ kubectl --context k3s-homelab delete ns argocd
 
 ## 相关
 
-- 迁移的通盘取舍：[../plans/2026-08-02-homelab-to-oracle-workload-migration.md](../plans/2026-08-02-homelab-to-oracle-workload-migration.md)
-- 反方向（homelab 纳管 oracle）的原始设计：[../plans/2026-06-04-oracle-k3s-argocd-gitops.md](../plans/2026-06-04-oracle-k3s-argocd-gitops.md)
+- 应用（而非控制面）的搬家：[stateful-service-cross-cluster-migration.md](stateful-service-cross-cluster-migration.md)
 - Application 写法约定：[../reference/argocd-app-patterns.md](../reference/argocd-app-patterns.md)

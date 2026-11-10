@@ -27,8 +27,8 @@ VENDORED = ROOT / ".agents"
 # 带日期前缀的目录（R2）；其余为常青目录，文件名不得带日期
 DATED_DIRS = {"plans", "records"}
 # 需要 README 完整索引的目录（R5）
-# plans 自 2026-09-09 起不分类别子目录，只剩 plans/ 与 plans/archive/ 两个索引。
-INDEXED = ["reference", "decisions", "runbooks", "guides", "records", "plans", "plans/archive"]
+# plans 自 2026-09-09 起不分类别子目录；2026-11-09 起不再归档（做完回写后删除），没有 archive/。
+INDEXED = ["reference", "decisions", "runbooks", "guides", "records", "plans"]
 # R4 状态标记：状态行必须以其中之一开头，否则无法扫读（后面的措辞不限）
 STATUS_MARKERS = ["✅", "🚧", "📐", "⚠️", "❌"]
 

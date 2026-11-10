@@ -18,7 +18,6 @@
 | [opencost-krr-data-sources](opencost-krr-data-sources.md) | 同一 cAdvisor 缺口：OpenCost 走 collector 旁路、KRR 补窄口径采集；否决 krr-enforcer |
 | [orphaned-resources](orphaned-resources.md) | 否决 kor（信噪比 0.6%、误判 secret），改用 ArgoCD 原生 `orphanedResources` + `warn: false` |
 | [argocd-image-updater](argocd-image-updater.md) | CRD 模型与约束（⚠️ 当前闲置，集群内无 `ImageUpdater` CR） |
-| [storage106-experiment-vm](storage106-experiment-vm.md) | ⛔ 已被取代 → `storage106-as-homelab-worker`；原结论"实验田独立小集群"，估算实测偏保守 |
 | [storage106-as-homelab-worker](storage106-as-homelab-worker.md) | 106 VM 以 `k8s-worker-106` 入编 homelab（取代上一条）；实测入伙税远低于估算，含三条与控制面不同的约束 |
 | [cluster-placement-for-new-services](cluster-placement-for-new-services.md) | 计算密集/大流量走 homelab、轻量无状态默认 oracle-k3s；含必写 CPU limit 与 thermal 代价 |
 | [multica-email-delivery](multica-email-delivery.md) | Multica 验证码改走 Gmail SMTP（动机是**停止把验证码写进 Loki**）；否决 Cloudflare（Workers Free 档 Outbound 不可用，实测卡在域名 onboard）与 Resend（接线成本不成比例） |
@@ -41,4 +40,5 @@
 
 - **命名**：描述性 kebab-case `<topic>.md`（如 `external-dns-adoption.md`），日期写在文首、不靠文件名排序。
 - **必含**：标题 / 日期 / 状态 / 上下文 Context / 决策 Decision / 后果 Consequences。
-- **决策被推翻时不删旧文件**：把文首状态改成 `已废弃`，并链到取代它的记录。
+- **被同主题新决策取代时删旧文件**：取代者先吸收仍有用的结论（对照表、推导），再删；
+  **否决 / 退役的决策保留**：它们回答「为什么不做 / 为什么撤掉」，防止被重新提议。

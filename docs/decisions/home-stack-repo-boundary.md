@@ -3,8 +3,7 @@
 > 日期: 2026-08-23
 > 状态: ✅ 已实施
 > 关联：[reference/networking-ingress.md](../reference/networking-ingress.md#不走这条链的-meirongdev-主机名集群外托管)（记录归属表）·
-> [reference/services.md](../reference/services.md)（服务清单唯一真相源）·
-> [ROADMAP #13](../ROADMAP.md)（本决策留下的监控缺口）
+> [reference/services.md](../reference/services.md)（服务清单唯一真相源）
 
 ## 上下文
 
@@ -78,6 +77,5 @@
   `Home Stack`，顺带把同样一个监控都没有的 `Playgrounds` 与 apex `Blog` 一起加上，
   Homepage 也补了 Home Stack 磁贴。⚠️ 但**这三条不是集群存活信号**（不经集群、
   不经隧道），dead-man's switch 仍只认 Grafana/Vault/Open Notebook 那组。
-  GitOps 意味着 push 后才生效：状态见 [ROADMAP #13](../ROADMAP.md)。
 - **home-stack 侧的对称文档**在它自己的 `docs/reference/cross-repo-boundary.md`，
   内容是本表的消费方视角。两份都改才叫改完。

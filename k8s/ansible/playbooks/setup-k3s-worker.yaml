@@ -2,7 +2,7 @@
 # 把 storage-106 上的 VM 以 **agent（worker）** 身份加入 homelab k3s 集群。
 # 2026-08-13 入编，取代了同一台 VM 上「独立单节点 k3s（k3s-exp）」的形态 ——
 # 两者互斥：同一台机不能既跑 k3s server 又当别的集群的 agent。
-# 被取代的决策见 docs/decisions/storage106-experiment-vm.md。
+# 现行决策见 docs/decisions/storage106-as-homelab-worker.md。
 #
 # ⚠️ 前置：必须先跑 `just setup-tailscale-worker <key>`。不是为了连通性（LAN 路由
 #    已够），而是为了 **MTU 一致性** —— 见下面 ③。

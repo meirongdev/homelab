@@ -4,7 +4,6 @@
 > Status: 生效事实
 > Scope: 双集群（homelab + oracle-k3s）的纵深防御模型，本文是 source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
-> 实施决策与权衡见 [../plans/2026-06-16-k3s-security-hardening.md](../plans/2026-06-16-k3s-security-hardening.md)。
 
 ## 速览
 

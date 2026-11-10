@@ -71,8 +71,8 @@ SPELLING = [
     (re.compile(r"\bZitadel\b"), "ZITADEL", "产品名全大写"),
     (re.compile(r"\bK3S\b"), "K3s", None),
     (re.compile(r"控制平面"), "控制面", "定正典时全仓 控制面 97 : 控制平面 1"),
-    # 只查裸 `storage106`（指主机时）。`storage106-as-homelab-worker` /
-    # `storage106-experiment-vm` 是已定的 ADR 文件名 slug，重命名要动 R5 索引和一堆引用，
+    # 只查裸 `storage106`（指主机时）。`storage106-as-homelab-worker` 是已定的 ADR 文件名
+    # slug，重命名要动 R5 索引和一堆引用，
     # 不值得 —— 故后面跟 `-` 的一律放过。
     (re.compile(r"storage106(?!-)"), "storage-106",
      "主机名带连字符；ADR 文件名 slug `storage106-*` 不在此列"),

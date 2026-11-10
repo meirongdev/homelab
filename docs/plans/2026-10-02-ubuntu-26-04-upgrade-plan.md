@@ -22,7 +22,7 @@ Ubuntu 26.04.1 LTS 已发布并触发跨版本升级提醒。目前集群全部 
 ## 二、为什么不能直接原地升级（In-place Upgrade）
 
 1. **Cilium eBPF 数据面挂死风险**：
-   集群开启了全功能 eBPF 数据面（`kubeProxyReplacement: true` + Gateway API）。[2026-03-08 的故障](2026-03-08-cilium-gateway-clustermesh-stabilization.md) 曾证明，内核升级带来的 BPF verifier 校验规则变动极易导致 `cilium-agent` CrashLoop，使全集群网络流量瞬间归零。
+   集群开启了全功能 eBPF 数据面（`kubeProxyReplacement: true` + Gateway API）。[2026-03 的故障](../runbooks/homelab-rebuild-ubuntu-24-04.md) 曾证明，内核升级带来的 BPF verifier 校验规则变动极易导致 `cilium-agent` CrashLoop，使全集群网络流量瞬间归零。
 2. **内核安全探针兼容性脆弱**：
    Falco 与 Tetragon 深度依赖宿主内核 kprobe 与 tracepoint。跨大版本内核变动极易导致探针失效或触发系统级内存/系统调用抖动（如 [2026-09-12 事件](../records/2026-09-12-falco-syscall-drops-apt-upgrade.md)）。
 3. **第三方源被禁用与配置漂移**：

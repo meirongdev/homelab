@@ -1,6 +1,6 @@
 # 成本归因与资源右尺寸
 
-> Last updated: 2026-10-28
+> Last updated: 2026-11-10
 > Status: 生效事实
 
 两套互补的工具：**OpenCost** 回答「钱花在哪」（常驻，出指标 → Grafana），
@@ -225,5 +225,3 @@ kubectl --context k3s-homelab create job --from=cronjob/krr krr-manual -n monito
 - [decisions/opencost-krr-data-sources.md](../decisions/opencost-krr-data-sources.md) — 数据源选型取舍
 - [k8s-qos-resource-management.md](k8s-qos-resource-management.md) — QoS 类别与 CPU limit 档位约定
 - [observability-multicluster.md](observability-multicluster.md) — 指标管道与 cluster 标签策略
-- plans: [OpenCost](../plans/2026-07-30-opencost-multicluster.md) ·
-  [KRR](../plans/2026-07-30-krr-rightsizing.md)

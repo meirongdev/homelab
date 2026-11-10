@@ -16,8 +16,8 @@
 
 | 日期 | 事件 |
 |------|------|
-| 2026-07-30 | OpenCost 上线：给 oracle collector 加 receiver 后无数据，`kubectl rollout restart daemonset/otel-collector -n monitoring` 后恢复。方案里留了「后续给 DaemonSet 加 checksum 注解」的建议（[plan](../plans/2026-07-30-opencost-multicluster.md)） |
-| 2026-07-30 | KRR 给 oracle 加 `prometheus/cadvisor`：同一问题，方案把手动重启写成不可省的部署步骤（[plan](../plans/2026-07-30-krr-rightsizing.md)） |
+| 2026-07-30 | OpenCost 上线：给 oracle collector 加 receiver 后无数据，`kubectl rollout restart daemonset/otel-collector -n monitoring` 后恢复。方案里留了「后续给 DaemonSet 加 checksum 注解」的建议 |
+| 2026-07-30 | KRR 给 oracle 加 `prometheus/cadvisor`：同一问题，方案把手动重启写成不可省的部署步骤 |
 | 2026-08-02 | Loki/Tempo 迁 oracle。提交里把 collector 的 logs/traces exporter 改成集群内直达，实测无效：pod 仍挂着旧配置，日志继续发往 homelab 旧 NodePort。定位为通用的潜伏缺陷而不是这次的个例，当天改成 `configMapGenerator`。渲染实测生成名 `otel-collector-config-8645t6kbfb`，DaemonSet 引用同步改写 |
 | 2026-08-06 | 复核：新增 `prometheus/readlist` receiver 后 ConfigMap 名变成 `otel-collector-config-2g4gm5979k`，DaemonSet 自动滚动、Pod age 归零、新指标立即到货 |
 | 2026-09-08 | generator 随 monitoring 组从根 `cloud/oracle/manifests/kustomization.yaml` 搬到 `cloud/oracle/manifests/monitoring/kustomization.yaml`（ROADMAP 开放项 #13）。搬家前后生成名一致，DaemonSet 未滚动 |

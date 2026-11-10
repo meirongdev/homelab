@@ -1,6 +1,6 @@
 # Calibre 元数据 — 覆盖率、污染与回补机制（架构事实）
 
-> Last updated: 2026-10-28
+> Last updated: 2026-11-10
 > Status: 生效事实
 > Scope: calibre 书库（oracle-k3s `personal-services`）的元数据现状、已知污染、
 > 回补作业的设计与判据，本文是 source of truth。书库本身的存储/备份口径见
@@ -43,8 +43,7 @@
   `01-01` 存疑，不必再猜 `MM-DD`。
 
 查不到就编一个值比留空更糟：编出来的值会被下游当成证据。这是 backfill 不做任何兜底、
-LLM 写入必须打 `#meta_src` 的原因。原方案见
-[plans/archive/2026-07-05-calibre-metadata-enrichment.md](../plans/archive/2026-07-05-calibre-metadata-enrichment.md)。
+LLM 写入必须打 `#meta_src` 的原因。
 
 ## 回补作业 `calibre-metadata-backfill`
 

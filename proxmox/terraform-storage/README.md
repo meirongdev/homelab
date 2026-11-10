@@ -7,7 +7,7 @@
 同日改为 **homelab 集群的 worker `k8s-worker-106`**。VM 的 terraform 定义没变
 （名字仍是 `k3s-exp`，改名要 destroy/recreate，不值得），变的是里面装什么。
 - 现行决策：[storage106-as-homelab-worker](../../docs/decisions/storage106-as-homelab-worker.md)
-- 8G 内存三方分配的推导仍在被取代的那份：[storage106-experiment-vm](../../docs/decisions/storage106-experiment-vm.md)
+- 8G 内存怎么分（ARC / 宿主 / VM）及历次调整：`variables.tf` 的 `vm_memory` 注释
 
 ## 用法
 

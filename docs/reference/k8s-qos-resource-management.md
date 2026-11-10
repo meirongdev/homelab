@@ -1,6 +1,6 @@
 # K8s 资源管理与 QoS 策略
 
-> Last updated: 2026-10-28
+> Last updated: 2026-11-10
 > Status: 生效事实（本文只定原则，不存具体数值）
 
 本文定 CPU/Memory requests & limits 与 Pod Priority 的原则和判据。**具体数值不在本文维护**，
@@ -306,6 +306,5 @@ mmap/顺序读文件重的负载（TSDB、对象存储缓存、大 SQLite），w
 
 - [cost-and-rightsizing.md](cost-and-rightsizing.md)：OpenCost 成本归因 + KRR 右尺寸
 - [runbooks/oracle-k3s-shape-downsize.md](../runbooks/oracle-k3s-shape-downsize.md)：改 A1 shape 的 SOP（本文原则的一次实战应用）
-- [plans/archive/2026-07-06-resource-optimization.md](../plans/archive/2026-07-06-resource-optimization.md)：2026-07-06 那轮调整的推导（历史快照，非当前值）
 - [observability-multicluster.md](observability-multicluster.md)：多集群监控架构
 - [Kubernetes QoS 官方文档](https://kubernetes.io/docs/tasks/configure-pod-container/quality-service-pod/)

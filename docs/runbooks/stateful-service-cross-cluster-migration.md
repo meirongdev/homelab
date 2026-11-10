@@ -6,12 +6,10 @@
 > **成功判定**：§ 5 校验全绿 + § 6 域名切换后业务可用。
 > **回滚**：源端保留到 § 7 之前：§ 6 域名切换未完成前可整体回切；§ 7 后源端已退役，需走
 > [backup-recovery.md](backup-recovery.md) 的 restic 恢复。
-> Last updated: 2026-09-09
+> Last updated: 2026-11-10
 >
 > 本文由 2026-08-03 的 calibre 迁移（书库 23G / 2061 本 / 3 个 sqlite）反推而成，
-> 那次的实测数字与事故见
-> [../plans/2026-08-02-homelab-to-oracle-workload-migration.md](../plans/2026-08-02-homelab-to-oracle-workload-migration.md)。
-> **下一个用户大概率是 Vault**（仍挂在那份文档的「剩余候选」里）。
+> **下一个用户大概率是 Vault**（可用性议题而非容量议题，内存收益仅 ~160Mi，尚未立项）。
 
 ## 0. 动手前必须核实的三件事
 
@@ -154,11 +152,10 @@ grep '^kind:' <要删的每个文件>
 ⚠️ `crictl rmi --prune` 会刷一屏 `DeadlineExceeded`（默认 RPC 超时 2s，控制面那台笔记本
 的 containerd 跟不上），**但删除其实在后台完成了**。别看见报错就重跑，先 `df -h` 复核。
 
-完整的一次实例（2026-08-03，释放 9GB）见迁移文档的「残余清理」一节。
+2026-08-03 那次实跑：containerd 一项释放 9GB（37G→28G）。
 
 ## 相关
 
-- [../plans/2026-08-02-homelab-to-oracle-workload-migration.md](../plans/2026-08-02-homelab-to-oracle-workload-migration.md) — 本文的来源，含实测数字与剩余候选
 - [argocd-control-plane-on-oracle.md](argocd-control-plane-on-oracle.md) — 控制面本身搬家（不是应用搬家）
 - [../reference/manifest-safety-checks.md](../reference/manifest-safety-checks.md) — H1/H2/H4 三条正是为本文里的坑写的
 - [../records/2026-08-03-namespace-prune-cascade.md](../records/2026-08-03-namespace-prune-cascade.md) — 退役步骤的事故复盘

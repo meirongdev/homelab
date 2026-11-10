@@ -1,8 +1,6 @@
 ---
-# oracle-k3s 工作负载,由 homelab ArgoCD 经 Tailscale 纳管。
-# 起步阶段故意不开 automated（先人工对账 diff，确认无意外删除后再开 prune+selfHeal，见 Task 7）。
-# 集群凭据见 ESO oracle-k3s-cluster（Task 3），destination 走 Tailscale（Task 1/4）。
-# 见 docs/plans/2026-06-04-oracle-k3s-argocd-gitops.md
+# oracle-k3s 的根 App（base/ + 各 namespace.yaml）。2026-06-04 起由 homelab ArgoCD 经 Tailscale 纳管，
+# 2026-08-02 控制面迁入 oracle 后变成 in-cluster。见 docs/runbooks/argocd-control-plane-on-oracle.md
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

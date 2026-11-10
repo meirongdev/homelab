@@ -1,6 +1,6 @@
 # Multi-Cluster Observability Architecture
 
-> Last updated: 2026-10-28
+> Last updated: 2026-11-10
 > Status: 生效事实
 >
 > 遥测的**采集与汇聚侧**：三条管线怎么跨集群流动、应用怎么接日志/追踪、坏了怎么查。
@@ -18,8 +18,7 @@
 
 Loki/Tempo 放 oracle：homelab 是内存与磁盘吃紧的笔记本 VM，而 Loki/Tempo 是纯「写入-存储」组件，
 不像 Prometheus 要贴着抓取目标，是 LGTM 里唯一能安全切出去的子集。附带收益：homelab 整机故障时
-故障前的日志与追踪还在。取舍见
-[plans/2026-08-02-homelab-to-oracle-workload-migration.md](../plans/2026-08-02-homelab-to-oracle-workload-migration.md)。
+故障前的日志与追踪还在。
 
 ```
 homelab (100.94.186.7)                       oracle-k3s (100.107.166.37)
@@ -397,9 +396,7 @@ kubectl --context oracle-k3s -n monitoring get ds otel-collector \
 | 标签 | OTel 语义标签 | 与 Grafana Labs 官方看板兼容，无需自定义映射 |
 | 内存保护 | `memory_limiter` | 防 collector OOM，背压式流控；限值见两侧配置 |
 
-collector 选型见 [decisions/otel-2026-alignment.md](../decisions/otel-2026-alignment.md)；原始方案见
-[plans/2026-02-21-otel-log-migration.md](../plans/2026-02-21-otel-log-migration.md)、
-[plans/2026-02-21-grafana-loki-dashboards.md](../plans/2026-02-21-grafana-loki-dashboards.md)。
+collector 选型见 [decisions/otel-2026-alignment.md](../decisions/otel-2026-alignment.md)。
 
 ## 相关文件索引
 
