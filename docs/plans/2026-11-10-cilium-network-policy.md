@@ -164,14 +164,16 @@ kubectl --context k3s-homelab -n kube-system exec ds/cilium -c cilium-agent -- c
   labels: { severity: warning }
 ```
 
-audit 窗口期间不发告警，只看 Grafana 面板：
-`sum by (cluster, source_namespace, source, destination_namespace, destination, traffic_direction) (increase(hubble_policy_verdicts_total{action="audit"}[24h]))`。
-⚠️ `action` 标签的取值以 PoC 实测为准（§7.1-d）。
+audit 窗口期间的判决由同文件第二条告警 `CiliumPolicyAuditVerdicts`（warning，进 Telegram）推送，
+按 `traffic_direction` 而不是 `reason` 分组，表达式同样带 `unless … offset` 分支；不需要每天手动看面板。
+`action="audit"` 是 PoC 实测的取值（§7.1-d）。上线前在 live Prometheus 回放过：只在 PoC 那 10 分钟命中，其余时间为空。
+☠️ 两条告警的 annotation 都不能出现 `<xxx>`（Telegram 的 HTML 模式回 400，告警永远发不出去），
+`CiliumPolicyDrops` 原来的 `netpol-brake <context>` 就是这个雷，已改成 `$context`。
 
 ### 4.3 紧急刹车
 
 配方 `just helm netpol-brake <ctx>`（`k8s/helm/justfile`，已提交）：对该集群**每一个** cilium agent 执行 `cilium-dbg config PolicyAuditMode=Enabled`。
-同批还有 `just helm netpol-audit [window] [cluster]`：按 workload 对列出 audit 判决，soak 期间每天看，代替 §4.2 的面板。
+同批还有 `just helm netpol-audit [window] [cluster]`：按 workload 对列出 audit 判决。日常靠 §4.2 的 Telegram 告警，翻 enforce 前用它核最近 72h。
 效果是全集群的策略立刻只记录不拦截，不需要 helm，ArgoCD 也不会来抢。它在 agent 重启后回到 ConfigMap 里的值，所以只能当止血手段，不能当状态。
 
 ⚠️ oracle 上刹车（以及整个 audit 窗口）会让现有 6 条 NP（readlist no-egress、argocd 的 4 条）一起变成只记录（§11 第 1 条）。
@@ -431,7 +433,7 @@ homelab 的 10 条先放在分支上，等每个 agent 都确认是 `PolicyAudit
   `kubectl --context <ctx> -n <ns> create job --from=cronjob/<name> netpol-soak-<name>`
 - **滚动重启长连接的客户端**，强制重新建连：两侧的 otel-collector、两侧的 ESO、
   所有被策略选中 ns 内的 Deployment、grafana、miniflux、litellm。不重启 ArgoCD（它不在任何策略里）。
-- 每天看一次 §4.2 的 audit 面板。凡有新出现的 workload 对，用 `hubble observe --verdict AUDIT -n <ns> --follow` 现场复现，补规则后重新计时。
+- `CiliumPolicyAuditVerdicts` 响了（Telegram）就处理：用 `hubble observe --verdict AUDIT -n <ns> --since 1h` 看 IP 和端口，补规则后重新计时。
 
 **homelab soak 记录**：2026-11-10 16:41（UTC+8）10 条 CNP 同步完成，soak 从这时算起，**最早 2026-11-18 可翻 enforce**。
 `netpol-poc/-` 那几条 audit 是 PoC 留下的，2026-11-13 之后会滚出 72h 窗口，不算数。

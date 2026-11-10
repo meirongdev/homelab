@@ -226,9 +226,9 @@ netpol-brake context=ctx:
         echo "$p: $(kubectl --context "{{context}}" -n kube-system exec "$p" -c cilium-agent -- cilium-dbg config | grep -E '^PolicyAuditMode')"
     done
 
-# 网络策略 audit 判决：窗口内每个 workload 对被记了多少次 audit。soak 期间每天看一次，
-# 通过标准是最近 72h 为空。oracle 的指标经 remote-write 进同一个 Prometheus，用 cluster 过滤。
-# 两个分支同告警 CiliumPolicyDrops：第二个分支接住窗口内才第一次出现的序列（increase 会把它读成 0）。
+# 网络策略 audit 判决：窗口内每个 workload 对被记了多少次 audit。日常由告警
+# CiliumPolicyAuditVerdicts 推 Telegram；翻 enforce 前用它核，通过标准是最近 72h 为空。oracle 的指标经 remote-write 进同一个 Prometheus，用 cluster 过滤。
+# 两个分支同告警 CiliumPolicyDrops / CiliumPolicyAuditVerdicts：第二个分支接住窗口内才第一次出现的序列（increase 会把它读成 0）。
 # 用法：just helm netpol-audit             # 两集群，最近 24h
 #       just helm netpol-audit 72h homelab
 # 列出网络策略 audit 判决（soak 用）

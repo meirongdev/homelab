@@ -16,8 +16,12 @@
 #    它的序列才刚出现，只有一个样本，increase() 读成 0，一次性的丢包就永远不会告警。
 #    第二个分支用 `unless … offset 10m` 专门接住「10 分钟前还不存在的新序列」。
 #
-# audit 窗口期间（policyAuditMode=true）不会有 POLICY_* 丢包，判决只记成 AUDIT，
-# 看 hubble_policy_verdicts_total{action="audit"}（`just helm netpol-audit`）。
+# audit 窗口期间（policyAuditMode=true）不会有 POLICY_* 丢包，判决只记成 AUDIT：
+# 由第二条 CiliumPolicyAuditVerdicts 推 Telegram，不用每天手动跑 `just helm netpol-audit`。
+# 它和上面一样要两个分支。上线前在 live Prometheus 回放过：PoC 那 10 分钟命中 2 行，其余时间为空。
+#
+# ☠️ annotation 里不能出现 `<xxx>`：Telegram 用 parseMode=HTML，会回 400，这条告警就永远发不出去
+#    （见 alertmanager-config.yaml）。占位符写 `$name`。
 #
 # release 标签必需：kube-prometheus-stack 的 ruleSelector 靠它收编本规则。
 # 由 ArgoCD `monitoring-dashboards` App 同步（git push → 3 分钟）。
@@ -54,5 +58,29 @@ spec:
               最近 10 分钟有连接被 Cilium 策略拒绝。先判断这是该拦的（反向检查、真的攻击面）还是漏写的例外。
               看 IP 和端口：在 {{ $labels.cluster }} 上跑
               `kubectl -n kube-system exec ds/cilium -c cilium-agent -- hubble observe --verdict DROPPED -n {{ $labels.source_namespace }} --follow`。
-              如果是漏写的例外且正在影响服务，先止血：`just helm netpol-brake <context>`（全集群只记录不拦截，agent 重启后失效），
+              如果是漏写的例外且正在影响服务，先止血：`just helm netpol-brake $context`（全集群只记录不拦截，agent 重启后失效），
               再补规则走 git。
+        - alert: CiliumPolicyAuditVerdicts
+          # soak 期间的主信号：这条连接到 enforce 时会被拦，现在只记录。enforce 之后再响 = 有人踩了 netpol-brake。
+          expr: |
+            (
+              sum by (cluster, source_namespace, source, destination_namespace, destination, traffic_direction) (
+                increase(hubble_policy_verdicts_total{action="audit"}[10m])
+              ) > 0
+            )
+            or
+            (
+              sum by (cluster, source_namespace, source, destination_namespace, destination, traffic_direction) (
+                hubble_policy_verdicts_total{action="audit"}
+                  unless hubble_policy_verdicts_total{action="audit"} offset 10m
+              )
+            )
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.cluster }}: {{ $labels.source_namespace }}/{{ $labels.source }} → {{ $labels.destination_namespace }}/{{ $labels.destination }} 出现 audit 判决（{{ $labels.traffic_direction }}）"
+            description: >-
+              这条连接到 enforce 时会被策略拦下，现在只记录、照常放行。漏写的例外：补规则走 git，soak 从头计时（72h 零判决才能翻 enforce）；
+              该拦的：记进方案 §7.3。看 IP 和端口：到源 pod 所在节点的 cilium agent 里跑
+              `hubble observe --verdict AUDIT -n {{ $labels.source_namespace }} --since 1h`（ds/cilium 只会挑中一个节点）。
+              enforce 之后还响，说明有人踩了 `just helm netpol-brake`，agent 重启前全集群都只记录不拦截。
