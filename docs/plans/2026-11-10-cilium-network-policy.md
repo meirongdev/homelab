@@ -437,6 +437,7 @@ homelab 的 10 条先放在分支上，等每个 agent 都确认是 `PolicyAudit
 
 **homelab soak 记录**：2026-11-10 16:41（UTC+8）10 条 CNP 同步完成，soak 从这时算起，**最早 2026-11-18 可翻 enforce**。
 `netpol-poc/-` 那几条 audit 是 PoC 留下的，2026-11-13 之后会滚出 72h 窗口，不算数。
+同理 `netpol-e2e/telegram-test`：2026-11-10 22:09（UTC+8）端到端测了一次 `CiliumPolicyAuditVerdicts`，约 1 分钟触发并投递到 Telegram，约 10 分钟后发出恢复消息，`alertmanager_notifications_failed_total` 保持 0。ns 已删。
 上线当天不靠重启也已核实（cilium-dbg 读 BPF 策略表的命中计数）：
 - vault-0 的 Allow Ingress 条目全部在走流量：Gateway、ESO、Prometheus、oracle 节点 `100.107.166.37`（跨集群源 IP 确实保住了）。
 - apps-pg：litellm、multica-backend、nakama 在走；grafana 要等有人打开 blogstats 面板；restic-backup 和 blog-stats-rollup 的 pod 不在场时选择器匹配 0 个 identity，属正常，等它们自然跑（每晚 03:00 / 每天 10:30 UTC）。
