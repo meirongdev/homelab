@@ -1,0 +1,40 @@
+# 所有 pod 禁止访问 OCI IMDS 的 HTTP 端口（2026-11-10）
+#
+# WHY：pod 的出口经节点 SNAT，IMDS 分不出请求来自 pod 还是节点。所以任何 pod 都能取到
+# 实例主体的证书和私钥（/opc/v{1,2}/identity/key.pem），以这台 VM 的身份调 OCI API。
+# 现在没有 dynamic group 授权时，这对凭据什么也做不了。但以后只要用实例主体授权
+# （比如离站备份走 OCI 对象存储），每个 pod 都会自动继承那份权限。
+# 第一道防线是 terraform 里关掉 IMDSv1（cloud/oracle/terraform/main.tf 的 instance_options）：
+# v2 必须带 `Authorization: Bearer Oracle` 头，SSRF 一般带不上。
+# 本策略是第二道：pod 被拿到 RCE 时，攻击者可以自己加头。
+#
+# ☠️ 只拦 TCP 80，绝不能拦全端口：同一个地址的 :53 是 VCN 的 DNS 解析器。CoreDNS 拿它当
+#    上游，`oraclevcn.com` server 块也**只**转发给它（base/coredns-custom.yaml）。误拦 53 会让
+#    oraclevcn 后缀从 NXDOMAIN 变成 SERVFAIL，musl 镜像随之放弃整轮 search，外网解析全挂
+#    （2026-08-13 事故的同一机制）。
+# ☠️ `enableDefaultDeny` 必须显式写 false：不写的话 egressDeny 会让被选中的 pod（这里是全部）
+#    出口进入默认拒绝，DNS 也一起断。
+#
+# hostNetwork 进程（oracle-cloud-agent、cloud-init）不受 pod 策略约束，照常访问 IMDS。
+# 验收（在 rsshub pod 里用 node 跑）：带 `Authorization: Bearer Oracle` 头请求 /opc/v2/instance/id，
+#   应在超时后失败；经 10.53.0.10 解析 x.oraclevcn.com，必须仍是 NXDOMAIN（ENOTFOUND）。
+#   如果变成 SERVFAIL，说明误拦了 53，立刻 revert。回滚 = git revert。
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: deny-oci-imds
+spec:
+  description: 所有 pod 禁止访问 OCI IMDS 的 HTTP；同一地址的 53 端口是 VCN DNS，CoreDNS 要用，不能拦
+  log:
+    value: deny-oci-imds
+  endpointSelector: {}
+  enableDefaultDeny:
+    ingress: false
+    egress: false
+  egressDeny:
+    - toCIDR:
+        - 169.254.169.254/32
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP

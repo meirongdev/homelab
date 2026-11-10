@@ -10,7 +10,7 @@
 
 - **11 层纵深防御**：WAF → OIDC → Vault+ESO → PSA → Kyverno → Trivy → CIS →
   节点加固 → 网络 → 运行时 → restic。
-- **第 9 层（网络）只到"可见性"**：无自建 CiliumNetworkPolicy，集群级默认拒绝刻意延后。
+- **第 9 层（网络）只到"可见性"**：自建的 Cilium 策略只有 oracle 一条拦 IMDS 的 CCNP（§8），集群级默认拒绝刻意延后。
 - **硬约束**：热笔记本 fail-open + 控 CPU；GitOps 优先（PSA 标签 / Vault / ESO / argocd 例外）。
 - 威胁覆盖矩阵见 § 10，已知缺口与路线图见 § 11。
 
@@ -137,7 +137,8 @@
 
 - **数据面**：双集群 Cilium（eBPF + VXLAN），具备 `CiliumNetworkPolicy` L3/L4/L7 能力；ClusterMesh 经 Tailscale 互联。
 - **当前态：默认放行 + Hubble 可见性**（relay 开，`hubble observe` 回答「谁在跟谁通信」，是日后默认拒绝的前置）。默认拒绝刻意延后（§11）；argocd chart 自带 4 条 NetworkPolicy 提供部分隔离。
-- **唯一自建的网络管控**（oracle）：`readlist-snapshot-no-egress` / `readlist-score-no-egress`，标准 `networking.k8s.io/v1` NetworkPolicy（Cilium 照常执行，不需要 CNP），`egress: []` 即全拒（含 DNS）。按数据敏感度切分：能读 calibre 书库与 `app.db`（含密码 hash/OIDC 凭据）的 snapshot/score 零出口，能出网的 ingest 挂不到 calibre 卷。可复用到其它碰敏感卷的 Job，但**只覆盖这两个短命 Job**，不代表有 ns 级或集群级默认拒绝。
+- **自建网络管控之一：readlist Job 零出口**（oracle）：`readlist-snapshot-no-egress` / `readlist-score-no-egress`，标准 `networking.k8s.io/v1` NetworkPolicy（Cilium 照常执行，不需要 CNP），`egress: []` 即全拒（含 DNS）。按数据敏感度切分：能读 calibre 书库与 `app.db`（含密码 hash/OIDC 凭据）的 snapshot/score 零出口，能出网的 ingest 挂不到 calibre 卷。可复用到其它碰敏感卷的 Job，但**只覆盖这两个短命 Job**，不代表有 ns 级或集群级默认拒绝。
+- **自建网络管控之二：oracle 的 IMDS**（2026-11-10）。pod 的出口经节点 SNAT，IMDS 分不出请求来自 pod 还是节点；此前任何 pod 发一个不带头的 GET，就能取到实例主体的证书和私钥。现在有两层：①实例关了 IMDSv1（`cloud/oracle/terraform/main.tf` 的 `instance_options`），v2 必须带 `Authorization: Bearer Oracle` 头，SSRF 带不上；②CCNP `deny-oci-imds` 拦所有 pod 到 `169.254.169.254:80`，防 pod 被拿下 RCE 后自己加头。hostNetwork 进程（oracle-cloud-agent）不受影响。☠️ 只拦 80：同一地址的 `:53` 是 VCN DNS，CoreDNS 的 `oraclevcn.com` 块只转发给它，误拦会重演 2026-08-13 的 musl SERVFAIL 故障。有没有 dynamic group 匹配这台实例，**尚未核实**；以后要用实例主体授权，先确认这两层都还在。
 
 ## 8.5 运行时检测 (Runtime detection) — 按集群分别选型
 

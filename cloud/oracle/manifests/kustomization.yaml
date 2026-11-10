@@ -10,6 +10,8 @@ resources:
   # CoreDNS 扩展：把 OCI VCN 私有后缀交给 OCI 解析器，修 musl pod 的阵发性 DNS 失败
   # （2026-08-13 备份 Job 三连挂的根因，来龙去脉全在文件头注释里）
   - base/coredns-custom.yaml
+  # 所有 pod 禁止访问 OCI IMDS 的 :80（同一地址的 :53 是 VCN DNS，不能拦；原因见文件头）
+  - base/deny-oci-imds.yaml
   # PriorityClasses（控制面驱逐优先级，见 base/priorityclasses.yaml）
   - base/priorityclasses.yaml
   # external-dns: ns + Cloudflare token ExternalSecret (chart is ArgoCD-managed, see

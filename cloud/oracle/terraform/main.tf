@@ -166,6 +166,16 @@ resource "oci_core_instance" "k3s" {
     ssh_authorized_keys = var.ssh_public_key
   }
 
+  # 关掉 IMDSv1（2026-11-10）。v1 不需要任何请求头，pod 经节点 SNAT 后发一个普通 GET
+  # 就能拿到实例主体的证书和私钥（/opc/v1/identity/key.pem），SSRF 也能做到。
+  # v2 必须带 `Authorization: Bearer Oracle`，SSRF 一般带不上这个头。
+  # 关之前在节点上抓了 5 分钟包：4 个请求全是 v2（oracle-cloud-agent），cloud-init 26.1 也先试 v2。
+  # 拿到 RCE 的 pod 能自己加头，那条路由 CCNP deny-oci-imds 拦
+  # （cloud/oracle/manifests/base/deny-oci-imds.yaml）。
+  instance_options {
+    are_legacy_imds_endpoints_disabled = true
+  }
+
   # Prevent boot volume deletion on instance termination
   preserve_boot_volume = true
 
