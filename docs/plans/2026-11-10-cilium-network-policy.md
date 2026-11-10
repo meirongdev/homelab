@@ -7,6 +7,13 @@
 >       全部用 `CiliumNetworkPolicy` 走 GitOps。每个集群开一次全局 audit 窗口，soak 至少 8 天、零 audit 判决才翻 enforce。
 >       先做 homelab，稳定一周后再做 oracle。
 >       例外：oracle 的 IMDS 不等 audit 窗口，单独先做（关 IMDSv1，加一条只拦 TCP 80 的 CCNP，见 §5.1）。
+> 进度（2026-11-10）：
+>       ✅ §5.1 oracle IMDS 已完成。
+>       🔧 homelab 阶段 0 已提交 `8cbc0ac`，但还没部署：deploy-cilium 要人手跑（见 §4.1）。
+>       🔧 homelab 阶段 1–3 共 10 条 CNP 已写好，全部通过 server-side dry-run，放在**分支 `netpol-homelab`**（`54f12a9`）。
+>       ☠️ 这个分支必须等 homelab 每个 agent 都是 `PolicyAuditMode: Enabled` 之后才能合进 main，否则 ArgoCD 一同步就直接 enforce。
+>       ⏳ 之后：PoC（§7.1）→ 至少 8 天 soak → 翻 enforce → homelab 稳定一周后 oracle 走同一遍。
+>       §11 的 4 条按默认处理：tailnet 例外照表开，2b 和阶段 4 不做。
 > 关联: [security.md §8 / §11-2](../reference/security.md) · [security-hardening 末节](../runbooks/security-hardening.md) ·
 >       [tailscale-network.md](../reference/tailscale-network.md) · [networking-ingress.md](../reference/networking-ingress.md)
 
@@ -121,6 +128,11 @@ hubble:
   不违背 [prometheus-series-reduction](../decisions/prometheus-series-reduction.md)。要看具体是哪个 IP，用 `hubble observe` 现场复现（§7.3）。
 - oracle 在 `cloud/oracle/manifests/monitoring/otel-collector-config.yaml` 里照 `prometheus/cilium-envoy` 的写法，
   新增一个对 `hubble-metrics.kube-system.svc:9965` 的抓取。
+- `policyAuditMode` 在 chart 1.20 的 values.yaml 里只是一行注释，但模板用 `hasKey` 读它，写上就生效（已核对 `cilium-configmap.yaml`）。
+- 2026-11-10 渲染比对：除了这 6 个 ConfigMap 键，只新增 `hubble-metrics` Service 和 `hubble` ServiceMonitor（interval 设 60s，chart 默认 10s），
+  外加 DaemonSet 多一个 `hostPort 9965`（两节点都确认无占用）。因为 pod 模板变了，**helm 会自己滚 agent**。
+  DaemonSet 是 `maxUnavailable: 2`，两节点的 agent 会同时重启，已有连接靠 eBPF 照常转发。滚完仍要逐个核实。
+  基线：agent CPU 76–79m，节流比例 0.1–0.3%（6h 均值）。
 - ☠️ **`policyAuditMode` 和 `policyDenyResponse` 只改 ConfigMap，不会触发 agent 滚动**：chart 的 `rollOutCiliumPods: false`，
   而 `just deploy-cilium` 只重启 operator。所以部署完必须手动 `rollout restart ds/cilium`，并**逐个** agent 核实（`exec ds/cilium` 只会落到其中一个 pod）。
 
@@ -157,7 +169,8 @@ audit 窗口期间不发告警，只看 Grafana 面板：
 
 ### 4.3 紧急刹车
 
-新增配方 `just netpol-brake <ctx>`：对该集群**每一个** cilium agent 执行 `cilium-dbg config PolicyAuditMode=Enabled`。
+配方 `just helm netpol-brake <ctx>`（`k8s/helm/justfile`，已提交）：对该集群**每一个** cilium agent 执行 `cilium-dbg config PolicyAuditMode=Enabled`。
+同批还有 `just helm netpol-audit [window] [cluster]`：按 workload 对列出 audit 判决，soak 期间每天看，代替 §4.2 的面板。
 效果是全集群的策略立刻只记录不拦截，不需要 helm，ArgoCD 也不会来抢。它在 agent 重启后回到 ConfigMap 里的值，所以只能当止血手段，不能当状态。
 
 ⚠️ oracle 上刹车（以及整个 audit 窗口）会让现有 6 条 NP（readlist no-egress、argocd 的 4 条）一起变成只记录（§11 第 1 条）。
@@ -208,6 +221,11 @@ oracle 版本把 except 改成 `10.52.0.0/16` 和 `10.53.0.0/16`。
 | oracle | `zitadel` | 无 | |
 | oracle | `cloudflare` | 无 | |
 | oracle | `personal-services` | 用 `endpointSelector` 排除 `app=uptime-kuma` 和 `app=calibre-metadata,role=llm` | uptime-kuma 的本职就是探内部；llm job 要访问 litellm NodePort 和 DGX，交给阶段 3 用端口精确的白名单 |
+
+2026-11-10 落地时核对的补充：
+- personal-services 还有 **xiaogpt**（在 worker 上）。它走集群内的 `litellm.litellm.svc`，不需要 tailnet 例外。
+- ⚠️ **护栏挡不住 pod 访问节点 IP**：CIDR 规则默认匹配不到 host / remote-node 身份，所以 `10.10.10.10`、`192.168.50.107` 照样能连
+  （sshd 只认 key，kubelet 和 API 要认证）。要挡只能按实体 deny `host`、`remote-node`，那会连 API server 一起断（multica 要用），所以不做。
 
 ⚠️ except 不能限定端口。`personal-services` 放行了 DGX 和 M2，意味着同 ns 的 nakama 也能连到那两个推理端口。
 推理端口不是皇冠资产，可以接受。想收得更紧，见 §11 第 3 条。
@@ -389,7 +407,9 @@ spec:
 ### 7.2 落地策略
 
 阶段 1–3 的 CNP 通过 git 提交，ArgoCD 同步。此时全局 audit 已开，提交本身不会拦截任何流量。
-CNP 是 ArgoCD 第一次管理的 Cilium CR：首个 CNP 上线后检查对应 App 是否 OutOfSync，有的话加 `ignoreDifferences`。
+ArgoCD 管 Cilium CR 不会常驻 OutOfSync：oracle 的 CCNP `deny-oci-imds` 同步后 oracle-k3s App 是 Synced / Healthy，不需要 `ignoreDifferences`。
+
+homelab 的 10 条在分支 `netpol-homelab` 上。合并前先确认每个 agent 都是 `PolicyAuditMode: Enabled`（§4.1 的循环），再 `git cherry-pick 54f12a9`。
 
 ### 7.3 soak（至少 8 天）
 
@@ -431,9 +451,13 @@ Grafana 能查 Loki 和 Tempo；ArgoCD 两侧的 App 全部 Synced。
    ⚠️ 只用 `kubectl delete cnp` 没用：git 里还有它，selfHeal 会在 3 分钟内把它建回来。
 3. **整体退回**：values 改回 `policyAuditMode: true`，按 §7.4 的流程再走一遍。
 
-## 8. CI 护栏（随阶段 1 一起提交）
+## 8. CI 护栏（暂缓）
 
-在 `scripts/check-manifests.py` 里加一条 **H6**，把 §3.3 中两条会造成整站中断的约定变成静态检查：
+> 2026-11-10 暂缓：check-manifests.py 和 manifest-safety-checks.md 都写明**只收已经发生过（或正在静默发生）的事故**，
+> 不为「看起来更规范」加规则，怕误报让整个检查被无视。H6 防的坑还没真出过事，现在加就违背这条收录原则。
+> 眼下靠每个策略文件里的 ☠️ 注释和 PoC（§7.1-b/c）的实证兜底。要不要破例，由你决定。
+
+原设想：在 `scripts/check-manifests.py` 里加一条 **H6**，把 §3.3 中两条会造成整站中断的约定变成静态检查：
 
 - **H6a**：CNP/CCNP 中只要含 `egressDeny` 或 `ingressDeny`，就必须显式写出 `enableDefaultDeny` 的对应方向。
 - **H6b**：deny 规则里的 `toCIDRSet` 只要覆盖了本集群的 Service CIDR（按清单路径判断集群：`k8s/` 对应 `10.43.0.0/16`，`cloud/oracle/` 对应 `10.53.0.0/16`），就必须在 `except` 中列出它。
