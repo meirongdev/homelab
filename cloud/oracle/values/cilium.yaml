@@ -44,6 +44,24 @@ hubble:
     enabled: true
   ui:
     enabled: true
+  # 2026-11-10 网络策略阶段 0：只开 drop 和 policy 两个指标，粒度到 workload 名、不带 IP（同 homelab）。
+  # oracle 没有 Prometheus Operator，不建 ServiceMonitor：由 otel-collector 抓 hubble-metrics:9965
+  # 再 remote-write 到 homelab（monitoring/otel-collector-config.yaml 的 prometheus/hubble）。
+  # 开它会给 DaemonSet 加 hostPort 9965，pod 模板变了，helm 会自己滚 agent。
+  metrics:
+    enabled:
+      - "drop:sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,destination_namespace"
+      - "policy:sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,destination_namespace,traffic_direction"
+
+# --- 网络策略阶段 0（2026-11-10）---
+# ☠️ 这两项只改 cilium-config ConfigMap：chart 的 rollOutCiliumPods=false。这次因为同时开了
+#    hubble.metrics（pod 模板变了）才会自动滚 agent；以后单独改它们（例如翻 enforce）必须
+#    `kubectl --context oracle-k3s -n kube-system rollout restart ds/cilium`，再跑
+#    `cilium-dbg config | grep PolicyAuditMode` 核实。
+# ⚠️ audit 窗口内 oracle 原有的策略也只记录不拦截：readlist 的 no-egress、argocd 的 4 条 NP，
+#    以及 base/deny-oci-imds.yaml（IMDSv1 已关，SSRF 仍拿不到凭据；实例主体当前无任何权限）。
+policyDenyResponse: icmp   # 出口被策略拒绝时回 ICMP 不可达：应用立即报错，不再静默超时
+policyAuditMode: true      # audit 窗口：全集群策略只记录不拦截。soak 通过后改 false，即翻 enforce
 
 # --- Gateway API: Cilium-managed ingress ---
 gatewayAPI:

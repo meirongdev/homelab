@@ -185,6 +185,21 @@ receivers:
               regex: 'cilium_kvstoremesh_remote_cluster(s|_readiness_status|_failures|_last_failure_ts|_cache_revocations)'
               action: keep
 
+  # Hubble 网络策略指标 → homelab Prometheus (cluster=oracle-k3s)。2026-11-10 网络策略阶段 0 新增。
+  # 对应 homelab 侧 chart 建的 `hubble` ServiceMonitor；消费方是共享的
+  # k8s/helm/manifests/monitoring/alerts/cilium-policy-alerts.yaml 与 `just helm netpol-audit`。
+  # hubble-metrics 是 headless Service，解析到节点 IP（agent 是 hostNetwork），port == targetPort == 9965。
+  # 只有 hubble_drop_total / hubble_policy_verdicts_total 两族（values 只开了 drop 和 policy），无需 keep 过滤。
+  prometheus/hubble:
+    config:
+      scrape_configs:
+        - job_name: 'hubble'
+          scrape_interval: 60s
+          static_configs:
+            - targets: ['hubble-metrics.kube-system.svc.cluster.local:9965']
+              labels:
+                cluster: oracle-k3s
+
   prometheus/trivy-operator:
     config:
       scrape_configs:
@@ -473,6 +488,10 @@ service:
       exporters: [prometheusremotewrite]
     metrics/clustermesh:
       receivers: [prometheus/clustermesh]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheusremotewrite]
+    metrics/hubble:
+      receivers: [prometheus/hubble]
       processors: [memory_limiter, resource, batch]
       exporters: [prometheusremotewrite]
     metrics/trivy-operator:
