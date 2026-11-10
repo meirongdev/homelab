@@ -433,6 +433,15 @@ homelab 的 10 条先放在分支上，等每个 agent 都确认是 `PolicyAudit
   所有被策略选中 ns 内的 Deployment、grafana、miniflux、litellm。不重启 ArgoCD（它不在任何策略里）。
 - 每天看一次 §4.2 的 audit 面板。凡有新出现的 workload 对，用 `hubble observe --verdict AUDIT -n <ns> --follow` 现场复现，补规则后重新计时。
 
+**homelab soak 记录**：2026-11-10 16:41（UTC+8）10 条 CNP 同步完成，soak 从这时算起，**最早 2026-11-18 可翻 enforce**。
+`netpol-poc/-` 那几条 audit 是 PoC 留下的，2026-11-13 之后会滚出 72h 窗口，不算数。
+上线当天不靠重启也已核实（cilium-dbg 读 BPF 策略表的命中计数）：
+- vault-0 的 Allow Ingress 条目全部在走流量：Gateway、ESO、Prometheus、oracle 节点 `100.107.166.37`（跨集群源 IP 确实保住了）。
+- apps-pg：litellm、multica-backend、nakama 在走；grafana 要等有人打开 blogstats 面板；restic-backup 和 blog-stats-rollup 的 pod 不在场时选择器匹配 0 个 identity，属正常，等它们自然跑（每晚 03:00 / 每天 10:30 UTC）。
+- open-notebook 的出口白名单：surrealdb、DNS、DGX、M2 都有命中，私网 deny 条目全是 0。
+- conntrack 扫描里唯一「会被拒」的是 vault-agent-injector → `10.10.10.10:6443`，是误报：节点 IP 是 host 身份（identity 1），CIDR 选择器选不到它。
+所以上面「滚动重启长连接客户端」可以省掉大半；ESO 重启被权限拦了，但上面的命中计数已经给出同样的答案。
+
 **通过标准**：最近 72 小时零 audit 判决；整个窗口内出现过的每一条 audit 都有解释，并已补规则或确认属于该拦的流量。
 
 ### 7.4 翻 enforce
