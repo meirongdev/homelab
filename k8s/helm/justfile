@@ -212,6 +212,40 @@ deploy-cilium: add-repos
 cilium-status:
     kubectl --context {{ctx}} exec -n kube-system ds/cilium -c cilium-agent -- cilium status --brief
 
+# 网络策略紧急刹车：把该集群**每一个** cilium agent 切到 PolicyAuditMode=Enabled（策略只记录不拦截）。
+# 秒级生效，不经 helm，ArgoCD 也不会来抢。agent 重启后回到 cilium-config 里的值，所以只能止血、
+# 不能当状态；要持久就改 values 的 policyAuditMode 再 deploy-cilium。
+# 解除：`kubectl --context <ctx> -n kube-system rollout restart ds/cilium`（回到 ConfigMap 的值）。
+# 用法：just helm netpol-brake oracle-k3s
+# 网络策略紧急刹车（全集群只记录不拦截）
+netpol-brake context=ctx:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for p in $(kubectl --context "{{context}}" -n kube-system get pods -l k8s-app=cilium -o name); do
+        kubectl --context "{{context}}" -n kube-system exec "$p" -c cilium-agent -- cilium-dbg config PolicyAuditMode=Enabled >/dev/null
+        echo "$p: $(kubectl --context "{{context}}" -n kube-system exec "$p" -c cilium-agent -- cilium-dbg config | grep -E '^PolicyAuditMode')"
+    done
+
+# 网络策略 audit 判决：窗口内每个 workload 对被记了多少次 audit。soak 期间每天看一次，
+# 通过标准是最近 72h 为空。oracle 的指标经 remote-write 进同一个 Prometheus，用 cluster 过滤。
+# 两个分支同告警 CiliumPolicyDrops：第二个分支接住窗口内才第一次出现的序列（increase 会把它读成 0）。
+# 用法：just helm netpol-audit             # 两集群，最近 24h
+#       just helm netpol-audit 72h homelab
+# 列出网络策略 audit 判决（soak 用）
+netpol-audit window="24h" cluster="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    sel='action="audit"'
+    [ -n "{{cluster}}" ] && sel="$sel,cluster=\"{{cluster}}\""
+    m="hubble_policy_verdicts_total{$sel}"
+    by="cluster, source_namespace, source, destination_namespace, destination, traffic_direction"
+    q="(sum by ($by) (increase($m[{{window}}])) > 0) or (sum by ($by) ($m unless $m offset {{window}}))"
+    enc=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))' "$q")
+    kubectl --context k3s-homelab get --raw "/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=$enc" \
+      | jq -r '.data.result | sort_by(-(.value[1]|tonumber))[] | [.metric.cluster, .metric.traffic_direction, "\(.metric.source_namespace)/\(.metric.source)", "->", "\(.metric.destination_namespace)/\(.metric.destination)", (.value[1]|tonumber|round)] | @tsv' \
+      | column -t
+    echo "(以上为空 = 最近 {{window}} 零 audit 判决)"
+
 # 检查双向 ClusterMesh / KVStoreMesh 状态
 clustermesh-status:
     cilium clustermesh status --context k3s-homelab --wait

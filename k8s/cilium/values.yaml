@@ -47,6 +47,13 @@ cgroup:
     enabled: false
   hostRoot: /sys/fs/cgroup
 
+# ── 网络策略阶段 0（2026-11-10）──
+# ☠️ 这两项只改 cilium-config ConfigMap：chart 的 rollOutCiliumPods=false，deploy-cilium 也只重启
+#    operator。改完必须 `kubectl -n kube-system rollout restart ds/cilium`，再逐个 agent 跑
+#    `cilium-dbg config | grep PolicyAuditMode` 核实（exec ds/cilium 只会落到其中一个 pod）。
+policyDenyResponse: icmp   # 出口被策略拒绝时回 ICMP 不可达：应用立即报错，不再静默超时
+policyAuditMode: true      # audit 窗口：全集群策略只记录不拦截。soak 通过后改 false，即翻 enforce
+
 # Gateway API. enableAppProtocol=true 让 Cilium 尊重 Service appProtocol
 # (kubernetes.io/h2c -> 显式 h2c upstream cluster)，任何 gRPC/h2c 后端过网关都需要。
 # 历史：为 ZITADEL console 引入（无此设置时 grpc-web -> native grpc 走 HTTP/1.1，
@@ -105,6 +112,17 @@ hubble:
       limits: { memory: 192Mi }
   ui:
     enabled: false
+  # 2026-11-10 网络策略阶段 0：只开 drop 和 policy 两个指标，粒度到 workload 名、不带 IP。
+  # policy 指标只在被策略选中的 endpoint 上产生，序列很稀疏。告警 CiliumPolicyDrops 用 drop；
+  # audit 窗口里看 hubble_policy_verdicts_total。要看具体 IP，现场用 hubble observe。
+  metrics:
+    enabled:
+      - "drop:sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,destination_namespace"
+      - "policy:sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,destination_namespace,traffic_direction"
+    serviceMonitor:
+      enabled: true
+      labels: { release: kube-prometheus-stack }
+      interval: "60s"   # chart 默认 10s；计数器用 60s 足够，少给热笔记本添负担
   tls:
     enabled: true
     auto:

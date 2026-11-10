@@ -1,0 +1,58 @@
+---
+# Cilium 网络策略丢包告警（2026-11-10，网络策略阶段 0）
+#
+# WHY：policyDenyResponse=icmp 之前，被策略拒绝的连接表现为**静默超时**——应用只会说
+# "timeout"，没有人会想到是策略。这条告警把每一个被策略丢掉的 workload 对报出来。
+#
+# 数据来源：cilium-agent 的 Hubble 指标 hubble_drop_total（values: hubble.metrics.enabled 的 drop），
+# homelab 由 chart 建的 ServiceMonitor `hubble` 抓取，`cluster` 标签由 Prometheus 的 scrapeClass 打上。
+# 粒度是 workload 名（source / destination），不带 IP；要看 IP 和端口，现场跑
+#   kubectl -n kube-system exec ds/cilium -c cilium-agent -- hubble observe --verdict DROPPED -n <ns> --follow
+#
+# reason 取值：POLICY_DENIED = 默认拒绝丢的（没有任何 allow 命中）；POLICY_DENY = 显式 deny 规则丢的
+# （egressDeny / ingressDeny，例如 guard-private-egress、oracle 的 deny-oci-imds）。两个都要。
+#
+# ☠️ 两个分支缺一不可：increase() 需要窗口内至少两个样本。某个 workload 对**第一次**被丢包时，
+#    它的序列才刚出现，只有一个样本，increase() 读成 0，一次性的丢包就永远不会告警。
+#    第二个分支用 `unless … offset 10m` 专门接住「10 分钟前还不存在的新序列」。
+#
+# audit 窗口期间（policyAuditMode=true）不会有 POLICY_* 丢包，判决只记成 AUDIT，
+# 看 hubble_policy_verdicts_total{action="audit"}（`just helm netpol-audit`）。
+#
+# release 标签必需：kube-prometheus-stack 的 ruleSelector 靠它收编本规则。
+# 由 ArgoCD `monitoring-dashboards` App 同步（git push → 3 分钟）。
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cilium-policy-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: cilium-policy
+      rules:
+        - alert: CiliumPolicyDrops
+          expr: |
+            (
+              sum by (cluster, source_namespace, source, destination_namespace, destination, reason) (
+                increase(hubble_drop_total{reason=~"POLICY_DENIED|POLICY_DENY"}[10m])
+              ) > 0
+            )
+            or
+            (
+              sum by (cluster, source_namespace, source, destination_namespace, destination, reason) (
+                hubble_drop_total{reason=~"POLICY_DENIED|POLICY_DENY"}
+                  unless hubble_drop_total{reason=~"POLICY_DENIED|POLICY_DENY"} offset 10m
+              )
+            )
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.cluster }}: {{ $labels.source_namespace }}/{{ $labels.source }} → {{ $labels.destination_namespace }}/{{ $labels.destination }} 被网络策略丢包（{{ $labels.reason }}）"
+            description: >-
+              最近 10 分钟有连接被 Cilium 策略拒绝。先判断这是该拦的（反向检查、真的攻击面）还是漏写的例外。
+              看 IP 和端口：在 {{ $labels.cluster }} 上跑
+              `kubectl -n kube-system exec ds/cilium -c cilium-agent -- hubble observe --verdict DROPPED -n {{ $labels.source_namespace }} --follow`。
+              如果是漏写的例外且正在影响服务，先止血：`just helm netpol-brake <context>`（全集群只记录不拦截，agent 重启后失效），
+              再补规则走 git。
