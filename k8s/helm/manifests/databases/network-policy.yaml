@@ -1,0 +1,50 @@
+# databases ns 的网络策略（2026-11-10，阶段 2：皇冠资产入口白名单）
+#
+# apps-pg 是 homelab 唯一的应用数据库（litellm 的虚拟 key、multica、nakama、blogstats 都在里面）。
+# 现在任何 pod 都能连 :5432，只靠口令挡。这条把入口收成已知客户端。
+# 只写 ingress，所以只有 apps-pg 的入口进入默认拒绝，出口不受影响。kubelet 探针来自 host 身份，默认放行。
+#
+# 来源依据（2026-11-10）：清单 + agent 的 conntrack 表里此刻连着 :5432 的全部源（litellm、multica-backend、nakama）。
+# grafana 的 blogstats 数据源、blog-stats-rollup 和 restic-backup 的 pg_dump 只是间歇连接，按清单补上。
+# 新应用要用 apps-pg：在下面加一个 matchLabels，否则连不上（audit 窗口外会立即被拒、CiliumPolicyDrops 响）。
+# 写法约定见 docs/plans/2026-11-10-cilium-network-policy.md §3.3。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: apps-pg-ingress
+  namespace: databases
+spec:
+  description: apps-pg 只接受已知应用、grafana / blog-stats-rollup 和夜间备份
+  log:
+    value: apps-pg-ingress
+  endpointSelector:
+    matchLabels:
+      app: apps-pg
+  enableDefaultDeny:
+    ingress: true
+    egress: false
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: litellm
+            app: litellm
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: personal-services
+            app.kubernetes.io/name: multica
+            app.kubernetes.io/component: backend
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: personal-services
+            app: nakama
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+            app.kubernetes.io/name: grafana     # blogstats 只读数据源（values/kube-prometheus-stack.yaml）
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+            app: blog-stats-rollup
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: backup
+            app: restic-backup                  # 每晚 03:00 pg_dump（backup/overlays/homelab/backup-script.yaml）
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP

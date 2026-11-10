@@ -1,0 +1,88 @@
+# vault ns 的网络策略（2026-11-10）
+#
+# 放在 vault-eso 这个 App 里，是因为 Vault 本体是 manual-helm，没有自己的 ArgoCD App；
+# vault-eso 是离它最近的 GitOps 目录（ClusterSecretStore 指向的就是它）。
+# 写法约定和每条 ☠️ 的来历见 docs/plans/2026-11-10-cilium-network-policy.md §3.3。
+# audit 窗口（cilium values 的 policyAuditMode=true）期间只记录不拦截：`just helm netpol-audit`。
+---
+# 阶段 1：vault ns 禁止访问私网段。Vault 自己没有私网出口需求
+# （auto-unseal 读本 ns 的 Secret；kubernetes auth 访问的 API server 是节点身份，CIDR 规则匹配不到它）。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: guard-private-egress
+  namespace: vault
+spec:
+  description: Vault 不得访问 LAN / tailnet / 链路本地
+  log:
+    value: guard-private-egress
+  endpointSelector: {}
+  # ☠️ 只写 deny 的策略必须显式写 false：不写时 egressDeny 会让整个 ns 的出口（包括 DNS）进入默认拒绝。
+  enableDefaultDeny:
+    ingress: false
+    egress: false
+  egressDeny:
+    - toCIDRSet:
+        - cidr: 10.0.0.0/8
+          except:
+            - 10.42.0.0/16     # Pod CIDR
+            - 10.43.0.0/16     # ☠️ Service CIDR：Gateway 的 ClusterIP 在策略眼里是 world
+        - cidr: 172.16.0.0/12
+        - cidr: 192.168.0.0/16
+        - cidr: 169.254.0.0/16
+        - cidr: 100.64.0.0/10
+---
+# 阶段 2：Vault server 的入口白名单。只写 ingress，所以只有 vault server 的入口进入默认拒绝，出口不受影响。
+# kubelet 探针来自本机 host 身份，Cilium 默认放行，不用写。
+#
+# 来源依据（2026-11-10）：清单 + agent 的 conntrack 表里此刻连着 :8200 的全部源
+# （Gateway、ESO、Prometheus、oracle 节点）。restic-backup 每晚 03:00 才连（raft 快照），
+# 抓不到活连接，按 backup-script.yaml 补上。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: vault-ingress
+  namespace: vault
+spec:
+  description: Vault 只接受 Gateway、两侧 ESO、夜间备份和 Prometheus
+  log:
+    value: vault-ingress
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: vault
+      component: server
+  enableDefaultDeny:
+    ingress: true
+    egress: false
+  ingress:
+    # vault.meirong.dev：运维 CLI 和 UI 都走 Gateway，后端看到的源是 reserved:ingress。
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: external-secrets
+            app.kubernetes.io/name: external-secrets
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: backup
+            app: restic-backup
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+            app.kubernetes.io/name: prometheus
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+    # oracle 的 ESO 经 NodePort 31952（cloud/oracle/manifests/base/vault-store.yaml）。
+    # ☠️ Tailscale IP 在策略里是 world，只能按 CIDR 写。
+    # ⚠️ 源 IP 能保住，是因为 oracle 连的是 k8s-node（100.94.186.7）而 vault-0 也在 k8s-node。
+    #    vault-0 若漂到 worker，NodePort 转发会 SNAT 成节点 IP，这条就失效（被拦，CiliumPolicyDrops 会响）。
+    - fromCIDR:
+        - 100.107.166.37/32
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP

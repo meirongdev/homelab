@@ -1,0 +1,74 @@
+# jobs-sg 的网络策略（2026-11-10）
+#
+# 为什么：ingest 抓的是外部招聘站点，jobs-sg-web 对公网开放。节点的 Tailscale ACL 是 *:*，
+# pod 出口经节点 SNAT 后能访问 tailnet 全部设备和 homelab LAN。这里把出口收成白名单：
+# DNS、DGX 推理端口（enrich）、公网。写法约定见 docs/plans/2026-11-10-cilium-network-policy.md §3.3。
+#
+# audit 窗口（cilium values 的 policyAuditMode=true）期间只记录不拦截：`just helm netpol-audit`。
+# 三个 CronJob 的 pod 没有任何标签，所以两条都按整个 ns 选。
+---
+# 阶段 1：禁止访问私网段（与阶段 3 的白名单叠加；deny 压过 allow，DGX 必须同时在这里 except）。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: guard-private-egress
+  namespace: jobs-sg
+spec:
+  description: 公网负载不得访问 LAN / tailnet / 链路本地；例外写在 except 里
+  log:
+    value: guard-private-egress
+  endpointSelector: {}
+  # ☠️ 只写 deny 的策略必须显式写 false：不写时 egressDeny 会让整个 ns 的出口（包括 DNS）进入默认拒绝。
+  enableDefaultDeny:
+    ingress: false
+    egress: false
+  egressDeny:
+    - toCIDRSet:
+        - cidr: 10.0.0.0/8
+          except:
+            - 10.42.0.0/16     # Pod CIDR
+            - 10.43.0.0/16     # ☠️ Service CIDR：Gateway 的 ClusterIP 在策略眼里是 world
+        - cidr: 172.16.0.0/12
+        - cidr: 192.168.0.0/16
+        - cidr: 169.254.0.0/16
+        - cidr: 100.64.0.0/10
+          except:
+            - 100.97.87.120/32   # DGX rank0：enrich 的 LLM_BASE_URL（cronjob-enrich.yaml）
+---
+# 阶段 3：出口白名单。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: jobs-sg-egress
+  namespace: jobs-sg
+spec:
+  description: jobs-sg 只能出公网、访问 DGX 推理端口和同 ns，碰不到集群内其它服务
+  log:
+    value: jobs-sg-egress
+  endpointSelector: {}
+  enableDefaultDeny:
+    ingress: false
+    egress: true
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY   # 纯 L4，不启用 DNS 代理
+    - toEndpoints:
+        - {}                  # 同 ns
+    # ☠️ DGX 换栈时端口变过（:8000 / :8888）。改 cronjob-enrich.yaml 的 LLM_BASE_URL 时连这里一起改，
+    #    否则 enrich 立即失败、CiliumPolicyDrops 会响。
+    - toCIDR:
+        - 100.97.87.120/32
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
+    # 公网（招聘站点、Telegram）。
+    - toCIDRSet:
+        - cidr: 0.0.0.0/0
+          except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10]

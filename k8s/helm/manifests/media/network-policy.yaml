@@ -1,0 +1,35 @@
+# media 的网络策略（2026-11-10）
+#
+# 为什么：jellyfin / navidrome / podcast 对公网开放，且会按元数据去抓外部内容。节点的 Tailscale ACL 是 *:*，pod 出口经节点 SNAT 后能访问 tailnet 全部设备的全部端口，
+# 还能访问 homelab LAN（pve :8006、106 的 restic 仓库）。一个应用被打穿或被当成 SSRF 跳板，这些地方就都能摸到。
+# 写法约定和每条 ☠️ 的来历见 docs/plans/2026-11-10-cilium-network-policy.md §3.3。
+#
+# audit 窗口（cilium values 的 policyAuditMode=true）期间只记录不拦截：`just helm netpol-audit`。
+# 新服务要访问 tailnet / LAN 上的某个地址：把它写进下面的 except，否则会被拦。
+---
+# 阶段 1：整个 ns 禁止访问私网段。只拒绝列出的网段，其余出口照旧。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: guard-private-egress
+  namespace: media
+spec:
+  description: 公网负载不得访问 LAN / tailnet / 链路本地；例外写在 except 里
+  log:
+    value: guard-private-egress
+  endpointSelector: {}
+  # ☠️ 只写 deny 的策略必须显式写 false：不写时 egressDeny 会让整个 ns 的出口（包括 DNS）进入默认拒绝。
+  enableDefaultDeny:
+    ingress: false
+    egress: false
+  egressDeny:
+    - toCIDRSet:
+        - cidr: 10.0.0.0/8
+          except:
+            - 10.42.0.0/16     # Pod CIDR
+            - 10.43.0.0/16     # ☠️ Service CIDR：Gateway 的 ClusterIP 在策略眼里是 world，不 except 就进不了网关
+        - cidr: 172.16.0.0/12
+        - cidr: 192.168.0.0/16
+        - cidr: 169.254.0.0/16
+        - cidr: 100.64.0.0/10
+          # 无例外：媒体 NFS 是 kubelet 挂载，不走 pod 网络，不受这条影响

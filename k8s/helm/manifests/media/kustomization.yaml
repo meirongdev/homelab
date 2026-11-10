@@ -9,6 +9,8 @@ resources:
   - jellyfin.yaml
   - navidrome.yaml
   - podcast.yaml
+  # 网络策略：私网出口护栏（2026-11-10）
+  - network-policy.yaml
 
 # 镜像已在各清单里按 **manifest-list（OCI index）digest** 固定（仓库惯例）。
 # homelab 是 amd64；镜像都是 multi-arch，留着 oracle arm64 迁移出口。

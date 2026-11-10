@@ -18,6 +18,8 @@ resources:
   - cronjob-report.yaml
   - web.yaml
   - monitoring.yaml
+  # 网络策略：私网出口护栏 + 出口白名单（2026-11-10）
+  - network-policy.yaml
 
 # 镜像按 **manifest-list（OCI index）digest** 固定，不是某个架构的 digest ——
 # 否则换架构就拉不到。homelab 是 amd64，但镜像同时构了 arm64，留着 oracle 迁移出口。
