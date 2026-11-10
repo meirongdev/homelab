@@ -1,7 +1,7 @@
 # Cilium 网络策略：双集群定向收口
 
 > 日期: 2026-11-10
-> 状态: 📐 设计（未实施。推翻了 ROADMAP「集群级网络默认拒绝：刻意延后」的前提，但那条结论本身不变：**仍不做集群级默认拒绝**）
+> 状态: 🚧 实施中（推翻了 ROADMAP「集群级网络默认拒绝：刻意延后」的前提，但那条结论本身不变：**仍不做集群级默认拒绝**）
 > 结论: 不追求零信任，只堵一类现实攻击：**公网应用被打穿或被当作 SSRF 跳板之后能摸到哪里**。
 >       三个必做阶段：①私网出口护栏 ②皇冠资产入口白名单 ③抓取类负载出口白名单；④对外 ns 入口隔离为可选。
 >       全部用 `CiliumNetworkPolicy` 走 GitOps。每个集群开一次全局 audit 窗口，soak 至少 8 天、零 audit 判决才翻 enforce。
@@ -12,7 +12,10 @@
 >       ✅ homelab 阶段 0 已部署（helm rev 20，connect-clustermesh 后 rev 21）：两个 agent 都是 `PolicyAuditMode: Enabled`，Hubble 指标已被抓取。
 >       ✅ homelab 阶段 1–3 的 10 条 CNP 已上线（`8ffceae`），全部 `Valid=True`，16 个 endpoint 都处于 audit（`audit-egress` / `audit-ingress` / `audit-both`）。
 >       ✅ PoC（§7.1）完成，证伪了 §3.3-3。
->       ⏳ 之后：至少 8 天 soak → 翻 enforce → homelab 稳定一周后 oracle 走同一遍。
+>       ⏳ homelab soak 中，最早 2026-11-18 翻 enforce。
+>       🚧 oracle 提前开始（2026-11-10，为尽早收住 rss-system 这个头号 SSRF 面；audit 期的行为和写法陷阱已在 homelab 验完）：
+>          阶段 0 已提交（`60ecbb3`），12 条阶段 1–3 策略在分支 `netpol-oracle`（`d5624f8`），等 agent 进 audit 后并入 main。
+>          oracle 翻 enforce 仍排在 homelab 之后。
 >       §11 的 4 条按默认处理：tailnet 例外照表开，2b 和阶段 4 不做。
 > 关联: [security.md §8 / §11-2](../reference/security.md) · [security-hardening 末节](../runbooks/security-hardening.md) ·
 >       [tailscale-network.md](../reference/tailscale-network.md) · [networking-ingress.md](../reference/networking-ingress.md)
@@ -385,6 +388,13 @@ spec:
 - 访问自家公网域名（`*.meirong.dev`）会出公网，经 Cloudflare 和 WAF 绕回来，这是允许的，也正好让 SSRF 无法绕开 WAF。
 - `calibre-metadata` 的 llm job 另加一条端口精确的 `toCIDR`：`100.94.186.7/32:31400`（litellm NodePort）和 `100.97.87.120/32:8000`。
 - readlist-snapshot/score 已经有 no-egress NP，保持不动。
+
+**2026-11-10 oracle 落地时的调整**（依据：清单里的连接串、5 分钟 Hubble 采样、oracle agent 的 conntrack 全表）：
+- calibre-metadata 的 llm job 只连 litellm NodePort `:31400`，清单里没有直连 DGX，所以没开 `100.97.87.120`。
+- 新增两条入口规则：`rsshub-browserless`（没有 TOKEN）和 `rsshub-redis`（没有密码）只接受 rsshub。
+- `calibre-metadata-enrich`、`calibre-metadata-updater`、`ebook-sync-monitor`、`open-notebook-ingest` 的 pod 没有标签，只受 ns 护栏约束。
+- ⚠️ oracle 的 `open-notebook-ingest` 指向 `open-notebook.personal-services.svc:5055`，而 oracle 上没有这个 Service（open-notebook 在 homelab），
+  这个手动 Job 本来就跑不通，与策略无关；§7.3 的手动触发清单里它可以跳过。
 
 ### 6.3 阶段 4（可选）：对外 ns 入口隔离
 
