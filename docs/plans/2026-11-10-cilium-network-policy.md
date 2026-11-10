@@ -9,10 +9,10 @@
 >       例外：oracle 的 IMDS 不等 audit 窗口，单独先做（关 IMDSv1，加一条只拦 TCP 80 的 CCNP，见 §5.1）。
 > 进度（2026-11-10）：
 >       ✅ §5.1 oracle IMDS 已完成。
->       🔧 homelab 阶段 0 已提交 `8cbc0ac`，但还没部署：deploy-cilium 要人手跑（见 §4.1）。
->       🔧 homelab 阶段 1–3 共 10 条 CNP 已写好，全部通过 server-side dry-run，放在**分支 `netpol-homelab`**（`54f12a9`）。
->       ☠️ 这个分支必须等 homelab 每个 agent 都是 `PolicyAuditMode: Enabled` 之后才能合进 main，否则 ArgoCD 一同步就直接 enforce。
->       ⏳ 之后：PoC（§7.1）→ 至少 8 天 soak → 翻 enforce → homelab 稳定一周后 oracle 走同一遍。
+>       ✅ homelab 阶段 0 已部署（helm rev 20，connect-clustermesh 后 rev 21）：两个 agent 都是 `PolicyAuditMode: Enabled`，Hubble 指标已被抓取。
+>       ✅ homelab 阶段 1–3 的 10 条 CNP 已上线（`8ffceae`），全部 `Valid=True`，16 个 endpoint 都处于 audit（`audit-egress` / `audit-ingress` / `audit-both`）。
+>       ✅ PoC（§7.1）完成，证伪了 §3.3-3。
+>       ⏳ 之后：至少 8 天 soak → 翻 enforce → homelab 稳定一周后 oracle 走同一遍。
 >       §11 的 4 条按默认处理：tailnet 例外照表开，2b 和阶段 4 不做。
 > 关联: [security.md §8 / §11-2](../reference/security.md) · [security-hardening 末节](../runbooks/security-hardening.md) ·
 >       [tailscale-network.md](../reference/tailscale-network.md) · [networking-ingress.md](../reference/networking-ingress.md)
@@ -53,7 +53,7 @@ Hubble 环形缓冲 4095 条，按 85–108 flows/s 算**只保留 40–50 秒�
 | 本集群与对端集群节点的 LAN/VCN IP（`10.10.10.10` `192.168.50.107` `10.0.0.26`） | `host` / `remote-node`（对端节点经 ClusterMesh 同步进来） | 用 `fromEntities`；CIDR 规则默认匹配不到节点 |
 | **所有 Tailscale IP**，包括对端节点的 `100.94.186.7` / `100.107.166.37` | `world` | 跨集群 NodePort 只能写 `fromCIDR`/`toCIDR`，`remote-node`、`cluster-mesh` 实体都匹配不到。实测 oracle ESO → homelab Vault 的源就是 `world 100.107.166.37` |
 | Gateway 转发给后端的流量 | `reserved:ingress` | 后端用 `fromEntities: [ingress]` 放行 |
-| pod 访问 **Gateway 的 ClusterIP**（cloudflared → `10.43.219.148:80`，即 `cilium-gateway-homelab-gateway`） | `world`（按 CIDR 判） | ☠️ 私网 deny 如果包含 `10.0.0.0/8` 而没有 except Service CIDR，cloudflared 就进不了 Gateway，**整站 530** |
+| pod 访问 **Gateway 的 ClusterIP**（cloudflared → `10.43.219.148:80`，即 `cilium-gateway-homelab-gateway`） | Hubble 显示为 `world`，但流量被重定向给 Envoy（`to-proxy`），**不经 pod 的出口策略** | 无影响。原先担心「10/8 deny 不 except Service CIDR 会整站 530」，PoC 在 enforce 下证伪（§7.1-c） |
 
 **5 分钟 Hubble 采样**只统计新建连接（TCP SYN 和 UDP）。§5–§6 的规则就是照它和清单写的。
 **它漏掉的部分更要紧**：homelab otel → oracle Loki `:31080`、oracle otel → homelab Prometheus `:31090`、
@@ -93,8 +93,9 @@ ArgoCD → homelab API `:6443`、oracle cloudflared → Gateway，这 5 分钟�
    `egressDeny` 也算 egress 规则。漏了这一行，整个 ns 的出口（包括 DNS）立刻变成默认拒绝。
 2. ☠️ **deny 永远压过 allow**，与端口粒度无关。例外只有两种写法：在 deny 规则里写 `except`，或者用 `endpointSelector` 把那个 pod 排除出去。
    另写一条 allow 不起作用。
-3. ☠️ **私网 deny 必须 except 本集群的 Service CIDR**（homelab `10.43.0.0/16`，oracle `10.53.0.0/16`），原因见 §2 的 Gateway ClusterIP。
-   Pod CIDR（`10.42/16`、`10.52/16`）也一起 except，防止 pod 刚起、ipcache 还没同步时被当成 world。
+3. 私网 deny 照样 except 本集群的 Service CIDR 和 Pod CIDR（homelab `10.43/16` `10.42/16`，oracle `10.53/16` `10.52/16`），但**只是防御性的**。
+   原先以为不 except 会挡住 Gateway、整站 530，PoC 在 enforce 下证伪了：访问 Gateway ClusterIP 的流量被重定向给 Envoy，不经 pod 出口策略（§7.1-c）。
+   Pod CIDR 的 except 防的是 pod 刚起、ipcache 还没同步时被当成 world。
 4. 跨集群一律写 **Tailscale IP 的 /32 CIDR**，不要用 entity。
 5. **选择器只用 pod 现有的标签**，不要为了写策略去改 pod 标签。改标签会重新分配 identity，又要面对一次「identity 低字节 = `0x08` 撞上 Tailscale fwmark」的 1/256 抽签。
    虽然有 5200 规则兜底，但没必要去碰（[tailscale-network.md](../reference/tailscale-network.md)）。
@@ -197,7 +198,7 @@ spec:
         - cidr: 10.0.0.0/8
           except:
             - 10.42.0.0/16        # 本集群 Pod CIDR
-            - 10.43.0.0/16        # ☠️ Service CIDR：Gateway ClusterIP 在策略眼里是 world
+            - 10.43.0.0/16        # Service CIDR：防御性保留（§3.3-3）
         - cidr: 172.16.0.0/12
         - cidr: 192.168.0.0/16
         - cidr: 169.254.0.0/16
@@ -214,7 +215,7 @@ oracle 版本把 except 改成 `10.52.0.0/16` 和 `10.53.0.0/16`。
 | homelab | `jobs-sg` | `100.97.87.120` | enrich 直连 DGX |
 | homelab | `litellm` | `100.97.87.120` `100.89.15.120` `100.98.220.75` | 推理后端：DGX、M2、Studio |
 | homelab | `media` | 无 | NFS 是 kubelet 挂载，不走 pod 网络，不受影响 |
-| homelab | `cloudflare` | 无 | 只连 Cloudflare 边缘和 Gateway ClusterIP（已在 Service CIDR 的 except 里） |
+| homelab | `cloudflare` | 无 | 只连 Cloudflare 边缘和 Gateway ClusterIP（后者走 Envoy 重定向，不经出口策略） |
 | homelab | `vault` | 无 | Vault 自己没有私网出口需求 |
 | oracle | `rss-system` | 无 | 头号 SSRF 面 |
 | oracle | `homepage` | 无 | widget 走 k8s API（`kube-apiserver` 实体，不是 CIDR） |
@@ -404,12 +405,23 @@ spec:
 
 做完之后删掉这个 ns。
 
+**2026-11-10 结果**（homelab，全局 audit 下；c 另用 `cilium-dbg endpoint config <id> PolicyAuditMode=Disabled` 只把 PoC 这一个 endpoint 切到 enforce）：
+
+| 项 | 结果 |
+|---|---|
+| a | ✅ 只有去 `192.168.50.4:8006` 的出 AUDIT（`policy-verdict:L3-Only`）；DNS、公网、Gateway 都不出 |
+| b | ✅ 坑是真的：去掉 `enableDefaultDeny` 后，去 CoreDNS :53 和公网 :443 的也出 AUDIT（`policy-verdict:none`，即默认拒绝） |
+| c | ❌ **原假设被证伪**：10/8 deny 不 except Service CIDR，即使在 enforce 下 Gateway ClusterIP 照样 200；同一时刻去 LAN 的被拦（`EGRESS DENIED`），0.2ms 立即失败，`policyDenyResponse: icmp` 生效。§2、§3.3-3 已改 |
+| d | ✅ `action="audit"`；显式 deny 丢包的 `reason=POLICY_DENY`，告警的正则对得上。`just helm netpol-audit` 能列出 PoC 的判决 |
+
+⚠️ 两个顺手发现：节点时钟比 Mac 快 14 秒，`hubble observe --since` 要用 agent 里 `date -u` 取的时间；`cilium-dbg endpoint config` 改完要等 endpoint 重新生成，立刻测会拿到旧行为。
+
 ### 7.2 落地策略
 
 阶段 1–3 的 CNP 通过 git 提交，ArgoCD 同步。此时全局 audit 已开，提交本身不会拦截任何流量。
 ArgoCD 管 Cilium CR 不会常驻 OutOfSync：oracle 的 CCNP `deny-oci-imds` 同步后 oracle-k3s App 是 Synced / Healthy，不需要 `ignoreDifferences`。
 
-homelab 的 10 条在分支 `netpol-homelab` 上。合并前先确认每个 agent 都是 `PolicyAuditMode: Enabled`（§4.1 的循环），再 `git cherry-pick 54f12a9`。
+homelab 的 10 条先放在分支上，等每个 agent 都确认是 `PolicyAuditMode: Enabled` 后才 cherry-pick 进 main（`8ffceae`）。oracle 照此办理。
 
 ### 7.3 soak（至少 8 天）
 
@@ -455,12 +467,12 @@ Grafana 能查 Loki 和 Tempo；ArgoCD 两侧的 App 全部 Synced。
 
 > 2026-11-10 暂缓：check-manifests.py 和 manifest-safety-checks.md 都写明**只收已经发生过（或正在静默发生）的事故**，
 > 不为「看起来更规范」加规则，怕误报让整个检查被无视。H6 防的坑还没真出过事，现在加就违背这条收录原则。
-> 眼下靠每个策略文件里的 ☠️ 注释和 PoC（§7.1-b/c）的实证兜底。要不要破例，由你决定。
+> 眼下靠每个策略文件里的 ☠️ 注释和 PoC（§7.1-b）的实证兜底。要不要破例，由你决定。
 
 原设想：在 `scripts/check-manifests.py` 里加一条 **H6**，把 §3.3 中两条会造成整站中断的约定变成静态检查：
 
 - **H6a**：CNP/CCNP 中只要含 `egressDeny` 或 `ingressDeny`，就必须显式写出 `enableDefaultDeny` 的对应方向。
-- **H6b**：deny 规则里的 `toCIDRSet` 只要覆盖了本集群的 Service CIDR（按清单路径判断集群：`k8s/` 对应 `10.43.0.0/16`，`cloud/oracle/` 对应 `10.53.0.0/16`），就必须在 `except` 中列出它。
+- **H6b**（PoC 已证伪其前提，不再需要）：deny 规则里的 `toCIDRSet` 只要覆盖了本集群的 Service CIDR（按清单路径判断集群：`k8s/` 对应 `10.43.0.0/16`，`cloud/oracle/` 对应 `10.53.0.0/16`），就必须在 `except` 中列出它。
 
 规则原文同步写进 [manifest-safety-checks.md](../reference/manifest-safety-checks.md)。
 

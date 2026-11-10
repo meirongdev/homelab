@@ -242,7 +242,7 @@ netpol-audit window="24h" cluster="":
     q="(sum by ($by) (increase($m[{{window}}])) > 0) or (sum by ($by) ($m unless $m offset {{window}}))"
     enc=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))' "$q")
     kubectl --context k3s-homelab get --raw "/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=$enc" \
-      | jq -r '.data.result | sort_by(-(.value[1]|tonumber))[] | [.metric.cluster, .metric.traffic_direction, "\(.metric.source_namespace)/\(.metric.source)", "->", "\(.metric.destination_namespace)/\(.metric.destination)", (.value[1]|tonumber|round)] | @tsv' \
+      | jq -r '.data.result | sort_by(-(.value[1]|tonumber))[] | [.metric.cluster, .metric.traffic_direction, "\(.metric.source_namespace // "-")/\(.metric.source // "-")", "->", "\(.metric.destination_namespace // "-")/\(.metric.destination // "-")", (.value[1]|tonumber|round)] | @tsv' \
       | column -t
     echo "(以上为空 = 最近 {{window}} 零 audit 判决)"
 

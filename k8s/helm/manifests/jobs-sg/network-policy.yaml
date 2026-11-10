@@ -27,7 +27,7 @@ spec:
         - cidr: 10.0.0.0/8
           except:
             - 10.42.0.0/16     # Pod CIDR
-            - 10.43.0.0/16     # ☠️ Service CIDR：Gateway 的 ClusterIP 在策略眼里是 world
+            - 10.43.0.0/16     # Service CIDR：防御性保留。PoC 实测 Gateway ClusterIP 走 Envoy 重定向（to-proxy），不经 pod 出口策略，不 except 也不断
         - cidr: 172.16.0.0/12
         - cidr: 192.168.0.0/16
         - cidr: 169.254.0.0/16
