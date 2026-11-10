@@ -60,6 +60,11 @@ deploy-cilium:
     # Reset release values so old manual --set flags cannot poison future upgrades, then
     # drop stale Hubble cert secrets so certgen re-issues them for the current cluster name.
     kubectl --context {{ctx}} -n kube-system delete secret hubble-server-certs hubble-relay-client-certs --ignore-not-found
+    # ☠️ 旧的 certgen Job 必须一起删（同 k8s/helm 的 deploy-cilium）。chart 里那个 Job 的名字只随 certgen
+    #    配置变；配置没变时集群里已有同名的 Complete Job，helm 不会再跑它 → 证书不重建 → hubble-relay
+    #    卡在 ContainerCreating（secret not found）→ `--wait` 等满 10 分钟，release 失败。2026-11-10 就这样卡住，
+    #    当时靠 `create job --from=cronjob/hubble-generate-certs` 手动补签才在超时前救回来。
+    kubectl --context {{ctx}} -n kube-system delete job -l k8s-app=hubble-generate-certs --ignore-not-found
     helm repo add cilium https://helm.cilium.io/ || true
     helm repo update cilium
     helm upgrade --install cilium cilium/cilium \

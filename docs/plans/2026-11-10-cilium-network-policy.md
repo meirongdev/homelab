@@ -14,7 +14,8 @@
 >       ✅ PoC（§7.1）完成，证伪了 §3.3-3。
 >       ⏳ homelab soak 中，最早 2026-11-18 翻 enforce。
 >       🚧 oracle 提前开始（2026-11-10，为尽早收住 rss-system 这个头号 SSRF 面；audit 期的行为和写法陷阱已在 homelab 验完）：
->          阶段 0 已提交（`60ecbb3`），12 条阶段 1–3 策略在分支 `netpol-oracle`（`d5624f8`），等 agent 进 audit 后并入 main。
+>          阶段 0 已部署（helm rev 21，agent `PolicyAuditMode: Enabled`），12 条阶段 1–3 策略随后并入 main（`93957da`）。
+>          ⚠️ 那次 `just oracle deploy-cilium` 卡在 hubble 证书上（配方漏删旧 certgen Job），已修。
 >          oracle 翻 enforce 仍排在 homelab 之后。
 >       §11 的 4 条按默认处理：tailnet 例外照表开，2b 和阶段 4 不做。
 > 关联: [security.md §8 / §11-2](../reference/security.md) · [security-hardening 末节](../runbooks/security-hardening.md) ·
