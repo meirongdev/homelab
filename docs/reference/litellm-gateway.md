@@ -1,6 +1,6 @@
 # LiteLLM 网关（运维事实与坑）
 
-> Last updated: 2026-10-28
+> Last updated: 2026-11-11
 > Status: 生效事实
 > Scope: `llm.meirong.dev` 这个 LLM 网关的配置生效路径、鉴权分层、上游可用性边界，
 > 本文是 source of truth。为什么选 LiteLLM、上游怎么选、Mac 兜底为何换 Ornith，见
@@ -34,6 +34,7 @@
 | `custom_dgx/qwen3.8-flash-next-tp2` | DGX | 刻意不配：给「就要打 DGX」的消费方，静默换成 Mac 反而有害（DGX 不通时如实报连接错误）|
 | `mac/ornith` / `mac/ornith-fast` | M2 的 OMLX，Ornith-1.5-35B-A3B；`-fast` 走 OMLX 的 `fast` profile（关思考），两者共用同一份驻留权重 | — |
 | `studio/qwen3.8-27b` | Mac Studio 的 OMLX（见「Mac Studio 上游」）| 不在任何兜底链，只能指名 |
+| OMLX 模型 ID 原文 ×4：`ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit`、`mlx-community__Qwen3-Embedding-4B-4bit-DWQ`（embedding）、`mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit`（TTS）、`mlx-community__Qwen3-ASR-1.7B-8bit`（ASR）| M2 的 OMLX | 给 open-notebook：它的模型按名字绑在凭据上、改名要删了重建，所以网关按原名建别名（2026-11-11）|
 | `openrouter/*` | OpenRouter 全量透传 | 免费档不能当兜底（见「哪些模型能免费用」）|
 
 ## DGX 主力栈：Qwen3.8-Flash-Next 双机 TP=2（vLLM，2026-09-30 起）

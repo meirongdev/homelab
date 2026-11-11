@@ -72,6 +72,39 @@ data:
           model: "openai/ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit:fast"
           api_base: http://100.89.15.120:8000/v1
           api_key: dummy
+      # ── open-notebook 专用：别名 = OMLX 的模型 ID 原文（2026-11-11）──
+      # 推理请求统一走网关后，open-notebook 两个凭据的 base_url 指向这里。它的模型按名字绑在凭据上，
+      # API 没有 PUT，改名只能在 UI 里删了重建（还要先扫 SurrealDB 有没有引用），所以网关这边按它
+      # 现有的名字逐字建别名，open-notebook 那边一个模型都不用动。
+      # ⚠️ 第一条与 mac/ornith 是同一个上游，别为了"去重"删掉其中一个：两边的消费方指名不同。
+      # ⚠️ TTS / ASR / embedding 的用法与限制见 docs/decisions/omlx-speech-model-selection.md。
+      #    TTS 的音色白名单（/v1/audio/voices）是 OMLX 自己的端点，网关不代理。
+      - model_name: ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit
+        litellm_params:
+          model: openai/ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit
+          api_base: http://100.89.15.120:8000/v1
+          api_key: dummy
+      - model_name: mlx-community__Qwen3-Embedding-4B-4bit-DWQ
+        litellm_params:
+          model: openai/mlx-community__Qwen3-Embedding-4B-4bit-DWQ
+          api_base: http://100.89.15.120:8000/v1
+          api_key: dummy
+        model_info:
+          mode: embedding
+      - model_name: mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit
+        litellm_params:
+          model: openai/mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit
+          api_base: http://100.89.15.120:8000/v1
+          api_key: dummy
+        model_info:
+          mode: audio_speech
+      - model_name: mlx-community__Qwen3-ASR-1.7B-8bit
+        litellm_params:
+          model: openai/mlx-community__Qwen3-ASR-1.7B-8bit
+          api_base: http://100.89.15.120:8000/v1
+          api_key: dummy
+        model_info:
+          mode: audio_transcription
       # ── Mac Studio（M5 Max / 128G，第三个自托管上游，2026-10-03）──
       # OMLX 0.7 的模型 ID 不带 org（目录是 ~/.omlx/models/lmstudio-community/<name>/），
       # 所以这里写的是裸名，不是 M2 那种 org__name。
@@ -146,7 +179,7 @@ spec:
         #    ⇒ ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按**旧路由表**继续跑。
         #    2026-08-25 实际踩过一次（改了 mac/ornith 后必须手动 rollout restart 才生效）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py 的 STAMP_ONLY），别手改。
-        checksum/config: "7c6d1b9e8acdde43"
+        checksum/config: "dc4e75f7c9c4bdb0"
         # 同理，但盯的是 codex_compat.py（litellm-codex-compat ConfigMap）：
         # 也是 subPath 挂载 + 只在启动时 import，改了不重启就是静默跑旧代码。
         checksum/codex-compat-py: "e5da4a39d90243d4"
