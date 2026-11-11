@@ -513,7 +513,7 @@ Grafana 能查 Loki 和 Tempo；ArgoCD 两侧的 App 全部 Synced。
 **收紧 Tailscale ACL**。CNP 只管被策略选中的 pod。`tag:homelab/tag:oracle → *:*` 同时放开了节点本身、hostNetwork 进程，
 以及没进护栏的 ns（monitoring、backup 等）。把 dst 收到真正用到的端口
 （OMLX `:8000`、exporter `:9100`/`:9090`、对端 NodePort、ClusterMesh `:32379`、106 的 `:22`），是节点级的那一半防线。
-建议单独列入 ROADMAP。
+2026-11-11 已单独出方案：[Tailscale ACL 收紧](2026-11-11-tailscale-acl-tightening.md)（按实测流量重做了端口清单，比这里列的多出 oracle 夜备 → 106 `:22` 等几条）。
 
 ## 10. 做完之后回写（然后删除本文件）
 
