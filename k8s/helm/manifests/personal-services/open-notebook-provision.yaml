@@ -80,9 +80,9 @@ data:
         #    ✅ 2026-09-19 已删掉 qwen38-flash-next（2026-09-03 那次删的是 deepseek-v4-flash）。
         #    删前的扫法：**直接查 SurrealDB 全部 19 张表**，别只扫 API
         #    （`SELECT * FROM <table>` 逐表 grep model id；API 有 404 的端点，扫不到不等于没有）。
-        #    两次扫下来外部引用都是 0。
-        # ⚠️ **别顺手删 `mlx-community__Qwen3.6-35B-A3B-nvfp4`**：它看着也像遗留，但 OMLX
-        #    仍在提供（2026-09-19 实测 `/v1/models` 有它），是可用备选而非死条目。
+        #    三次扫下来外部引用都是 0。
+        #    ✅ 2026-11-11 删掉 qwen3.8-27b-sglang 与 mlx-community__Qwen3.6-35B-A3B-nvfp4（推理改走网关后
+        #    两个名字网关都不认；Qwen3.6 的备选位由下面的 studio/qwen3.8-27b 接替）。
         {"name": "qwen3.8-flash-next-tp2", "type": "language", "credential": "dgx-vllm"},
         # 备用对话模型（非默认）：DGX 是跨境共享机器且暂无告警（ROADMAP #4），
         # 它不可达时在 UI 里一键切到这个本地 35B（262k ctx）兜底。
@@ -91,6 +91,11 @@ data:
         #    改名就得在 UI 里删了重建，所以是网关迁就这边，不是反过来。
         # 2026-08-25 由 Qwen3.6-35B 换为 Ornith-1.5-35B-A3B（OMLX 的 is_default 同日已指向它）。
         {"name": "ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit", "type": "language", "credential": "mac-omlx"},
+        # 第二备选对话模型（非默认，2026-11-11 接替 Qwen3.6-35B）：Mac Studio 的 Qwen3.8-27B（262k ctx，常驻、
+        # 不与 M2 抢内存）。名字是网关别名原样（带 studio/ 前缀），所以它的请求走 Studio 而不是 M2；
+        # 挂在 mac-omlx 凭据下只是分组（两个凭据都指向网关）。网关别名不在任何兜底链里：Studio 不通就如实报错。
+        # ☠️ 它在 open-notebook 那把 key 的白名单里是单独加的（坑 A），改别名要连 key 一起改。
+        {"name": "studio/qwen3.8-27b", "type": "language", "credential": "mac-omlx"},
         {"name": "mlx-community__Qwen3-Embedding-4B-4bit-DWQ", "type": "embedding", "credential": "mac-omlx"},
         {"name": "mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit", "type": "text_to_speech", "credential": "mac-omlx"},
         {"name": "mlx-community__Qwen3-ASR-1.7B-8bit", "type": "speech_to_text", "credential": "mac-omlx"},

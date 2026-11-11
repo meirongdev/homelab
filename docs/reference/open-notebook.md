@@ -36,6 +36,7 @@ personal-services 的网络策略随之只放行 litellm:4000，不再给 DGX、
 |---|---|---|
 | 对话/转换/长上下文/工具（默认） | `qwen3.8-flash-next-tp2`（262k ctx） | DGX vLLM；**DGX 出错时网关自动兜底到 M2 的 Ornith** |
 | 对话备选（非默认，UI 手动切） | `ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit`（262k ctx） | M2 OMLX |
+| 对话第二备选（非默认，UI 手动切） | `studio/qwen3.8-27b`（262k ctx） | Mac Studio OMLX；不在兜底链里 |
 | Embedding | `mlx-community__Qwen3-Embedding-4B-4bit-DWQ`（2560 维） | M2 OMLX |
 | STT | `mlx-community__Qwen3-ASR-1.7B-8bit` | M2 OMLX |
 | TTS | `mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit`（9 个具名音色）| M2 OMLX |
@@ -46,9 +47,9 @@ ctx / 冷启动 / 回滚）以 [litellm-gateway.md](litellm-gateway.md) 的「DG
 
 - ☠️ 模型名必须同时在网关的 model_list 里、且在 `open-notebook` 那把 key 的白名单里（[litellm-gateway.md](litellm-gateway.md) 坑 A）。
   写错当场 400，不再像直连 SGLang 时那样静默回显。
-- ⚠️ 两个 UI 里的旧条目**经网关后不可用**（网关不认这两个名字）：`qwen3.8-27b-sglang`（本来就是死条目）、
-  `mlx-community__Qwen3.6-35B-A3B-nvfp4`（原先是直连 OMLX 的第二备选；网关刻意不暴露它，M2 装不下两个 35B，
-  见 litellm.yaml「Mac 兜底」）。删前照下面第 3 条直扫 SurrealDB。
+- 2026-11-11 删掉了两个经网关后不可用的旧条目：`qwen3.8-27b-sglang`（本来就是死条目）、
+  `mlx-community__Qwen3.6-35B-A3B-nvfp4`（原先直连 OMLX 的第二备选；网关刻意不暴露它，M2 装不下两个 35B）。
+  删前按下面第 3 条直扫 SurrealDB 19 张表，外部引用为 0。第二备选改由 `studio/qwen3.8-27b` 接替。
 - ⚠️ 网关到 M2 用 `api_key: dummy`，能用**只是因为** Mac 上开着 `allow_unauthenticated_inference: true`。
   它一丢，Mac 那四个角色一起失败，见 [omlx-inference-metrics.md 的「鉴权」](omlx-inference-metrics.md#鉴权omlx-07-起)。
 
@@ -63,9 +64,8 @@ ctx / 冷启动 / 回滚）以 [litellm-gateway.md](litellm-gateway.md) 的「DG
    ☠️ **判据是直查 SurrealDB 全部表**（`ws://open-notebook-surrealdb…` 的 HTTP `/sql`，
    `INFO FOR DB` 取表名后逐表 `SELECT *` 再 grep model id），别只扫 API：本版本
    `/podcasts`、`/search-templates` 是 404，扫不到不代表没有。
-   - ⚠️ 遗留条目 `qwen3.8-27b-sglang` 截至 2026-10-04 仍在 `/api/models`（默认角色已不指向它），
-     选中当场 404，删前照上面扫一遍。
-   - ⚠️ **`mlx-community__Qwen3.6-35B-A3B-nvfp4` 看着像遗留但不要删**：OMLX 仍在提供，是可用备选。
+   - 扫描脚本的写法：在 open-notebook 容器里用 `SURREAL_*` 环境变量拼 HTTP `/sql`（`surreal-ns` / `surreal-db` 头 +
+     Basic auth），`INFO FOR DB` 取表名后逐表 `SELECT *`，在结果里数 model id 的出现次数；只在 `model` 表命中才算无引用。
 
 ### 语音模型换不动：调用口径把选择锁死了
 

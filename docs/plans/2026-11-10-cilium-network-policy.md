@@ -533,5 +533,6 @@ Grafana 能查 Loki 和 Tempo；ArgoCD 两侧的 App 全部 Synced。
    原文把 calibre-metadata-llm 也算进直连方，是错的：它本来就经网关的 NodePort。
    当初直连不是为了避开网关的超时（jobs-sg 那次 300s 是它自己的客户端超时；网关 30 天里有 15 个 >300s 的请求成功）。
    jobs-sg 用不带兜底的 `custom_dgx/` 别名；open-notebook 的 Mac 模型在网关按 OMLX 原名建别名。
-   代价：open-notebook 里两个不归 provisioner 管的旧条目（`qwen3.8-27b-sglang`、`mlx-community__Qwen3.6-35B-A3B-nvfp4`）经网关后不可用。
+   代价：open-notebook 里两个不归 provisioner 管的旧条目经网关后不可用，已扫 SurrealDB 确认无引用后删除，
+   第二备选改为 `studio/qwen3.8-27b`。
 4. **阶段 2b**（Loki、Tempo、Alertmanager 的入口白名单）和**阶段 4**做不做？

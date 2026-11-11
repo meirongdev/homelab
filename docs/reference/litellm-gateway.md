@@ -221,7 +221,7 @@ for m in free:
 | 别名 → 上游 | `studio/qwen3.8-27b` → `openai/Qwen3.8-27B-MLX-4bit` @ `100.98.220.75:8000/v1` |
 | 机器 | Mac Studio M5 Max / 128G，OMLX 0.7.0；池天花板 ~106G，常驻、不换入换出（M2「只暴露一个 35B」的约束不适用）|
 | 模型 | HF `lmstudio-community/Qwen3.8-27B-MLX-4bit`（VLM，262k ctx），思维链分离到 `reasoning_content`。⚠️ OMLX 0.7 的模型 ID 不带 org，别照 M2 写成 `org__name` |
-| key 白名单 | `LITELLM_VK`（sha256 前缀 2c15baf776…）、`key_alias=xiaogpt`（只有这一个模型）、`ext-team-1`（账户与 key 两层白名单都有）。其余窄 key 刻意没加，谁要用按坑 A 单独加 |
+| key 白名单 | `LITELLM_VK`（sha256 前缀 2c15baf776…）、`key_alias=xiaogpt`（只有这一个模型）、`ext-team-1`（账户与 key 两层白名单都有）、`key_alias=open-notebook`（2026-11-11，第二备选）。其余窄 key 刻意没加，谁要用按坑 A 单独加 |
 
 主机侧（OMLX 安装、key、模型下载、DFlash2 与实测性能）→ `macbook/ansible/README.md`；指标 →
 [omlx-inference-metrics.md](omlx-inference-metrics.md)。
@@ -299,7 +299,7 @@ curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
 | k8sgpt（`--backend openai`）| `qwen3.8-flash-next-tp2` | 同上。☠️ explain 输出为空：k8sgpt 0.4.39 实际按 2048 截断（无视 `maxtokens: 4096`），DGX 默认开思考，2048 全用在思考上（网关记 `success`、`completion_tokens=2048`），所以默认后端是 localai |
 | oracle 上的 calibre 元数据作业 | `qwen3.8-flash-next-tp2`（经 `litellm-external` NodePort）| [清单内嵌脚本](../../cloud/oracle/manifests/calibre-metadata/metadata-llm.yaml) |
 | xiaogpt（小爱音箱，homelab `personal-services`）| `studio/qwen3.8-27b`，专用 key `key_alias=xiaogpt` | [xiaogpt.yaml](../../k8s/helm/manifests/personal-services/xiaogpt.yaml) 的 ConfigMap |
-| Open Notebook（homelab `personal-services`）| `qwen3.8-flash-next-tp2` + OMLX 原名的 4 个别名（chat / embedding / TTS / ASR），专用 key `key_alias=open-notebook`，2026-11-11 起 | [open-notebook.md](open-notebook.md)；key 由 provisioner 写进两个凭据 |
+| Open Notebook（homelab `personal-services`）| `qwen3.8-flash-next-tp2` + OMLX 原名的 4 个别名（chat / embedding / TTS / ASR）+ `studio/qwen3.8-27b`（第二备选），专用 key `key_alias=open-notebook`，2026-11-11 起 | [open-notebook.md](open-notebook.md)；key 由 provisioner 写进两个凭据 |
 | jobs-sg enrich（homelab `jobs-sg`）| `custom_dgx/qwen3.8-flash-next-tp2`（刻意不带兜底），专用 key `key_alias=jobs-sg`，2026-11-11 起 | [jobs-sg.md](jobs-sg.md)「LLM 富化」|
 | `codex --profile dgx` / `m2` | 不走网关，直连 DGX / M2 的 OMLX | `~/.codex/{dgx,m2}.config.toml`（本机）|
 | 外部使用者（UI 账户 `ext-team-1`）| 5 个自托管别名 + 17 个 OpenRouter `:free` 模型 | Postgres（账户与 key 各一层白名单），见「发给外部的 key」|
