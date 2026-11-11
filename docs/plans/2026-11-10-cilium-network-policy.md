@@ -217,8 +217,8 @@ oracle 版本把 except 改成 `10.52.0.0/16` 和 `10.53.0.0/16`。
 
 | 集群 | ns | `100.64/10` 的 except | 备注 |
 |---|---|---|---|
-| homelab | `personal-services` | `100.89.15.120` `100.97.87.120` | open-notebook 及其 provision 直连 M2 OMLX 和 DGX 的 :8000 |
-| homelab | `jobs-sg` | `100.97.87.120` | enrich 直连 DGX |
+| homelab | `personal-services` | 无（2026-11-11 前是 `100.89.15.120` `100.97.87.120`） | open-notebook 的推理改走 LiteLLM（§11-3） |
+| homelab | `jobs-sg` | 无（2026-11-11 前是 `100.97.87.120`） | enrich 的推理改走 LiteLLM（§11-3） |
 | homelab | `litellm` | `100.97.87.120` `100.89.15.120` `100.98.220.75` | 推理后端：DGX、M2、Studio |
 | homelab | `media` | 无 | NFS 是 kubelet 挂载，不走 pod 网络，不受影响 |
 | homelab | `cloudflare` | 无 | 只连 Cloudflare 边缘和 Gateway ClusterIP（后者走 Envoy 重定向，不经出口策略） |
@@ -529,6 +529,9 @@ Grafana 能查 Loki 和 Tempo；ArgoCD 两侧的 App 全部 Synced。
 1. **oracle 的 audit 窗口（约 8 天）期间，readlist 的 no-egress 和 argocd 的 4 条 NP 只记录不拦截**。
    接受吗？我的判断是可以接受：readlist 那两个 Job 跑的是自己的代码，防的是供应链被投毒，8 天的暴露窗口很小。
 2. **Uptime Kuma 不进护栏**（它的本职就是探测内部服务）。接受吗？
-3. open-notebook、jobs-sg/enrich、calibre-metadata-llm **绕过 LiteLLM 直连 DGX 或 Mac**，于是这三处都要开 tailnet 例外。
-   如果它们改为走 LiteLLM，例外就能收敛到 litellm 一个 ns，但要先确认当初直连是不是为了避开 LiteLLM 的超时（jobs-sg 有过 300s 超时的问题）。
+3. ✅ **2026-11-11 已做：推理请求统一走 LiteLLM**，tailnet 例外收敛到 litellm 一个 ns。
+   原文把 calibre-metadata-llm 也算进直连方，是错的：它本来就经网关的 NodePort。
+   当初直连不是为了避开网关的超时（jobs-sg 那次 300s 是它自己的客户端超时；网关 30 天里有 15 个 >300s 的请求成功）。
+   jobs-sg 用不带兜底的 `custom_dgx/` 别名；open-notebook 的 Mac 模型在网关按 OMLX 原名建别名。
+   代价：open-notebook 里两个不归 provisioner 管的旧条目（`qwen3.8-27b-sglang`、`mlx-community__Qwen3.6-35B-A3B-nvfp4`）经网关后不可用。
 4. **阶段 2b**（Loki、Tempo、Alertmanager 的入口白名单）和**阶段 4**做不做？

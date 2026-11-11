@@ -25,6 +25,14 @@
 >   已用线上同 digest 镜像 + 真实渲染配置实测并修复，**Decision 本身（DGX 主 + Mac 兜底、
 >   严格主→兜底、不做双向均衡）不变**，变的只是声明位置。复现、对照表与"400 不该兜底"
 >   的理由见 [reference/litellm-gateway.md](../reference/litellm-gateway.md) 坑 A2。
+> 修订: 2026-11-11：Decision 里「**网关只接对话/生成模型**，embedding/STT/TTS 仍由 Open Notebook 直连 Mac」
+>   与「jobs-sg 直连 DGX」**作废**：集群内的推理请求统一走网关。动因是网络策略
+>   （[plans/2026-11-10-cilium-network-policy.md](../plans/2026-11-10-cilium-network-policy.md) §11-3）：
+>   直连要给 personal-services、jobs-sg 开 tailnet 例外，而 except 不能限定端口，同 ns 的任何 pod 都能连 DGX / M2
+>   的任意端口；经网关后这两个 ns 只放行 litellm:4000、碰不到 tailnet，并多了按 key 的用量计量。
+>   Mac 的 embedding / TTS / ASR 经网关实测可用（TTS 出 WAV 再送 ASR 转写一字不差）。
+>   open-notebook 的 Mac 别名按 OMLX 原名建（它的模型改名要删了重建），jobs-sg 用不带兜底的 `custom_dgx/` 别名
+>   （它的模型名是缓存键）。生效事实见 [reference/litellm-gateway.md](../reference/litellm-gateway.md) 的消费方表。
 
 ## Context
 

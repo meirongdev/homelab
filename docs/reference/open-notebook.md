@@ -1,6 +1,6 @@
 # Open Notebook — AI 研读知识库（架构事实）
 
-> Last updated: 2026-11-10
+> Last updated: 2026-11-11
 > Status: 生效事实
 > Scope: Open Notebook（NotebookLM 自托管替代）在 homelab 集群的部署形态、模型接线、
 > 配置真相源地图、备份口径，本文是 source of truth。
@@ -27,30 +27,38 @@
 **真相源是 `k8s/helm/manifests/personal-services/open-notebook-provision.yaml`**（PostSync hook
 幂等 reconcile，改模型 = 改它 + git push；不 prune UI 手工加的实验项）。当前指向：
 
-| 角色 | 后端（凭据） | 模型 |
+2026-11-11 起**全部模型调用经 LiteLLM 网关**：两个凭据（`dgx-vllm`、`mac-omlx`，名字只剩历史含义）的
+`base_url` 都是 `http://litellm.litellm.svc.cluster.local:4000/v1`，`api_key` 是虚拟 key `key_alias=open-notebook`
+（Vault `secret/homelab/open-notebook` 的 `litellm_key` → Secret `open-notebook-litellm` → provisioner 每次 sync 写入）。
+personal-services 的网络策略随之只放行 litellm:4000，不再给 DGX、M2 开 tailnet 例外。
+
+| 角色 | 网关别名（= open-notebook 里的模型名） | 网关后面 |
 |---|---|---|
-| 对话/转换/长上下文/工具（默认） | DGX vLLM `100.97.87.120:8000`（`dgx-vllm`） | `qwen3.8-flash-next-tp2`（262k ctx） |
-| 对话兜底（非默认，UI 手动切） | Mac OMLX `100.89.15.120:8000`（`mac-omlx`） | `ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit`（262k ctx） |
-| Embedding | Mac OMLX | Qwen3-Embedding-4B（2560 维） |
-| STT | Mac OMLX | `Qwen3-ASR-1.7B-8bit` |
-| TTS | Mac OMLX | `Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit`（9 个具名音色）|
+| 对话/转换/长上下文/工具（默认） | `qwen3.8-flash-next-tp2`（262k ctx） | DGX vLLM；**DGX 出错时网关自动兜底到 M2 的 Ornith** |
+| 对话备选（非默认，UI 手动切） | `ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit`（262k ctx） | M2 OMLX |
+| Embedding | `mlx-community__Qwen3-Embedding-4B-4bit-DWQ`（2560 维） | M2 OMLX |
+| STT | `mlx-community__Qwen3-ASR-1.7B-8bit` | M2 OMLX |
+| TTS | `mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit`（9 个具名音色）| M2 OMLX |
 
-上游模型的事实（served name / 端点 / ctx / 冷启动 / 回滚）以
-[litellm-gateway.md](litellm-gateway.md) 的「DGX 主力栈」为准。Open Notebook 不走网关，
-模型名必须与裸引擎的 served name 逐字相同。
+Mac 那四个别名在网关里按 OMLX 的模型 ID **原名**建（litellm.yaml「open-notebook 专用」）：这里的模型按名字
+绑在凭据上、API 没有 PUT，改名得在 UI 删了重建，所以是网关迁就这边。上游模型的事实（served name / 端点 /
+ctx / 冷启动 / 回滚）以 [litellm-gateway.md](litellm-gateway.md) 的「DGX 主力栈」为准。
 
-⚠️ `mac-omlx` 凭据填的是 `api_key: "dummy"`，能用**只是因为** Mac 上开着
-`allow_unauthenticated_inference: true`。它一丢，Mac 那四个角色一起 401，见
-[omlx-inference-metrics.md 的「鉴权」](omlx-inference-metrics.md#鉴权omlx-07-起)。
+- ☠️ 模型名必须同时在网关的 model_list 里、且在 `open-notebook` 那把 key 的白名单里（[litellm-gateway.md](litellm-gateway.md) 坑 A）。
+  写错当场 400，不再像直连 SGLang 时那样静默回显。
+- ⚠️ 两个 UI 里的旧条目**经网关后不可用**（网关不认这两个名字）：`qwen3.8-27b-sglang`（本来就是死条目）、
+  `mlx-community__Qwen3.6-35B-A3B-nvfp4`（原先是直连 OMLX 的第二备选；网关刻意不暴露它，M2 装不下两个 35B，
+  见 litellm.yaml「Mac 兜底」）。删前照下面第 3 条直扫 SurrealDB。
+- ⚠️ 网关到 M2 用 `api_key: dummy`，能用**只是因为** Mac 上开着 `allow_unauthenticated_inference: true`。
+  它一丢，Mac 那四个角色一起失败，见 [omlx-inference-metrics.md 的「鉴权」](omlx-inference-metrics.md#鉴权omlx-07-起)。
 
 ### ☠️ DGX 换主力栈时要核的三件事
 
 1. **长上下文有硬上限 262144**：`large_context_model` 与三个播客 episode profile 塞整本书会
    超窗，兜底的 Mac Ornith 也是 262k。长书截断或报超窗时先按这条判，别先怀疑上游挂了。
-2. **端点与模型名一起核**：凭据 `dgx-vllm` 的 `base_url` 也会随栈变。served name 用
-   `curl -s http://100.97.87.120:8000/v1/models`（本机任意目录）核。vLLM 下名字写错当场 404；
-   SGLang 一类引擎接受任意 model 名并原样回显，写错是静默的。凭据名**刻意不随引擎改名**
-   （provisioner 只增不删，改名只会多一条死凭据）。
+2. **端点只在网关改**：凭据的 `base_url` 指向网关，换栈、换端口都只改 litellm.yaml。
+   网关别名若跟着改名，这里的模型名、默认位、播客 profile 和 key 白名单要一起改（第 3 条的旧条目问题随之而来）；
+   别名不改名就什么都不用动。凭据名**刻意不随引擎改名**（provisioner 只增不删，改名只会多一条死凭据）。
 3. **改名不带走旧条目**：unmanaged models 只打 note，旧条目得在 UI 手删。删前确认没有引用，
    ☠️ **判据是直查 SurrealDB 全部表**（`ws://open-notebook-surrealdb…` 的 HTTP `/sql`，
    `INFO FOR DB` 取表名后逐表 `SELECT *` 再 grep model id），别只扫 API：本版本
@@ -78,7 +86,9 @@ TTS 不可用（只在合成那步 500）；STT（`content_core/processors/media
 
 第二层：**seed 的 `speaker.voice_id` 是 OpenAI 音色名**（`nova`/`alloy`/`echo`/`shimmer`/`ash`），
 Qwen3-TTS 一律 `500 Speaker 'nova' not supported`。只补 `voice_model` 会让黄条消失、播客推迟到
-合成那步才炸，**音色必须一起换**。可用音色向后端现取，不要抄文档：
+合成那步才炸，**音色必须一起换**。可用音色在 provisioner 的 `TTS_VOICES` 里写死（2026-11-11 起；
+provisioner 所在 ns 碰不到 tailnet，而音色表是 OMLX 自己的端点、网关不代理）。换 TTS 模型时从能连 tailnet 的
+机器现取，更新 `TTS_VOICES`：
 
 ```bash
 curl -s "http://100.89.15.120:8000/v1/audio/voices?model=mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit"

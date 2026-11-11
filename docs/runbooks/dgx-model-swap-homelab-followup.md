@@ -1,6 +1,6 @@
 # DGX 换了主力模型：homelab 侧跟进 SOP
 
-> Last updated: 2026-10-04
+> Last updated: 2026-11-11
 > Status: 生效事实 + 切换 SOP
 > 触发条件：`100.97.87.120:<port>/v1/models` 返回的 served name 与仓库里的引用不一致
 > —— 上游（`~/projects/meirongdev/nv-dgx-spark`）换栈、改 served name、或从换栈中
@@ -115,20 +115,16 @@ d=json.load(sys.stdin)["data"]
 | # | 文件 | 字段 | 备注 |
 |---|---|---|---|
 | 1 | `k8s/helm/manifests/litellm/litellm.yaml` | `custom_dgx/<name>` 与裸 `<name>` 的 `model_name` + `model: openai/<name>` | `fallbacks: ["mac/ornith"]` 保持不动；☠️ 改完**必须** `cd k8s/helm && just gen-embedded-scripts` |
-| 2 | `k8s/helm/manifests/jobs-sg/cronjob-enrich.yaml` | `LLM_MODELS` | **直连** DGX，网关清单帮不上忙；值必须是裸 served name，带前缀会 404 |
-| 3 | `k8s/helm/manifests/personal-services/open-notebook-provision.yaml` | `MODELS` + `DEFAULTS` 四个角色 + `EPISODE_PROFILE_LLMS` 三个 profile | 也是裸名（不走网关）；声明式，push 即生效 |
+| 2 | `k8s/helm/manifests/jobs-sg/cronjob-enrich.yaml` | `LLM_MODELS` | 走网关（2026-11-11 起），用**前缀别名** `custom_dgx/<name>`（不带兜底）|
+| 3 | `k8s/helm/manifests/personal-services/open-notebook-provision.yaml` | `MODELS` + `DEFAULTS` 四个角色 + `EPISODE_PROFILE_LLMS` 三个 profile | 走网关（2026-11-11 起），用**裸名别名**；声明式，push 即生效 |
 | 4 | `cloud/oracle/manifests/calibre-metadata/metadata-llm.yaml` | 内嵌脚本的 `LLM_MODEL` 默认值 + CronJob 的 `LLM_MODEL` | 走网关，走的是**裸名别名** |
 
-☠️ **端点变了的话（不只是模型名），上面 1–3 还各有一个 URL 要改**，而且 4 不用改
-（它走网关，网关帮它挡住了端点变化）：
+2–4 都经网关之后，**别名名字不变就只改第 1 行**；别名改名时 2–4 跟着改，并照坑 A 改 `jobs-sg`、
+`open-notebook` 等 key 的白名单（[litellm-gateway.md](../reference/litellm-gateway.md)）。
+☠️ **端点变了的话（不只是模型名），只有 1 要改**（两个别名的 `api_base`，2026-09-19 那次是
+`http://100.97.87.120:8888/v1`）：2–4 指向网关，网关帮它们挡住了端点变化。
 
-| # | 字段 | 2026-09-19 的值 |
-|---|---|---|
-| 1 | 两个别名的 `api_base` | `http://100.97.87.120:8888/v1` |
-| 2 | `LLM_BASE_URL` | `http://100.97.87.120:8888` |
-| 3 | `CREDENTIALS` 里 `dgx-vllm` 的 `base_url` | `http://100.97.87.120:8888/v1` |
-
-⚠️ 3 的**凭据名不要跟着改**（provisioner 只增不删，改名 = 多一条新凭据 + 一条死条目）。
+⚠️ 3 里的**凭据名 `dgx-vllm` 不要跟着改**（provisioner 只增不删，改名 = 多一条新凭据 + 一条死条目）。
 
 **监控侧还有两处**，它们在 §4 展开，但属于"必改"而不是"重估"：
 

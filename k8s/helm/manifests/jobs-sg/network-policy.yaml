@@ -2,12 +2,13 @@
 #
 # 为什么：ingest 抓的是外部招聘站点，jobs-sg-web 对公网开放。节点的 Tailscale ACL 是 *:*，
 # pod 出口经节点 SNAT 后能访问 tailnet 全部设备和 homelab LAN。这里把出口收成白名单：
-# DNS、DGX 推理端口（enrich）、公网。写法约定见 docs/plans/2026-11-10-cilium-network-policy.md §3.3。
+# DNS、LiteLLM 网关（enrich 的推理请求，2026-11-11 起不再直连 DGX）、公网。写法约定见 docs/plans/2026-11-10-cilium-network-policy.md §3.3。
 #
 # audit 窗口（cilium values 的 policyAuditMode=true）期间只记录不拦截：`just helm netpol-audit`。
 # 三个 CronJob 的 pod 没有任何标签，所以两条都按整个 ns 选。
 ---
-# 阶段 1：禁止访问私网段（与阶段 3 的白名单叠加；deny 压过 allow，DGX 必须同时在这里 except）。
+# 阶段 1：禁止访问私网段（与阶段 3 的白名单叠加；deny 压过 allow）。
+# 2026-11-11 起推理走集群内的 LiteLLM，tailnet 不再有例外。
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -32,8 +33,6 @@ spec:
         - cidr: 192.168.0.0/16
         - cidr: 169.254.0.0/16
         - cidr: 100.64.0.0/10
-          except:
-            - 100.97.87.120/32   # DGX rank0：enrich 的 LLM_BASE_URL（cronjob-enrich.yaml）
 ---
 # 阶段 3：出口白名单。
 apiVersion: cilium.io/v2
@@ -42,7 +41,7 @@ metadata:
   name: jobs-sg-egress
   namespace: jobs-sg
 spec:
-  description: jobs-sg 只能出公网、访问 DGX 推理端口和同 ns，碰不到集群内其它服务
+  description: jobs-sg 只能出公网、访问 LiteLLM 网关和同 ns，碰不到集群内其它服务
   log:
     value: jobs-sg-egress
   endpointSelector: {}
@@ -60,13 +59,14 @@ spec:
               protocol: ANY   # 纯 L4，不启用 DNS 代理
     - toEndpoints:
         - {}                  # 同 ns
-    # ☠️ DGX 换栈时端口变过（:8000 / :8888）。改 cronjob-enrich.yaml 的 LLM_BASE_URL 时连这里一起改，
-    #    否则 enrich 立即失败、CiliumPolicyDrops 会响。
-    - toCIDR:
-        - 100.97.87.120/32
+    # enrich 的推理请求（cronjob-enrich.yaml 的 LLM_BASE_URL）。DGX 换栈、换端口都只改网关，这里不用动。
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: litellm
+            app: litellm
       toPorts:
         - ports:
-            - port: "8000"
+            - port: "4000"
               protocol: TCP
     # 公网（招聘站点、Telegram）。
     - toCIDRSet:

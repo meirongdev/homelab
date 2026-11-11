@@ -72,25 +72,32 @@ spec:
               command: ["/usr/local/bin/jobs-sg-enrich"]
               args: ["--data-dir", "/data"]
               env:
-                # DGX Spark 推理引擎（Tailscale IP，pod 直连；不是集群内 Service）。
-                # 同一台机器也在给 Open Notebook 供模型，见 reference/open-notebook.md。
-                # ⚠️ :8888 是 docker/SGLang 栈；上一栈的 :8000(k3s/vLLM) 已经不监听了。
+                # 2026-11-11 起经 LiteLLM 网关（集群内 Service），不再直连 DGX 的 Tailscale IP。
+                # 网关之后 jobs-sg ns 的网络策略只放行 litellm:4000，碰不到 tailnet。
+                # 走集群内 Service 而不是 llm.meirong.dev：后者经 Cloudflare，有 100s 上限。
+                # 网关自身不会先于 LLM_TIMEOUT 超时（30 天里有 15 个 >300s 的请求经它成功，最长 1267s）。
                 - name: LLM_BASE_URL
-                  value: http://100.97.87.120:8000
-                # 裸引擎的模型 id，不带网关的 provider 前缀。
-                # ⚠️ 必须与 DGX 当前 serve 的模型逐字同名。
-                # ☠️ 判据变了：旧栈(vLLM)写错回 404，**新栈(SGLang)回 200 并原样回显**，
-                #    写错完全静默 —— 核对方式只有 `curl :8888/v1/models`。
-                # 2026-09-19 由 qwen38-flash-next 换为 qwen3.8-flash-next-tp2。
-                # ☠️ 上游 0632049 起，换模型**只改这一行**（模型相关参数全部下沉成 LLM_*）：
-                #    若新栈关思考的键名不是 enable_thinking，还要一起改 LLM_THINKING_KWARG。
-                #    验收不用手写请求，上游带了一条默认跳过、不进 CI 的实测用例：
-                #      LLM_LIVE_URL=http://100.97.87.120:8000 LLM_LIVE_MODEL=<新模型> \
+                  value: http://litellm.litellm.svc.cluster.local:4000
+                # 虚拟 key `key_alias=jobs-sg`，白名单只有下面这一个别名（docs/reference/litellm-gateway.md 坑 A）。
+                - name: LLM_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: jobs-sg-llm
+                      key: llm-api-key
+                # 网关别名。用 `custom_dgx/` 前缀那条，**不用**同名裸别名 qwen3.8-flash-next-tp2：
+                # 裸别名配了兜底，DGX 出错时会静默换成 Mac 的 Ornith 作答，而这里的模型名同时是
+                # enrich 缓存键和 job_tech 的出处 —— 别的模型的结果会挂着 DGX 的名字写进缓存。
+                # 前缀这条刻意不配兜底：DGX 不通就如实报错，岗位留在积压里第二天再试。
+                # ⚠️ 换名（2026-11-11 由裸引擎名换成本别名）只让缓存对重复描述多算一次；
+                #    积压按处理层判断，不会重跑历史。
+                # ☠️ DGX 换栈时：网关的别名与 key 白名单一起改（runbooks/dgx-model-swap-homelab-followup.md），
+                #    若关思考的键名不是 enable_thinking，还要一起改 LLM_THINKING_KWARG。
+                #    验收用上游那条默认跳过、不进 CI 的实测用例，指向网关：
+                #      LLM_LIVE_URL=http://100.94.186.7:31400 LLM_LIVE_MODEL=custom_dgx/$新模型 \
+                #        LLM_LIVE_KEY=$(vault kv get -field=llm_api_key secret/homelab/jobs-sg) \
                 #        go test ./internal/llm -run Live -v
-                #    它会真调一次并断言推理确实被关掉；挂了就换 LLM_LIVE_KWARG 试，
-                #    试通的值就是要写进清单的那个。
                 - name: LLM_MODELS
-                  value: qwen3.8-flash-next-tp2
+                  value: custom_dgx/qwen3.8-flash-next-tp2
                 - name: LLM_CONCURRENCY
                   value: "8"
                 # 单次调用预算（= 上游 llm.DefaultTimeout，可配，不必重构镜像）。

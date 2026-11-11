@@ -7,6 +7,7 @@
 #
 # audit 窗口（cilium values 的 policyAuditMode=true）期间只记录不拦截：`just helm netpol-audit`。
 # 新服务要访问 tailnet / LAN 上的某个地址：把它写进下面 guard 的 except，否则会被拦。
+# 要调推理模型的：走集群内的 LiteLLM（litellm.litellm.svc:4000，xiaogpt、open-notebook 都是），不开 tailnet 例外。
 ---
 # 阶段 1：整个 ns 禁止访问私网段。只拒绝列出的网段，其余出口照旧。
 apiVersion: cilium.io/v2
@@ -32,11 +33,9 @@ spec:
         - cidr: 172.16.0.0/12
         - cidr: 192.168.0.0/16
         - cidr: 169.254.0.0/16
+        # 2026-11-11 起 open-notebook 的推理经 LiteLLM，原来给 DGX 和 M2 开的两个例外已删，tailnet 整段拒绝。
+        # ☠️ 真要再开例外：deny 压过一切 allow，放行只能写在这里的 except；except 不能限定端口，同 ns 的其它 pod 也能连。
         - cidr: 100.64.0.0/10
-          # ☠️ deny 压过一切 allow：放行只能写在这里。except 不能限定端口，同 ns 的其它 pod 也能连这两台的任意端口。
-          except:
-            - 100.97.87.120/32   # DGX rank0：open-notebook 的 dgx-vllm 凭据（open-notebook-provision.yaml）
-            - 100.89.15.120/32   # M2 OMLX：open-notebook 的 mac-omlx 凭据（语言 / embedding / 语音）
 ---
 # 阶段 3：open-notebook 按用户给的 URL 抓外部内容（SSRF 面），出口改为白名单，碰不到集群内其它服务。
 apiVersion: cilium.io/v2
@@ -45,7 +44,7 @@ metadata:
   name: open-notebook-egress
   namespace: personal-services
 spec:
-  description: open-notebook 只能出公网和访问自身依赖（surrealdb、DGX / M2 推理端口）
+  description: open-notebook 只能出公网和访问自身依赖（surrealdb、LiteLLM 网关）
   log:
     value: open-notebook-egress
   endpointSelector:
@@ -70,14 +69,15 @@ spec:
         - ports:
             - port: "8000"
               protocol: TCP
-    # ☠️ DGX 换栈时端口变过（:8000 / :8888）。端口一变这里就拦，症状是模型调用立即失败，
-    #    CiliumPolicyDrops 会响。改端口时连同 open-notebook-provision.yaml 一起改。
-    - toCIDR:
-        - 100.97.87.120/32
-        - 100.89.15.120/32
+    # 全部模型调用（语言 / embedding / TTS / ASR）经 LiteLLM，凭据见 open-notebook-provision.yaml。
+    # DGX 换栈、换端口都只改网关，这里不用动。
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: litellm
+            app: litellm
       toPorts:
         - ports:
-            - port: "8000"
+            - port: "4000"
               protocol: TCP
     # 公网：访问 *.meirong.dev 也走这里（经 Cloudflare 和 WAF 绕回来），SSRF 绕不开 WAF。
     - toCIDRSet:

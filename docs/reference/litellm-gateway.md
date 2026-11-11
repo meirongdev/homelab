@@ -59,7 +59,7 @@
 | `reasoning_effort` | 只认 `low` / `medium` / `xhigh`（默认）；`minimal`、`high` 回 400 `Unexpected reasoning effort …`。档位集合每次换栈都变过，别跨栈照抄 |
 | CoT 字段 | ☠️ 直连是 `reasoning`，经网关是 `reasoning_content`（LiteLLM 改写，原字段留在 `provider_specific_fields.reasoning`）。直连的消费方只读 `reasoning_content` 会恒读到空 |
 | `reasoning_tokens` | 有值，关思考时为 0 |
-| 回滚 | 上游 `make switch TO=<stack-id>`（`make stack-check` 列出可选）。☠️ 网关别名 + jobs-sg + open-notebook + oracle calibre 四处一起回退，**外加坑 A 的 key 白名单** |
+| 回滚 | 上游 `make switch TO=<stack-id>`（`make stack-check` 列出可选）。2026-11-11 起集群内消费方（jobs-sg、open-notebook、oracle calibre）都经网关：别名名字不变时只改网关的上游；别名改名时消费方与**坑 A 的 key 白名单**一起改 |
 
 - ✅ 经网关能传 `reasoning_effort`（2026-10-04 实测，镜像 v1.103.1）：对 `custom_dgx/` 前缀别名传非法档位，回的是 DGX 自己的 400 原文。
 - ☠️ **裸别名上，参数错误会被兜底悄悄吞掉**：传 `minimal` 给 `qwen3.8-flash-next-tp2`，DGX 回 400 → 兜底
@@ -299,7 +299,8 @@ curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
 | k8sgpt（`--backend openai`）| `qwen3.8-flash-next-tp2` | 同上。☠️ explain 输出为空：k8sgpt 0.4.39 实际按 2048 截断（无视 `maxtokens: 4096`），DGX 默认开思考，2048 全用在思考上（网关记 `success`、`completion_tokens=2048`），所以默认后端是 localai |
 | oracle 上的 calibre 元数据作业 | `qwen3.8-flash-next-tp2`（经 `litellm-external` NodePort）| [清单内嵌脚本](../../cloud/oracle/manifests/calibre-metadata/metadata-llm.yaml) |
 | xiaogpt（小爱音箱，homelab `personal-services`）| `studio/qwen3.8-27b`，专用 key `key_alias=xiaogpt` | [xiaogpt.yaml](../../k8s/helm/manifests/personal-services/xiaogpt.yaml) 的 ConfigMap |
-| Open Notebook | 不走网关，直连 DGX 与 OMLX | [open-notebook.md](open-notebook.md) |
+| Open Notebook（homelab `personal-services`）| `qwen3.8-flash-next-tp2` + OMLX 原名的 4 个别名（chat / embedding / TTS / ASR），专用 key `key_alias=open-notebook`，2026-11-11 起 | [open-notebook.md](open-notebook.md)；key 由 provisioner 写进两个凭据 |
+| jobs-sg enrich（homelab `jobs-sg`）| `custom_dgx/qwen3.8-flash-next-tp2`（刻意不带兜底），专用 key `key_alias=jobs-sg`，2026-11-11 起 | [jobs-sg.md](jobs-sg.md)「LLM 富化」|
 | `codex --profile dgx` / `m2` | 不走网关，直连 DGX / M2 的 OMLX | `~/.codex/{dgx,m2}.config.toml`（本机）|
 | 外部使用者（UI 账户 `ext-team-1`）| 5 个自托管别名 + 17 个 OpenRouter `:free` 模型 | Postgres（账户与 key 各一层白名单），见「发给外部的 key」|
 | M2 / Studio 上的 magpie（`homelab` provider）| `qwen3.8-flash-next-tp2` → `studio/qwen3.8-27b`（magpie 的 `group/qwen`），另暴露若干 `openrouter/*` | 每台一把（`key_alias` 为 `m2-magpie` / `studio-magpie`），值在 Vault `secret/homelab/magpie`，`cd macbook/ansible && just magpie` 下发。☠️ 别写进 playbook：[泄露复盘](../records/2026-10-26-litellm-keys-in-public-repo.md) |

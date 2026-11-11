@@ -42,28 +42,34 @@ data:
     PW = os.environ["OPEN_NOTEBOOK_PASSWORD"]
 
     # ---- 期望状态（改这里 + git push = 改配置）----
-    # api_key 都是 "dummy"：vLLM 不设鉴权，OMLX 0.7 起有 key 但开着 allow_unauthenticated_inference；
-    # esperanto 只是需要非空值。
+    # 2026-11-11 起两个凭据都指向 LiteLLM 网关（集群内 Service），不再直连 DGX / M2 的 Tailscale IP；
+    # personal-services 的网络策略随之只放行 litellm:4000。api_key 是网关的虚拟 key
+    # （key_alias=open-notebook，白名单 = 下面 MODELS 的五个名字），Vault secret/homelab/open-notebook
+    # 的 litellm_key → Secret open-notebook-litellm → env LITELLM_KEY。
+    # ⚠️ 凭据的 GET 只回 has_api_key、读不回原值，所以 api_key 每次 sync 都写一遍（幂等）：
+    #    轮换 key 只要改 Vault，下一次 sync 自动跟上。
+    LLM_GATEWAY = "http://litellm.litellm.svc.cluster.local:4000/v1"
+    LITELLM_KEY = os.environ["LITELLM_KEY"]
     CREDENTIALS = [
         # ⚠️ 凭据名 `dgx-vllm` 只是个标识符（2026-09-19 那一栈曾是 SGLang，2026-09-30 起又是 vLLM），
         #    **刻意不改名**：本 provisioner 只增不删，改名只会在 UI 里多出一条新凭据、
         #    旧那条变成没人用的死条目，还得手动删。它只是个标识符，不参与路由。
-        # ☠️ DGX 换栈时 base_url 的端口可能跟着变（:8000 / :8888 都被不同的栈用过，旧端口会
-        #    直接 connection refused）。现状 :8000，见 docs/reference/litellm-gateway.md「DGX 主力栈」。
+        #    同理 `mac-omlx` 现在也指向网关；两个名字都只剩"这组模型原来来自哪"的含义。
+        # DGX 换栈、换端口都只改网关（litellm.yaml），这里不用动。
         {"name": "dgx-vllm", "provider": "openai_compatible",
          "modalities": ["language"],
-         "api_key": "dummy", "base_url": "http://100.97.87.120:8000/v1"},
+         "api_key": LITELLM_KEY, "base_url": LLM_GATEWAY},
         {"name": "mac-omlx", "provider": "openai_compatible",
          "modalities": ["language", "embedding", "speech_to_text", "text_to_speech"],
-         "api_key": "dummy", "base_url": "http://100.89.15.120:8000/v1"},
+         "api_key": LITELLM_KEY, "base_url": LLM_GATEWAY},
     ]
     MODELS = [
         # 2026-09-19 DGX 换主力栈：qwen38-flash-next → qwen3.8-flash-next-tp2
         # （Qwen3.8-27B-Uncensored NVFP4 + SGLang + DFlash2，单节点）。
-        # ☠️ 名字必须与裸引擎的 served name 逐字相同 —— 这里**不走 LLM 网关**，
-        #    填网关别名（custom_dgx/…）会 404。
-        # ☠️ 而且 SGLang **接受任意 model 名并原样回显**（上游 gotcha #10），不像 vLLM 会 404：
-        #    名字写错在这条路径上是**静默**的，只能靠 `curl :8888/v1/models` 核对。
+        # ☠️ 2026-11-11 起这里的名字是 **LiteLLM 的别名**（经网关），必须同时满足两件事：
+        #    在 litellm.yaml 的 model_list 里存在，且在 open-notebook 那把虚拟 key 的白名单里（坑 A）。
+        #    写错会当场 400（网关不认），不再像直连 SGLang 时那样静默回显。
+        #    这个名字是裸别名，带兜底：DGX 出错时网关改由 M2 的 Ornith 作答（交互场景这正是想要的）。
         # ⚠️ 本 provisioner 只增不删（unmanaged models 只打 note）：改模型名之后**旧条目会
         #    留在 UI 里**，git push 带不走它，得手动删。
         # ☠️ **旧条目的危害在 2026-09-19 换成 SGLang 之后变大了**：vLLM 时代选中死条目会当场
@@ -80,8 +86,9 @@ data:
         {"name": "qwen3.8-flash-next-tp2", "type": "language", "credential": "dgx-vllm"},
         # 备用对话模型（非默认）：DGX 是跨境共享机器且暂无告警（ROADMAP #4），
         # 它不可达时在 UI 里一键切到这个本地 35B（262k ctx）兜底。
-        # ⚠️ 这里走 mac-omlx 凭据直连 OMLX，所以填的是 OMLX 的模型 ID，
-        #    不是 LiteLLM 的别名 mac/ornith（那个名字在 OMLX 上不存在）。
+        # ⚠️ 下面四个名字是 OMLX 的模型 ID 原文。经网关后照样能用，是因为网关按这些原名建了同名别名
+        #    （litellm.yaml「open-notebook 专用」那段）—— 这里的模型按名字绑在凭据上、API 没有 PUT，
+        #    改名就得在 UI 里删了重建，所以是网关迁就这边，不是反过来。
         # 2026-08-25 由 Qwen3.6-35B 换为 Ornith-1.5-35B-A3B（OMLX 的 is_default 同日已指向它）。
         {"name": "ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit", "type": "language", "credential": "mac-omlx"},
         {"name": "mlx-community__Qwen3-Embedding-4B-4bit-DWQ", "type": "embedding", "credential": "mac-omlx"},
@@ -132,7 +139,7 @@ data:
     # ☠️ seed 的 speaker.voice_id 是 **OpenAI 音色名**（nova/alloy/echo/shimmer/ash），
     # Qwen3-TTS 收到直接 500 `Speaker 'nova' not supported`。只补 voice_model 会让横幅消失、
     # 播客却在合成那步才炸 —— 音色必须一起换掉，否则修的是症状。
-    # 白名单不写死在这里：provision 时从 OMLX 现取（见 live_voices()）。
+    # 白名单见下面的 TTS_VOICES（2026-11-11 起写死，原因在那里）。
     # 同 profile 内不重复分配（两人同音色听不出谁在说）。性别是按名字推的，没逐个试听。
     SPEAKER_VOICES = {         # speaker profile 名 -> {speaker 名: 音色}
         "tech_experts": {"Dr. Alex Chen": "eric", "Jamie Rodriguez": "aiden"},
@@ -183,12 +190,11 @@ data:
             cred_ids[want["name"]] = have["id"]
             drift = {k: want[k] for k in ("base_url", "modalities")
                      if have.get(k) != want[k]}
-            if drift:
-                st, resp = req("PUT", f"/credentials/{have['id']}", drift)
-                if must(st, resp, f"update credential {want['name']}"):
-                    print(f"[provision] updated credential {want['name']}: {sorted(drift)}")
-            else:
-                print(f"[provision] credential {want['name']} up-to-date")
+            # api_key 读不回来（GET 只回 has_api_key），每次都随 PUT 写一遍，见 CREDENTIALS 上方的说明。
+            st, resp = req("PUT", f"/credentials/{have['id']}", {**drift, "api_key": want["api_key"]})
+            if must(st, resp, f"update credential {want['name']}"):
+                print(f"[provision] credential {want['name']}: "
+                      f"{'updated ' + str(sorted(drift)) if drift else 'up-to-date'}, api_key synced")
     unmanaged = sorted(set(by_name) - {c["name"] for c in CREDENTIALS})
     if unmanaged:
         print(f"[provision] note: unmanaged credentials (left alone): {unmanaged}")
@@ -231,16 +237,16 @@ data:
     #    好处是几十行上游 prose 不必抄进 git，坏处是 prose 仍只活在 DB（可接受：它是
     #    上游默认值，不是我们的决策；真要改文案就在 UI 改，provisioner 不会覆盖回去）。
     #    **不创建**：profile 由应用首启 seed，缺了只告警（说明库是空的或被手工删过）。
+    # 音色白名单。原来 provision 时直接问 OMLX 的 /v1/audio/voices 现取；2026-11-11 推理改走网关后，
+    # 这个 Job 所在的 ns 按网络策略碰不到 tailnet，而 /v1/audio/voices 是 OMLX 自己的端点、网关不代理。
+    # 现取会永远失败、校验永远被跳过，等于死代码，所以改成写死（值是当天从 OMLX 现取的原样）。
+    # ☠️ 换 TTS 模型时必须一起更新：从能连 tailnet 的机器跑
+    #      curl -s "http://100.89.15.120:8000/v1/audio/voices?model=$PODCAST_TTS" | jq -c .voices
+    #    换型号前先读 docs/decisions/omlx-speech-model-selection.md。
+    TTS_VOICES = {"aiden", "dylan", "eric", "ono_anna", "ryan", "serena", "sohee", "uncle_fu", "vivian"}
+
     def live_voices():
-        """从 OMLX 现取该 TTS 模型的音色白名单；Mac 睡着就返回 None（跳过校验）。"""
-        base = next(c["base_url"] for c in CREDENTIALS if c["name"] == "mac-omlx")
-        url = f"{base}/audio/voices?model={urllib.parse.quote(PODCAST_TTS)}"
-        try:
-            with urllib.request.urlopen(url, timeout=10) as r:
-                return set(json.loads(r.read()).get("voices", []))
-        except Exception as e:
-            print(f"[provision] WARN cannot fetch TTS voices ({e}); skipping voice validation")
-            return None
+        return TTS_VOICES
 
     tts_id = model_ids.get(PODCAST_TTS)
     if tts_id is None:
@@ -333,6 +339,32 @@ data:
 
     print("[provision] DONE")
 ---
+# Vault → open-notebook-litellm：open-notebook 调 LiteLLM 网关的虚拟 key（2026-11-11，推理请求统一走网关）。
+# key 由 LiteLLM `/key/generate` 发出（key_alias=open-notebook），先写进 secret/homelab/open-notebook 的
+# litellm_key 再提交本对象。只有下面的 provisioner 读它：它把 key 写进 open-notebook 的两个凭据，
+# 应用本身从自己的库里取，不读这个 Secret。
+# ☠️ 刻意不并进 open-notebook.yaml 的 open-notebook-secret：ESO 的 data 全有全无，这把 key 取不到时
+#    会连 encryption-key / app-password 一起停止同步。
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: open-notebook-litellm
+  namespace: personal-services
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: open-notebook-litellm
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: litellm-key
+      remoteRef:
+        key: homelab/open-notebook
+        property: litellm_key
+---
 # PostSync hook：personal-services App 每次 sync 后跑一遍（幂等，~10s）。
 # 成功即删（BeforeHookCreation,HookSucceeded），失败保留 Job 供排查并使 sync 标红。
 apiVersion: batch/v1
@@ -359,6 +391,12 @@ spec:
                 secretKeyRef:
                   name: open-notebook-secret
                   key: app-password
+            # 写进两个凭据的网关虚拟 key（见脚本里 CREDENTIALS 上方的说明）。
+            - name: LITELLM_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: open-notebook-litellm
+                  key: litellm-key
           resources:
             requests:
               cpu: 25m

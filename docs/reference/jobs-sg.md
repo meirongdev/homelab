@@ -1,6 +1,6 @@
 # jobs-sg — 新加坡 SWE 岗位趋势周报（架构事实）
 
-> Last updated: 2026-11-10
+> Last updated: 2026-11-11
 > Status: 生效事实
 > Scope: jobs-sg 在 homelab 集群的部署形态、镜像固定方式、备份口径、首次上线依赖顺序
 > 本文是 source of truth。应用代码在 [meirongdev/jobs-sg](https://github.com/meirongdev/jobs-sg)。
@@ -11,7 +11,7 @@
   一个镜像里 6 个二进制：4 个管线阶段（ingest / enrich / report / web）= 3 个 CronJob
   + 1 Deployment；另外 2 个是运维工具、**没有任何 CronJob 跑**，手动起一次性 Job
   （`reclassify` 重算分类、`retech` 重算规则层技术栈，都默认 dry-run）。
-- **跑什么**：每日抓 SG 岗位 → 规则 + LLM 富化（直连 DGX，fail-open）→ 周报推 Telegram；
+- **跑什么**：每日抓 SG 岗位 → 规则 + LLM 富化（经 LiteLLM 网关打 DGX，fail-open）→ 周报推 Telegram；
   聚合页随请求渲染。
 - **备份两条路径，缺一不可**：`jobs.db` 走白名单；`raw/*.jsonl.gz` 单独纳 restic，
   只加白名单会静默漏备（H4 查不出）。
@@ -34,7 +34,7 @@
 | 组件 | 触发 | 说明 |
 |---|---|---|
 | `ingest` | 每日 18:15 UTC（02:15 SGT） | 增量；程序按 SGT 判断周日自动转全量 reconcile |
-| `enrich` | 每日 19:10 UTC | 规则 + LLM（**直连 DGX vLLM**）；fail-open |
+| `enrich` | 每日 19:10 UTC | 规则 + LLM（经 LiteLLM 打 DGX vLLM）；fail-open |
 | `report` | 周一 01:00 UTC（09:00 SGT） | 出 HTML/MD + 推 Telegram |
 | `jobs-sg-web` | 常驻 | 只读挂载 PVC，服务页面 + Prometheus 指标 |
 
@@ -133,21 +133,25 @@ busy handler（在那儿睡可能死锁）。
   周日那轮撞一次锁就静默损失一周的岗位寿命数据。
 - `/ops/2026-08-08` 01:09 那行 `partial` / `errors=1` 保留不动：它是当时的事实，改库等于篡改记录。
 
-## LLM 富化：直连 DGX，不经 LLM 网关
+## LLM 富化：经 LiteLLM 网关打 DGX
 
-`enrich` 的 `LLM_BASE_URL` 指向 DGX 推理引擎 `http://100.97.87.120:8000`（Tailscale IP，pod
-直连，无需认证；同一台机器也给 Open Notebook 供模型），所以不需要网关的 virtual key，少一条
-Vault 依赖。DGX 栈本身（模型、端口、引擎、档位）的唯一真相源是
-[litellm-gateway.md](litellm-gateway.md) 的「DGX 主力栈」；换栈照
-[runbooks/dgx-model-swap-homelab-followup.md](../runbooks/dgx-model-swap-homelab-followup.md) 走。
+2026-11-11 起 `enrich` 的 `LLM_BASE_URL` 是集群内的 `http://litellm.litellm.svc.cluster.local:4000`，
+`LLM_MODELS` 是网关别名 `custom_dgx/qwen3.8-flash-next-tp2`，带虚拟 key（`key_alias=jobs-sg`，
+Vault `secret/homelab/jobs-sg` 的 `llm_api_key` → ExternalSecret `jobs-sg-llm` → env `LLM_API_KEY`）。
+此前直连 DGX 的 Tailscale IP；改走网关是为了让 jobs-sg ns 的网络策略碰不到 tailnet。
+DGX 栈本身（模型、端口、引擎、档位）的唯一真相源是 [litellm-gateway.md](litellm-gateway.md) 的「DGX 主力栈」；
+换栈照 [runbooks/dgx-model-swap-homelab-followup.md](../runbooks/dgx-model-swap-homelab-followup.md) 走。
 
-- ☠️ 因为是**直连**，git 里那份网关清单帮不上忙：换栈只有 `LLM_BASE_URL` + `LLM_MODELS` 跟着改
-  才有效。只改模型名不改端口，等于把作业指向空端口。
-- ⚠️ 模型 id 是后端相关的：网关路由用带前缀的 `custom_dgx/qwen3.8-flash-next-tp2`，裸引擎是
-  `qwen3.8-flash-next-tp2`，写前缀名会 404（vLLM 对错名回 404）。
-- ☠️ 直连时思维链在 `message.reasoning`，`reasoning_content` **恒为空**（经网关时 LiteLLM 才改写
-  成 `reasoning_content`）。拿 `reasoning_content` 长度判「思考关没关」会恒读到 0，与真关掉同形。
-  判据是 `usage.completion_tokens_details.reasoning_tokens`（关思考时为 0）。
+- ☠️ **用 `custom_dgx/` 前缀那条，不用同名裸别名**：裸别名配了兜底，DGX 出错时网关静默换成 M2 的 Ornith
+  作答；而模型名同时是 enrich 缓存键和 `job_tech` 的出处，别的模型的结果会挂着 DGX 的名字进缓存。
+  前缀这条没有兜底，DGX 不通就如实报错，岗位留在积压里第二天再试。
+- ☠️ 换别名要同时改 key 的白名单（[litellm-gateway.md](litellm-gateway.md) 坑 A），这把 key 只认这一个别名。
+- ⚠️ 走集群内 Service，不走 `llm.meirong.dev`：后者经 Cloudflare，有 100s 上限。网关自身不会先于
+  `LLM_TIMEOUT` 超时（2026-11-11 查 30 天：15 个 >300s 的请求经网关成功，最长 1267s）。
+- ⚠️ 2026-11-11 换名（裸引擎名 → 网关别名）只让缓存对重复描述多算一次：积压按处理层（`source='llm'`）判断，
+  与模型名无关，不重跑历史。
+- 经网关时思维链在 `reasoning_content`（直连时是 `message.reasoning`）。判「思考关没关」看
+  `usage.completion_tokens_details.reasoning_tokens`（关思考时为 0），2026-11-11 经网关实测为 0。
 
 enrich 要模型回严格 JSON（上游 `ExtractPrompt`，六个 key），换模型要连这条一起验。
 
@@ -162,12 +166,14 @@ LLM_API_KEY / LLM_AUTH_HEADER / LLM_EXTRA_BODY`。换模型不改代码、不发
 挂了就换 `LLM_LIVE_KWARG` 试。当前栈 2026-10-04 PASS，即 `LLM_THINKING_KWARG` 保持默认值。
 
 ```sh
-LLM_LIVE_URL=http://100.97.87.120:8000 LLM_LIVE_MODEL=qwen3.8-flash-next-tp2 go test ./internal/llm -run Live -v
+LLM_LIVE_URL=http://100.94.186.7:31400 LLM_LIVE_MODEL=custom_dgx/qwen3.8-flash-next-tp2 \
+  LLM_LIVE_KEY=$(VAULT_ADDR=https://vault.meirong.dev vault kv get -field=llm_api_key secret/homelab/jobs-sg) \
+  go test ./internal/llm -run Live -v
 ```
 
-**取舍**：不经网关就没有网关的回退，也没有用量计量；DGX 是跨 tailnet 共享的境内机器
-（RTT 66–83ms），不可用时 enrich fail-open 退回纯规则。改走网关要改 `LLM_BASE_URL`、删
-`LLM_MODELS`、声明对应的 key（见 `cronjob-enrich.yaml` 注释）。
+**取舍**：经网关多一跳和一条 Vault 依赖，换来用量计量（spend log 按 `key_alias=jobs-sg` 可查）和
+「jobs-sg 碰不到 tailnet」。刻意不要网关的兜底（见上）。DGX 是跨 tailnet 共享的境内机器
+（RTT 66–83ms），不可用时 enrich fail-open 退回纯规则。
 
 ### 耗时、超时与并发
 
@@ -229,7 +235,7 @@ kubectl --context k3s-homelab -n jobs-sg apply -f <一次性 Job yaml>
 - 当前栈档位 `low` / `medium` / `xhigh`（默认），`minimal`、`high` 回 400。默认档是 `xhigh`，
   封顶键不能省。⚠️ 失效形态是整轮 400 全挂，不是悄悄不生效；档位集合每次换栈都变过，换栈后先核。
 - 经 LiteLLM 网关也能传，但裸别名上传错档位会被兜底吞掉、换模型回 200（见
-  [litellm-gateway.md](litellm-gateway.md)）。本作业直连，不受影响。
+  [litellm-gateway.md](litellm-gateway.md)）。本作业用的是不带兜底的 `custom_dgx/` 别名，不受影响。
 - 封顶只能封推理。调大 `LLM_TIMEOUT` 没用（生成长度没有上界，`max_model_len` 262144）；
   `LLM_MAX_TOKENS` 更糟，模型先把推理写满、`content` 返回 null，慢成功变硬失败，清单刻意不设。
 - 封顶效果是在 qwen38-flash-next 上测的（前夜超时的 5 条全部 8–22s 完成，8 条正常岗位合计
@@ -322,10 +328,10 @@ falcosidekick，见 [decisions/alerting-telegram-migration.md](../decisions/aler
 | chat id | 不是 | `cronjob-report.yaml` 明文 | `-1003981213530`（与告警同一个群） |
 | thread id | 不是 | `cronjob-report.yaml` 明文 | `552` = 群里的 `jobs-sg` 话题 |
 
-- `external-secret.yaml` 只声明 `telegram-bot-token` 一个键，指向的路径一直在线同步
-  （`monitoring/alertmanager-telegram` 同用）。
-- ⚠️ **ESO 的 `data` 是全有全无的**：只声明真正要用的键。多声明一个没人写值的键（比如直连 DGX
-  根本用不到的 virtual key），连 bot token 都同步不了。
+- `external-secret.yaml` 里是两个对象：`jobs-sg-secrets` 只声明 `telegram-bot-token`（路径一直在线同步，
+  `monitoring/alertmanager-telegram` 同用）；`jobs-sg-llm` 只声明网关 key（2026-11-11）。
+- ⚠️ **ESO 的 `data` 是全有全无的**：只声明真正要用的键，不相干的键分到不同对象。网关 key 合进
+  `jobs-sg-secrets` 的话，它取不到时连 bot token 都同步不了。
 - ⚠️ 别引用还没人填的 Vault 路径：ESO `Ready=False` → `ExternalSecretNotReady` 持续告警、App 常驻
   `Degraded`。先看现有路径够不够用。
 - `TELEGRAM_BOT_TOKEN` 标 `optional: true`：ESO 没同步上时 report 打一行 "telegram disabled"
