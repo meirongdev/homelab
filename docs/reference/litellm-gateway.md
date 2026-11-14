@@ -1,6 +1,6 @@
 # LiteLLM 网关（运维事实与坑）
 
-> Last updated: 2026-11-14
+> Last updated: 2026-11-15
 > Status: 生效事实
 > Scope: `llm.meirong.dev` 这个 LLM 网关的配置生效路径、鉴权分层、上游可用性边界，
 > 本文是 source of truth。为什么选 LiteLLM、上游怎么选、Mac 兜底为何换 Ornith，见
@@ -30,14 +30,14 @@
 
 | 别名 | 上游 | 兜底 |
 |---|---|---|
-| `qwen3.8-flash-next-tp2` | DGX（下节）| → `mac/ornith`（`router_settings.fallbacks`，坑 A2）|
-| `custom_dgx/qwen3.8-flash-next-tp2` | DGX | 刻意不配：给「就要打 DGX」的消费方，静默换成 Mac 反而有害（DGX 不通时如实报连接错误）|
+| `DeepSeek-V4.1-Flash-1017` | DGX（下节）| → `mac/ornith`（`router_settings.fallbacks`，坑 A2）|
+| `custom_dgx/DeepSeek-V4.1-Flash-1017` | DGX | 刻意不配：给「就要打 DGX」的消费方，静默换成 Mac 反而有害（DGX 不通时如实报连接错误）|
 | `mac/ornith` / `mac/ornith-fast` | M2 的 OMLX，Ornith-1.5-35B-A3B；`-fast` 走 OMLX 的 `fast` profile（关思考），两者共用同一份驻留权重 | — |
 | `studio/qwen3.8-27b` | Mac Studio 的 OMLX（见「Mac Studio 上游」）| 不在任何兜底链，只能指名 |
 | OMLX 模型 ID 原文 ×4：`ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit`、`mlx-community__Qwen3-Embedding-4B-4bit-DWQ`（embedding）、`mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit`（TTS）、`mlx-community__Qwen3-ASR-1.7B-8bit`（ASR）| M2 的 OMLX | 给 open-notebook：它的模型按名字绑在凭据上、改名要删了重建，所以网关按原名建别名（2026-11-11）|
 | `openrouter/*` | OpenRouter 全量透传 | 免费档不能当兜底（见「哪些模型能免费用」）|
 
-## DGX 主力栈：Qwen3.8-Flash-Next 双机 TP=2（vLLM，2026-09-30 起）
+## DGX 主力栈：DeepSeek-V4.1-Flash-1017 双机 TP=2（TensorFold，2026-11-15 起）
 
 上游 `~/projects/meirongdev/nv-dgx-spark` 单方面换栈，本仓库只跟着改引用；本节是本仓库关于该上游的唯一真相源
 （换栈理由与压测在上游仓库）。☠️ 再换模型或回滚，照
@@ -45,28 +45,32 @@
 哪些阈值要重估、怎么验收，改本节也是其中一步）。减负方案
 [plans/2026-09-03-dgx-model-swap-optimizations.md](../plans/2026-09-03-dgx-model-swap-optimizations.md) 📐 未实施，门禁还不存在。
 
+下表除注明外均为 2026-11-15 直连 `:8000` 实测。
+
 | | |
 |---|---|
-| 上游栈 id | `hibrid48tp2`（Qwen3.8-Flash-Next hibrid48 NVFP4，K=5 MTP 投机解码），定义在上游 `stacks/hibrid48tp2/stack.env` |
-| served name | `qwen3.8-flash-next-tp2` |
-| 端点 | `100.97.87.120:8000/v1`（head 在 S1）。上一栈的 `:8888` 已不响应 |
-| 引擎 | vLLM 0.30.0（`GET :8000/version`）。模型名写错回 404 `The model ... does not exist` |
-| `max_model_len` | 262144 |
-| 拓扑 / 冷启动 | 双机 TP=2，占满 S1+S2 的 GPU；S2 上原来常驻的 `fndgx`（`100.67.164.92:18300`）已停。加载约 4–5 分钟（上游 `STACK_LOAD_TIME`）。☠️ 两个 rank 必须成对起停，只用上游 `make restart`，别单独重启一台 |
-| 自愈 | 未核实。运行时是 docker + tmux（`STACK_RUNTIME` / `STACK_TMUX`），重启策略在 DGX 本机的启动脚本里，两个仓库都看不到 |
-| 并发 | `max-num-seqs=64`。上游实测单流约 99 tok/s、64 并发聚合约 562 tok/s |
-| 关思考 | `chat_template_kwargs {"enable_thinking": false}`，直连与经网关都有效（`reasoning_tokens=0`）|
-| `reasoning_effort` | 只认 `low` / `medium` / `xhigh`（默认）；`minimal`、`high` 回 400 `Unexpected reasoning effort …`。档位集合每次换栈都变过，别跨栈照抄 |
-| CoT 字段 | ☠️ 直连是 `reasoning`，经网关是 `reasoning_content`（LiteLLM 改写，原字段留在 `provider_specific_fields.reasoning`）。直连的消费方只读 `reasoning_content` 会恒读到空 |
+| 上游栈 id | `dsv41`（DeepSeek-V4.1-Flash-1017 EXL3 2.9bpw，MiaAI-Lab recipe），定义在上游 `stacks/dsv41/stack.env`（上游标 `candidate`，截至 11-15 未提交、`stacks/PRIMARY` 仍是旧栈 `hibrid48tp2v52`）|
+| served name | `DeepSeek-V4.1-Flash-1017` |
+| 端点 | `100.97.87.120:8000/v1`（head 在 S1，与上一栈同端口）|
+| 引擎 | TensorFold（Zig）。☠️ **模型名写错照常 200**（与 SGLang 同类，vLLM 才 404），响应体的 `model` 是真名；判据只能是 `/v1/models` 或响应里的 `model` |
+| `max_model_len` | 524288（上一栈 262144）。⚠️ 兜底的 Ornith 仍是 262k，超过的请求 DGX 出错时兜底接不住 |
+| 拓扑 / 冷启动 | 双机 TP=2（rank0 + API 在 S1，rank1 在 S2）。11-15 实测 `loaded in 31.0s`（权重在页缓存里；冷缓存每台要读约 98 GiB，会久得多）。☠️ 两个 rank 必须成对起停，只用上游 `make restart` |
+| 自愈 | 容器 `restart=no`、无 healthcheck。引擎日志说 rank 对断开时以 status 75 退出「供两个 rank 一起重启」，外层是否真会重启未核实 |
+| 并发 | ☠️ `/health` 报 `max_batch_size: 4`（上一栈 vLLM 是 64），第 5 路起排队。jobs-sg 的 `LLM_CONCURRENCY` 已随之 8→4 |
+| 关思考 | `chat_template_kwargs {"enable_thinking": false}` 生效；旧键 `{"thinking": false}` 在这个栈上**也**生效（Qwen 栈上是静默空操作）|
+| `reasoning_effort` | `none` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max` 七档全收；不认识的值回 400 `reasoning_effort must be none, minimal, low, medium, high, xhigh or max`。6000 字真实提示词上 `medium` 确实压住推理（538→255 token）|
+| 中间的 system 消息 | chat 与 `/v1/responses` 都接受，所以坑 E 的两条声明这个栈都不需要 |
+| CoT 字段 | 直连就是 `reasoning_content`（与经网关一致）|
 | `reasoning_tokens` | 有值，关思考时为 0 |
-| 回滚 | 上游 `make switch TO=<stack-id>`（`make stack-check` 列出可选）。2026-11-11 起集群内消费方（jobs-sg、open-notebook、oracle calibre）都经网关：别名名字不变时只改网关的上游；别名改名时消费方与**坑 A 的 key 白名单**一起改 |
+| 其他 | 工具调用（`finish_reason=tool_calls`）、严格 JSON、流式、`/v1/responses` 均正常。指标前缀 `tensorfold:*`（另有一批 vLLM 同名的镜像指标），`/health` 带 `pair.stalled` / `pair.broken`。没有 `/version` |
+| 回滚 | 上游 `make switch TO=<stack-id>`（`make stack-check` 列出可选）。集群内消费方（jobs-sg、open-notebook、oracle calibre）都经网关：别名名字不变时只改网关的上游；别名改名时消费方与**坑 A 的 key 白名单**一起改 |
 
-- ✅ 经网关能传 `reasoning_effort`（2026-10-04 实测，镜像 v1.103.1）。⚠️ 2026-11-14 起两个 DGX 别名上的
-  `high` / `minimal` / `none` 会先被 `upstream_compat` 改写成集合内的档位（坑 E），所以想看 DGX 的 400 原文
-  （换栈后核档位集合就靠它），要对 `custom_dgx/` 前缀别名传一个**不认识的值**，比如 `"bogus"`。
+- ✅ 经网关能传 `reasoning_effort`（2026-10-04 实测，镜像 v1.103.1）。想看 DGX 对档位的 400 原文（换栈后核档位集合就靠它），
+  对 `custom_dgx/` 前缀别名传一个**不认识的值**，比如 `"bogus"`：声明了档位集合的栈上，`high` 这类已知档位会先被
+  `upstream_compat` 改写（坑 E）。
 - ☠️ **裸别名上，参数错误会被兜底悄悄吞掉**：DGX 回 400 → 兜底 `mac/ornith` 接受这个参数 → 200，只有响应里的
-  `model`（`ornith-ai__…`）看得出换了模型。已知的两种已由坑 E 的 hook 改写掉；其余的仍会被吞，调参数用带前缀的别名。机制见坑 A2。
-- ⚠️ 质量未验证：上游只给了速度基准（`benchmarks/hibrid48tp2-2026-09-30/`）。
+  `model`（`ornith-ai__…`）看得出换了模型。调参数用带前缀的别名。机制见坑 A2，Qwen 栈时期的实例见坑 E。
+- ⚠️ 质量未验证：只做了上面这些功能性实测。
 
 ## ☠️ 坑 A：虚拟 key 的模型白名单在 Postgres 里，git 完全管不到
 
@@ -105,7 +109,7 @@ curl -s -H "Authorization: Bearer $MK" "$GW/key/info?key=$VK" \
 
 # 覆盖白名单（整个列表替换）
 curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
-  -d '{"key":"'"$VK"'","models":["custom_dgx/qwen3.8-flash-next-tp2","qwen3.8-flash-next-tp2",
+  -d '{"key":"'"$VK"'","models":["custom_dgx/DeepSeek-V4.1-Flash-1017","DeepSeek-V4.1-Flash-1017",
        "mac/ornith","mac/ornith-fast","openrouter/*"]}' \
   "$GW/key/update"
 ```
@@ -114,7 +118,7 @@ curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
 
 ```yaml
 router_settings:
-  fallbacks: [{"qwen3.8-flash-next-tp2": ["mac/ornith"]}]   # ✅ 唯一生效的位置
+  fallbacks: [{"DeepSeek-V4.1-Flash-1017": ["mac/ornith"]}]   # ✅ 唯一生效的位置
 # 写在模型条目的 litellm_params.fallbacks 里 = 透传给 SDK 的 kwarg，不解析 model_list ❌
 ```
 
@@ -183,6 +187,7 @@ CI 强制（`scripts/check-embedded-scripts.py` 的 `STAMP_ONLY`），机制见 
 - 修法：`k8s/helm/manifests/litellm/upstream_compat.py` 在转发前按两个 DGX 别名 `model_info` 里的声明改写：
   `upstream_system_first` 把中间的 system 并进开头，`upstream_reasoning_efforts` 把集合外的档位换成不低于它的最小档。
   规则、作用域与失败模式在它的文件头。☠️ **换栈时这两条声明要跟着重核**（档位集合每个栈都变过），runbook 已列为必改项。
+  2026-11-15 换上的 DeepSeek-V4.1 / TensorFold 两种都接受（七档全收、中间的 system 也收），声明已撤，本层对它是空操作。
 - 验证 hook 已加载：`kubectl --context k3s-homelab -n litellm logs deploy/litellm | grep upstream_compat`（每个 pod 首次改写打一条 WARNING）。
 - 这类问题不会自己报出来。查最近谁被静默兜底了（本机任意目录；修复后应只剩 DGX 真宕机时段的行）：
 
@@ -329,13 +334,13 @@ curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
 | `codex --profile mac` | `mac/ornith` | `~/.codex/mac.config.toml`（本机）|
 | 本机任意 OpenAI 兼容客户端 | `studio/qwen3.8-27b` | 读 `LITELLM_VK`；目前没有固定消费方 |
 | k8sgpt（默认，`--backend localai`）| `mac/ornith-fast` | `~/Library/Application Support/k8sgpt/k8sgpt.yaml`（本机）|
-| k8sgpt（`--backend openai`）| `qwen3.8-flash-next-tp2` | 同上。☠️ explain 输出为空：k8sgpt 0.4.39 实际按 2048 截断（无视 `maxtokens: 4096`），DGX 默认开思考，2048 全用在思考上（网关记 `success`、`completion_tokens=2048`），所以默认后端是 localai |
-| oracle 上的 calibre 元数据作业 | `qwen3.8-flash-next-tp2`（经 `litellm-external` NodePort）| [清单内嵌脚本](../../cloud/oracle/manifests/calibre-metadata/metadata-llm.yaml) |
+| k8sgpt（`--backend openai`）| `DeepSeek-V4.1-Flash-1017` | 同上。☠️ explain 输出为空：k8sgpt 0.4.39 实际按 2048 截断（无视 `maxtokens: 4096`），DGX 默认开思考，2048 全用在思考上（网关记 `success`、`completion_tokens=2048`），所以默认后端是 localai |
+| oracle 上的 calibre 元数据作业 | `DeepSeek-V4.1-Flash-1017`（经 `litellm-external` NodePort）| [清单内嵌脚本](../../cloud/oracle/manifests/calibre-metadata/metadata-llm.yaml) |
 | xiaogpt（小爱音箱，homelab `personal-services`）| `studio/qwen3.8-27b`，专用 key `key_alias=xiaogpt` | [xiaogpt.yaml](../../k8s/helm/manifests/personal-services/xiaogpt.yaml) 的 ConfigMap |
-| Open Notebook（homelab `personal-services`）| `qwen3.8-flash-next-tp2` + OMLX 原名的 4 个别名（chat / embedding / TTS / ASR）+ `studio/qwen3.8-27b`（第二备选），专用 key `key_alias=open-notebook`，2026-11-11 起 | [open-notebook.md](open-notebook.md)；key 由 provisioner 写进两个凭据 |
-| jobs-sg enrich（homelab `jobs-sg`）| `custom_dgx/qwen3.8-flash-next-tp2`（刻意不带兜底），专用 key `key_alias=jobs-sg`，2026-11-11 起 | [jobs-sg.md](jobs-sg.md)「LLM 富化」|
+| Open Notebook（homelab `personal-services`）| `DeepSeek-V4.1-Flash-1017` + OMLX 原名的 4 个别名（chat / embedding / TTS / ASR）+ `studio/qwen3.8-27b`（第二备选），专用 key `key_alias=open-notebook`，2026-11-11 起 | [open-notebook.md](open-notebook.md)；key 由 provisioner 写进两个凭据 |
+| jobs-sg enrich（homelab `jobs-sg`）| `custom_dgx/DeepSeek-V4.1-Flash-1017`（刻意不带兜底），专用 key `key_alias=jobs-sg`，2026-11-11 起 | [jobs-sg.md](jobs-sg.md)「LLM 富化」|
 | `codex --profile dgx` / `m2` | 不走网关，直连 DGX / M2 的 OMLX | `~/.codex/{dgx,m2}.config.toml`（本机）|
 | 外部使用者（UI 账户 `ext-team-1`）| 5 个自托管别名 + 17 个 OpenRouter `:free` 模型 | Postgres（账户与 key 各一层白名单），见「发给外部的 key」|
-| M2 / Studio 上的 magpie（`homelab` provider）| `qwen3.8-flash-next-tp2` → `studio/qwen3.8-27b`（magpie 的 `group/qwen`），另暴露若干 `openrouter/*` | 每台一把（`key_alias` 为 `m2-magpie` / `studio-magpie`），值在 Vault `secret/homelab/magpie`，`cd macbook/ansible && just magpie` 下发。☠️ 别写进 playbook：[泄露复盘](../records/2026-10-26-litellm-keys-in-public-repo.md) |
+| M2 / Studio 上的 magpie（`homelab` provider）| `DeepSeek-V4.1-Flash-1017` → `studio/qwen3.8-27b`（magpie 的 `group/qwen`；组 id 是历史名，换栈没改，免得每个 agent 重设），另暴露若干 `openrouter/*` | 每台一把（`key_alias` 为 `m2-magpie` / `studio-magpie`），值在 Vault `secret/homelab/magpie`，`cd macbook/ansible && just magpie` 下发。☠️ 别写进 playbook：[泄露复盘](../records/2026-10-26-litellm-keys-in-public-repo.md) |
 
 ⚠️ 本机消费方全部读同一个 `LITELLM_VK`（`~/.zshrc`），坑 A 一旦发生是全体受影响。

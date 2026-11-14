@@ -7,7 +7,7 @@
 #   - admin UI (/ui): LiteLLM 自带登录 (UI_USERNAME/UI_PASSWORD, Vault→ESO)
 # Config: config.yaml in git (model_list); keys/spend live in Postgres —— 2026-08-25 起
 #   是共享实例 `databases/apps-pg` 的 litellm 租户，不再是本 ns 自带的 litellm-pg。
-# 自托管上游: DGX (qwen3.8-flash-next-tp2, 主) + MacPro M2 OMLX (Ornith-1.5-35B, 兜底)
+# 自托管上游: DGX (DeepSeek-V4.1-Flash-1017, 主) + MacPro M2 OMLX (Ornith-1.5-35B, 兜底)
 #   + Mac Studio OMLX (Qwen3.8-27B, 独立可指名、不进兜底链, 2026-10-03),
 #   fallbacks 键 = 严格的"主→兜底"链（只认顶层 router_settings，见 docs/reference/litellm-gateway.md 坑 A2）。
 # 升版：改 image digest + 注释 tag → git push。不要追 main-stable。
@@ -18,33 +18,31 @@ metadata:
   namespace: litellm
 data:
   # ⚠️ api_base 必须带 /v1 后缀 —— LiteLLM 不会自动补。
-  # api_key: dummy 不是机密（DGX vLLM 不设鉴权；Mac OMLX 0.7 起配了 key，但开着
+  # api_key: dummy 不是机密（DGX 推理引擎不设鉴权；Mac OMLX 0.7 起配了 key，但开着
   # allow_unauthenticated_inference，推理接口不验 key），因此可留在 git。
-  # ☠️ SGLang 与 vLLM 在这里有个要命的差别：**SGLang 接受任意 model 名并原样回显**
-  #    （上游 gotcha #10），vLLM 才会 404。所以「请求成功了」不能证明别名指对了栈，
-  #    判据只能是 `/v1/models` 报的 served name。
+  # ☠️ 引擎之间有个要命的差别：**SGLang 和 TensorFold（2026-11-15 实测）接受任意 model 名**
+  #    照常作答，只有 vLLM 会 404。所以「请求成功了」不能证明别名指对了栈，
+  #    判据只能是 `/v1/models` 报的 served name（或响应体里的 `model`）。
   # 强制 key 鉴权由 env LITELLM_MASTER_KEY 实现（general_settings.master_key 语义=require a key for all calls）。
   config.yaml: |
     model_list:
       # ── DGX（主；custom_dgx/ 前缀是历史约定，保留）──
-      # 现状（2026-09-30 起）：Qwen3.8-Flash-Next，vLLM 双机 TP=2，端点 100.97.87.120:8000。
+      # 现状（2026-11-15 起）：DeepSeek-V4.1-Flash-1017，TensorFold（Zig）双机 TP=2，端点 100.97.87.120:8000。
       # 历次换栈与各栈参数见 docs/reference/litellm-gateway.md「DGX 主力栈」。
       # ☠️ 换栈时端口可能跟着变（:8000 / :8888 都被不同的栈用过，旧端口会直接不监听），
       #    只改模型名不改 api_base = 把消费方指向空端口。端口也区分不了后端，改之前先
       #    `curl -s http://100.97.87.120:<port>/v1/models` 看 served name 再动手。
-      - model_name: custom_dgx/qwen3.8-flash-next-tp2
+      # upstream_compat 的两条 model_info 声明（upstream_reasoning_efforts / upstream_system_first）
+      # 这个栈**都不需要**：2026-11-15 实测 reasoning_effort 七档（none…max）全收，对话中间的
+      # system 消息 chat 与 /v1/responses 都收。☠️ 换栈时重测（坑 E）：对本别名传
+      # "reasoning_effort": "bogus" 看 400 原文列出的集合，再发一条中间带 system 的请求；
+      # 有一项被拒就把对应声明加回这两条（两条必须一致）。
+      - model_name: custom_dgx/DeepSeek-V4.1-Flash-1017
         litellm_params:
-          model: openai/qwen3.8-flash-next-tp2
+          model: openai/DeepSeek-V4.1-Flash-1017
           api_base: http://100.97.87.120:8000/v1
           api_key: dummy
-        # upstream_compat hook 读这两个声明（语义见 upstream_compat.py 文件头）。
-        # ☠️ 换栈时跟着重核：档位集合每个栈都不一样（对本别名传 "reasoning_effort": "bogus"，DGX 的 400
-        #    原文会列出集合；别传 high 这类已知档位，会先被 hook 改写），
-        #    写错 = 请求被改写成上游不认的档位。两个 DGX 别名的声明必须一致。
-        model_info:
-          upstream_reasoning_efforts: [low, medium, xhigh]
-          upstream_system_first: true
-      # ── 无前缀别名 qwen3.8-flash-next-tp2：DGX 主 + Mac 兜底 ──
+      # ── 无前缀别名 DeepSeek-V4.1-Flash-1017：DGX 主 + Mac 兜底 ──
       # ☠️ 兜底声明在**文件末尾的 `router_settings.fallbacks`**，不在这条的 litellm_params 里。
       #    2026-09-19 实测：写在 litellm_params 里 **从来没有生效过** —— 它会被当成 SDK 级
       #    fallback，拿裸字符串 `mac/ornith` 去找 provider，于是主上游一挂就回
@@ -53,16 +51,13 @@ data:
       #    很容易误判成"Mac 睡着了"。复现与对照见 docs/records/2026-09-19-litellm-fallbacks-never-active.md。
       # 与裸引擎同名是刻意的（下游改 base_url 即可绕过网关），代价是换模型时两边都得动。
       # ☠️ 改别名必须同步改 Postgres 里各虚拟 key 的 models 白名单，否则「清单正确 + Synced + 调用全 403」。
-      #    2026-09-19 实测受影响的是 **16 把里的 8 把**（与 09-03 那次同一数量级）。
-      - model_name: qwen3.8-flash-next-tp2
+      #    2026-09-19 实测受影响的是 **16 把里的 8 把**；2026-11-15 是 13 把里的 11 把 + 账户 ext-team-1
+      #    （外部 key 多了；账户级白名单也要改，zcode-agent 那把 key 自己的 models 是空的）。
+      - model_name: DeepSeek-V4.1-Flash-1017
         litellm_params:
-          model: openai/qwen3.8-flash-next-tp2
+          model: openai/DeepSeek-V4.1-Flash-1017
           api_base: http://100.97.87.120:8000/v1
           api_key: dummy
-        # 同上一条。这条带兜底，声明缺失时 DGX 的 400 会被 mac/ornith 静默接走（2026-11-13 查到）。
-        model_info:
-          upstream_reasoning_efforts: [low, medium, xhigh]
-          upstream_system_first: true
       # ── Mac 兜底（也是独立可用的实际模型）──
       # 2026-08-25 由 Qwen3.6-35B 换为 Ornith-1.5-35B-A3B（OMLX 的 is_default 同日已指向它）。
       # ☠️ 只暴露一个 Mac 35B：OMLX 池天花板 30GB 装不下两个（19.95 + 19.08GB），
@@ -160,7 +155,7 @@ data:
     #    的消费方用的，被静默换成 Mac 反而是坏事。
     # ☠️ 换模型时这里的键名要跟着换（它是别名的字面量），漏改 = 兜底静默失效。
     router_settings:
-      fallbacks: [{"qwen3.8-flash-next-tp2": ["mac/ornith"]}]
+      fallbacks: [{"DeepSeek-V4.1-Flash-1017": ["mac/ornith"]}]
 
     # ── 客户端 IP（2026-10-03）──
     # 公网请求到 LiteLLM 时 TCP 对端已经是集群内地址，spend log 的 requester_ip_address
@@ -195,14 +190,14 @@ spec:
         #    ⇒ ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按**旧路由表**继续跑。
         #    2026-08-25 实际踩过一次（改了 mac/ornith 后必须手动 rollout restart 才生效）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py 的 STAMP_ONLY），别手改。
-        checksum/config: "1b122b0aaf2b53cb"
+        checksum/config: "15a7e777fd878e04"
         # 同理，但盯的是 codex_compat.py（litellm-codex-compat ConfigMap）：
         # 也是 subPath 挂载 + 只在启动时 import，改了不重启就是静默跑旧代码。
         checksum/codex-compat-py: "e5da4a39d90243d4"
         # 同理，盯 client_ip.py（litellm-client-ip ConfigMap）。
         checksum/client-ip-py: "73ac6eb0b2a145f1"
         # 同理，盯 upstream_compat.py（litellm-upstream-compat ConfigMap）。
-        checksum/upstream-compat-py: "c8627ac915743e34"
+        checksum/upstream-compat-py: "8333687bb362acb1"
       labels:
         app: litellm
     spec:

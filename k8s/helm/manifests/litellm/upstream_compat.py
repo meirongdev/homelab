@@ -5,7 +5,9 @@ model group 在 config.yaml 的 `model_info` 里声明过**的那两件事，没
 
 ## 为什么需要
 
-DGX（vLLM + Qwen chat template）有两种请求会回 400，而 Mac 的 OMLX 两种都接受：
+2026-11 的 DGX 栈（vLLM + Qwen chat template）有两种请求会回 400，而 Mac 的 OMLX 两种都接受
+（11-15 换上的 DeepSeek-V4.1 / TensorFold 两种都接受，所以当前 config 里没有声明，本层对它是空操作；
+留着它是为了下一个挑剔的栈只需加两行声明）：
 
   1. 对话中间出现 role=system 消息 → `400 System message must be at the beginning.`
      （Qwen 模板里的 raise_exception）。Claude Code 2.1.31x 起把 `# Environment` 块作为
@@ -13,12 +15,12 @@ DGX（vLLM + Qwen chat template）有两种请求会回 400，而 Mac 的 OMLX �
   2. `reasoning_effort` 不在它的档位集合里 → `400 Unexpected reasoning effort high`。
      DGX 只认 low / medium / xhigh；magpie 一类代理会把客户端的 `high` 透传过来。
 
-裸别名 `qwen3.8-flash-next-tp2` 配了 `mac/ornith` 兜底，所以这两种 400 **不会报错**：
+DGX 的裸别名（当时是 `qwen3.8-flash-next-tp2`）配了 `mac/ornith` 兜底，所以这两种 400 **不会报错**：
 请求被悄悄转给 M2，调用方只觉得慢（Ornith 30–47s，DGX 几秒），响应里的 `model` 变成
 `ornith-ai__…`。2026-11-13 查外发 key 时发现 3 把 key 的主力请求全落在 M2 上，DGX 空着。
 没有这一层时，唯一的痕迹是 spend log 里 `original_model_group ≠ model_group`。
 
-## 改写规则（声明在 config.yaml 的 model_info，换栈时跟模型条目一起改）
+## 改写规则（声明在 config.yaml 的 model_info，换栈时跟模型条目一起改；值是 11-14 给 Qwen 栈写的）
 
   upstream_system_first: true
       非首位的 role=system 消息并进开头的 system 提示（追加在末尾，静态前缀不动，
