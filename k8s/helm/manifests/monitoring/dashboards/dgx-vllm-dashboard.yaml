@@ -1,36 +1,29 @@
 ---
 # Grafana Dashboard: DGX Spark 推理引擎
 # 2× NVIDIA DGX Spark (GB10) 推理服务的引擎指标，homelab Prometheus 经 Tailscale 抓取
-# (job `dgx-inference`；2026-09-20 起两台并跑：S1 dgx-spark-1 :8888 SGLang `sglang:*` 主力，
-#  S2 dgx-spark-2 :18300 vLLM fndgx `vllm:*` 常驻；同 job 两前缀并存)。
+# (job `dgx-inference`；2026-11-15 起 dsv41：TensorFold 双机 TP=2，只有 S1 dgx-spark-1 :8000
+#  一个 target（rank1 在 S2 上，没有自己的端点），指标前缀 `tensorfold:*`)。
 #
 # ☠️ **引擎会换，指标前缀与端口跟着换** —— 本面板最容易静默失效的地方：
-#      ~2026-09-19   vLLM   :8000    `vllm:*`     (k3s, 2026-09-20 已随集群移除)
-#      2026-09-19 起 SGLang :8888    `sglang:*`   ← S1 主力 (当前)
-#      2026-09-20 起 vLLM   :18300   `vllm:*`     ← S2 fndgx 常驻 (当前)
+#      ~2026-09-19   vLLM        :8000    `vllm:*`
+#      2026-09-19 起 SGLang      :8888    `sglang:*`
+#      2026-09-30 起 vLLM TP=2   :8000    `vllm:*`
+#      2026-11-15 起 TensorFold  :8000    `tensorfold:*`   ← 当前
 #   过期的前缀**不报错**：面板只是全部空白，与"最近没有流量"长得一模一样。
 #   换栈后先 `curl -s http://<head>:<port>/metrics | head -1` 确认前缀，再改这里。
-#   2026-09-20 双引擎并存：口径可比的指标面板写成 `sglang:X{…} or vllm:Y{…}` 并集；
-#   口径不可比的（prefix cache 请求数 vs token 数、投机解码、by-mode 拆分）保留
-#   SGLang 原样并在面板 description 注明。⚠️ vLLM 侧标签只有 {engine, model_name}，
-#   没有 is_streaming/moe_ep_rank 那组 —— 凡带 `sum by (nodename)` / `sum by (le)` 聚合的并集安全。
+#   ☠️ TensorFold 的指标**没有 model_name 标签**，所以 2026-11-15 删掉了 `$model` 模板变量；
+#   留着它会让每条带 `model_name=~"$model"` 的查询恒空。
+#   口径变了的格子（KV 占用、prefix cache、排队 → prefill、HTTP 状态 → 结果计数、accept length）
+#   各自的 description 里写了为什么换、与旧栈可不可比。
+#   查询改完用线上 Prometheus 逐条实跑过，非空才算（2026-11-15）。
 #
 # ⚠️ uid 仍是 `dgx-vllm`（与当前引擎名实不符）**是刻意的**：uid 是 Grafana 的链接身份，
 #   改了会打断已有书签与外链。标题/标签/查询都已改，只有 uid 与文件名不动。
 #
-# ⚠️ 从 vLLM 迁过来时有三个指标**没有等价物**（不是漏改，是换了口径，各面板 description 里写了）：
-#   - vllm:engine_sleep_state             → SGLang 无 sleep 概念，改用 up
-#   - vllm:num_requests_waiting_by_reason → 改成四个独立队列/状态计数
-#   - vllm:prefix_cache_hits/queries      → SGLang 统计 **token 数**不是请求数，
-#                                           口径按指标 HELP 原文的公式算，与旧栈数值不可比
-# ☠️ 两个标签陷阱（踩了就是恒空，不报错）：
-#   - `sglang:*_tokens_total` 带 is_streaming 维度、**不带** tp_rank 那组标签 → 必须 sum
-#   - `sglang:http_responses_total` **没有 model_name** → 不能用 $model 过滤
-#
 # Follows the dgx-spark-node-dashboard pattern: sidecar auto-load via
 # grafana_dashboard:"1" + grafana_folder annotation, synced by ArgoCD
-# monitoring-dashboards App. cluster/nodename 由 scrape config 注入，model_name 由引擎自带
-# 并经 label_values() 解析成模板变量 —— **只换模型名不用改本文件**，换引擎才要改。
+# monitoring-dashboards App. cluster/nodename 由 scrape config 注入。查询里不含模型名，
+# **只换模型名不用改本文件**，换引擎才要改。
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -44,23 +37,17 @@ data:
   dgx-vllm.json: |-
     {
       "annotations": {"list": []},
-      "description": "DGX Spark 推理指标（2026-09-20 起双引擎并跑：S1 SGLang 主力 + S2 vLLM fndgx）：KV/token 占用、请求队列、token 吞吐、TTFT/端到端/逐 token/排队延迟、prefix cache、投机解码接受率",
+      "description": "DGX Spark 推理指标（2026-11-15 起 dsv41：DeepSeek-V4.1-Flash-1017，TensorFold 双机 TP=2，指标前缀 tensorfold:*）：并发与排队、KV 占用、token 吞吐、TTFT/端到端/逐 token/prefill 延迟、prompt 缓存、MTP 投机解码、rank 对健康与显存",
       "editable": true,
       "graphTooltip": 1,
       "links": [],
       "schemaVersion": 39,
-      "tags": ["curated", "inference", "sglang", "vllm", "dgx-spark"],
+      "tags": ["curated", "inference", "tensorfold", "dgx-spark"],
       "title": "Hardware / DGX 推理",
       "uid": "dgx-vllm",
       "templating": {
         "list": [
-          {
-            "name": "datasource",
-            "type": "constant",
-            "query": "prometheus",
-            "current": {"text": "prometheus", "value": "prometheus"},
-            "hide": 2
-          },
+          {"name": "datasource", "type": "constant", "query": "prometheus", "current": {"text": "prometheus", "value": "prometheus"}, "hide": 2},
           {
             "name": "nodename",
             "type": "query",
@@ -70,37 +57,17 @@ data:
             "includeAll": true,
             "multi": true,
             "current": {"text": "All", "value": "$__all"}
-          },
-          {
-            "name": "model",
-            "type": "query",
-            "datasource": {"type": "prometheus", "uid": "${datasource}"},
-            "query": "label_values(sglang:num_running_reqs{job=\"dgx-inference\"} or vllm:num_requests_running{job=\"dgx-inference\"}, model_name)",
-            "refresh": 2,
-            "includeAll": true,
-            "multi": true,
-            "current": {"text": "All", "value": "$__all"}
           }
         ]
       },
       "panels": [
-        {
-          "collapsed": false,
-          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
-          "id": 100,
-          "title": "📊 概览 / Overview",
-          "type": "row"
-        },
+        {"collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0}, "id": 100, "title": "📊 概览 / Overview", "type": "row"},
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "fieldConfig": {
             "defaults": {
               "color": {"mode": "thresholds"},
-              "thresholds": {"mode": "absolute", "steps": [
-                {"color": "green", "value": null},
-                {"color": "yellow", "value": 70},
-                {"color": "red", "value": 90}
-              ]},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 70}, {"color": "red", "value": 90}]},
               "unit": "percent",
               "mappings": [],
               "min": 0,
@@ -121,18 +88,24 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "(sglang:token_usage{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"} or vllm:kv_cache_usage_perc{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}) * 100",
-              "legendFormat": "{{model_name}}",
+              "expr": "max by (nodename) (tensorfold:kv_cache_usage_ratio{job=\"dgx-inference\", nodename=~\"$nodename\"}) * 100",
+              "legendFormat": "{{nodename}}",
               "refId": "A"
             }
           ],
           "title": "KV Cache 使用率 %",
-          "type": "stat"
+          "type": "stat",
+          "description": "TensorFold 口径：**每条流**的缓存占用 / 该流的上下文窗口，取最大的那条。不是全局 KV 池占用，与旧栈的 kv_cache_usage_perc / token_usage 不可比。"
         },
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "fieldConfig": {
-            "defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}, "unit": "none", "mappings": []},
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]},
+              "unit": "none",
+              "mappings": []
+            },
             "overrides": []
           },
           "gridPos": {"h": 4, "w": 6, "x": 6, "y": 1},
@@ -148,18 +121,24 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sglang:num_running_reqs{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"} or vllm:num_requests_running{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}",
-              "legendFormat": "{{model_name}}",
+              "expr": "sum by (nodename) (tensorfold:requests_running{job=\"dgx-inference\", nodename=~\"$nodename\"})",
+              "legendFormat": "{{nodename}}",
               "refId": "A"
             }
           ],
           "title": "推理中 / Running",
-          "type": "stat"
+          "type": "stat",
+          "description": "正在 prefill 或 decode 的请求数。上限 4（/health 的 max_batch_size，2026-11-15）。"
         },
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "fieldConfig": {
-            "defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}, "unit": "none", "mappings": []},
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]},
+              "unit": "none",
+              "mappings": []
+            },
             "overrides": []
           },
           "gridPos": {"h": 4, "w": 6, "x": 12, "y": 1},
@@ -175,23 +154,21 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sglang:num_queue_reqs{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"} or vllm:num_requests_waiting{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}",
-              "legendFormat": "{{model_name}}",
+              "expr": "sum by (nodename) (tensorfold:requests_waiting{job=\"dgx-inference\", nodename=~\"$nodename\"})",
+              "legendFormat": "{{nodename}}",
               "refId": "A"
             }
           ],
           "title": "排队中 / Queued",
-          "type": "stat"
+          "type": "stat",
+          "description": "排队或等空闲通道的请求数。>4 持续 2 分钟会触发 DgxSparkRequestsQueued。"
         },
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "fieldConfig": {
             "defaults": {
               "color": {"mode": "thresholds"},
-              "thresholds": {"mode": "absolute", "steps": [
-                {"color": "red", "value": 0},
-                {"color": "green", "value": 1}
-              ]},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": 0}, {"color": "green", "value": 1}]},
               "mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}],
               "unit": "none"
             },
@@ -219,20 +196,25 @@ data:
           "title": "引擎状态 / Engine",
           "type": "stat"
         },
-
-        {
-          "collapsed": false,
-          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5},
-          "id": 101,
-          "title": "🧠 KV Cache / 请求队列",
-          "type": "row"
-        },
+        {"collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5}, "id": 101, "title": "🧠 KV Cache / 请求队列", "type": "row"},
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "fieldConfig": {
             "defaults": {
               "color": {"mode": "palette-classic"},
-              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
               "unit": "percent",
               "min": 0,
               "max": 100,
@@ -243,22 +225,19 @@ data:
           },
           "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
           "id": 5,
-          "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "(sglang:token_usage{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"} or vllm:kv_cache_usage_perc{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}) * 100",
-              "legendFormat": "{{model_name}} 全池",
+              "expr": "tensorfold:kv_cache_usage_ratio{job=\"dgx-inference\", nodename=~\"$nodename\"} * 100",
+              "legendFormat": "{{nodename}} pool {{pool}}",
               "refId": "A"
-            },
-            {
-              "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sglang:full_token_usage{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"} * 100",
-              "legendFormat": "{{model_name}} full-attn",
-              "refId": "B"
             }
           ],
-          "description": "SGLang 的 token_usage 与 vLLM 的 kv_cache_usage_perc 同形（0–1 占比）。⚠️ 但绝对值不可与旧栈比：新栈 KV 池 1,220,951 token（mem-fraction 0.80），对 262k 上下文约 4.6 路满窗并发 —— 打满已不再意味着饱和，饱和看队列（见告警 DgxSparkRequestsQueued 上方的墓碑注释）。",
+          "description": "TensorFold 口径：**每条流**的缓存占用 / 该流的上下文窗口，取最大的那条。不是全局 KV 池占用，与旧栈的 kv_cache_usage_perc / token_usage 不可比。",
           "title": "KV Cache 使用率 %",
           "type": "timeseries"
         },
@@ -267,7 +246,19 @@ data:
           "fieldConfig": {
             "defaults": {
               "color": {"mode": "palette-classic"},
-              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 0, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
               "unit": "none",
               "min": 0,
               "mappings": []
@@ -276,51 +267,53 @@ data:
           },
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
           "id": 6,
-          "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sglang:num_queue_reqs{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"} or vllm:num_requests_waiting{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}",
-              "legendFormat": "queued",
+              "expr": "sum by (nodename) (tensorfold:requests_running{job=\"dgx-inference\", nodename=~\"$nodename\"})",
+              "legendFormat": "running",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sglang:num_grammar_queue_reqs{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}",
-              "legendFormat": "grammar queue",
+              "expr": "sum by (nodename) (tensorfold:requests_waiting{job=\"dgx-inference\", nodename=~\"$nodename\"})",
+              "legendFormat": "waiting",
               "refId": "B"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum by (nodename) (sglang:num_paused_reqs{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"})",
-              "legendFormat": "paused",
+              "expr": "sum by (nodename) (increase(tensorfold:preemptions_total{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval]))",
+              "legendFormat": "preemptions",
               "refId": "C"
-            },
-            {
-              "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum by (nodename) (sglang:num_retracted_reqs{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"})",
-              "legendFormat": "retracted",
-              "refId": "D"
             }
           ],
-          "description": "SGLang 没有 vLLM 的 waiting_by_reason。这里拆的是四个独立队列/状态计数：retracted（被回退重排）与 paused 长期非 0 = KV 压力；grammar 高 = 结构化输出的消费方（严格 JSON 那几个作业）在等语法编译。⚠️ paused/retracted 带 pid 标签，必须 sum 掉。2026-09-20 起 S2（vLLM fndgx）并跑：总排队那条（A）是双前缀并集；grammar/paused/retracted 三条是 SGLang 专有，S2 侧无对应指标（vLLM 用 waiting_by_reason，口径不同），S2 选中时这三条为空。",
-          "title": "队列构成 / Queue breakdown",
+          "description": "running 顶在 4 而 waiting 持续 >0 = 通道打满。preemptions 是请求被迫把通道让给后来者的次数。jobs-sg 夜里（19:10 UTC，并发 4）一个作业就能占满。",
+          "title": "并发 / Lanes（上限 4）",
           "type": "timeseries"
         },
-
-        {
-          "collapsed": false,
-          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 14},
-          "id": 102,
-          "title": "⚡ 吞吐 / 请求",
-          "type": "row"
-        },
+        {"collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 14}, "id": 102, "title": "⚡ 吞吐 / 请求", "type": "row"},
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "fieldConfig": {
             "defaults": {
               "color": {"mode": "palette-classic"},
-              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 0, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
               "unit": "tokps",
               "min": 0,
               "mappings": []
@@ -329,22 +322,31 @@ data:
           },
           "gridPos": {"h": 8, "w": 12, "x": 0, "y": 15},
           "id": 7,
-          "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum by (nodename) (rate(sglang:generation_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:generation_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]))",
+              "expr": "sum by (nodename) (rate(tensorfold:generation_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval]))",
               "legendFormat": "generation",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum by (nodename) (rate(sglang:prompt_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:prompt_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]))",
+              "expr": "sum by (nodename) (rate(tensorfold:prompt_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval]))",
               "legendFormat": "prompt",
               "refId": "B"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (nodename) (rate(tensorfold:prompt_tokens_cached_total{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval]))",
+              "legendFormat": "prompt (cached)",
+              "refId": "C"
             }
           ],
-          "description": "☠️ sglang:*_tokens_total 带 is_streaming 维度、且**不带** tp_rank 那组标签 —— 不 sum 掉的话曲线会按流式/非流式劈成两条，看起来像吞吐掉了一半。2026-09-20 起 S2（vLLM fndgx）并跑：两路为双前缀并集（vllm:generation/prompt_tokens_total），口径相同（tokens/s）。",
+          "description": "☠️ 这几个 counter 只在**请求结束时**累加（HELP: of finished requests），长请求会让曲线成块状、尖峰落在结束那一刻。实时生成速度看 `curl -s http://100.97.87.120:8000/health` 的 live.decode_tokens_per_second。",
           "title": "Token 吞吐 (tokens/s)",
           "type": "timeseries"
         },
@@ -353,7 +355,19 @@ data:
           "fieldConfig": {
             "defaults": {
               "color": {"mode": "palette-classic"},
-              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 0, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
               "unit": "reqps",
               "min": 0,
               "mappings": []
@@ -362,51 +376,59 @@ data:
           },
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 15},
           "id": 8,
-          "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum by (status_code) (rate(sglang:http_responses_total{job=\"dgx-inference\", nodename=~\"$nodename\", endpoint=~\"/v1/.*\"}[$__rate_interval]))",
-              "legendFormat": "{{status_code}}",
+              "expr": "sum by (nodename) (rate(tensorfold:request_latency_seconds_count{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval]))",
+              "legendFormat": "完成 req/s",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum by (nodename) (rate(sglang:num_aborted_requests_total{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval]))",
-              "legendFormat": "aborted",
+              "expr": "sum by (nodename) (rate(tensorfold:client_disconnections_total{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval]))",
+              "legendFormat": "客户端提前断开",
               "refId": "B"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum by (nodename) (rate(vllm:request_success_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\", finished_reason=~\"stop|length\"}[$__rate_interval]))",
-              "legendFormat": "vllm ok ({{nodename}})",
+              "expr": "sum by (nodename) (rate(tensorfold:pair_failed{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval]))",
+              "legendFormat": "rank 对断开致失败",
               "refId": "C"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum by (nodename) (rate(vllm:request_success_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\", finished_reason=~\"abort|error\"}[$__rate_interval]))",
-              "legendFormat": "vllm aborted+error ({{nodename}})",
+              "expr": "sum by (nodename) (rate(tensorfold:service_refused{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval]))",
+              "legendFormat": "service refused",
               "refId": "D"
             }
           ],
-          "description": "SGLang 没有 vLLM 的 request_success_total{finished_reason}，状态码是最接近的等价物。☠️ sglang:http_responses_total **不带 model_name**，硬加 $model 过滤会恒为空，所以本面板只按 job+nodename 过滤、不受 $model 影响。另附 aborted：客户端断开/超时放弃的请求，它在状态码里看不见（jobs-sg 那 300s 超时就落在这里）。2026-09-20 起 S2（vLLM）并跑：该构建无 status_code 计数器，C/D 两条用 vllm:request_success_total{finished_reason} 拆分，与 SGLang 状态码口径不同（请求数 vs 状态码），仅供 S2 参考。",
-          "title": "请求结果 / HTTP responses",
+          "description": "TensorFold 不导出 HTTP 状态码，换成这几个计数。rank 对断开致失败 >0 = 两台之间的 TP 链路出过事（与 DgxSparkInferenceStuck 的 pair_* 分支同源）。pair_failed / service_refused 是 counter 但名字没有 _total。",
+          "title": "请求结果 / Requests",
           "type": "timeseries"
         },
-
-        {
-          "collapsed": false,
-          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 23},
-          "id": 103,
-          "title": "⏱️ 延迟 / Latency (histogram 分位)",
-          "type": "row"
-        },
+        {"collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 23}, "id": 103, "title": "⏱️ 延迟 / Latency (histogram 分位)", "type": "row"},
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "fieldConfig": {
             "defaults": {
               "color": {"mode": "palette-classic"},
-              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 0, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
               "unit": "s",
               "mappings": []
             },
@@ -414,23 +436,26 @@ data:
           },
           "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
           "id": 9,
-          "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.50, sum by (le) (rate(sglang:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.5, sum by (le) (rate(tensorfold:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval])))",
               "legendFormat": "p50",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.95, sum by (le) (rate(sglang:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(tensorfold:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval])))",
               "legendFormat": "p95",
               "refId": "B"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(sglang:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(tensorfold:time_to_first_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval])))",
               "legendFormat": "p99",
               "refId": "C"
             }
@@ -443,7 +468,19 @@ data:
           "fieldConfig": {
             "defaults": {
               "color": {"mode": "palette-classic"},
-              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 0, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
               "unit": "s",
               "mappings": []
             },
@@ -451,23 +488,26 @@ data:
           },
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
           "id": 10,
-          "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.50, sum by (le) (rate(sglang:e2e_request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:e2e_request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.5, sum by (le) (rate(tensorfold:request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval])))",
               "legendFormat": "p50",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.95, sum by (le) (rate(sglang:e2e_request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:e2e_request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(tensorfold:request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval])))",
               "legendFormat": "p95",
               "refId": "B"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(sglang:e2e_request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:e2e_request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(tensorfold:request_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval])))",
               "legendFormat": "p99",
               "refId": "C"
             }
@@ -480,7 +520,19 @@ data:
           "fieldConfig": {
             "defaults": {
               "color": {"mode": "palette-classic"},
-              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 0, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
               "unit": "s",
               "mappings": []
             },
@@ -488,17 +540,20 @@ data:
           },
           "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32},
           "id": 11,
-          "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.50, sum by (le) (rate(sglang:inter_token_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:inter_token_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.5, sum by (le) (rate(tensorfold:request_time_per_output_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval])))",
               "legendFormat": "p50",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.95, sum by (le) (rate(sglang:inter_token_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:inter_token_latency_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(tensorfold:request_time_per_output_token_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval])))",
               "legendFormat": "p95",
               "refId": "B"
             }
@@ -511,7 +566,19 @@ data:
           "fieldConfig": {
             "defaults": {
               "color": {"mode": "palette-classic"},
-              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 0, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
               "unit": "s",
               "mappings": []
             },
@@ -519,38 +586,47 @@ data:
           },
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 32},
           "id": 12,
-          "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.50, sum by (le) (rate(sglang:queue_time_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:request_queue_time_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.5, sum by (le) (rate(tensorfold:request_prefill_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval])))",
               "legendFormat": "p50",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.95, sum by (le) (rate(sglang:queue_time_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]) or rate(vllm:request_queue_time_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])))",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(tensorfold:request_prefill_seconds_bucket{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval])))",
               "legendFormat": "p95",
               "refId": "B"
             }
           ],
-          "title": "排队延迟 / Queue latency",
-          "type": "timeseries"
+          "title": "Prefill 耗时 / Prefill time",
+          "type": "timeseries",
+          "description": "TensorFold 不导出排队时间直方图（旧栈这一格是 queue latency），换成 prompt pass 耗时。排队看「并发 / Lanes」那一格。"
         },
-
-        {
-          "collapsed": false,
-          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 40},
-          "id": 104,
-          "title": "🎯 Prefix Cache",
-          "type": "row"
-        },
+        {"collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 40}, "id": 104, "title": "🎯 Prefix Cache", "type": "row"},
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "fieldConfig": {
             "defaults": {
               "color": {"mode": "palette-classic"},
-              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 0, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
               "unit": "percent",
               "min": 0,
               "max": 100,
@@ -560,22 +636,19 @@ data:
           },
           "gridPos": {"h": 8, "w": 12, "x": 0, "y": 41},
           "id": 13,
-          "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum by (nodename) (rate(sglang:prefill_effective_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\", mode=~\".*_hit\"}[$__rate_interval])) / clamp_min(sum by (nodename) (rate(sglang:prefill_effective_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])), 0.0001) * 100",
-              "legendFormat": "{{model_name}} (SGLang, token 口径)",
+              "expr": "sum by (nodename) (rate(tensorfold:prompt_tokens_cached_total{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval])) / clamp_min(sum by (nodename) (rate(tensorfold:prompt_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval])), 0.0001) * 100",
+              "legendFormat": "{{nodename}}",
               "refId": "A"
-            },
-            {
-              "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum by (nodename) (rate(vllm:prefix_cache_hits_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])) / clamp_min(sum by (nodename) (rate(vllm:prefix_cache_queries_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])), 0.0001) * 100",
-              "legendFormat": "{{nodename}} (vLLM, 请求口径)",
-              "refId": "B"
             }
           ],
-          "description": "按 SGLang 指标 HELP 的官方公式算：rate(各 *_hit 模式之和) / rate(全部模式之和)。⚠️ 与 vLLM 的 hits/queries **口径不同** —— SGLang 统计的是 token 数、vLLM 是请求数，两栈的数值不可直接比。引擎另有自算的 sglang:cache_hit_rate 瞬时 gauge，但它按日志间隔更新、窗口不受 $__rate_interval 控制，故这里不用它。2026-09-20 起 S2（vLLM fndgx）并跑：B 线是 S2 专属（hits/queries 请求口径），与 A 线不可直接比。",
+          "description": "token 口径：从保留的 prompt 状态里恢复的 prompt token 占全部 prompt token 的比例（结束的请求才计）。与 vLLM 时代按请求数算的命中率不可比。",
           "title": "Prefix Cache 命中率 %",
           "type": "timeseries"
         },
@@ -584,7 +657,19 @@ data:
           "fieldConfig": {
             "defaults": {
               "color": {"mode": "palette-classic"},
-              "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 0, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}},
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
               "unit": "short",
               "min": 0,
               "mappings": []
@@ -593,84 +678,257 @@ data:
           },
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 41},
           "id": 14,
-          "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
-          "targets": [
-            {
-              "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum by (mode) (rate(sglang:prefill_effective_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval]))",
-              "legendFormat": "{{mode}}",
-              "refId": "A"
-            }
-          ],
-          "description": "input = 真正要算的 prefill token；device/host/storage_hit = 各层前缀缓存命中省下的。上面那块命中率就是由这几条算出来的。⚠️ mode 维度是 SGLang 专有，本面板仅覆盖 S1；S2（vLLM）没有 mode 拆分。",
-          "title": "Prefill tokens by mode (tokens/s)",
-          "type": "timeseries"
-        },
-        {
-          "collapsed": false,
-          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 49},
-          "id": 105,
-          "title": "🔮 投机解码 / Speculative decoding (S1 DFlash2 / S2 MTP)",
-          "type": "row"
-        },
-        {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "fieldConfig": {
-            "defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 0, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "unit": "percentunit", "min": 0, "max": 1, "mappings": []},
-            "overrides": []
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
           },
-          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 50},
-          "id": 15,
-          "options": {"legend": {"calcs": ["lastNotNull", "min"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sglang:spec_accept_rate{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}",
-              "legendFormat": "{{model_name}} (SGLang)",
+              "expr": "sum by (nodename) (rate(tensorfold:prompt_tokens_cached_total{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval]))",
+              "legendFormat": "cached",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum by (nodename) (rate(vllm:spec_decode_num_accepted_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])) / clamp_min(sum by (nodename) (rate(vllm:spec_decode_num_draft_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])), 0.0001)",
-              "legendFormat": "{{nodename}} MTP accept rate (vLLM)",
+              "expr": "sum by (nodename) (rate(tensorfold:prompt_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval])) - sum by (nodename) (rate(tensorfold:prompt_tokens_cached_total{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval]))",
+              "legendFormat": "computed",
               "refId": "B"
             }
           ],
-          "description": "☠️ 本行是新栈（SGLang + DFlash2）独有的，旧栈没有投机解码。草稿 token 被主模型接受的比例塌到接近 0 = 投机解码在做无用功，**吞吐会静默掉回非投机水平，而 up / 延迟分位 / 错误率全部照常正常** —— 没有任何告警看得见这一格，只能靠这张图。换草稿模型或改 speculative 参数后先来这里看。2026-09-20 起 S2（vLLM fndgx，MTP=2）并跑：B 线是 vLLM 的 accepted/draft tokens 比，口径近似但实现不同，与 S1 不可直接比。",
+          "description": "prompt_tokens_total 包含 cached 的那部分，computed = total − cached。",
+          "title": "Prompt tokens：命中缓存 vs 重算 (tokens/s)",
+          "type": "timeseries"
+        },
+        {"collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 49}, "id": 105, "title": "🔮 投机解码 / Speculative decoding (MTP)", "type": "row"},
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 50},
+          "id": 15,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "min"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum by (nodename) (rate(tensorfold:mtp_accepted_total{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval])) / clamp_min(sum by (nodename) (rate(tensorfold:mtp_drafted_total{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval])), 0.0001)",
+              "legendFormat": "{{nodename}} MTP accept rate",
+              "refId": "A"
+            }
+          ],
+          "description": "草稿 token 被主模型接受的比例（MTP）。塌到接近 0 = 投机解码在做无用功，吞吐会静默掉回非投机水平，而 up / 延迟分位 / 错误率全部照常 —— 没有告警看得见这一格。",
           "title": "接受率 / Accept rate",
           "type": "timeseries"
         },
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
           "fieldConfig": {
-            "defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 0, "gradientMode": "none", "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "unit": "none", "min": 0, "mappings": []},
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
+              "unit": "none",
+              "min": 0,
+              "mappings": []
+            },
             "overrides": []
           },
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 50},
           "id": 16,
-          "options": {"legend": {"calcs": ["lastNotNull", "mean"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "mean"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sglang:spec_accept_length{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}",
-              "legendFormat": "accept length",
+              "expr": "sum by (nodename) (rate(tensorfold:generation_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval])) / clamp_min(sum by (nodename) (rate(tensorfold:decode_rounds_total{job=\"dgx-inference\", nodename=~\"$nodename\"}[$__rate_interval])), 0.0001)",
+              "legendFormat": "{{nodename}}",
+              "refId": "A"
+            }
+          ],
+          "description": "生成 token 数 / 解码轮数 ≈ 1 + 每轮平均被接受的草稿数，相当于旧栈的 accept length。TensorFold 没有直接的 accept length 指标。",
+          "title": "每轮解码产出 token / Tokens per decode round",
+          "type": "timeseries"
+        },
+        {"collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 58}, "id": 106, "title": "🔗 Rank 对与显存 / Pair & memory", "type": "row"},
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
+              "unit": "ms",
+              "min": 0,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 59},
+          "id": 17,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "max by (nodename) (tensorfold:pair_busy_ms{job=\"dgx-inference\", nodename=~\"$nodename\"})",
+              "legendFormat": "busy",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sglang:spec_num_draft_tokens{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}",
-              "legendFormat": "draft tokens/step (SGLang)",
+              "expr": "max by (nodename) (tensorfold:pair_stall_ms{job=\"dgx-inference\", nodename=~\"$nodename\"})",
+              "legendFormat": "stall 上限",
               "refId": "B"
+            }
+          ],
+          "description": "pair_busy_ms 一直涨到 pair_stall_ms（stall 上限，实测 120000）就会判定 rank 对卡死并断开。平时应贴着 0。",
+          "title": "引擎线程忙而无进展 / Pair busy",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
+              "unit": "none",
+              "min": 0,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 59},
+          "id": 18,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "max by (nodename) (tensorfold:pair_stalled{job=\"dgx-inference\", nodename=~\"$nodename\"})",
+              "legendFormat": "stalled",
+              "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum by (nodename) (rate(vllm:spec_decode_num_accepted_tokens_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])) / clamp_min(sum by (nodename) (rate(vllm:spec_decode_num_drafts_total{job=\"dgx-inference\", nodename=~\"$nodename\", model_name=~\"$model\"}[$__rate_interval])), 0.0001)",
-              "legendFormat": "MTP accept length ({{nodename}} vLLM)",
-              "refId": "C"
+              "expr": "max by (nodename) (tensorfold:pair_broken{job=\"dgx-inference\", nodename=~\"$nodename\"})",
+              "legendFormat": "broken",
+              "refId": "B"
             }
           ],
-          "description": "每步平均被接受的 token 数 ≈ 投机解码带来的加速倍数。**1.0 = 完全没有加速**（每步只接受了主模型自己那一个）。accept length 贴着 draft tokens/step 走 = 草稿几乎全中；贴着 1 走 = 草稿基本全废。A/B 是 SGLang（S1）口径；C 线是 S2（vLLM MTP）accepted/drafts 比，口径近似但实现不同，不可与 A/B 直接比。",
-          "title": "接受长度 / Accept length",
+          "description": "pair_stalled=1：超过 stall 上限仍无进展；pair_broken=1：rank 对已断（默认配置下进程随即以 status 75 退出）。任一为 1 持续 5 分钟触发 DgxSparkInferenceStuck。",
+          "title": "Rank 对状态 / Pair state (0/1)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisPlacement": "auto",
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"}
+              },
+              "unit": "bytes",
+              "min": 0,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 59},
+          "id": 19,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "max by (nodename) (tensorfold:device_memory_bytes{job=\"dgx-inference\", nodename=~\"$nodename\"})",
+              "legendFormat": "now",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "max by (nodename) (tensorfold:device_memory_peak_bytes{job=\"dgx-inference\", nodename=~\"$nodename\"})",
+              "legendFormat": "peak",
+              "refId": "B"
+            }
+          ],
+          "description": "引擎持有的设备内存（权重 + 缓存 + 活着的流）与启动以来的峰值。GB10 是统一内存，这里涨也意味着宿主可用内存在降。",
+          "title": "显存 / Device memory",
           "type": "timeseries"
         }
       ],
