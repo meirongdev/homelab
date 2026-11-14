@@ -3,20 +3,11 @@
 # （baseline 全量扫描实测 29 分钟 / 884 页，所以 19:10 开始不会撞上）。
 # fail-open：LLM 出错时保留规则结果并 exit 0；积压由 JobsSgEnrichBacklog 告警兜底。
 #
-# ⚠️ **直连 DGX 推理引擎，不经 LLM 网关**：省掉 virtual key 这条 Vault 依赖。
-# 模型 id 是后端相关的 —— 网关路由用带 provider 前缀的名字
-# （`custom_dgx/qwen3.8-flash-next-tp2`），裸引擎提供的是 `qwen3.8-flash-next-tp2`，
-# 写前缀名会 404。上游 2026-08-03 (d833623) 把模型链改成读 LLM_MODELS 后才可配。
-# ☠️ DGX 换栈时端点可能和模型名一起变（:8000 / :8888 都被不同的栈用过，旧端口会直接不监听）。
-#    本作业**直连** DGX，端点与模型名都不在网关清单里，只能靠改这里跟着换。
-#    现状（2026-09-30 起 vLLM 双机 TP=2，:8000）见 docs/reference/litellm-gateway.md「DGX 主力栈」。
-# ☠️ 若换成 SGLang 栈：它**接受任意 model 名并原样回显**（上游 gotcha #10），不像 vLLM 会 404，
-#    模型名写错是**静默**的，判据只能是 `/v1/models` 报的 served name。
-# 实测（2026-08-03，jobs-sg ns 内的 pod）：DGX 可达、无需认证、`x-bf-vk` 头被忽略。
-#
-# 代价：不经网关就没有网关的兜底链和用量计量；DGX 是跨 tailnet 共享的
-# 境内机器（RTT 66–83ms），不可用时 enrich fail-open 退回纯规则模式。
-# （2026-08-08 退役的是旧网关；现在的 LiteLLM 网关可以接，要另配 virtual key。）
+# 2026-11-11 起**经 LiteLLM 网关**打 DGX（下面 LLM_BASE_URL / LLM_API_KEY / LLM_MODELS 三处），
+# 不再直连；端点与引擎变化由网关挡住，换栈时这里只跟着改别名名字（runbooks/dgx-model-swap-homelab-followup.md）。
+# ☠️ 现在的 DGX 引擎（TensorFold，2026-11-15）和 SGLang 一样**接受任意 model 名**照常作答，
+#    模型名写错是静默的；网关这一层则会对不在路由表里的名字报错，所以别名写错反而是响的。
+# 不可用时 enrich fail-open 退回纯规则模式。
 #
 # 网关的 virtual key 环境变量不在此处：走 DGX 时它是空值且无害（vLLM 忽略该头）。
 # Vault 未写时也不会 CreateContainerConfigError 卡死（见 external-secret.yaml）。
@@ -84,7 +75,7 @@ spec:
                     secretKeyRef:
                       name: jobs-sg-llm
                       key: llm-api-key
-                # 网关别名。用 `custom_dgx/` 前缀那条，**不用**同名裸别名 qwen3.8-flash-next-tp2：
+                # 网关别名。用 `custom_dgx/` 前缀那条，**不用**同名裸别名：
                 # 裸别名配了兜底，DGX 出错时会静默换成 Mac 的 Ornith 作答，而这里的模型名同时是
                 # enrich 缓存键和 job_tech 的出处 —— 别的模型的结果会挂着 DGX 的名字写进缓存。
                 # 前缀这条刻意不配兜底：DGX 不通就如实报错，岗位留在积压里第二天再试。
@@ -96,10 +87,14 @@ spec:
                 #      LLM_LIVE_URL=http://100.94.186.7:31400 LLM_LIVE_MODEL=custom_dgx/$新模型 \
                 #        LLM_LIVE_KEY=$(vault kv get -field=llm_api_key secret/homelab/jobs-sg) \
                 #        go test ./internal/llm -run Live -v
+                # 2026-11-15 随 DGX 换栈：custom_dgx/qwen3.8-flash-next-tp2 → DeepSeek-V4.1-Flash-1017。
                 - name: LLM_MODELS
-                  value: custom_dgx/qwen3.8-flash-next-tp2
+                  value: custom_dgx/DeepSeek-V4.1-Flash-1017
+                # 8 → 4（2026-11-15）：新引擎 /health 报 `max_batch_size: 4`，第 5 路起在引擎里排队，
+                # 而排队时间也算在下面的 LLM_TIMEOUT 里 —— 8 并发等于一半请求先等一轮再开始算。
+                # 旧栈（vLLM max-num-seqs=64）给 8 是有余量的，现在没有了。
                 - name: LLM_CONCURRENCY
-                  value: "8"
+                  value: "4"
                 # 单次调用预算（= 上游 llm.DefaultTimeout，可配，不必重构镜像）。
                 # 该端点非流式、生成完才回 header，所以这个预算覆盖**整个生成过程**
                 # （错误信息里的 "awaiting headers" 就是它）；客户端放弃也不会让服务端

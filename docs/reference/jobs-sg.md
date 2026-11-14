@@ -136,7 +136,7 @@ busy handler（在那儿睡可能死锁）。
 ## LLM 富化：经 LiteLLM 网关打 DGX
 
 2026-11-11 起 `enrich` 的 `LLM_BASE_URL` 是集群内的 `http://litellm.litellm.svc.cluster.local:4000`，
-`LLM_MODELS` 是网关别名 `custom_dgx/qwen3.8-flash-next-tp2`，带虚拟 key（`key_alias=jobs-sg`，
+`LLM_MODELS` 是网关别名 `custom_dgx/DeepSeek-V4.1-Flash-1017`（2026-11-15 前是 `custom_dgx/qwen3.8-flash-next-tp2`），带虚拟 key（`key_alias=jobs-sg`，
 Vault `secret/homelab/jobs-sg` 的 `llm_api_key` → ExternalSecret `jobs-sg-llm` → env `LLM_API_KEY`）。
 此前直连 DGX 的 Tailscale IP；改走网关是为了让 jobs-sg ns 的网络策略碰不到 tailnet。
 DGX 栈本身（模型、端口、引擎、档位）的唯一真相源是 [litellm-gateway.md](litellm-gateway.md) 的「DGX 主力栈」；
@@ -166,7 +166,7 @@ LLM_API_KEY / LLM_AUTH_HEADER / LLM_EXTRA_BODY`。换模型不改代码、不发
 挂了就换 `LLM_LIVE_KWARG` 试。当前栈 2026-10-04 PASS，即 `LLM_THINKING_KWARG` 保持默认值。
 
 ```sh
-LLM_LIVE_URL=http://100.94.186.7:31400 LLM_LIVE_MODEL=custom_dgx/qwen3.8-flash-next-tp2 \
+LLM_LIVE_URL=http://100.94.186.7:31400 LLM_LIVE_MODEL=custom_dgx/DeepSeek-V4.1-Flash-1017 \
   LLM_LIVE_KEY=$(VAULT_ADDR=https://vault.meirong.dev vault kv get -field=llm_api_key secret/homelab/jobs-sg) \
   go test ./internal/llm -run Live -v
 ```

@@ -34,7 +34,7 @@ personal-services 的网络策略随之只放行 litellm:4000，不再给 DGX、
 
 | 角色 | 网关别名（= open-notebook 里的模型名） | 网关后面 |
 |---|---|---|
-| 对话/转换/长上下文/工具（默认） | `qwen3.8-flash-next-tp2`（262k ctx） | DGX vLLM；**DGX 出错时网关自动兜底到 M2 的 Ornith** |
+| 对话/转换/长上下文/工具（默认） | `DeepSeek-V4.1-Flash-1017`（524k ctx，2026-11-15 起） | DGX；**DGX 出错时网关自动兜底到 M2 的 Ornith** |
 | 对话备选（非默认，UI 手动切） | `ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit`（262k ctx） | M2 OMLX |
 | 对话第二备选（非默认，UI 手动切） | `studio/qwen3.8-27b`（262k ctx） | Mac Studio OMLX；不在兜底链里 |
 | Embedding | `mlx-community__Qwen3-Embedding-4B-4bit-DWQ`（2560 维） | M2 OMLX |

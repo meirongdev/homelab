@@ -82,13 +82,17 @@
       when: provider_key.rc != 0
       no_log: true
 
+    # 网关 DGX 别名随上游换栈改名（2026-11-15：qwen3.8-flash-next-tp2 → DeepSeek-V4.1-Flash-1017，
+    # 见 docs/runbooks/dgx-model-swap-homelab-followup.md）。旧名的 -custom_dgx 那条留着无害（不存在就是空操作）。
     - name: Remove custom_dgx from exposed models
       ansible.builtin.command: >
-        {{ magpie_bin }} provider models homelab -custom_dgx/qwen3.8-flash-next-tp2
+        {{ magpie_bin }} provider models homelab -custom_dgx/DeepSeek-V4.1-Flash-1017 -custom_dgx/qwen3.8-flash-next-tp2
       failed_when: false
 
+    # ⚠️ 组 id 保持 `qwen` 是刻意的：agent 按 `group/qwen` 选它，改 id 每个 agent 都得重设。
+    #    名字是历史遗留（建组时主力是 Qwen），成员才是事实：DGX 主力在前、Studio 的 Qwen3.8-27B 兜底。
     - name: Configure qwen routing group (DGX primary, Studio fallback)
-      ansible.builtin.command: "{{ magpie_bin }} group add qwen models=homelab/qwen3.8-flash-next-tp2,homelab/studio/qwen3.8-27b routing=order"
+      ansible.builtin.command: "{{ magpie_bin }} group add qwen models=homelab/DeepSeek-V4.1-Flash-1017,homelab/studio/qwen3.8-27b routing=order"
       failed_when: false
 
     - name: Test homelab provider connection
