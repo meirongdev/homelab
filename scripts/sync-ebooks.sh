@@ -319,6 +319,9 @@ upload_and_verify_once() {
   local src_cksum; src_cksum=$(checksum "$file")
 
   local remote_output
+  # 单引号是刻意的：$1/$2 要由 pod 里的 sh 展开（值经 `_ "$dest_dir" "$filename"` 作为位置参数传进去），
+  # 不能在本机先展开拼进命令串 —— 书名里的引号/空格/$ 会被当成 shell 语法。SC2016 在这里是误报。
+  # shellcheck disable=SC2016
   remote_output=$(tar -C "$(dirname "$file")" -cf - "$filename" 2>/dev/null | \
     kt "$CP_TIMEOUT" exec -i -n "$NAMESPACE" -c "$CONTAINER" "$pod" -- \
       sh -c 'tar -C "$1" -xf - && sha256sum "$1/$2"' _ "$dest_dir" "$filename" 2>/dev/null)
