@@ -1,6 +1,6 @@
 # Homelab Changelog
 
-> Last updated: 2026-11-10
+> Last updated: 2026-11-15
 > 已经做完的事，一条一行，按阶段/时间倒着找。**这里只回答「做过什么」**——
 > 还剩什么没做看 [ROADMAP.md](ROADMAP.md)，现在是什么样看 [reference/](reference/README.md)。
 > 2026-09-02 从 ROADMAP 拆出：那份文件长到 23.8KB，9 条开放项被 65 条历史淹没，
@@ -130,6 +130,8 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-11-06 | **Trivy Stale CVE 自动分诊 + agent 修复**：Stale 告警 webhook 到 Multica，只读的「Homelab 排障」出结论与 diff；人审后指派给「个人工程师」实测、开 PR，人合并。webhook 投递失败是静默的 ([runbook §7](runbooks/trivy-cve-alert-triage.md)) |
 | 2026-11-06 | **Trivy 第六类静默失败：扫描 Job 被时限杀掉**：grafana 自 10-02 起没有报告是扫描 pod 内存 requests 超出 worker-106 余量、一直 Pending 到时限（requests 降到 128Mi）；xiaogpt / oracle browserless 是扫得慢（Job 20m、Trivy 15m）。加 `TrivyScanJobFailed` ([trivy-cve-ops ⑥](reference/trivy-cve-ops.md)) |
 | 2026-11-09 | **Terraform state 迁入 R2**（ROADMAP #2 关闭）：8 个 root 进私有桶 `homelab-tfstate`（不与 home-stack 共用桶），`use_lockfile` 加锁实测可用；凭据经 `scripts/tf-r2.sh` 从 Vault 现取，裸敲 `terraform` 会失败 ([现状](reference/terraform-state.md)) |
+| 2026-11-14 | **LiteLLM 静默兜底修复**：Qwen 栈上 claude-cli 的中间 system 消息与 `reasoning_effort=high` 被 DGX 回 400、再被 Ornith 静默接走；`upstream_compat` hook 按 `model_info` 声明改写 ([坑 E](reference/litellm-gateway.md)) |
+| 2026-11-15 | **DGX 换栈跟进 (dsv41)**：主力换成 TensorFold 双机 TP=2 的 `DeepSeek-V4.1-Flash-1017`（同 `:8000`、524k、并发 4）；网关别名、jobs-sg（并发 8→4）/ Open Notebook / calibre / magpie 跟改，11 把 key + 1 个账户白名单同步改 ([现状](reference/litellm-gateway.md)) |
 ### 审计与清理（历史）
 
 | 时间 | 内容 |

@@ -1,6 +1,6 @@
 # LLM API 使用说明（给拿到 key 的外部使用者）
 
-> Last updated: 2026-10-30
+> Last updated: 2026-11-15
 >
 > 这份文档是公开的，**不含任何密钥**。你的 API key 会单独私下发给你。
 > 文档中的所有示例、配置与错误码均在公网端点经过实测验证。
@@ -65,9 +65,13 @@ curl -s https://llm.meirong.dev/v1/models \
 
 网关当前提供两套自托管主力模型，特性与硬件算力不同，应根据使用场景合理指定：
 
+> ⚠️ **2026-11-15 改名**：DGX 上的模型换成了 DeepSeek-V4.1，模型名从 `qwen3.8-flash-next-tp2` 改为
+> **`DeepSeek-V4.1-Flash-1017`**（带 `custom_dgx/` 前缀的那个同理）。旧名已停用，调用会报模型不存在，
+> 请把客户端配置里的模型名换成新的。
+
 | 模型名（调用时填写的 ID） | 物理承载硬件 | 吞吐速度 (tok/s) | 上下文窗口 | 适用场景与推荐 |
 |---|---|---|---|---|
-| **`qwen3.8-flash-next-tp2`**（默认推荐）| DGX 双机 TP=2 (NVFP4 投机解码) | **~90–110** | 262k | **日常写代码、代码补全、Agent 多轮工具调用、日常快速问答**。延迟极低，首字毫秒级响应，推荐作为首选模型。 |
+| **`DeepSeek-V4.1-Flash-1017`**（默认推荐）| DGX 双机 TP=2（2026-11-15 起） | **~69**（单流） | 524k | **日常写代码、Agent 多轮工具调用、日常快速问答**。首字约 0.35 秒，推荐作为首选模型。⚠️ 同时只处理 4 路请求，多开并发会排队。 |
 | **`studio/qwen3.8-27b`** | Mac Studio M5 Max (128G 统一内存) | **~30–45** | 262k | **复杂架构设计、深度逻辑推理、长文本深度归纳、图片/视觉多模态输入**。参数规模更大，逻辑更强。 |
 
 ---
@@ -105,7 +109,7 @@ curl -s https://llm.meirong.dev/v1/models \
 ```bash
 export OPENAI_BASE_URL="https://llm.meirong.dev/v1"
 export OPENAI_API_KEY="<你的 key>"
-export OPENAI_MODEL="qwen3.8-flash-next-tp2"   # 指定默认模型
+export OPENAI_MODEL="DeepSeek-V4.1-Flash-1017"   # 指定默认模型
 ```
 
 可将上述配置追加到你的 Shell 配置文件中（`~/.zshrc` 或 `~/.bashrc`）。
@@ -121,7 +125,7 @@ export OPENAI_MODEL="qwen3.8-flash-next-tp2"   # 指定默认模型
 ```bash
 export OPENAI_BASE_URL="https://llm.meirong.dev/v1"
 export OPENAI_API_KEY="<你的 key>"
-export OPENAI_MODEL="qwen3.8-flash-next-tp2"   # 日常极速编程
+export OPENAI_MODEL="DeepSeek-V4.1-Flash-1017"   # 日常极速编程
 
 # 若需切换为 27B 深度推理模型：
 # export OPENAI_MODEL="studio/qwen3.8-27b"
@@ -135,7 +139,7 @@ qwen
 # 启动时使用 -m 指定模型
 qwen --openai-base-url "https://llm.meirong.dev/v1" \
      --openai-api-key "<你的 key>" \
-     -m "qwen3.8-flash-next-tp2"
+     -m "DeepSeek-V4.1-Flash-1017"
 ```
 
 #### 方法 C：配置文件持久化（`~/.qwen/settings.json`）
@@ -146,12 +150,12 @@ qwen --openai-base-url "https://llm.meirong.dev/v1" \
 {
   "model": {
     "baseUrl": "https://llm.meirong.dev/v1",
-    "name": "qwen3.8-flash-next-tp2"
+    "name": "DeepSeek-V4.1-Flash-1017"
   },
   "modelProviders": {
     "openai": [
       {
-        "id": "qwen3.8-flash-next-tp2",
+        "id": "DeepSeek-V4.1-Flash-1017",
         "name": "Qwen 3.8 Flash Next (DGX TP2)",
         "baseUrl": "https://llm.meirong.dev/v1"
       },
@@ -183,7 +187,7 @@ export ANTHROPIC_BASE_URL="https://llm.meirong.dev"
 export ANTHROPIC_API_KEY="<你的 key>"
 
 # 启动并通过 --model 指定目标模型
-claude --model "qwen3.8-flash-next-tp2"
+claude --model "DeepSeek-V4.1-Flash-1017"
 ```
 
 > [!NOTE]
@@ -206,7 +210,7 @@ env_key = "LLM_KEY"
 在自定义 profile（如 `~/.codex/litellm.config.toml`）中指定模型：
 
 ```toml
-model = "qwen3.8-flash-next-tp2"
+model = "DeepSeek-V4.1-Flash-1017"
 model_provider = "litellm"
 ```
 
@@ -231,7 +235,7 @@ codex --profile litellm
 magpie provider add homelab https://llm.meirong.dev/v1 --key "<你的 key>" --type openai
 
 # 创建路由组（DGX 主力优先，Mac Studio 兜底）
-magpie group add qwen models=homelab/qwen3.8-flash-next-tp2,homelab/studio/qwen3.8-27b routing=order
+magpie group add qwen models=homelab/DeepSeek-V4.1-Flash-1017,homelab/studio/qwen3.8-27b routing=order
 
 # 连通性测试
 magpie provider test homelab
@@ -259,7 +263,7 @@ client = OpenAI(
 
 # 指定调用 DGX 主力极速模型
 resp = client.chat.completions.create(
-    model="qwen3.8-flash-next-tp2",
+    model="DeepSeek-V4.1-Flash-1017",
     messages=[{"role": "user", "content": "用三句话解释什么是 LRU 缓存。"}],
     max_tokens=512,
 )
@@ -302,7 +306,7 @@ print("直接回答:", resp_fast.choices[0].message.content)  # 391
 
 ```python
 stream = client.chat.completions.create(
-    model="qwen3.8-flash-next-tp2",
+    model="DeepSeek-V4.1-Flash-1017",
     messages=[{"role": "user", "content": "从 1 数到 5，逗号分隔。"}],
     max_tokens=64,
     stream=True,
@@ -347,7 +351,7 @@ print(resp.choices[0].message.content)
 ### 4.5 生成速度基准参考
 
 在开启流式输出的前提下，自托管节点实测基准速度如下：
-- **`qwen3.8-flash-next-tp2`**：约 90–110 tok/s，首字延迟（TTFT）通常在 0.4–0.5 秒内。
+- **`DeepSeek-V4.1-Flash-1017`**：单流约 69 tok/s，首字延迟（TTFT）约 0.35 秒（2026-11-15 关思考实测）。
 - **`studio/qwen3.8-27b`**：约 30–45 tok/s，大模型推理及超长提示词（如 1.5 万 token）预处理约需 5–10 秒。
 
 ---

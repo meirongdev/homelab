@@ -274,6 +274,7 @@ Open Notebook 的接线只能在应用里看（值存的是模型 id，不是名
 | 2026-08-25 | Mac 兜底换 Ornith，别名改名 → key 白名单没跟着改，**全挂** | 坑 A 的由来；从此"改别名必同步改 key" |
 | 2026-09-02/03 | DGX 换 Flash-Next，本文全流程 | 8/16 把 key 受影响；两条阈值要重估；`{"thinking":false}` 变静默空操作 |
 | 2026-09-19 | DGX 换 qwen38un（**换引擎 + 换端点 + 变单节点**），本文全流程 | 又是 8/16 把 key。新增的三类工作全部源于"这次换的不只是模型名"：① 端点 `:8000`→`:8888`（三处清单 + scrape target）；② 指标前缀 `vllm:`→`sglang:`（四条告警 + 整张面板，且 3 个指标无等价物）；③ 拓扑变单节点（S2 告警范围、冷启动阈值、Stuck 窗口）。☠️ 两条判据同时失效：`reasoning_tokens` 在 SGLang 恒 null、"请求成功"不再证明模型名对（SGLang 原样回显）|
+| 2026-11-15 | DGX 换 dsv41（DeepSeek-V4.1-Flash-1017，**换引擎 TensorFold + 换名，同端点**），本文全流程 | 13 把里 11 把 key + **账户 `ext-team-1`**（zcode-agent 那把 key 自己 `models=[]`，权限在账户上，只扫 key 会漏）。新引擎和 SGLang 一样**接受任意 model 名**；并发上限 64→4，jobs-sg 并发跟着降；指标前缀换成 `tensorfold:*`。白名单分两步改（先追加新名、部署验证后再删旧名），切换期间零 403 |
 
 下一次想省事的完整方案（含实测成本、优先级、被否决的选项）已展开成
 [plans/2026-09-03-dgx-model-swap-optimizations.md](../plans/2026-09-03-dgx-model-swap-optimizations.md)，
