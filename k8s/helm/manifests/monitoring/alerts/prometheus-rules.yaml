@@ -1011,6 +1011,17 @@ spec:
     # 按前缀写的表达式必须对两个前缀都覆盖（union），否则**静默忽略一台**；
     # 上方第 3 条「只盯 S1」的结论就此作废，本组定向告警重新覆盖两台。
     # ════════════════════════════════════════════════════════════════════════════
+    #
+    # ══ 2026-11-15 更新：dsv41（TensorFold 双机 TP=2），前缀换成 `tensorfold:*` ══════════
+    # 上游换成 DeepSeek-V4.1-Flash-1017（TensorFold Zig 引擎；rank0 + API 在 S1、rank1 在 S2，
+    # 同端口 :8000）。S2 的 fndgx 早在 09-30 换 TP=2 时就停了，所以 dgx-inference 只有 S1 一个
+    # target；两台的 node-exporter 照抓（TP=2 下任一台掉线 = 推理整个没了）。
+    # ☠️ `vllm:*` / `sglang:*` 两族序列已全部消失 → 下面几条原来的并集表达式**恒为空**、
+    #    Prometheus 不报错（runbook §4.0 那类静默失效又来了一次）。本次全部改成 `tensorfold:*`。
+    #    标签只有 {cluster, instance, job, nodename}（KV 那条多一个 pool），**没有 model_name**。
+    # 新引擎自带 rank 对健康指标 `tensorfold:pair_stalled` / `pair_broken`，Stuck 用上了。
+    # 验证：promtool test rules（与现网同版本）喂合成序列，正反用例见 Stuck 的注释。
+    # ════════════════════════════════════════════════════════════════════════════
     - name: dgx-spark-inference
       rules:
         - alert: DgxSparkInferenceDown
@@ -1026,6 +1037,7 @@ spec:
           #   qwen38fn  8–11m（权重 126 GiB）→ for 15m
           #   qwen38un  约 3m（权重只有 23 GiB；实测各阶段 load_weight 14.8s /
           #             scheduler_e2e 43s / cuda_graph 20s，其余是容器与 tmux 起步）→ for 10m
+          #   dsv41     31s（2026-11-15，权重在页缓存里；冷缓存每台要读约 98 GiB，会久得多）→ 仍 10m
           # 收回到 10m 是因为余量已经大到 3 倍：再留 15m 只是白白多盲 5 分钟，
           # 而**新栈没有任何自动重启**，这条是唯一会叫人的信号，早 5 分钟是有价值的。
           for: 10m
@@ -1035,18 +1047,16 @@ spec:
           annotations:
             summary: "dgx-spark 推理引擎不可用（宿主在线，推理端口无响应）：{{ $labels.nodename }}"
             description: |
-              DGX 推理端点（2026-09-20 起两台常驻、双栈并跑）：
-              S1 (dgx-spark-1) 100.97.87.120:8000  = qwen38un（SGLang，`qwen3.8-flash-next-tp2`，主力）
-              S2 (dgx-spark-2) 100.97.87.120:8000 = fndgx（vLLM，`qwen3.8-flash-next`，常驻）
+              DGX 推理端点（2026-11-15 起 dsv41：DeepSeek-V4.1-Flash-1017，TensorFold 双机 TP=2）：
+              S1 (dgx-spark-1) 100.97.87.120:8000 = API + rank0；S2 (dgx-spark-2) 只跑 rank1，没有自己的端点。
               {{ $labels.nodename }} 对应的那个端点没了，而宿主机还活着。
-              ☠️ **它不会自己回来**：上游 2026-09-20 起 docker 是唯一运行时（k3s 已拆），
-              既无 liveness 探针也无 `--restart` 策略（上游刻意如此），没人动手就一直挂着。
-              先确认不是被内存看门狗停掉的（memwatch 触发时的动作就是 `./stop.sh`）：
-                `ssh -i ~/.ssh/vgio admin@<该节点 IP> 'free -m; docker ps -a | head'`
+              ☠️ **它不会自己回来**：容器 `restart=no`、无 healthcheck（2026-11-15 实测）。
+              引擎在 rank 对断开时会以 status 75 退出「供两个 rank 一起重启」，外层会不会真重启未核实。
+              先确认不是被内存看门狗停掉的（memwatch 触发时的动作就是 `./stop.sh`；$ip = 该节点 IP，S1 100.97.87.120 / S2 100.67.164.92）：
+                `ssh -i ~/.ssh/vgio admin@$ip 'free -m; docker ps -a | head'`
               状态与重启：`cd ~/projects/meirongdev/nv-dgx-spark && make status`
-                          `make restart`（S1 加载约 3 分钟 / S2 约 5 分钟，冷页缓存更久）· 日志 `make logs`
-              ⚠️ k3s 相关目标（`make qwen38fn-*` 等）已从上游移除（2026-09-20），别再去敲。
-              换回别的栈或回滚：`make switch TO=<stack-id>`（`make stack-check` 列出可选），
+                          `make restart`（两个 rank 成对起停，别单独重启一台）· 日志 `make logs`
+              换回别的栈或回滚：`make switch TO=$stack`（`make stack-check` 列出可选），
               ☠️ 换栈后网关别名 / jobs-sg / Open Notebook / calibre 作业的模型名要一起改，
               走 docs/runbooks/dgx-model-swap-homelab-followup.md。
         - alert: DgxSparkInferenceStuck
@@ -1056,34 +1066,36 @@ spec:
           # 进度计数器冻住整 4 分钟）；单节点栈不会再有 TP 组，但"有需求 + 零进度"
           # 这个故障类（CUDA 卡死、调度器死锁、投机解码 draft 侧挂住）并没有消失。
           #
-          # ☠️ 两个**静默失效的坑**，改这条表达式时都会踩：
-          # 1. `sglang:generation_tokens_total` 的标签集与 `num_running_reqs` **不同**
-          #    （前者 {engine_type,is_streaming,model_name}，后者还带 moe_ep_rank/pp_rank/
-          #    tp_rank）。默认的 `and` 要求标签全等 → 直接写会**恒为空 = 永不触发**。
-          #    所以这里显式 `and on(nodename)`，并先 sum 掉 is_streaming 那一维
-          #    （流式/非流式是两条序列，只看其中一条会漏掉另一类流量）。
-          # 2. 指标缺失时表达式返回空 = 不告警，与"missing data must pass"一致
-          #    （直方图/计数器在第一次请求完成前根本不存在）。
-          #
-          # ☠️ 2026-09-20：S2（fndgx，vLLM）也常驻了，同 job 两前缀并存。vLLM 侧的等价物：
-          #    进度计数器 `vllm:generation_tokens_total`（标签 {engine,model_name}）、
-          #    忙/等 `vllm:num_requests_running` / `vllm:num_requests_waiting`。两侧都先
-          #    `sum by (nodename)` 再 `and on(nodename)` —— 同一类标签陷阱（跨指标直接
-          #    `and` 恒空）。两分支按 nodename 天然不相交（S1 只有 sglang:*、S2 只有
-          #    vllm:*），`or` 并集不会重复计数。
+          # ☠️ 2026-11-15 换成 TensorFold，判据跟着换了（旧的 sglang:/vllm: 并集此时恒为空）：
+          # 1. 「有需求」= requests_running + requests_waiting > 0（都是 gauge，单序列，无标签陷阱）。
+          # 2. 「有进度」取三者之一，**都**在窗口内不动才算零进度：
+          #    · `tensorfold:generation_tokens_total` / `prompt_tokens_total` —— ☠️ 这两个只在**请求结束时**
+          #      才累加（HELP 原文 "of finished requests"），一条还在生成的长请求整段期间都不动，
+          #      单靠它们会把「一条 20 分钟的长生成」误报成卡死；
+          #    · `tensorfold:generation_tokens_running`（gauge，活着的流里已生成的 token 数）—— 生成中
+          #      每次抓取都在变，`changes()` 补上了上面那个盲区。
+          #    仍然看不见的是**超长 prefill**（prefill 期间三者都不动）：524k 窗口的满窗 prefill 要多久
+          #    还没实测，这正是 [20m] 窗口保留下来的原因。
+          # 3. 引擎自报的 rank 对状态：`pair_stalled`=1 是引擎线程超过 stall 上限（实测 120s）仍无进展，
+          #    `pair_broken`=1 是 rank 对已断。默认配置下断了就以 status 75 退出（→ 走 InferenceDown），
+          #    `TF_DS_PAIR_BROKEN=degrade` 时进程留着、请求逐个失败 —— 那种形态只有这里看得见。
+          # 每个分支都先 `max/sum by (nodename)` 再 `and on(nodename)`：单 target 时标签本来就一致，
+          # 但 KV 等指标带 pool 维度，养成显式 join 的习惯，免得下次换引擎又踩「标签不全等 → 恒空」。
           expr: |
             (
-              (sglang:num_running_reqs{job="dgx-inference"} + sglang:num_queue_reqs{job="dgx-inference"}) > 0
+              (sum by (nodename) (tensorfold:requests_running{job="dgx-inference"})
+                 + sum by (nodename) (tensorfold:requests_waiting{job="dgx-inference"})) > 0
                 and on(nodename)
-              sum by (nodename) (increase(sglang:generation_tokens_total{job="dgx-inference"}[20m])) == 0
+              sum by (nodename) (increase(tensorfold:generation_tokens_total{job="dgx-inference"}[20m])) == 0
+                and on(nodename)
+              sum by (nodename) (increase(tensorfold:prompt_tokens_total{job="dgx-inference"}[20m])) == 0
+                and on(nodename)
+              sum by (nodename) (changes(tensorfold:generation_tokens_running{job="dgx-inference"}[20m])) == 0
             )
             or
-            (
-              (sum by (nodename) (vllm:num_requests_running{job="dgx-inference"})
-                 + sum by (nodename) (vllm:num_requests_waiting{job="dgx-inference"})) > 0
-                and on(nodename)
-              sum by (nodename) (increase(vllm:generation_tokens_total{job="dgx-inference"}[20m])) == 0
-            )
+            max by (nodename) (tensorfold:pair_stalled{job="dgx-inference"}) == 1
+            or
+            max by (nodename) (tensorfold:pair_broken{job="dgx-inference"}) == 1
           # ⚠️ 窗口史：increase[5m]+for5m →（2026-09-19）increase[3m]+for2m → 现在
           # increase[20m]+for5m。09-19 那次收紧兑现的是上一版注释里"若哪天探针被移除，
           # 把窗口收到 increase[3m] + for 2m"的预留条件（换栈后探针确实没了：docker 栈
@@ -1123,35 +1135,30 @@ spec:
           annotations:
             summary: "dgx-spark 推理引擎有请求积压但零进度（疑似卡死）"
             description: |
-              引擎**看着是活的**（up==1、/health 200、/v1/models 200）但一步都没往前走。
-              ☠️ 别拿 `/health` 或 `/v1/models` 判断，它们在这个故障里照样返回 200。
-              有判别力的真生成探针（按 {{ $labels.nodename }} 选对应一条）：
-                S1: `curl -s -m 60 -o /dev/null -w '%{http_code}\n' http://100.97.87.120:8000/health_generate`（SGLang 专有能力）
-                S2: `curl -s -m 60 -o /dev/null -w '%{http_code}\n' -H 'Content-Type: application/json' -d '{"model":"qwen3.8-flash-next","messages":[{"role":"user","content":"OK"}],"max_tokens":8}' http://100.97.87.120:8000/v1/chat/completions`（该 vLLM 构建无 /health_generate，2026-09-21 实测 404）
-              ☠️ 也别拿"发个请求成功了"当凭据来判断模型对不对：**SGLang 接受任意 model 名
-              并原样回显**（上游 gotcha #10），vLLM 才会 404。
-              现场取证（按 {{ $labels.nodename }} 选对应一条）：
-                S1: `curl -s http://100.97.87.120:8000/metrics | grep -E 'num_running_reqs|num_queue_reqs|generation_tokens_total'`
-                S2: `curl -s http://100.97.87.120:8000/metrics | grep -E 'num_requests_running|num_requests_waiting|generation_tokens_total'`
-              恢复：`cd ~/projects/meirongdev/nv-dgx-spark && make restart`（S1 约 3 分钟 / S2 约 5 分钟）。
+              引擎**看着是活的**（up==1、/v1/models 200）但一步都没往前走，或引擎自报 rank 对卡住/断开。
+              ☠️ 别拿 `/v1/models` 判断，它在这个故障里照样返回 200。先看引擎自报的状态：
+                `curl -s http://100.97.87.120:8000/health`（看 `pair.stalled` / `pair.broken` / `live`）
+              有判别力的真生成探针：
+                `curl -s -m 60 -o /dev/null -w '%{http_code}\n' -H 'Content-Type: application/json' -d '{"model":"DeepSeek-V4.1-Flash-1017","messages":[{"role":"user","content":"OK"}],"max_tokens":8}' http://100.97.87.120:8000/v1/chat/completions`
+              ☠️ 别拿"发个请求成功了"判断模型对不对：TensorFold 和 SGLang 一样**接受任意 model 名**，
+              响应体里的 `model` 才是真名。
+              现场取证：
+                `curl -s http://100.97.87.120:8000/metrics | grep -E 'requests_(running|waiting)|generation_tokens|pair_'`
+              恢复：`cd ~/projects/meirongdev/nv-dgx-spark && make restart`（两个 rank 成对起停）。
               没有探针会替你动手 —— 这条响了就是要人动手。
         - alert: DgxSparkInferenceRestarted
           # 重启会重置一切内存态，必须显式盯（与本文件 NodeRebooted 同一哲学）。
           # 性能含义仍然成立：重启后头几个请求实测约 30% 慢（冷启动 + 一次性 JIT/CUDA
           # graph 捕获），看到这条就知道那段时间的 tok/s 数字不能拿来引用。
           #
-          # ☠️ 判据换了一种形态。旧栈用 `time() - process_start_time_seconds < 1800`，
-          # 而 **SGLang 根本不导出 `process_start_time_seconds`**（它不是 prometheus_client
-          # 的标准进程收集器，2026-09-19 逐条核对过全部 80 个指标族）。照抄旧表达式的后果
-          # 是恒为空 = 永不触发，而且看不出任何异常。
-          # 替代判据用计数器重置：引擎进程重启 → `sglang:process_cpu_seconds_total` 归零
-          # → `resets()` 在其后 30 分钟内 > 0，与旧表达式的 30m 窗口语义等价。
-          # ⚠️ 它带的是 {component=tokenizer|detokenizer} 而**没有** model_name，所以要 sum 掉。
-          # ☠️ 2026-09-20：S2（fndgx vLLM）也要覆盖，而这版 vLLM **不导出 `process_*`**
-          #    （2026-09-21 实测 /metrics 只有 `vllm:*` 一族，无 prometheus_client 标准进程
-          #    收集器）→ 用 `vllm:generation_tokens_total` 计数器归零（resets）替代，`or` 并集。
-          #    两节点 series 按 nodename 不相交，不会重复计数。
-          expr: sum by (nodename) (resets(sglang:process_cpu_seconds_total{job="dgx-inference"}[30m])) > 0 or sum by (nodename) (resets(vllm:generation_tokens_total{job="dgx-inference"}[30m])) > 0
+          # ☠️ 判据随引擎换过三次。vLLM 早期用 `time() - process_start_time_seconds < 1800`；
+          # SGLang 和后来的 vLLM 构建都不导出 `process_*`，改成 counter 归零（resets）；
+          # 2026-11-15 的 TensorFold 同样没有 `process_*`（逐条核对过 /metrics），照旧用 resets，
+          # 只是换成 `tensorfold:prompt_tokens_total` —— 引擎进程重启它就从 0 重新数，
+          # `resets()` 在其后 30 分钟内 > 0，与旧表达式的 30m 窗口语义等价。
+          # ⚠️ 盲区：重启前那个进程**一个请求都没处理完**（counter 一直是 0）时看不出 reset。
+          #    DGX 每天都有流量，可接受；真正的「挂了没人管」走 InferenceDown，不靠这条。
+          expr: sum by (nodename) (resets(tensorfold:prompt_tokens_total{job="dgx-inference"}[30m])) > 0
           # for 5m：等引擎真起来再报，免得和 DgxSparkInferenceDown 抢话。
           # warning 而非 critical：重启**已经成功**了，属于事后知情，不是正在烧的火。
           # ⚠️ 新栈无 `--restart`、无探针，所以这条的含义比旧栈更窄：容器不可能自己回来，
@@ -1164,13 +1171,12 @@ spec:
           annotations:
             summary: "dgx-spark 推理引擎刚重启（不足 30 分钟）"
             description: |
-              引擎进程重启了（{{ $labels.nodename }}）。上游没有自动重启策略（docker-only，
-              2026-09-20 起 k3s 已拆），所以这几乎一定是人为动作 —— 若不是你，那就是这台
-              **共享**机器上的另一个人。
+              引擎进程重启了（{{ $labels.nodename }}）。容器 `restart=no`、无 healthcheck，
+              所以这几乎一定是人为动作 —— 若不是你，那就是这台**共享**机器上的另一个人
+              （或引擎在 rank 对断开后以 status 75 退出、被外层拉起，这条路径是否存在未核实）。
               Check: `cd ~/projects/meirongdev/nv-dgx-spark && make status`
-              日志：`make logs`（docker 栈：S1 `docker logs --since 30m qwen3.8-flash-next-tp2`、
-              S2 `docker logs --since 30m qwen38-flash`）
-              ⚠️ 刚重启后别做性能基准（冷启动约 30% 慢，首个请求含 CUDA graph/JIT 尖峰）。
+              日志：`make logs`（或 S1/S2 上 `docker logs --since 30m dsv41-1017-exl3-tf`，两台同名）
+              ⚠️ 刚重启后别做性能基准（首个请求含 CUDA graph 捕获之类的一次性开销）。
               ⚠️ 若同时看到 DgxSparkInferenceDown 转 resolved，那就是一次正常重启，不用查。
 
         # ⚠️ 防过载/前兆规则（2026-08-15 落地，规格见 nv-dgx-spark/docs/auto-mitigation-cn.md §3）。
@@ -1201,20 +1207,16 @@ spec:
         - alert: DgxSparkRequestsQueued
           # 排队饱和前兆：waiting>4 意味着并发上限被打满、有人在挨饿
           # （2026-08-02 事故类型——饱和时交互请求会被长批处理拖死）。
-          # ⚠️ 阈值**第三次刻意不动**，理由每次都一样：这条量的是「有没有人在挨饿」，
-          #    不是「用了几成容量」。历任有效并发上限 6 → 5.34(KV 实测) → 现在 16
-          #    （SGLang `max_running_requests=16`；KV 池 1.22M token 对 262k 窗口约 4.6 路，
-          #    但真实请求远短于满窗，实际卡住的是 16 这个条数）。
-          #    按 16 等比抬到 12 会把"有人在挨饿"那一段推迟到几乎不可能触发。
-          #    反过来说：现在要排到 4 个，意味着 16 路全忙 + 另有 4 个在等，
-          #    比旧栈的同一阈值是**更强**的饱和信号。首月按实测回校。
+          # ⚠️ 阈值**第四次刻意不动**，理由每次都一样：这条量的是「有没有人在挨饿」，
+          #    不是「用了几成容量」。历任有效并发上限 6 → 5.34(KV 实测) → 16（SGLang）→ 64（vLLM TP=2）
+          #    → **现在 4**（TensorFold `/health` 报 `max_batch_size: 4`，2026-11-15）。
+          #    排到 4 个 = 4 路全忙 + 另有 4 个在等，即需求是容量的两倍，饱和信号比任何一任都强。
+          #    ☠️ 但 4 路很容易被打满：jobs-sg 夜里一个作业就占满 4 路（LLM_CONCURRENCY 已随之 8→4），
+          #    此时任何交互请求都要排队。首周按实测回校 —— 若夜里 19:10 UTC 那轮常态触发，先看是
+          #    不是 jobs-sg 自己，再决定抬阈值还是让 jobs-sg 让路。
           # ⚠️ 与 DgxSparkInferenceStuck 语义**不同**：那条是"有需求但零进度"（卡死），
           # 这条是"引擎健康但队列挤爆"。
-          # ☠️ 2026-09-20：S2（fndgx，vLLM `max-num-seqs=8`）常驻并跑，vLLM 侧的等待计数是
-          #    `vllm:num_requests_waiting`，用 `or` 并入同一表达式（两节点 series 按
-          #    nodename 不相交）。⚠️ >4 这个阈值在 S2 上**尚未校准**（沿袭 S1 按 16 路
-          #    上限的历史阈值；8 路上限下排队 4 个同样是强饱和信号），首月按实测回校。
-          expr: sglang:num_queue_reqs{job="dgx-inference"} > 4 or vllm:num_requests_waiting{job="dgx-inference"} > 4
+          expr: max by (nodename) (tensorfold:requests_waiting{job="dgx-inference"}) > 4
           for: 2m
           labels:
             severity: warning
@@ -1222,15 +1224,14 @@ spec:
           annotations:
             summary: "dgx-spark 推理排队请求 > 4（并发上限饱和）"
             description: |
-              有 {{ $value }} 个请求在排队（节点 {{ $labels.nodename }}），引擎接近/达到并发上限：
-              S1（SGLang）max_running_requests=16；S2（vLLM fndgx）max-num-seqs=8
-              （S2 侧阈值未校准，见规则注释）。长批处理会把交互请求饿死。
-              查当前占用（按 {{ $labels.nodename }} 选一条）：
-                S1: `curl -s http://100.97.87.120:8000/metrics | grep -E 'num_running_reqs|num_queue_reqs|token_usage'`
-                S2: `curl -s http://100.97.87.120:8000/metrics | grep -E 'num_requests_running|num_requests_waiting|kv_cache_usage_perc'`
+              有 {{ $value }} 个请求在排队（节点 {{ $labels.nodename }}），引擎的 4 路并发全满
+              （TensorFold `max_batch_size: 4`，2026-11-15 起；上一栈是 64）。长批处理会把交互请求饿死。
+              查当前占用：
+                `curl -s http://100.97.87.120:8000/health`（`live.connections` / `live.waiting`）
+                `curl -s http://100.97.87.120:8000/metrics | grep -E 'requests_(running|waiting)|preemptions'`
               或 `cd ~/projects/meirongdev/nv-dgx-spark && make status`。
-              本集群的常驻并发客户：jobs-sg enrich（每晚 19:10 UTC，LLM_CONCURRENCY=8）、
-              calibre 元数据作业、Open Notebook、网关上的交互式 CLI。
+              本集群的常驻并发客户：jobs-sg enrich（每晚 19:10 UTC，LLM_CONCURRENCY=4，一个作业就占满）、
+              calibre 元数据作业、Open Notebook、网关上的交互式 CLI 与外部 key。
               长期高频触发 = 并发客户太多，考虑限流/减并发；偶发自愈则忽略。
         - alert: DgxSparkNodeDown
           # 覆盖盲区（2026-08-15 补）：S2 断电级死亡时，内置 TargetDown（severity=warning、
@@ -1277,11 +1278,11 @@ spec:
             summary: "dgx-spark 推理主机掉线：{{ $labels.nodename }}（node-exporter 不可达）"
             description: |
               {{ $labels.nodename }} 的 node_exporter 被 Prometheus 抓不到了，整机或整条出网
-              路径中断。两台现在都是常驻推理机（S1 主力 qwen38un / S2 常驻 fndgx），
-              任一掉线 = 该栈服务没了。
+              路径中断。两台是同一个 TP=2 栈的两个 rank（2026-11-15 起 dsv41：S1 = API + rank0，
+              S2 = rank1），**任一掉线 = 推理整个没了**。
               先确认是不是整个 tailnet 抖动：另一台 dgx 还通吗？
               两台都不通 = 网络/中继问题；只这台不通 = 大概率它自己硬挂了（断电级，参考 08-15 S2）。
-              判断对端：`ssh -i ~/.ssh/vgio admin@<对端 IP> uptime`（S1=100.97.87.120 / S2=100.67.164.92）
+              判断对端：`ssh -i ~/.ssh/vgio admin@$peer uptime`（S1=100.97.87.120 / S2=100.67.164.92）
               （登录方式与 tailnet 归属见本文件 NodeRebooted 的长注释）。
               ⚠️ 无 BMC/IPMI + WoL 无效时，真断电只能物理到场硬重启，重启后
               `cd ~/projects/meirongdev/nv-dgx-spark && make status && make test`。

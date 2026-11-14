@@ -200,6 +200,24 @@ curl -s -H "Authorization: Bearer $MK" "$GW/key/info?key=<sha256>" | python3 -c 
 且 Prometheus 3.x 拒收 `python -m http.server` 的 `application/octet-stream`
 （要自己发 `text/plain`）—— 这两个现象都与"我的表达式没匹配上"长得一样。
 
+**2026-11-15 换 TensorFold 时的映射**（`tensorfold:*` 没有 `model_name` 标签，面板的 `$model` 变量已删）：
+
+| 用途 | TensorFold | 注意 |
+|---|---|---|
+| 忙 / 等 | `requests_running` / `requests_waiting` | 另有 vLLM 同名镜像 `num_requests_*`，挑一套用 |
+| 进度 | `generation_tokens_total`、`prompt_tokens_total` + `generation_tokens_running` | ☠️ 前两个**请求结束时**才累加，只用它们会把长生成误报成卡死；第三个是实时 gauge，要一起看 |
+| 卡死 / 断开 | `pair_stalled` / `pair_broken` | 引擎自报，旧栈没有，Stuck 用上了 |
+| 重启 | `resets(prompt_tokens_total)` | 没有 `process_*` |
+| 排队延迟 | **无** | 面板换成 prefill 耗时（`request_prefill_seconds`）|
+| HTTP 状态码 | **无** | 换成 `client_disconnections_total` / `pair_failed` / `service_refused`（后两个是 counter 但没有 `_total`）|
+| prefix cache | `prompt_tokens_cached_total / prompt_tokens_total` | token 口径 |
+| 投机解码 | `mtp_accepted_total / mtp_drafted_total`；`generation_tokens_total / decode_rounds_total` ≈ accept length | |
+
+验证换了做法：规则用 `promtool test rules`（与现网同版本 v3.13.0）喂合成序列，9 组正反用例
+（含「长生成不误报」「瞬时 stall 不误报」「整机掉线只报 NodeDown」）；再把每个子表达式和
+面板的 36 条查询拿到线上 Prometheus 实跑，**非空才算过**。合成数据的标签是自己写的，
+只有线上实跑才能抓到标签对不上。
+
 ### 4.1 重估三个量（别机械等比）
 
 | 量 | 重估方法 | 2026-09-19 的结论 |
@@ -210,6 +228,11 @@ curl -s -H "Authorization: Bearer $MK" "$GW/key/info?key=<sha256>" | python3 -c 
 | 告警 description 里的 runbook 指针 | `make <旧栈>-*`、`-n <旧ns> logs deploy/<旧deploy>` 全量替换 | 上游 2026-09-19 起改成**栈无关**的 `make status/restart/logs/test`（读 `stacks/PRIMARY`），所以这些指针从此不用再跟着换栈改 |
 | **告警与 job 的命名** | — | 2026-09-19 一次性去掉引擎名：job `vllm-dgx-spark`→`dgx-inference`，`DgxSparkVllm*`→`DgxSparkInference*`。下次换引擎不用再改名 |
 | **`DgxSparkNodeDown` 的范围** | 看是否有第二台承载推理的节点 | 2026-09-19 主力切单节点（qwen38un）后曾只盯 S1；2026-09-20 上游在 S2 新落常驻栈 `fndgx`（vLLM `:18300`），故**恢复盯两台**。若以后某台再次变为纯备用，需重新评估是否收窄范围，避免为闲置机器半夜发 🆘 —— 只盯单节点那版正是 2026-08-13 事故的成因 |
+
+2026-11-15（dsv41）的结论：`DgxSparkInferenceDown` 的 `for` **10m 不变**（冷启动实测 31s，页缓存热；冷缓存每台要读约 98 GiB）；
+`DgxSparkRequestsQueued` 的 `> 4` **第四次不动**，但有效上限从 64 掉到 **4**，jobs-sg 一个作业就占满，首周按实测回校；
+`DgxSparkInferenceStuck` 窗口 `[20m]+for 5m` 不变（超长 prefill 期间三个进度信号都不动，524k 满窗 prefill 的耗时还没实测），
+判据换成上表的三信号 + `pair_*`；`DgxSparkNodeDown` 两台都盯（TP=2，任一台掉线 = 推理整个没了）。
 
 面板在**只换模型名**时不用改：`model_name` 是 `label_values()` 的模板变量，换模型自适应
 （scrape target 也不含模型名）。⚠️ 但**换引擎时整张面板都要改**（见 §4.0），

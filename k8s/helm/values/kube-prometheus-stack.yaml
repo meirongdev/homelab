@@ -559,28 +559,27 @@ prometheus:
 
       # DGX Spark inference engine metrics, scraped over Tailscale. Exposes engine
       # run-state, KV-cache occupancy, TTFT / e2e / inter-token latency buckets.
-      # Both nodes serve since 2026-09-20 (k3s removed from both, docker-only runtime):
-      #   S1: qwen38un (docker, SGLang, :8888, `sglang:*`) — primary
-      #   S2: fndgx    (docker, vLLM,   :18300, `vllm:*`)  — resident secondary
+      # Since 2026-11-15 one stack spans both nodes: dsv41 = DeepSeek-V4.1-Flash-1017 on the
+      # TensorFold engine, TP=2 (rank0 + API on S1, rank1 on S2). Only S1 exposes an endpoint,
+      # so this job has a single target; both nodes' node-exporters are still scraped.
       #
       # ☠️ BOTH the port AND the metric prefix are stack-dependent — re-check both on
       #    every upstream stack swap:
-      #      qwen38fn (k3s, vLLM)      :8000/metrics   `vllm:*`     retired 2026-09-20
-      #      qwen38un (docker, SGLang) :8888/metrics   `sglang:*`   retired 2026-09-30
-      #      hibrid48tp2 (docker, vLLM):8000/metrics   `vllm:*`     ← S1 head (TP=2) since 2026-09-30
-      #    Nothing errors when this is stale: the target simply goes down, every
-      #    `vllm:*` or `sglang:*` alert expression evaluates empty (= never fires), and
-      #    the dashboard goes blank. Verify with
+      #      qwen38fn (k3s, vLLM)          :8000/metrics   `vllm:*`        retired 2026-09-20
+      #      qwen38un (docker, SGLang)     :8888/metrics   `sglang:*`      retired 2026-09-30
+      #      hibrid48tp2 (docker, vLLM)    :8000/metrics   `vllm:*`        retired 2026-11-15
+      #      dsv41 (docker, TensorFold)    :8000/metrics   `tensorfold:*`  ← S1 head (TP=2) now
+      #    Nothing errors when this is stale: the target may stay up (same port) while every
+      #    old-prefix alert expression evaluates empty (= never fires) and the dashboard goes
+      #    blank — exactly what happened on 2026-11-15 until the rules were ported. Verify with
       #    `curl -s http://<head>:<port>/metrics | head -1`.
       #
       # ⚠️ job name is deliberately engine-NEUTRAL (`dgx-inference`, was `vllm-dgx-spark`):
       #    it survives the next engine swap, and a job called "vllm" scraping SGLang is
       #    exactly the kind of quiet lie that costs an afternoon. Renamed 2026-09-19.
-      #    Now BOTH engines coexist in the same job (sglang:* on S1, vllm:* on S2), so
-      #    this neutrality is load-bearing: prefix-specific rules/dashboards must union
-      #    both prefixes or they silently ignore one node.
-      # Served model name is an engine-supplied label (model_name), not part of the target,
-      # so a pure model rename needs no change here — a port/engine change does.
+      # ⚠️ TensorFold metrics carry NO model_name label (only cluster/instance/job/nodename
+      #    from here, plus `pool` on the KV gauge), so a pure model rename needs no change
+      #    here — a port/engine change does.
       - job_name: 'dgx-inference'
         scrape_interval: 15s
         static_configs:
