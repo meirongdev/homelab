@@ -1,6 +1,6 @@
 # LiteLLM 网关（运维事实与坑）
 
-> Last updated: 2026-11-11
+> Last updated: 2026-11-14
 > Status: 生效事实
 > Scope: `llm.meirong.dev` 这个 LLM 网关的配置生效路径、鉴权分层、上游可用性边界，
 > 本文是 source of truth。为什么选 LiteLLM、上游怎么选、Mac 兜底为何换 Ornith，见
@@ -61,9 +61,11 @@
 | `reasoning_tokens` | 有值，关思考时为 0 |
 | 回滚 | 上游 `make switch TO=<stack-id>`（`make stack-check` 列出可选）。2026-11-11 起集群内消费方（jobs-sg、open-notebook、oracle calibre）都经网关：别名名字不变时只改网关的上游；别名改名时消费方与**坑 A 的 key 白名单**一起改 |
 
-- ✅ 经网关能传 `reasoning_effort`（2026-10-04 实测，镜像 v1.103.1）：对 `custom_dgx/` 前缀别名传非法档位，回的是 DGX 自己的 400 原文。
-- ☠️ **裸别名上，参数错误会被兜底悄悄吞掉**：传 `minimal` 给 `qwen3.8-flash-next-tp2`，DGX 回 400 → 兜底
-  `mac/ornith` 接受这个参数 → 200，只有响应里的 `model`（`ornith-ai__…`）看得出换了模型。调参数、试档位用带前缀的别名。机制见坑 A2。
+- ✅ 经网关能传 `reasoning_effort`（2026-10-04 实测，镜像 v1.103.1）。⚠️ 2026-11-14 起两个 DGX 别名上的
+  `high` / `minimal` / `none` 会先被 `upstream_compat` 改写成集合内的档位（坑 E），所以想看 DGX 的 400 原文
+  （换栈后核档位集合就靠它），要对 `custom_dgx/` 前缀别名传一个**不认识的值**，比如 `"bogus"`。
+- ☠️ **裸别名上，参数错误会被兜底悄悄吞掉**：DGX 回 400 → 兜底 `mac/ornith` 接受这个参数 → 200，只有响应里的
+  `model`（`ornith-ai__…`）看得出换了模型。已知的两种已由坑 E 的 hook 改写掉；其余的仍会被吞，调参数用带前缀的别名。机制见坑 A2。
 - ⚠️ 质量未验证：上游只给了速度基准（`benchmarks/hibrid48tp2-2026-09-30/`）。
 
 ## ☠️ 坑 A：虚拟 key 的模型白名单在 Postgres 里，git 完全管不到
@@ -163,6 +165,37 @@ CI 强制（`scripts/check-embedded-scripts.py` 的 `STAMP_ONLY`），机制见 
 - hook 仍保留：codex 改默认或有人手开 v2 不会再撞 400，另三种 type 也不限于多 agent 场景。
 
 证据与排查经过：[records/2026-09-08-codex-subagent-agent-message-400.md](../records/2026-09-08-codex-subagent-agent-message-400.md)。
+
+## ☠️ 坑 E：DGX 回 400 的请求被兜底静默接走（已由 `upstream_compat` 改写）
+
+- 症状：调用方没有任何报错，只是慢（Ornith 30–47s，DGX 几秒），响应里的 `model` 变成 `ornith-ai__…`。
+  2026-11-13 查外发 key 时发现，claude-cli 的主循环请求和 magpie 的大请求全部落在 M2 上，DGX 空着。
+- 两种 400（拿 `custom_dgx/` 前缀别名打才看得到原文，裸别名上已被兜底吞掉）：
+
+  | 原文 | 谁会触发 |
+  |---|---|
+  | `System message must be at the beginning.`（Qwen chat template） | Claude Code 2.1.31x 起把 `# Environment` 块作为 `messages[1]` 的 `role: "system"` 发出来。标题生成之类的旁路请求不带它，所以同一个 session 里有的请求能打到 DGX |
+  | `Unexpected reasoning effort high. Supported types are …` | 透传客户端档位的代理（magpie 0.1.2138），或直接传 `high` / `minimal` 的客户端 |
+
+- ⚠️ `/v1/messages` 打 `openai/` 上游时，LiteLLM 1.103.1 走的是 Responses API（DGX 收到的是 `instructions` + `input`），
+  不是 chat；Claude Code 第一次请求带的 `thinking` 会在 LiteLLM 参数层被拒（`UnsupportedParamsError … reasoning.effort`），
+  客户端去掉 thinking 重试，重试那次才撞到上面第一种 400。
+- 修法：`k8s/helm/manifests/litellm/upstream_compat.py` 在转发前按两个 DGX 别名 `model_info` 里的声明改写：
+  `upstream_system_first` 把中间的 system 并进开头，`upstream_reasoning_efforts` 把集合外的档位换成不低于它的最小档。
+  规则、作用域与失败模式在它的文件头。☠️ **换栈时这两条声明要跟着重核**（档位集合每个栈都变过），runbook 已列为必改项。
+- 验证 hook 已加载：`kubectl --context k3s-homelab -n litellm logs deploy/litellm | grep upstream_compat`（每个 pod 首次改写打一条 WARNING）。
+- 这类问题不会自己报出来。查最近谁被静默兜底了（本机任意目录；修复后应只剩 DGX 真宕机时段的行）：
+
+```bash
+kubectl --context k3s-homelab -n databases exec deploy/apps-pg -- psql -U postgres -d litellm -c "
+select coalesce(nullif(metadata->>'user_api_key_alias', ''), left(api_key, 12)) as key,
+       split_part(metadata->>'user_agent', ' ', 1) as ua,
+       metadata->>'original_model_group' as asked, model_group as served, count(*) as n
+from \"LiteLLM_SpendLogs\"
+where \"startTime\" > now() - interval '7 days' and status = 'success'
+  and metadata->>'original_model_group' <> model_group
+group by 1, 2, 3, 4 order by n desc;"
+```
 
 ## 怎么查「哪些模型能免费用」
 

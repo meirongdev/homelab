@@ -37,6 +37,13 @@ data:
           model: openai/qwen3.8-flash-next-tp2
           api_base: http://100.97.87.120:8000/v1
           api_key: dummy
+        # upstream_compat hook 读这两个声明（语义见 upstream_compat.py 文件头）。
+        # ☠️ 换栈时跟着重核：档位集合每个栈都不一样（对本别名传 "reasoning_effort": "bogus"，DGX 的 400
+        #    原文会列出集合；别传 high 这类已知档位，会先被 hook 改写），
+        #    写错 = 请求被改写成上游不认的档位。两个 DGX 别名的声明必须一致。
+        model_info:
+          upstream_reasoning_efforts: [low, medium, xhigh]
+          upstream_system_first: true
       # ── 无前缀别名 qwen3.8-flash-next-tp2：DGX 主 + Mac 兜底 ──
       # ☠️ 兜底声明在**文件末尾的 `router_settings.fallbacks`**，不在这条的 litellm_params 里。
       #    2026-09-19 实测：写在 litellm_params 里 **从来没有生效过** —— 它会被当成 SDK 级
@@ -52,6 +59,10 @@ data:
           model: openai/qwen3.8-flash-next-tp2
           api_base: http://100.97.87.120:8000/v1
           api_key: dummy
+        # 同上一条。这条带兜底，声明缺失时 DGX 的 400 会被 mac/ornith 静默接走（2026-11-13 查到）。
+        model_info:
+          upstream_reasoning_efforts: [low, medium, xhigh]
+          upstream_system_first: true
       # ── Mac 兜底（也是独立可用的实际模型）──
       # 2026-08-25 由 Qwen3.6-35B 换为 Ornith-1.5-35B-A3B（OMLX 的 is_default 同日已指向它）。
       # ☠️ 只暴露一个 Mac 35B：OMLX 池天花板 30GB 装不下两个（19.95 + 19.08GB），
@@ -156,8 +167,13 @@ data:
     # 全记成 10.42.0.152。client_ip hook 改用 Cloudflare 写的 CF-Connecting-IP。
     # ⚠️ 别改成 general_settings.use_x_forwarded_for：那会把整条可伪造的 XFF 链存成一个字符串。
     #    理由与信任边界见 client_ip.py 的文件头。
+    # ── 上游兼容改写（2026-11-14）──
+    # DGX 会对两种请求回 400（对话中间的 system 消息、不认识的 reasoning_effort 档位），
+    # 裸别名的兜底把它们静默转给 Mac。upstream_compat 按上面 model_info 的声明在转发前改写。
+    # 详见 upstream_compat.py 的文件头；同样必须 subPath 挂到 /app/。
     litellm_settings:
-      callbacks: ["codex_compat.codex_compat_handler", "client_ip.client_ip_handler"]
+      callbacks: ["codex_compat.codex_compat_handler", "client_ip.client_ip_handler",
+                  "upstream_compat.upstream_compat_handler"]
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -179,12 +195,14 @@ spec:
         #    ⇒ ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按**旧路由表**继续跑。
         #    2026-08-25 实际踩过一次（改了 mac/ornith 后必须手动 rollout restart 才生效）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py 的 STAMP_ONLY），别手改。
-        checksum/config: "dc4e75f7c9c4bdb0"
+        checksum/config: "1b122b0aaf2b53cb"
         # 同理，但盯的是 codex_compat.py（litellm-codex-compat ConfigMap）：
         # 也是 subPath 挂载 + 只在启动时 import，改了不重启就是静默跑旧代码。
         checksum/codex-compat-py: "e5da4a39d90243d4"
         # 同理，盯 client_ip.py（litellm-client-ip ConfigMap）。
         checksum/client-ip-py: "73ac6eb0b2a145f1"
+        # 同理，盯 upstream_compat.py（litellm-upstream-compat ConfigMap）。
+        checksum/upstream-compat-py: "c8627ac915743e34"
       labels:
         app: litellm
     spec:
@@ -236,6 +254,10 @@ spec:
               mountPath: /app/client_ip.py
               subPath: client_ip.py
               readOnly: true
+            - name: upstream-compat
+              mountPath: /app/upstream_compat.py
+              subPath: upstream_compat.py
+              readOnly: true
           resources:
             # memory 512Mi → 1400Mi（2026-09-09）：**这不是为了防它自己 OOM**（limit 2Gi、
             # 零重启），是因为 512Mi 让调度器把它低估了 2.4 倍。
@@ -274,6 +296,9 @@ spec:
         - name: client-ip
           configMap:
             name: litellm-client-ip
+        - name: upstream-compat
+          configMap:
+            name: litellm-upstream-compat
 ---
 apiVersion: v1
 kind: Service

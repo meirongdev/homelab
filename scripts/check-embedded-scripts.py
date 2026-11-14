@@ -74,6 +74,14 @@ TARGETS = [
         "stamp": ("k8s/helm/manifests/litellm/litellm.yaml",
                   "checksum/client-ip-py"),
     },
+    {
+        # LiteLLM 的上游兼容改写 hook（DGX 的两种 400 → 兜底静默接走，2026-11-14）。同上套路。
+        "src": "k8s/helm/manifests/litellm/upstream_compat.py",
+        "cm": "k8s/helm/manifests/litellm/litellm-upstream-compat-cm.yaml",
+        "key": "upstream_compat.py",
+        "stamp": ("k8s/helm/manifests/litellm/litellm.yaml",
+                  "checksum/upstream-compat-py"),
+    },
     # ── KRR 内存构成附表 ──────────────────────────────────────────────────────
     # ☠️ 下面两条是**同一个 `src` 的两份内嵌副本**（homelab 与 oracle 各一份）。
     # 这是本列表里第一次出现一对多，登记两条就够了：每条各自校验/重写自己那份 ConfigMap，

@@ -1,6 +1,6 @@
 # DGX 换了主力模型：homelab 侧跟进 SOP
 
-> Last updated: 2026-11-11
+> Last updated: 2026-11-14
 > Status: 生效事实 + 切换 SOP
 > 触发条件：`100.97.87.120:<port>/v1/models` 返回的 served name 与仓库里的引用不一致
 > —— 上游（`~/projects/meirongdev/nv-dgx-spark`）换栈、改 served name、或从换栈中
@@ -68,7 +68,7 @@ d=json.load(sys.stdin)["data"]
 | 并发上限 | `curl -s :$PORT/server_info` 读 `max_running_requests` / `max_total_num_tokens`（SGLang）；vLLM 读 `/metrics` 的 `cache_config_info` | `DgxSparkRequestsQueued` 的阈值（§4） |
 | 冷启动时长 | 上游 `stack.env` 的 `STACK_LOAD_TIME` | `DgxSparkInferenceDown` 的 `for`（§4） |
 | 有没有自愈 | 上游栈是 k3s（有 liveness 探针）还是 docker（**无探针、无 `--restart`**）| 决定 `DgxSparkInferenceStuck` 的窗口松紧（§4）|
-| 关思考的 kwargs 名与 effort 枚举 | 见下方"三条静默失效" | jobs-sg 的 `DisableThinking`、codex profiles 的 `model_reasoning_effort` |
+| 关思考的 kwargs 名与 effort 枚举 | 见下方"三条静默失效"。effort 集合：对 `custom_dgx/` 别名传 `"reasoning_effort": "bogus"`，400 原文会列出（别传 `high` 之类的已知档位，会先被网关改写） | jobs-sg 的 `DisableThinking`、codex profiles 的 `model_reasoning_effort`、网关两个 DGX 别名的 `model_info.upstream_reasoning_efforts`（§2 第 1 行）|
 | 工具调用 | 发一次带 `tools` 的请求看 `finish_reason=tool_calls` | codex / 一切 agentic 消费方 |
 | 严格 JSON | 用**消费方自己的提示词**打一次，`json.loads` 其 `content` | calibre 元数据、jobs-sg enrich |
 
@@ -114,7 +114,7 @@ d=json.load(sys.stdin)["data"]
 
 | # | 文件 | 字段 | 备注 |
 |---|---|---|---|
-| 1 | `k8s/helm/manifests/litellm/litellm.yaml` | `custom_dgx/<name>` 与裸 `<name>` 的 `model_name` + `model: openai/<name>` | `fallbacks: ["mac/ornith"]` 保持不动；☠️ 改完**必须** `cd k8s/helm && just gen-embedded-scripts` |
+| 1 | `k8s/helm/manifests/litellm/litellm.yaml` | `custom_dgx/<name>` 与裸 `<name>` 的 `model_name` + `model: openai/<name>`，以及两条的 `model_info` 声明 | `fallbacks: ["mac/ornith"]` 保持不动；☠️ `upstream_reasoning_efforts` 按 §1 采到的集合改，`upstream_system_first` 看新模板还拒不拒中间的 system（[坑 E](../reference/litellm-gateway.md)）；☠️ 改完**必须** `cd k8s/helm && just gen-embedded-scripts` |
 | 2 | `k8s/helm/manifests/jobs-sg/cronjob-enrich.yaml` | `LLM_MODELS` | 走网关（2026-11-11 起），用**前缀别名** `custom_dgx/<name>`（不带兜底）|
 | 3 | `k8s/helm/manifests/personal-services/open-notebook-provision.yaml` | `MODELS` + `DEFAULTS` 四个角色 + `EPISODE_PROFILE_LLMS` 三个 profile | 走网关（2026-11-11 起），用**裸名别名**；声明式，push 即生效 |
 | 4 | `cloud/oracle/manifests/calibre-metadata/metadata-llm.yaml` | 内嵌脚本的 `LLM_MODEL` 默认值 + CronJob 的 `LLM_MODEL` | 走网关，走的是**裸名别名** |
