@@ -1,0 +1,66 @@
+---
+# 三台 Mac（base 组：M5 + M2 + Studio）的 Qwen Code 与 codex 客户端配置，统一走 LiteLLM 网关。
+# 入口：just llm-clients [host]。无需 sudo，幂等：没变化的机器报 ok，有变化的先备份再写。
+#
+# 落地什么（逻辑全在 files/llm-clients/llm_clients.py，改模型清单改那里）：
+#   Qwen Code  ~/.qwen/settings.json：三个网关模型（默认 = 自动降级别名），key 走 envKey LITELLM_VK
+#   codex      默认仍是 ChatGPT 登录；自建模型用 `codex -p litellm|studio|mac`，三个 profile 都经网关
+#   清理       直连上游的旧 profile（dgx / fndgx / m2 / local）及其 catalog、cwd 已不存在的 MCP、
+#              配置文件里的占位 key 与明文 key 副本。备份在 ~/.codex/backup-llm-clients-<时间>/ 与
+#              ~/.qwen/backup-llm-clients-<时间>/
+#
+# ☠️ key 不进配置文件：三台的 LITELLM_VK 由 chezmoi 写进 ~/.secrets.sh（同一把虚拟 key）。
+#    从没有这个环境变量的地方启动（比如不经 shell 的启动器）会 401，修法是让启动方 source ~/.secrets.sh。
+# ⚠️ M5 上 nv-dgx-spark 仓库的 scripts/qwen-model-switch.sh 也会改 ~/.qwen/settings.json 的启动默认值
+#    （换 DGX 栈时把它指回直连）。在那边跑过之后，重跑本 playbook 改回网关。
+# ⚠️ Studio 上受限用户 `multica` 的 Qwen Code 不归这里管（multica-daemon-restricted.yaml，刻意不给网关 key）。
+- name: LLM CLI clients → LiteLLM gateway
+  hosts: base
+  gather_facts: false
+  vars:
+    homebrew_prefix: /opt/homebrew
+    path_env: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    probe_prompt: 只回复 OK 两个字母，不要调用任何工具
+  tasks:
+    - name: Apply the unified Qwen Code + codex config
+      ansible.builtin.script:
+        cmd: ../files/llm-clients/llm_clients.py
+        executable: "{{ homebrew_prefix }}/bin/python3"   # 要 tomllib（≥3.11）；系统的 /usr/bin/python3 是 3.9
+      register: applied
+      changed_when: (applied.stdout_lines | last | from_json).changed
+
+    - name: Show what changed
+      ansible.builtin.debug:
+        msg: "{{ (applied.stdout_lines | last | from_json).actions }}"
+      when: (applied.stdout_lines | last | from_json).changed
+
+    # 验收：两个客户端各经网关答一句。走的是默认的自动降级别名，所以 DGX 宕机时也该过（由 Studio / M2 作答）。
+    - name: Qwen Code answers through the gateway
+      ansible.builtin.shell: |
+        set -eo pipefail
+        . "$HOME/.secrets.sh"
+        cd "$(mktemp -d)"
+        qwen -p '{{ probe_prompt }}' 2>/dev/null | tail -n 1
+      args:
+        executable: /bin/bash
+      environment:
+        PATH: "{{ path_env }}"
+      register: qwen_probe
+      changed_when: false
+      failed_when: "'OK' not in qwen_probe.stdout"
+      timeout: 300
+
+    - name: codex answers through the gateway (-p litellm)
+      ansible.builtin.shell: |
+        set -eo pipefail
+        . "$HOME/.secrets.sh"
+        cd "$(mktemp -d)"
+        codex exec -p litellm --skip-git-repo-check '{{ probe_prompt }}' 2>/dev/null | tail -n 1
+      args:
+        executable: /bin/bash
+      environment:
+        PATH: "{{ path_env }}"
+      register: codex_probe
+      changed_when: false
+      failed_when: "'OK' not in codex_probe.stdout"
+      timeout: 300   # 被 Gatekeeper 隔离的 codex 会永久卡在 _dyld_start（见 ai-clis.yaml），别无限等

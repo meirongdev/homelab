@@ -24,10 +24,16 @@ packages target="base":
 mise target="dev":
     ansible-playbook playbooks/mise.yaml --limit '{{target}}'
 
-# claude/qwen/codex 只装 M2（macbook 组），Antigravity CLI（agy）装每台（base 组）。
+# claude 只装 M2（macbook 组），qwen 装 M2 + Studio（钉版本），codex 装 M2 + Studio（macs 组），
+# Antigravity CLI（agy）装每台（base 组）。连哪个模型归 llm-clients。
 # 安装/确认 AI CLI 工具（无需 sudo，幂等）
 ai-clis target="all":
     ansible-playbook playbooks/ai-clis.yaml --limit '{{target}}'
+
+# 三台 Mac 的 Qwen Code + codex 统一走 LiteLLM 网关；清掉直连上游的旧配置（先备份），最后两个客户端各经网关答一句验收。
+# 统一 Qwen Code / codex 的模型配置（无需 sudo，幂等）
+llm-clients target="base":
+    ansible-playbook playbooks/llm-clients.yaml --limit '{{target}}'
 
 # 每台的 LiteLLM 虚拟 key 从 Vault 现取（secret/homelab/magpie，字段名 = inventory 主机名），
 # 整份 JSON 经环境变量 MAGPIE_LITELLM_KEYS 传给 playbook：不上命令行、不落盘、不进 git。

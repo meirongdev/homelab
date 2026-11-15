@@ -5,8 +5,9 @@
 # Tool → method → hosts:
 #   claude (Claude Code)        npm @anthropic-ai/claude-code   macbook (M2)
 #   qwen   (Qwen Code)          npm @qwen-code/qwen-code        qwen     (M2 + Studio; pinned version)
-#   codex  (OpenAI Codex)       brew cask codex                 macbook  (self-contained arm64 binary)
+#   codex  (OpenAI Codex)       brew cask codex                 macs     (M2 + Studio; self-contained arm64 binary)
 #   agy    (Antigravity CLI)    brew cask antigravity-cli       base     (every Mac)
+# 两个客户端连哪个模型由 llm-clients.yaml 管（just llm-clients），本文件只管装。
 #
 # Prerequisites: Homebrew must already be installed (packages.yaml handles that).
 - name: AI CLI tools
@@ -16,8 +17,6 @@
     homebrew_prefix: /opt/homebrew
     homebrew_formulas:
       - node           # brings npm; required for claude (qwen has its own play below)
-    homebrew_casks:
-      - codex
     npm_global_packages:
       - "@anthropic-ai/claude-code"
 
@@ -28,13 +27,6 @@
         state: present
         path: "{{ homebrew_prefix }}/bin"
         update_homebrew: false
-      environment:
-        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-
-    - name: Ensure AI CLI Homebrew casks are present
-      community.general.homebrew_cask:
-        name: "{{ homebrew_casks }}"
-        state: present
       environment:
         PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
@@ -58,7 +50,7 @@
   gather_facts: false
   vars:
     homebrew_prefix: /opt/homebrew
-    qwen_code_version: "0.26.0"
+    qwen_code_version: "0.27.3"   # 2026-11-15 两台实际在用的版本（原先钉 0.26.0，重跑会把它们降级）
   tasks:
     - name: Ensure Homebrew node is present (brings npm)
       community.general.homebrew:
@@ -90,6 +82,35 @@
       failed_when: qwen_after.stdout | trim != qwen_code_version
       environment:
         PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+# codex 装在两台远程机（2026-11-15 前只有 M2）。只补装不升级。
+# ☠️ cask 每次装 / 升级都落一个带 com.apple.quarantine 的新二进制，Gatekeeper 的首次评估要 GUI 点批准，
+#    无头机上经 ssh / launchd 启动就永久卡在 _dyld_start（连 --version 都不输出，sample 能看到）。
+#    装完去掉 Caskroom 里裸二进制的隔离标记（它不在 /Applications，不受「App 管理」保护，ssh 下删得掉），
+#    再限时跑一次 --version 断言：卡住会报失败，而不是让 playbook 无限等。
+- name: codex on the remote Macs
+  hosts: macs
+  gather_facts: false
+  vars:
+    homebrew_prefix: /opt/homebrew
+  tasks:
+    - name: Ensure the codex cask is present
+      community.general.homebrew_cask:
+        name: codex
+        state: present
+      environment:
+        PATH: "{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Clear Gatekeeper quarantine on the cask binary
+      ansible.builtin.command: xattr -dr com.apple.quarantine {{ homebrew_prefix }}/Caskroom/codex
+      changed_when: false
+      failed_when: false   # 没有这个标记时 xattr 也返回非零；真正的判据是下一步能不能启动
+
+    - name: Assert codex starts headless
+      ansible.builtin.command: "{{ homebrew_prefix }}/bin/codex --version"
+      register: codex_version
+      changed_when: false
+      timeout: 30
 
 # cask 标了 auto_updates，`brew upgrade` 不会升它，这里也只管装上。M5 上 cask 那份停在初装的
 # 1.1.7，PATH 上实际用的是官方安装器放的 ~/.local/bin/agy（.zprofile 里那段 PATH 就是它加的）。

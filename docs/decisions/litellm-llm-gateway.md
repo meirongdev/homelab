@@ -24,7 +24,7 @@
 >   主上游一挂就回 `LLM Provider NOT provided ... You passed model=mac/ornith`。
 >   已用线上同 digest 镜像 + 真实渲染配置实测并修复，**Decision 本身（DGX 主 + Mac 兜底、
 >   严格主→兜底、不做双向均衡）不变**，变的只是声明位置。复现、对照表与"400 不该兜底"
->   的理由见 [reference/litellm-gateway.md](../reference/litellm-gateway.md) 坑 A2。
+>   见 [records/2026-09-19-litellm-fallbacks-never-active.md](../records/2026-09-19-litellm-fallbacks-never-active.md)。
 > 修订: 2026-11-11：Decision 里「**网关只接对话/生成模型**，embedding/STT/TTS 仍由 Open Notebook 直连 Mac」
 >   与「jobs-sg 直连 DGX」**作废**：集群内的推理请求统一走网关。动因是网络策略
 >   （[plans/2026-11-10-cilium-network-policy.md](../plans/2026-11-10-cilium-network-policy.md) §11-3）：
@@ -40,6 +40,12 @@
 >   `is busy` 的故障模式。代价两条：OMLX 不校验 `reasoning_effort`，裸别名上的参数级 400 全被兜底吞掉；
 >   兜底流量与 xiaogpt 等指名调用挤同一个进程。M2 的别名全部保留，只是不再进兜底链。
 >   生效事实见 [reference/litellm-gateway.md](../reference/litellm-gateway.md) 的「Mac Studio 上游」。
+> 修订: 2026-11-15（二）：「严格主→兜底」从**两级 + 手工切换**改为**三级自动降级**（用户要求故障时自动切换、
+>   保证基本可用）。同日 DGX 宕机时还得人手把裸别名改指 Studio、恢复后再改回；现在裸别名是同组三条 deployment
+>   （`order` DGX → Studio → M2）+ 后台健康检查剔除，宕机和恢复都不用动配置，M2 重新进链当第 3 级。
+>   弃用 `router_settings.fallbacks` 的原因是实测：它挂的是单上游组，没有冷却，主上游整机离线时**每个请求**
+>   要先挨约 406s 才降级；健康检查剔除后同一场景 0.3s。语义仍是严格主→降级、不做均衡（DGX 健康就只打 DGX）。
+>   生效事实与实测表见 [reference/litellm-gateway.md](../reference/litellm-gateway.md)「自动降级」。
 
 ## Context
 
@@ -115,7 +121,7 @@ OMLX 的 parser 就失去切分依据，**把整段思维链原样放进 `conten
 Qwen3.6 仍在盘上、仍可直连 OMLX 指名调用，只是不再从网关暴露。
 
 Mac 侧的 `is_default` 已于 2026-08-25 指向 Ornith，因此**不带模型名**的 OMLX 调用
-（如 `codex --profile m2`）也随之切换。
+（直连 OMLX 的客户端）也随之切换。
 
 
 ---

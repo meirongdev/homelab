@@ -22,19 +22,19 @@
 
 | 东西 | 存在哪 | 改法 |
 |---|---|---|
-| 模型列表 / `api_base` / `fallbacks` | git 的 ConfigMap | 改清单 → push → ArgoCD |
+| 模型列表 / `api_base` / 降级顺序与健康检查 | git 的 ConfigMap | 改清单 → push → ArgoCD |
 | **虚拟 key 能访问哪些模型** | Postgres | 只能调 API（坑 A）|
 | 花费账本 / key 有效期 | Postgres | `/ui` 或 API |
 
 ### 别名
 
-| 别名 | 上游 | 兜底 |
+| 别名 | 上游 | 降级 |
 |---|---|---|
-| `DeepSeek-V4.1-Flash-1017` | DGX（下节）。☠️ **临时（2026-11-15 起）改由 Studio 的 Qwen3.8-27B 作答**：DGX `:8000` 拒绝连接；客户端照旧用这个名字、key 白名单不动，DGX 恢复后切回（[ROADMAP #22](../ROADMAP.md)）| → `studio/qwen3.8-27b`（`router_settings.fallbacks`，坑 A2；2026-11-15 前是 `mac/ornith`）。临时期间清空：主上游就是 Studio |
-| `qwen3.8-flash-next-tp2` | **兼容别名**（2026-11-15）：上一个 DGX 栈的旧名，外发 key 的使用者还在用。上游始终与上一行一致（现在也是 Studio）；4 把 ext-* key 与 ext-team-1 账户的白名单已加回这个名字。名字与实际模型对不上是刻意的代价，为的是不动客户端。spend log 连续两周没有旧名调用再删，删时同步从那 5 处白名单拿掉 | 与上一行一致 |
-| `custom_dgx/DeepSeek-V4.1-Flash-1017` | DGX | 刻意不配：给「就要打 DGX」的消费方，静默换成别的模型反而有害（DGX 不通时如实报连接错误）|
-| `mac/ornith` / `mac/ornith-fast` | M2 的 OMLX，Ornith-1.5-35B-A3B；`-fast` 走 OMLX 的 `fast` profile（关思考），两者共用同一份驻留权重 | —（2026-11-15 前 `mac/ornith` 是 DGX 的兜底）|
-| `studio/qwen3.8-27b` | Mac Studio 的 OMLX（见「Mac Studio 上游」）| 自己没有兜底；它是 DGX 裸别名的兜底目标（2026-11-15 起）|
+| `DeepSeek-V4.1-Flash-1017` | 三级：DGX（下节）→ Studio 的 Qwen3.8-27B → M2 的 Ornith。由谁作答由网关按健康状况决定，DGX 宕机、恢复都不用改配置 | 自动，见「自动降级」|
+| `qwen3.8-flash-next-tp2` | **兼容别名**（2026-11-15）：上一个 DGX 栈的旧名，外发 key 的使用者还在用。三级上游始终与上一行一致；4 把 ext-* key 与 ext-team-1 账户的白名单已加回这个名字。名字与实际模型对不上是刻意的代价，为的是不动客户端。spend log 连续两周没有旧名调用再删，删时同步从那 5 处白名单和健康检查列表拿掉 | 与上一行一致 |
+| `custom_dgx/DeepSeek-V4.1-Flash-1017` | DGX | 刻意不降级：给「就要打 DGX」的消费方，静默换成别的模型反而有害（DGX 不通时如实报连接错误）|
+| `mac/ornith` / `mac/ornith-fast` | M2 的 OMLX，Ornith-1.5-35B-A3B；`-fast` 走 OMLX 的 `fast` profile（关思考），两者共用同一份驻留权重 | 无（同一份权重是裸别名的第 3 级）|
+| `studio/qwen3.8-27b` | Mac Studio 的 OMLX（见「Mac Studio 上游」）| 无（同一份权重是裸别名的第 2 级）|
 | OMLX 模型 ID 原文 ×4：`ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit`、`mlx-community__Qwen3-Embedding-4B-4bit-DWQ`（embedding）、`mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit`（TTS）、`mlx-community__Qwen3-ASR-1.7B-8bit`（ASR）| M2 的 OMLX | 给 open-notebook：它的模型按名字绑在凭据上、改名要删了重建，所以网关按原名建别名（2026-11-11）|
 | `openrouter/*` | OpenRouter 全量透传 | 免费档不能当兜底（见「哪些模型能免费用」）|
 
@@ -69,9 +69,9 @@
 - ✅ 经网关能传 `reasoning_effort`（2026-10-04 实测，镜像 v1.103.1）。想看 DGX 对档位的 400 原文（换栈后核档位集合就靠它），
   对 `custom_dgx/` 前缀别名传一个**不认识的值**，比如 `"bogus"`：声明了档位集合的栈上，`high` 这类已知档位会先被
   `upstream_compat` 改写（坑 E）。
-- ☠️ **裸别名上，参数错误会被兜底悄悄吞掉**：DGX 回 400 → 兜底 `studio/qwen3.8-27b` 接受这个参数 → 200，只有响应里的
-  `model` 看得出换了模型。Studio 的 OMLX 不校验 `reasoning_effort`（`bogus` 也 200），所以**任何**档位错误都会被吞。
-  调参数用带前缀的别名。机制见坑 A2，Qwen 栈时期的实例见坑 E。
+- ☠️ **裸别名上，参数错误会被降级悄悄吞掉**：DGX 回 400 → 第 2 级 Studio 接受这个参数 → 200，只有响应头
+  `x-litellm-model-api-base` 看得出换了上游。Studio 的 OMLX 不校验 `reasoning_effort`（`bogus` 也 200），所以**任何**档位错误都会被吞。
+  调参数用带前缀的别名。机制见「自动降级」，Qwen 栈时期的实例见坑 E。
 - ⚠️ 质量未验证：只做了上面这些功能性实测。
 
 ## ☠️ 坑 A：虚拟 key 的模型白名单在 Postgres 里，git 完全管不到
@@ -91,9 +91,8 @@ key not allowed to access model. This key can only access models=[...]. Tried to
 - ⚠️ `/key/update` 是**整表替换**，不是增量：先读原列表，只映射要改的项，其余原样带回。
 - `/key/list` 只认 GET + 分页（POST 回 405），返回的是 token 的 sha256 而不是原文，白名单要逐把 `key/info` 看。
   本机的 `LITELLM_VK` 是哪把：`printf %s "$LITELLM_VK" | sha256sum` 去匹配列表。
-- ✅ 白名单只约束「你能指名什么」，**不约束路由内部的兜底跳转**：只含 DGX 别名的窄 key 照样拿到兜底，
-  直接指名兜底别名仍 403（09-19 拿 `mac/ornith` 实测）。窄 key（如 `calibre-metadata-llm`）不需要为兜底放宽。
-  实测见 [records/2026-09-19-litellm-fallbacks-never-active.md](../records/2026-09-19-litellm-fallbacks-never-active.md)。
+- ✅ 白名单只约束「你能指名什么」：降级在同一个别名组内完成，只含 `DeepSeek-V4.1-Flash-1017` 的窄 key
+  照样被降到 Studio / M2，但直接指名 `studio/qwen3.8-27b` 仍 403。窄 key（如 `calibre-metadata-llm`）不需要为降级放宽。
 
 本机任意目录（`VK` = 要查或要改的那把虚拟 key）：
 
@@ -116,21 +115,34 @@ curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
   "$GW/key/update"
 ```
 
-## ☠️ 坑 A2：`fallbacks` 只认顶层 `router_settings`，写进 `litellm_params` 是静默空操作
+## 自动降级：裸别名的三级上游（2026-11-15 起）
 
-```yaml
-router_settings:
-  fallbacks: [{"DeepSeek-V4.1-Flash-1017": ["studio/qwen3.8-27b"]}]   # ✅ 唯一生效的位置
-# 写在模型条目的 litellm_params.fallbacks 里 = 透传给 SDK 的 kwarg，不解析 model_list ❌
-```
+同一个 `model_name` 下三条 deployment，`order` 1 DGX → 2 Studio → 3 M2，叠加后台健康检查。配置在
+`litellm.yaml`，下表是用线上同 digest 镜像（1.103.1）在本地对假上游实测的结果：
 
-- 写错位置的症状：主上游一失败就 500 `LLM Provider NOT provided ... You passed model=<兜底别名>`（当年是 `mac/ornith`）。
-  读起来像兜底配错了，真正错在主上游那条的声明位置；且只在主上游失败时才暴露，平时零症状。
-  网关从落地到 2026-09-19 一直是这样：[records/2026-09-19-litellm-fallbacks-never-active.md](../records/2026-09-19-litellm-fallbacks-never-active.md)。
-- ☠️ **LiteLLM 不按错误类型决定兜不兜底**：主上游回 4xx 也照样进 `run_async_fallback` 去试兜底。兜底模型接受该参数，
-  请求就真的打到兜底并回 200；不接受，那一跳在参数映射层就抛错，调用方拿回原 400，兜底收不到请求。
-  现在的兜底 Studio 什么档位都收，所以实际总是前一种。判据是日志里的 `run_async_fallback` / `Error doing the fallback`，不是返回码。
-- ⚠️ `router_settings` 的键是别名字面量，换模型时漏改 = 兜底静默失效。与坑 A 是同一类问题的两个位置。
+| 主上游怎么坏 | 只有 `order` | 加上健康检查剔除（现行）|
+|---|---|---|
+| 拒绝连接（引擎停了、主机在线；11-15 DGX 就是这样）| 同一请求内降级，多花 <0.5s；chat / responses、流式与否都过 | 同左 |
+| 黑洞（整机离线，SYN 没回应）| ☠️ **每个请求先挨约 406s**（内核 SYN 重试约 127s × SDK 共 3 次）才降级，且单上游组默认不冷却，下一个请求照挨 | 探测标记后 0.3s 直接走第 2 级 |
+| 前两级都坏 | 降到第 3 级 | 同左 |
+| 主上游恢复 | — | 下一轮探测通过即切回 order 1，不用改配置 |
+
+- 看这次是谁答的：响应头 `x-litellm-model-api-base`（响应体的 `model` 永远是别名本身）。
+- 健康检查每 30s 一轮、单条超时 15s、16 token。所以上游**刚**坏的头一轮（最长约 45s）里，请求照常先打它：
+  拒绝连接无所谓，黑洞或「收连接但不回」的那几个请求要等满超时才降级。之后的请求不受影响。
+- ☠️ `background_health_check_model_groups` 必须列明：不列就探全部模型，包括 `openrouter/*`（真花钱）和
+  M2 的 TTS / ASR / embedding（会让 OMLX 换入换出）。列明后范围外的组 0 次探测（实测）。换栈时这里的名字要跟着换，
+  漏了 = 不再探活，整机离线时退回每请求 406s。
+- ☠️ `health_check_staleness_threshold` 必须大于「单条超时 + 间隔」：健康状态一过期，过滤整个失效、所有上游重新放行。
+  默认是间隔 ×2，太紧。
+- ⚠️ 别设 router 级 `allowed_fails` / `allowed_fails_policy`：设了以后健康检查过滤被跳过，而且所有单上游别名也开始冷却。
+- ⚠️ 不按错误类型区分：DGX 回参数级 400 也会降级，见上节「参数错误会被降级悄悄吞掉」。
+- ⚠️ 别用 YAML 锚点给这 6 条去重：PyYAML 的别名是同一个 dict 对象，LiteLLM 会往 `model_info` 里写各自的 id。
+
+**历史**：2026-11-15 前用的是 `router_settings.fallbacks: [{"<主>": ["<兜底>"]}]` 串别名。它是单上游组，没有冷却，
+整机离线时就是上表左列的 406s。更早（08-01 至 09-19）`fallbacks` 写在模型条目的 `litellm_params` 里，那是透传给
+SDK 的 kwarg，从来没生效过，主上游一失败就 500 `LLM Provider NOT provided ...`：
+[records/2026-09-19-litellm-fallbacks-never-active.md](../records/2026-09-19-litellm-fallbacks-never-active.md)。
 
 ## ☠️ 坑 B：`/v1/models` 返回的是「这个 key 能访问什么」，不是 live config
 
@@ -261,14 +273,14 @@ for m in free:
 | 别名 → 上游 | `studio/qwen3.8-27b` → `openai/Qwen3.8-27B-MLX-4bit` @ `100.98.220.75:8000/v1` |
 | 机器 | Mac Studio M5 Max / 128G，OMLX 0.7.0；池天花板 ~106G，常驻、不换入换出（M2「只暴露一个 35B」的约束不适用）|
 | 模型 | HF `lmstudio-community/Qwen3.8-27B-MLX-4bit`（VLM，262k ctx），思维链分离到 `reasoning_content`。⚠️ OMLX 0.7 的模型 ID 不带 org，别照 M2 写成 `org__name` |
-| 兜底 | 2026-11-15 起接 DGX 裸别名 `DeepSeek-V4.1-Flash-1017` 的兜底。换前经网关实测（短提示）：`reasoning_effort` none…max 七档和 `bogus` 全 200（OMLX 不校验，`none` 也照样思考；关思考要用 `chat_template_kwargs {"enable_thinking": false}`）；对话中间的 system 在 chat / `/v1/responses` / `/v1/messages` 三条路都 200；工具调用 `finish_reason=tool_calls` |
+| 降级 | 2026-11-15 起是裸别名 `DeepSeek-V4.1-Flash-1017` 的第 2 级（「自动降级」）。上线前经网关实测（短提示）：`reasoning_effort` none…max 七档和 `bogus` 全 200（OMLX 不校验，`none` 也照样思考；关思考要用 `chat_template_kwargs {"enable_thinking": false}`）；对话中间的 system 在 chat / `/v1/responses` / `/v1/messages` 三条路都 200；工具调用 `finish_reason=tool_calls` |
 | key 白名单 | `LITELLM_VK`（sha256 前缀 2c15baf776…）、`key_alias=xiaogpt`（只有这一个模型）、`ext-team-1`（账户与 key 两层白名单都有）、`key_alias=open-notebook`（2026-11-11，第二备选）。其余窄 key 刻意没加，谁要用按坑 A 单独加 |
 
 主机侧（OMLX 安装、key、模型下载、DFlash2 与实测性能）→ `macbook/ansible/README.md`；指标 →
 [omlx-inference-metrics.md](omlx-inference-metrics.md)。
 
-- ⚠️ **兜底时比 DGX 弱的两处**：预填充约 1000 tok/s（DGX 约 2,300），接近 262k 满窗的请求在兜底上要 4 分钟以上，
-  撞 300 秒客户端超时；兜底流量与 xiaogpt、open-notebook 第二备选等指名调用挤同一个 OMLX 进程，
+- ⚠️ **降级到 Studio 时比 DGX 弱的两处**：预填充约 1000 tok/s（DGX 约 2,300），接近 262k 满窗的请求要 4 分钟以上，
+  撞 300 秒客户端超时；降级流量与 xiaogpt、open-notebook 第二备选、三台 Mac 的客户端挤同一个 OMLX 进程，
   而 N=2 时总吞吐不涨、每路减半（2026-10-22 实测）。DGX 一挂，这些指名调用也会跟着变慢。
 
 - ☠️ **`mac/*` 与 `studio/*` 的 `api_key: dummy` 能用，是 Mac 上一个开关的结果**：OMLX 0.7 起非回环监听必须配 key，
@@ -338,7 +350,7 @@ curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
 
 | 消费方 | 用哪个别名 | 配置在哪 |
 |---|---|---|
-| `codex --profile mac` | `mac/ornith` | `~/.codex/mac.config.toml`（本机）|
+| 三台 Mac 的 Qwen Code 与 codex | 默认 `DeepSeek-V4.1-Flash-1017`（自动降级），可指名 `studio/qwen3.8-27b` / `mac/ornith`。codex 默认仍是 ChatGPT 登录，经网关用 `codex -p litellm\|studio\|mac` | `cd macbook/ansible && just llm-clients` 统一下发（2026-11-15 起；直连上游的旧 profile 已清掉）|
 | 本机任意 OpenAI 兼容客户端 | `studio/qwen3.8-27b` | 读 `LITELLM_VK`；目前没有固定消费方 |
 | k8sgpt（默认，`--backend localai`）| `mac/ornith-fast` | `~/Library/Application Support/k8sgpt/k8sgpt.yaml`（本机）|
 | k8sgpt（`--backend openai`）| `DeepSeek-V4.1-Flash-1017` | 同上。☠️ explain 输出为空：k8sgpt 0.4.39 实际按 2048 截断（无视 `maxtokens: 4096`），DGX 默认开思考，2048 全用在思考上（网关记 `success`、`completion_tokens=2048`），所以默认后端是 localai |
@@ -346,8 +358,7 @@ curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
 | xiaogpt（小爱音箱，homelab `personal-services`）| `studio/qwen3.8-27b`，专用 key `key_alias=xiaogpt` | [xiaogpt.yaml](../../k8s/helm/manifests/personal-services/xiaogpt.yaml) 的 ConfigMap |
 | Open Notebook（homelab `personal-services`）| `DeepSeek-V4.1-Flash-1017` + OMLX 原名的 4 个别名（chat / embedding / TTS / ASR）+ `studio/qwen3.8-27b`（第二备选），专用 key `key_alias=open-notebook`，2026-11-11 起 | [open-notebook.md](open-notebook.md)；key 由 provisioner 写进两个凭据 |
 | jobs-sg enrich（homelab `jobs-sg`）| `custom_dgx/DeepSeek-V4.1-Flash-1017`（刻意不带兜底），专用 key `key_alias=jobs-sg`，2026-11-11 起 | [jobs-sg.md](jobs-sg.md)「LLM 富化」|
-| `codex --profile dgx` / `m2` | 不走网关，直连 DGX / M2 的 OMLX | `~/.codex/{dgx,m2}.config.toml`（本机）|
 | 外部使用者（UI 账户 `ext-team-1`）| 5 个自托管别名 + 17 个 OpenRouter `:free` 模型 | Postgres（账户与 key 各一层白名单），见「发给外部的 key」|
 | M2 / Studio 上的 magpie（`homelab` provider）| `DeepSeek-V4.1-Flash-1017` → `studio/qwen3.8-27b`（magpie 的 `group/qwen`；组 id 是历史名，换栈没改，免得每个 agent 重设），另暴露若干 `openrouter/*` | 每台一把（`key_alias` 为 `m2-magpie` / `studio-magpie`），值在 Vault `secret/homelab/magpie`，`cd macbook/ansible && just magpie` 下发。☠️ 别写进 playbook：[泄露复盘](../records/2026-10-26-litellm-keys-in-public-repo.md) |
 
-⚠️ 本机消费方全部读同一个 `LITELLM_VK`（`~/.zshrc`），坑 A 一旦发生是全体受影响。
+⚠️ 三台 Mac 的消费方全部读同一个 `LITELLM_VK`（chezmoi 写进各自的 `~/.secrets.sh`），坑 A 一旦发生是全体受影响。
