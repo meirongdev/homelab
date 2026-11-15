@@ -30,7 +30,7 @@
 
 | 别名 | 上游 | 兜底 |
 |---|---|---|
-| `DeepSeek-V4.1-Flash-1017` | DGX（下节）| → `studio/qwen3.8-27b`（`router_settings.fallbacks`，坑 A2；2026-11-15 前是 `mac/ornith`）|
+| `DeepSeek-V4.1-Flash-1017` | DGX（下节）。☠️ **临时（2026-11-15 起）改由 Studio 的 Qwen3.8-27B 作答**：DGX `:8000` 拒绝连接；客户端照旧用这个名字、key 白名单不动，DGX 恢复后 revert 切回（[ROADMAP #22](../ROADMAP.md)）| → `studio/qwen3.8-27b`（`router_settings.fallbacks`，坑 A2；2026-11-15 前是 `mac/ornith`）。临时期间清空：主上游就是 Studio |
 | `custom_dgx/DeepSeek-V4.1-Flash-1017` | DGX | 刻意不配：给「就要打 DGX」的消费方，静默换成别的模型反而有害（DGX 不通时如实报连接错误）|
 | `mac/ornith` / `mac/ornith-fast` | M2 的 OMLX，Ornith-1.5-35B-A3B；`-fast` 走 OMLX 的 `fast` profile（关思考），两者共用同一份驻留权重 | —（2026-11-15 前 `mac/ornith` 是 DGX 的兜底）|
 | `studio/qwen3.8-27b` | Mac Studio 的 OMLX（见「Mac Studio 上游」）| 自己没有兜底；它是 DGX 裸别名的兜底目标（2026-11-15 起）|
