@@ -7,9 +7,9 @@
 #   - admin UI (/ui): LiteLLM 自带登录 (UI_USERNAME/UI_PASSWORD, Vault→ESO)
 # Config: config.yaml in git (model_list); keys/spend live in Postgres —— 2026-08-25 起
 #   是共享实例 `databases/apps-pg` 的 litellm 租户，不再是本 ns 自带的 litellm-pg。
-# 自托管上游: DGX (DeepSeek-V4.1-Flash-1017, 主) + Mac Studio OMLX (Qwen3.8-27B, 兜底, 2026-11-15 起)
-#   + MacPro M2 OMLX (Ornith-1.5-35B 等, 只能指名; 2026-11-15 前它是兜底),
-#   fallbacks 键 = 严格的"主→兜底"链（只认顶层 router_settings，见 docs/reference/litellm-gateway.md 坑 A2）。
+# 自托管上游: DGX (DeepSeek-V4.1-Flash-1017) + Mac Studio OMLX (Qwen3.8-27B) + MacPro M2 OMLX (Ornith-1.5-35B 等)。
+#   裸别名 DeepSeek-V4.1-Flash-1017 = 同组三级 DGX → Studio → M2，按 order 降级 + 健康检查剔除（2026-11-15 起，
+#   见 docs/reference/litellm-gateway.md「自动降级」）；各上游另有指名别名。
 # 升版：改 image digest + 注释 tag → git push。不要追 main-stable。
 apiVersion: v1
 kind: ConfigMap
@@ -42,39 +42,51 @@ data:
           model: openai/DeepSeek-V4.1-Flash-1017
           api_base: http://100.97.87.120:8000/v1
           api_key: dummy
-      # ── 无前缀别名 DeepSeek-V4.1-Flash-1017：DGX 主 + Studio 兜底 ──
-      # ☠️ 兜底声明在**文件末尾的 `router_settings.fallbacks`**，不在这条的 litellm_params 里。
-      #    2026-09-19 实测：写在 litellm_params 里 **从来没有生效过** —— 它会被当成 SDK 级
-      #    fallback，拿裸字符串 `mac/ornith` 去找 provider，于是主上游一挂就回
-      #    `LLM Provider NOT provided ... You passed model=mac/ornith` 的 500，
-      #    而不是切到 Mac。**连接级失败与参数级失败表现完全一样**，所以过去看到这条报错
-      #    很容易误判成"Mac 睡着了"。复现与对照见 docs/records/2026-09-19-litellm-fallbacks-never-active.md。
+      # ── 无前缀别名 DeepSeek-V4.1-Flash-1017：DGX → Studio → M2 三级自动降级 ──
+      # 2026-11-15 前靠 router_settings.fallbacks 串别名；现在改为同组 order + 健康检查（理由见下面那组的注释）。
+      # ☠️ 别往模型条目的 litellm_params 里写 fallbacks：那是透传给 SDK 的 kwarg，从来没生效过
+      #    （docs/records/2026-09-19-litellm-fallbacks-never-active.md）。
       # 与裸引擎同名是刻意的（下游改 base_url 即可绕过网关），代价是换模型时两边都得动。
       # ☠️ 改别名必须同步改 Postgres 里各虚拟 key 的 models 白名单，否则「清单正确 + Synced + 调用全 403」。
       #    2026-09-19 实测受影响的是 **16 把里的 8 把**；2026-11-15 是 13 把里的 11 把 + 账户 ext-team-1
       #    （外部 key 多了；账户级白名单也要改，zcode-agent 那把 key 自己的 models 是空的）。
-      # ☠️☠️ 临时（2026-11-15 起）：DGX :8000 拒绝连接，这个裸别名先改由 Studio 的 Qwen3.8-27B 作答。
-      #    客户端照旧用这个名字、key 白名单不动，对调用方透明（只是换了模型、变慢）。
-      #    DGX 恢复后把本文件里标着「☠️☠️ 临时」的三处（本条、下面的兼容别名、末尾 fallbacks）改回去（ROADMAP #22）；
-      #    改之前先 `curl -s http://100.97.87.120:8000/v1/models` 确认 served name 和端口都没变，变了就按换栈 runbook 走。
-      #    原值：model: openai/DeepSeek-V4.1-Flash-1017 / api_base: http://100.97.87.120:8000/v1
+      # ── 自动降级（2026-11-15 起）：同一个 model_name 下三条 deployment，order 1 DGX → 2 Studio → 3 M2 ──
+      # 客户端只认这个名字，背后由谁作答由网关按上游健康状况决定；DGX 宕机、恢复都不用改配置。两层机制叠加，
+      # 都用线上同 digest 镜像在本地实测过（docs/reference/litellm-gateway.md「自动降级」）：
+      #   · 请求级：上一级失败（拒绝连接 / 5xx）就在同一个请求里试下一级，chat / responses、流式与否都行。
+      #   · 健康检查剔除（文件末尾 general_settings + router_settings）：每 30s 探一次，探不通的不再参与选路，
+      #     下一轮探通了自动回到 order 1。
+      #   ☠️ 只靠请求级不够：整机离线时 SYN 没回应，每个请求要先挨约 406s 才降级（实测：内核 SYN 重试约 127s
+      #      × SDK 共 3 次），而且单上游组默认不冷却，下一个请求照挨。
+      # ⚠️ 降级不区分错误类型：DGX 回的参数级 400 也会被 Studio 接走、不再报出来（OMLX 什么 reasoning_effort 都收）。
+      #    调参数、核档位一律用 custom_dgx/ 前缀那条。降级也不看 key 白名单，窄 key 不必为此加 Studio / M2。
+      # ☠️ 换栈时这一组与下面兼容别名那组要一起改，general_settings.background_health_check_model_groups 里的名字也要跟着换
+      #    （漏了 = 不再探活，整机离线时退回每请求 406s）。
+      # ⚠️ 别用 YAML 锚点去重：PyYAML 的别名是同一个 dict 对象，LiteLLM 会往 model_info 里写各自的 id。
       - model_name: DeepSeek-V4.1-Flash-1017
-        litellm_params:
-          model: openai/Qwen3.8-27B-MLX-4bit
-          api_base: http://100.98.220.75:8000/v1
-          api_key: dummy
+        litellm_params: {model: openai/DeepSeek-V4.1-Flash-1017, api_base: "http://100.97.87.120:8000/v1", api_key: dummy, order: 1}
+        model_info: {health_check_timeout: 15, health_check_max_tokens: 16}
+      - model_name: DeepSeek-V4.1-Flash-1017
+        litellm_params: {model: openai/Qwen3.8-27B-MLX-4bit, api_base: "http://100.98.220.75:8000/v1", api_key: dummy, order: 2}
+        model_info: {health_check_timeout: 15, health_check_max_tokens: 16}
+      - model_name: DeepSeek-V4.1-Flash-1017
+        litellm_params: {model: openai/ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit, api_base: "http://100.89.15.120:8000/v1", api_key: dummy, order: 3}
+        model_info: {health_check_timeout: 15, health_check_max_tokens: 16}
       # ── 兼容别名 qwen3.8-flash-next-tp2（2026-11-15）──
       # 上一个 DGX 栈的名字。外发 key 的使用者还不知道已改名为 DeepSeek-V4.1-Flash-1017，客户端照旧发旧名，
-      # 所以按旧名建一条，**上游和兜底始终与上面的裸别名保持一致**。4 把 ext-* key 和 ext-team-1 账户的白名单
+      # 所以按旧名建一组，**三级上游始终与上面的裸别名保持一致**。4 把 ext-* key 和 ext-team-1 账户的白名单
       # 同日加回了这个名字（坑 A）。名字与实际模型对不上是刻意的代价，只为不动客户端。
-      # 删它的条件：spend log 里连续两周没有旧名调用；删时同步从那 5 处白名单里拿掉。
-      # ☠️☠️ 临时（2026-11-15 起，同上面裸别名那条）：现在指向 Studio，切回 DGX 时这条一起改（原值同上）。
+      # 删它的条件：spend log 里连续两周没有旧名调用；删时同步从那 5 处白名单里拿掉，并从健康检查列表里删掉。
       - model_name: qwen3.8-flash-next-tp2
-        litellm_params:
-          model: openai/Qwen3.8-27B-MLX-4bit
-          api_base: http://100.98.220.75:8000/v1
-          api_key: dummy
-      # ── M2 的 Ornith（只能指名；2026-11-15 前是 DGX 裸别名的兜底，现由 Studio 接替，见文件末尾）──
+        litellm_params: {model: openai/DeepSeek-V4.1-Flash-1017, api_base: "http://100.97.87.120:8000/v1", api_key: dummy, order: 1}
+        model_info: {health_check_timeout: 15, health_check_max_tokens: 16}
+      - model_name: qwen3.8-flash-next-tp2
+        litellm_params: {model: openai/Qwen3.8-27B-MLX-4bit, api_base: "http://100.98.220.75:8000/v1", api_key: dummy, order: 2}
+        model_info: {health_check_timeout: 15, health_check_max_tokens: 16}
+      - model_name: qwen3.8-flash-next-tp2
+        litellm_params: {model: openai/ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit, api_base: "http://100.89.15.120:8000/v1", api_key: dummy, order: 3}
+        model_info: {health_check_timeout: 15, health_check_max_tokens: 16}
+      # ── M2 的 Ornith（指名别名；同一份权重也是裸别名的第 3 级，见上）──
       # 2026-08-25 由 Qwen3.6-35B 换为 Ornith-1.5-35B-A3B（OMLX 的 is_default 同日已指向它）。
       # ☠️ 只暴露一个 Mac 35B：OMLX 池天花板 30GB 装不下两个（19.95 + 19.08GB），
       #    两个别名并存会让交替调用持续换入换出（~18s/次，期间对请求回 "is busy"）。
@@ -130,8 +142,8 @@ data:
       # ── Mac Studio（M5 Max / 128G，第三个自托管上游，2026-10-03）──
       # OMLX 0.7 的模型 ID 不带 org（目录是 ~/.omlx/models/lmstudio-community/<name>/），
       # 所以这里写的是裸名，不是 M2 那种 org__name。
-      # 2026-11-15 起兼任 DGX 裸别名的兜底（文件末尾 router_settings），同时仍可指名。
-      # ⚠️ 兜底流量和指名调用（xiaogpt、open-notebook 第二备选、本机客户端）挤同一个 OMLX 进程：
+      # 同一份权重也是裸别名的第 2 级（见上），同时仍可指名。
+      # ⚠️ 降级流量和指名调用（xiaogpt、open-notebook 第二备选、三台 Mac 的客户端）挤同一个 OMLX 进程：
       #    DGX 一挂，这些指名调用也会跟着变慢。
       # 和 mac/* 一样靠 Studio 上的 allow_unauthenticated_inference 才能用 dummy（omlx.yaml 管着）。
       # 冷装载 ~14s（16.9G），之后常驻：Studio 的池天花板 ~106G，不存在 M2 那种换入换出。
@@ -159,30 +171,24 @@ data:
     # 这个 hook 在转发前把它降级成普通 message。详见 codex_compat.py 的文件头。
     # ⚠️ 模块是按 **config 文件所在目录 + 模块名** 找的（get_instance_fn），所以
     #    codex_compat.py 必须 subPath 挂到 /app/ 下，与本文件同目录。
-    # ── 兜底链（唯一生效的声明位置）──────────────────────────────────────
-    # 语义是严格的「主 → 兜底」，不是轮询：只有主上游**失败**时才打 Studio。
-    # 2026-11-15 兜底由 M2 的 mac/ornith 换成 Studio 的 studio/qwen3.8-27b。换前经网关实测 Studio 接得住
-    #    DGX 现在接的全部请求形状：reasoning_effort 七档、对话中间的 system（chat / responses / messages
-    #    三条路）、工具调用全部 200，上下文同为 262k。
-    #    ⚠️ 代价：OMLX 不校验 reasoning_effort（"bogus" 也回 200），所以裸别名上 DGX 回的参数级 400
-    #    现在**全都**会被兜底接走、不再报出来。调参数、核档位一律用 custom_dgx/ 前缀那条。
-    # ✅ 2026-09-19 用线上同一 digest 的镜像在本地实测（主上游指向死端口）：
-    #    · 连接级失败 → 200，内容来自兜底 ✅
-    #    · 参数级失败（400，如 reasoning_effort）→ 调用方拿到的是原样的 400 + 真实原因
-    #      （那是因为当时的兜底 Ornith 也不收该参数；换成 Studio 后不再成立，见上）。
-    #      ☠️ 但机制不是"LiteLLM 识别 4xx 所以跳过兜底"——上线后看生产日志订正过：
-    #      它照样进 run_async_fallback 去试 Mac，只是那一跳在**参数映射层**就抛了同一个
-    #      UnsupportedParamsError，**没有 HTTP 请求真的发到 Mac**，最后把真实 400 抛回。
-    #      换一种"主上游 4xx 而兜底能接受该参数"的组合，兜底就会真的被打出去。
-    #      判据是日志里的 `run_async_fallback` / `Error doing the fallback`，不是返回码。
-    # ⚠️ 只给裸别名配兜底，`custom_dgx/` 前缀那条**刻意不配** —— 它是给"我就是要打 DGX"
-    #    的消费方用的，被静默换成别的模型反而是坏事。
-    # ☠️ 换模型时这里的键名要跟着换（它是别名的字面量），漏改 = 兜底静默失效。
-    # ☠️☠️ 临时（2026-11-15 起，同上面裸别名那条）：主上游此刻就是 Studio，再兜底到 Studio 只会把失败的请求重打一遍，
-    #    所以兜底链先清空。切回 DGX 时恢复为（兼容别名也要兜底）：
-    #    [{"DeepSeek-V4.1-Flash-1017": ["studio/qwen3.8-27b"]}, {"qwen3.8-flash-next-tp2": ["studio/qwen3.8-27b"]}]
+    # ── 健康检查剔除（2026-11-15）：裸别名三级降级的第二层，配合模型条目里的 order ─────────────
+    # 后台每 30s 给下面两组的每个上游发一条 16 token 的探测（单条超时 15s，见各条的 model_info），
+    # 探不通的上游在选路时直接跳过，探通了自动回来。
+    # ☠️ background_health_check_model_groups 必须列明：不列 = 探全部模型，包括 openrouter/*（真花钱）
+    #    和 M2 上的 TTS / ASR / embedding（会让 OMLX 换入换出）。本地实测列明后范围外的组 0 次探测。
+    # ☠️ staleness 必须大于「单条超时 + 间隔」（15 + 30）：健康状态一过期，过滤就整个失效、
+    #    所有上游重新放行（源码 _async_filter_health_check_unhealthy_deployments）。默认是间隔 ×2 = 60s，太紧。
+    # ⚠️ 别设 router 级 allowed_fails / allowed_fails_policy：设了以后这层过滤会被跳过（同一函数开头），
+    #    而且所有单上游别名（studio/qwen3.8-27b、mac/ornith…）也会开始冷却。
+    # ⚠️ custom_dgx/ 前缀那条**刻意不进**降级也不探活：它是给「我就是要打 DGX」的消费方用的，
+    #    被静默换成别的模型反而是坏事，DGX 不通时如实报连接错误。
+    general_settings:
+      background_health_checks: true
+      health_check_interval: 30
+      health_check_staleness_threshold: 120
+      background_health_check_model_groups: ["DeepSeek-V4.1-Flash-1017", "qwen3.8-flash-next-tp2"]
     router_settings:
-      fallbacks: []
+      enable_health_check_routing: true
 
     # ── 客户端 IP（2026-10-03）──
     # 公网请求到 LiteLLM 时 TCP 对端已经是集群内地址，spend log 的 requester_ip_address
@@ -217,7 +223,7 @@ spec:
         #    ⇒ ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按**旧路由表**继续跑。
         #    2026-08-25 实际踩过一次（改了 mac/ornith 后必须手动 rollout restart 才生效）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py 的 STAMP_ONLY），别手改。
-        checksum/config: "9d3848521a66249b"
+        checksum/config: "d246b4f8c108b459"
         # 同理，但盯的是 codex_compat.py（litellm-codex-compat ConfigMap）：
         # 也是 subPath 挂载 + 只在启动时 import，改了不重启就是静默跑旧代码。
         checksum/codex-compat-py: "e5da4a39d90243d4"
