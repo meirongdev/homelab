@@ -46,6 +46,12 @@
 >   弃用 `router_settings.fallbacks` 的原因是实测：它挂的是单上游组，没有冷却，主上游整机离线时**每个请求**
 >   要先挨约 406s 才降级；健康检查剔除后同一场景 0.3s。语义仍是严格主→降级、不做均衡（DGX 健康就只打 DGX）。
 >   生效事实与实测表见 [reference/litellm-gateway.md](../reference/litellm-gateway.md)「自动降级」。
+> 修订: 2026-11-15（三）：首选按**调用方**分开（用户决定）：给出去的 key 仍是 DGX 首选、Studio 兜底；homelab 内部
+>   反过来，Studio 的 Qwen3.8-27B 首选、DGX 兜底，M2 两边都是第 3 级。两边请求同一批名字，所以按 key 分：内部 key 带
+>   LiteLLM 的 key 级 `aliases`，改道到新组 `homelab/qwen3.8-27b`，客户端不改。代价是又一处路由事实落在 Postgres
+>   （与 key 白名单同类），换栈改名时 `aliases` 的键要跟着改，否则静默不改道。没选的两条：按名字分（两边用的是同一批
+>   名字，分不开）；改内部客户端去调新名字（要动 Mac / magpie / open-notebook / calibre 四处配置，且 open-notebook 的
+>   模型改名要在 UI 里删了重建）。生效事实见 [reference/litellm-gateway.md](../reference/litellm-gateway.md)「按 key 分首选」。
 
 ## Context
 

@@ -24,17 +24,19 @@
 |---|---|---|
 | 模型列表 / `api_base` / 降级顺序与健康检查 | git 的 ConfigMap | 改清单 → push → ArgoCD |
 | **虚拟 key 能访问哪些模型** | Postgres | 只能调 API（坑 A）|
+| **哪些 key 改道到 Studio 首选**（key 级 `aliases`）| Postgres | 只能调 API（「按 key 分首选」）|
 | 花费账本 / key 有效期 | Postgres | `/ui` 或 API |
 
 ### 别名
 
 | 别名 | 上游 | 降级 |
 |---|---|---|
-| `DeepSeek-V4.1-Flash-1017` | 三级：DGX（下节）→ Studio 的 Qwen3.8-27B → M2 的 Ornith。由谁作答由网关按健康状况决定，DGX 宕机、恢复都不用改配置 | 自动，见「自动降级」|
+| `DeepSeek-V4.1-Flash-1017` | 外发 key 与默认的首选。三级：DGX（下节）→ Studio 的 Qwen3.8-27B → M2 的 Ornith。由谁作答由网关按健康状况决定，DGX 宕机、恢复都不用改配置。homelab 内部的 key 请求这个名字会被改道到 `homelab/qwen3.8-27b` | 自动，见「自动降级」|
 | `qwen3.8-flash-next-tp2` | **兼容别名**（2026-11-15）：上一个 DGX 栈的旧名，外发 key 的使用者还在用。三级上游始终与上一行一致；4 把 ext-* key 与 ext-team-1 账户的白名单已加回这个名字。名字与实际模型对不上是刻意的代价，为的是不动客户端。spend log 连续两周没有旧名调用再删，删时同步从那 5 处白名单和健康检查列表拿掉 | 与上一行一致 |
+| `homelab/qwen3.8-27b` | homelab 内部的首选（2026-11-15）。三级，顺序与上两行相反：Studio 的 Qwen3.8-27B → DGX → M2。**不进任何白名单**，只有带 key 级 `aliases` 的内部 key 经改道到达 | 自动，见「按 key 分首选」|
 | `custom_dgx/DeepSeek-V4.1-Flash-1017` | DGX | 刻意不降级：给「就要打 DGX」的消费方，静默换成别的模型反而有害（DGX 不通时如实报连接错误）|
 | `mac/ornith` / `mac/ornith-fast` | M2 的 OMLX，Ornith-1.5-35B-A3B；`-fast` 走 OMLX 的 `fast` profile（关思考），两者共用同一份驻留权重 | 无（同一份权重是裸别名的第 3 级）|
-| `studio/qwen3.8-27b` | Mac Studio 的 OMLX（见「Mac Studio 上游」）| 无（同一份权重是裸别名的第 2 级）|
+| `studio/qwen3.8-27b` | Mac Studio 的 OMLX（见「Mac Studio 上游」）| 外发 key：无（同一份权重是裸别名的第 2 级）。内部 key：被改道到 `homelab/qwen3.8-27b`，多了 DGX 兜底 |
 | OMLX 模型 ID 原文 ×4：`ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit`、`mlx-community__Qwen3-Embedding-4B-4bit-DWQ`（embedding）、`mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit`（TTS）、`mlx-community__Qwen3-ASR-1.7B-8bit`（ASR）| M2 的 OMLX | 给 open-notebook：它的模型按名字绑在凭据上、改名要删了重建，所以网关按原名建别名（2026-11-11）|
 | `openrouter/*` | OpenRouter 全量透传 | 免费档不能当兜底（见「哪些模型能免费用」）|
 
@@ -141,12 +143,50 @@ curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
   所有上游重新放行。默认是间隔 ×2，太紧。
 - ⚠️ 别设 router 级 `allowed_fails` / `allowed_fails_policy`：设了以后健康检查过滤被跳过，而且所有单上游别名也开始冷却。
 - ⚠️ 不按错误类型区分：DGX 回参数级 400 也会降级，见上节「参数错误会被降级悄悄吞掉」。
-- ⚠️ 别用 YAML 锚点给这 6 条去重：PyYAML 的别名是同一个 dict 对象，LiteLLM 会往 `model_info` 里写各自的 id。
+- ⚠️ 别用 YAML 锚点给这 9 条去重：PyYAML 的别名是同一个 dict 对象，LiteLLM 会往 `model_info` 里写各自的 id。
 
 **历史**：2026-11-15 前用的是 `router_settings.fallbacks: [{"<主>": ["<兜底>"]}]` 串别名。它是单上游组，没有冷却，
 整机离线时就是上表左列的 406s。更早（08-01 至 09-19）`fallbacks` 写在模型条目的 `litellm_params` 里，那是透传给
 SDK 的 kwarg，从来没生效过，主上游一失败就 500 `LLM Provider NOT provided ...`：
 [records/2026-09-19-litellm-fallbacks-never-active.md](../records/2026-09-19-litellm-fallbacks-never-active.md)。
+
+## 按 key 分首选：外发 DGX 首选，homelab 内部 Studio 首选（2026-11-15 起）
+
+分工是用户定的：给出去的 key 用 DGX 的 DeepSeek-V4.1-Flash 当首选、Studio 的 Qwen3.8-27B 兜底；homelab 内部反过来。
+两边请求的是同一批名字（裸别名、兼容别名），按名字分不开，所以按 key 分：内部 key 带 LiteLLM 的 key 级 `aliases`
+（`{"请求名": "改道到的组"}`），把三个名字改道到 `homelab/qwen3.8-27b`。客户端一个字不用改。
+
+| 谁 | 请求 `DeepSeek-V4.1-Flash-1017` / `qwen3.8-flash-next-tp2` | 请求 `studio/qwen3.8-27b` |
+|---|---|---|
+| 外发 key（4 把 `ext-*`、`ext-team-1` 账户下的 key）、master key、以后新发的 key | 原组：DGX → Studio → M2 | 只有 Studio，不降级 |
+| 带 `aliases` 的内部 key | 改道 `homelab/qwen3.8-27b`：Studio → DGX → M2 | 同左 |
+
+带 `aliases` 的内部 key（2026-11-15）：`LITELLM_VK`（sha256 前缀 2c15baf776…，三台 Mac 的 Qwen Code / codex / k8sgpt）、
+`m2-magpie`、`m5-magpie`、`studio-magpie`、`open-notebook`、`calibre-metadata-llm`、`xiaogpt`。
+`jobs-sg` 刻意没带：它只用 `custom_dgx/` 前缀（就要打 DGX、不降级），这个名字也不在改道表里。
+
+- 实测（2026-11-15，线上 1.103.1，临时 key）：白名单按客户端请求的**原名**查，白名单只有目标组、没有原名的 key 是 403；
+  改道后响应体的 `model` 仍是原名，客户端看不出来。所以 `homelab/qwen3.8-27b` 不进任何白名单，外发 key 指名调它是 403。
+- 谁答的：响应头 `x-litellm-model-api-base`。spend log 的 `model_group` 记的是改道后的组名，
+  内部 key 的调用在那里显示为 `homelab/qwen3.8-27b`，不是客户端填的名字。
+- ☠️ `/key/update` 传 `aliases` 是**整表替换**（实测：只传一条，原来那条就没了），改完立即生效，不用重启。
+- ☠️ 改道目标组在 config 里不存在时，请求直接 400 `There are no healthy deployments for this model`（实测）。
+  所以顺序是先 push 新组、等 pod 换上，再写 `aliases`；删组时反过来，先清 `aliases`。
+- ☠️ 这又是一处不在 git 里的路由事实（与坑 A 同类）。换栈改名时，`aliases` 的**键**（客户端请求的原名）要跟着改：
+  键对不上不会报错，只是不再改道，内部流量悄悄回到 DGX 首选。
+- 新增内部 key 时在 `/key/generate` 里带上同样的 `aliases`；不带就是外发口径（DGX 首选）。
+
+```bash
+# 回读：哪些 key 带改道（在 Postgres 里，git 看不到）
+kubectl --context k3s-homelab -n databases exec deploy/apps-pg -- psql -U postgres -d litellm -c \
+  "select coalesce(key_alias, left(token,10)) k, aliases from \"LiteLLM_VerificationToken\" where aliases::text <> '{}' order by 1;"
+
+# 给一把内部 key 加改道（整表替换：先 /key/info 看原值，原来有别的条目要一起带上）
+curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
+  -d '{"key":"<token>","aliases":{"DeepSeek-V4.1-Flash-1017":"homelab/qwen3.8-27b",
+       "qwen3.8-flash-next-tp2":"homelab/qwen3.8-27b","studio/qwen3.8-27b":"homelab/qwen3.8-27b"}}' \
+  "$GW/key/update"
+```
 
 ## ☠️ 坑 B：`/v1/models` 返回的是「这个 key 能访问什么」，不是 live config
 
@@ -277,15 +317,15 @@ for m in free:
 | 别名 → 上游 | `studio/qwen3.8-27b` → `openai/Qwen3.8-27B-MLX-4bit` @ `100.98.220.75:8000/v1` |
 | 机器 | Mac Studio M5 Max / 128G，OMLX 0.7.0；池天花板 ~106G，常驻、不换入换出（M2「只暴露一个 35B」的约束不适用）|
 | 模型 | HF `lmstudio-community/Qwen3.8-27B-MLX-4bit`（VLM，262k ctx），思维链分离到 `reasoning_content`。⚠️ OMLX 0.7 的模型 ID 不带 org，别照 M2 写成 `org__name` |
-| 降级 | 2026-11-15 起是裸别名 `DeepSeek-V4.1-Flash-1017` 的第 2 级（「自动降级」）。上线前经网关实测（短提示）：`reasoning_effort` none…max 七档和 `bogus` 全 200（OMLX 不校验，`none` 也照样思考；关思考要用 `chat_template_kwargs {"enable_thinking": false}`）；对话中间的 system 在 chat / `/v1/responses` / `/v1/messages` 三条路都 200；工具调用 `finish_reason=tool_calls` |
+| 降级 | 2026-11-15 起是裸别名 `DeepSeek-V4.1-Flash-1017` 的第 2 级（「自动降级」）、内部改道组 `homelab/qwen3.8-27b` 的第 1 级（「按 key 分首选」）。上线前经网关实测（短提示）：`reasoning_effort` none…max 七档和 `bogus` 全 200（OMLX 不校验，`none` 也照样思考；关思考要用 `chat_template_kwargs {"enable_thinking": false}`）；对话中间的 system 在 chat / `/v1/responses` / `/v1/messages` 三条路都 200；工具调用 `finish_reason=tool_calls` |
 | key 白名单 | `LITELLM_VK`（sha256 前缀 2c15baf776…）、`key_alias=xiaogpt`（只有这一个模型）、`ext-team-1`（账户与 key 两层白名单都有）、`key_alias=open-notebook`（2026-11-11，第二备选）。其余窄 key 刻意没加，谁要用按坑 A 单独加 |
 
 主机侧（OMLX 安装、key、模型下载、DFlash2 与实测性能）→ `macbook/ansible/README.md`；指标 →
 [omlx-inference-metrics.md](omlx-inference-metrics.md)。
 
-- ⚠️ **降级到 Studio 时比 DGX 弱的两处**：预填充约 1000 tok/s（DGX 约 2,300），接近 262k 满窗的请求要 4 分钟以上，
-  撞 300 秒客户端超时；降级流量与 xiaogpt、open-notebook 第二备选、三台 Mac 的客户端挤同一个 OMLX 进程，
-  而 N=2 时总吞吐不涨、每路减半（2026-10-22 实测）。DGX 一挂，这些指名调用也会跟着变慢。
+- ⚠️ **Studio 比 DGX 弱的两处**（homelab 内部流量首选它，外发 key 的流量在 DGX 挂掉时降到它）：预填充约 1000 tok/s（DGX 约 2,300），接近 262k 满窗的请求要 4 分钟以上，
+  撞 300 秒客户端超时；homelab 内部的全部流量与外发 key 的降级流量挤同一个 OMLX 进程，
+  而 N=2 时总吞吐不涨、每路减半（2026-10-22 实测）。Studio 忙到探测超时（60s）时内部请求会降到 DGX，这是设计如此。
 
 - ☠️ **`mac/*` 与 `studio/*` 的 `api_key: dummy` 能用，是 Mac 上一个开关的结果**：OMLX 0.7 起非回环监听必须配 key，
   现行配法是 key + `allow_unauthenticated_inference: true`。开关一丢就全部 401，而网关清单正确、ArgoCD Synced。
@@ -354,15 +394,15 @@ curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
 
 | 消费方 | 用哪个别名 | 配置在哪 |
 |---|---|---|
-| 三台 Mac 的 Qwen Code 与 codex | 默认 `DeepSeek-V4.1-Flash-1017`（自动降级），可指名 `studio/qwen3.8-27b` / `mac/ornith`。codex 默认仍是 ChatGPT 登录，经网关用 `codex -p litellm\|studio\|mac` | `cd macbook/ansible && just llm-clients` 统一下发（2026-11-15 起；直连上游的旧 profile 已清掉）|
+| 三台 Mac 的 Qwen Code 与 codex | 默认 `DeepSeek-V4.1-Flash-1017`（`LITELLM_VK` 带 `aliases`，实际 Studio 首选、DGX 兜底），可指名 `studio/qwen3.8-27b` / `mac/ornith`。codex 默认仍是 ChatGPT 登录，经网关用 `codex -p litellm\|studio\|mac` | `cd macbook/ansible && just llm-clients` 统一下发（2026-11-15 起；直连上游的旧 profile 已清掉）|
 | 本机任意 OpenAI 兼容客户端 | `studio/qwen3.8-27b` | 读 `LITELLM_VK`；目前没有固定消费方 |
 | k8sgpt（默认，`--backend localai`）| `mac/ornith-fast` | `~/Library/Application Support/k8sgpt/k8sgpt.yaml`（本机）|
 | k8sgpt（`--backend openai`）| `DeepSeek-V4.1-Flash-1017` | 同上。☠️ explain 输出为空：k8sgpt 0.4.39 实际按 2048 截断（无视 `maxtokens: 4096`），DGX 默认开思考，2048 全用在思考上（网关记 `success`、`completion_tokens=2048`），所以默认后端是 localai |
-| oracle 上的 calibre 元数据作业 | `DeepSeek-V4.1-Flash-1017`（经 `litellm-external` NodePort）| [清单内嵌脚本](../../cloud/oracle/manifests/calibre-metadata/metadata-llm.yaml) |
-| xiaogpt（小爱音箱，homelab `personal-services`）| `studio/qwen3.8-27b`，专用 key `key_alias=xiaogpt` | [xiaogpt.yaml](../../k8s/helm/manifests/personal-services/xiaogpt.yaml) 的 ConfigMap |
-| Open Notebook（homelab `personal-services`）| `DeepSeek-V4.1-Flash-1017` + OMLX 原名的 4 个别名（chat / embedding / TTS / ASR）+ `studio/qwen3.8-27b`（第二备选），专用 key `key_alias=open-notebook`，2026-11-11 起 | [open-notebook.md](open-notebook.md)；key 由 provisioner 写进两个凭据 |
+| oracle 上的 calibre 元数据作业 | `DeepSeek-V4.1-Flash-1017`（经 `litellm-external` NodePort；key 带 `aliases`，实际 Studio 首选）。⚠️ 护栏没在 Studio 的 Qwen3.8-27B 上复验过，下次跑先 `DRY_RUN=1` | [清单内嵌脚本](../../cloud/oracle/manifests/calibre-metadata/metadata-llm.yaml) |
+| xiaogpt（小爱音箱，homelab `personal-services`）| `studio/qwen3.8-27b`，专用 key `key_alias=xiaogpt`（带 `aliases`，改道后多了 DGX 兜底）| [xiaogpt.yaml](../../k8s/helm/manifests/personal-services/xiaogpt.yaml) 的 ConfigMap |
+| Open Notebook（homelab `personal-services`）| `DeepSeek-V4.1-Flash-1017`（key 带 `aliases`，实际 Studio 首选）+ OMLX 原名的 4 个别名（chat / embedding / TTS / ASR）+ `studio/qwen3.8-27b`（第二备选），专用 key `key_alias=open-notebook`，2026-11-11 起 | [open-notebook.md](open-notebook.md)；key 由 provisioner 写进两个凭据 |
 | jobs-sg enrich（homelab `jobs-sg`）| `custom_dgx/DeepSeek-V4.1-Flash-1017`（刻意不带兜底），专用 key `key_alias=jobs-sg`，2026-11-11 起 | [jobs-sg.md](jobs-sg.md)「LLM 富化」|
-| 外部使用者（UI 账户 `ext-team-1`）| 5 个自托管别名 + 17 个 OpenRouter `:free` 模型 | Postgres（账户与 key 各一层白名单），见「发给外部的 key」|
-| M2 / Studio 上的 magpie（`homelab` provider）| `DeepSeek-V4.1-Flash-1017` → `studio/qwen3.8-27b`（magpie 的 `group/qwen`；组 id 是历史名，换栈没改，免得每个 agent 重设），另暴露若干 `openrouter/*` | 每台一把（`key_alias` 为 `m2-magpie` / `studio-magpie`），值在 Vault `secret/homelab/magpie`，`cd macbook/ansible && just magpie` 下发。☠️ 别写进 playbook：[泄露复盘](../records/2026-10-26-litellm-keys-in-public-repo.md) |
+| 外部使用者（UI 账户 `ext-team-1`）| 5 个自托管别名 + 17 个 OpenRouter `:free` 模型。不带 `aliases`：DGX 首选 | Postgres（账户与 key 各一层白名单），见「发给外部的 key」|
+| M2 / Studio 上的 magpie（`homelab` provider）| `DeepSeek-V4.1-Flash-1017` → `studio/qwen3.8-27b`（magpie 的 `group/qwen`；组 id 是历史名，换栈没改，免得每个 agent 重设。三把 magpie key 都带 `aliases`，两个名字实际都是 Studio 首选、DGX 兜底），另暴露若干 `openrouter/*` | 每台一把（`key_alias` 为 `m2-magpie` / `studio-magpie`），值在 Vault `secret/homelab/magpie`，`cd macbook/ansible && just magpie` 下发。☠️ 别写进 playbook：[泄露复盘](../records/2026-10-26-litellm-keys-in-public-repo.md) |
 
 ⚠️ 三台 Mac 的消费方全部读同一个 `LITELLM_VK`（chezmoi 写进各自的 `~/.secrets.sh`），坑 A 一旦发生是全体受影响。

@@ -10,6 +10,7 @@
 # 自托管上游: DGX (DeepSeek-V4.1-Flash-1017) + Mac Studio OMLX (Qwen3.8-27B) + MacPro M2 OMLX (Ornith-1.5-35B 等)。
 #   裸别名 DeepSeek-V4.1-Flash-1017 = 同组三级 DGX → Studio → M2，按 order 降级 + 健康检查剔除（2026-11-15 起，
 #   见 docs/reference/litellm-gateway.md「自动降级」）；各上游另有指名别名。
+#   homelab 内部的 key 经 key 级 aliases（在 Postgres）改道 homelab/qwen3.8-27b = Studio → DGX → M2（2026-11-15 起）。
 # 升版：改 image digest + 注释 tag → git push。不要追 main-stable。
 apiVersion: v1
 kind: ConfigMap
@@ -86,6 +87,24 @@ data:
       - model_name: qwen3.8-flash-next-tp2
         litellm_params: {model: openai/ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit, api_base: "http://100.89.15.120:8000/v1", api_key: dummy, order: 3}
         model_info: {health_check_timeout: 60, health_check_max_tokens: 16}
+      # ── homelab 内部改道组 homelab/qwen3.8-27b（2026-11-15）：Studio → DGX → M2，与上面两组顺序相反 ──
+      # 用户的分工：外发 key 用 DGX 的 DeepSeek-V4.1-Flash 当首选、Qwen3.8-27B 兜底；homelab 内部反过来。
+      # 两边请求的是同一批名字（裸别名、兼容别名），按名字分不开，所以按 **key** 分：内部 key 在 Postgres 里带
+      # key 级 aliases，把裸别名 / 兼容别名 / studio/qwen3.8-27b 三个名字改道到这一组，客户端一个字不用改。
+      # 外发 key 不带 aliases，照旧落在上面两组（DGX 首选）；新发的 key 默认也是 DGX 首选。
+      # 2026-11-15 用线上 1.103.1 临时 key 实测：白名单按客户端请求的**原名**查（只放行目标组名的 key 照样 403），
+      # 改道后响应体的 `model` 仍是原名；谁答的看响应头 x-litellm-model-api-base 或 spend log 的 model_group。
+      # ☠️ 这组不进任何白名单：只能经 aliases 到达，外发 key 指名调它是 403。哪些 key 带 aliases 不在 git 里，
+      #    清单与回读命令见 docs/reference/litellm-gateway.md「按 key 分首选」。
+      - model_name: homelab/qwen3.8-27b
+        litellm_params: {model: openai/Qwen3.8-27B-MLX-4bit, api_base: "http://100.98.220.75:8000/v1", api_key: dummy, order: 1}
+        model_info: {health_check_timeout: 60, health_check_max_tokens: 16}
+      - model_name: homelab/qwen3.8-27b
+        litellm_params: {model: openai/DeepSeek-V4.1-Flash-1017, api_base: "http://100.97.87.120:8000/v1", api_key: dummy, order: 2}
+        model_info: {health_check_timeout: 30, health_check_max_tokens: 16}
+      - model_name: homelab/qwen3.8-27b
+        litellm_params: {model: openai/ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit, api_base: "http://100.89.15.120:8000/v1", api_key: dummy, order: 3}
+        model_info: {health_check_timeout: 60, health_check_max_tokens: 16}
       # ── M2 的 Ornith（指名别名；同一份权重也是裸别名的第 3 级，见上）──
       # 2026-08-25 由 Qwen3.6-35B 换为 Ornith-1.5-35B-A3B（OMLX 的 is_default 同日已指向它）。
       # ☠️ 只暴露一个 Mac 35B：OMLX 池天花板 30GB 装不下两个（19.95 + 19.08GB），
@@ -142,9 +161,10 @@ data:
       # ── Mac Studio（M5 Max / 128G，第三个自托管上游，2026-10-03）──
       # OMLX 0.7 的模型 ID 不带 org（目录是 ~/.omlx/models/lmstudio-community/<name>/），
       # 所以这里写的是裸名，不是 M2 那种 org__name。
-      # 同一份权重也是裸别名的第 2 级（见上），同时仍可指名。
-      # ⚠️ 降级流量和指名调用（xiaogpt、open-notebook 第二备选、三台 Mac 的客户端）挤同一个 OMLX 进程：
-      #    DGX 一挂，这些指名调用也会跟着变慢。
+      # 同一份权重也是裸别名的第 2 级、homelab/qwen3.8-27b 的第 1 级（见上），同时仍可指名。
+      # ⚠️ 2026-11-15 起 homelab 内部的流量（三台 Mac 的客户端、magpie、open-notebook、xiaogpt、calibre）默认都先到这里，
+      #    外发 key 的流量在 DGX 挂掉时也降到这里，全部挤同一个 OMLX 进程（N=2 时总吞吐不涨、每路减半）。
+      #    内部 key 指名 studio/qwen3.8-27b 也会被 aliases 改道到 homelab/qwen3.8-27b（多了 DGX 兜底）。
       # 和 mac/* 一样靠 Studio 上的 allow_unauthenticated_inference 才能用 dummy（omlx.yaml 管着）。
       # 冷装载 ~14s（16.9G），之后常驻：Studio 的池天花板 ~106G，不存在 M2 那种换入换出。
       # ☠️ 指名调用要进虚拟 key 的白名单（坑 A）；兜底跳转不看白名单，窄 key 不必为兜底加它。
@@ -172,7 +192,7 @@ data:
     # ⚠️ 模块是按 **config 文件所在目录 + 模块名** 找的（get_instance_fn），所以
     #    codex_compat.py 必须 subPath 挂到 /app/ 下，与本文件同目录。
     # ── 健康检查剔除（2026-11-15）：裸别名三级降级的第二层，配合模型条目里的 order ─────────────
-    # 后台每 30s 给下面两组的每个上游发一条 16 token 的探测（单条超时见各条的 model_info），
+    # 后台每 30s 给下面列明的三组的每个上游发一条 16 token 的探测（单条超时见各条的 model_info），
     # 探不通的上游在选路时直接跳过，探通了自动回来。
     # ☠️ 超时按「坏」和「忙」区分：DGX 30s（引擎半起、推理挂住要判得出来）；Studio / M2 60s ——
     #    2026-11-15 上线当天用的是统一 15s，DGX 宕机、全部流量压到 Studio 时，一个 2.8 万 token 的预填充
@@ -189,7 +209,7 @@ data:
       background_health_checks: true
       health_check_interval: 30
       health_check_staleness_threshold: 180
-      background_health_check_model_groups: ["DeepSeek-V4.1-Flash-1017", "qwen3.8-flash-next-tp2"]
+      background_health_check_model_groups: ["DeepSeek-V4.1-Flash-1017", "qwen3.8-flash-next-tp2", "homelab/qwen3.8-27b"]
     router_settings:
       enable_health_check_routing: true
 
@@ -226,7 +246,7 @@ spec:
         #    ⇒ ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按**旧路由表**继续跑。
         #    2026-08-25 实际踩过一次（改了 mac/ornith 后必须手动 rollout restart 才生效）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py 的 STAMP_ONLY），别手改。
-        checksum/config: "4186969d65190769"
+        checksum/config: "68cf5a01ff04080b"
         # 同理，但盯的是 codex_compat.py（litellm-codex-compat ConfigMap）：
         # 也是 subPath 挂载 + 只在启动时 import，改了不重启就是静默跑旧代码。
         checksum/codex-compat-py: "e5da4a39d90243d4"
