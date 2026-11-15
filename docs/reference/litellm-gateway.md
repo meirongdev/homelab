@@ -128,13 +128,17 @@ curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
 | 主上游恢复 | — | 下一轮探测通过即切回 order 1，不用改配置 |
 
 - 看这次是谁答的：响应头 `x-litellm-model-api-base`（响应体的 `model` 永远是别名本身）。
-- 健康检查每 30s 一轮、单条超时 15s、16 token。所以上游**刚**坏的头一轮（最长约 45s）里，请求照常先打它：
-  拒绝连接无所谓，黑洞或「收连接但不回」的那几个请求要等满超时才降级。之后的请求不受影响。
+- 健康检查每 30s 一轮、16 token，单条超时 DGX 30s、Studio / M2 60s。所以上游**刚**坏的头一轮（DGX 最长约 60s）里，
+  请求照常先打它：拒绝连接无所谓，黑洞或「收连接但不回」的那几个请求要等满超时才降级。之后的请求不受影响。
+- ☠️ 超时要按「坏」和「忙」区分，别统一调小：上线当天统一 15s，DGX 宕机、全部流量压到 Studio 时，一个 2.8 万 token
+  的预填充就让探测排队 10s 以上，Studio 两次被误判、请求被降到 M2（会话中途换模型，前缀缓存作废）。
+  判据：`LiteLLM_HealthCheckTable`（只在状态变化时写一行）里 Studio 的 `Timeout exceeded`，对照 Studio 的
+  `/opt/homebrew/var/log/omlx.log` 同一时刻有没有大 `prompt:` 的请求。
 - ☠️ `background_health_check_model_groups` 必须列明：不列就探全部模型，包括 `openrouter/*`（真花钱）和
   M2 的 TTS / ASR / embedding（会让 OMLX 换入换出）。列明后范围外的组 0 次探测（实测）。换栈时这里的名字要跟着换，
   漏了 = 不再探活，整机离线时退回每请求 406s。
-- ☠️ `health_check_staleness_threshold` 必须大于「单条超时 + 间隔」：健康状态一过期，过滤整个失效、所有上游重新放行。
-  默认是间隔 ×2，太紧。
+- ☠️ `health_check_staleness_threshold`（现为 180s）必须大于「最长单条超时 + 间隔」：健康状态一过期，过滤整个失效、
+  所有上游重新放行。默认是间隔 ×2，太紧。
 - ⚠️ 别设 router 级 `allowed_fails` / `allowed_fails_policy`：设了以后健康检查过滤被跳过，而且所有单上游别名也开始冷却。
 - ⚠️ 不按错误类型区分：DGX 回参数级 400 也会降级，见上节「参数错误会被降级悄悄吞掉」。
 - ⚠️ 别用 YAML 锚点给这 6 条去重：PyYAML 的别名是同一个 dict 对象，LiteLLM 会往 `model_info` 里写各自的 id。
