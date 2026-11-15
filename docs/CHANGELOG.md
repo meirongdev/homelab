@@ -132,6 +132,7 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-11-09 | **Terraform state 迁入 R2**（ROADMAP #2 关闭）：8 个 root 进私有桶 `homelab-tfstate`（不与 home-stack 共用桶），`use_lockfile` 加锁实测可用；凭据经 `scripts/tf-r2.sh` 从 Vault 现取，裸敲 `terraform` 会失败 ([现状](reference/terraform-state.md)) |
 | 2026-11-14 | **LiteLLM 静默兜底修复**：Qwen 栈上 claude-cli 的中间 system 消息与 `reasoning_effort=high` 被 DGX 回 400、再被 Ornith 静默接走；`upstream_compat` hook 按 `model_info` 声明改写 ([坑 E](reference/litellm-gateway.md)) |
 | 2026-11-15 | **DGX 换栈跟进 (dsv41)**：主力换成 TensorFold 双机 TP=2 的 `DeepSeek-V4.1-Flash-1017`（同 `:8000`、524k、并发 4）；网关别名、jobs-sg（并发 8→4）/ Open Notebook / calibre / magpie 跟改，11 把 key + 1 个账户白名单同步改 ([现状](reference/litellm-gateway.md)) |
+| 2026-11-15 | **LiteLLM 兜底换成 Mac Studio**：DGX 裸别名的兜底由 M2 的 `mac/ornith` 换成 `studio/qwen3.8-27b`（262k、模型常驻不换入换出）；换前经网关实测七档 `reasoning_effort` / 对话中间的 system / 工具调用全收。代价：裸别名上的参数级 400 全被兜底吞掉 ([现状](reference/litellm-gateway.md)) |
 ### 审计与清理（历史）
 
 | 时间 | 内容 |

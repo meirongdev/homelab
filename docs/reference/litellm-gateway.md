@@ -3,7 +3,7 @@
 > Last updated: 2026-11-15
 > Status: 生效事实
 > Scope: `llm.meirong.dev` 这个 LLM 网关的配置生效路径、鉴权分层、上游可用性边界，
-> 本文是 source of truth。为什么选 LiteLLM、上游怎么选、Mac 兜底为何换 Ornith，见
+> 本文是 source of truth。为什么选 LiteLLM、上游怎么选、兜底为何几经更换（Qwen3.6 → Ornith → Studio），见
 > [decisions/litellm-llm-gateway.md](../decisions/litellm-llm-gateway.md)（决策与实测数据）。
 
 ## 速览
@@ -30,10 +30,10 @@
 
 | 别名 | 上游 | 兜底 |
 |---|---|---|
-| `DeepSeek-V4.1-Flash-1017` | DGX（下节）| → `mac/ornith`（`router_settings.fallbacks`，坑 A2）|
-| `custom_dgx/DeepSeek-V4.1-Flash-1017` | DGX | 刻意不配：给「就要打 DGX」的消费方，静默换成 Mac 反而有害（DGX 不通时如实报连接错误）|
-| `mac/ornith` / `mac/ornith-fast` | M2 的 OMLX，Ornith-1.5-35B-A3B；`-fast` 走 OMLX 的 `fast` profile（关思考），两者共用同一份驻留权重 | — |
-| `studio/qwen3.8-27b` | Mac Studio 的 OMLX（见「Mac Studio 上游」）| 不在任何兜底链，只能指名 |
+| `DeepSeek-V4.1-Flash-1017` | DGX（下节）| → `studio/qwen3.8-27b`（`router_settings.fallbacks`，坑 A2；2026-11-15 前是 `mac/ornith`）|
+| `custom_dgx/DeepSeek-V4.1-Flash-1017` | DGX | 刻意不配：给「就要打 DGX」的消费方，静默换成别的模型反而有害（DGX 不通时如实报连接错误）|
+| `mac/ornith` / `mac/ornith-fast` | M2 的 OMLX，Ornith-1.5-35B-A3B；`-fast` 走 OMLX 的 `fast` profile（关思考），两者共用同一份驻留权重 | —（2026-11-15 前 `mac/ornith` 是 DGX 的兜底）|
+| `studio/qwen3.8-27b` | Mac Studio 的 OMLX（见「Mac Studio 上游」）| 自己没有兜底；它是 DGX 裸别名的兜底目标（2026-11-15 起）|
 | OMLX 模型 ID 原文 ×4：`ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit`、`mlx-community__Qwen3-Embedding-4B-4bit-DWQ`（embedding）、`mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit`（TTS）、`mlx-community__Qwen3-ASR-1.7B-8bit`（ASR）| M2 的 OMLX | 给 open-notebook：它的模型按名字绑在凭据上、改名要删了重建，所以网关按原名建别名（2026-11-11）|
 | `openrouter/*` | OpenRouter 全量透传 | 免费档不能当兜底（见「哪些模型能免费用」）|
 
@@ -53,7 +53,7 @@
 | served name | `DeepSeek-V4.1-Flash-1017` |
 | 端点 | `100.97.87.120:8000/v1`（head 在 S1，与上一栈同端口）|
 | 引擎 | TensorFold（Zig）。☠️ **模型名写错照常 200**（与 SGLang 同类，vLLM 才 404），响应体的 `model` 是真名；判据只能是 `/v1/models` 或响应里的 `model` |
-| `max_model_len` | 524288（上一栈 262144）。⚠️ 兜底的 Ornith 仍是 262k，超过的请求 DGX 出错时兜底接不住 |
+| `max_model_len` | 524288（上一栈 262144）。⚠️ 兜底的 Studio Qwen3.8-27B 只有 262k，超过的请求 DGX 出错时兜底接不住 |
 | 拓扑 / 冷启动 | 双机 TP=2（rank0 + API 在 S1，rank1 在 S2）。11-15 实测 `loaded in 31.0s`（权重在页缓存里；冷缓存每台要读约 98 GiB，会久得多）。☠️ 两个 rank 必须成对起停，只用上游 `make restart` |
 | 自愈 | 容器 `restart=no`、无 healthcheck。引擎日志说 rank 对断开时以 status 75 退出「供两个 rank 一起重启」，外层是否真会重启未核实 |
 | 并发 | ☠️ `/health` 报 `max_batch_size: 4`（上一栈 vLLM 是 64），第 5 路起排队。jobs-sg 的 `LLM_CONCURRENCY` 已随之 8→4 |
@@ -68,8 +68,9 @@
 - ✅ 经网关能传 `reasoning_effort`（2026-10-04 实测，镜像 v1.103.1）。想看 DGX 对档位的 400 原文（换栈后核档位集合就靠它），
   对 `custom_dgx/` 前缀别名传一个**不认识的值**，比如 `"bogus"`：声明了档位集合的栈上，`high` 这类已知档位会先被
   `upstream_compat` 改写（坑 E）。
-- ☠️ **裸别名上，参数错误会被兜底悄悄吞掉**：DGX 回 400 → 兜底 `mac/ornith` 接受这个参数 → 200，只有响应里的
-  `model`（`ornith-ai__…`）看得出换了模型。调参数用带前缀的别名。机制见坑 A2，Qwen 栈时期的实例见坑 E。
+- ☠️ **裸别名上，参数错误会被兜底悄悄吞掉**：DGX 回 400 → 兜底 `studio/qwen3.8-27b` 接受这个参数 → 200，只有响应里的
+  `model` 看得出换了模型。Studio 的 OMLX 不校验 `reasoning_effort`（`bogus` 也 200），所以**任何**档位错误都会被吞。
+  调参数用带前缀的别名。机制见坑 A2，Qwen 栈时期的实例见坑 E。
 - ⚠️ 质量未验证：只做了上面这些功能性实测。
 
 ## ☠️ 坑 A：虚拟 key 的模型白名单在 Postgres 里，git 完全管不到
@@ -90,7 +91,7 @@ key not allowed to access model. This key can only access models=[...]. Tried to
 - `/key/list` 只认 GET + 分页（POST 回 405），返回的是 token 的 sha256 而不是原文，白名单要逐把 `key/info` 看。
   本机的 `LITELLM_VK` 是哪把：`printf %s "$LITELLM_VK" | sha256sum` 去匹配列表。
 - ✅ 白名单只约束「你能指名什么」，**不约束路由内部的兜底跳转**：只含 DGX 别名的窄 key 照样拿到兜底，
-  直接指名 `mac/ornith` 仍 403。窄 key（如 `calibre-metadata-llm`）不需要为兜底放宽。
+  直接指名兜底别名仍 403（09-19 拿 `mac/ornith` 实测）。窄 key（如 `calibre-metadata-llm`）不需要为兜底放宽。
   实测见 [records/2026-09-19-litellm-fallbacks-never-active.md](../records/2026-09-19-litellm-fallbacks-never-active.md)。
 
 本机任意目录（`VK` = 要查或要改的那把虚拟 key）：
@@ -118,16 +119,16 @@ curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
 
 ```yaml
 router_settings:
-  fallbacks: [{"DeepSeek-V4.1-Flash-1017": ["mac/ornith"]}]   # ✅ 唯一生效的位置
+  fallbacks: [{"DeepSeek-V4.1-Flash-1017": ["studio/qwen3.8-27b"]}]   # ✅ 唯一生效的位置
 # 写在模型条目的 litellm_params.fallbacks 里 = 透传给 SDK 的 kwarg，不解析 model_list ❌
 ```
 
-- 写错位置的症状：主上游一失败就 500 `LLM Provider NOT provided ... You passed model=mac/ornith`。
-  读起来像 Mac 配错了，真正错在主上游那条的声明位置；且只在主上游失败时才暴露，平时零症状。
+- 写错位置的症状：主上游一失败就 500 `LLM Provider NOT provided ... You passed model=<兜底别名>`（当年是 `mac/ornith`）。
+  读起来像兜底配错了，真正错在主上游那条的声明位置；且只在主上游失败时才暴露，平时零症状。
   网关从落地到 2026-09-19 一直是这样：[records/2026-09-19-litellm-fallbacks-never-active.md](../records/2026-09-19-litellm-fallbacks-never-active.md)。
 - ☠️ **LiteLLM 不按错误类型决定兜不兜底**：主上游回 4xx 也照样进 `run_async_fallback` 去试兜底。兜底模型接受该参数，
-  请求就真的打到 Mac 并回 200（裸别名传 `reasoning_effort: minimal` 现在就是这样）；不接受，那一跳在参数映射层就抛错，
-  调用方拿回原 400，Mac 收不到请求。判据是日志里的 `run_async_fallback` / `Error doing the fallback`，不是返回码。
+  请求就真的打到兜底并回 200；不接受，那一跳在参数映射层就抛错，调用方拿回原 400，兜底收不到请求。
+  现在的兜底 Studio 什么档位都收，所以实际总是前一种。判据是日志里的 `run_async_fallback` / `Error doing the fallback`，不是返回码。
 - ⚠️ `router_settings` 的键是别名字面量，换模型时漏改 = 兜底静默失效。与坑 A 是同一类问题的两个位置。
 
 ## ☠️ 坑 B：`/v1/models` 返回的是「这个 key 能访问什么」，不是 live config
@@ -259,10 +260,15 @@ for m in free:
 | 别名 → 上游 | `studio/qwen3.8-27b` → `openai/Qwen3.8-27B-MLX-4bit` @ `100.98.220.75:8000/v1` |
 | 机器 | Mac Studio M5 Max / 128G，OMLX 0.7.0；池天花板 ~106G，常驻、不换入换出（M2「只暴露一个 35B」的约束不适用）|
 | 模型 | HF `lmstudio-community/Qwen3.8-27B-MLX-4bit`（VLM，262k ctx），思维链分离到 `reasoning_content`。⚠️ OMLX 0.7 的模型 ID 不带 org，别照 M2 写成 `org__name` |
+| 兜底 | 2026-11-15 起接 DGX 裸别名 `DeepSeek-V4.1-Flash-1017` 的兜底。换前经网关实测（短提示）：`reasoning_effort` none…max 七档和 `bogus` 全 200（OMLX 不校验，`none` 也照样思考；关思考要用 `chat_template_kwargs {"enable_thinking": false}`）；对话中间的 system 在 chat / `/v1/responses` / `/v1/messages` 三条路都 200；工具调用 `finish_reason=tool_calls` |
 | key 白名单 | `LITELLM_VK`（sha256 前缀 2c15baf776…）、`key_alias=xiaogpt`（只有这一个模型）、`ext-team-1`（账户与 key 两层白名单都有）、`key_alias=open-notebook`（2026-11-11，第二备选）。其余窄 key 刻意没加，谁要用按坑 A 单独加 |
 
 主机侧（OMLX 安装、key、模型下载、DFlash2 与实测性能）→ `macbook/ansible/README.md`；指标 →
 [omlx-inference-metrics.md](omlx-inference-metrics.md)。
+
+- ⚠️ **兜底时比 DGX 弱的两处**：预填充约 1000 tok/s（DGX 约 2,300），接近 262k 满窗的请求在兜底上要 4 分钟以上，
+  撞 300 秒客户端超时；兜底流量与 xiaogpt、open-notebook 第二备选等指名调用挤同一个 OMLX 进程，
+  而 N=2 时总吞吐不涨、每路减半（2026-10-22 实测）。DGX 一挂，这些指名调用也会跟着变慢。
 
 - ☠️ **`mac/*` 与 `studio/*` 的 `api_key: dummy` 能用，是 Mac 上一个开关的结果**：OMLX 0.7 起非回环监听必须配 key，
   现行配法是 key + `allow_unauthenticated_inference: true`。开关一丢就全部 401，而网关清单正确、ArgoCD Synced。

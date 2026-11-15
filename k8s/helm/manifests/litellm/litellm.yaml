@@ -7,8 +7,8 @@
 #   - admin UI (/ui): LiteLLM 自带登录 (UI_USERNAME/UI_PASSWORD, Vault→ESO)
 # Config: config.yaml in git (model_list); keys/spend live in Postgres —— 2026-08-25 起
 #   是共享实例 `databases/apps-pg` 的 litellm 租户，不再是本 ns 自带的 litellm-pg。
-# 自托管上游: DGX (DeepSeek-V4.1-Flash-1017, 主) + MacPro M2 OMLX (Ornith-1.5-35B, 兜底)
-#   + Mac Studio OMLX (Qwen3.8-27B, 独立可指名、不进兜底链, 2026-10-03),
+# 自托管上游: DGX (DeepSeek-V4.1-Flash-1017, 主) + Mac Studio OMLX (Qwen3.8-27B, 兜底, 2026-11-15 起)
+#   + MacPro M2 OMLX (Ornith-1.5-35B 等, 只能指名; 2026-11-15 前它是兜底),
 #   fallbacks 键 = 严格的"主→兜底"链（只认顶层 router_settings，见 docs/reference/litellm-gateway.md 坑 A2）。
 # 升版：改 image digest + 注释 tag → git push。不要追 main-stable。
 apiVersion: v1
@@ -42,7 +42,7 @@ data:
           model: openai/DeepSeek-V4.1-Flash-1017
           api_base: http://100.97.87.120:8000/v1
           api_key: dummy
-      # ── 无前缀别名 DeepSeek-V4.1-Flash-1017：DGX 主 + Mac 兜底 ──
+      # ── 无前缀别名 DeepSeek-V4.1-Flash-1017：DGX 主 + Studio 兜底 ──
       # ☠️ 兜底声明在**文件末尾的 `router_settings.fallbacks`**，不在这条的 litellm_params 里。
       #    2026-09-19 实测：写在 litellm_params 里 **从来没有生效过** —— 它会被当成 SDK 级
       #    fallback，拿裸字符串 `mac/ornith` 去找 provider，于是主上游一挂就回
@@ -58,7 +58,7 @@ data:
           model: openai/DeepSeek-V4.1-Flash-1017
           api_base: http://100.97.87.120:8000/v1
           api_key: dummy
-      # ── Mac 兜底（也是独立可用的实际模型）──
+      # ── M2 的 Ornith（只能指名；2026-11-15 前是 DGX 裸别名的兜底，现由 Studio 接替，见文件末尾）──
       # 2026-08-25 由 Qwen3.6-35B 换为 Ornith-1.5-35B-A3B（OMLX 的 is_default 同日已指向它）。
       # ☠️ 只暴露一个 Mac 35B：OMLX 池天花板 30GB 装不下两个（19.95 + 19.08GB），
       #    两个别名并存会让交替调用持续换入换出（~18s/次，期间对请求回 "is busy"）。
@@ -114,10 +114,12 @@ data:
       # ── Mac Studio（M5 Max / 128G，第三个自托管上游，2026-10-03）──
       # OMLX 0.7 的模型 ID 不带 org（目录是 ~/.omlx/models/lmstudio-community/<name>/），
       # 所以这里写的是裸名，不是 M2 那种 org__name。
-      # 独立可指名，**不在任何兜底链里**：它不是 DGX 的替身，只是多一个可选模型。
+      # 2026-11-15 起兼任 DGX 裸别名的兜底（文件末尾 router_settings），同时仍可指名。
+      # ⚠️ 兜底流量和指名调用（xiaogpt、open-notebook 第二备选、本机客户端）挤同一个 OMLX 进程：
+      #    DGX 一挂，这些指名调用也会跟着变慢。
       # 和 mac/* 一样靠 Studio 上的 allow_unauthenticated_inference 才能用 dummy（omlx.yaml 管着）。
       # 冷装载 ~14s（16.9G），之后常驻：Studio 的池天花板 ~106G，不存在 M2 那种换入换出。
-      # ☠️ 新别名要进虚拟 key 的白名单才能用（坑 A）；2026-10-03 只加进了 LITELLM_VK。
+      # ☠️ 指名调用要进虚拟 key 的白名单（坑 A）；兜底跳转不看白名单，窄 key 不必为兜底加它。
       - model_name: studio/qwen3.8-27b
         litellm_params:
           model: openai/Qwen3.8-27B-MLX-4bit
@@ -142,20 +144,26 @@ data:
     # ⚠️ 模块是按 **config 文件所在目录 + 模块名** 找的（get_instance_fn），所以
     #    codex_compat.py 必须 subPath 挂到 /app/ 下，与本文件同目录。
     # ── 兜底链（唯一生效的声明位置）──────────────────────────────────────
-    # 语义是严格的「主 → 兜底」，不是轮询：只有主上游**失败**时才打 Mac。
+    # 语义是严格的「主 → 兜底」，不是轮询：只有主上游**失败**时才打 Studio。
+    # 2026-11-15 兜底由 M2 的 mac/ornith 换成 Studio 的 studio/qwen3.8-27b。换前经网关实测 Studio 接得住
+    #    DGX 现在接的全部请求形状：reasoning_effort 七档、对话中间的 system（chat / responses / messages
+    #    三条路）、工具调用全部 200，上下文同为 262k。
+    #    ⚠️ 代价：OMLX 不校验 reasoning_effort（"bogus" 也回 200），所以裸别名上 DGX 回的参数级 400
+    #    现在**全都**会被兜底接走、不再报出来。调参数、核档位一律用 custom_dgx/ 前缀那条。
     # ✅ 2026-09-19 用线上同一 digest 的镜像在本地实测（主上游指向死端口）：
     #    · 连接级失败 → 200，内容来自兜底 ✅
-    #    · 参数级失败（400，如 reasoning_effort）→ 调用方拿到的是原样的 400 + 真实原因。
+    #    · 参数级失败（400，如 reasoning_effort）→ 调用方拿到的是原样的 400 + 真实原因
+    #      （那是因为当时的兜底 Ornith 也不收该参数；换成 Studio 后不再成立，见上）。
     #      ☠️ 但机制不是"LiteLLM 识别 4xx 所以跳过兜底"——上线后看生产日志订正过：
     #      它照样进 run_async_fallback 去试 Mac，只是那一跳在**参数映射层**就抛了同一个
     #      UnsupportedParamsError，**没有 HTTP 请求真的发到 Mac**，最后把真实 400 抛回。
     #      换一种"主上游 4xx 而兜底能接受该参数"的组合，兜底就会真的被打出去。
     #      判据是日志里的 `run_async_fallback` / `Error doing the fallback`，不是返回码。
     # ⚠️ 只给裸别名配兜底，`custom_dgx/` 前缀那条**刻意不配** —— 它是给"我就是要打 DGX"
-    #    的消费方用的，被静默换成 Mac 反而是坏事。
+    #    的消费方用的，被静默换成别的模型反而是坏事。
     # ☠️ 换模型时这里的键名要跟着换（它是别名的字面量），漏改 = 兜底静默失效。
     router_settings:
-      fallbacks: [{"DeepSeek-V4.1-Flash-1017": ["mac/ornith"]}]
+      fallbacks: [{"DeepSeek-V4.1-Flash-1017": ["studio/qwen3.8-27b"]}]
 
     # ── 客户端 IP（2026-10-03）──
     # 公网请求到 LiteLLM 时 TCP 对端已经是集群内地址，spend log 的 requester_ip_address
@@ -164,7 +172,7 @@ data:
     #    理由与信任边界见 client_ip.py 的文件头。
     # ── 上游兼容改写（2026-11-14）──
     # DGX 会对两种请求回 400（对话中间的 system 消息、不认识的 reasoning_effort 档位），
-    # 裸别名的兜底把它们静默转给 Mac。upstream_compat 按上面 model_info 的声明在转发前改写。
+    # 裸别名的兜底把它们静默转给当时的兜底 Ornith。upstream_compat 按上面 model_info 的声明在转发前改写。
     # 详见 upstream_compat.py 的文件头；同样必须 subPath 挂到 /app/。
     litellm_settings:
       callbacks: ["codex_compat.codex_compat_handler", "client_ip.client_ip_handler",
@@ -190,7 +198,7 @@ spec:
         #    ⇒ ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按**旧路由表**继续跑。
         #    2026-08-25 实际踩过一次（改了 mac/ornith 后必须手动 rollout restart 才生效）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py 的 STAMP_ONLY），别手改。
-        checksum/config: "15a7e777fd878e04"
+        checksum/config: "d528324bc9e6df6f"
         # 同理，但盯的是 codex_compat.py（litellm-codex-compat ConfigMap）：
         # 也是 subPath 挂载 + 只在启动时 import，改了不重启就是静默跑旧代码。
         checksum/codex-compat-py: "e5da4a39d90243d4"

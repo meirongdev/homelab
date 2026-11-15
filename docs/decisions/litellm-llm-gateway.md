@@ -33,6 +33,13 @@
 >   Mac 的 embedding / TTS / ASR 经网关实测可用（TTS 出 WAV 再送 ASR 转写一字不差）。
 >   open-notebook 的 Mac 别名按 OMLX 原名建（它的模型改名要删了重建），jobs-sg 用不带兜底的 `custom_dgx/` 别名
 >   （它的模型名是缓存键）。生效事实见 [reference/litellm-gateway.md](../reference/litellm-gateway.md) 的消费方表。
+> 修订: 2026-11-15：兜底由 M2 的 `mac/ornith`（Ornith-1.5-35B-A3B）换成 Mac Studio 的 `studio/qwen3.8-27b`
+>   （用户决定）。Decision 的形状不变（DGX 主 + Mac 兜底、严格主→兜底），换的只是哪台 Mac。换前经网关实测：
+>   Studio 接得住 DGX 现在接的全部请求形状（`reasoning_effort` 七档、对话中间的 system、工具调用，chat /
+>   responses / messages 三条路），上下文同为 262k；池天花板 ~106G、模型常驻，没有 M2 那种换入换出期间回
+>   `is busy` 的故障模式。代价两条：OMLX 不校验 `reasoning_effort`，裸别名上的参数级 400 全被兜底吞掉；
+>   兜底流量与 xiaogpt 等指名调用挤同一个进程。M2 的别名全部保留，只是不再进兜底链。
+>   生效事实见 [reference/litellm-gateway.md](../reference/litellm-gateway.md) 的「Mac Studio 上游」。
 
 ## Context
 

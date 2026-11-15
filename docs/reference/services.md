@@ -1,6 +1,6 @@
 # Services — 服务清单
 
-> Last updated: 2026-10-28
+> Last updated: 2026-11-15
 > Status: 生效事实
 >
 > **这张表是服务清单的唯一真相源**：`docs/README.md`、`docs/ARCHITECTURE.md` 与各 runbook
@@ -27,7 +27,7 @@
 | Calibre-Web | oracle-k3s | `personal-services` | `book.meirong.dev` | |
 | Open Notebook (AI 研读) | homelab | `personal-services` | `notebook.meirong.dev` | 模型走 DGX + Mac OMLX（[open-notebook.md](open-notebook.md)） |
 | Multica (AI 编码 agent 协作台) | homelab | `personal-services` | `multica.meirong.dev` | ☠️ **服务是两半的**，daemon 在 MacBook 上；另有 `/` 重定向坑，见备忘 |
-| LiteLLM (LLM 网关) | homelab | `litellm` | `llm.meirong.dev` | inference API + 自带认证 admin UI `/ui`；DGX 主 + Mac 兜底。运维事实与坑见 [litellm-gateway.md](litellm-gateway.md) |
+| LiteLLM (LLM 网关) | homelab | `litellm` | `llm.meirong.dev` | inference API + 自带认证 admin UI `/ui`；DGX 主 + Mac Studio 兜底。运维事实与坑见 [litellm-gateway.md](litellm-gateway.md) |
 | Nakama (游戏后端) | homelab | `personal-services` | `nakama.meirong.dev` + `nakama-console.meirong.dev` | ☠️ 控制台裸挂公网、只有自带口令，见备忘 |
 | 家庭游戏大厅 (Godot Web) | homelab | `personal-services` | `game.meirong.dev` | ☠️ 这个域名下**还挂着 Nakama 的 API**，路由少两条游戏就打不开，见备忘 |
 | jobs-sg (SG 岗位周报) | homelab | `jobs-sg` | `jobs.meirong.dev` | 独立 ns + 3 个 CronJob（[jobs-sg.md](jobs-sg.md)） |

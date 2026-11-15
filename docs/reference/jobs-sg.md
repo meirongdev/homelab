@@ -142,7 +142,7 @@ Vault `secret/homelab/jobs-sg` 的 `llm_api_key` → ExternalSecret `jobs-sg-llm
 DGX 栈本身（模型、端口、引擎、档位）的唯一真相源是 [litellm-gateway.md](litellm-gateway.md) 的「DGX 主力栈」；
 换栈照 [runbooks/dgx-model-swap-homelab-followup.md](../runbooks/dgx-model-swap-homelab-followup.md) 走。
 
-- ☠️ **用 `custom_dgx/` 前缀那条，不用同名裸别名**：裸别名配了兜底，DGX 出错时网关静默换成 M2 的 Ornith
+- ☠️ **用 `custom_dgx/` 前缀那条，不用同名裸别名**：裸别名配了兜底，DGX 出错时网关静默换成 Studio 的 Qwen3.8-27B
   作答；而模型名同时是 enrich 缓存键和 `job_tech` 的出处，别的模型的结果会挂着 DGX 的名字进缓存。
   前缀这条没有兜底，DGX 不通就如实报错，岗位留在积压里第二天再试。
 - ☠️ 换别名要同时改 key 的白名单（[litellm-gateway.md](litellm-gateway.md) 坑 A），这把 key 只认这一个别名。

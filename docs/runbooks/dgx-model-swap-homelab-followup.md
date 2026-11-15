@@ -114,7 +114,7 @@ d=json.load(sys.stdin)["data"]
 
 | # | 文件 | 字段 | 备注 |
 |---|---|---|---|
-| 1 | `k8s/helm/manifests/litellm/litellm.yaml` | `custom_dgx/<name>` 与裸 `<name>` 的 `model_name` + `model: openai/<name>`，以及两条的 `model_info` 声明 | `fallbacks: ["mac/ornith"]` 保持不动；☠️ `upstream_reasoning_efforts` 按 §1 采到的集合改，`upstream_system_first` 看新模板还拒不拒中间的 system（[坑 E](../reference/litellm-gateway.md)）；☠️ 改完**必须** `cd k8s/helm && just gen-embedded-scripts` |
+| 1 | `k8s/helm/manifests/litellm/litellm.yaml` | `custom_dgx/<name>` 与裸 `<name>` 的 `model_name` + `model: openai/<name>`，以及两条的 `model_info` 声明 | `router_settings.fallbacks` 的**键**是裸别名字面量，跟着换（漏改 = 兜底静默失效，坑 A2），值 `["studio/qwen3.8-27b"]` 不动；☠️ `upstream_reasoning_efforts` 按 §1 采到的集合改，`upstream_system_first` 看新模板还拒不拒中间的 system（[坑 E](../reference/litellm-gateway.md)）；☠️ 改完**必须** `cd k8s/helm && just gen-embedded-scripts` |
 | 2 | `k8s/helm/manifests/jobs-sg/cronjob-enrich.yaml` | `LLM_MODELS` | 走网关（2026-11-11 起），用**前缀别名** `custom_dgx/<name>`（不带兜底）|
 | 3 | `k8s/helm/manifests/personal-services/open-notebook-provision.yaml` | `MODELS` + `DEFAULTS` 四个角色 + `EPISODE_PROFILE_LLMS` 三个 profile | 走网关（2026-11-11 起），用**裸名别名**；声明式，push 即生效 |
 | 4 | `cloud/oracle/manifests/calibre-metadata/metadata-llm.yaml` | 内嵌脚本的 `LLM_MODEL` 默认值 + CronJob 的 `LLM_MODEL` | 走网关，走的是**裸名别名** |
@@ -327,7 +327,8 @@ Open Notebook 的接线只能在应用里看（值存的是模型 id，不是名
 |---|---|---|---|
 | DGX 两台 GB10（`100.97.87.120` head / `100.67.164.92`，2026-09-20 起常驻 `fndgx` vLLM 栈） | **别人 tailnet 的共享节点**，经 Tailscale node sharing 进来 | served name / **端点** / **引擎** / ctx / 冷启动 / 并发上限 / **拓扑**全部由它单方面决定 | 引擎死 = 响（定向告警）；**换栈 = 哑**（只有第一个 404 或第一张空面板才发现，见 §8 哨兵那条） |
 | `nv-dgx-spark` 仓库 | 本机 `~/projects/meirongdev/nv-dgx-spark` | `stacks/PRIMARY` + `stacks/<id>/stack.env` = **"谁是主力"的唯一事实源**（2026-09-19 起）；memwatch、**权重与镜像保留期 = 我们的回滚窗口** | 那边换栈而我们没跟上，表现是哑的（见上一行）。✅ 好消息：make 动词已收敛成栈无关的 `status/restart/logs/test`，我们的 runbook 指针从此不会因换栈而过期 |
-| Mac 上的 OMLX（`100.89.15.120:8000`） | 另一台机器（笔记本） | 兜底上游 + embedding / TTS / STT 全在这；`fast` profile 的开关名也在它那边 | 兜底拿不拿得到是哑的（且受 key 白名单影响，见 §3） |
+| M2 上的 OMLX（`100.89.15.120:8000`） | 另一台机器（笔记本） | embedding / TTS / STT 全在这；`fast` profile 的开关名也在它那边（2026-11-15 前也是兜底上游） | 哑的 |
+| Mac Studio 上的 OMLX（`100.98.220.75:8000`） | 另一台机器 | DGX 裸别名的兜底上游（2026-11-15 起） | 兜底拿不拿得到是哑的（不受 key 白名单影响，见 [坑 A](../reference/litellm-gateway.md)） |
 | OpenRouter | 第三方 SaaS | 第三来源；**目录与限额在对方手里**（以接口的 pricing 为准；NVIDIA 第四来源 2026-10-04 已删） | 免费档 429/503 是响的；目录漂移是哑的 |
 
 ### B. 运行时状态：在本仓库部署、但**不在 git 里**

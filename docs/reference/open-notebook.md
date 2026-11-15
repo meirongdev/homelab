@@ -34,9 +34,9 @@ personal-services 的网络策略随之只放行 litellm:4000，不再给 DGX、
 
 | 角色 | 网关别名（= open-notebook 里的模型名） | 网关后面 |
 |---|---|---|
-| 对话/转换/长上下文/工具（默认） | `DeepSeek-V4.1-Flash-1017`（524k ctx，2026-11-15 起） | DGX；**DGX 出错时网关自动兜底到 M2 的 Ornith** |
+| 对话/转换/长上下文/工具（默认） | `DeepSeek-V4.1-Flash-1017`（524k ctx，2026-11-15 起） | DGX；**DGX 出错时网关自动兜底到 Studio 的 Qwen3.8-27B** |
 | 对话备选（非默认，UI 手动切） | `ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit`（262k ctx） | M2 OMLX |
-| 对话第二备选（非默认，UI 手动切） | `studio/qwen3.8-27b`（262k ctx） | Mac Studio OMLX；不在兜底链里 |
+| 对话第二备选（非默认，UI 手动切） | `studio/qwen3.8-27b`（262k ctx） | Mac Studio OMLX；也是上面默认那条的兜底（2026-11-15 起）|
 | Embedding | `mlx-community__Qwen3-Embedding-4B-4bit-DWQ`（2560 维） | M2 OMLX |
 | STT | `mlx-community__Qwen3-ASR-1.7B-8bit` | M2 OMLX |
 | TTS | `mlx-community__Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit`（9 个具名音色）| M2 OMLX |
@@ -56,7 +56,7 @@ ctx / 冷启动 / 回滚）以 [litellm-gateway.md](litellm-gateway.md) 的「DG
 ### ☠️ DGX 换主力栈时要核的三件事
 
 1. **长上下文有硬上限 262144**：`large_context_model` 与三个播客 episode profile 塞整本书会
-   超窗，兜底的 Mac Ornith 也是 262k。长书截断或报超窗时先按这条判，别先怀疑上游挂了。
+   超窗，兜底的 Studio Qwen3.8-27B 也是 262k。长书截断或报超窗时先按这条判，别先怀疑上游挂了。
 2. **端点只在网关改**：凭据的 `base_url` 指向网关，换栈、换端口都只改 litellm.yaml。
    网关别名若跟着改名，这里的模型名、默认位、播客 profile 和 key 白名单要一起改（第 3 条的旧条目问题随之而来）；
    别名不改名就什么都不用动。凭据名**刻意不随引擎改名**（provisioner 只增不删，改名只会多一条死凭据）。

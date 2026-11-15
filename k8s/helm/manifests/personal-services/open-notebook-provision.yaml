@@ -69,7 +69,7 @@ data:
         # ☠️ 2026-11-11 起这里的名字是 **LiteLLM 的别名**（经网关），必须同时满足两件事：
         #    在 litellm.yaml 的 model_list 里存在，且在 open-notebook 那把虚拟 key 的白名单里（坑 A）。
         #    写错会当场 400（网关不认），不再像直连 SGLang 时那样静默回显。
-        #    这个名字是裸别名，带兜底：DGX 出错时网关改由 M2 的 Ornith 作答（交互场景这正是想要的）。
+        #    这个名字是裸别名，带兜底：DGX 出错时网关改由 Studio 的 Qwen3.8-27B 作答（交互场景这正是想要的）。
         # ⚠️ 本 provisioner 只增不删（unmanaged models 只打 note）：改模型名之后**旧条目会
         #    留在 UI 里**，git push 带不走它，得手动删。
         # ☠️ **旧条目的危害在 2026-09-19 换成 SGLang 之后变大了**：vLLM 时代选中死条目会当场
@@ -95,7 +95,7 @@ data:
         {"name": "ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit", "type": "language", "credential": "mac-omlx"},
         # 第二备选对话模型（非默认，2026-11-11 接替 Qwen3.6-35B）：Mac Studio 的 Qwen3.8-27B（262k ctx，常驻、
         # 不与 M2 抢内存）。名字是网关别名原样（带 studio/ 前缀），所以它的请求走 Studio 而不是 M2；
-        # 挂在 mac-omlx 凭据下只是分组（两个凭据都指向网关）。网关别名不在任何兜底链里：Studio 不通就如实报错。
+        # 挂在 mac-omlx 凭据下只是分组（两个凭据都指向网关）。这个别名自己没有兜底：Studio 不通就如实报错（它倒是上面 DGX 裸别名的兜底目标）。
         # ☠️ 它在 open-notebook 那把 key 的白名单里是单独加的（坑 A），改别名要连 key 一起改。
         {"name": "studio/qwen3.8-27b", "type": "language", "credential": "mac-omlx"},
         {"name": "mlx-community__Qwen3-Embedding-4B-4bit-DWQ", "type": "embedding", "credential": "mac-omlx"},
@@ -123,7 +123,7 @@ data:
         "default_transformation_model": "DeepSeek-V4.1-Flash-1017",
         # ⚠️ max_model_len 2026-11-15 起是 524288（DeepSeek-V4.1，实测 /v1/models），比旧栈翻倍；
         #    但长上下文角色仍有真实上限，整本书一次性塞进去照样可能超窗。
-        #    ☠️ 兜底的 Mac Ornith 只有 262k：超过 262k 的请求在 DGX 出错时兜底也接不住。
+        #    ☠️ 兜底的 Studio Qwen3.8-27B 只有 262k：超过 262k 的请求在 DGX 出错时兜底也接不住。
         "large_context_model": "DeepSeek-V4.1-Flash-1017",
         "default_tools_model": "DeepSeek-V4.1-Flash-1017",
         "default_embedding_model": "mlx-community__Qwen3-Embedding-4B-4bit-DWQ",
