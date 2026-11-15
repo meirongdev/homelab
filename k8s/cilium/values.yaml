@@ -114,7 +114,7 @@ hubble:
     enabled: false
   # 2026-11-10 网络策略阶段 0：只开 drop 和 policy 两个指标，粒度到 workload 名、不带 IP。
   # policy 指标只在被策略选中的 endpoint 上产生，序列很稀疏。告警 CiliumPolicyDrops 用 drop；
-  # audit 窗口里看 hubble_policy_verdicts_total。要看具体 IP，现场用 hubble observe。
+  # audit 窗口里看 hubble_policy_verdicts_total。要看具体 IP 和端口：`just helm netpol-verdicts`（下面 export 的 verdicts 流）。
   metrics:
     enabled:
       - "drop:sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,destination_namespace"
@@ -123,6 +123,69 @@ hubble:
       enabled: true
       labels: { release: kube-prometheus-stack }
       interval: "60s"   # chart 默认 10s；计数器用 60s 足够，少给热笔记本添负担
+  # 2026-11-15 流量日志 → Loki：agent 的环形缓冲只存几分钟（实测 40s–4min），夜间作业的调用看不到。
+  # agent 把选中的流量写成节点上的 JSON 文件，otel-collector（DaemonSet）的 filelog/hubble-* 收走送 Loki，
+  # 流 {service_name="hubble-flows"|"hubble-verdicts"}，保留 30 天（cloud/oracle/values/loki.yaml）。
+  # 用 dynamic 而不是 static：以后调过滤规则只改 ConfigMap cilium-flowlog-config，约 60s 生效、不重启 agent；
+  # 配置写错只是那个导出器不工作，agent 照常跑（fail-open）。
+  # ⚠️ 两个集群的 content 除了 flows 的最后一条 exclude 外必须一致，改一边就同步另一边（cloud/oracle/values/cilium.yaml）。
+  # ⚠️ 文件在 /var/run/cilium/hubble（tmpfs）：每个导出器 10MB × (1+2 份轮转) = 30MB，两个导出器每节点最多占 60MB 内存。
+  export:
+    dynamic:
+      enabled: true
+      config:
+        content:
+          # 调用图：只要新建连接（TCP 首个 SYN、UDP 首包）。2026-11-15 采样估算过滤后每节点 0–1 条/秒。
+          # 字段掩码不带 labels（pod 标签一条就上千字节）；reserved 身份看 identity 号：
+          # 1 host · 2/9 world · 4 health · 6 remote-node · 7 kube-apiserver · 8 ingress · ≥16777216 CIDR。
+          - name: flows
+            filePath: /var/run/cilium/hubble/flows.log
+            fileMaxSizeMb: 10
+            fileMaxBackups: 2
+            fieldMask: &flowmask
+              - verdict
+              - drop_reason_desc
+              - traffic_direction
+              - event_type
+              - trace_observation_point
+              - is_reply
+              - IP.source
+              - IP.destination
+              - IP.source_xlated
+              - l4.TCP.destination_port
+              - l4.UDP.destination_port
+              - source.identity
+              - source.cluster_name
+              - source.namespace
+              - source.workloads
+              - destination.identity
+              - destination.cluster_name
+              - destination.namespace
+              - destination.workloads
+              - egress_denied_by
+              - ingress_denied_by
+            includeFilters:
+              - event_type: [{ type: 4 }]        # trace 事件；policy-verdict(5) 是同一连接的重复记录
+                tcp_flags: [{ SYN: true }]
+                reply: [false]                   # 去掉 SYN-ACK
+              - event_type: [{ type: 4 }]
+                protocol: ["udp"]
+                reply: [false]
+            excludeFilters:
+              - source_label: ["reserved:host"]          # kubelet 探针、kube-apiserver 调 webhook、tailscaled
+              - destination_label: ["reserved:health"]   # cilium-health
+              - destination_port: ["53"]                 # DNS
+              - event_type: [{ type: 4, match_sub_type: true, sub_type: 11 }]   # TO_NETWORK：SNAT 后的重复记录
+          # 被拦和被审计的流量：不套 flows 的排除规则，翻 enforce 后 DNS / 探针被拦也要看得到。
+          - name: verdicts
+            filePath: /var/run/cilium/hubble/verdicts.log
+            fileMaxSizeMb: 10
+            fileMaxBackups: 2
+            fieldMask: *flowmask
+            includeFilters:
+              - verdict: ["DROPPED", "AUDIT"]
+            excludeFilters:
+              - drop_reason_desc: ["UNSUPPORTED_L3_PROTOCOL"]   # IPv6/LLDP 之类，约 1400 条/天，与策略无关
   tls:
     enabled: true
     auto:

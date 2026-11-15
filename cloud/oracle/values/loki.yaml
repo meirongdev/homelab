@@ -17,6 +17,13 @@ loki:
 
   limits_config:
     retention_period: 168h
+    # Cilium 流量日志留 30 天（2026-11-15）：调用图要覆盖每周才跑一次的作业，网络策略翻 enforce
+    # 前后也要能回头对照。量小：2026-11-15 短窗口采样估算两集群合计约 13 万行 / 天、每行约 450 字节（约 60MB / 天原始量），压缩后落盘每天个位数 MB。
+    # 来源见 k8s/cilium/values.yaml 的 hubble.export。
+    retention_stream:
+      - selector: '{service_name=~"hubble-flows|hubble-verdicts"}'
+        priority: 1
+        period: 720h
     otlp_config:
       resource_attributes:
         attributes_config:

@@ -52,6 +52,64 @@ hubble:
     enabled:
       - "drop:sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,destination_namespace"
       - "policy:sourceContext=workload-name|reserved-identity;destinationContext=workload-name|reserved-identity;labelsContext=source_namespace,destination_namespace,traffic_direction"
+  # 2026-11-15 流量日志 → Loki。来龙去脉、字段掩码和过滤规则的理由都写在 homelab 那份
+  # （k8s/cilium/values.yaml 的 hubble.export），这里只是同一份配置。
+  # ⚠️ 与 homelab 唯一的差别是 flows 多排除 loki-gateway → loki：nginx 不复用连接，
+  #    2026-11-15 实测占本节点新建连接的一半，而这条边本身没有信息量。
+  export:
+    dynamic:
+      enabled: true
+      config:
+        content:
+          - name: flows
+            filePath: /var/run/cilium/hubble/flows.log
+            fileMaxSizeMb: 10
+            fileMaxBackups: 2
+            fieldMask: &flowmask
+              - verdict
+              - drop_reason_desc
+              - traffic_direction
+              - event_type
+              - trace_observation_point
+              - is_reply
+              - IP.source
+              - IP.destination
+              - IP.source_xlated
+              - l4.TCP.destination_port
+              - l4.UDP.destination_port
+              - source.identity
+              - source.cluster_name
+              - source.namespace
+              - source.workloads
+              - destination.identity
+              - destination.cluster_name
+              - destination.namespace
+              - destination.workloads
+              - egress_denied_by
+              - ingress_denied_by
+            includeFilters:
+              - event_type: [{ type: 4 }]
+                tcp_flags: [{ SYN: true }]
+                reply: [false]
+              - event_type: [{ type: 4 }]
+                protocol: ["udp"]
+                reply: [false]
+            excludeFilters:
+              - source_label: ["reserved:host"]
+              - destination_label: ["reserved:health"]
+              - destination_port: ["53"]
+              - event_type: [{ type: 4, match_sub_type: true, sub_type: 11 }]
+              - source_pod: ["monitoring/loki-gateway"]
+                destination_pod: ["monitoring/loki-"]
+          - name: verdicts
+            filePath: /var/run/cilium/hubble/verdicts.log
+            fileMaxSizeMb: 10
+            fileMaxBackups: 2
+            fieldMask: *flowmask
+            includeFilters:
+              - verdict: ["DROPPED", "AUDIT"]
+            excludeFilters:
+              - drop_reason_desc: ["UNSUPPORTED_L3_PROTOCOL"]
 
 # --- 网络策略阶段 0（2026-11-10）---
 # ☠️ 这两项只改 cilium-config ConfigMap：chart 的 rollOutCiliumPods=false。这次因为同时开了

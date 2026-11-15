@@ -45,11 +45,44 @@ presets:
     enabled: true
     extractAllPodLabels: false    # 只提取 metadata 基本集，控制 Loki 标签基数
 
+# Cilium 流量日志（2026-11-15）：agent 的 hubble 导出器写在节点的 /var/run/cilium/hubble
+# （k8s/cilium/values.yaml 的 hubble.export），下面的 filelog/hubble-* 读它。
+# DirectoryOrCreate：collector 先于导出器起来也不卡 ContainerCreating。
+extraVolumes:
+  - name: hubble-flowlogs
+    hostPath:
+      path: /var/run/cilium/hubble
+      type: DirectoryOrCreate
+extraVolumeMounts:
+  - name: hubble-flowlogs
+    mountPath: /var/run/cilium/hubble
+    readOnly: true
+
 config:
   extensions:
     # storeCheckpoints preset 已挂 hostPath；create_directory 让配置自足（首次启动自建目录）
     file_storage:
       create_directory: true
+  # Cilium 流量日志：每行一条 JSON 流量，原样送 Loki、不解析（查询时 `| json`），只靠
+  # service.name 区分两条流。过滤规则和字段在 k8s/cilium/values.yaml，这里不重复。
+  # start_at: beginning + checkpoint：首次读整个文件，之后从断点续读，重启不丢不重。
+  receivers:
+    filelog/hubble-flows:
+      include: [/var/run/cilium/hubble/flows.log]
+      start_at: beginning
+      storage: file_storage
+      operators:
+        - type: add
+          field: resource["service.name"]
+          value: hubble-flows
+    filelog/hubble-verdicts:
+      include: [/var/run/cilium/hubble/verdicts.log]
+      start_at: beginning
+      storage: file_storage
+      operators:
+        - type: add
+          field: resource["service.name"]
+          value: hubble-verdicts
   processors:
     # 顺序约定：memory_limiter 必须最前，batch 必须最后
     memory_limiter:
@@ -99,6 +132,11 @@ config:
       logs:
         receivers: [otlp, filelog]
         processors: [memory_limiter, k8sattributes, resource, batch]
+        exporters: [otlphttp/loki]
+      # 流量日志不是 pod 日志，不过 k8sattributes
+      logs/hubble:
+        receivers: [filelog/hubble-flows, filelog/hubble-verdicts]
+        processors: [memory_limiter, resource, batch]
         exporters: [otlphttp/loki]
       traces:
         receivers: [otlp]

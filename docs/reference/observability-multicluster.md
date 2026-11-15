@@ -1,6 +1,6 @@
 # Multi-Cluster Observability Architecture
 
-> Last updated: 2026-11-10
+> Last updated: 2026-11-15
 > Status: 生效事实
 >
 > 遥测的**采集与汇聚侧**：三条管线怎么跨集群流动、应用怎么接日志/追踪、坏了怎么查。
@@ -74,6 +74,33 @@ homelab (100.94.186.7)                       oracle-k3s (100.107.166.37)
   preset `kubernetesAttributes` 申请 RBAC，从 K8s API 补 pod metadata。
 - 发往 oracle `http://100.107.166.37:31080/otlp`。oracle 侧不是这个形态，那边是手写清单。
 
+### Cilium 流量日志（两集群 → Loki，2026-11-15 起）
+
+`hubble observe` 只能看 agent 环形缓冲里的几分钟（实测 40 秒到 4 分钟），夜间和每周的作业永远看不到。
+所以让 agent 把选中的流量写成节点上的 JSON 行，再由上面两条日志管道顺路送进 Loki：
+
+```
+Cilium agent（hubble 动态导出器）→ /var/run/cilium/hubble/{flows,verdicts}.log
+  → otel-collector filelog/hubble-*（各加 service.name）→ Loki，保留 30 天
+```
+
+| 流 | 内容 | 用途 |
+|----|------|------|
+| `{service_name="hubble-flows"}` | 新建连接：TCP 首个 SYN、UDP 首包；排除 kubelet 探针（源是 host）、DNS、cilium-health、SNAT 后的重复记录 | 调用图：`just helm netpol-callgraph [7d] [cluster]` |
+| `{service_name="hubble-verdicts"}` | 所有 DROPPED / AUDIT，不套上面的排除规则 | 网络策略取证：`just helm netpol-verdicts [24h] [cluster]` |
+
+- 过滤规则和字段掩码的唯一真相源是两份 Cilium values 的 `hubble.export.dynamic`（`k8s/cilium/values.yaml`、
+  `cloud/oracle/values/cilium.yaml`），两份除 oracle 多排除 loki-gateway → loki 外必须一致。
+  改它是 manual-helm（`deploy-cilium` + `connect-clustermesh`）；之后 agent 约 60 秒内自动重载，不重启。
+- 只留十来个字段，不带 pod labels。非 pod 端靠 identity 号区分：1 host · 2/9 world · 4 health ·
+  6 remote-node · 7 kube-apiserver · 8 ingress · ≥16777216 是 CIDR 身份（按 IP 看）。
+- 量：2026-11-15 短窗口采样估算两集群合计约 13 万行 / 天，约为 Loki 现有日写入行数的八分之一。
+- ⚠️ 公网目标只有 IP 没有域名：没开 DNS 代理，Hubble 看不到 DNS 应答。
+- ⚠️ 调用图的「次数」是观测次数：跨节点连接被源、目的两个节点各记一次，只当量级看。
+- ⚠️ 文件在 tmpfs（`/var/run`）：每个导出器 10MB × 3 份轮转，每节点最多占 60MB 内存。
+- 自检：节点上 `ls -la /var/run/cilium/hubble/` 有两个 `.log` 且在长；Loki 里
+  `{service_name="hubble-flows"}` 有新行。都没有就先看 agent 日志里的 `exporter` 报错。
+
 ### Loki 标签
 
 Loki 3.x 原生收 OTLP（`/otlp/v1/logs`），把 OTel resource attributes 提升为 stream label。
@@ -86,7 +113,7 @@ Loki 3.x 原生收 OTLP（`/otlp/v1/logs`），把 OTel resource attributes 提�
 | `k8s_pod_name` | 同上 | `calibre-web-569cc4444d-rfw67` |
 | `k8s_container_name` | 同上；同 pod 多容器各成一路 | `calibre-web` / `permission-fixer` |
 | `k8s_deployment_name` | k8sattributes | `calibre-web` |
-| `service_name` | OTel resource attr（SDK 上报的服务） | `calibre-web` |
+| `service_name` | OTel resource attr（SDK 上报的服务；Cilium 流量日志由 filelog 写死） | `calibre-web` / `hubble-flows` |
 
 `k8s.node.name`、`log.iostream` 等在 structured metadata 里，不是索引标签，用管道过滤：
 `{k8s_namespace_name="x"} | log_iostream="stderr"`。

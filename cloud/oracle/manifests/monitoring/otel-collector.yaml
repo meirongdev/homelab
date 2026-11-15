@@ -157,6 +157,10 @@ spec:
               readOnly: true
             - name: otel-state
               mountPath: /var/lib/otelcol
+            # Cilium 流量日志（filelog/hubble-*，见 otel-collector-config.yaml）
+            - name: hubble-flowlogs
+              mountPath: /var/run/cilium/hubble
+              readOnly: true
           env:
             - name: K8S_NODE_NAME
               valueFrom:
@@ -184,6 +188,12 @@ spec:
         - name: otel-state
           hostPath:
             path: /var/lib/otelcol
+            type: DirectoryOrCreate
+        # Cilium agent 的 hubble 导出器写在这里（cloud/oracle/values/cilium.yaml 的 hubble.export）。
+        # DirectoryOrCreate：collector 先于导出器起来也不卡 ContainerCreating。
+        - name: hubble-flowlogs
+          hostPath:
+            path: /var/run/cilium/hubble
             type: DirectoryOrCreate
       tolerations:
         - operator: Exists

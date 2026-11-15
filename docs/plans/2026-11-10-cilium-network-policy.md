@@ -130,7 +130,7 @@ hubble:
 ```
 
 - 只开 `drop` 和 `policy` 两个指标，粒度是 workload 名，不带 IP。`policy` 只在有策略的 endpoint 上产生，所以序列很稀疏，
-  不违背 [prometheus-series-reduction](../decisions/prometheus-series-reduction.md)。要看具体是哪个 IP，用 `hubble observe` 现场复现（§7.3）。
+  不违背 [prometheus-series-reduction](../decisions/prometheus-series-reduction.md)。要看具体是哪个 IP，2026-11-15 起用 `just helm netpol-verdicts`（DROPPED / AUDIT 逐条进 Loki，留 30 天）；之前只能 `hubble observe` 现场复现（§7.3）。
 - oracle 在 `cloud/oracle/manifests/monitoring/otel-collector-config.yaml` 里照 `prometheus/cilium-envoy` 的写法，
   新增一个对 `hubble-metrics.kube-system.svc:9965` 的抓取。
 - `policyAuditMode` 在 chart 1.20 的 values.yaml 里只是一行注释，但模板用 `hasKey` 读它，写上就生效（已核对 `cilium-configmap.yaml`）。
@@ -444,7 +444,7 @@ homelab 的 10 条先放在分支上，等每个 agent 都确认是 `PolicyAudit
   `kubectl --context <ctx> -n <ns> create job --from=cronjob/<name> netpol-soak-<name>`
 - **滚动重启长连接的客户端**，强制重新建连：两侧的 otel-collector、两侧的 ESO、
   所有被策略选中 ns 内的 Deployment、grafana、miniflux、litellm。不重启 ArgoCD（它不在任何策略里）。
-- `CiliumPolicyAuditVerdicts` 响了（Telegram）就处理：用 `hubble observe --verdict AUDIT -n <ns> --since 1h` 看 IP 和端口，补规则后重新计时。
+- `CiliumPolicyAuditVerdicts` 响了（Telegram）就处理：用 `just helm netpol-verdicts 24h` 看 IP、端口和命中的策略，补规则后重新计时。流量日志上线（2026-11-15）之前的判决只能 `hubble observe --verdict AUDIT -n <ns> --since 1h` 现场看。
 
 **homelab soak 记录**：2026-11-10 16:41（UTC+8）10 条 CNP 同步完成，soak 从这时算起，**最早 2026-11-18 可翻 enforce**。
 `netpol-poc/-` 那几条 audit 是 PoC 留下的，2026-11-13 之后会滚出 72h 窗口，不算数。

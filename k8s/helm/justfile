@@ -246,6 +246,23 @@ netpol-audit window="24h" cluster="":
       | column -t
     echo "(以上为空 = 最近 {{window}} 零 audit 判决)"
 
+# 调用图：最近一段时间里谁连过谁。数据是 Loki 里的 Cilium 流量日志（保留 30 天，来源见
+# k8s/cilium/values.yaml 的 hubble.export），所以夜间、每周的作业也看得到；hubble observe 只有几分钟。
+# 加 --json 输出给调用图页面的生成脚本用：just helm netpol-callgraph 30d "" --json
+# 用法：just helm netpol-callgraph               # 两集群，最近 7d
+#       just helm netpol-callgraph 30d oracle-k3s
+# 列出调用边（Loki 流量日志）
+netpol-callgraph window="7d" cluster="" *flags="":
+    python3 ../../scripts/hubble-flowlog.py edges --window {{window}} --cluster "{{cluster}}" {{flags}}
+
+# 被拦（DROPPED）和被审计（AUDIT）流量的逐条明细：带 IP、端口、命中的策略名。
+# 告警 CiliumPolicyAuditVerdicts / CiliumPolicyDrops 响了以后用它查具体是哪条连接。
+# 用法：just helm netpol-verdicts                # 两集群，最近 24h
+#       just helm netpol-verdicts 72h homelab
+# 列出被拦 / 被审计的流量明细（Loki 流量日志）
+netpol-verdicts window="24h" cluster="":
+    python3 ../../scripts/hubble-flowlog.py verdicts --window {{window}} --cluster "{{cluster}}"
+
 # 检查双向 ClusterMesh / KVStoreMesh 状态
 clustermesh-status:
     cilium clustermesh status --context k3s-homelab --wait
