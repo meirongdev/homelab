@@ -55,9 +55,21 @@ data:
       #    （外部 key 多了；账户级白名单也要改，zcode-agent 那把 key 自己的 models 是空的）。
       # ☠️☠️ 临时（2026-11-15 起）：DGX :8000 拒绝连接，这个裸别名先改由 Studio 的 Qwen3.8-27B 作答。
       #    客户端照旧用这个名字、key 白名单不动，对调用方透明（只是换了模型、变慢）。
-      #    DGX 恢复后 `git revert` 本次提交即切回（ROADMAP 记着）；revert 前先
-      #    `curl -s http://100.97.87.120:8000/v1/models` 确认 served name 和端口都没变，变了就按换栈 runbook 走。
+      #    DGX 恢复后把本文件里标着「☠️☠️ 临时」的三处（本条、下面的兼容别名、末尾 fallbacks）改回去（ROADMAP #22）；
+      #    改之前先 `curl -s http://100.97.87.120:8000/v1/models` 确认 served name 和端口都没变，变了就按换栈 runbook 走。
+      #    原值：model: openai/DeepSeek-V4.1-Flash-1017 / api_base: http://100.97.87.120:8000/v1
       - model_name: DeepSeek-V4.1-Flash-1017
+        litellm_params:
+          model: openai/Qwen3.8-27B-MLX-4bit
+          api_base: http://100.98.220.75:8000/v1
+          api_key: dummy
+      # ── 兼容别名 qwen3.8-flash-next-tp2（2026-11-15）──
+      # 上一个 DGX 栈的名字。外发 key 的使用者还不知道已改名为 DeepSeek-V4.1-Flash-1017，客户端照旧发旧名，
+      # 所以按旧名建一条，**上游和兜底始终与上面的裸别名保持一致**。4 把 ext-* key 和 ext-team-1 账户的白名单
+      # 同日加回了这个名字（坑 A）。名字与实际模型对不上是刻意的代价，只为不动客户端。
+      # 删它的条件：spend log 里连续两周没有旧名调用；删时同步从那 5 处白名单里拿掉。
+      # ☠️☠️ 临时（2026-11-15 起，同上面裸别名那条）：现在指向 Studio，切回 DGX 时这条一起改（原值同上）。
+      - model_name: qwen3.8-flash-next-tp2
         litellm_params:
           model: openai/Qwen3.8-27B-MLX-4bit
           api_base: http://100.98.220.75:8000/v1
@@ -167,7 +179,8 @@ data:
     #    的消费方用的，被静默换成别的模型反而是坏事。
     # ☠️ 换模型时这里的键名要跟着换（它是别名的字面量），漏改 = 兜底静默失效。
     # ☠️☠️ 临时（2026-11-15 起，同上面裸别名那条）：主上游此刻就是 Studio，再兜底到 Studio 只会把失败的请求重打一遍，
-    #    所以兜底链先清空。revert 后恢复为 [{"DeepSeek-V4.1-Flash-1017": ["studio/qwen3.8-27b"]}]。
+    #    所以兜底链先清空。切回 DGX 时恢复为（兼容别名也要兜底）：
+    #    [{"DeepSeek-V4.1-Flash-1017": ["studio/qwen3.8-27b"]}, {"qwen3.8-flash-next-tp2": ["studio/qwen3.8-27b"]}]
     router_settings:
       fallbacks: []
 
@@ -204,7 +217,7 @@ spec:
         #    ⇒ ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按**旧路由表**继续跑。
         #    2026-08-25 实际踩过一次（改了 mac/ornith 后必须手动 rollout restart 才生效）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py 的 STAMP_ONLY），别手改。
-        checksum/config: "58a73955260e9778"
+        checksum/config: "9d3848521a66249b"
         # 同理，但盯的是 codex_compat.py（litellm-codex-compat ConfigMap）：
         # 也是 subPath 挂载 + 只在启动时 import，改了不重启就是静默跑旧代码。
         checksum/codex-compat-py: "e5da4a39d90243d4"
