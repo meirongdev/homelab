@@ -22,6 +22,8 @@
     litellm_url: "https://llm.meirong.dev/v1"
     litellm_keys: "{{ lookup('ansible.builtin.env', 'MAGPIE_LITELLM_KEYS') | default('{}', true) | from_json }}"
     litellm_key: "{{ litellm_keys[inventory_hostname] | default('') }}"
+    # 网关上 DGX 的裸别名（带 Studio 兜底）。换栈改名时只改这里（runbooks/dgx-model-swap-homelab-followup.md）。
+    dgx_alias: DeepSeek-V4.1-Flash-1017
   environment:
     PATH: "{{ ansible_env.HOME | default('~') }}/.local/bin:{{ homebrew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
@@ -82,18 +84,41 @@
       when: provider_key.rc != 0
       no_log: true
 
+    # 不带参数 = 从网关重新拉模型列表（网关删掉的别名自动下架、新别名上架）。
+    # ☠️ 必须在 group add 之前单独跑：下面带 `-x` 的那条在「x 没暴露」时直接报错退出、**不刷新**，
+    #    2026-11-15 换栈时 group add 因此引用了列表里还不存在的新别名而失败，又被 failed_when: false
+    #    吞掉 —— playbook 报 changed，两台的组实际还指着已删除的旧名（magpie 标 "not served"）。
+    - name: Refresh homelab model list from the gateway
+      ansible.builtin.command: "{{ magpie_bin }} provider models homelab"
+      changed_when: false
+
     # 网关 DGX 别名随上游换栈改名（2026-11-15：qwen3.8-flash-next-tp2 → DeepSeek-V4.1-Flash-1017，
-    # 见 docs/runbooks/dgx-model-swap-homelab-followup.md）。旧名的 -custom_dgx 那条留着无害（不存在就是空操作）。
+    # 见 docs/runbooks/dgx-model-swap-homelab-followup.md）。
+    # ⚠️ magpie 0.1.2918 上这条实测藏不掉 custom_dgx（报 "isn't exposed"，列表里却还在），
+    #    影响只是 agent 多一个不带兜底的可选项，所以保留 failed_when: false。
     - name: Remove custom_dgx from exposed models
       ansible.builtin.command: >
-        {{ magpie_bin }} provider models homelab -custom_dgx/DeepSeek-V4.1-Flash-1017 -custom_dgx/qwen3.8-flash-next-tp2
+        {{ magpie_bin }} provider models homelab -custom_dgx/{{ dgx_alias }}
       failed_when: false
 
     # ⚠️ 组 id 保持 `qwen` 是刻意的：agent 按 `group/qwen` 选它，改 id 每个 agent 都得重设。
     #    名字是历史遗留（建组时主力是 Qwen），成员才是事实：DGX 主力在前、Studio 的 Qwen3.8-27B 兜底。
     - name: Configure qwen routing group (DGX primary, Studio fallback)
-      ansible.builtin.command: "{{ magpie_bin }} group add qwen models=homelab/DeepSeek-V4.1-Flash-1017,homelab/studio/qwen3.8-27b routing=order"
-      failed_when: false
+      ansible.builtin.command: "{{ magpie_bin }} group add qwen models=homelab/{{ dgx_alias }},homelab/studio/qwen3.8-27b routing=order"
+
+    # 组配错是静默的：agent 照常工作，只是一直落在 Studio 上。所以显式断言。
+    - name: Read qwen routing group
+      ansible.builtin.command: "{{ magpie_bin }} groups"
+      register: magpie_groups
+      changed_when: false
+
+    - name: Assert qwen group starts with the live DGX alias
+      ansible.builtin.assert:
+        that:
+          - magpie_groups.stdout_lines | select('search', 'group/qwen') | select('search', 'homelab/' ~ dgx_alias) | list | length > 0
+          - magpie_groups.stdout_lines | select('search', 'group/qwen') | select('search', 'not served') | list | length == 0
+        fail_msg: "qwen 组没有指向 homelab/{{ dgx_alias }}，或有成员 not served：{{ magpie_groups.stdout_lines | select('search', 'group/qwen') | list }}"
+        quiet: true
 
     - name: Test homelab provider connection
       ansible.builtin.command: "{{ magpie_bin }} provider test homelab"
