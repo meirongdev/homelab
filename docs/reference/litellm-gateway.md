@@ -1,6 +1,6 @@
 # LiteLLM 网关（运维事实与坑）
 
-> Last updated: 2026-11-15
+> Last updated: 2026-11-16
 > Status: 生效事实
 > Scope: `llm.meirong.dev` 这个 LLM 网关的配置生效路径、鉴权分层、上游可用性边界，
 > 本文是 source of truth。为什么选 LiteLLM、上游怎么选、兜底为何几经更换（Qwen3.6 → Ornith → Studio），见
@@ -56,8 +56,8 @@
 | served name | `DeepSeek-V4.1-Flash-1017` |
 | 端点 | `100.97.87.120:8000/v1`（head 在 S1，与上一栈同端口）|
 | 引擎 | TensorFold（Zig）。☠️ **模型名写错照常 200**（与 SGLang 同类，vLLM 才 404），响应体的 `model` 是真名；判据只能是 `/v1/models` 或响应里的 `model` |
-| `max_model_len` | 524288（上一栈 262144）。⚠️ 兜底的 Studio Qwen3.8-27B 只有 262k，超过的请求 DGX 出错时兜底接不住 |
-| 拓扑 / 冷启动 | 双机 TP=2（rank0 + API 在 S1，rank1 在 S2）。11-15 实测 `loaded in 31.0s`（权重在页缓存里；冷缓存每台要读约 98 GiB，会久得多）。☠️ 两个 rank 必须成对起停，只用上游 `make restart` |
+| `max_model_len` | **262144**（上游 `local.sh` 的 `CONTEXT`）。换栈当天是 524288，当晚改小：与兜底的 262k 对齐（当时的 Ornith、现在的 Studio Qwen3.8-27B 都是 262k）、满窗 prefill 约 2 分钟（实测约 2,300 tok/s）不撞 300 秒客户端超时、S1 多留约 1 GiB 余量（7.0→8.0 GiB）。上游默认是 1M |
+| 拓扑 / 冷启动 | 双机 TP=2（rank0 + API 在 S1，rank1 在 S2）。11-15 实测 `loaded in 31.0s` / 改 262k 后 24.7s（权重在页缓存里；冷缓存每台要读约 98 GiB，会久得多）。☠️ 两个 rank 必须成对起停，只用上游 `make restart` |
 | 自愈 | 容器 `restart=no`、无 healthcheck。引擎日志说 rank 对断开时以 status 75 退出「供两个 rank 一起重启」，外层是否真会重启未核实 |
 | 并发 | ☠️ `/health` 报 `max_batch_size: 4`（上一栈 vLLM 是 64），第 5 路起排队。jobs-sg 的 `LLM_CONCURRENCY` 已随之 8→4 |
 | 关思考 | `chat_template_kwargs {"enable_thinking": false}` 生效；旧键 `{"thinking": false}` 在这个栈上**也**生效（Qwen 栈上是静默空操作）|

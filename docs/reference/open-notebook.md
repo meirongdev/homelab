@@ -1,6 +1,6 @@
 # Open Notebook — AI 研读知识库（架构事实）
 
-> Last updated: 2026-11-15
+> Last updated: 2026-11-16
 > Status: 生效事实
 > Scope: Open Notebook（NotebookLM 自托管替代）在 homelab 集群的部署形态、模型接线、
 > 配置真相源地图、备份口径，本文是 source of truth。
@@ -34,7 +34,7 @@ personal-services 的网络策略随之只放行 litellm:4000，不再给 DGX、
 
 | 角色 | 网关别名（= open-notebook 里的模型名） | 网关后面 |
 |---|---|---|
-| 对话/转换/长上下文/工具（默认） | `DeepSeek-V4.1-Flash-1017`（524k ctx，2026-11-15 起） | DGX；**DGX 出错时网关自动兜底到 Studio 的 Qwen3.8-27B** |
+| 对话/转换/长上下文/工具（默认） | `DeepSeek-V4.1-Flash-1017`（262k ctx，2026-11-15 起） | DGX；**DGX 出错时网关自动兜底到 Studio 的 Qwen3.8-27B** |
 | 对话备选（非默认，UI 手动切） | `ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit`（262k ctx） | M2 OMLX |
 | 对话第二备选（非默认，UI 手动切） | `studio/qwen3.8-27b`（262k ctx） | Mac Studio OMLX；也是上面默认那条的兜底（2026-11-15 起）|
 | Embedding | `mlx-community__Qwen3-Embedding-4B-4bit-DWQ`（2560 维） | M2 OMLX |

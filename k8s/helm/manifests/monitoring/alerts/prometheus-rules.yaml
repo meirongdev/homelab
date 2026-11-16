@@ -1074,7 +1074,7 @@ spec:
           #      单靠它们会把「一条 20 分钟的长生成」误报成卡死；
           #    · `tensorfold:generation_tokens_running`（gauge，活着的流里已生成的 token 数）—— 生成中
           #      每次抓取都在变，`changes()` 补上了上面那个盲区。
-          #    仍然看不见的是**超长 prefill**（prefill 期间三者都不动）：524k 窗口的满窗 prefill 要多久
+          #    仍然看不见的是**超长 prefill**（prefill 期间三者都不动）：262k 窗口的满窗 prefill 要多久（按约 2,300 tok/s 估约 2 分钟）
           #    还没实测，这正是 [20m] 窗口保留下来的原因。
           # 3. 引擎自报的 rank 对状态：`pair_stalled`=1 是引擎线程超过 stall 上限（实测 120s）仍无进展，
           #    `pair_broken`=1 是 rank 对已断。默认配置下断了就以 status 75 退出（→ 走 InferenceDown），

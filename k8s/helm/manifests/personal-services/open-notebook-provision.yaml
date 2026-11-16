@@ -65,7 +65,8 @@ data:
     ]
     MODELS = [
         # 2026-11-15 DGX 换主力栈：qwen3.8-flash-next-tp2 → DeepSeek-V4.1-Flash-1017
-        # （TensorFold 双机 TP=2，max_model_len 524288）。旧条目 qwen3.8-flash-next-tp2 要按下面的扫法删。
+        # （TensorFold 双机 TP=2，max_model_len 262144）。✅ 旧条目 qwen3.8-flash-next-tp2 已按下面的扫法删掉
+        # （19 张表只在 model 表自身命中 1 次，DELETE /api/models/<id> 200）。
         # ☠️ 2026-11-11 起这里的名字是 **LiteLLM 的别名**（经网关），必须同时满足两件事：
         #    在 litellm.yaml 的 model_list 里存在，且在 open-notebook 那把虚拟 key 的白名单里（坑 A）。
         #    写错会当场 400（网关不认），不再像直连 SGLang 时那样静默回显。
@@ -121,9 +122,8 @@ data:
     DEFAULTS = {  # 值是上面 MODELS 里的 name
         "default_chat_model": "DeepSeek-V4.1-Flash-1017",
         "default_transformation_model": "DeepSeek-V4.1-Flash-1017",
-        # ⚠️ max_model_len 2026-11-15 起是 524288（DeepSeek-V4.1，实测 /v1/models），比旧栈翻倍；
-        #    但长上下文角色仍有真实上限，整本书一次性塞进去照样可能超窗。
-        #    ☠️ 兜底的 Studio Qwen3.8-27B 只有 262k：超过 262k 的请求在 DGX 出错时兜底也接不住。
+        # ⚠️ max_model_len 2026-11-15 起是 262144（DeepSeek-V4.1；换栈当天曾是 524288，当晚改小与兜底对齐）。
+        #    长上下文角色有真实上限，整本书一次性塞进去会超窗。兜底的 Studio Qwen3.8-27B 也是 262k。
         "large_context_model": "DeepSeek-V4.1-Flash-1017",
         "default_tools_model": "DeepSeek-V4.1-Flash-1017",
         "default_embedding_model": "mlx-community__Qwen3-Embedding-4B-4bit-DWQ",
@@ -135,7 +135,7 @@ data:
     # voice_model（frontend/src/lib/types/podcasts.ts::needsModelSetup），defaults 配得
     # 再全也不影响它。上游首启 seed 出来的三个 episode + 三个 speaker 这三个字段全是 null。
     EPISODE_PROFILE_LLMS = {   # profile 名 -> 出大纲/台本的 language 模型
-        # ⚠️ 同样受窗口限制（2026-11-15 起 524k；曾按更早的栈 1M 写「整本书塞得进去」）。长书出大纲
+        # ⚠️ 同样受窗口限制（2026-11-15 起 262k；曾按更早的栈 1M 写「整本书塞得进去」）。长书出大纲
         #    若开始截断/报错，先看是不是超窗，别先怀疑上游挂了。
         "tech_discussion": "DeepSeek-V4.1-Flash-1017",
         "business_analysis": "DeepSeek-V4.1-Flash-1017",

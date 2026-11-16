@@ -47,7 +47,7 @@
 #     默认(xhigh) 769 token、medium 409、low 367。**没有复现 `content=null` 那条崩溃。**
 #     ⚠️ 但余量比上一栈薄了：旧栈 389–512（≈4 倍冗余），新栈默认档 769（≈2.6 倍）。
 #     原因是新栈的默认推理强度是 `xhigh`。
-#   · ☠️ **2026-11-15 DGX 换成 DeepSeek-V4.1-Flash-1017**（TensorFold 双机 TP=2，max_model_len 524288），
+#   · ☠️ **2026-11-15 DGX 换成 DeepSeek-V4.1-Flash-1017**（TensorFold 双机 TP=2，max_model_len 当晚定为 262144），
 #     别名跟着改名。✅ 护栏已复验：同一份线上提示词 + 6000 字符摘录 + `max_tokens=2000`/`temperature=0`，
 #     英文摘录默认档 398 token（medium 330）、中文摘录默认档 690（medium 414），全部 `finish=stop`、
 #     JSON 四个字段齐全 —— 余量回到约 2.9–5 倍，比 Qwen 栈宽。

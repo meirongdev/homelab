@@ -1,6 +1,6 @@
 # DGX 换了主力模型：homelab 侧跟进 SOP
 
-> Last updated: 2026-11-15
+> Last updated: 2026-11-16
 > Status: 生效事实 + 切换 SOP
 > 触发条件：`100.97.87.120:<port>/v1/models` 返回的 served name 与仓库里的引用不一致
 > —— 上游（`~/projects/meirongdev/nv-dgx-spark`）换栈、改 served name、或从换栈中
@@ -231,7 +231,7 @@ curl -s -H "Authorization: Bearer $MK" "$GW/key/info?key=<sha256>" | python3 -c 
 
 2026-11-15（dsv41）的结论：`DgxSparkInferenceDown` 的 `for` **10m 不变**（冷启动实测 31s，页缓存热；冷缓存每台要读约 98 GiB）；
 `DgxSparkRequestsQueued` 的 `> 4` **第四次不动**，但有效上限从 64 掉到 **4**，jobs-sg 一个作业就占满，首周按实测回校；
-`DgxSparkInferenceStuck` 窗口 `[20m]+for 5m` 不变（超长 prefill 期间三个进度信号都不动，524k 满窗 prefill 的耗时还没实测），
+`DgxSparkInferenceStuck` 窗口 `[20m]+for 5m` 不变（超长 prefill 期间三个进度信号都不动，262k 满窗 prefill 按约 2,300 tok/s 估约 2 分钟，还没实测），
 判据换成上表的三信号 + `pair_*`；`DgxSparkNodeDown` 两台都盯（TP=2，任一台掉线 = 推理整个没了）。
 
 面板在**只换模型名**时不用改：`model_name` 是 `label_values()` 的模板变量，换模型自适应
