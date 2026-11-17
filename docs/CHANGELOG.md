@@ -1,6 +1,6 @@
 # Homelab Changelog
 
-> Last updated: 2026-11-16
+> Last updated: 2026-11-18
 > 已经做完的事，一条一行，按阶段/时间倒着找。**这里只回答「做过什么」**——
 > 还剩什么没做看 [ROADMAP.md](ROADMAP.md)，现在是什么样看 [reference/](reference/README.md)。
 > 2026-09-02 从 ROADMAP 拆出：那份文件长到 23.8KB，9 条开放项被 65 条历史淹没，
@@ -136,6 +136,7 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-11-15 | **LiteLLM 裸别名三级自动降级**：DGX → Studio → M2，同组 `order` + 健康检查剔除，宕机与恢复不再要人改配置（ROADMAP #22 关闭）。实测主上游整机离线时只靠 `order` 每请求先卡约 406s，加健康检查后 0.3s ([自动降级](reference/litellm-gateway.md)) |
 | 2026-11-15 | **三台 Mac 的 Qwen Code / codex 统一走网关**：`just llm-clients` 下发，清掉直连 DGX / M2 / 本机 OMLX 的旧配置和坏掉的 MCP；codex 默认仍是 ChatGPT，Studio 补装 codex ([macbook/ansible](../macbook/ansible/README.md)) |
 | 2026-11-15 | **LiteLLM 按 key 分首选**：外发 key 照旧 DGX → Studio → M2；homelab 内部 7 把 key 带 key 级 `aliases`，同样的名字改道到新组 `homelab/qwen3.8-27b`（Studio → DGX → M2），客户端不改。实测白名单按原名查、响应 `model` 仍是原名 ([按 key 分首选](reference/litellm-gateway.md)) |
+| 2026-11-18 | **DGX 后端换回 Qwen，网关对外名字不变**：四条 DGX deployment 改指 `qwen3.8-flash-next-tp2`（kit v5.4，vLLM），加回 upstream_compat 两条声明；DGX 三条告警改成 `tensorfold:*` / `vllm:*` 并集 ([现状](reference/litellm-gateway.md)) |
 ### 审计与清理（历史）
 
 | 时间 | 内容 |

@@ -28,21 +28,34 @@ data:
   config.yaml: |
     model_list:
       # ── DGX（主；custom_dgx/ 前缀是历史约定，保留）──
-      # 现状（2026-11-15 起）：DeepSeek-V4.1-Flash-1017，TensorFold（Zig）双机 TP=2，端点 100.97.87.120:8000。
+      # 现状（2026-11-18 起）：DGX 后端是 Qwen3.8-Flash-Next（hibrid48 权重，myllmbox cluster kit v5.4，vLLM）双机 TP=2，
+      #   端点 100.97.87.120:8000，served name `qwen3.8-flash-next-tp2`。2026-11-17 13:43 上游从 DeepSeek-V4.1-Flash-1017
+      #   换回了它（DeepSeek 用的 TensorFold 什么名字都收，vLLM 对别的名字一律 404）。
+      # ☠️ 对客户端的名字刻意不变（用户决定，2026-11-18）：custom_dgx/DeepSeek-V4.1-Flash-1017、裸别名
+      #   DeepSeek-V4.1-Flash-1017、兼容别名 qwen3.8-flash-next-tp2 照旧可用，只改下面四条 DGX deployment 的
+      #   `model:`。所以虚拟 key 白名单、健康检查的模型组名都不用动；代价是「DeepSeek」这个名字背后答话的是 Qwen。
+      # 2026-11-15 → 11-17 的后端是 DeepSeek-V4.1-Flash-1017，TensorFold（Zig）双机 TP=2，同一端点。
       # 历次换栈与各栈参数见 docs/reference/litellm-gateway.md「DGX 主力栈」。
       # ☠️ 换栈时端口可能跟着变（:8000 / :8888 都被不同的栈用过，旧端口会直接不监听），
       #    只改模型名不改 api_base = 把消费方指向空端口。端口也区分不了后端，改之前先
       #    `curl -s http://100.97.87.120:<port>/v1/models` 看 served name 再动手。
       # upstream_compat 的两条 model_info 声明（upstream_reasoning_efforts / upstream_system_first）
-      # 这个栈**都不需要**：2026-11-15 实测 reasoning_effort 七档（none…max）全收，对话中间的
-      # system 消息 chat 与 /v1/responses 都收。☠️ 换栈时重测（坑 E）：对本别名传
+      # Qwen v5.4 **两条都需要**（2026-11-18 对 :8000 实测）：reasoning_effort 只有 none / low / medium / xhigh 回 200，
+      # minimal / high / max 回 400（"bogus" 的报错列七档，那是接口层，模板只认四档）；none 真能关思考（推理 0 字），
+      # 所以集合里保留 none（11-14 那版写的 [low, medium, xhigh] 会把 none 改成 low）；对话中间的 system 消息
+      # chat 与 /v1/responses 都 400（"System message must be at the beginning."）。DeepSeek 那三天两条都不需要。
+      # homelab/qwen3.8-27b 那组不加：声明对整组生效，会改写发给 Studio 的请求，而 DGX 在那组只是第 2 级。
+      # ☠️ 换栈时重测（坑 E）：对本别名传
       # "reasoning_effort": "bogus" 看 400 原文列出的集合，再发一条中间带 system 的请求；
       # 有一项被拒就把对应声明加回这两条（两条必须一致）。
       - model_name: custom_dgx/DeepSeek-V4.1-Flash-1017
         litellm_params:
-          model: openai/DeepSeek-V4.1-Flash-1017
+          model: openai/qwen3.8-flash-next-tp2
           api_base: http://100.97.87.120:8000/v1
           api_key: dummy
+        model_info:
+          upstream_reasoning_efforts: [none, low, medium, xhigh]
+          upstream_system_first: true
       # ── 无前缀别名 DeepSeek-V4.1-Flash-1017：DGX → Studio → M2 三级自动降级 ──
       # 2026-11-15 前靠 router_settings.fallbacks 串别名；现在改为同组 order + 健康检查（理由见下面那组的注释）。
       # ☠️ 别往模型条目的 litellm_params 里写 fallbacks：那是透传给 SDK 的 kwarg，从来没生效过
@@ -65,8 +78,8 @@ data:
       #    （漏了 = 不再探活，整机离线时退回每请求 406s）。
       # ⚠️ 别用 YAML 锚点去重：PyYAML 的别名是同一个 dict 对象，LiteLLM 会往 model_info 里写各自的 id。
       - model_name: DeepSeek-V4.1-Flash-1017
-        litellm_params: {model: openai/DeepSeek-V4.1-Flash-1017, api_base: "http://100.97.87.120:8000/v1", api_key: dummy, order: 1}
-        model_info: {health_check_timeout: 30, health_check_max_tokens: 16}
+        litellm_params: {model: openai/qwen3.8-flash-next-tp2, api_base: "http://100.97.87.120:8000/v1", api_key: dummy, order: 1}
+        model_info: {health_check_timeout: 30, health_check_max_tokens: 16, upstream_reasoning_efforts: [none, low, medium, xhigh], upstream_system_first: true}
       - model_name: DeepSeek-V4.1-Flash-1017
         litellm_params: {model: openai/Qwen3.8-27B-MLX-4bit, api_base: "http://100.98.220.75:8000/v1", api_key: dummy, order: 2}
         model_info: {health_check_timeout: 60, health_check_max_tokens: 16}
@@ -79,8 +92,8 @@ data:
       # 同日加回了这个名字（坑 A）。名字与实际模型对不上是刻意的代价，只为不动客户端。
       # 删它的条件：spend log 里连续两周没有旧名调用；删时同步从那 5 处白名单里拿掉，并从健康检查列表里删掉。
       - model_name: qwen3.8-flash-next-tp2
-        litellm_params: {model: openai/DeepSeek-V4.1-Flash-1017, api_base: "http://100.97.87.120:8000/v1", api_key: dummy, order: 1}
-        model_info: {health_check_timeout: 30, health_check_max_tokens: 16}
+        litellm_params: {model: openai/qwen3.8-flash-next-tp2, api_base: "http://100.97.87.120:8000/v1", api_key: dummy, order: 1}
+        model_info: {health_check_timeout: 30, health_check_max_tokens: 16, upstream_reasoning_efforts: [none, low, medium, xhigh], upstream_system_first: true}
       - model_name: qwen3.8-flash-next-tp2
         litellm_params: {model: openai/Qwen3.8-27B-MLX-4bit, api_base: "http://100.98.220.75:8000/v1", api_key: dummy, order: 2}
         model_info: {health_check_timeout: 60, health_check_max_tokens: 16}
@@ -100,7 +113,7 @@ data:
         litellm_params: {model: openai/Qwen3.8-27B-MLX-4bit, api_base: "http://100.98.220.75:8000/v1", api_key: dummy, order: 1}
         model_info: {health_check_timeout: 60, health_check_max_tokens: 16}
       - model_name: homelab/qwen3.8-27b
-        litellm_params: {model: openai/DeepSeek-V4.1-Flash-1017, api_base: "http://100.97.87.120:8000/v1", api_key: dummy, order: 2}
+        litellm_params: {model: openai/qwen3.8-flash-next-tp2, api_base: "http://100.97.87.120:8000/v1", api_key: dummy, order: 2}
         model_info: {health_check_timeout: 30, health_check_max_tokens: 16}
       - model_name: homelab/qwen3.8-27b
         litellm_params: {model: openai/ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit, api_base: "http://100.89.15.120:8000/v1", api_key: dummy, order: 3}
@@ -246,7 +259,7 @@ spec:
         #    ⇒ ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按**旧路由表**继续跑。
         #    2026-08-25 实际踩过一次（改了 mac/ornith 后必须手动 rollout restart 才生效）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py 的 STAMP_ONLY），别手改。
-        checksum/config: "68cf5a01ff04080b"
+        checksum/config: "ea33144b4902d498"
         # 同理，但盯的是 codex_compat.py（litellm-codex-compat ConfigMap）：
         # 也是 subPath 挂载 + 只在启动时 import，改了不重启就是静默跑旧代码。
         checksum/codex-compat-py: "e5da4a39d90243d4"

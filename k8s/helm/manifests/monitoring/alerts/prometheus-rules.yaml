@@ -1012,6 +1012,11 @@ spec:
     # 上方第 3 条「只盯 S1」的结论就此作废，本组定向告警重新覆盖两台。
     # ════════════════════════════════════════════════════════════════════════════
     #
+    # ══ 2026-11-18 更新：DGX 在 TensorFold 与 vLLM 之间来回换，三条规则改成两族并集 ══════════
+    # 11-17 13:43 上游从 dsv41（TensorFold）换回 Qwen3.8-Flash-Next（myllmbox kit v5.4，vLLM），`tensorfold:*`
+    # 消失、`vllm:*` 回来 —— 只认 tensorfold 的 Stuck / Restarted / RequestsQueued 再次**恒为空**（静默失效）。
+    # 现在每条都是「tensorfold 分支 or vllm 分支」：哪族序列在，哪个分支求值，另一个为空不影响结果。
+    # vllm 分支照搬 11-15 之前验证过的写法（git 68ccfd4^）。InferenceDown 用 up{}，本来就与引擎无关。
     # ══ 2026-11-15 更新：dsv41（TensorFold 双机 TP=2），前缀换成 `tensorfold:*` ══════════
     # 上游换成 DeepSeek-V4.1-Flash-1017（TensorFold Zig 引擎；rank0 + API 在 S1、rank1 在 S2，
     # 同端口 :8000）。S2 的 fndgx 早在 09-30 换 TP=2 时就停了，所以 dgx-inference 只有 S1 一个
@@ -1096,6 +1101,13 @@ spec:
             max by (nodename) (tensorfold:pair_stalled{job="dgx-inference"}) == 1
             or
             max by (nodename) (tensorfold:pair_broken{job="dgx-inference"}) == 1
+            or
+            (
+              (sum by (nodename) (vllm:num_requests_running{job="dgx-inference"})
+                 + sum by (nodename) (vllm:num_requests_waiting{job="dgx-inference"})) > 0
+                and on(nodename)
+              sum by (nodename) (increase(vllm:generation_tokens_total{job="dgx-inference"}[20m])) == 0
+            )
           # ⚠️ 窗口史：increase[5m]+for5m →（2026-09-19）increase[3m]+for2m → 现在
           # increase[20m]+for5m。09-19 那次收紧兑现的是上一版注释里"若哪天探针被移除，
           # 把窗口收到 increase[3m] + for 2m"的预留条件（换栈后探针确实没了：docker 栈
@@ -1158,7 +1170,7 @@ spec:
           # `resets()` 在其后 30 分钟内 > 0，与旧表达式的 30m 窗口语义等价。
           # ⚠️ 盲区：重启前那个进程**一个请求都没处理完**（counter 一直是 0）时看不出 reset。
           #    DGX 每天都有流量，可接受；真正的「挂了没人管」走 InferenceDown，不靠这条。
-          expr: sum by (nodename) (resets(tensorfold:prompt_tokens_total{job="dgx-inference"}[30m])) > 0
+          expr: sum by (nodename) (resets(tensorfold:prompt_tokens_total{job="dgx-inference"}[30m])) > 0 or sum by (nodename) (resets(vllm:generation_tokens_total{job="dgx-inference"}[30m])) > 0
           # for 5m：等引擎真起来再报，免得和 DgxSparkInferenceDown 抢话。
           # warning 而非 critical：重启**已经成功**了，属于事后知情，不是正在烧的火。
           # ⚠️ 新栈无 `--restart`、无探针，所以这条的含义比旧栈更窄：容器不可能自己回来，
@@ -1216,7 +1228,7 @@ spec:
           #    不是 jobs-sg 自己，再决定抬阈值还是让 jobs-sg 让路。
           # ⚠️ 与 DgxSparkInferenceStuck 语义**不同**：那条是"有需求但零进度"（卡死），
           # 这条是"引擎健康但队列挤爆"。
-          expr: max by (nodename) (tensorfold:requests_waiting{job="dgx-inference"}) > 4
+          expr: max by (nodename) (tensorfold:requests_waiting{job="dgx-inference"}) > 4 or max by (nodename) (vllm:num_requests_waiting{job="dgx-inference"}) > 4
           for: 2m
           labels:
             severity: warning

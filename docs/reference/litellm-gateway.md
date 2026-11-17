@@ -1,6 +1,6 @@
 # LiteLLM 网关（运维事实与坑）
 
-> Last updated: 2026-11-16
+> Last updated: 2026-11-18
 > Status: 生效事实
 > Scope: `llm.meirong.dev` 这个 LLM 网关的配置生效路径、鉴权分层、上游可用性边界，
 > 本文是 source of truth。为什么选 LiteLLM、上游怎么选、兜底为何几经更换（Qwen3.6 → Ornith → Studio），见
@@ -41,6 +41,16 @@
 | `openrouter/*` | OpenRouter 全量透传 | 免费档不能当兜底（见「哪些模型能免费用」）|
 
 ## DGX 主力栈：DeepSeek-V4.1-Flash-1017 双机 TP=2（TensorFold，2026-11-15 起）
+
+> ⚠️ **2026-11-18：后端已换回 Qwen3.8-Flash-Next，对客户端的名字不变。** 2026-11-17 13:43 上游停了 DeepSeek，
+> 起了 Qwen3.8-Flash-Next（hibrid48 权重，myllmbox cluster kit **v5.4**，vLLM，双机 TP=2，同一端点 `:8000`，
+> served name `qwen3.8-flash-next-tp2`）。用户决定网关对客户端保持不变：`custom_dgx/DeepSeek-V4.1-Flash-1017`、
+> 裸别名 `DeepSeek-V4.1-Flash-1017`、兼容别名 `qwen3.8-flash-next-tp2` 照旧可用，只把四条 DGX deployment 的
+> `model:` 改成 `openai/qwen3.8-flash-next-tp2`，并加回两条 upstream_compat 声明（2026-11-18 实测：档位只收
+> none / low / medium / xhigh，none 真能关思考；对话中间的 system 消息 400）。虚拟 key 白名单与健康检查组名都
+> 没动。改之前四条全 404（vLLM 对别的名字一律 404），网关流量全部落在 Studio / M2。
+> 同时 DGX 的三条告警（Stuck / Restarted / RequestsQueued）改成 `tensorfold:*` 与 `vllm:*` 两族并集；
+> `dgx-vllm-dashboard` 仍按 `tensorfold:*` 画，换回 vLLM 期间面板为空。下表是 DeepSeek 那三天的实测，保留作记录。
 
 上游 `~/projects/meirongdev/nv-dgx-spark` 单方面换栈，本仓库只跟着改引用；本节是本仓库关于该上游的唯一真相源
 （换栈理由与压测在上游仓库）。☠️ 再换模型或回滚，照
