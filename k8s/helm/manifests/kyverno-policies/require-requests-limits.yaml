@@ -2,8 +2,10 @@
 # 要求容器声明 CPU/内存 requests + 内存 limit。
 # 动机：本单节点曾因无界 Pod 把节点推过 110-pod / 内存上限触发驱逐（见 personal-services-limits.yaml）。
 #
-# ⚠️ 先 Audit：读 `kubectl get polr -A` 确认存量工作负载零违规后，再把
-#    validationFailureAction 改为 Enforce 并 git push。
+# Enforce（2026-11-18 提升）。判据是「本 webhook 真正 gate 的 ns 里零违规」，不是 polr 原始计数：
+# 实测 11 条违规全在 kube-system，而 resourceFilters 把整个 kube-system 排除在准入之外。
+# ⚠️ cloudflare / databases / litellm / opencost 这 4 个应用 ns 没有 LimitRange 兜底，
+#    本策略是它们唯一的边界；回滚 = failureAction 改回 Audit。
 # 注：未要求 limits.cpu（CPU limit 会引入节流争议）；仅校验 containers（initContainers 可后补）。
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
@@ -24,7 +26,7 @@ spec:
               kinds: ["Pod"]
       validate:
         # Kyverno v1.11+ 把 action 从 spec 级迁到每条 rule 的 validate.failureAction
-        failureAction: Audit
+        failureAction: Enforce
         message: "每个容器必须声明 resources.requests.cpu/memory 与 resources.limits.memory。"
         pattern:
           spec:
