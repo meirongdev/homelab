@@ -45,9 +45,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 APPS_DIR = ROOT / "argocd" / "applications"
 REPO_URL = "https://github.com/meirongdev/homelab"
 
-# 两集群现网都是 v1.35.8+k3s1（2026-09-02 `kubectl version`）。升 k3s（runbooks/k3s-cluster-upgrade.md）
+# 两集群现网都是 v1.36.6+k3s1（2026-11-19 `kubectl get nodes`）。升 k3s（runbooks/k3s-cluster-upgrade.md）
 # 时同步改这里：它同时喂给 helm --kube-version 与 kubeconform -kubernetes-version。
-KUBE_VERSION = "1.35.8"
+KUBE_VERSION = "1.36.6"
 
 # ArgoCD 渲染 chart 时把目标集群的 api-versions 传给 helm；不传则 .Capabilities.APIVersions.Has
 # 全为 false，ServiceMonitor / PrometheusRule / HTTPRoute 一类模板直接不渲染，等于校验了一份

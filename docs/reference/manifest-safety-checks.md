@@ -1,6 +1,6 @@
 # 清单安全规则 (Manifest Safety Checks)
 
-> Last updated: 2026-10-28
+> Last updated: 2026-11-20
 > Status: 生效事实
 > Scope: CI 强制的仓库规则，本文是 source of truth。四个检查器：
 > `scripts/check-manifests.py` 的 **H1-H5**（清单结构）、
@@ -202,7 +202,7 @@ uv run --with pyyaml python scripts/render-manifests.py --app loki       # 只�
 uv run --with pyyaml python scripts/render-manifests.py --out /tmp/r     # 渲染结果落盘，人工 diff
 ```
 
-`KUBE_VERSION`（当前 `1.35.8`）跟现网走，升 k3s 时同步改，它同时喂给 `helm --kube-version` 与 `kubeconform -kubernetes-version`。
+`KUBE_VERSION`（当前 `1.36.6`）跟现网走，升 k3s 时同步改，它同时喂给 `helm --kube-version` 与 `kubeconform -kubernetes-version`。
 
 ### 同批加的 `terraform validate`
 
