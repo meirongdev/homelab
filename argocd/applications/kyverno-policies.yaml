@@ -7,8 +7,8 @@ metadata:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: homelab
-  # 与 kyverno 安装分离，便于逐条把策略从 Audit 提升到 Enforce（改 git 即可）。
-  # 首次同步可能因 ClusterPolicy CRD 尚未就绪而短暂失败，待 kyverno App 装好 CRD 后自动重试通过。
+  # 与 kyverno 安装分离，便于逐条把策略从 Audit 提升到 Deny（改 git 即可）。
+  # 首次同步可能因 ValidatingPolicy CRD 尚未就绪而短暂失败，待 kyverno App 装好 CRD 后自动重试通过。
   source:
     repoURL: https://github.com/meirongdev/homelab
     targetRevision: main
@@ -18,17 +18,8 @@ spec:
   destination:
     server: https://100.94.186.7:6443
     namespace: kyverno
-  # Kyverno admission webhook 会给 ClusterPolicy 回填一批服务端默认字段，git 清单里没有
-  # → ArgoCD 永远 OutOfSync（纯化妆性，策略本身 Ready 且在工作）。忽略这些默认字段。
-  ignoreDifferences:
-    - group: kyverno.io
-      kind: ClusterPolicy
-      jqPathExpressions:
-        - .spec.admission
-        - .spec.emitWarning
-        - .spec.validationFailureAction
-        - .spec.rules[].skipBackgroundRequests
-        - .spec.rules[].validate.allowExistingViolations
+  # 2026-11-19 策略迁到 policies.kyverno.io ValidatingPolicy 后，旧的 ClusterPolicy
+  # ignoreDifferences 已删：新类型不回填默认字段，并跑期间实测直接 Synced。
   syncPolicy:
     automated:
       prune: true

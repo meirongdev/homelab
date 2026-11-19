@@ -2,50 +2,24 @@
 # 禁止使用 :latest tag（不可复现、难追溯、绕过 ArgoCD Image Updater 的 newest-build）。
 #
 # ⚠️ digest-aware：本仓库工作负载普遍用 digest 固定（`repo@sha256:...`，比 tag 更不可变/更安全）。
-#    刻意 **不** 加 "必须有 tag"(`*:*`) 规则——那会把 digest 固定的镜像误判为缺 tag，
-#    Enforce 时反而拦掉最佳实践。digest 与正常 tag 均放行，只拦 `:latest`。
-#    (代价：裸浮动名如 `nginx`(无 tag 无 digest) 不会被本策略拦——本仓库无此用法；
-#     若日后要堵裸名，单独加一条 require-digest-or-tag 的 CEL 规则。)
+#    刻意 **不** 加 "必须有 tag" 规则，那会把 digest 固定的镜像误判为缺 tag，
+#    Deny 时反而拦掉最佳实践。digest 与正常 tag 均放行，只拦 `:latest`。
+#    (代价：裸浮动名如 `nginx`(无 tag 无 digest) 不会被本策略拦，本仓库无此用法。)
 #
-# 现状：运行中工作负载零 :latest（历史 ReplicaSet 的 :latest 为 replicas=0 旧 revision，
-#       Enforce 仅作用于新建 Pod，不影响这些非活动 RS）→ 已提 Enforce（2026-06-18 audit 后）。
-# failurePolicy=Ignore 保底：Kyverno 宕机时不阻断调度。如需回退改回 Audit。
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
-metadata:
-  name: disallow-latest-tag
-  annotations:
-    policies.kyverno.io/title: Disallow Latest Tag
-    policies.kyverno.io/category: Supply Chain Security
-    policies.kyverno.io/severity: medium
-spec:
-  failurePolicy: Ignore
-  background: true
-  rules:
-    - name: validate-image-tag-not-latest
-      match:
-        any:
-          - resources:
-              kinds: ["Pod"]
-      validate:
-        failureAction: Enforce
-        message: "禁止使用 :latest tag（请用固定 tag 或 digest @sha256: 固定）。"
-        pattern:
-          spec:
-            containers:
-              - image: "!*:latest"
----
-# ⏳ CEL 迁移 Phase A（2026-11-19）：与上面的 ClusterPolicy 并跑，先 Audit 对比报告，
-# Phase B 改 Deny 并删掉旧的。动因：Kyverno v1.20 源码里删光了 legacy 准入路径，
-# 不迁就是升级后静默失效（见 docs/runbooks/k3s-cluster-upgrade.md §3.2）。
+# Deny 自 2026-06-18（audit 零违规后提升）。failurePolicy=Ignore 保底：Kyverno 宕机时不阻断调度。
+# 回退 = validationActions 改回 [Audit]。
 #
-# 与旧版逐项对应：
+# 2026-11-19 从 kyverno.io/v1 ClusterPolicy 迁到 CEL ValidatingPolicy：Kyverno v1.20 删光了
+# legacy 准入路径，不迁就是升级后静默失效。迁移时与旧版并跑对比过后台扫描报告，
+# 两边都覆盖的 195 个资源结论 0 差异。与旧版的逐项对应：
 #   pattern `!*:latest`          → endsWith(':latest') 取反，只查 containers（与旧版一致）
-#   failurePolicy: Ignore        → spec.failurePolicy（fail-open 不变）
-#   resourceFilters 排除系统 ns  → 显式 namespaceSelector。CEL 策略的匹配走 matchConstraints，
-#                                  不保证读 configmap 的 resourceFilters，所以写死在这里
-#   autogen 全部控制器           → 不写 podControllers（源码：nil = AllConfigs，含 CronJob）
+#   resourceFilters 排除系统 ns  → 显式 namespaceSelector。CEL 策略的匹配走 matchConstraints；
+#                                  configmap 里全局 webhooks 选择器虽也会被合并进 webhook，
+#                                  但它只排除 kube-system/kyverno，且只管准入不管后台扫描
+#   autogen 全部控制器           → 不写 podControllers（源码：nil = 全部，含 CronJob）
+#   allowExistingViolations      → CEL 策略不支持。迁移时受管 ns 里零违规，无影响
 #   不生成原生 VAP               → 生成后执行挪到 apiserver，失败语义随之改变，刻意关掉
+# ⚠️ 验证别只看 READY：主动打一发该被拒的请求（runbooks/k3s-cluster-upgrade.md §9 ⑥）。
 apiVersion: policies.kyverno.io/v1
 kind: ValidatingPolicy
 metadata:
@@ -55,7 +29,7 @@ metadata:
     policies.kyverno.io/category: Supply Chain Security
     policies.kyverno.io/severity: medium
 spec:
-  validationActions: [Audit]
+  validationActions: [Deny]
   failurePolicy: Ignore
   evaluation:
     admission: {enabled: true}
