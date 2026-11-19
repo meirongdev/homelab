@@ -31,7 +31,11 @@
 #   operator 日志里那句 "Required GatewayAPI resources are not found" 是**故障信号**
 #   （有输出=坏了），健康集群什么都不打，所以 grep 不到不等于健康。
 #   完整复盘 docs/records/2026-08-11-gateway-api-crd-stall.md
-cilium_version := "1.20.0"
+# 2026-11-20 1.20.0 → 1.20.5：补丁版但不是无痛的。chart 的 `envoy.xdsMode` 默认值在补丁之间翻了
+# （1.20.0 对新装默认 ads，1.20.5 默认不设、agent 回落 split），Envoy 也从 1.37 跳到 1.39。
+# 已在两份 values 里显式钉 `envoy.xdsMode: ads` 保持现网行为（helm template 实证 cilium-config 与
+# Envoy bootstrap 与 1.20.0 渲染逐字段一致）。Gateway API CRD 仍是 1.6.1，不用动。
+cilium_version := "1.20.5"
 
 # Cilium 1.20 要求的 Gateway API CRD 版本（装它的配方是 `just deploy-gateway-api-crds`，
 # 两个 justfile 各有一份，因为要打的是各自的集群）。

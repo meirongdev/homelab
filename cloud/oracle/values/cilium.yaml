@@ -183,6 +183,14 @@ clustermesh:
         requests: { cpu: 15m, memory: 64Mi }
         limits: { cpu: 300m, memory: 192Mi }
 
+# ☠️ xDS 模式必须显式钉死（2026-11-20）。chart 的默认值在补丁版之间翻过：1.20.0 对「新装」默认 `ads`
+# （我们没设，于是静默拿到 ads，两集群现网都是 `envoy-xds-mode: ads`），1.20.5 改成默认不设、
+# agent 回落到 `split`。不钉的话，一次例行 `deploy-cilium` 就会悄悄把 Envoy 的配置下发通道换掉，
+# 而入口流量全走 Envoy。同类事故见 versions.just 头部（2026-08-10 漏 --version 静默升了 minor）。
+# 钉 ads 而不是 split：保持现网行为不变，并拿到 1.20.3/1.20.4 里的 ADS 修复。
+envoy:
+  xdsMode: ads
+
 # --- cgroup: K3s mounts cgroup v2 at /sys/fs/cgroup ---
 cgroup:
   autoMount:

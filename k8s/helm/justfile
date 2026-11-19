@@ -160,7 +160,7 @@ deploy-gateway-api-crds:
 deploy-cilium: add-repos
     #!/usr/bin/env bash
     set -euo pipefail
-    # 真源 ../cilium/values.yaml 含 gatewayAPI.enableAppProtocol（ZITADEL console 必需）；--version 对齐 v1.20.0 镜像。
+    # 真源 ../cilium/values.yaml 含 gatewayAPI.enableAppProtocol（ZITADEL console 必需）；--version 取 versions.just 的 cilium_version（与现网镜像一致）。
     # ClusterMesh CA 属密钥（不入库）：升级时从在集群恢复以保住 mesh 互信，全新安装让 Cilium 自签新 CA。
     ctx="{{ctx}}"
     # Drop stale Hubble cert secrets so certgen re-issues them for the current cluster name.
