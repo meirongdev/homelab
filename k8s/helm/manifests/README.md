@@ -15,7 +15,7 @@
 | `external-dns/` | `external-dns` | `external-dns` | Cloudflare token 的 ExternalSecret（chart 本体 2026-07-31 采纳进 ArgoCD：multi-source chart + `values/external-dns.yaml` + 本目录 ExternalSecret） |
 | `gateway/` | `gateway` | `kube-system` | `gateway.yaml` = GatewayClass + Gateway 本体；每条对外路由一个 `route-<service>.yaml`（ReferenceGrant + HTTPRoute 成对）。**新子域名 = 新建一个 `route-*.yaml`**，DNS 由 external-dns 自动建 |
 | `kube-bench/` | `kube-bench` | `kube-bench` | CIS 周巡检 CronJob（ns 由 manifest 自身渲染） |
-| `kyverno-policies/` | `kyverno-policies` | `kyverno` | Kyverno ClusterPolicy（与 kyverno chart 安装分离，便于逐条 Audit→Enforce） |
+| `kyverno-policies/` | `kyverno-policies` | `kyverno` | Kyverno ValidatingPolicy（CEL；与 kyverno chart 安装分离，便于逐条 Audit→Deny） |
 | `monitoring/` | `monitoring-dashboards` | `monitoring` | `dashboards/`（Grafana ConfigMap）、`alerts/`（PrometheusRule + Alertmanager 配置/secret）、`slos.yaml`、`krr.yaml`（右尺寸周报）、`monitoring-external.yaml`（外部抓取）、`cilium-envoy-servicemonitor.yaml` |
 | `namespace-guardrails/` | `namespace-guardrails` | 跨 ns | 轻量应用 ns 的 LimitRange 护栏 |
 | `personal-services/` | `personal-services` | `personal-services` | calibre-web、calibre-ebook-sync、open-notebook（app + 按需摄取 + 模型接线 provisioner）+ 该 ns 的 LimitRange/Quota。**新个人服务放这里**（见 add-service 技能） |

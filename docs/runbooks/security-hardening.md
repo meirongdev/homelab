@@ -108,18 +108,18 @@ kubectl --context k3s-homelab get vulnerabilityreports,configauditreports,expose
 ### 4. Kyverno（Audit 起步）
 
 核对 chart 版本后 `git push`。两个 App：`kyverno`（安装）+ `kyverno-policies`（策略）。
-> `kyverno-policies` 首次同步可能因 ClusterPolicy CRD 未就绪短暂失败，待 `kyverno` 装好 CRD 后自动重试。
+> `kyverno-policies` 首次同步可能因 ValidatingPolicy CRD 未就绪短暂失败，待 `kyverno` 装好 CRD 后自动重试。
 
 ```bash
 kubectl --context k3s-homelab get pods -n kyverno
-kubectl --context k3s-homelab get cpol                 # 4 条策略 Ready
+kubectl --context k3s-homelab get validatingpolicies.policies.kyverno.io   # 4 条策略 READY=true
 kubectl --context k3s-homelab get polr -A              # Audit 模式下的违规报告
 ```
 
-**Audit → Enforce 提升流程**（逐条）：
+**Audit → Deny 提升流程**（逐条）：
 1. 读 `kubectl get polr -A` 找出某策略的存量违规；
 2. 修违规的工作负载 manifest（git）；
-3. 确认该策略零违规后，把对应 `manifests/kyverno-policies/<策略>.yaml` 里每条 rule 的 `validate.failureAction: Audit` 改为 `Enforce`，`git push`。（Kyverno v1.11+ 用 per-rule `failureAction`，非旧的 spec 级 `validationFailureAction`。）
+3. 确认该策略零违规后，把对应 `manifests/kyverno-policies/<策略>.yaml` 的 `spec.validationActions: [Audit]` 改为 `[Deny]`，`git push`。
 - `restrict-image-registries` 噪声最大（裸镜像名会被标记），长期建议保持 Audit，提 Enforce 前先把镜像写全限定名。
 - 所有策略 `failurePolicy: Ignore`（fail-open）：Kyverno 宕机不阻断调度（保护单节点恢复路径）。
 

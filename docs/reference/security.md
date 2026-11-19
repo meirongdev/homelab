@@ -103,20 +103,20 @@
 
 ### 5.2 Kyverno（策略即代码，homelab）
 - 拆分 controller 各 `replicas:1`、`backgroundScanInterval:24h`、**所有策略 `failurePolicy:Ignore`（fail-open）**：fail-closed 时 Kyverno 起不来全集群就无法调度，与恢复路径冲突。
-- ☠️ 代价要说全：admission-controller 单副本、无反亲和、`priorityClassName:bulk`（内存压力下主动可驱逐），叠加 `failurePolicy:Ignore` 后，**`failureAction:Enforce` 的实际语义是「该 controller 存活期间强制」**——重启/升级/被驱逐的窗口里新建 Pod 一律放行，且没有任何「这段时间没校验」的信号。机制级地板只有 PSA（§5.1）。
-- **4 条 ClusterPolicy**（per-rule `failureAction`；最近对 live 核对：2026-11-18）：
+- ☠️ 代价要说全：admission-controller 单副本、无反亲和、`priorityClassName:bulk`（内存压力下主动可驱逐），叠加 `failurePolicy:Ignore` 后，**`validationActions:[Deny]` 的实际语义是「该 controller 存活期间强制」**——重启/升级/被驱逐的窗口里新建 Pod 一律放行，且没有任何「这段时间没校验」的信号。机制级地板只有 PSA（§5.1）。
+- **4 条 ValidatingPolicy**（`policies.kyverno.io/v1`，CEL；2026-11-19 由 legacy ClusterPolicy 迁入；最近对 live 核对：2026-11-19）：
 
   | 策略 | Action | 说明 |
   |------|--------|------|
-  | disallow-latest-tag | **Enforce** | digest-aware（只拦 `:latest`）；运行中工作负载零 `:latest`，零阻断 |
-  | require-requests-limits | **Enforce**（2026-11-18 提升） | 提升依据见下条方法论：11 条违规**全在 kube-system**，而它整 ns 被排除 → 受管控 ns 违规为 0，提升当下零新增阻断。⚠️ 此后 `cloudflare`/`databases`/`litellm`/`opencost`（无 LimitRange，§5.3）里任何不声明 resources 的 Pod 都会被拒 |
+  | disallow-latest-tag | **Deny** | digest-aware（只拦 `:latest`）；运行中工作负载零 `:latest`，零阻断 |
+  | require-requests-limits | **Deny**（2026-11-18 提升） | 提升依据见下条方法论：11 条违规**全在 kube-system**，而它整 ns 被排除 → 受管控 ns 违规为 0，提升当下零新增阻断。⚠️ 此后 `cloudflare`/`databases`/`litellm`/`opencost`（无 LimitRange，§5.3）里任何不声明 resources 的 Pod 都会被拒 |
   | restrict-image-registries | Audit（长期） | 实测 91 条违规里**没有一个非可信来源**：11 个唯一镜像串只是省略了 `docker.io/` 前缀（隐式 docker.io，本就在白名单内，其中 10 个还是 digest 固定的），另两个是白名单确实漏了 `reg.kyverno.io`（Kyverno 官方源，只在 kyverno ns，不受准入管控，只污染后台报告）与 `mirror.gcr.io`。即它校验的是镜像串写法而非来源可信度，故长期保持 Audit；真正的供应链缺口在别处——digest 固定率不足一半（2026-11-18 业务容器 35/93），而 `mirror.gcr.io` 正是「无认证 Hub 透明镜像 + 不固定 digest」两个弱条件叠加。要收紧应新增一条要求 digest 固定的规则，而不是放宽本条 |
   | require-probes | Audit | 失败大头是 Job/CronJob（合理无 probe）+ 基础设施，Enforce 会误伤批处理 |
 
-- **Audit→Enforce 的分母是「本 webhook 真正 gate 的 ns」，不是 `polr` 原始计数**：原始计数同时混入了被排除的 `kube-system`/`kyverno`、0 副本历史 ReplicaSet 与一次性 Job，直接看既虚高又可能指向错误的 ns。正确做法是按规则聚合后剔除非 gate ns。现值（2026-11-18）：`registries` 91（受管控 68）、`readiness-probe` 18（受管控 13）、`requests-limits` 11（受管控 **0**）、`latest-tag` 0。Enforce 只作用于新建 Pod。
-- ⚠️ **豁免通道当前是关的**：admission-controller 带 `--enablePolicyException=false`，而 PolicyException 的 CRD（`kyverno.io/v2` 与 `policies.kyverno.io/v1`）都 served —— 今天创建例外对象会被静默收下、不生效。现有 2 条 Enforce 都零违规所以不挡路，但要给改不动的上游 chart（jellyfin/navidrome 这类）提 Enforce，得先实测 v1.19 里哪套例外 API 真的生效、在 chart 3.9.0 怎么打开。
-- 系统 ns 由默认 resourceFilters 排除（CNI/控制面绝不 gate）；ClusterPolicy 的服务端默认字段经 App `ignoreDifferences` 消除 OutOfSync。
-- ⚠️ **`kyverno.io/v1 ClusterPolicy` 整体已弃用**：对 `manifests/kyverno-policies/` 任一份清单做 `apply --dry-run=server`，apiserver 都回 `ClusterPolicy (kyverno.io) is deprecated and will be removed in a future release; migrate to ValidatingPolicy, MutatingPolicy, GeneratingPolicy or ImageValidatingPolicy (policies.kyverno.io)`（2026-11-18 实测，v1.19.0）。警告没写具体在哪个版本移除，所以它是「下次大版本升级前先排雷」而不是「现在就要改」；但它和 §11 第 4 条指向同一处——迁移动作本身就该往 CEL 那一侧走，别在旧 API 上再加第 5 条策略。另注：`apply` 会给对象补 `kubectl.kubernetes.io/last-applied-configuration`，这 4 个对象归 ArgoCD 所有，别用 kubectl 真 apply（`--dry-run=server` 不落库，实测确认）。
+- **Audit→Deny 的分母是「本 webhook 真正 gate 的 ns」，不是 `polr` 原始计数**：原始计数同时混入了被排除的 `kube-system`/`kyverno`、0 副本历史 ReplicaSet 与一次性 Job，直接看既虚高又可能指向错误的 ns。正确做法是按规则聚合后剔除非 gate ns。现值（2026-11-18）：`registries` 91（受管控 68）、`readiness-probe` 18（受管控 13）、`requests-limits` 11（受管控 **0**）、`latest-tag` 0。Deny 只作用于新建 Pod。2026-11-19 迁 CEL 后 `require-requests-limits` 的 namespaceSelector 连后台扫描一起排除 kube-system，报告里不再有那 11 条。
+- ⚠️ **豁免通道当前是关的**：admission-controller 带 `--enablePolicyException=false`，而 PolicyException 的 CRD（`kyverno.io/v2` 与 `policies.kyverno.io/v1`）都 served —— 今天创建例外对象会被静默收下、不生效。现有 2 条 Deny 都零违规所以不挡路，但要给改不动的上游 chart（jellyfin/navidrome 这类）提 Deny，得先实测例外 API 真的生效、在 chart 里怎么打开（v1.20 起 legacy 的 `kyverno.io` PolicyException 随 legacy 执行一起移除，只有 `policies.kyverno.io/v1` 那套有意义）。
+- 系统 ns（CNI/控制面绝不 gate）：准入侧由 configmap 的 webhook namespaceSelector 排除 kube-system/kyverno，两条 Deny 策略另在自己的 `namespaceSelector` 里显式写了 kube-system/kube-public/kube-node-lease/kyverno，这样后台扫描也一致。ValidatingPolicy 不回填服务端默认字段，App 不再需要 `ignoreDifferences`。
+- ✅ **legacy `kyverno.io` 策略类型已清零**（2026-11-19）：Kyverno v1.20 源码里已删掉 legacy 准入/后台/报告执行路径，且 chart 3.10 在集群里还有 legacy 策略时拒绝升级，所以升级前必须迁完。迁移要点（语义对应表在各策略文件头注释里）：① `objectSelector` 只在 webhook 层生效，**后台扫描不认**，要排除某类对象必须再写 `matchConditions`（`require-probes` 排除 Job Pod 就栽过：并跑对比时新版多出 25 个 CronJob Pod 的恒定误报）；② 迁移用**并跑 + 按资源逐条对比两个 source 的 PolicyReport**（`source=kyverno` vs `KyvernoValidatingPolicy`），不看 READY；③ 新写策略一律 `policies.kyverno.io/v1`，别再加 ClusterPolicy。
 - 🚧 **oracle-k3s 没有策略引擎**：实测那边只有 CNPG/ESO 的 CRD schema 校验 webhook + PSA，`:latest`、无 requests、任意 registry 装进 oracle 不留任何记录。而它承载 GitOps 控制面 + ZITADEL + 生产 PG。不值得为它再跑 4 个 controller，候选做法是把 `disallow-latest-tag` 用原生 ValidatingAdmissionPolicy（CEL，v1.35 已 GA）单条装过去——零常驻成本，见 §11。
 
 ### 5.3 资源护栏：LimitRange + ResourceQuota
@@ -213,7 +213,7 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 just psa-status                                            # PSA 标签现状（仅 homelab）
 just psa-check                                             # PSA 漂移哨兵：有 Pod 却无标签 → 非零退出
 cd ../../cloud/oracle && just psa-status && just psa-check # oracle 侧同两条（各自的 ctx 与列表）
-kubectl get cpol                                           # Kyverno 策略
+kubectl get validatingpolicies.policies.kyverno.io         # Kyverno 策略（CEL）
 kubectl get polr -A                                        # Kyverno Audit 违规
 kubectl get vulnerabilityreports,exposedsecretreports -A   # Trivy 发现
 kubectl create job --from=cronjob/kube-bench kb-once -n kube-bench   # 手动跑 CIS

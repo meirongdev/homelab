@@ -175,7 +175,7 @@ bookworm(glibc)，跨 libc 搬 PGDATA 的排序规则不安全。逻辑恢复顺
    不再注入 `env: DATABASE_URL`、ConfigMap 不再有 `POSTGRES_*`：连接串**只**能从
    `existingSecret` 经 envFrom 进来。好处是不会和 chart 的 env 撞成 SSA 重复键硬失败。
 3. Kyverno 的 `restrict-image-registries` 是**字面前缀匹配**，镜像必须显式写
-   `docker.io/`。省略前缀虽然能拉到镜像，策略却判违规（`failureAction: Audit` 所以
+   `docker.io/`。省略前缀虽然能拉到镜像，策略却判违规（`validationActions: [Audit]` 所以
    fail-open，pod 照跑，只在 PolicyReport 里留一条永久违规）。合并前的两个旧实例
    **都在违规**，实测确认。
 4. ⚠️ **旧 PVC 不会被 prune**（都带 `Prune=false`，multica 那个是集群侧注解），

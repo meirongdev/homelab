@@ -6,7 +6,7 @@
 # 设计要点（单节点 5600H 笔记本，控 CPU + 不引入 fail-closed 可用性风险）：
 #   - 所有 controller replicas=1（admissionController 默认 3，必降）
 #   - backgroundScanInterval 拉到 24h：静态策略无需每小时重算
-#   - failurePolicy=Ignore 在每条 ClusterPolicy 里设（fail-open）——单节点上 fail-closed
+#   - failurePolicy=Ignore 在每条 ValidatingPolicy 里设（fail-open）——单节点上 fail-closed
 #     = Kyverno 没起来时全集群无法调度，与 homelab-recover 重启恢复路径冲突
 #   - 系统 namespace（kube-system/kube-public/kube-node-lease/kyverno）由 Kyverno 默认
 #     resourceFilters 已排除，无需额外配置（CNI/控制面绝不能被 gate）
