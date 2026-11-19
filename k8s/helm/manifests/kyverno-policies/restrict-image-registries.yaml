@@ -30,3 +30,34 @@ spec:
           spec:
             containers:
               - image: "docker.io/* | ghcr.io/* | quay.io/* | registry.k8s.io/* | gcr.io/* | public.ecr.aws/* | cgr.dev/* | mcr.microsoft.com/*"
+---
+# ⏳ CEL 迁移 Phase A（2026-11-19）：并跑，见 disallow-latest-tag.yaml 同段说明。本条本来就是 Audit。
+# `a/* | b/*` → startsWith 白名单。⚠️ 不排除系统 ns，理由同 require-probes（报告面不缩）。
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: restrict-image-registries
+  annotations:
+    policies.kyverno.io/title: Restrict Image Registries
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: medium
+spec:
+  validationActions: [Audit]
+  failurePolicy: Ignore
+  evaluation:
+    admission: {enabled: true}
+    background: {enabled: true}
+  autogen:
+    validatingAdmissionPolicy: {enabled: false}
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  validations:
+    - expression: >-
+        object.spec.containers.all(c,
+          ['docker.io/', 'ghcr.io/', 'quay.io/', 'registry.k8s.io/', 'gcr.io/',
+           'public.ecr.aws/', 'cgr.dev/', 'mcr.microsoft.com/'].exists(r, c.image.startsWith(r)))
+      message: "镜像必须来自可信仓库白名单（docker.io/ghcr.io/quay.io/registry.k8s.io/gcr.io/public.ecr.aws/cgr.dev/mcr.microsoft.com）。"

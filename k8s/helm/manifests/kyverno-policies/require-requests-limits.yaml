@@ -37,3 +37,41 @@ spec:
                     cpu: "?*"
                   limits:
                     memory: "?*"
+---
+# ⏳ CEL 迁移 Phase A（2026-11-19）：并跑 + 先 Audit，见 disallow-latest-tag.yaml 同段说明。
+# pattern `?*` → 键存在性检查：Quantity 在 CEL 里是 int-or-string，拿它和 '' 比会类型报错，
+# 而 apiserver 本来就拒绝空 quantity，所以「键在」等价于旧版的「非空」。
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: require-requests-limits
+  annotations:
+    policies.kyverno.io/title: Require Requests and Limits
+    policies.kyverno.io/category: Resource Management
+    policies.kyverno.io/severity: medium
+spec:
+  validationActions: [Audit]
+  failurePolicy: Ignore
+  evaluation:
+    admission: {enabled: true}
+    background: {enabled: true}
+  autogen:
+    validatingAdmissionPolicy: {enabled: false}
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: [kube-system, kube-public, kube-node-lease, kyverno]
+  validations:
+    - expression: >-
+        object.spec.containers.all(c,
+          has(c.resources) &&
+          has(c.resources.requests) && 'cpu' in c.resources.requests && 'memory' in c.resources.requests &&
+          has(c.resources.limits) && 'memory' in c.resources.limits)
+      message: "每个容器必须声明 resources.requests.cpu/memory 与 resources.limits.memory。"

@@ -34,3 +34,45 @@ spec:
           spec:
             containers:
               - image: "!*:latest"
+---
+# ⏳ CEL 迁移 Phase A（2026-11-19）：与上面的 ClusterPolicy 并跑，先 Audit 对比报告，
+# Phase B 改 Deny 并删掉旧的。动因：Kyverno v1.20 源码里删光了 legacy 准入路径，
+# 不迁就是升级后静默失效（见 docs/runbooks/k3s-cluster-upgrade.md §3.2）。
+#
+# 与旧版逐项对应：
+#   pattern `!*:latest`          → endsWith(':latest') 取反，只查 containers（与旧版一致）
+#   failurePolicy: Ignore        → spec.failurePolicy（fail-open 不变）
+#   resourceFilters 排除系统 ns  → 显式 namespaceSelector。CEL 策略的匹配走 matchConstraints，
+#                                  不保证读 configmap 的 resourceFilters，所以写死在这里
+#   autogen 全部控制器           → 不写 podControllers（源码：nil = AllConfigs，含 CronJob）
+#   不生成原生 VAP               → 生成后执行挪到 apiserver，失败语义随之改变，刻意关掉
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: disallow-latest-tag
+  annotations:
+    policies.kyverno.io/title: Disallow Latest Tag
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: medium
+spec:
+  validationActions: [Audit]
+  failurePolicy: Ignore
+  evaluation:
+    admission: {enabled: true}
+    background: {enabled: true}
+  autogen:
+    validatingAdmissionPolicy: {enabled: false}
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: [kube-system, kube-public, kube-node-lease, kyverno]
+  validations:
+    - expression: "object.spec.containers.all(c, !c.image.endsWith(':latest'))"
+      message: "禁止使用 :latest tag（请用固定 tag 或 digest @sha256: 固定）。"

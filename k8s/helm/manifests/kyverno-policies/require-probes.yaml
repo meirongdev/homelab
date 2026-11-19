@@ -57,3 +57,40 @@ spec:
             containers:
               - readinessProbe:
                   periodSeconds: ">0"
+---
+# ⏳ CEL 迁移 Phase A（2026-11-19）：并跑，见 disallow-latest-tag.yaml 同段说明。本条本来就是 Audit。
+# 「排除 Job 的 Pod」改用 objectSelector：Kyverno 源码 CanAutoGen() 遇到非空 objectSelector
+# 就**整个跳过 autogen**，恰好复刻旧版现状（旧版因 exclude 带 selector，status.autogen
+# 实测为空 = 只查 Pod）。而且排除发生在 webhook 选择器层，不进引擎、不耗 CPU。
+# ⚠️ 不排除系统 ns：Audit 只产报告，旧版后台扫描本来就覆盖 kube-system/kyverno，保持报告面不缩。
+# readinessProbe.periodSeconds ">0" → has(readinessProbe)：periodSeconds 由 apiserver 默认填 10，
+# 旧条件实际判的就是「有没有 readinessProbe」。
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: require-probes
+  annotations:
+    policies.kyverno.io/title: Require Readiness Probe
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: low
+spec:
+  validationActions: [Audit]
+  failurePolicy: Ignore
+  evaluation:
+    admission: {enabled: true}
+    background: {enabled: true}
+  autogen:
+    validatingAdmissionPolicy: {enabled: false}
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+    objectSelector:
+      matchExpressions:
+        - key: batch.kubernetes.io/job-name
+          operator: DoesNotExist
+  validations:
+    - expression: "object.spec.containers.all(c, has(c.readinessProbe))"
+      message: "每个容器应配置 readinessProbe。"
