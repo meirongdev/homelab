@@ -1,8 +1,9 @@
 # k3s 集群版本升级（两集群）
 
-> Last updated: 2026-09-27
-> Status: SOP：已按本文完整执行过一次（三节点 v1.34.5+k3s1 → v1.35.8+k3s1，
-> 顺序 oracle → homelab 控制面 → worker，验收 24/24 通过）。本文的每条命令都是实跑验证过的。
+> Last updated: 2026-11-19
+> Status: SOP：已按本文完整执行过两次（2026-09 三节点 v1.34.5+k3s1 → v1.35.8+k3s1，验收 24/24 通过；
+> 2026-11-19 补丁升级 → v1.35.10+k3s1，§9 全部通过），顺序均为 oracle → homelab 控制面 → worker。
+> 本文的每条命令都是实跑验证过的。
 > 触发条件：要把 `k3s-homelab`（`k8s-node` + `k8s-worker-106`）或 `oracle-k3s` 升到新的
 > k3s/Kubernetes 版本；或发现三处 `k3s_version` pin 与现网跑的版本对不上。
 > 成功判定：三个节点 `kubectl get nodes` 全 `Ready` 且 `VERSION` 是目标版本 ·

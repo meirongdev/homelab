@@ -132,7 +132,7 @@
     # scripts/check-version-pairs.py 的 V2 组 `k3s_version` 强制。
     # ⚠️ 描述现网、不是目标版本；升级流程见 docs/runbooks/k3s-cluster-upgrade.md
     #    （控制面必须先升、worker 后升，反过来违反 skew）。
-    k3s_version: v1.35.8+k3s1
+    k3s_version: v1.35.10+k3s1
   tasks:
     # ☠️ token 由调用方（justfile 的 join-worker）经 k8s-node 的 **Tailscale 地址**
     # 取好后传进来，本剧本刻意不用 `delegate_to: k8s-node`：inventory 里 k8s-node 的

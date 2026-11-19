@@ -433,7 +433,7 @@
     # （docs/runbooks/oracle-k3s-rebuild.md），漏钉只在重建那天才爆。
     # 三处取值一致，由 scripts/check-version-pairs.py 的 V2 组 `k3s_version` 强制。
     # ⚠️ 描述现网、不是目标版本；升级流程见 docs/runbooks/k3s-cluster-upgrade.md。
-    k3s_version: v1.35.8+k3s1
+    k3s_version: v1.35.10+k3s1
   tasks:
     - name: Check if K3s is already installed
       ansible.builtin.stat:
