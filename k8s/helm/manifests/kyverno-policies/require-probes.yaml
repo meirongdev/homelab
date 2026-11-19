@@ -91,6 +91,13 @@ spec:
       matchExpressions:
         - key: batch.kubernetes.io/job-name
           operator: DoesNotExist
+  # ☠️ objectSelector 只在 webhook 层生效，**后台扫描不认它**：Phase A 实测新版报告比旧版
+  # 多出 25 个 fail，逐个核对全是 CronJob 的 Pod（restic/enrich/krr/blog-stats-rollup…），
+  # 正是 09-08 那次消掉的恒定误报。引擎层再判一次（matchConditions 准入与后台都走）；
+  # 上面的 objectSelector 仍保留：它让准入时根本不调 webhook，并且是关掉 autogen 的开关。
+  matchConditions:
+    - name: exclude-job-pods
+      expression: "!('batch.kubernetes.io/job-name' in object.metadata.?labels.orValue({}))"
   validations:
     - expression: "object.spec.containers.all(c, has(c.readinessProbe))"
       message: "每个容器应配置 readinessProbe。"
