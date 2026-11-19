@@ -1,9 +1,10 @@
 # k3s 集群版本升级（两集群）
 
-> Last updated: 2026-11-19
-> Status: SOP：已按本文完整执行过两次（2026-09 三节点 v1.34.5+k3s1 → v1.35.8+k3s1，验收 24/24 通过；
-> 2026-11-19 补丁升级 → v1.35.10+k3s1，§9 全部通过），顺序均为 oracle → homelab 控制面 → worker。
-> 本文的每条命令都是实跑验证过的。
+> Last updated: 2026-11-20
+> Status: SOP：已按本文完整执行过三次（2026-09 三节点 v1.34.5+k3s1 → v1.35.8+k3s1；2026-11-19 补丁升到
+> v1.35.10+k3s1；2026-11-20 minor 升到 v1.36.6+k3s1，§9 全部通过），顺序均为 oracle → homelab 控制面 → worker。
+> 除 §10 回滚外，每条命令都是实跑验证过的：回滚命令从未真正执行过，2026-11-20 只做了静态核对，
+> 并修掉了其中的 glob 提权 bug（见 §5.2）。
 > 触发条件：要把 `k3s-homelab`（`k8s-node` + `k8s-worker-106`）或 `oracle-k3s` 升到新的
 > k3s/Kubernetes 版本；或发现三处 `k3s_version` pin 与现网跑的版本对不上。
 > 成功判定：三个节点 `kubectl get nodes` 全 `Ready` 且 `VERSION` 是目标版本 ·
@@ -55,17 +56,17 @@ worker 剧本里 `k3s_version` 的注释写的就是这条。
 
 ## 3. 升级前的兼容性闸门
 
-☠️ **这一节是流程，不是结论**。下表最右列是 2026-08-30 的核查结果，**每次升级前重跑一遍**：
+☠️ **这一节是流程，不是结论**。下表最右列是 2026-11-20（目标 1.36）的核查结果，**每次升级前重跑一遍**：
 组件在动，上游支持矩阵也在动。
 
-| # | 查什么 | 怎么查 | 2026-08-30 |
+| # | 查什么 | 怎么查 | 2026-11-20 |
 |---|--------|--------|-----------|
-| G1 | 目标版本的 **Urgent Upgrade Notes** | 读 `CHANGELOG-<minor>.md` 的该节（见下方命令）| 1.35 起 cgroup v1 由 warning 变硬错；1.35 移除 kubelet `--pod-infra-container-image` |
+| G1 | 目标版本的 **Urgent Upgrade Notes** | 读 `CHANGELOG-<minor>.md` 的该节（见下方命令）| 1.36 只有 KCM 指标改名 `volume_operation_total_errors`→`volume_operation_errors_total`（本仓库无引用）与调度器插件 API 变更（不适用）；k3s 一层无 breaking |
 | G2 | **cgroup v2** | `stat -fc %T /sys/fs/cgroup/` → 必须 `cgroup2fs` | 三节点全通过 |
 | G3 | **被移除的 kubelet flag** | `grep -A20 kubelet-arg /etc/rancher/k3s/config.yaml` | 三处均无被移除项 |
 | G4 | **还在被请求的弃用 API** | 见下方 `apiserver_requested_deprecated_apis` | 仅 `endpoints v1`（`removed_release=""`，无移除计划），不阻塞 |
-| G5 | 组件支持矩阵（谁支持新版本）| 见 §3.2 | ⚠️ **Kyverno 是天花板** |
-| G6 | **谁把 k8s 版本当\*\*输入\*\***（与 G5 是两回事）| 见 §3.3 | ☠️ ZITADEL chart 命中，已钉死 |
+| G5 | 组件支持矩阵（谁支持新版本）| 见 §3.2 | Kyverno v1.20 起支持到 1.37，天花板已解除（2026-11-19）|
+| G6 | **谁把 k8s 版本当\*\*输入\*\***（与 G5 是两回事）| 见 §3.3 | ☠️ ZITADEL chart 命中；`tools.kubectl.image.tag` 钉在与集群同 minor 的 1.36.6（arm64 多架构已核）|
 
 ### 3.1 G1/G4 的命令
 
@@ -74,7 +75,7 @@ worker 剧本里 `k3s_version` 的注释写的就是这条。
 curl -sSL https://raw.githubusercontent.com/kubernetes/kubernetes/master/CHANGELOG/CHANGELOG-1.35.md \
   | awk '/^## Urgent Upgrade Notes/,/^## Changes by Kind/'
 # k3s 自己的那层（打包的 containerd/runc/coredns/local-path 版本也在这里）
-curl -sS https://api.github.com/repos/k3s-io/k3s/releases/tags/v1.35.8+k3s1 \
+curl -sS https://api.github.com/repos/k3s-io/k3s/releases/tags/v1.36.6+k3s1 \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["body"])'
 
 # G4 —— 谁还在请求弃用 API。空输出 = 干净；
@@ -100,7 +101,7 @@ grep -rn "gitRepo:\|externalIPs:" --include="*.yaml" k8s/ cloud/ argocd/ backup/
 | 组件 | 在哪 | 怎么查 | 2026-08-30 结论 |
 |---|---|---|---|
 | Cilium | 两集群 1.20.0 | `docs.cilium.io/en/v<ver>/network/kubernetes/requirements/` | e2e 覆盖 k8s 1.33–1.36，到 1.36 不挡路 |
-| Kyverno | 仅 homelab（现 v1.19.0）| `kyverno.io/docs/installation/releases/` | ⚠️ 唯一 supported release v1.19 只到 k8s 1.35；**1.36 无任何版本支持**（v1.20 预计 2026-11）|
+| Kyverno | 仅 homelab（现 v1.20.0）| `kyverno.io/docs/installation/releases/` | v1.20（2026-11-12）支持 k8s v1.34–v1.37。⚠️ 升到 v1.20 要先把策略迁到 `policies.kyverno.io`，见下 |
 | **CNPG** | 仅 oracle 1.30.0 | 版本发布公告 | 1.30 已加 1.36 支持 |
 | ArgoCD / ESO / prometheus-operator / trivy-operator / tetragon / falco | 两集群 | 上游 release notes | 均无声明冲突 |
 
@@ -119,15 +120,28 @@ done
 
 `kyverno-resource-validating-webhook-cfg` 的 `failurePolicy` 是 **`Ignore`**（2026-08-30 实测），
 符合 [security.md](../reference/security.md) 的 fail-open 设计。所以 Kyverno 与 apiserver
-版本不兼容时，**不会有任何东西报错或告警**。4 条 ClusterPolicy
+版本不兼容时，**不会有任何东西报错或告警**。4 条 ValidatingPolicy
 （`disallow-latest-tag` / `require-probes` / `require-requests-limits` /
 `restrict-image-registries`）只是悄悄不再生效。
 
 这和 [2026-08-11 的 Gateway API CRD stall](../records/2026-08-11-gateway-api-crd-stall.md)
 是同一类死法，验收方式也一样：**别看 pod 是不是 Running，要主动打一发该被拦的请求**（§9）。
 
-**因此当前的结论是：可以升到 1.35，先别上 1.36。** 若确要上 1.36，得接受 Kyverno
-处于未测试状态，并在 §9 里把策略生效验证当作每次必查项。
+**结论（2026-11-19）：Kyverno 已升到 v1.20（支持 k8s 1.34–1.37），可以上 1.36。**
+升 Kyverno 本身有三个坑，下次再升大版本照此排雷：
+
+- ☠️ **v1.20 不再执行 legacy `kyverno.io` 策略**（`ClusterPolicy`/`Policy`/`CleanupPolicy`/
+  `ClusterCleanupPolicy`/`PolicyException`），源码里的准入路径已删；chart 3.10 在集群里还有 legacy
+  对象时直接拒绝升级（render-time `lookup` + pre-upgrade hook Job `kyverno-check-legacy-policies`）。
+  升前先清零：`for k in clusterpolicies policies cleanuppolicies clustercleanuppolicies policyexceptions;
+  do kubectl --context k3s-homelab get $k.kyverno.io -A --no-headers | wc -l; done` 全为 0。
+  迁移做法见 [security.md](../reference/security.md) §5.2：并跑、逐资源对比两个 source 的
+  PolicyReport、再切换；`objectSelector` 后台扫描不认，排除对象要再写 `matchConditions`。
+- ⚠️ **升大版本后重新列一遍 webhook 的 failurePolicy**，别假设还是全 `Ignore`：v1.20 新增了
+  fail-closed 的 `protect-generation-labels`，已用 `features.protectGenerationLabels.enabled=false` 关掉
+  （见 `k8s/helm/values/kyverno.yaml`）。
+- 每次升完照 §9 ⑥ 主动打被拦请求，另加一条「不该被拦」的对照（合规 Pod、kube-system 里的 `:latest`），
+  只验「被拦」放过不了写得过宽的策略。
 
 ### 3.3 G6：谁把 k8s 版本当**输入**
 
@@ -230,11 +244,15 @@ OCI 侧没有做 boot volume 备份策略，所以 oracle 的回滚点只能自�
 ssh -i ~/.ssh/vgio ubuntu@100.107.166.37 '
   sudo systemctl stop k3s
   sudo mkdir -p /root/k3s-preupgrade
-  sudo cp -a /var/lib/rancher/k3s/server/db/state.db* /root/k3s-preupgrade/
+  sudo bash -c "cp -a /var/lib/rancher/k3s/server/db/state.db* /root/k3s-preupgrade/"
   sudo cp -a /usr/local/bin/k3s /root/k3s-preupgrade/k3s.old      # 装新版会覆盖，先留一份
   sudo ls -la /root/k3s-preupgrade/
 '
 ```
+
+☠️ **glob 必须交给 root 的 shell 展开（`sudo bash -c "…"`）**：`server/db/` 与 `/root` 都是 root 专属，
+普通用户的 shell 展开不了 `state.db*`，`sudo cp` 收到字面量报 `cannot stat`（而且此时 k3s 已停，
+`set -e` 脚本会把集群留在停机状态），`sudo rm -f` 则是**静默什么都不删**（§10 的回滚同理）。
 
 ☠️ **必须先 `stop k3s` 再拷**。SQLite 是 WAL 模式（目录里那个 `state.db-wal` 就是），
 热拷贝三件套会拿到撕裂的状态。
@@ -256,7 +274,7 @@ sudo systemctl stop k3s
 
 # ★ 回滚点就在这里做（§5.2），停机窗口从这一刻才开始计
 sudo mkdir -p /root/k3s-preupgrade
-sudo cp -a /var/lib/rancher/k3s/server/db/state.db* /root/k3s-preupgrade/
+sudo bash -c "cp -a /var/lib/rancher/k3s/server/db/state.db* /root/k3s-preupgrade/"
 sudo cp -a /usr/local/bin/k3s /root/k3s-preupgrade/k3s.old
 
 # 全部启动参数都在 /etc/rancher/k3s/config.yaml 里，安装脚本会自己读，无需重传 flag
@@ -316,15 +334,14 @@ ssh -i ~/.ssh/vgio ubuntu@192.168.50.107 'sudo systemctl stop k3s-agent && sudo 
 ssh -i ~/.ssh/vgio root@100.110.27.111 \
   'qm snapshot 200 pre-k3s-upgrade --description "before k3s <目标版本>"'
 
-# 在 worker 上
-ssh -i ~/.ssh/vgio ubuntu@192.168.50.107
-# ☠️ **必须重传 K3S_URL / K3S_TOKEN**，见下方陷阱 ①
-curl -sfL https://get.k3s.io | \
-  INSTALL_K3S_VERSION=<目标版本> \
-  K3S_URL=https://10.10.10.10:6443 \
-  K3S_TOKEN="$(ssh -i ~/.ssh/vgio ubuntu@10.10.10.10 'sudo cat /var/lib/rancher/k3s/server/node-token')" \
-  sh -s - agent
-sudo systemctl status k3s-agent --no-pager
+# 在笔记本上（不要登进 worker 里跑）。token 走 stdin 管道，不进任何进程的 argv
+# （Tetragon 会把 argv 写进 Loki）。☠️ **必须重传 K3S_URL / K3S_TOKEN**，见下方陷阱 ①
+# ⚠️ 把这些步骤写成脚本时，除这一条（要用 stdin 传 token）外的 ssh 都加 `-n`：
+#    ssh 默认读 stdin，会把脚本剩下的内容吞掉，表现为「执行到一半悄悄停了、k3s 已 stop 却没装」。
+ssh -n -i ~/.ssh/vgio ubuntu@10.10.10.10 'sudo cat /var/lib/rancher/k3s/server/node-token' \
+ | ssh -i ~/.ssh/vgio ubuntu@192.168.50.107 'read -r T
+     curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=<目标版本> K3S_URL=https://10.10.10.10:6443 K3S_TOKEN="$T" sh -s - agent
+     sudo systemctl status k3s-agent --no-pager'
 
 # 回笔记本
 kubectl --context k3s-homelab uncordon k8s-worker-106
@@ -403,7 +420,7 @@ done
 cd k8s/helm     && just argocd-status        # 全 Synced/Healthy，条数对 ls argocd/applications/*.yaml | wc -l
 cd cloud/oracle && just clustermesh-status   # 双集群 connected
 cd cloud/oracle && just verify-node          # oracle 只读不变量（报几条是动态的，别写死）
-cd cloud/oracle && just check-node-drift     # 配置有没有漂移 —— 重装二进制后正该查这个
+cd cloud/oracle && just check-node-drift     # 配置有没有漂移 —— 重装二进制后正该查这个。基线 changed=1：config.yaml 的 tls-san（模板刻意不含 OCI 公网 IP，现网文件里还有）；若多出 panic_on_oops 那项，见 ⑦
 
 # ④ 密钥链路（Vault 自动解封 + 两集群 ESO）
 kubectl --context k3s-homelab -n vault exec vault-0 -- vault status | grep Sealed   # false
@@ -476,6 +493,27 @@ disallow-latest-tag:
 Kyverno 与 apiserver 不兼容时**不报错、不告警、pod 全 Running**，只是不再拦：
 这条命令是唯一能看见它的地方。
 
+**⑦ oracle 的 `kernel.panic_on_oops` 还是 0。** kubelet 在 `protect-kernel-defaults` 关着时，**每次启动都会把
+它写回 1**（同时写 `kernel.panic=10`），盖掉 `/etc/sysctl.d/99-panic-on-oops.conf`。oracle 没开
+`protect-kernel-defaults`（homelab 两台开了，所以不受影响），于是每次 k3s 重启都会把 AppArmor `af_unix`
+oops 的「硬重启」重新武装起来（[复盘](../records/2026-09-01-oracle-apparmor-af-unix-panic.md)）。
+`check-node-drift` 会报出来，但不看就等于没防：
+
+```bash
+ssh -n -i ~/.ssh/vgio ubuntu@100.107.166.37 'sysctl kernel.panic_on_oops'   # 必须是 0
+ssh -n -i ~/.ssh/vgio ubuntu@100.107.166.37 'sudo sysctl -w kernel.panic_on_oops=0'   # 不是 0 就立刻改回
+```
+
+**⑧ k3s 没顺手升 Gateway API CRD。** k3s 的发布说明里常有「Bump gateway-api」，那是随 Traefik 一起打包的；
+本仓库两集群都 `disable: traefik`，所以不该有影响，但这类 CRD 版本漂移正是头号静默失效点，升完照样核一遍：
+
+```bash
+for c in k3s-homelab oracle-k3s; do kubectl --context $c get crd -o json | python3 -c '
+import json,sys,collections
+print(dict(collections.Counter(x["metadata"].get("annotations",{}).get("gateway.networking.k8s.io/bundle-version","?")
+  for x in json.load(sys.stdin)["items"] if x["spec"]["group"]=="gateway.networking.k8s.io")))'; done   # 期望只有 v1.6.1
+```
+
 ## 10. 回滚
 
 判据：§9 任一条不过且十几分钟内定位不到原因，就回滚，别在生产上调试。
@@ -491,8 +529,8 @@ Kyverno 与 apiserver 不兼容时**不报错、不告警、pod 全 Running**，
 ssh -i ~/.ssh/vgio ubuntu@100.107.166.37 '
   sudo systemctl stop k3s
   curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=<升级前的版本> INSTALL_K3S_SKIP_START=true sh -s -
-  sudo rm -f /var/lib/rancher/k3s/server/db/state.db*
-  sudo cp -a /root/k3s-preupgrade/state.db* /var/lib/rancher/k3s/server/db/
+  sudo bash -c "rm -f /var/lib/rancher/k3s/server/db/state.db*"
+  sudo bash -c "cp -a /root/k3s-preupgrade/state.db* /var/lib/rancher/k3s/server/db/"
   sudo systemctl start k3s
 '
 ```
@@ -522,13 +560,17 @@ ssh -i ~/.ssh/vgio ubuntu@100.107.166.37 '
    uv run --with pyyaml python scripts/check-version-pairs.py   # V2 组 k3s_version 强制三处一致
    ```
 
+   ⚠️ **还有第四处不在 V2 里**：`scripts/render-manifests.py` 的 `KUBE_VERSION`（CI 的 render 任务用它做 schema
+   校验与 `helm --kube-version`）。上次补丁升级就漏改了它。改之前确认 kubeconform 有该版本的 schema：
+   `curl -sI https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v<版本>-standalone-strict/pod-v1.json`。
+
    跨了周末的分阶段升级（一侧已升、另一侧还没）在**先行那侧**行尾写豁免，别让 CI 长期挂红：
 
    ```yaml
    k3s_version: v1.35.8+k3s1  # version-pair-ok: 分阶段升级，oracle 先行，homelab <日期> 跟上
    ```
 
-2. **删快照**：`qm delsnapshot 100 pre-k3s-upgrade`（pve）、`qm delsnapshot 200 pre-k3s-upgrade`（106）；
+2. **删快照**（等至少一轮夜间 restic（02:00/03:00/03:30 UTC）在新版本上跑成功再删：回滚点是唯一能回到升级前的东西，不必抢在验收当晚删）：`qm delsnapshot 100 pre-k3s-upgrade`（pve）、`qm delsnapshot 200 pre-k3s-upgrade`（106）；
    oracle 上 `sudo rm -rf /root/k3s-preupgrade`。thin 快照留着会持续吃增量。
 
 3. **回来补本文的 §3 表格**（新的兼容性核查结果）与 Status 行，并把踩到的坑写进

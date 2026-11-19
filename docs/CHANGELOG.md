@@ -1,6 +1,6 @@
 # Homelab Changelog
 
-> Last updated: 2026-11-18
+> Last updated: 2026-11-20
 > 已经做完的事，一条一行，按阶段/时间倒着找。**这里只回答「做过什么」**——
 > 还剩什么没做看 [ROADMAP.md](ROADMAP.md)，现在是什么样看 [reference/](reference/README.md)。
 > 2026-09-02 从 ROADMAP 拆出：那份文件长到 23.8KB，9 条开放项被 65 条历史淹没，
@@ -137,6 +137,8 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-11-15 | **三台 Mac 的 Qwen Code / codex 统一走网关**：`just llm-clients` 下发，清掉直连 DGX / M2 / 本机 OMLX 的旧配置和坏掉的 MCP；codex 默认仍是 ChatGPT，Studio 补装 codex ([macbook/ansible](../macbook/ansible/README.md)) |
 | 2026-11-15 | **LiteLLM 按 key 分首选**：外发 key 照旧 DGX → Studio → M2；homelab 内部 7 把 key 带 key 级 `aliases`，同样的名字改道到新组 `homelab/qwen3.8-27b`（Studio → DGX → M2），客户端不改。实测白名单按原名查、响应 `model` 仍是原名 ([按 key 分首选](reference/litellm-gateway.md)) |
 | 2026-11-18 | **DGX 后端换回 Qwen，网关对外名字不变**：四条 DGX deployment 改指 `qwen3.8-flash-next-tp2`（kit v5.4，vLLM），加回 upstream_compat 两条声明；DGX 三条告警改成 `tensorfold:*` / `vllm:*` 并集 ([现状](reference/litellm-gateway.md)) |
+| 2026-11-20 | **k3s 三节点升 v1.36.6**（oracle → 控制面 → worker，验收全过）：先把 Kyverno 4 条策略从 legacy ClusterPolicy 迁到 CEL ValidatingPolicy、再升 Kyverno v1.20（它不再执行 legacy），顺带修了 runbook 回滚命令的 glob 空操作 ([复盘](records/2026-11-20-k3s-1-36-upgrade.md)) |
+
 ### 审计与清理（历史）
 
 | 时间 | 内容 |

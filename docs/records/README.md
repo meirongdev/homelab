@@ -4,6 +4,7 @@
 
 | 日期 | 记录 | 内容 |
 |------|------|------|
+| 2026-11-20 | [k3s-1-36-upgrade](2026-11-20-k3s-1-36-upgrade.md) | 三节点升 1.36.6 无线上事故，挖出五个静默坑：runbook 备份/回滚命令的 glob 在 sudo 前展开（回滚是空操作）· oracle 每次 k3s 重启 kubelet 把 `panic_on_oops` 写回 1 · Kyverno v1.20 不再执行 legacy 策略 · `ssh` 吞掉脚本剩余内容 |
 | 2026-10-26 | [litellm-keys-in-public-repo](2026-10-26-litellm-keys-in-public-repo.md) | 两把 LiteLLM 虚拟 key（白名单含 `openrouter/*`）明文推上公开仓库 7h40m，零调用，已吊销重发、历史已改写。☠️ 本地与 CI 两道 gitleaks 全绿：默认规则认不出 `sk-`+22 位，pre-push 钩子三台 clone 都没启用 |
 | 2026-10-24 | [intrusion-sweep-argv-secrets-in-loki](2026-10-24-intrusion-sweep-argv-secrets-in-loki.md) | 双集群入侵排查未见入侵；Tetragon 把 argv 里 4 处密钥送进 Loki（bot token / SurrealDB 口令 / 隧道 token / 备份 Vault token），两轮移出命令行 + redactionFilters 兜底；oracle 停用 3 个手工遗留 |
 | 2026-10-01 | [oracle-firewalld-flushes-cilium-iptables](2026-10-01-oracle-firewalld-flushes-cilium-iptables.md) | oracle pod 出站全断 30min、全站入口断 24min。needrestart 升 libssl 后重启 firewalld，**有 direct 规则就 flush 全部 iptables**，Cilium masquerade 被清。☠️ 08-01「OCI DNS 故障」是同一个病 |
