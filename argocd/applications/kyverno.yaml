@@ -22,7 +22,12 @@ spec:
       # 已逐键核对本仓库 values 的 30 个路径在 3.9.0 全部存活
       # （serviceMonitor.additionalLabels 是自由 map，不是缺失）。
       # ⚠️ 下次升 k8s minor 前先查 kyverno.io/docs/installation/releases/ 的支持矩阵。
-      targetRevision: "3.9.0"
+      # 2026-11-19: 3.9.0(app v1.19.0) → 3.10.0(app v1.20.0)。动因：v1.20 官方支持 k8s
+      # v1.34–v1.37，v1.19 到 1.35 为止，挡着 k3s 1.36。☠️ v1.20 删光了 legacy kyverno.io 策略的
+      # 执行路径，chart 在集群里还有 legacy 策略时直接拒绝升级——本仓库 4 条策略已先迁到
+      # policies.kyverno.io ValidatingPolicy（kyverno-policies App），升级前 5 种 legacy 类型实测均为 0。
+      # 本仓库 values 的 31 个键在 3.10.0 全部存活。
+      targetRevision: "3.10.0"
       helm:
         valueFiles:
           - $values/k8s/helm/values/kyverno.yaml
