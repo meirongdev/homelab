@@ -65,7 +65,7 @@ worker 剧本里 `k3s_version` 的注释写的就是这条。
 | G2 | **cgroup v2** | `stat -fc %T /sys/fs/cgroup/` → 必须 `cgroup2fs` | 三节点全通过 |
 | G3 | **被移除的 kubelet flag** | `grep -A20 kubelet-arg /etc/rancher/k3s/config.yaml` | 三处均无被移除项 |
 | G4 | **还在被请求的弃用 API** | 见下方 `apiserver_requested_deprecated_apis` | 仅 `endpoints v1`（`removed_release=""`，无移除计划），不阻塞 |
-| G5 | 组件支持矩阵（谁支持新版本）| 见 §3.2 | Kyverno v1.20 起支持到 1.37，天花板已解除（2026-11-19）|
+| G5 | 组件支持矩阵（谁支持新版本）| 见 §3.2 | Kyverno 天花板已解除（v1.20 起到 1.37）。⚠️ **新天花板是 Cilium**：1.37 要等 1.21 正式版，且是 CNI，不能当未测试组件硬上 |
 | G6 | **谁把 k8s 版本当\*\*输入\*\***（与 G5 是两回事）| 见 §3.3 | ☠️ ZITADEL chart 命中；`tools.kubectl.image.tag` 钉在与集群同 minor 的 1.36.6（arm64 多架构已核）|
 
 ### 3.1 G1/G4 的命令
@@ -100,7 +100,7 @@ grep -rn "gitRepo:\|externalIPs:" --include="*.yaml" k8s/ cloud/ argocd/ backup/
 
 | 组件 | 在哪 | 怎么查 | 2026-08-30 结论 |
 |---|---|---|---|
-| Cilium | 两集群 1.20.0 | `docs.cilium.io/en/v<ver>/network/kubernetes/requirements/` | e2e 覆盖 k8s 1.33–1.36，到 1.36 不挡路 |
+| Cilium | 两集群 1.20.5 | `docs.cilium.io/en/v<ver>/network/kubernetes/requirements/` | 1.20 线官方只测 k8s 1.33–1.36，**不含 1.37**；1.21 在 2026-11-20 仅有 pre 版 |
 | Kyverno | 仅 homelab（现 v1.20.0）| `kyverno.io/docs/installation/releases/` | v1.20（2026-11-12）支持 k8s v1.34–v1.37。⚠️ 升到 v1.20 要先把策略迁到 `policies.kyverno.io`，见下 |
 | **CNPG** | 仅 oracle 1.30.0 | 版本发布公告 | 1.30 已加 1.36 支持 |
 | ArgoCD / ESO / prometheus-operator / trivy-operator / tetragon / falco | 两集群 | 上游 release notes | 均无声明冲突 |

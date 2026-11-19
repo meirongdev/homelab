@@ -45,7 +45,7 @@ miniflux（抓任意 feed）、readlist-ingest、calibre-metadata-*、open-noteb
 **策略面**：homelab 一条都没有。oracle 有 6 条标准 NetworkPolicy：argocd chart 自带 4 条，readlist 的 no-egress 2 条。
 两个集群的 CNP 和 CCNP 都是 0。
 
-**Cilium**（两集群一致，1.20.0）：`enable-policy=default`；`policy-audit-mode` 关闭，但运行时选项
+**Cilium**（两集群一致，1.20.5）：`enable-policy=default`；`policy-audit-mode` 关闭，但运行时选项
 `PolicyAuditMode` 可用（`cilium-dbg config`）；`policy-deny-response=none`，被拒的连接表现为静默超时；
 Hubble 环形缓冲 4095 条，按 85–108 flows/s 算**只保留 40–50 秒历史**；Hubble metrics 未开启；
 `hubble-network-policy-correlation-enabled=true`；pod 只有 IPv4；`policy-default-local-cluster=true`。
