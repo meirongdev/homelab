@@ -216,7 +216,7 @@ spec:
     # 升级规则：kubectl 与集群同 minor 即可
     # （k8s 支持 ±1 minor 偏移），所以升 k8s minor 时才需要动这里，升补丁不用。
     # ⚠️ oracle 是 arm64：换 tag 前必须确认该 tag 是**多架构 manifest list**
-    #    （1.35.6 已核：linux/amd64 + linux/arm64）。
+    #    （1.36.6 已核 2026-11-19：linux/amd64 + linux/arm64）。
     #
     # ⚠️ 2026-08-30 补：这个 pin **确实覆盖 cleanup hook**（helm template 实测：设了
     #    tools.kubectl.image.tag=1.35.6 后 job_cleanup.yaml 也渲染成 1.35.6），
@@ -234,4 +234,4 @@ spec:
     tools:
       kubectl:
         image:
-          tag: "1.35.6"
+          tag: "1.36.6"
