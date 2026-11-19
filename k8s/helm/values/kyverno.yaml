@@ -98,3 +98,13 @@ cleanupController:
 features:
   backgroundScan:
     backgroundScanInterval: 24h
+  # 2026-11-19 升 v1.20 后实测多出一个 fail-closed 的 webhook：`protect-generation-labels`
+  # （failurePolicy=Fail，匹配所有资源的 CREATE/UPDATE，用 objectSelector 限定带
+  # `generate.kyverno.io/policy-name` 标签的对象）。chart 3.10 默认开启。
+  # 它只保护 generate 策略产出的对象的标签，而本仓库 0 条 generate 策略、全集群 0 个带该标签的对象，
+  # 所以今天它什么都不保护，却是 Kyverno 里唯一一个会在 admission-controller 宕机时拒绝请求的资源类
+  # webhook，与「所有安全组件 fail-open」相悖（单副本 + bulk 优先级，宕机窗口是常态不是例外）。
+  # 关掉它 = admission-controller 的 `--protectGenerationLabels=false`（helm template 实证
+  # 整份渲染只差这一行）。⚠️ 将来若引入 GeneratingPolicy，要重新评估是否打开。
+  protectGenerationLabels:
+    enabled: false
