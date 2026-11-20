@@ -19,9 +19,11 @@ spec:
     server: https://100.94.186.7:6443
     namespace: tetragon
   # TracingPolicy 的 CRD 会回填一批服务端默认值（kprobe 的 return、参数的 maxData / resolve /
-  # returnCopy），git 清单里没有 → 永久 OutOfSync。2026-11-20 上线时逐字段对比过 git 与 live：
-  # 差异**只有**这四个键，git 里写的内容一个字没被改。纯化妆性，忽略（同 kyverno.yaml 的先例）。
-  # ⚠️ 只忽略这四个键：若有人往清单里写这些字段，改动不会被 diff 发现。
+  # returnCopy、matchBinaries 的 followChildren），git 清单里没有 → 永久 OutOfSync。
+  # 2026-11-20 上线时逐字段对比过 git 与 live：差异**只有**这五个键，git 里写的内容一个字没被改。
+  # 纯化妆性，忽略（同 kyverno.yaml 的先例）。
+  # ⚠️ 新增策略用到别的可选字段时会再冒出新的默认值，OutOfSync 复现就照此法对比一次再补，
+  #    别直接 `ignoreDifferences: *`。也别往清单里写这几个字段：改动不会被 diff 发现。
   ignoreDifferences:
     - group: cilium.io
       kind: TracingPolicy
@@ -30,6 +32,7 @@ spec:
         - .spec.kprobes[]?.args[]?.maxData
         - .spec.kprobes[]?.args[]?.resolve
         - .spec.kprobes[]?.args[]?.returnCopy
+        - .spec.kprobes[]?.selectors[]?.matchBinaries[]?.followChildren
   syncPolicy:
     automated:
       prune: true
