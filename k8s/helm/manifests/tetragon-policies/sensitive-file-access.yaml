@@ -1,0 +1,60 @@
+---
+# 容器里打开凭据类文件（观察版：只上报，不拦截）。
+#
+# 钩子选 security_file_open 而不是 security_file_permission：后者每次 read/write 都触发，
+# 前者只在 open 时触发，调用量低一到两个数量级。热节点（5600H 笔记本）上这是取舍，不是随手选。
+# 路径用 Equal / Prefix 做**内核态**匹配，不命中的 open 不会上报到用户态。
+#
+# 命中的都是「正常业务进程几乎不会碰」的路径：
+#   · /etc/shadow /etc/gshadow /etc/sudoers(.d) —— 只有 su / sudo / login / sshd 这类程序读
+#   · /root/.ssh/ /root/.kube/ /root/.aws/ /root/.docker/ —— root 家目录下的凭据
+# 刻意没有加 ServiceAccount token（/var/run/secrets/kubernetes.io/...）：每个调 K8s API
+# 的 pod 都会读，不加白名单就是满屏误报，而「谁该读」恰恰是 Tetragon 看不出来的事。
+#
+# 作用范围：只看容器里的进程（matchNamespaces Pid NotIn host_ns）。宿主上 systemd 拉起带
+# `User=` 的单元时会读 /etc/shadow 与 pam —— oracle 的 Falco 就因此刷过 500 条/天误报
+# （docs/reference/security.md §8.5），宿主进程在这里不该出现。
+#
+# ⚠️ 只观察、不拦截，理由同 container-escape-syscalls.yaml。
+# ⚠️ 路径是**容器内视角**（进程自己的 mount namespace），不是宿主路径。
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: sensitive-file-access
+spec:
+  kprobes:
+    - call: "security_file_open"
+      syscall: false
+      message: "容器内打开凭据类文件"
+      tags: ["runtime.credential-access"]
+      ignore:
+        callNotFound: true
+      args:
+        - index: 0
+          type: "file"
+      selectors:
+        # 多个 selector 之间是 OR；同一个 selector 里的 matchNamespaces 与 matchArgs 是 AND。
+        - matchNamespaces:
+            - namespace: Pid
+              operator: NotIn
+              values: ["host_ns"]
+          matchArgs:
+            - index: 0
+              operator: "Equal"
+              values:
+                - "/etc/shadow"
+                - "/etc/gshadow"
+                - "/etc/sudoers"
+        - matchNamespaces:
+            - namespace: Pid
+              operator: NotIn
+              values: ["host_ns"]
+          matchArgs:
+            - index: 0
+              operator: "Prefix"
+              values:
+                - "/etc/sudoers.d/"
+                - "/root/.ssh/"
+                - "/root/.kube/"
+                - "/root/.aws/"
+                - "/root/.docker/"

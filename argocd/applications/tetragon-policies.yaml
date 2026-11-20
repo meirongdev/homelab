@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tetragon-policies
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: homelab
+  # 与 tetragon 安装分离（同 kyverno-policies 的做法）：策略逐条加/改/删只动 git，
+  # 不碰 Helm release；首次同步可能因 TracingPolicy CRD 尚未就绪短暂失败，待 tetragon App
+  # 装好 CRD 后自动重试通过。
+  # TracingPolicy 是集群级对象，destination.namespace 对它们无意义，仅占位。
+  source:
+    repoURL: https://github.com/meirongdev/homelab
+    targetRevision: main
+    path: k8s/helm/manifests/tetragon-policies
+  destination:
+    server: https://100.94.186.7:6443
+    namespace: tetragon
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true

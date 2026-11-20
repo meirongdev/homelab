@@ -1,0 +1,119 @@
+---
+# 容器里**不该出现**的内核操作（观察版：只上报，不拦截）。
+#
+# 为什么选这几个：它们是容器逃逸/横向移动/持久化的原语，而本集群的业务负载没有任何一个合法
+# 用途（ptrace 注入/调试其他进程、跨进程写内存、装卸内核模块、kexec、Shocker 式
+# open_by_handle_at 逃逸）。调用频率几乎为零，所以 eBPF 探针的常驻开销可以忽略 ——
+# 这是挑选的首要判据，不是「越全越好」。刻意**没有**加 mount / unshare / setns：
+# 容器启动时 runc 的 init 进程就会调用 mount（某些配置下还有 unshare / setns），
+# 每次 pod 启动都会刷出一串误报。
+#
+# ⚠️ 只观察、不拦截：没有 matchActions（默认 Post）。仓库的硬约束是安全组件 fail-open，
+# 拦截型策略（Sigkill/Override）一旦误报就是直接杀生产进程，方向正好相反。要拦截，先在这里
+# 观察出基线、写 ADR，再单独加一条，别在这份里改。
+#
+# 作用范围：matchNamespaces Pid NotIn host_ns —— 只看容器里的进程。宿主机自己的
+# modprobe / systemd 合法地装模块，不该进来。（宿主事件 namespace 为空，本来也会被
+# values/tetragon.yaml 的 exportDenyList 丢掉，这里在内核态就挡住，省一次用户态往返。）
+#
+# ignore.callNotFound：目标内核没有这个符号时静默跳过，而不是整条策略加载失败。
+# 节点是 Ubuntu 24.04 (6.8) 与 7.0，且 ROADMAP 里有 26.04 升级，别让内核换代把整份检测带走。
+# 但「静默跳过」本身是失效形态：每个符号都在 6.8 和 7.0 上实测存在（2026-11-20
+# /proc/kallsyms），加载状态由 TetragonPolicyNotEnabled 告警盯着。
+#
+# 事件长什么样：Loki `{k8s_namespace_name="tetragon"} |= "process_kprobe"`，字段
+# `policy_name` / `function_name` / `process.pod.namespace` / `process.binary`。
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: container-escape-syscalls
+spec:
+  kprobes:
+    - call: "sys_ptrace"
+      syscall: true
+      message: "容器内调用 ptrace（进程注入/调试）"
+      tags: ["runtime.escape"]
+      ignore:
+        callNotFound: true
+      args:
+        - index: 0
+          type: "int"
+        - index: 1
+          type: "int"
+      selectors:
+        - matchNamespaces:
+            - namespace: Pid
+              operator: NotIn
+              values: ["host_ns"]
+    - call: "sys_process_vm_writev"
+      syscall: true
+      message: "容器内调用 process_vm_writev（跨进程写内存）"
+      tags: ["runtime.escape"]
+      ignore:
+        callNotFound: true
+      args:
+        - index: 0
+          type: "int"
+      selectors:
+        - matchNamespaces:
+            - namespace: Pid
+              operator: NotIn
+              values: ["host_ns"]
+    - call: "sys_init_module"
+      syscall: true
+      message: "容器内加载内核模块（init_module）"
+      tags: ["runtime.escape"]
+      ignore:
+        callNotFound: true
+      selectors:
+        - matchNamespaces:
+            - namespace: Pid
+              operator: NotIn
+              values: ["host_ns"]
+    - call: "sys_finit_module"
+      syscall: true
+      message: "容器内加载内核模块（finit_module）"
+      tags: ["runtime.escape"]
+      ignore:
+        callNotFound: true
+      args:
+        - index: 0
+          type: "int"
+      selectors:
+        - matchNamespaces:
+            - namespace: Pid
+              operator: NotIn
+              values: ["host_ns"]
+    - call: "sys_delete_module"
+      syscall: true
+      message: "容器内卸载内核模块（delete_module）"
+      tags: ["runtime.escape"]
+      ignore:
+        callNotFound: true
+      selectors:
+        - matchNamespaces:
+            - namespace: Pid
+              operator: NotIn
+              values: ["host_ns"]
+    - call: "sys_kexec_load"
+      syscall: true
+      message: "容器内调用 kexec_load（替换内核）"
+      tags: ["runtime.escape"]
+      ignore:
+        callNotFound: true
+      selectors:
+        - matchNamespaces:
+            - namespace: Pid
+              operator: NotIn
+              values: ["host_ns"]
+    - call: "sys_open_by_handle_at"
+      syscall: true
+      message: "容器内调用 open_by_handle_at（Shocker 式容器逃逸原语）"
+      tags: ["runtime.escape"]
+      ignore:
+        callNotFound: true
+      selectors:
+        - matchNamespaces:
+            - namespace: Pid
+              operator: NotIn
+              values: ["host_ns"]
