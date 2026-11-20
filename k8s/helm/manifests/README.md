@@ -19,6 +19,7 @@
 | `monitoring/` | `monitoring-dashboards` | `monitoring` | `dashboards/`（Grafana ConfigMap）、`alerts/`（PrometheusRule + Alertmanager 配置/secret）、`slos.yaml`、`krr.yaml`（右尺寸周报）、`monitoring-external.yaml`（外部抓取）、`cilium-envoy-servicemonitor.yaml` |
 | `namespace-guardrails/` | `namespace-guardrails` | 跨 ns | 轻量应用 ns 的 LimitRange 护栏 |
 | `personal-services/` | `personal-services` | `personal-services` | calibre-web、calibre-ebook-sync、open-notebook（app + 按需摄取 + 模型接线 provisioner）+ 该 ns 的 LimitRange/Quota。**新个人服务放这里**（见 add-service 技能） |
+| `tetragon-policies/` | `tetragon-policies` | `tetragon` | Tetragon TracingPolicy（观察版；与 tetragon chart 分离，同 kyverno-policies 的拆法）。⚠️ 增删策略要同步改 `monitoring/alerts/tetragon-alerts.yaml` 里 `TetragonPolicyNotEnabled` 的期望数 |
 | `vault-eso/` | `vault-eso` | `external-secrets` | ClusterSecretStore 配置 + 共享 ExternalSecret |
 
 ## 备注

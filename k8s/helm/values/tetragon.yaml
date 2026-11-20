@@ -7,8 +7,10 @@
 #
 # 本期(v1)范围：开启**默认进程可见性**（process exec/exit 事件由 export-stdout 容器打到 stdout
 # → 现有 OTel→Loki 管道收集 → 按 pod=tetragon 查，可见容器内起 shell / kubectl exec / 异常进程）
-# + Prometheus 指标。自定义 TracingPolicy（敏感文件/提权/异常外联检测）与基于其指标的告警留作
-# 后续调优（避免一上来写错 kprobe 语法或加 CPU）。
+# + Prometheus 指标。2026-11-20 起另有两条观察版 TracingPolicy（容器逃逸 syscall / 凭据文件，独立
+# App `tetragon-policies`，见 k8s/helm/manifests/tetragon-policies/），命中走 Loki ruler 告警、健康走
+# Prometheus。⚠️ 下面的 exportDenyList 会把 kube-system / cilium / 宿主 / apps-pg 的 pg_isready
+# 探针事件挡在 Loki 之外：策略命中在这些范围内**看不到、也不会告警**。
 
 # ⚠️ 2026-08-10 修：**顶层 `resources:` 是死配置** —— chart 1.7.0 根本没有这个键
 # （`helm show values` 逐键确认：顶层无 `resources`，agent 的是 `tetragon.resources`，

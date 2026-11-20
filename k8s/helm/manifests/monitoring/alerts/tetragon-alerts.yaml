@@ -1,0 +1,104 @@
+---
+# Tetragon 自身健康告警 —— 「运行时检测死了，而且没人发现」。
+#
+# 为什么需要（2026-11-20）：Tetragon 上线 TracingPolicy 之前只是个进程日志，没有任何东西依赖它的
+# 「检测」能力，挂了也无所谓。现在有两条策略在盯容器逃逸与凭据文件，策略加载失败/被禁用/丢事件
+# 都是**静默**的：pod 照常 Running，只是检测悄悄失效。形态与 falco-alerts.yaml 完全一致，分工也一样：
+#   · 本文件（Prometheus）只管「检测器本身还活着吗」——健康类，指标最合适；
+#   · 「有人触发了策略」走 Loki ruler（cloud/oracle/manifests/monitoring/loki-rules.yaml
+#     的 tetragon-runtime 组）。不用指标做命中告警的原因：Tetragon 会在 pod 删除后清掉该 pod 的
+#     指标序列（实测：测试 pod 的 kprobe 计数在 pod 删除后很快消失），寿命短的 pod 里发生的命中
+#     可能在被评估之前就没了；日志行不会消失。
+#
+# ⚠️ 每条表达式都已对着现网 Prometheus **正反两个方向**验过（2026-11-20）：现在返回空，且把
+# 条件放宽后能命中对应序列。永远不触发的规则看起来和健康系统一模一样。
+#   · `absent(up{...job="tetragon-does-not-exist"})` → 1（证明 absent() 会触发）
+#   · 其余三条：放宽阈值后都返回 2 条序列（每节点一条），证明表达式与 `node` 标签都对得上。
+#
+# ⚠️ 指标名是现网 build 实际吐出来的（curl :2112/metrics），不是文档里的名字。
+#
+# TetragonPolicyNotEnabled 里的「2」= k8s/helm/manifests/tetragon-policies/ 下的 TracingPolicy 个数。
+# **增删策略要同步改这个数**（否则要么永远报警、要么少一条也不报），docs/reference/security.md
+# §8.5 的清单里也写了这一条。
+#
+# `release` 标签是 kube-prometheus-stack ruleSelector 必需的。
+# 经 ArgoCD `monitoring-dashboards` Application 部署（git push → 3 分钟同步）。
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tetragon-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: tetragon
+      rules:
+        # (1) 引擎不可达或序列整体消失 → homelab 的运行时检测整个关了。
+        # critical：纵深防御第 10 层在此期间不存在，而 homelab 没有别的东西会发现。
+        # 10m 容忍 DaemonSet 滚动与节点重启，别在没复查重启历史前往下收紧。
+        - alert: TetragonDown
+          expr: up{cluster="homelab", job="tetragon"} == 0 or absent(up{cluster="homelab", job="tetragon"})
+          for: 10m
+          labels:
+            severity: critical
+            cluster: homelab
+          annotations:
+            summary: "Tetragon 在 homelab 上不可达（运行时检测已失效）"
+            description: >-
+              抓取 tetragon:2112 失败或该序列整体消失超过 10 分钟。此期间 homelab 上
+              **没有任何运行时检测**（纵深防御第 10 层）。
+              `kubectl --context k3s-homelab -n tetragon get pods`；
+              加载失败看 `kubectl --context k3s-homelab -n tetragon logs ds/tetragon -c tetragon`。
+
+        # (2) 有策略处于 error / load_error。最常见成因：内核升级后某个符号没了（我们给每个 kprobe
+        # 都加了 ignore.callNotFound，所以多半是语法/类型错），或 CRD 升级后字段变了。
+        - alert: TetragonPolicyLoadFailed
+          expr: sum by (node) (tetragon_tracingpolicy_loaded{cluster="homelab", job="tetragon", state=~"error|load_error"}) > 0
+          for: 5m
+          labels:
+            severity: warning
+            cluster: homelab
+          annotations:
+            summary: "{{ $labels.node }} 上有 Tetragon 策略加载失败（{{ $value | printf \"%.0f\" }} 条）"
+            description: >-
+              该节点上有 TracingPolicy 处于 error / load_error，对应的检测已经失效，但 Tetragon
+              本身仍在运行、别的策略照常工作，所以不会有别的信号。
+              `kubectl --context k3s-homelab -n tetragon exec ds/tetragon -c tetragon -- tetra tracingpolicy list`
+              看是哪一条，原因在 `logs ds/tetragon -c tetragon | grep -i policy`。
+
+        # (3) 启用的策略数量不对。覆盖 (2) 看不见的情形：策略被 disable、CR 被误删、或 Tetragon 重启后
+        # 没把策略重新加载上。⚠️ 这里的 2 必须与 tetragon-policies/ 下的策略个数一致。
+        - alert: TetragonPolicyNotEnabled
+          expr: sum by (node) (tetragon_tracingpolicy_loaded{cluster="homelab", job="tetragon", state="enabled"}) < 2
+          for: 10m
+          labels:
+            severity: warning
+            cluster: homelab
+          annotations:
+            summary: "{{ $labels.node }} 上只启用了 {{ $value | printf \"%.0f\" }} 条 Tetragon 策略（期望 2）"
+            description: >-
+              k8s/helm/manifests/tetragon-policies/ 里有 2 条 TracingPolicy，该节点上启用的少于 2 条，
+              即有检测悄悄没在跑。先 `kubectl --context k3s-homelab get tracingpolicy`，
+              再看 ArgoCD 的 `tetragon-policies` 是否 Synced。**如果刚增删过策略，是这个规则里的 2
+              没同步改。**
+
+        # (4) 内核缓冲区丢事件 = **检测盲区**，静默：Tetragon 照常运行、照常报别的事件，被丢掉的那些
+        # 永远不会被评估。任何非零增长都值得看一眼，所以阈值是 >0（同 FalcoKernelEventDrops 的理由；
+        # 2026-09-12 Falco 一分钟丢 402,586 个就是这种形态）。基线：上线前 7 天为 0。
+        - alert: TetragonEventsLost
+          expr: >-
+            sum by (node) (increase(tetragon_observer_ringbuf_events_lost_total{cluster="homelab", job="tetragon"}[30m])) > 0
+            or
+            sum by (node) (increase(tetragon_observer_ringbuf_queue_events_lost_total{cluster="homelab", job="tetragon"}[30m])) > 0
+          for: 10m
+          labels:
+            severity: warning
+            cluster: homelab
+          annotations:
+            summary: "{{ $labels.node }} 上 Tetragon 丢内核事件（30 分钟内 {{ $value | printf \"%.0f\" }} 个）"
+            description: >-
+              ring buffer 溢出，丢掉的事件**不会被任何策略评估** —— 这是检测盲区，不是性能问题的
+              附带损失。先别查 CPU limit（Falco 那次全程只用了 0.024 核）：第一顺位查宿主维护任务
+              （`journalctl -u apt-daily-upgrade --since -1d`），升 glibc / python3 会重启全部服务，
+              fork 率能翻 10 倍。

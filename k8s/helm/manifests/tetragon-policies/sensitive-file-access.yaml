@@ -15,15 +15,17 @@
 # `User=` 的单元时会读 /etc/shadow 与 pam —— oracle 的 Falco 就因此刷过 500 条/天误报
 # （docs/reference/security.md §8.5），宿主进程在这里不该出现。
 #
-# ☠️ 排除了 /usr/bin/pg_isready —— **上线后第一次观察就抓到的真实噪声**（2026-11-20）：
-# databases/apps-pg 的就绪探针 `pg_isready -U postgres` 每次都会打开 /etc/shadow，
-# 100 秒内 20 条、零例外，永远不会停。它在 Loki 里看不到，只是因为 values/tetragon.yaml 的
-# exportDenyList 已经按「namespace + 二进制 + 参数」丢掉了这个探针的事件；但策略命中数与
-# Prometheus 指标照常计数，上告警就会一直响。
-# 代价要说清楚：这是按二进制**绝对路径**的排除，没法再限定 namespace（selector 里没有 k8s
-# namespace 维度）。能利用它的前提是攻击者已经能往 postgres 容器的 /usr/bin 里写文件，
-# 那时早有更响的信号。别把排除范围扩到别的二进制，除非先抓到证据。
-#
+# ☠️ 已知噪声：apps-pg 的就绪探针 `pg_isready -U postgres` 每次都会打开 /etc/shadow
+# （2026-11-20 上线后第一次观察就抓到：100 秒 20 条，永远不会停）。
+#   · **Loki 里没有它**：values/tetragon.yaml 的 exportDenyList 已按「namespace + 二进制 + 参数」
+#     丢掉这个探针的事件，所以基于日志的告警天然没有这个噪声。
+#   · **Prometheus 指标里有它**：策略命中数与 `tetragon_events_total{type="PROCESS_KPROBE",
+#     binary="/usr/bin/pg_isready"}` 照常计数。要基于指标告警，必须在表达式里按 `binary` 排除。
+# ☠️ **别想在策略里用 matchBinaries NotIn 把它排掉 —— 实测（Tetragon 1.7.0、内核 6.8/7.0）
+#    不生效**：对照实验用一条临时策略 `matchBinaries NotIn ["/usr/local/bin/python3"]`，python3
+#    读 /etc/hostname 的事件照样上报。上线时我就是这样写的、注释还写着「已排除」，实际一直在报，
+#    直到用对照实验才发现。要排除就在告警表达式或 exportDenyList 里做，并且做完要拿真事件验证。
+# ☠️ 同一次 open 会在日志里出现**两条**事件（原因未查）：告警按「有没有」判断，别按次数。
 # ⚠️ 只观察、不拦截，理由同 container-escape-syscalls.yaml。
 # ⚠️ 路径是**容器内视角**（进程自己的 mount namespace），不是宿主路径。
 apiVersion: cilium.io/v1alpha1
@@ -47,9 +49,6 @@ spec:
             - namespace: Pid
               operator: NotIn
               values: ["host_ns"]
-          matchBinaries:
-            - operator: "NotIn"
-              values: ["/usr/bin/pg_isready"]
           matchArgs:
             - index: 0
               operator: "Equal"
@@ -61,9 +60,6 @@ spec:
             - namespace: Pid
               operator: NotIn
               values: ["host_ns"]
-          matchBinaries:
-            - operator: "NotIn"
-              values: ["/usr/bin/pg_isready"]
           matchArgs:
             - index: 0
               operator: "Prefix"

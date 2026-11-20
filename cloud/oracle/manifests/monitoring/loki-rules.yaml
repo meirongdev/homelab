@@ -72,3 +72,60 @@ data:
                 1h 窗口。它能在故障引入后一小时内报出来，但**告警自动 resolved 不等于已修复**
                 —— 真正的验收是上面那条 just 配方结尾的自检，或确认新建 HTTPRoute 能拿到
                 `.status`（`kubectl -n <ns> get httproute <name> -o jsonpath='{.status.parents[0].conditions[?(@.type=="Accepted")].status}'`）。
+  # ───────────────────────────────────────────────────────────────────────────
+  # Tetragon 运行时策略命中（homelab）。2026-11-20 加。
+  #
+  # 为什么用日志而不是指标：Tetragon 会在 pod 删除后清掉该 pod 的指标序列（实测），寿命短的 pod 里
+  # 的命中可能在被评估前就没了；日志行不会消失。健康类（引擎死了/策略没加载/丢事件）走 Prometheus，
+  # 见 k8s/helm/manifests/monitoring/alerts/tetragon-alerts.yaml。
+  #
+  # 数据源：homelab 的 tetragon DaemonSet → export-stdout 容器 → OTel → 本 Loki。
+  # values/tetragon.yaml 的 exportDenyList 已经把 kube-system / cilium / 宿主（namespace 为空）以及
+  # databases 的 pg_isready 探针挡在导出之外，所以这里**没有**那个已知噪声。
+  #
+  # ⚠️ 每个方向都对着现网 Loki 验过：真实窗口 [5m] 返回 0；放宽到 [3h] 命中了测试 pod（2 个策略 × 2 个
+  # 节点共 4 条序列）；去掉 `tp-` 排除后多出 tp-exp-binaries，证明排除是起作用的。
+  # ⚠️ 没有做端到端的真实推送验证（那会真的往 Telegram 发一条）。ruler → Alertmanager → Telegram
+  # 这段已在 2026-08-11 用 info 级自检验证过，见本文件上方。
+  #
+  # ⚠️ 同一次 open 在日志里会出现两条事件（原因未查），所以只按「有没有」告警，不看次数。
+  # ⚠️ 策略名以 `tp-` 开头的视为临时测试策略，不告警：做对照实验时别再往群里发消息。
+  tetragon-runtime.yaml: |
+    groups:
+      - name: tetragon-runtime
+        interval: 1m
+        rules:
+          - alert: TetragonRuntimePolicyHit
+            expr: |
+              sum by (cluster, policy, ns, pod, binary, fn) (
+                count_over_time(
+                  {k8s_namespace_name="tetragon", k8s_container_name="export-stdout"}
+                  |= "\"process_kprobe\""
+                  | json policy="process_kprobe.policy_name", ns="process_kprobe.process.pod.namespace", pod="process_kprobe.process.pod.name", binary="process_kprobe.process.binary", fn="process_kprobe.function_name"
+                  | policy!~"tp-.*"
+                  [5m]
+                )
+              ) > 0
+            labels:
+              severity: warning
+              component: runtime-security
+            annotations:
+              summary: "{{ $labels.cluster }} 容器内触发 Tetragon 策略 {{ $labels.policy }}：{{ $labels.ns }}/{{ $labels.pod }} 的 {{ $labels.binary }}（{{ $labels.fn }}）"
+              description: |
+                容器里的进程做了「正常业务几乎不会做」的事：
+                  · container-escape-syscalls：ptrace / process_vm_writev / 装卸内核模块 / kexec / open_by_handle_at
+                  · sensitive-file-access：打开 /etc/shadow、sudoers、/root/.ssh 等凭据路径
+                策略是**只观察**的（没有拦截），所以进程已经成功执行了，需要人判断是不是误报。
+
+                先看是谁、做了什么：
+                  # Loki
+                  {k8s_namespace_name="tetragon", cluster="homelab"} |= "process_kprobe" |= "{{ $labels.pod }}"
+                  # 事件全文（含 argv、父进程、容器 id）
+                  kubectl --context k3s-homelab -n tetragon logs ds/tetragon -c export-stdout --since=15m | grep {{ $labels.pod }}
+                再看这个 pod：`kubectl --context k3s-homelab -n {{ $labels.ns }} describe pod {{ $labels.pod }}`，
+                是不是刚 `kubectl exec` 进去过、镜像是不是预期的那一个。
+
+                ⚠️ 这条告警只覆盖**导出之后**的事件：kube-system / cilium / 宿主进程在 values/tetragon.yaml
+                的 exportDenyList 里被丢弃，不会到这里。已知噪声（apps-pg 的 pg_isready 探针）同理，
+                日志里没有它，见 k8s/helm/manifests/tetragon-policies/sensitive-file-access.yaml。
+

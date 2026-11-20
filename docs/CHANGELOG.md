@@ -139,6 +139,7 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-11-18 | **DGX 后端换回 Qwen，网关对外名字不变**：四条 DGX deployment 改指 `qwen3.8-flash-next-tp2`（kit v5.4，vLLM），加回 upstream_compat 两条声明；DGX 三条告警改成 `tensorfold:*` / `vllm:*` 并集 ([现状](reference/litellm-gateway.md)) |
 | 2026-11-20 | **k3s 三节点升 v1.36.6**（oracle → 控制面 → worker，验收全过）：先把 Kyverno 4 条策略从 legacy ClusterPolicy 迁到 CEL ValidatingPolicy、再升 Kyverno v1.20（它不再执行 legacy），顺带修了 runbook 回滚命令的 glob 空操作 ([复盘](records/2026-11-20-k3s-1-36-upgrade.md)) |
 | 2026-11-20 | **Cilium 1.20.0 → 1.20.5（两集群）**：chart 默认值静默把 Envoy xDS 从 ads 翻成 split、Envoy 1.37→1.39，已显式钉 `envoy.xdsMode: ads`；先 oracle 后 homelab，26 个真实域名状态码与升级前逐一一致。k3s 1.37 要等 Cilium 1.21 正式版（1.20 线官方只测到 1.36）([复盘](records/2026-11-20-k3s-1-36-upgrade.md)) |
+| 2026-11-20 | **Tetragon 用起来**：homelab 运行时检测从「进程日志」变成真检测，上线两条观察版 TracingPolicy（容器逃逸 syscall / 凭据文件，只观察不拦截）+ 命中走 Loki 告警、健康走 Prometheus。实测抓到 `matchBinaries NotIn` 不生效与 Tetragon 指标随 pod 消失两个坑 ([security.md §8.5](reference/security.md)) |
 
 ### 审计与清理（历史）
 
