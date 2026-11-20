@@ -21,6 +21,10 @@
 # 但「静默跳过」本身是失效形态：每个符号都在 6.8 和 7.0 上实测存在（2026-11-20
 # /proc/kallsyms），加载状态由 TetragonPolicyNotEnabled 告警盯着。
 #
+# ⚠️ 这里没有给 process_vm_writev 写 args：它第 0 个参数的真实类型是 pid_t，CRD 的类型枚举里没有
+# 这个值，写 int 会在 agent 日志里报「type (pid_t) … does not match spec type (int)」
+# （2026-11-20 上线时实测到）。进程元数据已足够定位，不为一个信息性参数去猜类型。
+#
 # 事件长什么样：Loki `{k8s_namespace_name="tetragon"} |= "process_kprobe"`，字段
 # `policy_name` / `function_name` / `process.pod.namespace` / `process.binary`。
 apiVersion: cilium.io/v1alpha1
@@ -51,9 +55,6 @@ spec:
       tags: ["runtime.escape"]
       ignore:
         callNotFound: true
-      args:
-        - index: 0
-          type: "int"
       selectors:
         - matchNamespaces:
             - namespace: Pid

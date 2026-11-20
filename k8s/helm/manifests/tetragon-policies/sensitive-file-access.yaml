@@ -15,6 +15,15 @@
 # `User=` 的单元时会读 /etc/shadow 与 pam —— oracle 的 Falco 就因此刷过 500 条/天误报
 # （docs/reference/security.md §8.5），宿主进程在这里不该出现。
 #
+# ☠️ 排除了 /usr/bin/pg_isready —— **上线后第一次观察就抓到的真实噪声**（2026-11-20）：
+# databases/apps-pg 的就绪探针 `pg_isready -U postgres` 每次都会打开 /etc/shadow，
+# 100 秒内 20 条、零例外，永远不会停。它在 Loki 里看不到，只是因为 values/tetragon.yaml 的
+# exportDenyList 已经按「namespace + 二进制 + 参数」丢掉了这个探针的事件；但策略命中数与
+# Prometheus 指标照常计数，上告警就会一直响。
+# 代价要说清楚：这是按二进制**绝对路径**的排除，没法再限定 namespace（selector 里没有 k8s
+# namespace 维度）。能利用它的前提是攻击者已经能往 postgres 容器的 /usr/bin 里写文件，
+# 那时早有更响的信号。别把排除范围扩到别的二进制，除非先抓到证据。
+#
 # ⚠️ 只观察、不拦截，理由同 container-escape-syscalls.yaml。
 # ⚠️ 路径是**容器内视角**（进程自己的 mount namespace），不是宿主路径。
 apiVersion: cilium.io/v1alpha1
@@ -38,6 +47,9 @@ spec:
             - namespace: Pid
               operator: NotIn
               values: ["host_ns"]
+          matchBinaries:
+            - operator: "NotIn"
+              values: ["/usr/bin/pg_isready"]
           matchArgs:
             - index: 0
               operator: "Equal"
@@ -49,6 +61,9 @@ spec:
             - namespace: Pid
               operator: NotIn
               values: ["host_ns"]
+          matchBinaries:
+            - operator: "NotIn"
+              values: ["/usr/bin/pg_isready"]
           matchArgs:
             - index: 0
               operator: "Prefix"
