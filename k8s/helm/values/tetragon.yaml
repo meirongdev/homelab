@@ -82,14 +82,20 @@ tetragon:
   # 实测 7d 峰值 181Mi（超过原先想给的 128Mi request），故 request 给到 224Mi、
   # limit 384Mi。CPU 维持 50m/500m：沿用上面那条注释的原意，这次是真的生效了。
   #
-  # ☠️ 2026-11-20 上线 TracingPolicy（k8s/helm/manifests/tetragon-policies/）后**重新定过内存**：
-  #   · 稳态：142Mi → 约 210Mi（每节点 +70Mi，连续 3 小时稳定，没有继续增长）；
-  #   · 加载/重载策略时的尖峰：k8s-node 上 3 小时内峰值 **373Mi，对着 384Mi 的 limit 只差 11Mi**，
-  #     而这个尖峰每改一次策略（或 agent 重启）都会重放。被 OOM 杀掉 = 检测静默失效，所以不能留。
+  # ☠️ 2026-11-20 上线 TracingPolicy（k8s/helm/manifests/tetragon-policies/）后重新定过 **limit**。
+  # 实测要分清三个数，别混：
+  #   · 创建/**更新**策略时的峰值：k8s-node 上 3 小时内 **373Mi，对着 384Mi 的 limit 只差 11Mi**。
+  #     更新是 delete+add，新旧 sensor 会同时在内存里，所以每改一次策略都会重放这个尖峰。
+  #     被 OOM 杀掉 = 检测静默失效，这才是调 limit 的理由。
+  #   · agent **重启**时策略是预置的，峰值只有 233Mi（k8s-node）/ 167Mi（worker）。
+  #   · 稳态**还没定论**：上线后约 1 小时（期间改了 3 次策略）稳在 ~210Mi；干净重启后降到
+  #     131~167Mi，几乎回到原来的 142Mi。所以 ~210Mi 里有一部分是反复更新留下的堆，不是策略
+  #     固有的稳态代价。多观察几天再回头改 request，别拿 210Mi 当结论。
   #   · CPU 没有稳态代价：加载时冲到 ~22m、几分钟内回到 2~4m 基线，上面 50m/500m 不动。
-  #   · 宿主很宽裕（k8s-node 可用 5.3G、worker 可用 2.1G），所以涨的是上限不是占用。
-  # request 256Mi（贴着新稳态）、limit 512Mi（峰值 373Mi 的 1.37 倍）。
-  # ⚠️ 峰值只能用 max_over_time 看：15 分钟步长的曲线把它削成了 334Mi，差点据此少给。
+  #   · 宿主很宽裕（k8s-node 可用 5.3G、worker 可用 2.1G），涨的是上限不是占用。
+  # limit 512Mi = 更新路径峰值 373Mi 的 1.37 倍。request 256Mi 略高于观测上沿（~210Mi），只影响调度
+  # 记账与 QoS，不是占用。
+  # ⚠️ 峰值只能用 max_over_time 看：15 分钟步长的曲线把 373Mi 削成了 334Mi，差点据此少给。
   resources:
     requests:
       cpu: 50m
