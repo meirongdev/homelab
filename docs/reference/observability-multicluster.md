@@ -200,7 +200,7 @@ collector（同一份 `otel-collector-config.yaml`）抓本集群的 exporter，
 | `prometheus/falco` | `falco-metrics.falco.svc:8765` | 60s | 需 values 里两个开关同时开 |
 | `prometheus/falcosidekick` | `falco-falcosidekick.falco.svc:2801` | 60s | 投递链路（Telegram ok/error） |
 | `prometheus/argocd` | pod 发现：`argocd` ns 里 application-controller 的 `metrics`(8082) 端口 | 60s | 只 keep `argocd_app_info` / `argocd_cluster_connection_status`；ArgoCD 是 manual-helm，不开 chart 的 metrics Service |
-| `prometheus/apiserver` | `kubernetes.default.svc:443/metrics` | 60s | https + SA token + 投射 CA 真校验；只 keep `apiserver_request_total` / `…_terminations_total`（该端点 ~5.7 万行，留约 520 条）；ClusterRole 需 `nonResourceURLs: ["/metrics"]`；job 名 `apiserver` 与 homelab 一致，使 chart 的 `KubeAPIInstanceUnreachable` 自动覆盖 oracle |
+| `prometheus/apiserver` | `kubernetes.default.svc:443/metrics` | 60s | https + SA token + 投射 CA 真校验；只 keep `apiserver_request_total` / `…_terminations_total`（该端点 ~5.7 万行，留约 520 条）；ClusterRole 需 `nonResourceURLs: ["/metrics"]`；job 名 `apiserver` 与 homelab 一致，使 chart 的 `KubeAPIInstanceUnreachable` 自动覆盖 oracle。成本（实测）：collector CPU / 节流不变、RSS 均值 +~34Mi，见表下 |
 
 `prometheus/cadvisor` 直连 kubelet：
 
@@ -208,6 +208,13 @@ collector（同一份 `otel-collector-config.yaml`）抓本集群的 exporter，
 - `insecure_skip_verify: true`：k3s kubelet 服务证书自签，且 SAN 不含节点 IP。
 - keep 正则只留少数容器指标（清单与各自的消费者写在配置里正则旁的注释），并 drop `container=""` 的 Pod 级汇总。
 - 不够给 OpenCost 当 Prometheus 数据源（缺 `container_fs_*` / `container_network_*`），见 [cost-and-rightsizing.md](cost-and-rightsizing.md)。
+
+`prometheus/apiserver` 的成本（2026-11-22 实测，collector 滚动前后各取 25–30 分钟同口径窗口）：
+
+- 抓取：一次约 5.6 万个样本、耗时 0.75s，keep 后留 517 条；homelab Prometheus 的 head series 约 +730（117146 → 117880）。
+- collector（oracle，2 OCPU）：CPU 66.8m → 66.2m、CFS 节流 0.5% → 0.5%，**没有变化**；RSS 均值约 151Mi（140–164）→ 约 185Mi（179–192），**增加约 34Mi**，之后在这个带内持平、不继续涨。仍只占 768Mi limit 的约 24%，oracle 侧 `ContainerMemoryNearLimit` 没有触发。
+- ⚠️ 这是**不干净的对照**：旧 pod 已跑数天、新 pod 刚起，而且没有「同一个新 pod 不带这条抓取」的版本，RSS 增量无法严格归因给这条抓取。判断依据只是量级吻合（每分钟解析约 5.7 万行再丢掉 99%）且持平不增长。以后若要精确归因，临时去掉这条 receiver 重滚一次，取同样 25 分钟窗口再比。
+- 部署前的参照（旧 pod 1 天 RSS 峰值 192Mi、7 天峰值 447Mi，见 `otel-collector.yaml` 的内存注释）：本次增量没有改变那个结论，limit 不需要动。
 
 ### homelab Prometheus（集群内抓取）
 
