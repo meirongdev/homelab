@@ -401,6 +401,51 @@ receivers:
               regex: ''
               action: drop
 
+  # kube-apiserver 自身指标 → homelab Prometheus (cluster=oracle-k3s)。2026-11-22 新增。
+  #
+  # 为什么必须抓：oracle 的 apiserver 此前**一条指标都没进 Prometheus**（apiserver_* 序列数 = 0），
+  # 它挂了/过载没有任何专属信号。而这个集群跑着 ArgoCD 控制面，apiserver 出事 = 两个集群的部署一起停。
+  # 反过来 pod 在 apiserver 挂掉后照常运行，collector 照常上报，所以「遥测断了」那类间接告警未必会响。
+  # 消费方 k8s/helm/manifests/monitoring/alerts/apiserver-alerts.yaml。
+  #
+  # job 名刻意叫 `apiserver`（与 homelab 的 ServiceMonitor 一致）：chart 自带的
+  # `KubeAPIInstanceUnreachable`（`up{job="apiserver"} == 0`，不带 cluster 条件）因此自动覆盖 oracle。
+  # ☠️ 但 chart 的 `KubeAPIDown` 是 `absent(up{job="apiserver"})`，也不带 cluster：homelab 那条 up 存在，
+  #    它对 oracle 永远是空集 —— oracle 的「指标消失」只能靠 apiserver-alerts.yaml 里按 cluster 写的那条。
+  #
+  # 只留两族（该端点 ~57k 行 / 3.8 万个 apiserver_* series，keep 后 ~520 条，含 up）：
+  #   apiserver_request_total               → 5xx 比例（~510 条；WATCH 也留着，分母口径与 homelab 一致）
+  #   apiserver_request_terminations_total  → chart 的 KubeAPITerminatedRequests（被限流/超时主动丢弃的请求）
+  # 刻意不抓延迟直方图：duration_bucket 就有 1.1 万条，裁到两个 le 也要 ~1300 条，
+  # 且 oracle 侧 `le` 的写法（"1"）与 homelab 的 Prometheus 抓取（"1.0"）可能不一致，是现成的陷阱。
+  # oracle 暂无「变慢」告警，缺口记在 reference/observability-alerting-slo.md。
+  #
+  # TLS 走投射进 pod 的集群 CA 做真校验（不像 cadvisor 那条 insecure_skip_verify）：
+  # 部署前用同一份 CA 对 kubernetes.default.svc.cluster.local 实测通过（返回 401 而非证书错误）。
+  # 成本：每 60s 解析一次 ~57k 行再丢掉 95%+。部署前 collector 基线（2026-11-22）：RSS 1d 峰值 192Mi
+  # （limit 768Mi）、CPU ≈67m、CFS 节流 0.5%。部署后的对比写在 reference/observability-multicluster.md
+  # 的 prometheus/apiserver 一行（别写回这里：改本文件一个字就会让 collector 重滚一次）。
+  prometheus/apiserver:
+    config:
+      scrape_configs:
+        - job_name: 'apiserver'
+          scheme: https
+          scrape_interval: 60s
+          scrape_timeout: 20s
+          tls_config:
+            ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          authorization:
+            type: Bearer
+            credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+          static_configs:
+            - targets: ['kubernetes.default.svc.cluster.local:443']
+              labels:
+                cluster: oracle-k3s
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: 'apiserver_request_total|apiserver_request_terminations_total'
+              action: keep
+
 processors:
   memory_limiter:
     limit_mib: 400
@@ -542,5 +587,9 @@ service:
       exporters: [prometheusremotewrite]
     metrics/argocd:
       receivers: [prometheus/argocd]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheusremotewrite]
+    metrics/apiserver:
+      receivers: [prometheus/apiserver]
       processors: [memory_limiter, resource, batch]
       exporters: [prometheusremotewrite]

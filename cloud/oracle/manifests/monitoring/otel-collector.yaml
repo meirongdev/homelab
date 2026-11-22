@@ -34,6 +34,11 @@ rules:
   - apiGroups: [""]
     resources: ["nodes/metrics"]
     verbs: ["get"]
+  # /metrics: 抓 kube-apiserver 自己的指标（prometheus/apiserver，见 otel-collector-config.yaml）。
+  # 这是 non-resource URL，不属于任何 apiGroup/resource，得单独写 nonResourceURLs；
+  # 缺它时抓取拿 403、up=0（2026-11-22 部署前 `kubectl auth can-i get /metrics --as=...` 实测为 no）。
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
   - apiGroups: ["apps"]
     resources: ["replicasets"]
     verbs: ["get", "list", "watch"]

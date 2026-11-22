@@ -1,6 +1,6 @@
 # Observability — 告警、看板组织与 SLO
 
-> Last updated: 2026-11-06
+> Last updated: 2026-11-22
 > Status: 生效事实
 >
 > 遥测的消费侧：告警路由与覆盖盲区、Grafana 看板组织约定、SLI/SLO 体系。
@@ -87,6 +87,20 @@ yq '.spec' k8s/helm/manifests/monitoring/alerts/<file>.yaml \
 清单在 `k8s/helm/manifests/monitoring/alerts/`（ArgoCD `monitoring-dashboards` App）。这里只记
 各组守什么与刻意的取舍；未列出的文件与组，设计说明在各自的注释里。
 
+- `apiserver-alerts.yaml`（4 条，两集群，2026-11-22）：chart 的 `KubeAPIDown` / `KubeAPIInstanceUnreachable` /
+  `KubeAPITerminatedRequests` 管「挂了、过载」，但 availability / burnrate / Slos 三组因评估太重被有意关掉
+  （见 `values/kube-prometheus-stack.yaml`「默认规则裁剪」），所以 **apiserver 自身 5xx 升高、变慢原本没有告警**；
+  oracle 的 apiserver 更是一条指标都没有（ArgoCD 控制面就在它上面）。现在：`KubeAPIServerErrorsSustained`
+  （5xx 占比 >0.1% 持续 15m，两集群）、`KubeAPIServerSlowRequests`（>1s 的请求占比 >5% 持续 15m，仅 homelab）、
+  `OracleKubeAPIServerDown`（critical，10m）、`KubeAPIServerMetricsAbsent`（三种静默失效的守卫）。
+  oracle 数据源是 otel `prometheus/apiserver`（只留 `apiserver_request_total` / `…_terminations_total`，约 520 条，
+  不抓延迟直方图）。阈值来自 homelab 7 天回放：5xx 基线是 0，慢请求峰值 0.57%（都出在 k3s 升级重启那一刻）；
+  `for: 15m` 正是为了让 ~2–6 分钟的计划内重启不响。☠️ 三个坑：① chart 的 `KubeAPIDown` 是
+  `absent(up{job="apiserver"})`、不带 cluster，homelab 的 up 在，它对 oracle 恒为空；② **p99 在这里不可用**：
+  只剩 7 个 `le` 桶（0.05/0.1/1/5/10/30/60），p99 在 0.1–1s 间线性插值、常态就是 0.8–0.9s，「p99>0.5」回放 114 段误报，
+  所以改用「慢于 1s 的占比」；③ homelab 的 `le` 文本是 `"1.0"` 不是 `"1"`，写错则分子静默为空、恒不触发。
+  `apiserver_request_sli_duration_seconds` 不含 webhook 与 APF 排队时间，慢的只可能是 apiserver 自己或存储。
+  已知缺口：oracle 无「变慢」告警；两集群都没有审计日志（[security.md §11](security.md)）。
 - `eso-alerts.yaml`：`externalsecret`/`(cluster)secretstore` `Ready=False` 即报，堵「Vault 封印或
   token 过期 → Secret 停刷而 app 还在用旧值」。前置的一次性 metrics 开关：homelab
   `cd k8s/helm && just deploy-eso`（`serviceMonitor.enabled`）、oracle

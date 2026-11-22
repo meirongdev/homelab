@@ -1,0 +1,169 @@
+---
+# kube-apiserver 异常告警（两个集群）。2026-11-22 新增。
+#
+# 堵的盲区（2026-11-22 现网核对）：
+#   · homelab：chart 自带的 KubeAPIDown / KubeAPIInstanceUnreachable / KubeAPITerminatedRequests /
+#     KubeClientErrors 管「挂了、过载、证书」。但 kubeApiserverAvailability / Burnrate / Slos 三组在
+#     2026-08-02 被有意关掉（评估一轮 745s 把 Prometheus 压垮，且 7d retention 算不了 30d 窗口，
+#     见 values/kube-prometheus-stack.yaml「默认规则裁剪」），KubeAPIErrorBudgetBurn 随之没了：
+#     **apiserver 自身 5xx 升高、变慢，没有任何告警**。KubeClientErrors 量的是 apiserver 作为
+#     客户端发出的请求（rest_client_requests_total），不是它对外服务的错误率。
+#   · oracle：apiserver_* 序列数 = 0，一条指标都没进 Prometheus。该集群跑着 ArgoCD 控制面，
+#     apiserver 出事 = 两个集群的部署一起停；而 pod 在 apiserver 挂掉后照常运行、collector 照常上报，
+#     「遥测断了」这类间接告警未必会响。数据源见 cloud/oracle/manifests/monitoring/
+#     otel-collector-config.yaml 的 `prometheus/apiserver`（只留 request_total / terminations_total）。
+#
+# 为什么不把被关掉的三组重新打开：问题不在「要不要错误率」，在它们是 30d 窗口 + 全量 recording rule。
+# 这里每条都是单个即时表达式、5m 速率窗口、`for` 才升级，不新增任何 recording rule。
+#
+# ── 阈值怎么定的（2026-11-22，对 homelab 7 天历史逐条回放，step 2m）──────────────────────
+#   · 流量稳定：~10 req/s（p99 13.7，上限 33）。oracle 无历史，进程启动以来累计 ~5.6 req/s。
+#   · 5xx 比例：7 天里 p99.9 恒为 0；唯一非零是 11-19 夜到 11-20 凌晨 k3s 升级重启那两段
+#     （各 4–6 分钟，峰值 0.50%）。基线是**零**，所以阈值取 0.1%：5m 窗口里要有 ≥3 个 5xx，
+#     且持续 15m 才响——单个偶发 500 到不了（一个错误 = 0.03%）。升级重启（~2m）也不会响，
+#     这正是 `for: 15m` 的用意。oracle 累计 5xx 比例 0.0035%（41/1.19M，全是 GET 非资源路径）。
+#   · 慢请求占比（>1s，不含 WATCH/CONNECT）：7 天峰值 0.57%（同样是 11-20 升级那一刻），
+#     p99.9 = 0.32%。阈值取 5%，约为峰值的 9 倍。p99 延迟**不能用**：仅有的几个 le 桶
+#     （0.05/0.1/1/5/10/30/60）让 p99 在 0.1–1s 之间线性插值，常态就在 0.8–0.9s，
+#     「p99 > 1」永远不会触发、「p99 > 0.5」每天 100+ 段误报（回放实测 114 段）。
+#   · 每条都做了正反两个方向的验证：回放（常态 0 条触发）+ 阈值临时降到峰值以下，
+#     确认表达式在 11-20 那一刻真的有输出 + promtool test rules 喂合成序列
+#     （触发/不触发/低流量护栏/CONNECT 排除/缺失守卫各一组）。
+#
+# ⚠️ `apiserver_request_sli_duration_seconds` 不含 webhook 耗时和 APF 排队时间（上游定义），
+#   所以「Kyverno webhook 慢」不会让它变慢，它反映的是 apiserver 自己和存储（k3s 这里是 SQLite/kine）。
+# ⚠️ homelab 的 `le` 在 Prometheus 里的文本是 "1.0"，不是 "1"。别手写成 "1"：分子会静默变空，
+#   慢请求那条恒不触发（外观与「不慢」完全一致）——所以 KubeAPIServerMetricsAbsent 专门守这一个桶。
+# ⚠️ rate() 的新序列盲区：5xx 序列要等第一个错误出现才存在，第一次增量看不见。持续的错误流不受影响，
+#   只意味着「第一个 500」本身不会被计入，对 15m 持续判据无碍。
+#
+# Deployed via the ArgoCD `monitoring-dashboards` Application (git push → 3-min sync).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: apiserver-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: apiserver
+      rules:
+        # oracle 的 apiserver 不可达。chart 的 KubeAPIInstanceUnreachable（`up{job="apiserver"} == 0`，
+        # 15m、warning）在 oracle 开始上报 job="apiserver" 后会自动覆盖它，所以这条与它同时响是预期的：
+        # 这条更早（10m）、且是 critical——它是 GitOps 控制面。
+        # k3s 计划内重启约 2 分钟（2026-11-20 实测），10m 不会被它误触发。
+        # up==0 由 collector 在抓取失败时自己写出，所以「apiserver 挂了但 collector 还活着」能被抓到；
+        # 整条遥测链路断了（collector 或 Tailscale）会变成序列消失，由 OracleTelemetryAbsent 接管。
+        # ⚠️ chart 的 KubeAPIDown 是 `absent(up{job="apiserver"})`，不带 cluster：homelab 那条 up
+        #   存在，它对 oracle 永远是空集，**所以不能指望它**。
+        - alert: OracleKubeAPIServerDown
+          expr: up{job="apiserver", cluster="oracle-k3s"} == 0
+          for: 10m
+          labels:
+            severity: critical
+            component: apiserver
+          annotations:
+            summary: "oracle-k3s 的 kube-apiserver 不可达已超 10 分钟"
+            description: |
+              oracle otel-collector 抓 kubernetes.default.svc:443/metrics 连续失败。ArgoCD 控制面在这个集群上，
+              apiserver 不通 = 两个集群的 GitOps 同步一起停（已部署的负载照常跑）。
+              kubectl 此时多半也不通，直接上节点看：
+              `ssh -n -i ~/.ssh/vgio ubuntu@100.107.166.37 'systemctl is-active k3s; sudo journalctl -u k3s --since "20 min ago" --no-pager | tail -60'`
+              区分：只是抓取 403（RBAC 被改）还是 apiserver 真挂——
+              `ssh -n -i ~/.ssh/vgio ubuntu@100.107.166.37 'curl -sk https://127.0.0.1:6443/livez'` 返回 401 说明进程活着。
+              ⚠️ 若刚重启过 k3s：kubelet 会把 kernel.panic_on_oops 写回 1，记得改回 0（见 records/2026-11-20）。
+
+        # 5xx 持续存在。基线是零，所以 0.1% 就够敏感；traffic 护栏防止低流量时一两个错误撑出高比例。
+        # 常见成因：准入 webhook 失败（Kyverno，create/update 报 500 "failed calling webhook"）、
+        # kine/SQLite 锁竞争或磁盘慢（"database is locked"）、聚合 API 挂。
+        # 下面的 `and on (cluster)` 显式写 on：裸 `and` 会按全部标签匹配，两侧标签集不同则静默为空。
+        - alert: KubeAPIServerErrorsSustained
+          expr: |
+            (
+              sum by (cluster) (rate(apiserver_request_total{job="apiserver", code=~"5.."}[5m]))
+                /
+              sum by (cluster) (rate(apiserver_request_total{job="apiserver"}[5m]))
+            ) > 0.001
+            and on (cluster)
+            (sum by (cluster) (rate(apiserver_request_total{job="apiserver"}[5m])) > 1)
+          for: 15m
+          labels:
+            severity: warning
+            component: apiserver
+          annotations:
+            summary: "{{ $labels.cluster }} 的 kube-apiserver 5xx 占比 {{ $value | humanizePercentage }}，已持续 15 分钟"
+            description: |
+              基线是 0（7 天回放里只有 k3s 升级重启那几分钟非零），持续 15m 的 >0.1% 不是偶发。
+              先看是哪类请求在失败：
+              `topk(10, sum by (verb, resource, code) (rate(apiserver_request_total{cluster="{{ $labels.cluster }}", code=~"5.."}[15m])))`
+              · POST/PUT/PATCH 且 resource 是 pods/deployments 等 → 多半是准入 webhook（Kyverno）在失败：
+                `kubectl --context k3s-homelab -n kyverno get pods`，`kubectl get validatingwebhookconfigurations -o custom-columns=N:.metadata.name,F:.webhooks[*].failurePolicy`
+              · GET/LIST 全面 5xx → apiserver 或存储（SQLite/kine）：节点上 `journalctl -u k3s | grep -E 'database is locked|kine|etcd'`
+              · code=504 → 超时，同时看 KubeAPIServerSlowRequests。
+              计划内重启 k3s 会带来 ~2–6 分钟的 5xx，但达不到 15m。
+
+        # 慢请求占比。分子分母都排除 CONNECT（exec/port-forward 是长连接，天然很慢）；
+        # sli 直方图本身没有 WATCH。只对 homelab 写：oracle 暂时不抓延迟直方图（1.1 万条，见 otel 配置注释）。
+        - alert: KubeAPIServerSlowRequests
+          expr: |
+            (
+              1 - (
+                sum by (cluster) (rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver", cluster="homelab", verb!="CONNECT", le="1.0"}[5m]))
+                  /
+                sum by (cluster) (rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver", cluster="homelab", verb!="CONNECT", le="+Inf"}[5m]))
+              )
+            ) > 0.05
+            and on (cluster)
+            (sum by (cluster) (rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver", cluster="homelab", verb!="CONNECT", le="+Inf"}[5m])) > 1)
+          for: 15m
+          labels:
+            severity: warning
+            component: apiserver
+          annotations:
+            summary: "{{ $labels.cluster }} 的 kube-apiserver 有 {{ $value | humanizePercentage }} 的请求慢于 1 秒，已持续 15 分钟"
+            description: |
+              常态 <0.5%（7 天峰值 0.57%，k3s 升级重启那一刻）。阈值 5%。
+              这个直方图不含 webhook 耗时和 APF 排队，所以慢的是 apiserver 自己或存储——
+              homelab 的 k3s 用 SQLite（kine），k8s-node 是热笔记本，先查磁盘和 CPU：
+              `ssh -n -i ~/.ssh/vgio ubuntu@10.10.10.10 'uptime; iostat -x 1 3 | tail -8; sudo journalctl -u k3s --since "20 min ago" --no-pager | grep -iE "slow|took|database is locked" | tail -20'`
+              定位是哪类请求：
+              `topk(5, sum by (verb, resource) (rate(apiserver_request_sli_duration_seconds_count{cluster="homelab"}[10m])) - sum by (verb, resource) (rate(apiserver_request_sli_duration_seconds_bucket{cluster="homelab", le="1.0"}[10m])))`
+              大 LIST（Trivy、kube-state-metrics）和备份窗口（02:00/03:00 restic）是已知的 IO 竞争来源。
+
+        # 元告警：上面几条依赖的序列没了，它们会**静默**——没有数据 = 没有告警。三种情形：
+        #  ① oracle 的其它遥测在、apiserver 的 up 却没有 → prometheus/apiserver receiver 没生效
+        #     （配置没滚动、pipeline 漏写、RBAC 被撤后 collector 报错退出等）。其它遥测也没了是
+        #     OracleTelemetryAbsent 的事，故用 `and on() count(...)` 限定「别的在、只有它不在」。
+        #  ② up==1 却没有 apiserver_request_total → keep 正则失配（改名/升版本），抓取「成功」但内容全被丢。
+        #  ③ homelab 的 sli 直方图缺了 le="1.0" 桶 → 慢请求那条的分子变空、恒不触发。
+        #     成因：chart 升级后 `kubeApiServer.serviceMonitor.metricRelabelings` 的 drop 列表变了
+        #     （values/kube-prometheus-stack.yaml 里「保留 le=1.0」依赖那条 regex 不含 1）。
+        - alert: KubeAPIServerMetricsAbsent
+          expr: |
+            (
+              absent(up{job="apiserver", cluster="oracle-k3s"})
+              and on ()
+              (count(up{cluster="oracle-k3s", job!="apiserver"}) > 0)
+            )
+            or
+            (
+              count by (cluster) (up{job="apiserver"} == 1)
+                unless
+              count by (cluster) (apiserver_request_total{job="apiserver"})
+            )
+            or
+            absent(apiserver_request_sli_duration_seconds_bucket{job="apiserver", cluster="homelab", le="1.0"})
+          for: 15m
+          labels:
+            severity: warning
+            component: apiserver
+          annotations:
+            summary: "kube-apiserver 告警依赖的指标在 {{ $labels.cluster }} 上缺失"
+            description: |
+              {{ $labels.cluster }} 上 KubeAPIServerErrorsSustained / KubeAPIServerSlowRequests /
+              OracleKubeAPIServerDown 依赖的序列没有到达 Prometheus，它们现在**不会触发**。
+              · oracle：`kubectl --context oracle-k3s -n monitoring logs ds/otel-collector | grep -i apiserver`；
+                `kubectl --context oracle-k3s auth can-i get /metrics --as=system:serviceaccount:monitoring:otel-collector` 应为 yes。
+              · homelab：`kubectl --context k3s-homelab get servicemonitor -n monitoring kube-prometheus-stack-apiserver -o yaml | grep -A8 metricRelabelings`，
+                核对 drop 规则没有把 apiserver_request_sli_duration_seconds_bucket 的 le="1.0"（或整族）丢掉。

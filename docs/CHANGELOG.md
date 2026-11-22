@@ -1,6 +1,6 @@
 # Homelab Changelog
 
-> Last updated: 2026-11-20
+> Last updated: 2026-11-22
 > 已经做完的事，一条一行，按阶段/时间倒着找。**这里只回答「做过什么」**——
 > 还剩什么没做看 [ROADMAP.md](ROADMAP.md)，现在是什么样看 [reference/](reference/README.md)。
 > 2026-09-02 从 ROADMAP 拆出：那份文件长到 23.8KB，9 条开放项被 65 条历史淹没，
@@ -140,6 +140,7 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-11-20 | **k3s 三节点升 v1.36.6**（oracle → 控制面 → worker，验收全过）：先把 Kyverno 4 条策略从 legacy ClusterPolicy 迁到 CEL ValidatingPolicy、再升 Kyverno v1.20（它不再执行 legacy），顺带修了 runbook 回滚命令的 glob 空操作 ([复盘](records/2026-11-20-k3s-1-36-upgrade.md)) |
 | 2026-11-20 | **Cilium 1.20.0 → 1.20.5（两集群）**：chart 默认值静默把 Envoy xDS 从 ads 翻成 split、Envoy 1.37→1.39，已显式钉 `envoy.xdsMode: ads`；先 oracle 后 homelab，26 个真实域名状态码与升级前逐一一致。k3s 1.37 要等 Cilium 1.21 正式版（1.20 线官方只测到 1.36）([复盘](records/2026-11-20-k3s-1-36-upgrade.md)) |
 | 2026-11-20 | **Tetragon 用起来**：homelab 运行时检测从「进程日志」变成真检测，上线两条观察版 TracingPolicy（容器逃逸 syscall / 凭据文件，只观察不拦截）+ 命中走 Loki 告警、健康走 Prometheus。实测抓到 `matchBinaries NotIn` 不生效与 Tetragon 指标随 pod 消失两个坑 ([security.md §8.5](reference/security.md)) |
+| 2026-11-22 | **kube-apiserver 异常告警补齐**：homelab 此前只有「挂了/过载」类告警（错误预算三组因评估太重被关），apiserver 自身 5xx 与变慢无告警；oracle 的 apiserver 一条指标都没有。新增 oracle otel 抓取 + 4 条告警（5xx 占比、慢请求占比、oracle 不可达、指标缺失守卫），阈值取自 7 天回放，规则用 promtool 合成序列测试并做了变异验证。审计日志仍延后 ([告警](reference/observability-alerting-slo.md)) |
 
 ### 审计与清理（历史）
 

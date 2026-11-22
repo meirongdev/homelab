@@ -1,6 +1,6 @@
 # Multi-Cluster Observability Architecture
 
-> Last updated: 2026-11-15
+> Last updated: 2026-11-22
 > Status: 生效事实
 >
 > 遥测的**采集与汇聚侧**：三条管线怎么跨集群流动、应用怎么接日志/追踪、坏了怎么查。
@@ -200,6 +200,7 @@ collector（同一份 `otel-collector-config.yaml`）抓本集群的 exporter，
 | `prometheus/falco` | `falco-metrics.falco.svc:8765` | 60s | 需 values 里两个开关同时开 |
 | `prometheus/falcosidekick` | `falco-falcosidekick.falco.svc:2801` | 60s | 投递链路（Telegram ok/error） |
 | `prometheus/argocd` | pod 发现：`argocd` ns 里 application-controller 的 `metrics`(8082) 端口 | 60s | 只 keep `argocd_app_info` / `argocd_cluster_connection_status`；ArgoCD 是 manual-helm，不开 chart 的 metrics Service |
+| `prometheus/apiserver` | `kubernetes.default.svc:443/metrics` | 60s | https + SA token + 投射 CA 真校验；只 keep `apiserver_request_total` / `…_terminations_total`（该端点 ~5.7 万行，留约 520 条）；ClusterRole 需 `nonResourceURLs: ["/metrics"]`；job 名 `apiserver` 与 homelab 一致，使 chart 的 `KubeAPIInstanceUnreachable` 自动覆盖 oracle |
 
 `prometheus/cadvisor` 直连 kubelet：
 
