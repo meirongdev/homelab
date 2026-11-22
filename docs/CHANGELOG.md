@@ -142,6 +142,9 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-11-20 | **Tetragon 用起来**：homelab 运行时检测从「进程日志」变成真检测，上线两条观察版 TracingPolicy（容器逃逸 syscall / 凭据文件，只观察不拦截）+ 命中走 Loki 告警、健康走 Prometheus。实测抓到 `matchBinaries NotIn` 不生效与 Tetragon 指标随 pod 消失两个坑 ([security.md §8.5](reference/security.md)) |
 | 2026-11-22 | **kube-apiserver 异常告警补齐**：homelab 此前只有「挂了/过载」类告警（错误预算三组因评估太重被关），apiserver 自身 5xx 与变慢无告警；oracle 的 apiserver 一条指标都没有。新增 oracle otel 抓取 + 4 条告警（5xx 占比、慢请求占比、oracle 不可达、指标缺失守卫），阈值取自 7 天回放，规则用 promtool 合成序列测试并做了变异验证。审计日志仍延后 ([告警](reference/observability-alerting-slo.md)) |
 | 2026-11-22 | **oracle 的 apiserver「变慢」告警补上**：oracle otel 增抓 sli 直方图（只留 `le=1`/`+Inf` 两个桶），`KubeAPIServerSlowRequests` 改为两集群通用。离线用真实 `/metrics` 跑 otel 抓到三个坑（整数桶正则、`le` 两集群文本不同、`_sum` 被合成），细节见告警文档 ([告警](reference/observability-alerting-slo.md)) |
+| 2026-11-22 | **trivy-operator 每天被杀的根因是存活探针，不是 OOM**：每日 reconcile 脉冲把 CPU 顶在 250m、节流到 100%，chart 写死的 1s 探针连挂 10 次被 kubelet 杀（内核日志零 oom-kill）。CPU limit 改 500m、内存 768Mi ([values](../k8s/helm/values/trivy-operator.yaml)) |
+| 2026-11-22 | **告警规则 promtool 单元测试入库**：`scripts/alert-rule-tests/` + `just test-alert-rules`，CI 必跑。CI 首跑就抓到本地测不出的问题（mkdtemp 的 0700 目录 promtool 读不到） ([scripts](../scripts/README.md)) |
+| 2026-11-22 | **Tetragon「应用进程起 shell」告警**：只报父进程是应用的 shell，放行按参数精确写，7 天回放零误报；顺带 agent 的 memory request 按 2 天稳态从 256Mi 降到 160Mi ([security §8.5](reference/security.md)) |
 
 ### 审计与清理（历史）
 
