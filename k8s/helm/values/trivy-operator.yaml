@@ -65,13 +65,30 @@ operator:
 # operator 自身（控制器）资源
 # 2026-07-16 fix: 256Mi → 512Mi. 200 restart OOM (exit 137). Trivy plugin loading
 # + concurrent reconciliation on single-node homelab exceeds 256Mi.
+#
+# 2026-11-22：limits cpu 250m → 500m、memory 512Mi → 768Mi，request memory 256Mi → 320Mi。
+# 现象：`ContainerMemoryNearLimit` 断断续续响了 8 天；11-15 / 11-18 / 11-19 各被杀一次（exit 137）。
+# ☠️ **不是 OOM**：节点内核日志 11-15 以来零条 oom-kill，`ContainerOOMKilled` 也从没响过。
+#   kubelet 的 prober_probe_total 显示三次被杀的那一分钟各有 10–11 次 Liveness 失败，正好跨过
+#   chart 写死的 failureThreshold=10（timeoutSeconds=1，**values 改不了**，模板里硬编码）。
+#   exit 137 = kubelet 探针失败后补发的 SIGKILL；lastState.reason 显示 "Error" 而不是 "OOMKilled"。
+# 机理：operator 每天约 23:40Z 有一次 1–3 分钟的 reconcile 脉冲（RSS +150–190Mi，时刻随重启漂移，
+#   像是相对启动时间的 24h 周期）。轻的那几次 ~5 CPU 秒、节流 27–35%，探针没事；重的那次
+#   ~37 CPU 秒、CPU 顶在 250m 上节流 78–100% 持续 3 分钟，RSS 同时顶到 512Mi（max_usage > limit），
+#   /healthz 1 秒内答不上来 → 被杀 → 重启后从头再来。内存顶格时内核回收的 CPU 也算在本容器头上，
+#   所以两个 limit 一起抬（内存压力放大 CPU 争用这一点是推断，未单独证实）。
+# 为什么抬 CPU limit 不违背「控 CPU」：每次脉冲的工作量是固定的，limit 只决定它是 1 分钟做完，
+#   还是拖 3 分钟后被杀、再重启重做一遍——后者总 CPU 更多。平时均值 ~16m，request 不变。
+#   上限仍有界：automaxprocs 在 500m 下仍给 GOMAXPROCS=1，进程本身也用不满一个核。
+# request memory 按实测：7 天每小时最大值 p50 280Mi / p90 348Mi（旧值 256Mi 低于中位数）。
+# 验收看下一次 ~23:40Z 脉冲：Liveness 失败 0 次、节流 < 50%、RSS 峰值离 768Mi 有余量。
 resources:
   requests:
     cpu: 50m
-    memory: 256Mi
+    memory: 320Mi
   limits:
-    cpu: 250m
-    memory: 512Mi
+    cpu: 500m
+    memory: 768Mi
 
 trivy:
   mode: ClientServer                    # 配合 builtInTrivyServer
