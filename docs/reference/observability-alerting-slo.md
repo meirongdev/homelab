@@ -91,16 +91,19 @@ yq '.spec' k8s/helm/manifests/monitoring/alerts/<file>.yaml \
   `KubeAPITerminatedRequests` 管「挂了、过载」，但 availability / burnrate / Slos 三组因评估太重被有意关掉
   （见 `values/kube-prometheus-stack.yaml`「默认规则裁剪」），所以 **apiserver 自身 5xx 升高、变慢原本没有告警**；
   oracle 的 apiserver 更是一条指标都没有（ArgoCD 控制面就在它上面）。现在：`KubeAPIServerErrorsSustained`
-  （5xx 占比 >0.1% 持续 15m，两集群）、`KubeAPIServerSlowRequests`（>1s 的请求占比 >5% 持续 15m，仅 homelab）、
+  （5xx 占比 >0.1% 持续 15m，两集群）、`KubeAPIServerSlowRequests`（>1s 的请求占比 >5% 持续 15m，两集群）、
   `OracleKubeAPIServerDown`（critical，10m）、`KubeAPIServerMetricsAbsent`（三种静默失效的守卫）。
-  oracle 数据源是 otel `prometheus/apiserver`（只留 `apiserver_request_total` / `…_terminations_total`，约 520 条，
-  不抓延迟直方图）。阈值来自 homelab 7 天回放：5xx 基线是 0，慢请求峰值 0.57%（都出在 k3s 升级重启那一刻）；
+  oracle 数据源是 otel `prometheus/apiserver`：`apiserver_request_total` / `…_terminations_total`，加 sli 直方图里
+  只留 `le=1` 与 `+Inf` 两个桶并丢掉 CONNECT（共约 1.8k 条；duration 直方图要 1.1 万条，没抓）。阈值来自 homelab 7 天回放：5xx 基线是 0，慢请求峰值 0.57%（都出在 k3s 升级重启那一刻）；
   `for: 15m` 正是为了让 ~2–6 分钟的计划内重启不响。☠️ 三个坑：① chart 的 `KubeAPIDown` 是
   `absent(up{job="apiserver"})`、不带 cluster，homelab 的 up 在，它对 oracle 恒为空；② **p99 在这里不可用**：
   只剩 7 个 `le` 桶（0.05/0.1/1/5/10/30/60），p99 在 0.1–1s 间线性插值、常态就是 0.8–0.9s，「p99>0.5」回放 114 段误报，
-  所以改用「慢于 1s 的占比」；③ homelab 的 `le` 文本是 `"1.0"` 不是 `"1"`，写错则分子静默为空、恒不触发。
+  所以改用「慢于 1s 的占比」；③ 同一个桶的 `le` 文本两个集群不一样：homelab 直抓是 `"1.0"`，oracle 经 otel 过来是 `"1"`（relabel 阶段又是 `"1.0"` 写法），
+  规则写 `le=~"1|1\\.0"`，只写一种则另一个集群的分子静默为空、恒不触发；otel 里 drop 桶的正则对整数桶要带 `(\\.0)?`，
+  否则整数桶全部漏过（离线实验实测：留下 4424 个桶而不是 632 个）；`_sum` 不能丢，丢了 otel 会合成一个全 0 的 `_sum`。
   `apiserver_request_sli_duration_seconds` 不含 webhook 与 APF 排队时间，慢的只可能是 apiserver 自己或存储。
-  已知缺口：oracle 无「变慢」告警；两集群都没有审计日志（[security.md §11](security.md)）。
+  已知缺口：两集群都没有审计日志（[security.md §11](security.md)）；oracle 的慢请求阈值沿用 homelab 的 5%，
+  它自己的历史分布只有上线后的几小时，之后复核。
 - `eso-alerts.yaml`：`externalsecret`/`(cluster)secretstore` `Ready=False` 即报，堵「Vault 封印或
   token 过期 → Secret 停刷而 app 还在用旧值」。前置的一次性 metrics 开关：homelab
   `cd k8s/helm && just deploy-eso`（`serviceMonitor.enabled`）、oracle

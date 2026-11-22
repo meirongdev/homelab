@@ -413,16 +413,26 @@ receivers:
   # ☠️ 但 chart 的 `KubeAPIDown` 是 `absent(up{job="apiserver"})`，也不带 cluster：homelab 那条 up 存在，
   #    它对 oracle 永远是空集 —— oracle 的「指标消失」只能靠 apiserver-alerts.yaml 里按 cluster 写的那条。
   #
-  # 只留两族（该端点 ~57k 行 / 3.8 万个 apiserver_* series，keep 后 ~520 条，含 up）：
+  # 只留三族（该端点 ~57k 行 / 3.8 万个 apiserver_* series，keep 后约 1.8k 条，含 up）：
   #   apiserver_request_total               → 5xx 比例（~510 条；WATCH 也留着，分母口径与 homelab 一致）
   #   apiserver_request_terminations_total  → chart 的 KubeAPITerminatedRequests（被限流/超时主动丢弃的请求）
-  # 刻意不抓延迟直方图：duration_bucket 就有 1.1 万条，裁到两个 le 也要 ~1300 条，
-  # 且 oracle 侧 `le` 的写法（"1"）与 homelab 的 Prometheus 抓取（"1.0"）可能不一致，是现成的陷阱。
-  # oracle 暂无「变慢」告警，缺口记在 reference/observability-alerting-slo.md。
+  #   apiserver_request_sli_duration_seconds_{bucket,sum,count}
+  #                                         → KubeAPIServerSlowRequests（慢于 1s 的请求占比）。
+  #     直方图原有 7040 个 bucket series，只留 le=1 与 le=+Inf 两个桶、并丢掉 CONNECT（exec/port-forward
+  #     长连接，天然很慢）：632 桶 + 316 count + 316 sum。选 sli 而不是 duration：后者 1.1 万条，且含 WATCH。
+  #
+  #   ☠️ `le` 在这条链路上有三种写法，同一个桶：
+  #     apiserver 原文 "1" · metric_relabel 阶段 "1.0"（Prometheus 抓取时已把 le 规范成浮点写法）· 经 otel 导出后 "1"。
+  #     所以下面 drop 的正则对整数桶写成 `2(\.0)?`：只写 `2` 会匹配不上，整数桶全部漏过（离线实验实测：
+  #     第一版留下 4424 个桶而不是 632 个）。homelab 直抓的 Prometheus 里该桶是 "1.0"、oracle 这边是 "1"，
+  #     告警规则因此写成 le=~"1|1\.0"。apiserver 将来新增桶时会漏过这份 drop 列表，只是多几条 series，无害。
+  #   ☠️ `_sum` 必须留：去掉它，otel 会为直方图**合成一个全 0 的 `_sum`**（离线实验实测），
+  #     `rate(_sum)/rate(_count)` 会得到 0 的「平均延迟」，比没有更糟。留着则是真值，且 series 数完全一样。
+  #   桶值经 otel 往返后与原始 /metrics 逐位一致（离线实验：慢于 1s 225/906001，两边相同）。
   #
   # TLS 走投射进 pod 的集群 CA 做真校验（不像 cadvisor 那条 insecure_skip_verify）：
   # 部署前用同一份 CA 对 kubernetes.default.svc.cluster.local 实测通过（返回 401 而非证书错误）。
-  # 成本：每 60s 解析一次 ~57k 行再丢掉 95%+。部署前 collector 基线（2026-11-22）：RSS 1d 峰值 192Mi
+  # 成本：每 60s 解析一次 ~57k 行再丢掉 97%。部署前 collector 基线（2026-11-22）：RSS 1d 峰值 192Mi
   # （limit 768Mi）、CPU ≈67m、CFS 节流 0.5%。部署后的对比写在 reference/observability-multicluster.md
   # 的 prometheus/apiserver 一行（别写回这里：改本文件一个字就会让 collector 重滚一次）。
   prometheus/apiserver:
@@ -443,8 +453,15 @@ receivers:
                 cluster: oracle-k3s
           metric_relabel_configs:
             - source_labels: [__name__]
-              regex: 'apiserver_request_total|apiserver_request_terminations_total'
+              regex: 'apiserver_request_total|apiserver_request_terminations_total|apiserver_request_sli_duration_seconds_(bucket|sum|count)'
               action: keep
+            # 只留 le=1 与 +Inf：其余桶全丢。此刻 le 已是 "2.0" 这种写法，整数桶必须带 `(\.0)?`。
+            - source_labels: [__name__, le]
+              regex: 'apiserver_request_sli_duration_seconds_bucket;(0\.05|0\.1|0\.2|0\.4|0\.6|0\.8|1\.25|1\.5|2(\.0)?|3(\.0)?|4(\.0)?|5(\.0)?|6(\.0)?|8(\.0)?|10(\.0)?|15(\.0)?|20(\.0)?|30(\.0)?|45(\.0)?|60(\.0)?)'
+              action: drop
+            - source_labels: [__name__, verb]
+              regex: 'apiserver_request_sli_duration_seconds_(bucket|sum|count);CONNECT'
+              action: drop
 
 processors:
   memory_limiter:

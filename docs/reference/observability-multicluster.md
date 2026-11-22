@@ -200,7 +200,7 @@ collector（同一份 `otel-collector-config.yaml`）抓本集群的 exporter，
 | `prometheus/falco` | `falco-metrics.falco.svc:8765` | 60s | 需 values 里两个开关同时开 |
 | `prometheus/falcosidekick` | `falco-falcosidekick.falco.svc:2801` | 60s | 投递链路（Telegram ok/error） |
 | `prometheus/argocd` | pod 发现：`argocd` ns 里 application-controller 的 `metrics`(8082) 端口 | 60s | 只 keep `argocd_app_info` / `argocd_cluster_connection_status`；ArgoCD 是 manual-helm，不开 chart 的 metrics Service |
-| `prometheus/apiserver` | `kubernetes.default.svc:443/metrics` | 60s | https + SA token + 投射 CA 真校验；只 keep `apiserver_request_total` / `…_terminations_total`（该端点 ~5.7 万行，留约 520 条）；ClusterRole 需 `nonResourceURLs: ["/metrics"]`；job 名 `apiserver` 与 homelab 一致，使 chart 的 `KubeAPIInstanceUnreachable` 自动覆盖 oracle。成本（实测）：collector CPU / 节流不变、RSS 均值 +~34Mi，见表下 |
+| `prometheus/apiserver` | `kubernetes.default.svc:443/metrics` | 60s | https + SA token + 投射 CA 真校验；只 keep `apiserver_request_total` / `…_terminations_total` / sli 直方图的 `le=1`、`+Inf` 两个桶（该端点 ~5.7 万行，留约 1.8k 条；原先只留前两族约 520 条）；ClusterRole 需 `nonResourceURLs: ["/metrics"]`；job 名 `apiserver` 与 homelab 一致，使 chart 的 `KubeAPIInstanceUnreachable` 自动覆盖 oracle。成本（实测，仅前两族时）：collector CPU / 节流不变、RSS 均值 +~34Mi，见表下 |
 
 `prometheus/cadvisor` 直连 kubelet：
 
@@ -209,7 +209,7 @@ collector（同一份 `otel-collector-config.yaml`）抓本集群的 exporter，
 - keep 正则只留少数容器指标（清单与各自的消费者写在配置里正则旁的注释），并 drop `container=""` 的 Pod 级汇总。
 - 不够给 OpenCost 当 Prometheus 数据源（缺 `container_fs_*` / `container_network_*`），见 [cost-and-rightsizing.md](cost-and-rightsizing.md)。
 
-`prometheus/apiserver` 的成本（2026-11-22 实测，collector 滚动前后各取 25–30 分钟同口径窗口）：
+`prometheus/apiserver` 的成本（2026-11-22 实测，collector 滚动前后各取 25–30 分钟同口径窗口；**这是只留 `request_total` / `terminations_total`、共 517 条时的数据**，之后加了 sli 直方图的两个桶，见下一条）：
 
 - 抓取：一次约 5.6 万个样本、耗时 0.75s，keep 后留 517 条；homelab Prometheus 的 head series 约 +730（117146 → 117880）。
 - collector（oracle，2 OCPU）：CPU 66.8m → 66.2m、CFS 节流 0.5% → 0.5%，**没有变化**；RSS 均值约 151Mi（140–164）→ 约 185Mi（179–192），**增加约 34Mi**，之后在这个带内持平、不继续涨。仍只占 768Mi limit 的约 24%，oracle 侧 `ContainerMemoryNearLimit` 没有触发。
