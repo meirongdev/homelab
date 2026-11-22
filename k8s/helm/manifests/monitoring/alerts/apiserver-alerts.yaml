@@ -32,6 +32,8 @@
 #   · 每条都做了正反两个方向的验证：回放（常态 0 条触发）+ 阈值临时降到峰值以下，
 #     确认表达式在 11-20 那一刻真的有输出 + promtool test rules 喂合成序列
 #     （触发/不触发/低流量护栏/CONNECT 排除/缺失守卫各一组）。
+#   · 测试已入库：scripts/alert-rule-tests/apiserver-alerts.test.yaml，`just test-alert-rules`，CI 必跑。
+#     **改本文件的表达式就要同步改测试**；改完测试照样全过时，先怀疑测试没覆盖到改动。
 #
 # ⚠️ `apiserver_request_sli_duration_seconds` 不含 webhook 耗时和 APF 排队时间（上游定义），
 #   所以「Kyverno webhook 慢」不会让它变慢，它反映的是 apiserver 自己和存储（k3s 这里是 SQLite/kine）。

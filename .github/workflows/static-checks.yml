@@ -113,6 +113,12 @@ jobs:
         # 修复：cd k8s/helm && just gen-embedded-scripts
         run: uv run --with pyyaml python scripts/check-embedded-scripts.py
 
+      - name: 告警规则单元测试（promtool）
+        # scripts/alert-rule-tests/*.test.yaml 对 PrometheusRule 喂合成序列。告警规则写错的外观是
+        # 「不响」，与「没出事」一模一样，只有测试能区分。promtool 镜像钉在现网 Prometheus 的版本
+        # （见脚本里的 PROMTOOL_IMAGE），runner 自带 docker。--require：缺运行环境就失败，不静默跳过。
+        run: uv run --with pyyaml python scripts/test-alert-rules.py --require
+
       - name: justfile 冒烟（just --list）
         run: |
           # 版本与本地开发机一致（just 1.58.0）；升级时两处一起改。

@@ -102,6 +102,7 @@ yq '.spec' k8s/helm/manifests/monitoring/alerts/<file>.yaml \
   规则写 `le=~"1|1\\.0"`，只写一种则另一个集群的分子静默为空、恒不触发；otel 里 drop 桶的正则对整数桶要带 `(\\.0)?`，
   否则整数桶全部漏过（离线实验实测：留下 4424 个桶而不是 632 个）；`_sum` 不能丢，丢了 otel 会合成一个全 0 的 `_sum`。
   `apiserver_request_sli_duration_seconds` 不含 webhook 与 APF 排队时间，慢的只可能是 apiserver 自己或存储。
+  单元测试在 `scripts/alert-rule-tests/apiserver-alerts.test.yaml`（23 组，`just test-alert-rules`，CI 必跑）。
   已知缺口：两集群都没有审计日志（[security.md §11](security.md)）；oracle 的慢请求阈值沿用 homelab 的 5%，
   已用它自己上线后 9.5 小时的数据复核：慢请求占比最大 0.21%（p99 0.11%）、5xx 全程为 0、流量 p50 约 4.1 req/s，余量约 23 倍；
   样本仍只有半天，遇到升级重启或长时间负载后再看一次。

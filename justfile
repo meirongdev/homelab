@@ -36,6 +36,9 @@ check:
         echo "── $s"
         uv run --with pyyaml python scripts/$s.py || fail=1
     done
+    # 告警规则单元测试要 docker（或本机 promtool）；都没有时脚本自己跳过并提示，CI 用 --require 必跑。
+    echo "── test-alert-rules（promtool）"
+    uv run --with pyyaml python scripts/test-alert-rules.py || fail=1
     echo "── justfile 冒烟（just --list，含全部子模块）"
     just --list >/dev/null || fail=1
     # 密钥扫描：公开仓库里这一道必须在 push 前拦（CI 的 secret-scan.yml 跑在 push 之后，
@@ -55,6 +58,10 @@ check:
     echo ""
     echo "✅ 全部本地检查通过"
     echo "   ⚠️ 结构合规 ≠ 内容正确：文档与集群漂移、值写错层级这两类只能实测。"
+
+# 告警规则单元测试：scripts/alert-rule-tests/*.test.yaml → promtool（docker，镜像钉现网版本）
+test-alert-rules:
+    uv run --with pyyaml python scripts/test-alert-rules.py --require
 
 # 渲染 ArgoCD 全部 App 并过 schema（要联网 + kubectl/helm/kubeconform，约 2 分钟）
 check-render:

@@ -1,0 +1,385 @@
+# promtool 单元测试：k8s/helm/manifests/monitoring/alerts/apiserver-alerts.yaml
+# 跑法：`just test-alert-rules`（scripts/test-alert-rules.py 把 PrometheusRule 抽成规则文件、去掉
+# annotations 后交给 promtool；rule_files 由脚本替换，`source` 是本仓库加的键，promtool 不认它）。
+#
+# 每组只隔离一个因素。序列写法 `0+600x60` = 计数器每分钟 +600（10 req/s），共 61 个点。
+# 覆盖：5xx 阈值 / 低流量护栏 / 升级重启式短脉冲不响；慢请求两集群 le 文本（homelab "1.0"、oracle "1"）/
+# CONNECT 排除 / 两集群互不干扰；oracle 不可达的 for:10m 与计划内重启；缺失守卫的三支，以及
+# 「整条 oracle 遥测断了不归它管」「apiserver 真挂时不重复报」。
+#
+# 2026-11-22 上线时另做过变异验证：对规则做 18 处破坏（改阈值、去护栏、去 CONNECT 排除、le 只认一种
+# 文本、unless 换 and 等），每一处都至少让这里的一组测试失败。改规则时如果所有测试照样通过，
+# 先怀疑测试没覆盖到改动，而不是改动没问题。
+source: k8s/helm/manifests/monitoring/alerts/apiserver-alerts.yaml
+rule_files:
+- apiserver-alerts.rules.yaml
+evaluation_interval: 1m
+tests:
+- name: 5xx 0.5% sustained -> fires only after for:15m
+  interval: 1m
+  input_series:
+  - series: apiserver_request_total{job="apiserver",cluster="homelab",code="200",verb="GET"}
+    values: 0+597x60
+  - series: apiserver_request_total{job="apiserver",cluster="homelab",code="500",verb="GET"}
+    values: 0+3x60
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: KubeAPIServerErrorsSustained
+    exp_alerts: []
+  - eval_time: 14m
+    alertname: KubeAPIServerErrorsSustained
+    exp_alerts: []
+  - eval_time: 18m
+    alertname: KubeAPIServerErrorsSustained
+    exp_alerts:
+    - exp_labels: &id001
+        severity: warning
+        component: apiserver
+        cluster: homelab
+  - eval_time: 40m
+    alertname: KubeAPIServerErrorsSustained
+    exp_alerts:
+    - exp_labels: *id001
+- name: 5xx 0.05% (below 0.1%) never fires
+  interval: 1m
+  input_series:
+  - series: apiserver_request_total{job="apiserver",cluster="homelab",code="200",verb="GET"}
+    values: 0+599.7x60
+  - series: apiserver_request_total{job="apiserver",cluster="homelab",code="500",verb="GET"}
+    values: 0+0.3x60
+  alert_rule_test:
+  - eval_time: 40m
+    alertname: KubeAPIServerErrorsSustained
+    exp_alerts: []
+- name: 5xx 10% but only 0.5 rps total -> traffic guard
+  interval: 1m
+  input_series:
+  - series: apiserver_request_total{job="apiserver",cluster="homelab",code="200",verb="GET"}
+    values: 0+27x60
+  - series: apiserver_request_total{job="apiserver",cluster="homelab",code="500",verb="GET"}
+    values: 0+3x60
+  alert_rule_test:
+  - eval_time: 40m
+    alertname: KubeAPIServerErrorsSustained
+    exp_alerts: []
+- name: upgrade-like 5xx burst of 5m then clean -> never fires
+  interval: 1m
+  input_series:
+  - series: apiserver_request_total{job="apiserver",cluster="homelab",code="200",verb="GET"}
+    values: 0+597x60
+  - series: apiserver_request_total{job="apiserver",cluster="homelab",code="500",verb="GET"}
+    values: 0+3x5 15+0x55
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: KubeAPIServerErrorsSustained
+    exp_alerts: []
+  - eval_time: 40m
+    alertname: KubeAPIServerErrorsSustained
+    exp_alerts: []
+- name: oracle 5xx also covered (cluster label)
+  interval: 1m
+  input_series:
+  - series: apiserver_request_total{job="apiserver",cluster="oracle-k3s",code="200",verb="GET"}
+    values: 0+597x60
+  - series: apiserver_request_total{job="apiserver",cluster="oracle-k3s",code="500",verb="GET"}
+    values: 0+3x60
+  alert_rule_test:
+  - eval_time: 40m
+    alertname: KubeAPIServerErrorsSustained
+    exp_alerts:
+    - exp_labels: &id002
+        severity: warning
+        component: apiserver
+        cluster: oracle-k3s
+- name: homelab slow 10% (le='1.0') -> fires after 15m
+  interval: 1m
+  input_series:
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="homelab",le="+Inf",verb="GET"}
+    values: 0+600x60
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="homelab",le="1.0",verb="GET"}
+    values: 0+540x60
+  alert_rule_test:
+  - eval_time: 12m
+    alertname: KubeAPIServerSlowRequests
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: KubeAPIServerSlowRequests
+    exp_alerts:
+    - exp_labels: *id001
+- name: ORACLE slow 10% (le='1') -> fires after 15m
+  interval: 1m
+  input_series:
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="oracle-k3s",le="+Inf",verb="GET"}
+    values: 0+600x60
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="oracle-k3s",le="1",verb="GET"}
+    values: 0+540x60
+  alert_rule_test:
+  - eval_time: 12m
+    alertname: KubeAPIServerSlowRequests
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: KubeAPIServerSlowRequests
+    exp_alerts:
+    - exp_labels: *id002
+- name: homelab slow 3.3% (<5%) never fires
+  interval: 1m
+  input_series:
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="homelab",le="+Inf",verb="GET"}
+    values: 0+600x60
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="homelab",le="1.0",verb="GET"}
+    values: 0+580x60
+  alert_rule_test:
+  - eval_time: 40m
+    alertname: KubeAPIServerSlowRequests
+    exp_alerts: []
+- name: oracle slow 3.3% (<5%) never fires
+  interval: 1m
+  input_series:
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="oracle-k3s",le="+Inf",verb="GET"}
+    values: 0+600x60
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="oracle-k3s",le="1",verb="GET"}
+    values: 0+580x60
+  alert_rule_test:
+  - eval_time: 40m
+    alertname: KubeAPIServerSlowRequests
+    exp_alerts: []
+- name: 'CONNECT is excluded: 3.3% real slow + 60/min all-slow CONNECT -> still none'
+  interval: 1m
+  input_series:
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="homelab",le="+Inf",verb="GET"}
+    values: 0+600x60
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="homelab",le="1.0",verb="GET"}
+    values: 0+580x60
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="homelab",le="+Inf",verb="CONNECT"}
+    values: 0+60x60
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="homelab",le="1.0",verb="CONNECT"}
+    values: 0+0x60
+  alert_rule_test:
+  - eval_time: 40m
+    alertname: KubeAPIServerSlowRequests
+    exp_alerts: []
+- name: unrecognised le text '1.00' -> numerator empty -> NOT firing (this is what the absent guard is for)
+  interval: 1m
+  input_series:
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="oracle-k3s",le="+Inf",verb="GET"}
+    values: 0+600x60
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="oracle-k3s",le="1.00",verb="GET"}
+    values: 0+300x60
+  alert_rule_test:
+  - eval_time: 40m
+    alertname: KubeAPIServerSlowRequests
+    exp_alerts: []
+- name: slow 50% but only 0.5 rps -> traffic guard
+  interval: 1m
+  input_series:
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="oracle-k3s",le="+Inf",verb="GET"}
+    values: 0+30x60
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="oracle-k3s",le="1",verb="GET"}
+    values: 0+15x60
+  alert_rule_test:
+  - eval_time: 40m
+    alertname: KubeAPIServerSlowRequests
+    exp_alerts: []
+- name: 'the two clusters are evaluated independently: only oracle is slow -> only oracle fires'
+  interval: 1m
+  input_series:
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="homelab",le="+Inf",verb="GET"}
+    values: 0+600x60
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="homelab",le="1.0",verb="GET"}
+    values: 0+599x60
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="oracle-k3s",le="+Inf",verb="GET"}
+    values: 0+600x60
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="oracle-k3s",le="1",verb="GET"}
+    values: 0+500x60
+  alert_rule_test:
+  - eval_time: 30m
+    alertname: KubeAPIServerSlowRequests
+    exp_alerts:
+    - exp_labels: *id002
+- name: oracle up==0 -> critical only after 10m
+  interval: 1m
+  input_series:
+  - series: up{job="apiserver",cluster="oracle-k3s"}
+    values: '0x60'
+  alert_rule_test:
+  - eval_time: 9m
+    alertname: OracleKubeAPIServerDown
+    exp_alerts: []
+  - eval_time: 12m
+    alertname: OracleKubeAPIServerDown
+    exp_alerts:
+    - exp_labels: &id012
+        severity: critical
+        component: apiserver
+        cluster: oracle-k3s
+        job: apiserver
+- name: oracle up==1 -> none
+  interval: 1m
+  input_series:
+  - series: up{job="apiserver",cluster="oracle-k3s"}
+    values: 1x60
+  - series: apiserver_request_total{job="apiserver",cluster="oracle-k3s",code="200",verb="GET"}
+    values: 0+300x60
+  alert_rule_test:
+  - eval_time: 40m
+    alertname: OracleKubeAPIServerDown
+    exp_alerts: []
+- name: oracle planned restart (2m of up==0) -> none
+  interval: 1m
+  input_series:
+  - series: up{job="apiserver",cluster="oracle-k3s"}
+    values: 1x10 0x2 1x48
+  - series: apiserver_request_total{job="apiserver",cluster="oracle-k3s",code="200",verb="GET"}
+    values: 0+300x60
+  alert_rule_test:
+  - eval_time: 40m
+    alertname: OracleKubeAPIServerDown
+    exp_alerts: []
+- name: 'absent: oracle other telemetry present but no apiserver up -> fires'
+  interval: 1m
+  input_series:
+  - series: up{job="node-exporter",cluster="oracle-k3s"}
+    values: 1x60
+  - &id003
+    series: up{job="apiserver",cluster="homelab"}
+    values: 1x60
+  - &id004
+    series: apiserver_request_total{job="apiserver",cluster="homelab",code="200",verb="GET"}
+    values: 0+300x60
+  - &id005
+    series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="homelab",le="1.0",verb="GET"}
+    values: 0+300x60
+  - &id006
+    series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="homelab",le="+Inf",verb="GET"}
+    values: 0+300x60
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: KubeAPIServerMetricsAbsent
+    exp_alerts: []
+  - eval_time: 20m
+    alertname: KubeAPIServerMetricsAbsent
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        component: apiserver
+        cluster: oracle-k3s
+        job: apiserver
+- name: 'absent: oracle ENTIRE telemetry gone -> not this alert''s job (OracleTelemetryAbsent)'
+  interval: 1m
+  input_series:
+  - *id003
+  - *id004
+  - *id005
+  - *id006
+  alert_rule_test:
+  - eval_time: 40m
+    alertname: KubeAPIServerMetricsAbsent
+    exp_alerts: []
+- name: 'absent: oracle up==1 but request_total missing (keep regex mismatch) -> fires'
+  interval: 1m
+  input_series:
+  - series: up{job="node-exporter",cluster="oracle-k3s"}
+    values: 1x60
+  - series: up{job="apiserver",cluster="oracle-k3s"}
+    values: 1x60
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="oracle-k3s",le="1",verb="GET"}
+    values: 0+300x60
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="oracle-k3s",le="+Inf",verb="GET"}
+    values: 0+300x60
+  - *id003
+  - *id004
+  - *id005
+  - *id006
+  alert_rule_test:
+  - eval_time: 20m
+    alertname: KubeAPIServerMetricsAbsent
+    exp_alerts:
+    - exp_labels: *id002
+- name: 'absent: homelab has no le=1 bucket at all (only 1.25) while up==1 -> fires'
+  interval: 1m
+  input_series:
+  - series: up{job="apiserver",cluster="homelab"}
+    values: 1x60
+  - series: apiserver_request_total{job="apiserver",cluster="homelab",code="200",verb="GET"}
+    values: 0+300x60
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="homelab",le="1.25",verb="GET"}
+    values: 0+300x60
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="homelab",le="+Inf",verb="GET"}
+    values: 0+300x60
+  - &id007
+    series: up{job="apiserver",cluster="oracle-k3s"}
+    values: 1x60
+  - &id008
+    series: apiserver_request_total{job="apiserver",cluster="oracle-k3s",code="200",verb="GET"}
+    values: 0+300x60
+  - &id009
+    series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="oracle-k3s",le="1",verb="GET"}
+    values: 0+300x60
+  - &id010
+    series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="oracle-k3s",le="+Inf",verb="GET"}
+    values: 0+300x60
+  - &id011
+    series: up{job="node-exporter",cluster="oracle-k3s"}
+    values: 1x60
+  alert_rule_test:
+  - eval_time: 20m
+    alertname: KubeAPIServerMetricsAbsent
+    exp_alerts:
+    - exp_labels: *id001
+- name: 'absent: ORACLE has no le=1 bucket (drop regex too greedy) while up==1 -> fires'
+  interval: 1m
+  input_series:
+  - series: up{job="apiserver",cluster="oracle-k3s"}
+    values: 1x60
+  - series: apiserver_request_total{job="apiserver",cluster="oracle-k3s",code="200",verb="GET"}
+    values: 0+300x60
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="oracle-k3s",le="1.25",verb="GET"}
+    values: 0+300x60
+  - series: apiserver_request_sli_duration_seconds_bucket{job="apiserver",cluster="oracle-k3s",le="+Inf",verb="GET"}
+    values: 0+300x60
+  - series: up{job="node-exporter",cluster="oracle-k3s"}
+    values: 1x60
+  - *id003
+  - *id004
+  - *id005
+  - *id006
+  alert_rule_test:
+  - eval_time: 20m
+    alertname: KubeAPIServerMetricsAbsent
+    exp_alerts:
+    - exp_labels: *id002
+- name: 'absent: oracle writes le=''1'', homelab writes le=''1.0'' -> both accepted, none'
+  interval: 1m
+  input_series:
+  - *id003
+  - *id004
+  - *id005
+  - *id006
+  - *id007
+  - *id008
+  - *id009
+  - *id010
+  - *id011
+  alert_rule_test:
+  - eval_time: 40m
+    alertname: KubeAPIServerMetricsAbsent
+    exp_alerts: []
+- name: 'absent: apiserver really down (up==0, no series) -> only the Down alert, NOT a duplicate MetricsAbsent on the sli branch'
+  interval: 1m
+  input_series:
+  - series: up{job="apiserver",cluster="oracle-k3s"}
+    values: '0x60'
+  - series: up{job="node-exporter",cluster="oracle-k3s"}
+    values: 1x60
+  - *id003
+  - *id004
+  - *id005
+  - *id006
+  alert_rule_test:
+  - eval_time: 40m
+    alertname: KubeAPIServerMetricsAbsent
+    exp_alerts: []
+  - eval_time: 40m
+    alertname: OracleKubeAPIServerDown
+    exp_alerts:
+    - exp_labels: *id012
