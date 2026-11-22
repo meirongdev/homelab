@@ -65,6 +65,10 @@ def main():
 
     fail = 0
     work = tempfile.mkdtemp(prefix="alert-rule-tests-")
+    # ☠️ mkdtemp 建出来是 0700：prom/prometheus 镜像以 nobody 运行，进不了这个目录，promtool 报
+    #   `stat …: permission denied`。macOS 上 OrbStack 的文件共享会映射权限，本地照样通过，只有
+    #   Linux runner 上才炸（2026-11-22 CI 首跑实测）。文件权限也显式设，不赌 umask。
+    os.chmod(work, 0o755)
     try:
         for path in tests:
             name = os.path.basename(path)[: -len(".test.yaml")]
@@ -87,6 +91,8 @@ def main():
             yaml.safe_dump(spec, open(os.path.join(work, f"{name}.test.yaml"), "w"),
                            allow_unicode=True, width=10000, sort_keys=False)
 
+            for fn in (full, stripped, f"{name}.test.yaml"):
+                os.chmod(os.path.join(work, fn), 0o644)
             chk = run(work, ["check", "rules", full])
             tst = run(work, ["test", "rules", f"{name}.test.yaml"])
             n = len(spec.get("tests", []))
