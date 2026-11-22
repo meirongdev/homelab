@@ -200,7 +200,7 @@ collector（同一份 `otel-collector-config.yaml`）抓本集群的 exporter，
 | `prometheus/falco` | `falco-metrics.falco.svc:8765` | 60s | 需 values 里两个开关同时开 |
 | `prometheus/falcosidekick` | `falco-falcosidekick.falco.svc:2801` | 60s | 投递链路（Telegram ok/error） |
 | `prometheus/argocd` | pod 发现：`argocd` ns 里 application-controller 的 `metrics`(8082) 端口 | 60s | 只 keep `argocd_app_info` / `argocd_cluster_connection_status`；ArgoCD 是 manual-helm，不开 chart 的 metrics Service |
-| `prometheus/apiserver` | `kubernetes.default.svc:443/metrics` | 60s | https + SA token + 投射 CA 真校验；只 keep `apiserver_request_total` / `…_terminations_total` / sli 直方图的 `le=1`、`+Inf` 两个桶（该端点 ~5.7 万行，留约 1.8k 条；原先只留前两族约 520 条）；ClusterRole 需 `nonResourceURLs: ["/metrics"]`；job 名 `apiserver` 与 homelab 一致，使 chart 的 `KubeAPIInstanceUnreachable` 自动覆盖 oracle。成本（实测，仅前两族时）：collector CPU / 节流不变、RSS 均值 +~34Mi，见表下 |
+| `prometheus/apiserver` | `kubernetes.default.svc:443/metrics` | 60s | https + SA token + 投射 CA 真校验；只 keep `apiserver_request_total` / `…_terminations_total` / sli 直方图的 `le=1`、`+Inf` 两个桶（该端点 ~5.7 万行，留约 1.8k 条；原先只留前两族约 520 条）；ClusterRole 需 `nonResourceURLs: ["/metrics"]`；job 名 `apiserver` 与 homelab 一致，使 chart 的 `KubeAPIInstanceUnreachable` 自动覆盖 oracle。成本（实测）：collector CPU / 节流不变、RSS 均值 +~46Mi（151 → 197Mi），见表下 |
 
 `prometheus/cadvisor` 直连 kubelet：
 
@@ -209,11 +209,19 @@ collector（同一份 `otel-collector-config.yaml`）抓本集群的 exporter，
 - keep 正则只留少数容器指标（清单与各自的消费者写在配置里正则旁的注释），并 drop `container=""` 的 Pod 级汇总。
 - 不够给 OpenCost 当 Prometheus 数据源（缺 `container_fs_*` / `container_network_*`），见 [cost-and-rightsizing.md](cost-and-rightsizing.md)。
 
-`prometheus/apiserver` 的成本（2026-11-22 实测，collector 滚动前后各取 25–30 分钟同口径窗口；**这是只留 `request_total` / `terminations_total`、共 517 条时的数据**，之后加了 sli 直方图的两个桶，见下一条）：
+`prometheus/apiserver` 的成本（2026-11-22 实测，collector 滚动前后取同口径窗口；分两次滚动：先只留 `request_total` / `terminations_total`，后加 sli 直方图的 `le=1` / `+Inf` 两个桶）：
 
-- 抓取：一次约 5.6 万个样本、耗时 0.75s，keep 后留 517 条；homelab Prometheus 的 head series 约 +730（117146 → 117880）。
-- collector（oracle，2 OCPU）：CPU 66.8m → 66.2m、CFS 节流 0.5% → 0.5%，**没有变化**；RSS 均值约 151Mi（140–164）→ 约 185Mi（179–192），**增加约 34Mi**，之后在这个带内持平、不继续涨。仍只占 768Mi limit 的约 24%，oracle 侧 `ContainerMemoryNearLimit` 没有触发。
-- ⚠️ 这是**不干净的对照**：旧 pod 已跑数天、新 pod 刚起，而且没有「同一个新 pod 不带这条抓取」的版本，RSS 增量无法严格归因给这条抓取。判断依据只是量级吻合（每分钟解析约 5.7 万行再丢掉 99%）且持平不增长。以后若要精确归因，临时去掉这条 receiver 重滚一次，取同样 25 分钟窗口再比。
+- 抓取：一次约 5.6 万个样本、耗时 0.75s，keep 后留 1785 条（`scrape_samples_post_metric_relabeling`），其中 sli 桶 634 + count 317 + sum 317，其余是 request_total（515）等。直接数该 job 的 series 为准；Prometheus 的 head series 总数会随其它序列波动，不能拿来做这条的差值。
+- collector（oracle，2 OCPU）三个阶段的同口径对比：
+
+  | 阶段 | RSS 均值 | CPU | CFS 节流 |
+  |------|---------|-----|----------|
+  | 没有 apiserver 抓取（旧 pod，30m / 6h） | 151 / 153Mi（峰值 164 / 169Mi） | 66.8 / 67.2m | 0.5% |
+  | 只留 request_total 等（25m） | 约 185Mi（179–192） | 66.2m | 0.5% |
+  | 加 sli 两个桶（30m / 9h） | 197 / 198Mi（峰值 216 / 227Mi） | 66.6 / 66.9m | 0.5% / 0.4% |
+
+  CPU 和节流**始终没有变化**；RSS 累计增加约 46Mi（151 → 197Mi），其中 sli 两个桶约占 12Mi。30 分钟与 9 小时的均值几乎相同（197.2 vs 197.6Mi），**不随时间增长**，没有泄漏迹象。9 小时峰值 227Mi，约为 768Mi limit 的 30%，oracle 侧 `ContainerMemoryNearLimit` / `ContainerCPUThrottlingSustained` 都没有触发。
+- ⚠️ 这是**不干净的对照**：旧 pod 已跑数天、新 pod 刚起，而且没有「同一个新 pod 不带这条抓取」的版本，RSS 增量无法严格归因给这条抓取。判断依据是量级吻合（每分钟解析约 5.7 万行再丢掉 97%）且持平不增长。以后若要精确归因，临时去掉这条 receiver 重滚一次，取同样窗口再比。
 - 部署前的参照（旧 pod 1 天 RSS 峰值 192Mi、7 天峰值 447Mi，见 `otel-collector.yaml` 的内存注释）：本次增量没有改变那个结论，limit 不需要动。
 
 ### homelab Prometheus（集群内抓取）

@@ -103,7 +103,8 @@ yq '.spec' k8s/helm/manifests/monitoring/alerts/<file>.yaml \
   否则整数桶全部漏过（离线实验实测：留下 4424 个桶而不是 632 个）；`_sum` 不能丢，丢了 otel 会合成一个全 0 的 `_sum`。
   `apiserver_request_sli_duration_seconds` 不含 webhook 与 APF 排队时间，慢的只可能是 apiserver 自己或存储。
   已知缺口：两集群都没有审计日志（[security.md §11](security.md)）；oracle 的慢请求阈值沿用 homelab 的 5%，
-  它自己的历史分布只有上线后的几小时，之后复核。
+  已用它自己上线后 9.5 小时的数据复核：慢请求占比最大 0.21%（p99 0.11%）、5xx 全程为 0、流量 p50 约 4.1 req/s，余量约 23 倍；
+  样本仍只有半天，遇到升级重启或长时间负载后再看一次。
 - `eso-alerts.yaml`：`externalsecret`/`(cluster)secretstore` `Ready=False` 即报，堵「Vault 封印或
   token 过期 → Secret 停刷而 app 还在用旧值」。前置的一次性 metrics 开关：homelab
   `cd k8s/helm && just deploy-eso`（`serviceMonitor.enabled`）、oracle
