@@ -23,6 +23,8 @@ on:
       - 'scripts/check-version-pairs.py'
       - 'scripts/check-embedded-scripts.py'
       - 'scripts/render-manifests.py'
+      # 告警规则测试的运行器：2026-11-22 单改它（修 CI 上的目录权限）时 CI 没跑，漏的是同一类坑
+      - 'scripts/test-alert-rules.py'
       # 内嵌脚本的源文件：改了 .py 但忘了重新生成 ConfigMap，正是 E1 要拦的情况
       - 'k8s/helm/manifests/**/*.py'
       - '.github/workflows/static-checks.yml'
@@ -41,6 +43,8 @@ on:
       - 'scripts/check-version-pairs.py'
       - 'scripts/check-embedded-scripts.py'
       - 'scripts/render-manifests.py'
+      # 告警规则测试的运行器：2026-11-22 单改它（修 CI 上的目录权限）时 CI 没跑，漏的是同一类坑
+      - 'scripts/test-alert-rules.py'
       # 内嵌脚本的源文件：改了 .py 但忘了重新生成 ConfigMap，正是 E1 要拦的情况
       - 'k8s/helm/manifests/**/*.py'
       - '.github/workflows/static-checks.yml'
