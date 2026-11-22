@@ -129,3 +129,56 @@ data:
                 的 exportDenyList 里被丢弃，不会到这里。已知噪声（apps-pg 的 pg_isready 探针）同理，
                 日志里没有它，见 k8s/helm/manifests/tetragon-policies/sensitive-file-access.yaml。
 
+          # 应用进程起了 shell（2026-11-22）：webshell / RCE 最典型的形态——node、python、java 这类业务
+          # 进程本不该 fork 出 sh。数据源是 Tetragon 默认就有的 process_exec，不需要新 TracingPolicy。
+          #
+          # 判据刻意收窄成「父进程是应用」：父进程是 containerd-shim / runc 的 shell 是容器入口、exec 探针
+          # 或 `kubectl exec`，三者混在一起分不开（7 天 689 次 shell 里 ~600 次是这类，Trivy 扫描 Job 就占 ~500），
+          # 报它只会把人训练成忽略告警。代价：**`kubectl exec` 进去起的 shell 不在这条的视野里**——
+          # 能 exec 的人已经有 API 权限，那是另一层的事。shell 再起 shell 也不报（第一个 shell 已经报过了）。
+          #
+          # 放行清单按「父进程参数 + 子进程参数」精确写，**不要按 namespace 放行**（那等于给整个 ns 开后门）：
+          #   · litellm：Prisma 在 `prisma --version` / `migrate deploy` 时用 `sh -c "ldconfig -p | … grep libssl"`
+          #     探测 OpenSSL，每次 pod 启动 6 条。只放行「父进程是 prisma 且命令是 ldconfig -p」这一种组合。
+          #   · open-notebook：supervisord（python）按配置拉起 worker（`dash -c "uv run …"`），等同容器入口。
+          #   · kube-bench（审计命令）、apk（backup 的包触发器）按父进程排除。
+          # 基线（2026-11-22，Loki 里 Tetragon 事件只保留约 7 天）：用这条完整管道回放 7 天，**只命中 11-20
+          # 两次策略测试的 tp-exp pod**（python3 → sh），这正好是正向对照；分别去掉 Prisma / supervisord 两条
+          # 放行，对应的 12 / 2 条合法事件会冒出来，证明每条放行都是必需的。
+          # 新增合法模式时照同样写法补一条精确放行，并重放 7 天确认只多排除了那一种。
+          - alert: TetragonAppSpawnedShell
+            expr: |
+              sum by (cluster, ns, pod, parent, binary) (
+                count_over_time(
+                  {k8s_namespace_name="tetragon", k8s_container_name="export-stdout"}
+                  |= "\"process_exec\""
+                  | json binary="process_exec.process.binary", args="process_exec.process.arguments", ns="process_exec.process.pod.namespace", pod="process_exec.process.pod.name", parent="process_exec.parent.binary", pargs="process_exec.parent.arguments"
+                  | ns!=""
+                  | binary=~".*/(sh|bash|ash|dash|zsh|ksh|busybox)"
+                  | parent!~".*/(containerd-shim-runc-v2|runc|sh|bash|ash|dash|zsh|ksh|busybox|kube-bench|apk)|/lib/apk/exec/.*"
+                  | pargs!~".*supervisord.*"
+                  | (pargs!~".*node_modules/\\.bin/prisma.*" or args!~".*ldconfig -p.*")
+                  [5m]
+                )
+              ) > 0
+            labels:
+              severity: warning
+              component: runtime-security
+            annotations:
+              summary: "{{ $labels.cluster }} 容器里的应用进程起了 shell：{{ $labels.ns }}/{{ $labels.pod }} 的 {{ $labels.parent }} → {{ $labels.binary }}"
+              description: |
+                业务进程（不是容器入口、不是 kubectl exec）fork 出了 shell，这是 webshell / 命令注入的典型形态。
+                7 天基线里除了策略测试之外为零，所以先按真的处理，再判断是不是新的合法行为。
+
+                看它执行了什么（argv 在事件里）：
+                  # Loki
+                  {k8s_namespace_name="tetragon", k8s_container_name="export-stdout"} |= "process_exec" |= "{{ $labels.pod }}" |= "{{ $labels.binary }}"
+                  kubectl --context k3s-homelab -n tetragon logs ds/tetragon -c export-stdout --since=15m | grep {{ $labels.pod }}
+                再看同一个 pod 在这前后还做了什么（同一条查询去掉 binary 过滤），以及它最近有没有发版：
+                `kubectl --context k3s-homelab -n {{ $labels.ns }} describe pod {{ $labels.pod }}`。
+
+                确认是合法的新行为（比如升级后某个库开始在启动时调 shell）：在
+                cloud/oracle/manifests/monitoring/loki-rules.yaml 照 Prisma 那条写**父进程参数 + 命令**的精确放行，
+                别按 namespace 放行，改完重放 7 天确认只多排除了这一种。
+                ⚠️ kube-system / cilium / 宿主进程被 exportDenyList 丢弃，不在这条的视野里。
+
