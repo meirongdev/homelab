@@ -60,6 +60,10 @@ echo "dropin_fbonly=$(sed -n "s/^FallbackDNS=//p" /etc/systemd/resolved.conf.d/*
 echo "ts_routes=$(sudo tailscale debug prefs 2>/dev/null | tr -d " \n" | grep -o "\"AdvertiseRoutes\":\[[^]]*\]")"
 echo "k3s=$(systemctl is-active k3s)"
 echo "tailscaled=$(systemctl is-active tailscaled)"
+echo "oops_have=$(cat /proc/sys/kernel/panic_on_oops 2>/dev/null)"
+echo "oops_want=$(sed -n "s/^[[:space:]]*kernel\.panic_on_oops[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p" /etc/sysctl.d/99-panic-on-oops.conf 2>/dev/null | tail -n 1)"
+echo "oops_timer=$(systemctl is-active panic-on-oops-guard.timer 2>/dev/null)"
+echo "oops_dropin=$(systemctl cat k3s 2>/dev/null | grep -c "panic-on-oops-watch")"
 ' 2>/dev/null)
 [ -z "$HOST" ] && { bad "SSH 到 ${TS_IP} 失败 —— 后续主机层检查全部跳过"; HOST=""; }
 g() { echo "$HOST" | awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,""); print}'; }
@@ -113,6 +117,20 @@ if [ -n "$HOST" ]; then
   esac
   { [ "$(g k3s)" = "active" ] && [ "$(g tailscaled)" = "active" ]; } \
     && ok "k3s / tailscaled 均 active" || bad "k3s=$(g k3s) tailscaled=$(g tailscaled)"
+  # ☠️ kubelet 每次启动把 panic_on_oops 写回 1（oracle 没开 protect-kernel-defaults），
+  # 重新埋上「oops → 10 秒后硬重启」。判据是运行时值 == sysctl.d 的值，不是文件本身。
+  # 守望在 k3s 就绪后才开始、每 2 秒查一次：k3s 还没就绪时看到 ❌ 是正常的，就绪后仍 ❌ 才是守卫失效。
+  # 见 setup-k3s.yaml 的守卫段。
+  if [ -z "$(g oops_want)" ]; then
+    warn "99-panic-on-oops.conf 不在或无该项 —— 若是刻意交还发行版默认，同步删掉本检查"
+  else
+    [ "$(g oops_have)" = "$(g oops_want)" ] \
+      && ok "kernel.panic_on_oops = $(g oops_have)（与 sysctl.d 一致，没被 kubelet 写回）" \
+      || bad "kernel.panic_on_oops = $(g oops_have)，sysctl.d 要求 $(g oops_want) —— 被 kubelet 写回了；守卫没生效？"
+    { [ "$(g oops_timer)" = "active" ] && [ "$(g oops_dropin)" -ge 1 ] 2>/dev/null; } \
+      && ok "panic_on_oops 守卫在位（timer active + k3s drop-in）" \
+      || bad "panic_on_oops 守卫缺失（timer=$(g oops_timer) drop-in=$(g oops_dropin)）—— cd cloud/oracle && just apply-panic-on-oops-guard"
+  fi
 fi
 
 # ── 节点账目 ───────────────────────────────────────────────────────────

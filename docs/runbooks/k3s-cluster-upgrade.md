@@ -1,6 +1,6 @@
 # k3s 集群版本升级（两集群）
 
-> Last updated: 2026-11-20
+> Last updated: 2026-11-23
 > Status: SOP：已按本文完整执行过三次（2026-09 三节点 v1.34.5+k3s1 → v1.35.8+k3s1；2026-11-19 补丁升到
 > v1.35.10+k3s1；2026-11-20 minor 升到 v1.36.6+k3s1，§9 全部通过），顺序均为 oracle → homelab 控制面 → worker。
 > 除 §10 回滚外，每条命令都是实跑验证过的：回滚命令从未真正执行过，2026-11-20 只做了静态核对，
@@ -497,11 +497,15 @@ Kyverno 与 apiserver 不兼容时**不报错、不告警、pod 全 Running**，
 它写回 1**（同时写 `kernel.panic=10`），盖掉 `/etc/sysctl.d/99-panic-on-oops.conf`。oracle 没开
 `protect-kernel-defaults`（homelab 两台开了，所以不受影响），于是每次 k3s 重启都会把 AppArmor `af_unix`
 oops 的「硬重启」重新武装起来（[复盘](../records/2026-09-01-oracle-apparmor-af-unix-panic.md)）。
-`check-node-drift` 会报出来，但不看就等于没防：
+2026-11-23 起由 `setup-k3s.yaml` 里的守卫自动改回（k3s drop-in 拉起 5 分钟守望 + 每 5 分钟的 timer，
+部署 `cd cloud/oracle && just apply-panic-on-oops-guard`），`just oracle verify-node` 也会核它。
+**仍要看一眼**，守卫自己也可能没生效：
 
 ```bash
-ssh -n -i ~/.ssh/vgio ubuntu@100.107.166.37 'sysctl kernel.panic_on_oops'   # 必须是 0
-ssh -n -i ~/.ssh/vgio ubuntu@100.107.166.37 'sudo sysctl -w kernel.panic_on_oops=0'   # 不是 0 就立刻改回
+ssh -n -i ~/.ssh/vgio ubuntu@100.107.166.37 'sysctl kernel.panic_on_oops'   # 必须是 0（刚重启完等守望跑完再判）
+# 守望改过值会留一行 REASSERT，「k3s ready +N s」就是 kubelet 在 k3s 就绪后多久写回的 1
+ssh -n -i ~/.ssh/vgio ubuntu@100.107.166.37 'journalctl -b -u panic-on-oops-watch -u panic-on-oops-guard --no-pager | grep -E "REASSERT|FAILED"'
+ssh -n -i ~/.ssh/vgio ubuntu@100.107.166.37 'sudo sysctl -w kernel.panic_on_oops=0'   # 守卫没起作用时手动改回，再查原因
 ```
 
 **⑧ k3s 没顺手升 Gateway API CRD。** k3s 的发布说明里常有「Bump gateway-api」，那是随 Traefik 一起打包的；

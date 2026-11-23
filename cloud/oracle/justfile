@@ -21,6 +21,12 @@ eso_version    := "2.6.0"
 setup-node:
     cd ansible && just setup-k3s
 
+# 只装/更新 panic_on_oops 守卫（timer + k3s drop-in），不重启 k3s。
+# ⚠️ 别为这件事跑整本 setup-node：现网 config.yaml 与模板有已知差异（tls-san，见 check-node-drift），
+# 全量跑会顺手改写它。预览：`just apply-panic-on-oops-guard --check --diff`
+apply-panic-on-oops-guard *args:
+    cd ansible && ansible-playbook playbooks/setup-k3s.yaml --tags panic-on-oops-guard {{args}}
+
 # Fetch kubeconfig and merge into local ~/.kube/config
 fetch-kubeconfig:
     cd ansible && just fetch-kubeconfig

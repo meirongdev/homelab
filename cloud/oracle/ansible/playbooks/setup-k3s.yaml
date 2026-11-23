@@ -242,6 +242,161 @@
         sysctl_file: /etc/sysctl.d/99-panic-on-oops.conf
         state: present
         reload: true
+      tags: [panic-on-oops-guard]
+
+    # ☠️ 上面那个文件**单独不够**（2026-11-20 升 k3s 时发现）：oracle 没开
+    # `protect-kernel-defaults`，kubelet 每次启动都把 panic_on_oops 写回 1（连同 kernel.panic=10），
+    # 盖掉 sysctl.d —— 每次 k3s 重启都会重新埋上 09-01 那颗「oops → 10 秒后硬重启」的雷，且没有任何告警。
+    # 不能靠开 `protect-kernel-defaults: true` 修：它要求该值**就是 1**，与目标相反。
+    #
+    # 守卫两道，共用一个脚本：
+    #   ① k3s.service drop-in：每次 k3s（重）启动后拉起 panic-on-oops-watch，盯 5 分钟、每 2 秒查一次。
+    #      为什么是「盯一段时间」而不是 ExecStartPost 里直接 sysctl -w：drop-in 在 k3s 报 READY 之后才跑，
+    #      而 kubelet 是在 READY 之前还是之后写这个值**没核实过**；若在之后，直接改一次会被立刻盖回去。
+    #      watch 的日志会带「k3s 就绪后 +N 秒」，下一次真实重启后看 `journalctl -u panic-on-oops-watch`
+    #      就能回答这个问题。
+    #   ② panic-on-oops-guard.timer：每 5 分钟查一次，兜住 drop-in 没覆盖到的任何来源。
+    # 期望值**只认 99-panic-on-oops.conf**（脚本从文件里读）：哪天上游修好、要改回发行版默认，
+    # 删掉上面那条 sysctl 即可，守卫自动停手，不会留下第二个真相源把值继续压成 0。
+    # 应用：`cd cloud/oracle && just apply-panic-on-oops-guard`（只跑本 tag，别为这件事跑整本 playbook）。
+    - name: Install panic_on_oops guard script
+      ansible.builtin.copy:
+        dest: /usr/local/sbin/assert-panic-on-oops
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          # 把 kernel.panic_on_oops 拉回 /etc/sysctl.d/99-panic-on-oops.conf 写的值。
+          # ansible 管理（cloud/oracle/ansible/playbooks/setup-k3s.yaml），别在节点上手改。
+          # 用法：assert-panic-on-oops            查一次（panic-on-oops-guard.timer）
+          #       assert-panic-on-oops --watch N  N 秒内每 2 秒查一次（k3s 每次启动后经 drop-in 拉起）
+          # 改过值才打一行 REASSERT；值本来就对时不出声，免得每 5 分钟刷日志。
+          set -u
+
+          CONF=/etc/sysctl.d/99-panic-on-oops.conf
+          PROC=/proc/sys/kernel/panic_on_oops
+
+          want=$(sed -n 's/^[[:space:]]*kernel\.panic_on_oops[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+                   "$CONF" 2>/dev/null | tail -n 1)
+          # 文件不在 / 没这一项 = 刻意交还发行版默认，守卫不插手。
+          [ -n "$want" ] || exit 0
+
+          check() {
+            have=$(cat "$PROC" 2>/dev/null) || { echo "FAILED: cannot read $PROC" >&2; return 1; }
+            if [ "$have" = "$want" ]; then
+              return 0
+            fi
+            # 花括号包住再丢 stderr：写 `> "$PROC" 2>/dev/null` 时重定向从左到右处理，
+            # `>` 失败那一刻 2> 还没生效，shell 自己的 "cannot create" 会漏出来（容器里实测）。
+            if { printf '%s\n' "$want" > "$PROC"; } 2>/dev/null; then
+              echo "REASSERT: kernel.panic_on_oops was $have, set back to $want ($1)"
+              return 0
+            fi
+            echo "FAILED: kernel.panic_on_oops is $have, could not write $want ($1)" >&2
+            return 1
+          }
+
+          case "${1:-}" in
+            "")
+              check "timer"
+              ;;
+            --watch)
+              secs=${2:-300}
+              case "$secs" in *[!0-9]*|"") secs=300 ;; esac
+              rc=0
+              t=0
+              while [ "$t" -lt "$secs" ]; do
+                check "k3s ready +${t}s" || rc=1
+                sleep 2
+                t=$((t + 2))
+              done
+              exit "$rc"
+              ;;
+            *)
+              echo "usage: $0 [--watch SECONDS]" >&2
+              exit 2
+              ;;
+          esac
+      tags: [panic-on-oops-guard]
+
+    - name: Install panic-on-oops-guard service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/panic-on-oops-guard.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Re-assert kernel.panic_on_oops from sysctl.d (kubelet rewrites it on every k3s start)
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/assert-panic-on-oops
+      tags: [panic-on-oops-guard]
+
+    - name: Install panic-on-oops-guard timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/panic-on-oops-guard.timer
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Re-assert kernel.panic_on_oops every 5 minutes (backstop for the k3s drop-in)
+
+          [Timer]
+          OnBootSec=90
+          OnUnitActiveSec=5min
+
+          [Install]
+          WantedBy=timers.target
+      tags: [panic-on-oops-guard]
+
+    # Type=simple 而不是 oneshot：oneshot 的整段 ExecStart 受 TimeoutStartSec（默认 90s）约束，
+    # 5 分钟的守望会在第 90 秒被杀掉。
+    - name: Install panic-on-oops-watch service (started by the k3s drop-in)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/panic-on-oops-watch.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Watch kernel.panic_on_oops for 5 minutes after k3s starts
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/sbin/assert-panic-on-oops --watch 300
+      tags: [panic-on-oops-guard]
+
+    # k3s 安装脚本升级时只重写 /etc/systemd/system/k3s.service（和 .env），不碰 k3s.service.d/，
+    # 所以 drop-in 能活过 k3s 升级（2026-11-23 核对 get.k3s.io）。
+    - name: Ensure k3s.service drop-in directory exists
+      ansible.builtin.file:
+        path: /etc/systemd/system/k3s.service.d
+        state: directory
+        mode: "0755"
+      tags: [panic-on-oops-guard]
+
+    - name: Install k3s drop-in that starts the panic_on_oops watch
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/k3s.service.d/50-panic-on-oops-guard.conf
+        mode: "0644"
+        content: |
+          # ansible 管理（cloud/oracle/ansible/playbooks/setup-k3s.yaml）。
+          # 只负责「拉起守望」，自己不改值：
+          #   前缀 `-`      ：这条失败也不许让 systemd 判 k3s 启动失败（fail-open）。
+          #   --no-block    ：不让 k3s 等守望跑完（它要盯 5 分钟）。
+          #   restart       ：k3s 短时间内连续重启时，每次都重新计 5 分钟，而不是沿用上一轮的剩余时间。
+          [Service]
+          ExecStartPost=-/usr/bin/systemctl --no-block restart panic-on-oops-watch.service
+      tags: [panic-on-oops-guard]
+
+    # daemon_reload 同时让上面的 drop-in 生效 —— 只对**下一次** k3s 启动起作用，本任务不重启 k3s。
+    # ignore_errors 只在 --check 下：守卫还没部署时 timer 文件并不存在（check 不真写），模块报
+    # 「Could not find the requested service」；不放行的话 `check-node-drift` 会停在这里，
+    # 后面几个 play（config.yaml 等）全部查不到（2026-11-23 预览实测）。错误仍会以 ...ignoring 显示。
+    - name: Enable panic-on-oops-guard timer
+      ansible.builtin.systemd:
+        name: panic-on-oops-guard.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+      ignore_errors: "{{ ansible_check_mode }}"
+      tags: [panic-on-oops-guard]
 
     # ☠️ 上面那条 panic_on_oops=0 有个必须补上的代价：**它把响亮的故障变哑了**。
     # 改之前 oops → panic → 重启 → `NodeRebooted`/`NodeRebootLoop` 必然告警；
