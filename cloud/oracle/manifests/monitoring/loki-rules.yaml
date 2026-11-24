@@ -73,15 +73,19 @@ data:
                 —— 真正的验收是上面那条 just 配方结尾的自检，或确认新建 HTTPRoute 能拿到
                 `.status`（`kubectl -n <ns> get httproute <name> -o jsonpath='{.status.parents[0].conditions[?(@.type=="Accepted")].status}'`）。
   # ───────────────────────────────────────────────────────────────────────────
-  # Tetragon 运行时策略命中（homelab）。2026-11-20 加。
+  # Tetragon 运行时检测（两集群）。2026-11-20 加（homelab），2026-11-24 起 oracle 也跑 Tetragon（取代 Falco）。
   #
   # 为什么用日志而不是指标：Tetragon 会在 pod 删除后清掉该 pod 的指标序列（实测），寿命短的 pod 里
   # 的命中可能在被评估前就没了；日志行不会消失。健康类（引擎死了/策略没加载/丢事件）走 Prometheus，
   # 见 k8s/helm/manifests/monitoring/alerts/tetragon-alerts.yaml。
   #
-  # 数据源：homelab 的 tetragon DaemonSet → export-stdout 容器 → OTel → 本 Loki。
-  # values/tetragon.yaml 的 exportDenyList 已经把 kube-system / cilium / 宿主（namespace 为空）以及
-  # databases 的 pg_isready 探针挡在导出之外，所以这里**没有**那个已知噪声。
+  # 数据源：两集群的 tetragon DaemonSet → export-stdout 容器 → 各自的 OTel → 本 Loki，靠 `cluster` 标签区分。
+  # 规则**不按集群过滤**：两边跑同一份策略（security/tetragon/policies/）与同一份导出过滤
+  # （security/tetragon/values-common.yaml 的 exportDenyList：kube-system / cilium / 宿主（namespace 为空）
+  # 以及 databases 的 `pg_isready -U postgres` 探针都挡在导出之外，这里看不到）。
+  # ☠️ 反过来说，**一个集群独有的负载只在那个集群的基线里**：11-24 oracle 上线头一个小时，「应用起 shell」
+  # 就被 CNPG 的 WAL 归档、browserless、s6 等 homelab 没有的负载触发（见那条规则的放行清单）。
+  # 告警说明里的 kubectl context：homelab 的叫 k3s-homelab，其余与 cluster 标签同名（oracle-k3s）。
   #
   # ⚠️ 每个方向都对着现网 Loki 验过：真实窗口 [5m] 返回 0；放宽到 [3h] 命中了测试 pod（2 个策略 × 2 个
   # 节点共 4 条序列）；去掉 `tp-` 排除后多出 tp-exp-binaries，证明排除是起作用的。
@@ -90,6 +94,9 @@ data:
   #
   # ⚠️ 同一次 open 在日志里会出现两条事件（原因未查），所以只按「有没有」告警，不看次数。
   # ⚠️ 策略名以 `tp-` 开头的视为临时测试策略，不告警：做对照实验时别再往群里发消息。
+  #    另一个不发消息的测法：测试 pod 放 kube-system（exportDenyList 不导出），用
+  #    `tetra getevents --namespace kube-system --pods <pod>` 在 agent 上直接看。
+  #    ☠️ 别在导出的 ns 里 `grep -r … /etc`：会顺带打开 /etc/shadow，触发凭据策略（11-24 就这么误发过一条）。
   tetragon-runtime.yaml: |
     groups:
       - name: tetragon-runtime
@@ -119,15 +126,16 @@ data:
 
                 先看是谁、做了什么：
                   # Loki
-                  {k8s_namespace_name="tetragon", cluster="homelab"} |= "process_kprobe" |= "{{ $labels.pod }}"
+                  {k8s_namespace_name="tetragon", cluster="{{ $labels.cluster }}"} |= "process_kprobe" |= "{{ $labels.pod }}"
                   # 事件全文（含 argv、父进程、容器 id）
-                  kubectl --context k3s-homelab -n tetragon logs ds/tetragon -c export-stdout --since=15m | grep {{ $labels.pod }}
-                再看这个 pod：`kubectl --context k3s-homelab -n {{ $labels.ns }} describe pod {{ $labels.pod }}`，
+                  kubectl --context {{ if eq $labels.cluster "homelab" }}k3s-homelab{{ else }}{{ $labels.cluster }}{{ end }} -n tetragon logs ds/tetragon -c export-stdout --since=15m | grep {{ $labels.pod }}
+                再看这个 pod：`kubectl --context {{ if eq $labels.cluster "homelab" }}k3s-homelab{{ else }}{{ $labels.cluster }}{{ end }} -n {{ $labels.ns }} describe pod {{ $labels.pod }}`，
                 是不是刚 `kubectl exec` 进去过、镜像是不是预期的那一个。
 
-                ⚠️ 这条告警只覆盖**导出之后**的事件：kube-system / cilium / 宿主进程在 values/tetragon.yaml
-                的 exportDenyList 里被丢弃，不会到这里。已知噪声（apps-pg 的 pg_isready 探针）同理，
-                日志里没有它，见 k8s/helm/manifests/tetragon-policies/sensitive-file-access.yaml。
+                ⚠️ 这条告警只覆盖**导出之后**的事件：kube-system / cilium / 宿主进程在
+                security/tetragon/values-common.yaml 的 exportDenyList 里被丢弃，不会到这里。
+                已知噪声（apps-pg 的 pg_isready 探针）同理，日志里没有它，见
+                security/tetragon/policies/sensitive-file-access.yaml。
 
           # 应用进程起了 shell（2026-11-22）：webshell / RCE 最典型的形态——node、python、java 这类业务
           # 进程本不该 fork 出 sh。数据源是 Tetragon 默认就有的 process_exec，不需要新 TracingPolicy。
@@ -142,10 +150,17 @@ data:
           #     探测 OpenSSL，每次 pod 启动 6 条。只放行「父进程是 prisma 且命令是 ldconfig -p」这一种组合。
           #   · open-notebook：supervisord（python）按配置拉起 worker（`dash -c "uv run …"`），等同容器入口。
           #   · kube-bench（审计命令）、apk（backup 的包触发器）按父进程排除。
-          # 基线（2026-11-22，Loki 里 Tetragon 事件只保留约 7 天）：用这条完整管道回放 7 天，**只命中 11-20
-          # 两次策略测试的 tp-exp pod**（python3 → sh），这正好是正向对照；分别去掉 Prisma / supervisord 两条
-          # 放行，对应的 12 / 2 条合法事件会冒出来，证明每条放行都是必需的。
-          # 新增合法模式时照同样写法补一条精确放行，并重放 7 天确认只多排除了那一种。
+          #   以下四条是 2026-11-24 oracle 上线头一小时冒出来的（homelab 没有这些负载，7 天基线里看不到）：
+          #   · CNPG：postgres 的 archive_command 是 `sh -c "/controller/manager wal-archive …"`，每次切 WAL 段一次
+          #     （zitadel-pg、apps-pg）。只放行「父进程是 postgres 且命令是 manager wal-archive/restore」。
+          #   · s6-overlay：`s6-supervise` 用 `bash ./run <服务>` 拉起服务（calibre 那组），等同 supervisord。
+          #   · rsshub-browserless：node `./build/index.js` 用 `sh -c "cat /proc/stat … | grep cpu"` 取 CPU 负载。
+          #   · rsshub：容器入口经 npm 起 `dash -c "cross-env NODE_ENV=production … node dist/index.mjs"`。
+          #   后两类在 Tetragon 启动时会给存量进程补发 exec 事件（flags=procFS），所以每次 agent 或容器重启都会再来。
+          # 基线：homelab 用完整管道回放 7 天，**只命中 11-20 两次策略测试的 tp-exp pod**（python3 → sh），这正好
+          # 是正向对照；分别去掉 Prisma / supervisord 两条放行，对应的 12 / 2 条合法事件会冒出来。
+          # ☠️ oracle 的基线截至 11-24 只有上线后的一小时：每天/每小时才跑一次的合法 shell 还可能冒出来，
+          # 冒出来就照同样写法补一条精确放行，并重放确认只多排除了那一种。
           - alert: TetragonAppSpawnedShell
             expr: |
               sum by (cluster, ns, pod, parent, binary) (
@@ -158,6 +173,10 @@ data:
                   | parent!~".*/(containerd-shim-runc-v2|runc|sh|bash|ash|dash|zsh|ksh|busybox|kube-bench|apk)|/lib/apk/exec/.*"
                   | pargs!~".*supervisord.*"
                   | (pargs!~".*node_modules/\\.bin/prisma.*" or args!~".*ldconfig -p.*")
+                  | (parent!~".*/postgresql/[0-9]+/bin/postgres" or args!~".*/controller/manager wal-(archive|restore) .*")
+                  | (parent!~".*/s6-supervise" or args!~"\\./run( .*)?")
+                  | (pargs!~"\\./build/index\\.js" or args!~".*cat /proc/stat 2>/dev/null [|] grep cpu.*")
+                  | (parent!~".*/node" or args!~".*cross-env NODE_ENV=production .*node dist/index[.]mjs.*")
                   [5m]
                 )
               ) > 0
@@ -168,17 +187,86 @@ data:
               summary: "{{ $labels.cluster }} 容器里的应用进程起了 shell：{{ $labels.ns }}/{{ $labels.pod }} 的 {{ $labels.parent }} → {{ $labels.binary }}"
               description: |
                 业务进程（不是容器入口、不是 kubectl exec）fork 出了 shell，这是 webshell / 命令注入的典型形态。
-                7 天基线里除了策略测试之外为零，所以先按真的处理，再判断是不是新的合法行为。
+                基线里除了策略测试之外为零，所以先按真的处理，再判断是不是新的合法行为。
 
                 看它执行了什么（argv 在事件里）：
                   # Loki
-                  {k8s_namespace_name="tetragon", k8s_container_name="export-stdout"} |= "process_exec" |= "{{ $labels.pod }}" |= "{{ $labels.binary }}"
-                  kubectl --context k3s-homelab -n tetragon logs ds/tetragon -c export-stdout --since=15m | grep {{ $labels.pod }}
+                  {k8s_namespace_name="tetragon", k8s_container_name="export-stdout", cluster="{{ $labels.cluster }}"} |= "process_exec" |= "{{ $labels.pod }}" |= "{{ $labels.binary }}"
+                  kubectl --context {{ if eq $labels.cluster "homelab" }}k3s-homelab{{ else }}{{ $labels.cluster }}{{ end }} -n tetragon logs ds/tetragon -c export-stdout --since=15m | grep {{ $labels.pod }}
                 再看同一个 pod 在这前后还做了什么（同一条查询去掉 binary 过滤），以及它最近有没有发版：
-                `kubectl --context k3s-homelab -n {{ $labels.ns }} describe pod {{ $labels.pod }}`。
+                `kubectl --context {{ if eq $labels.cluster "homelab" }}k3s-homelab{{ else }}{{ $labels.cluster }}{{ end }} -n {{ $labels.ns }} describe pod {{ $labels.pod }}`。
 
                 确认是合法的新行为（比如升级后某个库开始在启动时调 shell）：在
-                cloud/oracle/manifests/monitoring/loki-rules.yaml 照 Prisma 那条写**父进程参数 + 命令**的精确放行，
-                别按 namespace 放行，改完重放 7 天确认只多排除了这一种。
+                cloud/oracle/manifests/monitoring/loki-rules.yaml 照 Prisma / CNPG 那几条写**父进程参数 + 命令**的
+                精确放行，别按 namespace 放行，改完重放确认只多排除了这一种。
                 ⚠️ kube-system / cilium / 宿主进程被 exportDenyList 丢弃，不在这条的视野里。
 
+          # 无文件 / 临时目录执行（2026-11-24，移植自 Falco 的「Execution from /dev/shm」「Fileless execution via
+          # memfd_create」，并近似「Drop and execute new binary in container」最常见的形态：下载器把载荷写进可写
+          # 临时目录再执行）。process_exec 自带，不需要新 TracingPolicy。
+          #   · /proc/<pid>/fd/N：fexecve(memfd) 的形态。runc 的 `init` 自我重执行同样长这样，已在
+          #     values-common.yaml 的 exportDenyList 里按「父进程 runc + 参数 init」三条件精确挡掉，**别放宽那一条**。
+          #   · /dev/shm 实测**能执行**（容器里没挂 noexec，11-24 在 oracle 上 cp busybox 进去跑成功了）。
+          # 验证（11-24）：oracle 测试 pod 里 /tmp、/dev/shm、memfd 三种执行全部命中；两集群全部可用历史
+          # （homelab 7 天 5397 条 exec + oracle 上线后）回放 0 命中——/tmp 原本担心噪声，实测为零。
+          - alert: TetragonFilelessExec
+            expr: |
+              sum by (cluster, ns, pod, parent, binary) (
+                count_over_time(
+                  {k8s_namespace_name="tetragon", k8s_container_name="export-stdout"}
+                  |= "\"process_exec\""
+                  | json binary="process_exec.process.binary", ns="process_exec.process.pod.namespace", pod="process_exec.process.pod.name", parent="process_exec.parent.binary"
+                  | ns!=""
+                  | binary=~"/dev/shm/.*|/proc/(self|[0-9]+)/fd/[0-9]+|/memfd:.*|.*[(]deleted[)]|/tmp/.*|/var/tmp/.*"
+                  [5m]
+                )
+              ) > 0
+            labels:
+              severity: warning
+              component: runtime-security
+            annotations:
+              summary: "{{ $labels.cluster }} 容器里从临时目录 / 内存执行程序：{{ $labels.ns }}/{{ $labels.pod }} 的 {{ $labels.parent }} → {{ $labels.binary }}"
+              description: |
+                镜像里的程序不会放在 /tmp、/dev/shm，也不会从 memfd（/proc/self/fd/N）执行——这是「下载载荷再执行」
+                或无文件执行的形态。基线为零，先按真的处理。
+                  # 事件全文（含 argv、父进程）
+                  {k8s_namespace_name="tetragon", k8s_container_name="export-stdout", cluster="{{ $labels.cluster }}"} |= "process_exec" |= "{{ $labels.pod }}"
+                  kubectl --context {{ if eq $labels.cluster "homelab" }}k3s-homelab{{ else }}{{ $labels.cluster }}{{ end }} -n {{ $labels.ns }} describe pod {{ $labels.pod }}
+                合法的新行为（某个工具在 /tmp 解压再运行）照 TetragonAppSpawnedShell 的写法加**父进程 + 程序**的精确放行。
+
+          # 攻击工具命令行（2026-11-24，移植自 Falco 的「Netcat Remote Code Execution in Container」
+          # 「Search Private Keys or Passwords」「Find AWS Credentials」「Remove Bulk Data from Disk」
+          # 「Debugfs Launched in Privileged Container」，以及「Clear Log Activities」里截断 /var/log 的那一半）。
+          # 只看程序名 + 参数，不加内核钩子：
+          #   · nc/ncat/socat 带 -e / -c / --exec / EXEC: / SYSTEM:（反弹 shell）
+          #   · grep/find/rg 的参数里有私钥标记、ssh 私钥名、云凭据 / kubeconfig / docker 凭据文件名
+          #   · shred / wipefs / mkfs* / debugfs（任何参数）；truncate 作用于 /var/log
+          #   · busybox 直接调用（`busybox nc -e …`）：此时程序是 /bin/busybox，子命令在参数里，单独一支。
+          #     经软链调用（alpine 的 /bin/grep → busybox）Tetragon 报的是调用路径 /bin/grep，走上面几支（11-24 核过
+          #     kube-bench 的 alpine 镜像）。
+          # 刻意不含「password」字样：grep password 的合法用法太多，加了只会被训练成忽略。
+          # 验证（11-24）：oracle 测试 pod 里 nc -e、busybox nc -e、grep 私钥标记、find id_rsa、shred 全部命中，
+          # 对照（nc -h、grep localhost、find hosts）不命中；两集群全部可用历史回放 0 命中。
+          - alert: TetragonAttackToolExec
+            expr: |
+              sum by (cluster, ns, pod, binary) (
+                count_over_time(
+                  {k8s_namespace_name="tetragon", k8s_container_name="export-stdout"}
+                  |= "\"process_exec\""
+                  | json binary="process_exec.process.binary", args="process_exec.process.arguments", ns="process_exec.process.pod.namespace", pod="process_exec.process.pod.name"
+                  | ns!=""
+                  | ( binary=~".*/(nc|ncat|netcat|nc[.]traditional|nc[.]openbsd|socat)" and args=~"(.* )?(-e|-c|--exec|--sh-exec|--lua-exec)( .*)?|.*(EXEC|SYSTEM):.*" ) or ( binary=~".*/(grep|egrep|fgrep|rg|find)" and args=~"(?i).*(BEGIN [A-Z ]*PRIVATE KEY|id_rsa|id_dsa|id_ecdsa|id_ed25519|aws_secret_access_key|[.]aws/credentials|[.]kube/config|[.]docker/config[.]json|[.]git-credentials|[.]pgpass|[.]netrc).*" ) or binary=~".*/(shred|wipefs|debugfs|mkfs([.][a-z0-9]+)?)" or ( binary=~".*/truncate" and args=~".*/var/log/.*" ) or ( binary=~".*/busybox" and args=~"(?i)((nc|netcat) (.* )?(-e|-c) .*|(grep|egrep|fgrep|find) .*(BEGIN [A-Z ]*PRIVATE KEY|id_rsa|id_dsa|id_ecdsa|id_ed25519|aws_secret_access_key|[.]aws/credentials|[.]kube/config|[.]docker/config[.]json|[.]git-credentials|[.]pgpass|[.]netrc).*|(shred|wipefs|debugfs|mkfs[.a-z0-9]*)( .*)?)" )
+                  [5m]
+                )
+              ) > 0
+            labels:
+              severity: warning
+              component: runtime-security
+            annotations:
+              summary: "{{ $labels.cluster }} 容器里运行了攻击常用的命令：{{ $labels.ns }}/{{ $labels.pod }} 的 {{ $labels.binary }}"
+              description: |
+                反弹 shell（nc -e）、翻找私钥 / 云凭据、擦盘 / 清日志、debugfs 这类命令在正常业务里不会出现，基线为零。
+                看完整命令行（argv 已按 redactionFilters 脱敏）：
+                  {k8s_namespace_name="tetragon", k8s_container_name="export-stdout", cluster="{{ $labels.cluster }}"} |= "process_exec" |= "{{ $labels.pod }}" |= "{{ $labels.binary }}"
+                  kubectl --context {{ if eq $labels.cluster "homelab" }}k3s-homelab{{ else }}{{ $labels.cluster }}{{ end }} -n {{ $labels.ns }} describe pod {{ $labels.pod }}
+                规则写法与边界见 cloud/oracle/manifests/monitoring/loki-rules.yaml 里这条规则上方的注释。

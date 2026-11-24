@@ -1,0 +1,244 @@
+# promtool 单元测试：k8s/helm/manifests/monitoring/alerts/tetragon-alerts.yaml（两集群化，2026-11-24）
+# 跑法：`just test-alert-rules`（同 apiserver-alerts.test.yaml，source 是本仓库加的键）。
+#
+# 两集群化最容易错的是 absent() 与分组标签，所以每组只隔离一个因素：
+#   · 一个集群坏、另一个好 —— 只报坏的那个，且 cluster/node 标签对得上；
+#   · 一个集群的序列**整体消失** —— absent 按集群各写一条，另一集群健康也照样报（只写一条
+#     `absent(up{job="tetragon"})` 时这组会失败）；
+#   · for: 的边界（不到时间不报）；
+#   · oracle 的序列带 otel_scope_name 等额外标签（OTel 抓取的形态），sum by (cluster, node) 要能吞掉；
+#   · tracingpolicy_loaded 的现网形态是每节点 4 条（enabled/disabled/error/load_error），0 值不能误报。
+# 改规则时如果所有测试照样通过，先怀疑测试没覆盖到改动。
+source: k8s/helm/manifests/monitoring/alerts/tetragon-alerts.yaml
+rule_files:
+- tetragon-alerts.rules.yaml
+evaluation_interval: 1m
+tests:
+# ── TetragonDown ──────────────────────────────────────────────────────────────
+- name: both clusters up -> nothing
+  interval: 1m
+  input_series:
+  - series: up{job="tetragon",cluster="homelab",node="k8s-node"}
+    values: 1x40
+  - series: up{job="tetragon",cluster="homelab",node="k8s-worker-106"}
+    values: 1x40
+  - series: up{job="tetragon",cluster="oracle-k3s",node="oracle-k3s",otel_scope_name="prometheusreceiver"}
+    values: 1x40
+  alert_rule_test:
+  - eval_time: 30m
+    alertname: TetragonDown
+    exp_alerts: []
+
+- name: one homelab node scrape fails -> only that node, only after for:10m
+  interval: 1m
+  input_series:
+  - series: up{job="tetragon",cluster="homelab",node="k8s-node"}
+    values: 1x5 0x35
+  - series: up{job="tetragon",cluster="homelab",node="k8s-worker-106"}
+    values: 1x40
+  - series: up{job="tetragon",cluster="oracle-k3s",node="oracle-k3s",otel_scope_name="prometheusreceiver"}
+    values: 1x40
+  alert_rule_test:
+  - eval_time: 12m
+    alertname: TetragonDown
+    exp_alerts: []
+  - eval_time: 20m
+    alertname: TetragonDown
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        job: tetragon
+        cluster: homelab
+        node: k8s-node
+
+- name: oracle scrape fails (series present, up=0) -> oracle reported with the OTel labels it carries
+  interval: 1m
+  input_series:
+  - series: up{job="tetragon",cluster="homelab",node="k8s-node"}
+    values: 1x40
+  - series: up{job="tetragon",cluster="oracle-k3s",node="oracle-k3s",otel_scope_name="prometheusreceiver"}
+    values: 1x5 0x35
+  alert_rule_test:
+  - eval_time: 20m
+    alertname: TetragonDown
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        job: tetragon
+        cluster: oracle-k3s
+        node: oracle-k3s
+        otel_scope_name: prometheusreceiver
+
+- name: oracle series vanishes entirely while homelab is healthy -> per-cluster absent fires
+  interval: 1m
+  input_series:
+  - series: up{job="tetragon",cluster="homelab",node="k8s-node"}
+    values: 1x40
+  - series: up{job="tetragon",cluster="homelab",node="k8s-worker-106"}
+    values: 1x40
+  - series: up{job="tetragon",cluster="oracle-k3s",node="oracle-k3s",otel_scope_name="prometheusreceiver"}
+    values: 1x5 _x35
+  alert_rule_test:
+  - eval_time: 15m
+    alertname: TetragonDown
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: TetragonDown
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        job: tetragon
+        cluster: oracle-k3s
+
+- name: homelab series vanishes entirely while oracle is healthy -> per-cluster absent fires
+  interval: 1m
+  input_series:
+  - series: up{job="tetragon",cluster="homelab",node="k8s-node"}
+    values: 1x5 _x35
+  - series: up{job="tetragon",cluster="homelab",node="k8s-worker-106"}
+    values: 1x5 _x35
+  - series: up{job="tetragon",cluster="oracle-k3s",node="oracle-k3s",otel_scope_name="prometheusreceiver"}
+    values: 1x40
+  alert_rule_test:
+  - eval_time: 30m
+    alertname: TetragonDown
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        job: tetragon
+        cluster: homelab
+
+- name: no tetragon series anywhere -> both clusters reported
+  interval: 1m
+  input_series:
+  - series: up{job="node-exporter",cluster="homelab"}
+    values: 1x40
+  alert_rule_test:
+  - eval_time: 20m
+    alertname: TetragonDown
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        job: tetragon
+        cluster: homelab
+    - exp_labels:
+        severity: critical
+        job: tetragon
+        cluster: oracle-k3s
+
+# ── TetragonPolicyLoadFailed ──────────────────────────────────────────────────
+- name: oracle has a policy in error -> oracle only, after for:5m; zero-valued error series elsewhere stay quiet
+  interval: 1m
+  input_series:
+  - series: tetragon_tracingpolicy_loaded{job="tetragon",cluster="oracle-k3s",node="oracle-k3s",state="enabled",otel_scope_name="prometheusreceiver"}
+    values: 1x30
+  - series: tetragon_tracingpolicy_loaded{job="tetragon",cluster="oracle-k3s",node="oracle-k3s",state="error",otel_scope_name="prometheusreceiver"}
+    values: 0x5 1x25
+  - series: tetragon_tracingpolicy_loaded{job="tetragon",cluster="homelab",node="k8s-node",state="enabled"}
+    values: 2x30
+  - series: tetragon_tracingpolicy_loaded{job="tetragon",cluster="homelab",node="k8s-node",state="error"}
+    values: 0x30
+  - series: tetragon_tracingpolicy_loaded{job="tetragon",cluster="homelab",node="k8s-node",state="load_error"}
+    values: 0x30
+  alert_rule_test:
+  - eval_time: 9m
+    alertname: TetragonPolicyLoadFailed
+    exp_alerts: []
+  - eval_time: 15m
+    alertname: TetragonPolicyLoadFailed
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        cluster: oracle-k3s
+        node: oracle-k3s
+
+# ── TetragonPolicyNotEnabled ──────────────────────────────────────────────────
+- name: live shape (4 states per node, enabled=2) on both clusters -> nothing
+  interval: 1m
+  input_series:
+  - series: tetragon_tracingpolicy_loaded{job="tetragon",cluster="homelab",node="k8s-node",state="enabled"}
+    values: 2x30
+  - series: tetragon_tracingpolicy_loaded{job="tetragon",cluster="homelab",node="k8s-node",state="disabled"}
+    values: 0x30
+  - series: tetragon_tracingpolicy_loaded{job="tetragon",cluster="homelab",node="k8s-worker-106",state="enabled"}
+    values: 2x30
+  - series: tetragon_tracingpolicy_loaded{job="tetragon",cluster="oracle-k3s",node="oracle-k3s",state="enabled",otel_scope_name="prometheusreceiver"}
+    values: 2x30
+  - series: tetragon_tracingpolicy_loaded{job="tetragon",cluster="oracle-k3s",node="oracle-k3s",state="disabled",otel_scope_name="prometheusreceiver"}
+    values: 0x30
+  alert_rule_test:
+  - eval_time: 25m
+    alertname: TetragonPolicyNotEnabled
+    exp_alerts: []
+  - eval_time: 25m
+    alertname: TetragonPolicyLoadFailed
+    exp_alerts: []
+
+- name: oracle drops to 1 enabled policy -> oracle only, after for:10m
+  interval: 1m
+  input_series:
+  - series: tetragon_tracingpolicy_loaded{job="tetragon",cluster="oracle-k3s",node="oracle-k3s",state="enabled",otel_scope_name="prometheusreceiver"}
+    values: 2x5 1x30
+  - series: tetragon_tracingpolicy_loaded{job="tetragon",cluster="homelab",node="k8s-node",state="enabled"}
+    values: 2x35
+  - series: tetragon_tracingpolicy_loaded{job="tetragon",cluster="homelab",node="k8s-worker-106",state="enabled"}
+    values: 2x35
+  alert_rule_test:
+  - eval_time: 14m
+    alertname: TetragonPolicyNotEnabled
+    exp_alerts: []
+  - eval_time: 20m
+    alertname: TetragonPolicyNotEnabled
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        cluster: oracle-k3s
+        node: oracle-k3s
+
+- name: a policy gets disabled (enabled 2->1, disabled 0->1; total across states stays 2) -> still reported
+  interval: 1m
+  input_series:
+  - series: tetragon_tracingpolicy_loaded{job="tetragon",cluster="oracle-k3s",node="oracle-k3s",state="enabled",otel_scope_name="prometheusreceiver"}
+    values: 2x5 1x30
+  - series: tetragon_tracingpolicy_loaded{job="tetragon",cluster="oracle-k3s",node="oracle-k3s",state="disabled",otel_scope_name="prometheusreceiver"}
+    values: 0x5 1x30
+  alert_rule_test:
+  - eval_time: 20m
+    alertname: TetragonPolicyNotEnabled
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        cluster: oracle-k3s
+        node: oracle-k3s
+
+# ── TetragonEventsLost ────────────────────────────────────────────────────────
+- name: oracle ringbuf loses events once, homelab queue loses events once -> each reported per node
+  interval: 1m
+  input_series:
+  - series: tetragon_observer_ringbuf_events_lost_total{job="tetragon",cluster="oracle-k3s",node="oracle-k3s",otel_scope_name="prometheusreceiver"}
+    values: 0x10 5+0x30
+  - series: tetragon_observer_ringbuf_queue_events_lost_total{job="tetragon",cluster="oracle-k3s",node="oracle-k3s",otel_scope_name="prometheusreceiver"}
+    values: 0x40
+  - series: tetragon_observer_ringbuf_events_lost_total{job="tetragon",cluster="homelab",node="k8s-node"}
+    values: 0x40
+  - series: tetragon_observer_ringbuf_queue_events_lost_total{job="tetragon",cluster="homelab",node="k8s-node"}
+    values: 0x10 3+0x30
+  - series: tetragon_observer_ringbuf_events_lost_total{job="tetragon",cluster="homelab",node="k8s-worker-106"}
+    values: 0x40
+  - series: tetragon_observer_ringbuf_queue_events_lost_total{job="tetragon",cluster="homelab",node="k8s-worker-106"}
+    values: 0x40
+  alert_rule_test:
+  - eval_time: 15m
+    alertname: TetragonEventsLost
+    exp_alerts: []
+  - eval_time: 25m
+    alertname: TetragonEventsLost
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        cluster: oracle-k3s
+        node: oracle-k3s
+    - exp_labels:
+        severity: warning
+        cluster: homelab
+        node: k8s-node
