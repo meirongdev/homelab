@@ -1,5 +1,5 @@
 ---
-# OpenCost — oracle-k3s 集群成本归因（跨集群部署，模式同 falco.yaml）
+# OpenCost — oracle-k3s 集群成本归因（跨集群部署，模式同 tetragon-oracle.yaml）
 # Chart: opencost/opencost
 # Values: cloud/oracle/values/opencost.yaml
 # 数据源为 collector（oracle 本地无 Prometheus，也不跨 Tailscale 查 homelab）。
@@ -38,6 +38,6 @@ spec:
       selfHeal: true
     syncOptions:
       # opencost ns 由 oracle-k3s kustomize App 拥有（含 PSA 标签），
-      # 故此处不重复创建/管理 ns，避免双重所有权（同 falco）。
+      # 故此处不重复创建/管理 ns，避免双重所有权（同 tetragon-oracle）。
       - CreateNamespace=false
       - ServerSideApply=true

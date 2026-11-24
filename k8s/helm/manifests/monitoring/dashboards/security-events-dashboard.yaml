@@ -1,8 +1,9 @@
 ---
-# Grafana 看板：安全事件聚合（Loki）—— kube-bench CIS / Tetragon 进程事件 / Falco 告警。
+# Grafana 看板：安全事件聚合（Loki）—— kube-bench CIS / Tetragon 进程事件与策略命中（两集群）。
 # Security 文件夹。数据源 Loki。
 # 注：面板在对应组件产出日志前为空 —— kube-bench 每周日跑(或手动触发)；
-#     Tetragon(homelab)/Falco(oracle) 部署后开始产出（Falco 经 oracle OTel 远写到本 Loki）。
+#     Tetragon 两集群都跑（2026-11-24 起 oracle 也换成 Tetragon，Falco 退役），oracle 的事件经 oracle OTel 进本 Loki，
+#     靠 cluster 标签区分。策略命中按 Loki ruler 的口径排除 `tp-` 测试策略。
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -28,11 +29,11 @@ data:
       },
       "panels": [
         {
-          "id": 1, "type": "stat", "title": "Falco 告警数（近 24h）",
+          "id": 1, "type": "stat", "title": "Tetragon 策略命中（近 24h，两集群）",
           "gridPos": { "h": 4, "w": 8, "x": 0, "y": 0 },
           "datasource": { "type": "loki", "uid": "${datasource}" },
           "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 1 } ] }, "color": { "mode": "thresholds" } } },
-          "targets": [ { "expr": "sum(count_over_time({k8s_namespace_name=\"falco\"} != \"falcosidekick\" [24h]))", "refId": "A" } ]
+          "targets": [ { "expr": "sum(count_over_time({k8s_namespace_name=\"tetragon\", k8s_container_name=\"export-stdout\"} |= \"\\\"process_kprobe\\\"\" | json policy=\"process_kprobe.policy_name\" | policy!~\"tp-.*\" [24h]))", "refId": "A" } ]
         },
         {
           "id": 2, "type": "stat", "title": "Tetragon 进程事件（近 1h）",
@@ -48,14 +49,14 @@ data:
           "targets": [ { "expr": "sum(count_over_time({k8s_namespace_name=\"kube-bench\"} |= \"[FAIL]\" [7d]))", "refId": "A" } ]
         },
         {
-          "id": 4, "type": "logs", "title": "Falco 运行时告警（oracle）",
+          "id": 4, "type": "logs", "title": "Tetragon 策略命中（两集群；容器逃逸 syscall / 凭据文件）",
           "gridPos": { "h": 9, "w": 24, "x": 0, "y": 4 },
           "datasource": { "type": "loki", "uid": "${datasource}" },
           "options": { "showTime": true, "wrapLogMessage": true, "dedupStrategy": "none", "enableLogDetails": true },
-          "targets": [ { "expr": "{k8s_namespace_name=\"falco\"} != \"falcosidekick\"", "refId": "A" } ]
+          "targets": [ { "expr": "{k8s_namespace_name=\"tetragon\", k8s_container_name=\"export-stdout\"} |= \"\\\"process_kprobe\\\"\"", "refId": "A" } ]
         },
         {
-          "id": 5, "type": "logs", "title": "Tetragon 进程事件（homelab；起 shell / kubectl exec 等）",
+          "id": 5, "type": "logs", "title": "Tetragon 进程事件（两集群；起 shell / kubectl exec 等）",
           "gridPos": { "h": 9, "w": 24, "x": 0, "y": 13 },
           "datasource": { "type": "loki", "uid": "${datasource}" },
           "options": { "showTime": true, "wrapLogMessage": true, "dedupStrategy": "none", "enableLogDetails": true },

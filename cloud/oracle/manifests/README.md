@@ -14,7 +14,7 @@
 | `base/` | `oracle-k3s` | kustomize（根树） | 集群级地基：Gateway、cloudflared、ClusterSecretStore、CoreDNS 扩展、PriorityClass。**内嵌两个 Namespace** |
 | `databases/` | `oracle-k3s` | 同上 | CNPG `apps-pg` |
 | `homepage/` | `oracle-k3s` | 同上 | |
-| `falco/` | `oracle-k3s` | 同上 | 只有 ns + falcosidekick 凭据；Falco 本体是独立 Helm App |
+| `tetragon/` | `oracle-k3s` | 同上 | 只有 ns（PSA privileged）；Tetragon 本体是独立 Helm App `tetragon-oracle`，策略在 `security/tetragon/policies/` |
 | `opencost/` | `oracle-k3s` | 同上 | 只有 ns |
 | `argocd/` | `oracle-k3s` | 同上 | ns + 两个 ESO 凭据 + argocd 路由。**ArgoCD 本体是 manual-helm，刻意不自管** |
 | `rss-system/` | **`oracle-rss`** | 目录源 | ⚠️ 它的 HTTPRoute/ReferenceGrant 在 `base/gateway.yaml`，不在本目录 |
@@ -51,7 +51,7 @@ ArgoCD **不会**把已被 `oracle-k3s` 拥有的对象让给新 App（新 App �
 ## 加一个新服务
 
 放进对应子目录即可 —— 那五个目录源 App 是「目录即清单」，**不需要**再登记到
-任何 `resources:` 列表。只有 `base/`、`databases/`、`homepage/`、`falco/`、`argocd/`
+任何 `resources:` 列表。只有 `base/`、`databases/`、`homepage/`、`tetragon/`、`argocd/`
 这几个还归根 `kustomization.yaml` 的目录需要显式登记（漏登记会静默不生效）。
 `monitoring/` 需要登记进 `monitoring/kustomization.yaml`。
 

@@ -48,20 +48,17 @@ resources:
   - uptime-kuma/namespace.yaml
   # Observability
   # 2026-08-02 起本集群不再只是「轻量采集端」：Loki(日志)+Tempo(追踪) 已从 homelab 迁入
-  # （工作负载由独立的 loki / tempo Helm App 部署，同 falco 模式；此处只放 NodePort 入口）。
+  # （工作负载由独立的 loki / tempo Helm App 部署，同 tetragon 模式；此处只放 NodePort 入口）。
   # Prometheus/Grafana/Alertmanager 仍在 homelab——它们要贴着抓取目标，不搬。
   # 工作负载已于 2026-09-08 拆给 `oracle-monitoring` App（kustomize 源，
   # cloud/oracle/manifests/monitoring/kustomization.yaml —— configMapGenerator 也搬过去了）。
   # ☠️ namespace.yaml 留在本树（ns 被 prune 会级联删光）。
   - monitoring/namespace.yaml
-  # OpenCost 成本归因：仅 namespace（工作负载由独立 opencost-oracle Helm App 部署，同 falco 模式）
+  # OpenCost 成本归因：仅 namespace（工作负载由独立 opencost-oracle Helm App 部署，同 tetragon 模式）
   # 见 docs/reference/cost-and-rightsizing.md
   - opencost/namespace.yaml
-  # Tetragon 运行时检测（2026-11-24 起取代 Falco）：仅 namespace（工作负载由独立 tetragon-oracle Helm App 部署）
+  # Tetragon 运行时检测（2026-11-24 起取代 Falco，Falco 的 ns 与 falcosidekick 凭据同日删除）：仅 namespace（工作负载由独立 tetragon-oracle Helm App 部署）
   - tetragon/namespace.yaml
-  # Falco 运行时检测：namespace + falcosidekick→Telegram token（Falco 工作负载由独立 falco Helm App 部署）
-  - falco/namespace.yaml
-  - falco/falcosidekick-secret.yaml
   # Backup: serverless restic → 106 ZFS 仓库（Tailscale sftp）。见 plans/2026-07-06-…backup-redesign.md
   # 2026-07-07 与 homelab 合并为 kustomize base+overlay（repo 根 backup/）
   - ../../../backup/overlays/oracle

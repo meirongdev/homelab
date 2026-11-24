@@ -310,21 +310,20 @@ trivy:
       #     (需应用实际收发 AMQP 消息)
       #   · CVE-2026-77411: readLongstr 遇 broker 提供 >0x7FFFFFFF 的 longstr 时解析
       #     失步(需与恶意/受损 broker 交互)
-      # 本集群 3 个命中镜像均未启用任何 RabbitMQ/AMQP 路径(2026-09-20 逐项核配置):
+      # 本集群命中镜像均未启用任何 RabbitMQ/AMQP 路径(2026-09-20 逐项核配置; 当时 3 个,
+      # 2026-11-24 falcosidekick 随 Falco 退役后剩下面 2 个):
       #   · otel-collector 0.156.0(amqp091-go 1.12.0): otel 配置 extensions 仅
       #     health_check/file_storage, 无 rabbitmq 扩展, 全文件无 rabbit/amqp 字样
-      #   · falcosidekick 2.34.1(amqp091-go 1.10.0): 配置仅启用 telegram output
-      #     (cloud/oracle/values/falco.yaml), 无 rabbitmq
       #   · wait4x 3.6(amqp091-go 1.10.0): zitadel-login 的 wait-for-zitadel init 容器,
       #     只做服务就绪等待, 无消息队列
       # ⚠️ 覆盖范围: 按 ID 全集群生效。若将来有组件开始用 RabbitMQ/AMQP(加 otel 的
-      #   rabbitmq 扩展、启用 falcosidekick 的 rabbitmq output 等), 这三条必须重估。
+      #   rabbitmq 扩展等), 这三条必须重估。
       - id: CVE-2026-77405
-        statement: "amqp091-go <1.13.0 amqps URI 可协商 TLS1.0/1.1(未设 MinVersion); 触发需进程为 AMQP 客户端, otel-collector(extensions 仅 health_check/file_storage)/falcosidekick(仅 telegram)/wait4x(就绪等待容器)均未启用 RabbitMQ/AMQP, 2026-11 复审"
+        statement: "amqp091-go <1.13.0 amqps URI 可协商 TLS1.0/1.1(未设 MinVersion); 触发需进程为 AMQP 客户端, otel-collector(extensions 仅 health_check/file_storage)/wait4x(就绪等待容器)均未启用 RabbitMQ/AMQP, 2026-11 复审"
       - id: CVE-2026-77408
-        statement: "amqp091-go <1.13.0 >255 字节属性值截断不报错(writeShortstr); 触发需进程收发 AMQP 消息, 上述 3 镜像均未启用 RabbitMQ/AMQP, 2026-11 复审"
+        statement: "amqp091-go <1.13.0 >255 字节属性值截断不报错(writeShortstr); 触发需进程收发 AMQP 消息, 上述 2 镜像均未启用 RabbitMQ/AMQP, 2026-11 复审"
       - id: CVE-2026-77411
-        statement: "amqp091-go <1.13.0 broker 提供超长 longstr 致解析失步(readLongstr); 触发需与 broker 交互, 上述 3 镜像均未启用 RabbitMQ/AMQP, 2026-11 复审"
+        statement: "amqp091-go <1.13.0 broker 提供超长 longstr 致解析失步(readLongstr); 触发需与 broker 交互, 上述 2 镜像均未启用 RabbitMQ/AMQP, 2026-11 复审"
       #
       # --- Debian perl 5.40.1-6 三条 Critical（2026-09-14 分诊；**已根除，本集群不留条目**）---
       # 本告警曾自 2026-09-13 16:12 UTC 起 firing，报 15 条 Critical —— 逐条核过，

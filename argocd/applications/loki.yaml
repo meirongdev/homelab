@@ -39,6 +39,6 @@ spec:
       selfHeal: true
     syncOptions:
       # monitoring ns 由 oracle-k3s kustomize App 拥有（含 PSA privileged 标签），
-      # 故此处不重复创建/管理 ns，避免双重所有权（同 falco.yaml）。
+      # 故此处不重复创建/管理 ns，避免双重所有权（同 tetragon-oracle.yaml）。
       - CreateNamespace=false
       - ServerSideApply=true

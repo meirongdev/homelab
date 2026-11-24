@@ -21,7 +21,7 @@ cloud/oracle/
 │   ├── argocd/             # 控制面的 ns、ESO 凭据、路由（ArgoCD 本体是 manual-helm，见 k8s/helm/justfile）
 │   ├── calibre-metadata/   # 独立 ArgoCD App（需要专门的 ignoreDifferences），不在整树里
 │   ├── databases/          # CNPG 共享实例 apps-pg
-│   ├── falco/ monitoring/ opencost/   # ns + 密钥 + 配置；工作负载由各自的 Helm App 部署
+│   ├── tetragon/ monitoring/ opencost/   # ns + 密钥 + 配置；工作负载由各自的 Helm App 部署
 │   ├── homepage/ rss-system/ uptime-kuma/ zitadel/
 │   ├── personal-services/  # 个人服务（清单即真相源，名单见 services.md）
 │   └── kustomization.yaml

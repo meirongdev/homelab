@@ -1,5 +1,5 @@
 # tetragon ns（oracle）—— 归 oracle-k3s kustomize App；工作负载由独立的 tetragon-oracle Helm App 部署
-# （CreateNamespace=false），同原先 falco 的模式。H1：Namespace 独占文件；H5：PSA 显式写。
+# （CreateNamespace=false）。H1：Namespace 独占文件；H5：PSA 显式写。
 # privileged：agent 要 hostPID、挂宿主 /sys/fs/bpf 与 /proc，加载 eBPF。warn/audit 仍按 baseline 记录。
 apiVersion: v1
 kind: Namespace

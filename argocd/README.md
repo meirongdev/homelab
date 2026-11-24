@@ -11,7 +11,7 @@ argocd/
 │                   #   watch 本目录（`recurse: false`，只认本层 *.yaml，
 │                   #   子目录不生效），所以改任一 *.yaml + push 即生效。
 │                   #   （kube-prometheus-stack / otel / external-dns / backup /
-│                   #     personal-services / vault-eso / gateway / falco / …）
+│                   #     personal-services / vault-eso / gateway / tetragon / …）
 ├── projects/       # AppProject，每集群一个（homelab.yaml / oracle-k3s.yaml），各只允许
 │                   #   一条 destination；由 applications/projects.yaml 那个 App 托管，push 即生效。
 │                   #   root / projects 两个元 App 挂内置 `default`（CI 规则 H2 强制）。

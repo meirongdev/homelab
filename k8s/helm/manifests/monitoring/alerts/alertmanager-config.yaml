@@ -8,8 +8,9 @@
 # messageThreadID 2)。bot token: Vault secret/homelab/telegram → ESO
 # (k8s/helm/manifests/monitoring/alerts/alertmanager-telegram-secret.yaml)→ k8s Secret
 # monitoring/alertmanager-telegram key=bot-token。
-# Gotify 本体已于 2026-07 彻底下线(不再是"仍服务 Falco"——Falco 也已迁到原生
-# Telegram output,见 falco.yaml + decisions/alerting-telegram-migration.md)。
+# Gotify 本体已于 2026-07 彻底下线(decisions/alerting-telegram-migration.md)。Falco 曾用
+# falcosidekick 直推 Telegram,2026-11-24 随 Falco 退役;oracle 的运行时检测改由 Tetragon
+# 经 Loki ruler → 本 Alertmanager 推送(cloud/oracle/manifests/monitoring/loki-rules.yaml)。
 ---
 apiVersion: monitoring.coreos.com/v1alpha1
 kind: AlertmanagerConfig

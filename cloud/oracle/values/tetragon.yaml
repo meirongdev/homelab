@@ -7,10 +7,12 @@ tetragon:
   # request 照抄 homelab 的稳态口径（50m / 160Mi）：oracle 2 OCPU / 12G，CPU requests 本来就占到 ~67%，
   # 别在这里多报。
   # ☠️ memory limit 先给 768Mi（homelab 是 512Mi），**待实测后收紧**：上线当天 Falco 刚因为 7.0 内核在
-  #   加载 BPF 时把校验器内存记到容器 memcg 上被 OOM（峰值 520Mi，见 values/falco.yaml 的历史），
+  #   加载 BPF 时把校验器内存记到容器 memcg 上被 OOM（峰值 520Mi，见 docs/records/2026-11-24-oracle-kernel-7-falco-to-tetragon.md），
   #   Tetragon 加载 / 更新策略同样要过校验器，而 homelab 的 373Mi 峰值是 x86 + 7.0.0-30 上测的，
   #   oracle 是 arm64 + 7.0.0-1016。被 OOM = 检测静默失效，宁可先宽。
   #   判据看 cgroup 的 memory.peak（或 dmesg 的 memcg 统计），不是稳态 working set。
+  #   上线实测（11-24）：首次加载两条策略 memory.peak 185Mi、稳态 86Mi；**策略更新路径的峰值还没测**
+  #   （homelab 那 373Mi 就是更新路径），下次改策略后看一眼再定，目标是与 homelab 一样 512Mi 并挪进 values-common。
   resources:
     requests:
       cpu: 50m

@@ -1,7 +1,7 @@
 ---
 # 周一 09:00 SGT = 01:00 UTC 出周报 + 推 Telegram。
 #
-# Telegram 三要素按本仓库既有分工拆开（同 Alertmanager / falco）：
+# Telegram 三要素按本仓库既有分工拆开（同 Alertmanager）：
 #   · bot token → Vault `secret/homelab/telegram` (property bot_token) 经 ESO
 #     （external-secret.yaml）—— 与告警共用同一个 bot，**已存在，无需手工写值**
 #   · chat id / thread id → **不是密钥**，就是两个 ID，这里明文给

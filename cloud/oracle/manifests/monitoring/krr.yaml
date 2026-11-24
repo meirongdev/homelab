@@ -4,7 +4,7 @@
 # 与 homelab 版（k8s/helm/manifests/monitoring/krr.yaml）的差异只有三处：
 #   ① Prometheus 指向中枢（oracle 本地没有 Prometheus），经 Tailscale NodePort 31090
 #   ② -l=oracle-k3s
-#   ③ bot token 需本集群自己的 ExternalSecret（跨集群读同一个 Vault 路径，同 falcosidekick）
+#   ③ bot token 需本集群自己的 ExternalSecret（跨集群读同一个 Vault 路径 secret/homelab/telegram）
 #
 # 前置：otel-collector 的 prometheus/cadvisor receiver 必须已在跑，否则中枢 Prometheus 里
 # 没有 oracle 的 container_cpu_usage_seconds_total / container_memory_working_set_bytes，

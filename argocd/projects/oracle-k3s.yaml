@@ -22,7 +22,6 @@ spec:
   sourceRepos:
     - https://github.com/meirongdev/homelab
     - https://aquasecurity.github.io/helm-charts            # trivy-operator-oracle
-    - https://falcosecurity.github.io/charts                # falco
     - https://helm.cilium.io/                               # tetragon-oracle
     - https://grafana.github.io/helm-charts                 # loki / tempo
     # cnpg-operator：OCI 源。2026-09-03 从 https://cloudnative-pg.github.io/charts 换来 ——

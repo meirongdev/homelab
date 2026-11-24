@@ -35,6 +35,6 @@ spec:
       prune: true
       selfHeal: true
     syncOptions:
-      # monitoring ns 由 oracle-k3s kustomize App 拥有（同 falco.yaml / loki.yaml）
+      # monitoring ns 由 oracle-k3s kustomize App 拥有（同 tetragon-oracle.yaml / loki.yaml）
       - CreateNamespace=false
       - ServerSideApply=true

@@ -40,6 +40,6 @@ spec:
       selfHeal: true
     syncOptions:
       # personal-services ns 由 homelab 的 personal-services App 拥有（含 PSA 标签），
-      # 这里不重复创建，避免双重所有权（同 loki.yaml / falco.yaml 的做法）。
+      # 这里不重复创建，避免双重所有权（同 loki.yaml / tetragon-oracle.yaml 的做法）。
       - CreateNamespace=false
       - ServerSideApply=true

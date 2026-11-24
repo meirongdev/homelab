@@ -1,5 +1,5 @@
 ---
-# external-dns — oracle-k3s 实例（跨集群部署，模式同 falco/opencost-oracle）
+# external-dns — oracle-k3s 实例（跨集群部署，模式同 tetragon-oracle/opencost-oracle）
 # Chart: external-dns/external-dns · Values: cloud/oracle/values/external-dns.yaml
 # 2026-07-31: chart 本体从 manual-helm（just deploy-external-dns-oracle）采纳进 ArgoCD。
 # ns + Cloudflare token 的 ExternalSecret 由 oracle-k3s kustomize App 提供
@@ -48,6 +48,6 @@ spec:
       selfHeal: true
     syncOptions:
       # external-dns ns 由 oracle-k3s kustomize App 拥有（含 PSA 标签 + ESO secret），
-      # 故此处不重复创建/管理 ns，避免双重所有权（同 falco/opencost-oracle）。
+      # 故此处不重复创建/管理 ns，避免双重所有权（同 tetragon-oracle/opencost-oracle）。
       - CreateNamespace=false
       - ServerSideApply=true
