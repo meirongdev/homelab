@@ -94,6 +94,10 @@ data:
   #
   # ⚠️ 同一次 open 在日志里会出现两条事件（原因未查），所以只按「有没有」告警，不看次数。
   # ⚠️ 策略名以 `tp-` 开头的视为临时测试策略，不告警：做对照实验时别再往群里发消息。
+  # ⚠️ 夜备的三条放行（2026-11-24 补，TetragonRuntimePolicyHit）：sensitive-file-access 11-20 上线起，homelab 两个
+  #    restic Job **每晚都触发**——restic 调 ssh 推 106（sftp），ssh 读自己的 /root/.ssh/{id_ed25519,known_hosts,config}；
+  #    backup.sh 写 /root/.ssh/config；apk 装包时 adduser 改 /etc/shadow。一晚 ~130 次命中，统一后 oracle 的夜备（同一个
+  #    脚本）也会触发。放行写成「ns + 程序 + 父进程/参数 + 文件路径」四条件同时成立，备份 pod 里别的进程碰这些文件照报。
   #    另一个不发消息的测法：测试 pod 放 kube-system（exportDenyList 不导出），用
   #    `tetra getevents --namespace kube-system --pods <pod>` 在 agent 上直接看。
   #    ☠️ 别在导出的 ns 里 `grep -r … /etc`：会顺带打开 /etc/shadow，触发凭据策略（11-24 就这么误发过一条）。
@@ -108,8 +112,11 @@ data:
                 count_over_time(
                   {k8s_namespace_name="tetragon", k8s_container_name="export-stdout"}
                   |= "\"process_kprobe\""
-                  | json policy="process_kprobe.policy_name", ns="process_kprobe.process.pod.namespace", pod="process_kprobe.process.pod.name", binary="process_kprobe.process.binary", fn="process_kprobe.function_name"
+                  | json policy="process_kprobe.policy_name", ns="process_kprobe.process.pod.namespace", pod="process_kprobe.process.pod.name", binary="process_kprobe.process.binary", fn="process_kprobe.function_name", args="process_kprobe.process.arguments", parent="process_kprobe.parent.binary", path="process_kprobe.args[0].file_arg.path"
                   | policy!~"tp-.*"
+                  | (ns!="backup" or binary!="/usr/bin/ssh" or parent!="/usr/bin/restic" or path!~"/root/\\.ssh/(id_ed25519|known_hosts|config)")
+                  | (ns!="backup" or binary!="/bin/sh" or args!~"/scripts/backup\\.sh.*" or path!~"/root/\\.ssh/(id_ed25519|known_hosts|config)")
+                  | (ns!="backup" or binary!="/usr/sbin/adduser" or path!~"/etc/g?shadow")
                   [5m]
                 )
               ) > 0
