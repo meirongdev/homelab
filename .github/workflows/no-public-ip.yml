@@ -23,7 +23,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # 只用标准库，不需要 setup-python / 装依赖
       - name: 检查公网 IP 泄露

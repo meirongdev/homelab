@@ -56,10 +56,15 @@ jobs:
   static:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 安装 uv（显式声明，不赌 runner 镜像内容）
-        uses: astral-sh/setup-uv@v6
+        # 钉完整版本：setup-uv 从 v8 起不再发 v8/v9/v10 这类浮动大版本 tag，写 @v10 会解析失败。
+        # 缓存关掉：本仓库没有 uv.lock / requirements，依赖只是几个 `--with` 小包，缓存省不了时间，
+        # 反而每次都报「No file matched to [**/*requirements*.txt, …]」警告（2026-11-24 清理）。
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: false
 
       - name: YAML 语法解析（含重复键）
         run: |
@@ -139,7 +144,7 @@ jobs:
           done
 
       - name: 安装 terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.15.5
 
@@ -183,10 +188,13 @@ jobs:
   render:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 安装 uv
-        uses: astral-sh/setup-uv@v6
+        # 版本与缓存的取舍同 static job 那一步。
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: false
 
       - name: 安装 kubeconform
         # 钉版本，理由同 just / shellcheck：不赌 runner 镜像。升级时改这里的版本并本地复跑一遍。
