@@ -9,9 +9,11 @@ spec:
   project: oracle-k3s
   sources:
     # Falco chart 版本 —— 部署前 `helm search repo falcosecurity/falco --versions` 核对。
+    # 9.2.2 = Falco 0.45.2（2026-11-24 从 9.1.0/0.44.1 升）：oracle 换 7.0 内核后 0.44.x 不再可用，
+    # 上游 falco#3955（7.0 可抢占内核上 auxmap 处理出错 → 解析失败退出）在 libs 0.26.0 / Falco 0.45.0 修复。
     - repoURL: https://falcosecurity.github.io/charts
       chart: falco
-      targetRevision: "9.1.0"
+      targetRevision: "9.2.2"
       helm:
         valueFiles:
           - $values/cloud/oracle/values/falco.yaml

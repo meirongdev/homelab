@@ -32,7 +32,7 @@ driver:
 
 # bulk(-10)：镜像 homelab 侧 tetragon=bulk 的决定——安全传感器 fail-open，掉了不挡
 # 业务，内存紧张时先让位。⚠️ 键名是 podPriorityClassName 不是 priorityClassName
-# （chart 9.1.0，已用 helm template --set 实证渲染进 DaemonSet）。
+# （chart 9.1.0 与 9.2.2 均已用 helm template 实证渲染进 DaemonSet）。
 podPriorityClassName: bulk
 
 # Falco 引擎
@@ -100,15 +100,21 @@ customRules:
 #     falco 是唯一 CPU 真在干活的安全组件，降过头会在事件尖峰时被同节点邻居挤掉。
 #   memory request 256Mi→160Mi —— 实测 7d 峰值仅 127Mi，256Mi 白占 oracle 的调度预算。
 # 保留 CPU limit "1"：符合 CLAUDE.md「所有安全组件 fail-open + 控 CPU」的硬约束。
+# ☠️ memory limit 512Mi→1Gi（2026-11-24）：oracle 换 7.0.0-1016 内核后，**加载 modern BPF 探针那十几秒**
+#   内核 slab 暴涨（BPF 校验器的内存记在本容器 memcg 上），512Mi 被打满 → OOMKilled（exit 137，
+#   dmesg 里 memcg 统计 anon 32MB / kernel 503MB / slab 467MB），CrashLoop。6.17 上同一配置一直没事。
+#   一次性测试 pod（3Gi 上限）实测：加载峰值 memory.peak = 520Mi，稳态 131Mi —— 只超原上限 2%。
+#   给到 1Gi 是因为这个峰值随内核版本漂移（这次就是升内核静默顶破的），limit 不占调度预算。
+#   判据：看 limit 够不够要看 memory.peak / dmesg 的 memcg 统计，**不是**稳态的 working set。
 resources:
   requests:
     cpu: 30m
     memory: 160Mi
   limits:
     cpu: "1"
-    memory: 512Mi
+    memory: 1Gi
 
-# falcoctl —— 2026-08-24 补 resources。chart 9.1.0 两处默认都是 `resources: {}`，
+# falcoctl —— 2026-08-24 补 resources。chart 9.1.0（9.2.2 亦然）两处默认都是 `resources: {}`，
 # 于是 falco DaemonSet 里的 falcoctl-artifact-follow sidecar 一直裸奔：实测在
 # 15–50Mi 之间来回（拉规则包时涨），CPU 几乎为 0。
 # ☠️ 与 loki 的 loki-sc-rules 同一形状：pod 级 QoS 因主容器 falco 有 requests 而记作
