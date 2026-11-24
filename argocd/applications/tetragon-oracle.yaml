@@ -1,0 +1,37 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tetragon-oracle
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: oracle-k3s
+  # 2026-11-24 起 oracle 的运行时检测由 Falco 换成 Tetragon（两集群统一），取舍见
+  # docs/reference/security.md §8.5。与 homelab 的 tetragon App 一一对应：共用 values 在前、集群 values 在后。
+  sources:
+    # 与 homelab 的 tetragon App 必须同版本（check-version-pairs.py V1 强制）。
+    - repoURL: https://helm.cilium.io/
+      chart: tetragon
+      targetRevision: "1.7.0"
+      helm:
+        # releaseName 同 homelab：资源名（Service tetragon、DaemonSet tetragon …）两边一致，
+        # 告警说明里的 kubectl 命令换个 context 就能通用。
+        releaseName: tetragon
+        valueFiles:
+          - $values/security/tetragon/values-common.yaml
+          - $values/cloud/oracle/values/tetragon.yaml
+    - repoURL: https://github.com/meirongdev/homelab
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tetragon
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # tetragon ns 由 oracle-k3s kustomize App 拥有（PSA privileged 标签，H5），此处不建，避免双重所有权。
+      - CreateNamespace=false
+      - ServerSideApply=true

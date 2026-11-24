@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tetragon-policies-oracle
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: oracle-k3s
+  # homelab 的 tetragon-policies 在 oracle 上的对应物，指向**同一个目录**（security/ 是 H2 登记的共用树），
+  # 两集群跑的策略一字不差。首次同步可能因 TracingPolicy CRD 尚未就绪短暂失败，tetragon-oracle 装好
+  # CRD 后自动重试通过。TracingPolicy 是集群级对象，destination.namespace 仅占位。
+  source:
+    repoURL: https://github.com/meirongdev/homelab
+    targetRevision: main
+    path: security/tetragon/policies
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tetragon
+  # CRD 回填的服务端默认值，与 homelab 的 tetragon-policies 同一组（理由见那边的注释）。
+  ignoreDifferences:
+    - group: cilium.io
+      kind: TracingPolicy
+      jqPathExpressions:
+        - .spec.kprobes[]?.return
+        - .spec.kprobes[]?.args[]?.maxData
+        - .spec.kprobes[]?.args[]?.resolve
+        - .spec.kprobes[]?.args[]?.returnCopy
+        - .spec.kprobes[]?.selectors[]?.matchBinaries[]?.followChildren
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true

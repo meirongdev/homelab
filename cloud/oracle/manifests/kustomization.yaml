@@ -57,6 +57,8 @@ resources:
   # OpenCost 成本归因：仅 namespace（工作负载由独立 opencost-oracle Helm App 部署，同 falco 模式）
   # 见 docs/reference/cost-and-rightsizing.md
   - opencost/namespace.yaml
+  # Tetragon 运行时检测（2026-11-24 起取代 Falco）：仅 namespace（工作负载由独立 tetragon-oracle Helm App 部署）
+  - tetragon/namespace.yaml
   # Falco 运行时检测：namespace + falcosidekick→Telegram token（Falco 工作负载由独立 falco Helm App 部署）
   - falco/namespace.yaml
   - falco/falcosidekick-secret.yaml

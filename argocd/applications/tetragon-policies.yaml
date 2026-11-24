@@ -14,7 +14,8 @@ spec:
   source:
     repoURL: https://github.com/meirongdev/homelab
     targetRevision: main
-    path: k8s/helm/manifests/tetragon-policies
+    # 两集群共用一份策略（security/ 是 H2 登记的共用树）；oracle 侧是 tetragon-policies-oracle。
+    path: security/tetragon/policies
   destination:
     server: https://100.94.186.7:6443
     namespace: tetragon

@@ -9,11 +9,14 @@ spec:
   project: homelab
   sources:
     # Tetragon chart 版本 —— 部署前 `helm search repo cilium/tetragon --versions` 核对。
+    # 与 tetragon-oracle 必须一致（check-version-pairs.py V1 强制）。
     - repoURL: https://helm.cilium.io/
       chart: tetragon
       targetRevision: "1.7.0"
       helm:
+        # 先共用、后集群：后者覆盖前者（列表/字符串整体替换，map 深合并）。
         valueFiles:
+          - $values/security/tetragon/values-common.yaml
           - $values/k8s/helm/values/tetragon.yaml
     - repoURL: https://github.com/meirongdev/homelab
       targetRevision: main

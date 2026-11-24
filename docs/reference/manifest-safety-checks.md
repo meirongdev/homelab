@@ -1,6 +1,6 @@
 # 清单安全规则 (Manifest Safety Checks)
 
-> Last updated: 2026-11-20
+> Last updated: 2026-11-24
 > Status: 生效事实
 > Scope: CI 强制的仓库规则，本文是 source of truth。四个检查器：
 > `scripts/check-manifests.py` 的 **H1-H5**（清单结构）、
@@ -43,6 +43,9 @@
 - ① chart 型 source 没有 `path`，由 ② ③ 兜住。
 - ② values 一棵集群一棵树（放错树时 `Synced` 照绿）；不在已知树里也报错，新树先登记 `VALUES_CLUSTER`。
   ⚠️ 两集群成对的 values（external-dns / opencost / trivy-operator）改一边忘另一边会静默分叉，本条不查。
+- **两集群共用树**（`SHARED_TREES`，2026-11-24）：`security/tetragon/` 下的策略目录与 `values-common.yaml`
+  两个集群的 App 都能引用，① ② 对它放行。只登记「改一处另一处必须跟着改」的内容，集群差异仍放各自的树、
+  由 App 在共用 values 之后叠加。策略目录同时登记在 `GITOPS_TREES` 里，删文件前同样受 H1 约束。
 - ③ 脱节时 ArgoCD 服务端也会拒绝同步（`destination server ... is not permitted`），本条在 push 前就拦。
   内置全放行的 `default` 只许 `argocd/` 下的 root / projects 两个元 App 用。[ADR](../decisions/argocd-project-per-cluster.md)
 - ④ AppProject 必须且只能有一条 destination，且是 project 名对应的集群；多列或通配会让服务端兜底静默失守。

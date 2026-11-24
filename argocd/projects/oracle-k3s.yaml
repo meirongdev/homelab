@@ -23,6 +23,7 @@ spec:
     - https://github.com/meirongdev/homelab
     - https://aquasecurity.github.io/helm-charts            # trivy-operator-oracle
     - https://falcosecurity.github.io/charts                # falco
+    - https://helm.cilium.io/                               # tetragon-oracle
     - https://grafana.github.io/helm-charts                 # loki / tempo
     # cnpg-operator：OCI 源。2026-09-03 从 https://cloudnative-pg.github.io/charts 换来 ——
     # 那个地址重定向到 cloudnative-pg.io，而该域名在公共 resolver 上解析不出来。

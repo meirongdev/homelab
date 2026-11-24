@@ -1,88 +1,15 @@
-# Tetragon — eBPF 运行时可见性/检测（homelab）
-# Chart: cilium/tetragon  (仓库 https://helm.cilium.io/)
+# Tetragon —— homelab 专属 values（叠加在 security/tetragon/values-common.yaml 之上）
 # 由 ArgoCD Helm App 部署（argocd/applications/tetragon.yaml），dest ns: tetragon
-#
-# 为何 homelab 选 Tetragon（而非 Falco）：Cilium 原生、**内核态(eBPF)过滤**只把命中事件上报用户态，
-# 远比 Falco 用户态逐 syscall 处理省 CPU —— 适配 5600H 热笔记本，不加热。
-#
-# 本期(v1)范围：开启**默认进程可见性**（process exec/exit 事件由 export-stdout 容器打到 stdout
-# → 现有 OTel→Loki 管道收集 → 按 pod=tetragon 查，可见容器内起 shell / kubectl exec / 异常进程）
-# + Prometheus 指标。2026-11-20 起另有两条观察版 TracingPolicy（容器逃逸 syscall / 凭据文件，独立
-# App `tetragon-policies`，见 k8s/helm/manifests/tetragon-policies/），命中走 Loki ruler 告警、健康走
-# Prometheus。⚠️ 下面的 exportDenyList 会把 kube-system / cilium / 宿主 / apps-pg 的 pg_isready
-# 探针事件挡在 Loki 之外：策略命中在这些范围内**看不到、也不会告警**。
+# 两集群共用的部分（导出过滤、argv 脱敏、优先级、导出器/operator 资源、选型理由）都在 values-common.yaml，
+# 这里只放与 homelab 硬件有关的：agent 资源、ServiceMonitor。
+# homelab 控制面是 5600H 热笔记本 —— 资源按实测给，CPU limit 必须有（CLAUDE.md「安全组件控 CPU」）。
 
-# ⚠️ 2026-08-10 修：**顶层 `resources:` 是死配置** —— chart 1.7.0 根本没有这个键
-# （`helm show values` 逐键确认：顶层无 `resources`，agent 的是 `tetragon.resources`，
-# stdout 导出器的是 `export.resources`——注意**不是** `export.stdout.resources`）。
-# 写错层级 Helm 静默忽略、不报错，于是 tetragon DaemonSet 一直是 **BestEffort**：
-# 上一行注释写着「热节点严格受限」，而这台 5600H 笔记本上的 tetragon **从来没有过
-# CPU limit**，与 CLAUDE.md「所有安全组件 fail-open + 控 CPU」的硬约束正好相反。
-# 同类坑：kube-prometheus-stack.yaml 的 kubeStateMetrics/nodeExporter（2026-08-10 同日修）、
-# kyverno.yaml 的 reportsController。发现途径与验证方法见
-# docs/runbooks/krr-report-triage.md § 3。
-
-# PriorityClass 分档补齐（2026-08-10）：tetragon agent 归 `bulk`(-10)。
-# 依据是 k8s-qos-resource-management.md 对 trivy-operator 归 bulk 的同一条理由 ——
-# CLAUDE.md 硬约束是「所有安全组件 fail-open + 控 CPU」，**被驱逐正是 fail-open**：
-# tetragon 掉线只丢一段运行时可见性，不影响任何运行中的工作负载。
-#
-# ⚠️⚠️ **本 chart 的 priorityClassName 与 resources 层级正好相反**（1.7.0 逐键实证）：
-#   resources          → 顶层**无效**，必须写 `tetragon.resources`（见下）
-#   priorityClassName  → 顶层**有效**，`tetragon.priorityClassName` 不存在
-# 两者挨着写、方向相反，是本文件最容易搞错的地方。改动前务必 `helm template --set` 验一次。
-priorityClassName: bulk
-
-# 进程事件已默认开启；保持精简，先不开 enableProcessCred/enableProcessNs（额外开销）。
 tetragon:
-  # --- 导出降噪（2026-09-24）---
-  # 实测 10 分钟 660 条事件（~2.6KB/条，k8s-node 容器日志总量的 91%）**100% 是噪声**，
-  # otel-collector 每节点 ~55m CPU 基本都花在把它们搬进 Loki：
-  #   ① runc 的 `init` 自我重执行（binary=/proc/self/fd/N，每次 exec 探针/容器启动一对）
-  #      —— 任何 health_check 过滤都盖不到，因为它不是探针命令本身；
-  #   ② 探针漏网：chart 默认的 {"health_check":true} 只认**绝对路径**的探针命令
-  #      （v1.7.0 pkg/filters/health_check.go MaybeExecProbe：args 带 argv0，相对路径时
-  #      不剥离 → 长度对不上 → 恒 false）。node-mem-profile 的探针已改绝对路径根治；
-  #      apps-pg 的 `pg_isready` 为不重启共享库改在这里拦；
-  #   ③ postgres 每条连接 fork 一个 backend，退出时报 PROCESS_EXIT（不 exec，只有 exit）。
-  # ☠️ ① 必须三条件同时收窄（AND）：`/proc/self/fd/N` 本身就是 memfd 无文件执行的特征，
-  #    单按 binary 拦会把真攻击一起静音。父进程是 runc 且 args 恰为 `init` 才算。
-  # 下面前两行是 chart 默认值原样照抄（列表覆盖=整体替换，漏抄就丢默认过滤）。
-  exportDenyList: |-
-    {"health_check":true}
-    {"namespace":["", "cilium", "kube-system"]}
-    {"binary_regex":["^/proc/self/fd/[0-9]+$"],"parent_binary_regex":["/runc$"],"arguments_regex":["^init$"]}
-    {"namespace":["databases"],"binary_regex":["^/usr/bin/pg_isready$"],"arguments_regex":["^/usr/bin/pg_isready -U postgres$"]}
-    {"namespace":["databases"],"event_set":["PROCESS_EXIT"],"binary_regex":["^/usr/lib/postgresql/[0-9]+/bin/postgres$"],"parent_binary_regex":["^/usr/lib/postgresql/[0-9]+/bin/postgres$"]}
-  # --- argv 脱敏（2026-10-24，10-27 补两条）---
-  # 进程事件带完整命令行，经 export-stdout → Loki 落盘，任何能查 Loki 的人都看得到。
-  # 当日在 Loki 里查到两处明文：krr 的 Telegram bot token（URL 里）与夜备的
-  # SurrealDB 口令（`curl -u root:<口令>`），已在源头改成 curl --variable。
-  # 这里是兜底：捕获组被替换为 *****。依次是 Telegram bot token · curl -u/--user 的口令 ·
-  # Bearer token · URL 里的 user:pass@ · `-token`/`--token` 参数值 · `…Token:` 请求头的值。
-  # RE2 语法，已用 Go regexp 对样例验过。
-  # ☠️ 别以为进程只在启动时被记一次：Tetragon 自己重启时会给所有存量进程补发 exec 事件
-  # （flags=procFS），进程退出时的 exit 事件也带完整 argv。
-  # 10-27 补的两条，来由：
-  #   ⑤ `--token`：cloudflared 带着 `--token <隧道 token>` 跑了 58 天，10-24 本文件改动触发的
-  #      重启补发了一份，10-27 升级换 pod 时的 exit 事件又写了一份。源头已改成 env
-  #      TUNNEL_TOKEN。`--token-file <路径>` 不匹配，路径不算密钥。
-  #   ⑥ `token:`：为 ⑤ 查 Loki 时顺带查到，夜备每晚 `curl -H "X-Vault-Token: …"`，把那把
-  #      period 720h、每晚自续期的备份 token 写了进来（7 天 28 行）。所有 `…Token:` 请求头
-  #      一起盖住，误伤的只会是 `seed-token: kept` 这类提示文字。
-  # ⚠️ 只是兜底：带空格且加引号的口令只能打掉一半，密钥别放进 argv 才是正解。
-  redactionFilters: |-
-    {"redact": ["bot[0-9]{6,}:([A-Za-z0-9_-]{20,})"]}
-    {"redact": ["(?:^|\\s)(?:-u|--user)(?:\\s+|=)\"?[^:\\s\"]*:([^\\s\"]+)"]}
-    {"redact": ["(?i)authorization:\\s*bearer\\s+([^\\s\"]+)"]}
-    {"redact": ["://[^:/\\s@]+:([^@/\\s]+)@"]}
-    {"redact": ["(?:^|\\s)\"?--?token(?:\\s+|=)\"?([^\\s\"]+)"]}
-    {"redact": ["(?i)token:\\s*([^\\s\"]+)"]}
   # --- agent DaemonSet 资源（热节点严格受限）---
   # 实测 7d 峰值 181Mi（超过原先想给的 128Mi request），故 request 给到 224Mi、
-  # limit 384Mi。CPU 维持 50m/500m：沿用上面那条注释的原意，这次是真的生效了。
+  # limit 384Mi。CPU 维持 50m/500m。
   #
-  # ☠️ 2026-11-20 上线 TracingPolicy（k8s/helm/manifests/tetragon-policies/）后重新定过 **limit**。
+  # ☠️ 2026-11-20 上线 TracingPolicy（security/tetragon/policies/）后重新定过 **limit**。
   # 实测要分清三个数，别混：
   #   · 创建/**更新**策略时的峰值：k8s-node 上 3 小时内 **373Mi，对着 384Mi 的 limit 只差 11Mi**。
   #     更新是 delete+add，新旧 sensor 会同时在内存里，所以每改一次策略都会重放这个尖峰。
@@ -104,32 +31,10 @@ tetragon:
     limits:
       cpu: 500m
       memory: 512Mi
-  # Prometheus 指标（:2112）+ ServiceMonitor。labelsOverride 注入 release 让 kube-prometheus-stack 采纳。
+  # ServiceMonitor：labelsOverride 注入 release 让 kube-prometheus-stack 采纳。
+  # oracle 没有 Prometheus（指标经 OTel 抓取后 remote write 到这边），所以只有 homelab 开。
   prometheus:
-    enabled: true
     serviceMonitor:
       enabled: true
       labelsOverride:
         release: kube-prometheus-stack
-
-# --- stdout 导出器资源（实测 7d 峰值仅 2Mi，纯转发）---
-# ⚠️ 键是 `export.resources`，**不是** `export.stdout.resources`（后者写了不生效）。
-export:
-  resources:
-    requests:
-      cpu: 10m
-      memory: 32Mi
-    limits:
-      memory: 64Mi
-
-# --- operator 资源（本段键名一直是对的，operator 也确实是 Burstable）---
-tetragonOperator:
-  # 同 agent 归 bulk：它只做 CRD/TracingPolicy 的 reconcile，掉了不影响已加载的策略。
-  priorityClassName: bulk
-  resources:
-    requests:
-      cpu: 25m
-      memory: 64Mi
-    limits:
-      cpu: 200m
-      memory: 128Mi

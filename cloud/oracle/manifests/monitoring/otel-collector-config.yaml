@@ -260,6 +260,29 @@ receivers:
               labels:
                 cluster: oracle-k3s
 
+  # Tetragon agent → homelab Prometheus (cluster=oracle-k3s)。2026-11-24 起 oracle 的运行时检测换成
+  # Tetragon，健康告警与 homelab 共用 k8s/helm/manifests/monitoring/alerts/tetragon-alerts.yaml（按 cluster 分组）。
+  # 告警真正吃重的是抓取本身产生的 `up` 序列（TetragonDown 靠 up==0 / absent），检测长期零命中是好事，
+  # 不能拿命中计数当死亡判据。
+  # 只留告警用到的三个指标 + build_info：tetragon 的事件计数按 pod / binary 带标签，基数高，
+  # remote write 过去没人用。要加看板指标时在这里放行。
+  # node 标签：homelab 的由 ServiceMonitor 打上，告警按 (cluster, node) 分组；oracle 单节点，静态写死对齐。
+  # agent 是 hostNetwork，Service 后面就是节点 10.0.0.26:2112。
+  prometheus/tetragon:
+    config:
+      scrape_configs:
+        - job_name: 'tetragon'
+          scrape_interval: 60s
+          static_configs:
+            - targets: ['tetragon.tetragon.svc.cluster.local:2112']
+              labels:
+                cluster: oracle-k3s
+                node: oracle-k3s
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: 'tetragon_tracingpolicy_loaded|tetragon_observer_ringbuf_(queue_)?events_lost_total|tetragon_build_info'
+              action: keep
+
   # Falco 引擎自身 → homelab Prometheus (cluster=oracle-k3s)。2026-08-10 新增。
   #
   # 为什么必须抓：Falco 此前**没有任何健康信号**。它挂掉、规则加载失败、驱动没起来，
@@ -592,6 +615,10 @@ service:
       exporters: [prometheusremotewrite]
     metrics/readlist:
       receivers: [prometheus/readlist]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheusremotewrite]
+    metrics/tetragon:
+      receivers: [prometheus/tetragon]
       processors: [memory_limiter, resource, batch]
       exporters: [prometheusremotewrite]
     metrics/falco:

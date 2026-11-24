@@ -38,6 +38,7 @@ GITOPS_TREES = [
     "cloud/oracle/manifests",
     "backup",
     "argocd",
+    "security/tetragon/policies",
 ]
 
 # ── H1 ────────────────────────────────────────────────────────────────────
@@ -71,6 +72,16 @@ PATH_CLUSTER = [
 VALUES_CLUSTER = [
     ("k8s/helm/values", HOMELAB_SERVER),
     ("cloud/oracle/values", ORACLE_SERVER),
+]
+
+# ── H2（共用树）──────────────────────────────────────────────────────────
+# 两集群**刻意**部署同一份内容的目录（2026-11-24，两集群统一用 Tetragon）：策略与「两边必须一样」的
+# values 只写一处，免得靠注释「两处同步改」——那正是 V2 的来由。这里登记过的路径 / values，两个集群的
+# App 都可以引用；没登记的仍按上面两张表判归属。
+# ⚠️ 只登记「改了一处另一处也必须跟着改」的东西。集群有差异的部分（资源配额、ServiceMonitor 等）
+#    仍放各自集群的 values 树，由 App 按顺序叠加在共用 values 之后。
+SHARED_TREES = [
+    "security/tetragon",
 ]
 
 # 2026-09-02 起每个集群一个 AppProject（docs/decisions/argocd-project-per-cluster.md）：
@@ -225,6 +236,8 @@ def check_h2(p, docs):
                 if not head.startswith("$"):
                     continue        # 不带 $ref 前缀 = 与 chart 同仓库的相对路径，本仓库不用这种写法
                 vpath = vf.split("/", 1)[1].rstrip("/") if "/" in vf else vf
+                if any(vpath == s or vpath.startswith(s + "/") for s in SHARED_TREES):
+                    continue        # 两集群共用（见 SHARED_TREES），任一集群引用都合法
                 hit = next((prx for prx, _ in VALUES_CLUSTER
                             if vpath == prx or vpath.startswith(prx + "/")), None)
                 if hit is None:
