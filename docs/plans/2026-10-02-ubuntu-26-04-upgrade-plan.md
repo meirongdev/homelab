@@ -2,7 +2,7 @@
 
 > 日期: 2026-10-02
 > 状态: 📐 设计（待生态成熟与 IaC 适配）
-> 结论: 禁止在生产节点执行原地 `do-release-upgrade`。规范演进路径为：① 在 PVE 独立实验 VM 沙盒验证 Cilium 1.20+ eBPF、Falco/Tetragon、Tailscale 与 K3s；② 补齐 Terraform 与 Ansible 对新镜像及源的支持；③ 借助 PVE VM 完整快照与 restic PVC 备份，按节点滚动重建/替换。
+> 结论: 禁止在生产节点执行原地 `do-release-upgrade`。规范演进路径为：① 在 PVE 独立实验 VM 沙盒验证 Cilium 1.20+ eBPF、Tetragon、Tailscale 与 K3s；② 补齐 Terraform 与 Ansible 对新镜像及源的支持；③ 借助 PVE VM 完整快照与 restic PVC 备份，按节点滚动重建/替换。
 > 关联: [ROADMAP 开放项 #20](../ROADMAP.md)
 
 ---
@@ -24,7 +24,7 @@ Ubuntu 26.04.1 LTS 已发布并触发跨版本升级提醒。目前集群全部 
 1. **Cilium eBPF 数据面挂死风险**：
    集群开启了全功能 eBPF 数据面（`kubeProxyReplacement: true` + Gateway API）。[2026-03 的故障](../runbooks/homelab-rebuild-ubuntu-24-04.md) 曾证明，内核升级带来的 BPF verifier 校验规则变动极易导致 `cilium-agent` CrashLoop，使全集群网络流量瞬间归零。
 2. **内核安全探针兼容性脆弱**：
-   Falco 与 Tetragon 深度依赖宿主内核 kprobe 与 tracepoint。跨大版本内核变动极易导致探针失效或触发系统级内存/系统调用抖动（如 [2026-09-12 事件](../records/2026-09-12-falco-syscall-drops-apt-upgrade.md)）。
+   Tetragon（2026-11-24 起两集群统一，Falco 已退役）深度依赖宿主内核 kprobe 与 tracepoint；2026-11-24 oracle 换 7.0 内核时 Falco 就因 BPF 校验器内存被 OOM（[record](../records/2026-11-24-oracle-kernel-7-falco-to-tetragon.md)）。跨大版本内核变动极易导致探针失效或触发系统级内存/系统调用抖动（如 [2026-09-12 事件](../records/2026-09-12-falco-syscall-drops-apt-upgrade.md)）。
 3. **第三方源被禁用与配置漂移**：
    `do-release-upgrade` 会自动禁用非官方第三方源（如 Tailscale 的 noble 源），导致节点脱离 Tailnet 失联。且原地升级导致物理机与 Terraform/Ansible 代码库彻底失步。
 4. **本地存储数据损失不可逆**：
@@ -61,7 +61,7 @@ Ubuntu 26.04.1 LTS 已发布并触发跨版本升级提醒。目前集群全部 
 3. 严格验证：
    * `cilium status --wait` 全绿，无 BPF verifier 报错；
    * 部署测试 HTTPRoute 能正常拿到 `.status`（验收判据遵从 `records/2026-08-11-gateway-api-crd-stall.md`）；
-   * Falco 与 Tetragon 容器正常采集事件且无异常丢包。
+   * Tetragon 两条策略 `enabled`、agent `memory.peak` 离 limit 有余量，且无异常丢包。
 
 ### Phase 2: 生产前置保护与快照
 1. **备份校验**：

@@ -1,6 +1,6 @@
 # Homelab Changelog
 
-> Last updated: 2026-11-23
+> Last updated: 2026-11-25
 > 已经做完的事，一条一行，按阶段/时间倒着找。**这里只回答「做过什么」**——
 > 还剩什么没做看 [ROADMAP.md](ROADMAP.md)，现在是什么样看 [reference/](reference/README.md)。
 > 2026-09-02 从 ROADMAP 拆出：那份文件长到 23.8KB，9 条开放项被 65 条历史淹没，
@@ -146,6 +146,9 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-11-22 | **告警规则 promtool 单元测试入库**：`scripts/alert-rule-tests/` + `just test-alert-rules`，CI 必跑。CI 首跑就抓到本地测不出的问题（mkdtemp 的 0700 目录 promtool 读不到） ([scripts](../scripts/README.md)) |
 | 2026-11-22 | **Tetragon「应用进程起 shell」告警**：只报父进程是应用的 shell，放行按参数精确写，7 天回放零误报；顺带 agent 的 memory request 按 2 天稳态从 256Mi 降到 160Mi ([security §8.5](reference/security.md)) |
 | 2026-11-23 | **oracle `panic_on_oops` 守卫**：kubelet 每次启动把它写回 1，重新埋上 oops 硬重启。加 k3s drop-in（启动后盯 5 分钟）+ 5 分钟 timer，期望值只读 sysctl.d；`verify-node` 新增两项 ([记录](records/2026-11-20-k3s-1-36-upgrade.md)) |
+| 2026-11-24 | **GitHub Actions 升 Node 24**：checkout v7 / setup-uv v10.3.3（v8 起无浮动大版本 tag）/ setup-terraform v4 / docker 系 v4–v7，setup-uv 关缓存；每次运行的弃用警告清零 |
+| 2026-11-24 | **oracle 换 7.0 内核**：7.0.0-1016 带 09-01 AppArmor 崩溃的上游修复（CVE-2026-72462）；panic_on_oops 守卫经真实重启验证（kubelet 就绪后 +2s 写回 1）。Falco 0.44.1 加载 BPF 被 memcg OOM，先修为 0.45.2 + 1Gi ([记录](records/2026-11-24-oracle-kernel-7-falco-to-tetragon.md)) |
+| 2026-11-24 | **运行时检测两集群统一 Tetragon，Falco 退役**：策略与公共 values 进共用树 `security/tetragon/`；告警两集群化（promtool 11 组、12 处变异全杀）；移植无文件执行 / 攻击工具两条检测；oracle 独有负载与 11-20 起每晚的夜备误报精确放行 ([ADR](decisions/runtime-detection-tetragon-both-clusters.md)) |
 
 ### 审计与清理（历史）
 

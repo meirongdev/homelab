@@ -85,7 +85,7 @@ ArgoCD → homelab API `:6443`、oracle cloudflared → Gateway，这 5 分钟�
 - **`toFQDNs`**：要把 DNS 交给 agent 的 DNS 代理，agent 重启或升级期间受管 pod 的解析会抖。
   放行公网一律写「`0.0.0.0/0` except 私网」，不按域名放行。
 - **基础设施 ns 一律不动**：kube-system、monitoring（2b 除外）、argocd、backup、external-secrets、external-dns、
-  trivy-system、kyverno、cnpg-system、tetragon、falco、kube-bench。
+  trivy-system、kyverno、cnpg-system、tetragon、kube-bench。
 - **Host firewall**（`hostFirewall.enabled`）：NodePort 在 LAN 和 tailnet 上全开，这确实是个口子。
   但 oracle 出过 firewalld 冲掉 Cilium 规则的事（[records/2026-10-01](../records/2026-10-01-oracle-firewalld-flushes-cilium-iptables.md)），值得单独评估。
   节点级的口子用 Tailscale ACL 收更合适（§9）。

@@ -1,7 +1,7 @@
 # Homelab Architecture
 
 > 单页架构总览，双集群 homelab（homelab + oracle-k3s）。
-> Last updated: 2026-11-09
+> Last updated: 2026-11-25
 
 ## Network Topology
 
@@ -42,7 +42,7 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 | 角色 | 指标中枢 + Vault + 本地模型接入 (Prometheus/Grafana/Vault/Open Notebook) | 公网服务 + GitOps 控制面 + 日志/追踪 + 身份面 (ArgoCD/Loki/Tempo/ZITADEL/Calibre/…) |
 | 存储 | 可写卷全 local-path（NFS 于 2026-07-11 退出读写路径）+ `media` ns 的 **5 个只读 NFS PV**（106 ZFS，2026-08-16） | local-path only |
 | 备份 | restic CronJob ×2 → 106 sftp（控制面 03:00 / worker 02:00） | restic CronJob → 106 sftp (via TS) |
-| 安全 | Tetragon + Kyverno + Trivy | Falco + Trivy（oracle 无 Kyverno；Trivy 于 2026-08-03 补齐） |
+| 安全 | Tetragon + Kyverno + Trivy | Tetragon + Trivy（oracle 无 Kyverno；Tetragon 于 2026-11-24 取代 Falco） |
 | GitOps | ArgoCD spoke（2026-08-02 起被 oracle 控制面经 TS 纳管） | ArgoCD hub（2026-08-02 起控制面在此，in-cluster；`kubernetes.default.svc` = oracle） |
 
 ## Key Architecture Decisions
@@ -69,7 +69,7 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 
 ## Security (Defense in Depth)
 
-11 层纵深防御: 边缘(WAF) → 身份(OIDC) → 密钥(Vault+ESO) → 准入(PSA) → 策略(Kyverno) → 供应链(Trivy) → CIS → 节点加固 → 网络(**仅 Hubble 可见性**) → 运行时(Tetragon/Falco) → 备份(restic)。
+11 层纵深防御: 边缘(WAF) → 身份(OIDC) → 密钥(Vault+ESO) → 准入(PSA) → 策略(Kyverno) → 供应链(Trivy) → CIS → 节点加固 → 网络(**仅 Hubble 可见性**) → 运行时(Tetragon) → 备份(restic)。
 
 ⚠️ 第 9 层是 11 层里唯一没落到"管控"的一层：集群内没有自建 `CiliumNetworkPolicy`，**网络默认拒绝是刻意延后的**。
 

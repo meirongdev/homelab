@@ -4,6 +4,7 @@
 
 | 日期 | 记录 | 内容 |
 |------|------|------|
+| 2026-11-24 | [oracle-kernel-7-falco-to-tetragon](2026-11-24-oracle-kernel-7-falco-to-tetragon.md) | 换 7.0 内核后 Falco 加载 BPF 时被 memcg OOM（校验器 slab 记在容器上，峰值 520Mi）；统一 Tetragon 时多源 App 渲染出半截配置（redaction-filters 被写空 6 分钟，未生效）；shell 规则基线只覆盖 homelab |
 | 2026-11-20 | [k3s-1-36-upgrade](2026-11-20-k3s-1-36-upgrade.md) | 三节点升 1.36.6 无线上事故，挖出六个静默坑：回滚命令的 glob 在 sudo 前展开（空操作）· oracle 重启 k3s 把 `panic_on_oops` 写回 1 · Kyverno v1.20 不再执行 legacy 策略 · `ssh` 吞脚本 · Cilium 补丁版默认值把 xDS 从 ads 翻成 split |
 | 2026-10-26 | [litellm-keys-in-public-repo](2026-10-26-litellm-keys-in-public-repo.md) | 两把 LiteLLM 虚拟 key（白名单含 `openrouter/*`）明文推上公开仓库 7h40m，零调用，已吊销重发、历史已改写。☠️ 本地与 CI 两道 gitleaks 全绿：默认规则认不出 `sk-`+22 位，pre-push 钩子三台 clone 都没启用 |
 | 2026-10-24 | [intrusion-sweep-argv-secrets-in-loki](2026-10-24-intrusion-sweep-argv-secrets-in-loki.md) | 双集群入侵排查未见入侵；Tetragon 把 argv 里 4 处密钥送进 Loki（bot token / SurrealDB 口令 / 隧道 token / 备份 Vault token），两轮移出命令行 + redactionFilters 兜底；oracle 停用 3 个手工遗留 |

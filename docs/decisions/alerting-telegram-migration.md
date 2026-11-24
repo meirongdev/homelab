@@ -1,7 +1,8 @@
 # Alerting Delivery: Gotify Bridge → Native Telegram
 
 > 日期: 2026-07-18
-> 状态: ✅ 已实施
+> 状态: ✅ 已实施（其中 Falco → falcosidekick 原生 Telegram 那条链路已于 2026-11-24 随 Falco 退役：oracle 改用
+> Tetragon，运行时告警经 Loki ruler 进同一个 Alertmanager，见 [runtime-detection-tetragon-both-clusters](runtime-detection-tetragon-both-clusters.md)）
 
 ## Scope
 

@@ -1,6 +1,6 @@
 # 成本归因与资源右尺寸
 
-> Last updated: 2026-11-10
+> Last updated: 2026-11-25
 > Status: 生效事实
 
 两套互补的工具：**OpenCost** 回答「钱花在哪」（常驻，出指标 → Grafana），
@@ -154,7 +154,7 @@ textfile 目录；两集群 node-exporter 都已开着 `--collector.textfile.dir
 
 - `hostPID: true`：缺了只看得见采集器自己那几个进程。
 - `runAsUser: 0` + `CAP_SYS_PTRACE`：**root 单独不够**，容器 root 默认不带这个 capability，大部分进程读不到。
-- `appArmorProfile: Unconfined`：privileged 容器（cilium-agent / tetragon / falco）跑在 unconfined 下，
+- `appArmorProfile: Unconfined`：privileged 容器（cilium-agent / tetragon）跑在 unconfined 下，
   受限 profile 的进程 ptrace 不了它们。
 
 ⚠️ 指标标签是 `k8s_namespace` / `k8s_pod_name` / `k8s_container_name`，**刻意不叫**

@@ -1,6 +1,6 @@
 # jobs-sg — 新加坡 SWE 岗位趋势周报（架构事实）
 
-> Last updated: 2026-11-15
+> Last updated: 2026-11-25
 > Status: 生效事实
 > Scope: jobs-sg 在 homelab 集群的部署形态、镜像固定方式、备份口径、首次上线依赖顺序
 > 本文是 source of truth。应用代码在 [meirongdev/jobs-sg](https://github.com/meirongdev/jobs-sg)。
@@ -319,8 +319,8 @@ jobs-sg 占两处：
 
 ## 密钥与 Telegram 路由
 
-没有新的 Vault 路径，也没有需要手工写的值。按本仓库既有分工拆开（同 Alertmanager / krr /
-falcosidekick，见 [decisions/alerting-telegram-migration.md](../decisions/alerting-telegram-migration.md)）：
+没有新的 Vault 路径，也没有需要手工写的值。按本仓库既有分工拆开（同 Alertmanager / krr，
+见 [decisions/alerting-telegram-migration.md](../decisions/alerting-telegram-migration.md)）：
 
 | 项 | 是密钥？ | 放哪 | 值 |
 |---|---|---|---|
@@ -344,7 +344,7 @@ falcosidekick，见 [decisions/alerting-telegram-migration.md](../decisions/aler
 
 | 话题 | thread id | 谁在用 |
 |---|---|---|
-| 🚨 Homelab 告警 | `2` | Alertmanager / falcosidekick / krr |
+| 🚨 Homelab 告警 | `2` | Alertmanager（含两集群 Tetragon 经 Loki ruler 的运行时告警）/ krr |
 | jobs-sg | `552` | jobs-sg 周报 |
 | （General） | 留空 | — |
 

@@ -1,6 +1,6 @@
 # K3s 集群安全架构 (Security Architecture)
 
-> Last updated: 2026-11-22
+> Last updated: 2026-11-25
 > Status: 生效事实
 > Scope: 双集群（homelab + oracle-k3s）的纵深防御模型，本文是 source of truth。
 > 部署/验证/回滚步骤见 [../runbooks/security-hardening.md](../runbooks/security-hardening.md)；
@@ -34,9 +34,9 @@
 | 7 | CIS 合规 | kube-bench（周巡检，钉 control-plane；worker node 级未覆盖，有意接受） | ✅ 生产 | `manifests/kube-bench/kube-bench.yaml` | homelab |
 | 8 | 节点加固 | k3s `protect-kernel-defaults` + sysctl | ✅ 生效（两节点 k3s 都在配置之后重启过，2026-10-28 核） | `k8s/ansible/playbooks/setup-k3s.yaml` | homelab |
 | 9 | 网络 | Cilium NetworkPolicy + Hubble 可见性 | 🟡 仅可见性 | Cilium（默认拒绝刻意延后） | 双 |
-| 10 | 运行时检测 | Tetragon(homelab) / Falco+Falcosidekick(oracle) | ✅ 已实现 | `values/{tetragon,falco}.yaml`、`manifests/tetragon-policies/` | 双（分别选型） |
+| 10 | 运行时检测 | Tetragon（两集群统一，2026-11-24 起；Falco 退役） | ✅ 已实现 | `security/tetragon/`（共用策略 + values）、各集群 `values/tetragon.yaml` | 双 |
 | 11 | 备份/恢复 | restic（106 ZFS 加密仓库）| 🟡 Phase1（每夜备份 + 恢复演练通过；**离站副本待做**）| `runbooks/backup-recovery.md` | 双 |
-| 12 | 安全可观测 | Alertmanager → Telegram（homelab）/ Falcosidekick → Telegram（oracle Falco） | ✅ 生产 | `kube-prometheus-stack.yaml`, 各 `*-alerts.yaml` | 双 |
+| 12 | 安全可观测 | Alertmanager → Telegram（运行时检测经 Loki ruler 进同一个 Alertmanager） | ✅ 生产 | `kube-prometheus-stack.yaml`, 各 `*-alerts.yaml`, `loki-rules.yaml` | 双 |
 
 ---
 
@@ -85,7 +85,7 @@
   |---------|-----------|
   | `baseline` | default, vault, personal-services, cloudflare, external-secrets, kyverno, external-dns, opencost, media, litellm, databases（homelab；官方 postgres 镜像先以 root 建/chown 数据目录再 gosu 降权，restricted 会挡住）；argocd, cloudflare, external-dns, homepage, personal-services, rss-system, opencost, default, external-secrets, cnpg-system（oracle） |
   | `restricted` | jobs-sg（homelab）；databases（oracle，CNPG `apps-pg`）· zitadel（oracle，SSO + 身份库 zitadel-pg） |
-  | `privileged`（显式豁免, warn/audit 仍记 baseline） | kube-system, monitoring, trivy-system, tetragon, kube-bench, backup（homelab）；kube-system, monitoring, trivy-system, falco, backup（oracle） |
+  | `privileged`（显式豁免, warn/audit 仍记 baseline） | kube-system, monitoring, trivy-system, tetragon, kube-bench, backup（homelab）；kube-system, monitoring, trivy-system, tetragon, backup（oracle） |
 
   只剩 `cilium-secrets` / `kube-node-lease` / `kube-public` 无标签：它们不跑 Pod，`psa-check` 据此放行（判据是「有没有 Pod」，不维护会漂的白名单）。
   一处不对称值得记着：oracle 的 `argocd` / `opencost` 是 `enforce=baseline` 而 `warn=restricted`（比 enforce 高一档的预演，warn 只记事件不阻断），对账时别当成标签写错。
@@ -147,33 +147,67 @@
 - **自建网络管控之一：readlist Job 零出口**（oracle）：`readlist-snapshot-no-egress` / `readlist-score-no-egress`，标准 `networking.k8s.io/v1` NetworkPolicy（Cilium 照常执行，不需要 CNP），`egress: []` 即全拒（含 DNS）。按数据敏感度切分：能读 calibre 书库与 `app.db`（含密码 hash/OIDC 凭据）的 snapshot/score 零出口，能出网的 ingest 挂不到 calibre 卷。可复用到其它碰敏感卷的 Job，但**只覆盖这两个短命 Job**，不代表有 ns 级或集群级默认拒绝。
 - **自建网络管控之二：oracle 的 IMDS**（2026-11-10）。pod 的出口经节点 SNAT，IMDS 分不出请求来自 pod 还是节点；此前任何 pod 发一个不带头的 GET，就能取到实例主体的证书和私钥。现在有两层：①实例关了 IMDSv1（`cloud/oracle/terraform/main.tf` 的 `instance_options`），v2 必须带 `Authorization: Bearer Oracle` 头，SSRF 带不上；②CCNP `deny-oci-imds` 拦所有 pod 到 `169.254.169.254:80`，防 pod 被拿下 RCE 后自己加头。hostNetwork 进程（oracle-cloud-agent）不受影响。☠️ 只拦 80：同一地址的 `:53` 是 VCN DNS，CoreDNS 的 `oraclevcn.com` 块只转发给它，误拦会重演 2026-08-13 的 musl SERVFAIL 故障。2026-11-10 在控制台核对过，没有 dynamic group 匹配这台实例，实例主体凭据当前没有任何权限；以后要用实例主体授权，先确认这两层都还在。
 
-## 8.5 运行时检测 (Runtime detection) — 按集群分别选型
+## 8.5 运行时检测 (Runtime detection) — 两集群统一 Tetragon
 
-eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异常外联），按集群硬件选型：
+eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、无文件执行、攻击工具）。**2026-11-24 起两集群统一用
+Tetragon**，oracle 原来的 Falco + Falcosidekick 同日退役（取舍与 Falco 规则逐条去向见
+[ADR](../decisions/runtime-detection-tetragon-both-clusters.md)，经过见
+[records/2026-11-24](../records/2026-11-24-oracle-kernel-7-falco-to-tetragon.md)）。
 
-- **homelab → Tetragon**（`values/tetragon.yaml`，ns `tetragon`，Helm App）。Cilium 原生，内核态过滤只上报命中事件，省 CPU。v1 = 默认进程 exec/exit 可见性 → `export-stdout` → OTel → Loki（`{k8s_namespace_name="tetragon"}`）+ Prometheus 指标（ServiceMonitor 带 release 标签）。**2026-11-20 起另有两条观察版 TracingPolicy**（`k8s/helm/manifests/tetragon-policies/`，独立 App `tetragon-policies`，拆法同 kyverno-policies）：`container-escape-syscalls`（容器内 ptrace / process_vm_writev / 内核模块装卸 / kexec / open_by_handle_at）与 `sensitive-file-access`（`security_file_open` 上内核态匹配 /etc/shadow、sudoers、/root/.ssh 等凭据路径）。全部**只观察、不拦截**：仓库硬约束是安全组件 fail-open，拦截型策略误报即杀生产进程。
-  - **告警分两路**：命中走 **Loki ruler**（`cloud/oracle/manifests/monitoring/loki-rules.yaml` 的 `TetragonRuntimePolicyHit`，warning，`tp-` 前缀的策略视为临时测试不告警）；健康走 Prometheus（`alerts/tetragon-alerts.yaml`：`TetragonDown` / `TetragonPolicyLoadFailed` / `TetragonPolicyNotEnabled` / `TetragonEventsLost`）。命中不用指标，因为 **Tetragon 会在 pod 删除后清掉该 pod 的指标序列**（实测），寿命短的 pod 里的命中可能在被评估前就没了，日志行不会。
-  - **「应用进程起了 shell」**（2026-11-22，同在 Loki ruler 的 `TetragonAppSpawnedShell`）：用 Tetragon 默认就有的 `process_exec`，不新增策略。只报父进程是应用（node、python…）的 shell，这是 webshell / 命令注入最典型的形态；父进程是 containerd-shim / runc 的（容器入口、exec 探针、`kubectl exec`）分不开，7 天 689 次 shell 里约 600 次是这类，**不报**，所以 `kubectl exec` 起的 shell 不在视野里。放行按「父进程参数 + 命令」精确写（Prisma 启动时的 `ldconfig -p` 探测、open-notebook 的 supervisord），不按 namespace 放行。7 天回放只命中 11-20 两次策略测试，误报为零。
-  - ⚠️ **增删策略要同步改 `TetragonPolicyNotEnabled` 里的 `2`**，否则要么永远报警、要么少一条也不报。
-  - ☠️ **`matchBinaries NotIn` 在这里不生效**（Tetragon 1.7.0、内核 6.8/7.0，对照实验：排除 python3 的策略照样上报 python3）。别指望用它排噪声，要排就在告警表达式 / `exportDenyList` 里做，并且做完拿真事件验证。已知噪声：apps-pg 的就绪探针 `pg_isready` 每次都打开 /etc/shadow；它不在 Loki 里（`exportDenyList` 已挡），但在 Prometheus 指标里。
-  - **`exportDenyList` 也会挡策略事件**：kube-system / cilium / 宿主（namespace 为空）的命中不会进 Loki，也就不会告警；宿主进程本来就被策略的 `matchNamespaces Pid NotIn host_ns` 排除（已用宿主 `sudo cat /etc/shadow` 实测不触发）。
-  - **CRD 会回填服务端默认值**（`return` / `maxData` / `resolve` / `returnCopy` / `followChildren`），App 永久 OutOfSync，已用 `ignoreDifferences` 忽略。新策略用到别的可选字段时可能再冒出新键：逐字段对比 git 与 live 再补，别写 `*`。
-  - **验证策略要两个方向都测**：起一个临时 pod（节点上现成的 `python:3.12-alpine`，ptrace 用 `PTRACE_PEEKDATA` 打向不存在的 pid，无副作用；再读一个普通文件当对照），用 `tetra getevents --policy-names …` 在两个节点的 agent 上抓事件。`tetra tracingpolicy list` 显示 `enabled` 不等于探针真的在工作。
-  - ☠️ **进程事件带完整 argv，命令行里的密钥会进 Loki**。密钥改用 env，或 curl 的 `--variable %VAR` + `--expand-*`（curl ≥ 8.3，命令行只剩 `{{VAR}}`）。exit 事件也带 argv，Tetragon 重启时还会给存量进程补发 exec 事件（`flags=procFS`），所以长期运行的进程同样会漏。
-  - `redactionFilters` 兜底 6 条：bot token / `-u` 口令 / Bearer / URL 里的 `user:pass@` / `-token`、`--token` 的参数值 / `…Token:` 请求头的值。兜底不是正解：带空格且加引号的口令只能打掉一半。
-  - oracle 没有 Tetragon，argv 只在 `/proc` 可见、不进 Loki，写法同样照改。泄露经过与未轮换项见 [records/2026-10-24](../records/2026-10-24-intrusion-sweep-argv-secrets-in-loki.md)。
-- **oracle → Falco + Falcosidekick**（`cloud/oracle/values/falco.yaml`，ns `falco`，Helm App）。规则库开箱即用，oracle CPU 余量大；`driver: modern_ebpf`（CO-RE，无需内核模块）。**双出口**：① JSON → stdout → OTel → Loki（always-on，零依赖）；② Falcosidekick 原生 Telegram output（warning+，与 homelab 告警同一 bot/话题）。
-  - bot token：Vault `secret/homelab/telegram`（与 Alertmanager 共用，跨集群读）→ ESO `cloud/oracle/manifests/falco/falcosidekick-secret.yaml` → secret `falcosidekick-telegram`（key `TELEGRAM_TOKEN`）；chatid/messagethreadid 明文在 `falco.yaml`。缺 token 只影响推送。falco ns（PSA 标签 + ESO secret）归 oracle-k3s kustomize App，工作负载归独立的 `falco` Helm App（`CreateNamespace=false`）。
-  - ⚠️ **规则误报会吃掉整条通道，还会冒充心跳**。已知一条：宿主 systemd 拉起带 `User=` 的单元时读 `/etc/shadow`、`/etc/pam.d/*`，触发 `Read sensitive file untrusted`；`systemd-executor` 的 comm 是纯数字，`proc.name` 白名单接不住，只能按 `proc.exepath` 排除（override 在 `falco.yaml`）。
-  - **自身健康告警 5 条**：otel 抓 `falco`(falco-metrics:8765) 与 `falcosidekick`(:2801) → homelab Prometheus，规则 `falco-alerts.yaml`（见 [observability-alerting-slo.md](observability-alerting-slo.md)）。
-  - ⚠️ **依赖 inotify**：oracle 节点必须 `fs.inotify.max_user_instances=8192`（Ubuntu 默认 128 会被占满，falco 启动即 `could not initialize inotify handler` CrashLoop），已固化在 `cloud/oracle/ansible/playbooks/setup-k3s.yaml`。慢性 `KubePodCrashLooping` warning 易被噪音淹没，要人定期扫一眼。
+- **部署**：两集群各一个 Helm App（homelab `tetragon`、oracle `tetragon-oracle`，ns `tetragon`，chart 版本由 V1 强制
+  一致），都先引用两集群共用的 `security/tetragon/values-common.yaml`（导出过滤、argv 脱敏、优先级），再叠加各自的
+  `values/tetragon.yaml`（agent 资源；homelab 另开 ServiceMonitor）。`security/tetragon/` 是 H2 登记的共用树
+  （[manifest-safety-checks.md](manifest-safety-checks.md)）。内核态过滤只上报命中事件，省 CPU。
+  默认进程 exec/exit → `export-stdout` → 各集群 OTel → oracle 上的 Loki（`{k8s_namespace_name="tetragon"}`，`cluster`
+  标签区分）。指标：homelab 走 ServiceMonitor；oracle 由 OTel 抓 `tetragon:2112`，只留告警用的三个指标。
+- **策略**（`security/tetragon/policies/`，两集群同一份，独立 App `tetragon-policies` / `tetragon-policies-oracle`，
+  拆法同 kyverno-policies）：`container-escape-syscalls`（容器内 ptrace / process_vm_writev / 内核模块装卸 / kexec /
+  open_by_handle_at）与 `sensitive-file-access`（`security_file_open` 上内核态匹配 /etc/shadow、sudoers、/root/.ssh 等
+  凭据路径）。全部**只观察、不拦截**：仓库硬约束是安全组件 fail-open，拦截型策略误报即杀生产进程。
+- **告警分两路**。健康走 Prometheus（`alerts/tetragon-alerts.yaml`：`TetragonDown` / `TetragonPolicyLoadFailed` /
+  `TetragonPolicyNotEnabled` / `TetragonEventsLost`，按 `(cluster, node)` 分组，`TetragonDown` 每集群一个 absent；
+  promtool 用例在 `scripts/alert-rule-tests/tetragon-alerts.test.yaml`）。检测走 **Loki ruler**
+  （`cloud/oracle/manifests/monitoring/loki-rules.yaml` 的 tetragon-runtime 组，不按集群过滤，warning）：
+  - `TetragonRuntimePolicyHit`：上面两条策略的命中，`tp-` 前缀的策略视为临时测试不告警。夜备精确放行三条
+    （restic 调 ssh 读自己的 `/root/.ssh/{id_ed25519,known_hosts,config}`、`backup.sh` 写 config、apk 的 `adduser` 改
+    `/etc/shadow`）：策略 11-20 上线起每晚误报 ~130 次，11-24 才发现并补上。
+  - `TetragonAppSpawnedShell`（11-22）：父进程是应用（node、python…）的 shell，webshell / 命令注入最典型的形态。
+    父进程是 containerd-shim / runc 的（容器入口、exec 探针、`kubectl exec`）分不开，homelab 7 天 689 次 shell 里约 600 次
+    是这类，**不报**，所以 `kubectl exec` 起的 shell 不在视野里。放行按「父进程参数 + 命令」精确写，不按 namespace：
+    Prisma 的 `ldconfig -p`、supervisord；11-24 补 oracle 独有的 CNPG `manager wal-archive`、s6 的 `./run`、browserless
+    读 `/proc/stat`、rsshub 的 npm 入口。
+  - `TetragonFilelessExec`（11-24，移植自 Falco）：从 `/dev/shm`、memfd（`/proc/*/fd/N`）、`/tmp`、`/var/tmp` 执行或
+    二进制已删除。`/dev/shm` 在容器里实测可执行。
+  - `TetragonAttackToolExec`（11-24，移植自 Falco）：`nc`/`ncat`/`socat` 带 `-e`/`-c`/`EXEC:`；grep/find/rg 翻私钥标记、
+    ssh key、云凭据、kubeconfig；shred/wipefs/mkfs/debugfs；truncate `/var/log`；`busybox nc -e` 直接调用一支（经软链
+    调用时 Tetragon 报调用路径 `/bin/grep`，不是 busybox）。
+  命中不用指标，因为 **Tetragon 会在 pod 删除后清掉该 pod 的指标序列**（实测），寿命短的 pod 里的命中可能在被评估前
+  就没了，日志行不会。
+- ☠️ **集群独有负载只在那个集群的基线里**：oracle 上线头一小时，「应用起 shell」就被 homelab 没有的负载触发（见上）。
+  oracle 的基线截至 11-24 只有数小时，日/小时级的合法 shell 还可能冒出来，照同样写法补精确放行并重放。
+- ☠️ **换内核前把 eBPF 组件当成要过闸门的东西**：unattended-upgrades 装好新内核、下次重启即生效。Falco 就是这样在
+  7.0 上被 BPF 校验器的内存顶破 limit 的。重启后核：`tetra tracingpolicy list` 两条 enabled、agent 的 `memory.peak`
+  离 limit 有余量（oracle 首次加载 185Mi / limit 768Mi，homelab 策略更新路径峰值 373Mi / 512Mi）。
+- ⚠️ **增删策略要同步改 `TetragonPolicyNotEnabled` 里的 `2`**，否则要么永远报警、要么少一条也不报。
+- ☠️ **`matchBinaries NotIn` 在这里不生效**（Tetragon 1.7.0、内核 6.8/7.0，对照实验：排除 python3 的策略照样上报 python3）。别指望用它排噪声，要排就在告警表达式 / `exportDenyList` 里做，并且做完拿真事件验证。已知噪声：apps-pg 的就绪探针 `pg_isready -U postgres` 每次都打开 /etc/shadow；它不在 Loki 里（`exportDenyList` 已挡），但在 Prometheus 指标里。
+- **`exportDenyList` 也会挡策略事件**：kube-system / cilium / 宿主（namespace 为空）的命中不会进 Loki，也就不会告警；宿主进程本来就被策略的 `matchNamespaces Pid NotIn host_ns` 排除（已用宿主 `sudo cat /etc/shadow` 实测不触发）。
+- **CRD 会回填服务端默认值**（`return` / `maxData` / `resolve` / `returnCopy` / `followChildren`），App 永久 OutOfSync，已用 `ignoreDifferences` 忽略。新策略用到别的可选字段时可能再冒出新键：逐字段对比 git 与 live 再补，别写 `*`。
+- **验证要两个方向都测，而且别往群里发消息**：测试 pod 放 kube-system（`exportDenyList` 不导出 → 不进 Loki、不告警），
+  在 agent 上 `tetra getevents --namespace kube-system --pods <pod>` 看策略命中；ptrace 用 `PTRACE_PEEKDATA` 打向不存在的
+  pid，无副作用，再读一个普通文件当对照。只测 exec 类规则时测试 pod 才放导出的 ns，再用规则表达式直接查 Loki。
+  ☠️ 别在导出的 ns 里 `grep -r … /etc`：会顺带打开 /etc/shadow（11-24 就这么误发过一条）。`tetra tracingpolicy list`
+  显示 `enabled` 不等于探针真的在工作。
+- ☠️ **进程事件带完整 argv，命令行里的密钥会进 Loki**（2026-11-24 起两集群都是）。密钥改用 env，或 curl 的 `--variable %VAR` + `--expand-*`（curl ≥ 8.3，命令行只剩 `{{VAR}}`）。exit 事件也带 argv，Tetragon 重启时还会给存量进程补发 exec 事件（`flags=procFS`），所以长期运行的进程同样会漏。
+- `redactionFilters` 兜底 6 条（两集群共用）：bot token / `-u` 口令 / Bearer / URL 里的 `user:pass@` / `-token`、`--token` 的参数值 / `…Token:` 请求头的值。兜底不是正解：带空格且加引号的口令只能打掉一半。泄露经过与未轮换项见 [records/2026-10-24](../records/2026-10-24-intrusion-sweep-argv-secrets-in-loki.md)。
+- ☠️ **跨文件挪 values 要拆两次提交**：多源 App 的 `$values` 跟 `main` 立即生效，valueFiles 列表要等 root App 同步；
+  11-24 拆共用 values 时中间态把 tetragon-config 的 redaction-filters 写空了 6 分钟（agent 未重启，未生效）。
 
 ## 9. 安全可观测与告警
 
-- **告警链路**（Alertmanager → Telegram、`Watchdog` 死人开关）的唯一真相源是 [observability-alerting-slo.md](observability-alerting-slo.md)；⚠️ 死人开关有已证实的失明盲区（[dead-mans-switch.md](dead-mans-switch.md)）。oracle Falco 走 Falcosidekick 直推（§8.5），与 Alertmanager 代码路径独立、互不依赖。Gotify 与旧 bridge 已退役（[决策](../decisions/alerting-telegram-migration.md)）。
+- **告警链路**（Alertmanager → Telegram、`Watchdog` 死人开关）的唯一真相源是 [observability-alerting-slo.md](observability-alerting-slo.md)；⚠️ 死人开关有已证实的失明盲区（[dead-mans-switch.md](dead-mans-switch.md)）。运行时检测（两集群 Tetragon）经 Loki ruler 进同一个 Alertmanager（§8.5）；Falcosidekick 那条绕过 Alertmanager 的直推通路随 Falco 于 2026-11-24 退役，Alertmanager 本身的失效靠死人开关兜。Gotify 与旧 bridge 已退役（[决策](../decisions/alerting-telegram-migration.md)）。
 - **新增 `PrometheusRule`/`ServiceMonitor` 必须带 `release:kube-prometheus-stack`**，否则 operator selector 忽略。
-- **安全相关规则**：`eso-alerts.yaml`、`trivy-alerts.yaml`、`falco-alerts.yaml`，多集群靠 `cluster` 标签区分。
-- **看板**：Grafana `Security` 文件夹 3 张：Trivy 漏洞概览（Prometheus）、Kyverno 准入策略（Prometheus，各 controller ServiceMonitor）、运行时与审计事件（Falco + Tetragon + kube-bench，Loki）。网络流用 Hubble CLI。
+- **安全相关规则**：`eso-alerts.yaml`、`trivy-alerts.yaml`、`tetragon-alerts.yaml`（Prometheus）+ `loki-rules.yaml` 的 tetragon-runtime 组（Loki ruler），多集群靠 `cluster` 标签区分。
+- **看板**：Grafana `Security` 文件夹 3 张：Trivy 漏洞概览（Prometheus）、Kyverno 准入策略（Prometheus，各 controller ServiceMonitor）、运行时与审计事件（两集群 Tetragon + kube-bench，Loki）。网络流用 Hubble CLI。
 - **别处的可见性**：Kyverno 存量违规看 `kubectl get polr -A`（counter 指标只适合看趋势）；PSA violation 在 `kubectl get events`。
 
 ## 10. 威胁模型与覆盖矩阵
@@ -189,13 +223,13 @@ eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、异
 | 配置劣化（无 limits/probes/不可信仓库） | Kyverno Audit + LimitRange 护栏 | 🟡 Audit + 护栏 |
 | 镜像已知 CVE | Trivy（HIGH/CRITICAL）→ Telegram + 看板 | ✅ |
 | 节点/控制面配置不合规 | kube-bench 周巡检 + protect-kernel-defaults | ✅ |
-| 容器内运行时入侵 | Tetragon（homelab，2 条观察版 TracingPolicy + 「应用进程起 shell」→ Loki/Telegram）/ Falco（oracle，规则→Loki+Telegram） | ✅ 观察版，调优持续 |
+| 容器内运行时入侵 | Tetragon（两集群：2 条观察版 TracingPolicy + Loki ruler 的应用起 shell / 无文件执行 / 攻击工具命令行 → Telegram） | ✅ 观察版，调优持续 |
 | 东西向横向移动 | 网络默认拒绝 | ❌ 延后（仅 Hubble 可见性） |
 | 数据丢失 | restic 双集群 CronJob（Vault raft / pg_dump / sqlite）→ 106 ZFS + 恢复演练通过 | 🟡 本地单副本，无离站 |
 
 ## 11. 已知缺口与路线图
 
-1. **运行时检测调优**（观察版已部署，§8.5）：① Tetragon 还没做的：异常外联、ServiceAccount token 读取（都要先有「谁该读 / 该连谁」的基线，否则满屏误报）；`kubectl exec` 起的 shell 有意不报；观察一段时间后再评估是否提严，**拦截型策略要先写 ADR**；② Falco 噪声规则按环境裁剪。
+1. **运行时检测调优**（观察版已部署，§8.5）：① Tetragon 还没做的：异常外联、ServiceAccount token 读取（都要先有「谁该读 / 该连谁」的基线，否则满屏误报）；`kubectl exec` 起的 shell 有意不报；观察一段时间后再评估是否提严，**拦截型策略要先写 ADR**；② 有意未移植的 Falco 规则（访问 K8s API、packet socket、release_agent、链接覆盖敏感文件、非标端口 SSH，理由见 [ADR](../decisions/runtime-detection-tetragon-both-clusters.md)）；③ oracle 的「应用起 shell」基线只有上线后数小时；④ oracle agent 的 memory limit（768Mi）待测过策略更新路径的峰值后收紧。
 2. **网络默认拒绝（门控灰度）**：Hubble 基线流量 → 每端点 `PolicyAuditMode` 只记不拦 → 单个无状态叶子 ns（personal-services/homepage）试点 CiliumNetworkPolicy（放行 DNS/Envoy/必要 egress）→ soak → 逐 ns 评估，**建议只对对外暴露 ns 做**。
 3. **节点 API 审计日志**：延后（磁盘紧）；如开启用 Metadata 级策略 + 严格 maxsize/maxbackup，先确认磁盘余量。
 4. **Kyverno Audit→Enforce**（§5.2）：`require-requests-limits` 已于 2026-11-18 提升，剩 `require-probes`（先按 ns 豁免批处理）与 `restrict-image-registries`（长期保持 Audit——它抓的是镜像串写法，不是来源）。提下一条之前有两个前置：① 打开并实测 PolicyException 通道（现在是关的）；② 顺手把 `disallow-latest-tag` 改成原生 ValidatingAdmissionPolicy，填上 oracle 零引擎的空子——`--generateValidatingAdmissionPolicy=true` 已开，per-rule 开关是 `rules[].validate.cel.generate: true`，两集群都 v1.35（VAP 自 1.30 GA，homelab 已有 Cilium 的一条在跑）。⚠️ Kyverno 生成的 VAP 是否真生效**尚未实测**，先拿一个 ns 试一条并 `kubectl get vap` 核对。

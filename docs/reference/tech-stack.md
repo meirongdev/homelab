@@ -1,6 +1,6 @@
 # Tech Stack — 技术栈全景
 
-> Last updated: 2026-11-09
+> Last updated: 2026-11-25
 > Status: 生效事实
 >
 > 这套系统由哪些技术组成、每个是干什么的、为什么是它、配置和版本钉在哪。
@@ -144,7 +144,7 @@ Service → Pod ────── 网络由 Cilium eBPF 承载；跨集群走 C
 | **Kyverno** | 策略即代码。只在 homelab |
 | **Trivy Operator** | 持续扫镜像 CVE 与配置。两集群都有；☠️ 五类静默失败 → [trivy-cve-ops.md](trivy-cve-ops.md) |
 | **kube-bench** | CIS 基线自查，CronJob 定期跑 |
-| **Tetragon / Falco** | eBPF 运行时检测。两集群分别选型：Tetragon 在 homelab，Falco + Falcosidekick 在 oracle；⚠️ 规则误报会吃掉整条通道 |
+| **Tetragon** | eBPF 运行时检测，两集群统一（2026-11-24 起，oracle 的 Falco 退役，[ADR](../decisions/runtime-detection-tetragon-both-clusters.md)）。⚠️ 检测规则自己维护；规则误报会吃掉整条通道 |
 | **Hubble** | Cilium 的网络流可见性。⚠️ 第 9 层只到可见性：没有自建 `CiliumNetworkPolicy`，默认拒绝刻意延后 |
 
 ### 3.10 仓库工程（CI 与护栏）

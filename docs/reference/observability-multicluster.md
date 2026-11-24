@@ -1,6 +1,6 @@
 # Multi-Cluster Observability Architecture
 
-> Last updated: 2026-11-22
+> Last updated: 2026-11-25
 > Status: 生效事实
 >
 > 遥测的**采集与汇聚侧**：三条管线怎么跨集群流动、应用怎么接日志/追踪、坏了怎么查。
@@ -197,8 +197,7 @@ collector（同一份 `otel-collector-config.yaml`）抓本集群的 exporter，
 | `prometheus/clustermesh` | `clustermesh-apiserver-metrics.kube-system.svc:9964` | 60s | 只 keep `cilium_kvstoremesh_remote_cluster*` |
 | `prometheus/trivy-operator` | `trivy-operator.trivy-system.svc:8080` | 60s | |
 | `prometheus/readlist` | `readlist.personal-services.svc:8080` | 300s | 数据一天才变一次 |
-| `prometheus/falco` | `falco-metrics.falco.svc:8765` | 60s | 需 values 里两个开关同时开 |
-| `prometheus/falcosidekick` | `falco-falcosidekick.falco.svc:2801` | 60s | 投递链路（Telegram ok/error） |
+| `prometheus/tetragon` | `tetragon.tetragon.svc:2112` | 60s | 只 keep 告警用的三个指标 + `build_info`；静态打 `node=oracle-k3s` 与 homelab 的 ServiceMonitor 对齐（2026-11-24 起，取代 falco / falcosidekick 两条） |
 | `prometheus/argocd` | pod 发现：`argocd` ns 里 application-controller 的 `metrics`(8082) 端口 | 60s | 只 keep `argocd_app_info` / `argocd_cluster_connection_status`；ArgoCD 是 manual-helm，不开 chart 的 metrics Service |
 | `prometheus/apiserver` | `kubernetes.default.svc:443/metrics` | 60s | https + SA token + 投射 CA 真校验；只 keep `apiserver_request_total` / `…_terminations_total` / sli 直方图的 `le=1`、`+Inf` 两个桶（该端点 ~5.7 万行，留约 1.8k 条；原先只留前两族约 520 条）；ClusterRole 需 `nonResourceURLs: ["/metrics"]`；job 名 `apiserver` 与 homelab 一致，使 chart 的 `KubeAPIInstanceUnreachable` 自动覆盖 oracle。成本（实测）：collector CPU / 节流不变、RSS 均值 +~46Mi（151 → 197Mi），见表下 |
 

@@ -1,6 +1,6 @@
 # ArgoCD Application Patterns
 
-> Last updated: 2026-11-10
+> Last updated: 2026-11-25
 > Status: 生效事实
 >
 > GitOps 现状：App 结构与源写法、控制面形态、Application 清单、新增 App 的坑；文末是未采用的备选 pattern。
@@ -88,8 +88,8 @@ kubectl --context oracle-k3s -n argocd get app <name> -o jsonpath='{.status.sync
 **project `oracle-k3s`（destination in-cluster `kubernetes.default.svc`）**:
 `oracle-k3s` · `oracle-rss` · `oracle-uptime-kuma` · `oracle-personal-services` ·
 `oracle-monitoring` · `oracle-zitadel` · `calibre-metadata` · `cnpg-operator` ·
-`external-dns-oracle` · `falco` · `loki` · `tempo` · `trivy-operator-oracle` ·
-`opencost-oracle`
+`external-dns-oracle` · `tetragon-oracle` · `tetragon-policies-oracle` · `loki` · `tempo` ·
+`trivy-operator-oracle` · `opencost-oracle`
 
 **project `default`（元 App，只写 argocd ns）**: `root`（App-of-Apps）· `projects`（托管 `argocd/projects/`）
 

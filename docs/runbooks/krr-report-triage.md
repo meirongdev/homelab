@@ -1,6 +1,6 @@
 # KRR 报告分诊与采纳
 
-> Last updated: 2026-10-28
+> Last updated: 2026-11-25
 > Status: 生效 SOP
 > 触发条件：周一收到 KRR 推送到 Telegram 的两份报告（homelab 09:00 / oracle-k3s 09:15）；
 > 或改 shape、加服务、扩容之后主动跑一次核对。
@@ -196,7 +196,7 @@ requests 是那里真正稀缺的东西。逐容器按实测 p95 下调，能一
 
 - **DNS / 延迟敏感组件**（coredns）：request 是 CPU 竞争时的 shares 底线，
   省那几十 m 不值得拿 DNS 延迟换。
-- **CPU 真在干活的安全组件**（falco）：降过头会在事件尖峰被邻居挤掉，
+- **CPU 真在干活的安全组件**（当年的 falco；现在两集群的 tetragon 是内核态过滤，稳态 2~4m）：降过头会在事件尖峰被邻居挤掉，
   与「fail-open」的本意相反。
 
 ⚠️ **k3s 内置组件（coredns / metrics-server / local-path-provisioner）不在本仓库**，

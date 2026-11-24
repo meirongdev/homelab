@@ -1,6 +1,6 @@
 # Observability — 告警、看板组织与 SLO
 
-> Last updated: 2026-11-22
+> Last updated: 2026-11-25
 > Status: 生效事实
 >
 > 遥测的消费侧：告警路由与覆盖盲区、Grafana 看板组织约定、SLI/SLO 体系。
@@ -28,8 +28,9 @@
 - `TrivyCriticalCVEStale` 另由 `trivy-triage` AlertmanagerConfig（`alertmanager-trivy-triage.yaml`）
   webhook 到 Multica autopilot，自动建分诊 issue；URL 含 token，走 Vault → ESO。⚠️ 它的投递失败被
   watchdog 那条 `integration="webhook"` 的 null 路由一并静默（Telegram 照常到），见该文件头。
-- oracle 的 Falco 告警走 Falcosidekick 原生 Telegram output（同 bot 同话题，与 Alertmanager
-  互不依赖），见 [security.md §8.5](security.md)。
+- 运行时检测（两集群 Tetragon）走 **Loki ruler → 本 Alertmanager → Telegram**（`loki-rules.yaml` 的 tetragon-runtime 组，
+  4 条：策略命中 / 应用起 shell / 无文件执行 / 攻击工具命令行），见 [security.md §8.5](security.md)。2026-11-24 之前 oracle 的
+  Falco 经 Falcosidekick 绕过 Alertmanager 直推，那条独立通路已随 Falco 退役。
 
 ☠️ 判投递健康只看指标，不看 AM 日志：默认 `info` 级别下首次投递成功只打 DEBUG（重试成功才 INFO，
 失败打 WARN），日志连日空白只说明没有投递失败，别据此重启 AM。
@@ -121,12 +122,13 @@ yq '.spec' k8s/helm/manifests/monitoring/alerts/<file>.yaml \
   蕴含：score >36h、snapshot >36h（score 会对旧快照照常打分）、ingest >3d（证据约 180 天才刷新）。
   C/F 维全库为 0 的两条用 `and ignoring(dim) works_total > 0` 兜空库，D/P/A 三维刻意不告警。处置见
   [runbooks/readlist-bootstrap.md](../runbooks/readlist-bootstrap.md)。
-- `falco-alerts.yaml`（oracle，5 条）：Falco 安静不等于健康。oracle otel 抓 `falco`（:8765，要同时开
-  `metrics.enabled` 与 `falco.webserver.prometheus_metrics_enabled`）与 `falcosidekick`（:2801）。
-  存活分两条（`FalcoDown` critical；`FalcosidekickDown` warning，只影响通知）、Telegram 投递失败、
-  `scap_n_drops_total`（内核丢事件，见 [records/2026-09-12-…](../records/2026-09-12-falco-syscall-drops-apt-upgrade.md)）、
-  `outputs_queue_num_drops_total`（看见了没送出）。⚠️ 前缀别混：引擎 `falcosecurity_falco_*` /
-  `falcosecurity_scap_*`，转发器 `falcosecurity_falcosidekick_*`。
+- `tetragon-alerts.yaml`（两集群，4 条）：运行时检测安静不等于健康。`TetragonDown`（critical，每集群一个
+  absent——单写 `absent(up{job="tetragon"})` 时一个集群整体消失永远不报）、`TetragonPolicyLoadFailed`、
+  `TetragonPolicyNotEnabled`（期望数 2 = `security/tetragon/policies/` 的策略个数，增删策略要同步改）、
+  `TetragonEventsLost`（ring buffer 丢事件 = 检测盲区，形态同 [records/2026-09-12-…](../records/2026-09-12-falco-syscall-drops-apt-upgrade.md)
+  的 Falco 那次，先查宿主维护任务）。按 `(cluster, node)` 分组：homelab 的指标走 ServiceMonitor，oracle 的由 otel
+  `prometheus/tetragon` 抓、静态打 `node=oracle-k3s` 对齐。promtool 用例 `scripts/alert-rule-tests/tetragon-alerts.test.yaml`
+  （11 组，12 处变异全杀）。检测命中不在这里，在 Loki ruler（见上）。
 - `cf-analytics-alerts.yaml`（6 条）：exporter 每 6h 拉 Cloudflare Analytics API（→
   [public-traffic-analysis.md](public-traffic-analysis.md)），失效全静默。`CFAnalyticsScrapeFailing`、
   `CFAnalyticsDataStale`（>24h 无成功）、`CFAnalyticsMetricsAbsent`、`CFAnalyticsRowsTruncated` /

@@ -10,7 +10,7 @@
 > 数据一律从 restic 恢复（见 [backup-recovery.md](backup-recovery.md)），
 > 无更早状态可退。注豁免。
 >
-> Last updated: 2026-11-09
+> Last updated: 2026-11-25
 > Status: 生效 SOP
 
 ## 现状（一句话）
@@ -69,7 +69,7 @@ kubectl --context oracle-k3s get nodes    # 应 Ready
 ```
 
 `setup-k3s.yaml` 会一并装好：firewalld 放行（K3s/Cilium 端口 + 10.52/10.53 CIDR 信任）、
-Gateway API CRD v1.2.1（standard channel）、falco 依赖的 `fs.inotify.max_user_instances=8192`。
+Gateway API CRD v1.2.1（standard channel）、`fs.inotify.max_user_instances=8192`（当年 falco 因默认 128 被占满而 CrashLoop，其它 inotify 重度 pod 同样需要）。
 ⚠️ 不要改 playbook 里 `disable: traefik` 那段：Gateway API CRD 由 playbook 独立安装，
 让 traefik 托管会在 k3s 重启时级联删 CRD、路由全断（2026-06-04 踩过）。
 

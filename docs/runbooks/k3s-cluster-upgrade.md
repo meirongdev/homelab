@@ -1,6 +1,6 @@
 # k3s 集群版本升级（两集群）
 
-> Last updated: 2026-11-23
+> Last updated: 2026-11-25
 > Status: SOP：已按本文完整执行过三次（2026-09 三节点 v1.34.5+k3s1 → v1.35.8+k3s1；2026-11-19 补丁升到
 > v1.35.10+k3s1；2026-11-20 minor 升到 v1.36.6+k3s1，§9 全部通过），顺序均为 oracle → homelab 控制面 → worker。
 > 除 §10 回滚外，每条命令都是实跑验证过的：回滚命令从未真正执行过，2026-11-20 只做了静态核对，
@@ -103,7 +103,7 @@ grep -rn "gitRepo:\|externalIPs:" --include="*.yaml" k8s/ cloud/ argocd/ backup/
 | Cilium | 两集群 1.20.5 | `docs.cilium.io/en/v<ver>/network/kubernetes/requirements/` | 1.20 线官方只测 k8s 1.33–1.36，**不含 1.37**；1.21 在 2026-11-20 仅有 pre 版 |
 | Kyverno | 仅 homelab（现 v1.20.0）| `kyverno.io/docs/installation/releases/` | v1.20（2026-11-12）支持 k8s v1.34–v1.37。⚠️ 升到 v1.20 要先把策略迁到 `policies.kyverno.io`，见下 |
 | **CNPG** | 仅 oracle 1.30.0 | 版本发布公告 | 1.30 已加 1.36 支持 |
-| ArgoCD / ESO / prometheus-operator / trivy-operator / tetragon / falco | 两集群 | 上游 release notes | 均无声明冲突 |
+| ArgoCD / ESO / prometheus-operator / trivy-operator / tetragon | 两集群 | 上游 release notes | 均无声明冲突 |
 
 ```bash
 # 现网各组件实际版本（别信文档里的快照）
@@ -111,7 +111,7 @@ for c in k3s-homelab oracle-k3s; do
   echo "###### $c"
   kubectl --context "$c" get deploy,ds,sts -A \
     -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\t"}{range .spec.template.spec.containers[*]}{.image}{" "}{end}{"\n"}{end}' \
-    | grep -iE "cilium|kyverno|cloudnative|argocd|external-secrets|prometheus-operator|trivy|tetragon|falco" \
+    | grep -iE "cilium|kyverno|cloudnative|argocd|external-secrets|prometheus-operator|trivy|tetragon" \
     | sed 's/@sha256:[a-f0-9]*//g' | sort
 done
 ```

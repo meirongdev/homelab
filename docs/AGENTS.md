@@ -144,7 +144,7 @@ GitOps/App `argocd-app-patterns.md` · 入口/DNS `networking-ingress.md` · 跨
 ## Security Model
 
 纵深防御 11 层：Cloudflare WAF → ZITADEL OIDC → Vault+ESO → PSA → Kyverno → Trivy →
-kube-bench → 节点 CIS → 网络 → Tetragon/Falco → restic。逐层状态与灰度路径见
+kube-bench → 节点 CIS → 网络 → Tetragon → restic。逐层状态与灰度路径见
 [security.md](reference/security.md)。
 
 - ⚠️ **第 9 层网络基本只到「可见性」**：自建管控只有 readlist Job 的 `NetworkPolicy` 和 oracle
