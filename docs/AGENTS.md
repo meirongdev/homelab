@@ -1,15 +1,10 @@
 # Homelab — Agent Context
 
-> 双集群 homelab（homelab + oracle-k3s）基础设施即代码。
-> 给 AI 助手的**唯一上下文文件**：根目录 `AGENTS.md`、`CLAUDE.md`、`.gemini.md`、
-> `.github/copilot-instructions.md` 全部软链到本文件。
->
-> 📖 **需要细节时按域读 `docs/reference/`**（生效事实 + 踩坑记录，索引
-> [reference/README.md](reference/README.md)；总门户 [docs/README.md](README.md)）。
->
-> **本文件只放三类东西**：①一句话讲不清就会出事的陷阱 ②去哪查的指针 ③跨域的硬约束。
-> 不要往这里搬：命令清单（`just --list` 自带）、目录树（`ls` 自带）、
-> 实测数值（会漂，且 reference/ 才是唯一真相源）。架构事实进 `reference/`，决策进 `decisions/`。
+> 双集群 homelab（homelab + oracle-k3s）基础设施即代码。根目录 `AGENTS.md`、`CLAUDE.md`、`.gemini.md`、
+> `.github/copilot-instructions.md` 都软链到本文件。
+> **本文件只放三类东西**：①一句话讲不清就会出事的陷阱 ②去哪查的指针 ③跨域硬约束。
+> 细节、实测数值、事故经过都在 `docs/reference/`（唯一真相源，索引 [reference/README.md](reference/README.md)，
+> 总门户 [docs/README.md](README.md)）；别往这里搬命令清单（`just --list`）和目录树（`ls`）。
 
 ## Project Structure
 
@@ -21,14 +16,14 @@ argocd/                        # GitOps (install|projects|applications/)
 cloudflare/terraform/          # Tunnel + DNS + WAF          tailscale/{terraform,ansible}/  # ACL · 节点 tailscale
 zitadel/                       # 身份/SSO                     backup/               # restic (kustomize)
 macbook/ansible/               # 无头M2+Studio · M5开发环境  images/               # 自研镜像(各一条 build workflow)
-scripts/                       # just check 的 6 个检查器 · tf-r2.sh · 运维脚本
+scripts/                       # just check 的检查器 · tf-r2.sh · 运维脚本
 docs/                          # 见下方「Documentation Rules」
 根 justfile · versions.just    # 根 justfile 聚合全部子 justfile；versions.just = 两集群共享的版本
 ```
 
 ## Key Commands
 
-完整清单跑根目录 `just --list`。下表配方属 homelab 应用层，从根跑要加前缀：`just helm deploy-cilium` ≡ `cd k8s/helm && just deploy-cilium`。**只列带坑的**：
+全部配方跑根目录 `just --list`；homelab 应用层的配方从根跑要加前缀（`just helm deploy-cilium` ≡ `cd k8s/helm && just deploy-cilium`）。**只列带坑的**：
 
 | 命令 | 坑 |
 |------|-----|
@@ -38,139 +33,85 @@ docs/                          # 见下方「Documentation Rules」
 | `just connect-clustermesh <homelab-ts>:32379 <oracle-ts>:32379` | ☠️ 任一侧 deploy-cilium 后必跑 |
 
 - **GitOps**：`git push` → ArgoCD 3 分钟轮询自动同步，**不可手动 `kubectl apply` 覆盖**。
-  LGTM/otel/external-dns/backup 全 GitOps。
-- ⚠️ **manual-helm 的例外**（改 values 必须手动 `helm upgrade`，提交≠部署）：
-  Cilium / Vault / ESO / ArgoCD 本体。
-- ⚠️ **新加子域名不需要动 DNS**：写一个 HTTPRoute 即可（external-dns 建记录 + 隧道通配路由）。
-  不要改 `cloudflare/terraform`。机制见 [networking-ingress.md](reference/networking-ingress.md)。
-- ⚠️ **`aiven/` 是外部托管的额外库，不是数据面**：不在集群里、无 ArgoCD App、
-  **不在 restic 备份面内**（H4 只查清单 PVC，看不见外部库）。应用数据仍然只有集群内
-  `apps-pg` 一个家（[shared-postgres-platform.md](decisions/shared-postgres-platform.md)）；
-  往那边挪负载要先立 ADR。→ [aiven/README.md](../aiven/README.md)
+  ⚠️ 例外是 manual-helm：Cilium / Vault / ESO / ArgoCD 本体，改 values 要手动 `helm upgrade`，提交≠部署。
+- ⚠️ **新加子域名只写一个 HTTPRoute**（external-dns 建记录 + 隧道通配路由），不要改 `cloudflare/terraform`。
+  → [networking-ingress.md](reference/networking-ingress.md)
+- ⚠️ **`aiven/` 是外部托管的额外库，不是数据面**：不在集群、无 ArgoCD App、**不在 restic 备份面内**。
+  应用数据只有集群内 `apps-pg` 一个家，往外挪要先立 ADR。→ [aiven/README.md](../aiven/README.md)
 
 ## Architecture Quick Reference
 
-- **GitOps 控制面在 oracle-k3s**（2026-08-02 迁移）：Application 里的
-  `destination.server: kubernetes.default.svc` 指的是 oracle；homelab 负载必须显式写
-  `https://100.94.186.7:6443`。日志(Loki)/追踪(Tempo) 同批迁 oracle，**但
-  Prometheus/Grafana/Alertmanager 仍在 homelab**，遥测不是单向的。
-  → [runbooks/argocd-control-plane-on-oracle.md](runbooks/argocd-control-plane-on-oracle.md)
-- **CNI**：双集群 Cilium eBPF + VXLAN。**Ingress**：Cilium Gateway API（唯一入口）。
-  ☠️ **Gateway API CRD 版本与 Cilium 是一对**：缺 CRD 则 operator 的 Gateway API 控制器
-  整个不初始化，而旧路由照常 200、无任何告警，只有新增路由静默 503。升 Cilium 必跑
-  `just deploy-gateway-api-crds`。☠️ **验收判据别搞反**：operator 日志里那句
-  `Required GatewayAPI resources are not found` 是故障信号，有输出就是坏了；
-  健康集群什么都不打（实测两集群皆无），所以「grep 得到」不能当健康证据。
-  唯一的正向判据是新建一条 HTTPRoute 能拿到 `.status`（旧路由 curl 200 也不算）。→ [records/2026-08-11-gateway-api-crd-stall.md](records/2026-08-11-gateway-api-crd-stall.md)
-- **跨集群**：Tailscale 只做节点级 underlay（节点 IP + NodePort），pod↔pod 走
-  ClusterMesh VXLAN。⚠️ 只有 node0 通告自己的 /32，k8s-node/worker 什么都不通告（会投毒路由）。
-  → [tailscale-network.md](reference/tailscale-network.md)
+- **GitOps 控制面在 oracle-k3s**：`destination.server: kubernetes.default.svc` 指 **oracle**，homelab 负载必须写
+  `https://100.94.186.7:6443`。Loki/Tempo 在 oracle，**Prometheus/Grafana/Alertmanager 在 homelab**。
+  → [argocd-control-plane-on-oracle.md](runbooks/argocd-control-plane-on-oracle.md)
+- **CNI** 双集群 Cilium eBPF + VXLAN，**Ingress** 只走 Cilium Gateway API。☠️ **Gateway API CRD 与 Cilium 版本是一对**：
+  缺 CRD 时旧路由照常 200、新路由静默 503、无告警。升 Cilium 必跑 `just deploy-gateway-api-crds`；
+  唯一可靠的验收是**新建一条 HTTPRoute 能拿到 `.status`**（operator 日志里出现 `Required GatewayAPI resources are not found`
+  才是故障，grep 不到不代表健康）。→ [networking-ingress.md](reference/networking-ingress.md)
+- **跨集群**：Tailscale 只做节点级 underlay，pod↔pod 走 ClusterMesh VXLAN。⚠️ 只有 node0 通告自己的 /32，
+  k8s-node/worker 什么都不通告（会投毒路由）。→ [tailscale-network.md](reference/tailscale-network.md)
 - **外部流量**：Internet → Cloudflare DNS → Tunnel → Cilium Gateway → Service
-- ☠️ **跨仓库边界（2026-08-23）**：`stack.meirong.dev` 不是本仓库的东西。它是
-  `~/projects/meirongdev/home-stack`（公开仓库）用自己的 terraform 部到 Cloudflare
-  Workers 的，那条 DNS 记录由 Cloudflare 自建，不在本仓库 state 里。本仓库
-  **既不许再声明一份**（Workers 自定义域名不能建在已有 CNAME 的主机名上），
-  **也不许当游离记录清理**（删掉 = 站点域名解析消失，且本仓库无线索）。反过来 zone
-  设置/WAF/隧道/R2 桶本体归本仓库独占。完整归属表 →
-  [decisions/home-stack-repo-boundary.md](decisions/home-stack-repo-boundary.md)
-- **节点**：homelab 自 2026-08-13 起是双节点。control-plane `k8s-node` `10.10.10.10`
-  / TS `100.94.186.7`（Ryzen 5600H 笔记本）+ worker `k8s-worker-106` `192.168.50.107` /
-  TS `100.74.162.97`（跑在 NAS 106 上的 2c/4G VM）· oracle-k3s `10.0.0.26` / TS
-  `100.107.166.37` · NAS storage-106 宿主 `192.168.50.106` / TS `100.110.27.111`
-  ⚠️ worker 与控制面 **不在同一网段**（LAN vs pve 的 `10.10.10.0/24`），且它多一条
-  ip rule。加/改它必读 `k8s/ansible/playbooks/setup-k3s-worker.yaml` 的文件头三条约束
-  （[ADR](decisions/storage106-as-homelab-worker.md)）。
-- oracle 重启/改 shape 后跑 `just oracle verify-node`（只读核全部不变量；
-  **别在文档里写死它报的条数**，那是动态累加的）。
+- ☠️ **`stack.meirong.dev` 不归本仓库**：它由 `home-stack` 仓库部署到 Cloudflare Workers，DNS 由 Cloudflare 自建。
+  本仓库**既不许再声明、也不许当游离记录清理**。→ [home-stack-repo-boundary.md](decisions/home-stack-repo-boundary.md)
+- **节点**：homelab 控制面 `k8s-node` `10.10.10.10` / TS `100.94.186.7`（5600H 笔记本）+ worker `k8s-worker-106`
+  `192.168.50.107` / TS `100.74.162.97`（106 上的 VM）· oracle-k3s `10.0.0.26` / TS `100.107.166.37` ·
+  NAS 106 宿主 `192.168.50.106` / TS `100.110.27.111`。⚠️ worker 与控制面不在同一网段且多一条 ip rule，
+  改它先读 `k8s/ansible/playbooks/setup-k3s-worker.yaml` 文件头。oracle 重启后跑 `just oracle verify-node`。
 
-**按域查细节（`docs/reference/`）**：术语/命名正典 `terminology.md`（写文档或注释前先对
-一眼）· 服务清单 `services.md`（唯一真相源）· ☠️ **LLM 网关 `litellm-gateway.md`**，配置真相源分两半：
-模型/路由在 git，**虚拟 key 的模型白名单在 Postgres**；改网关别名不同步改 key 就
-「清单正确 + ArgoCD Synced + 调用全挂」，且用虚拟 key 查 `/v1/models` 会误判成配置没生效 ·
-GitOps/App `argocd-app-patterns.md` · 入口/DNS `networking-ingress.md` · 跨集群 `tailscale-network.md` ·
-存储/备份 `storage.md` · 身份/OIDC `identity.md` · 安全逐层 `security.md` · 可观测
-`observability-multicluster.md` · 告警/SLO
-`observability-alerting-slo.md` · 公网访问分析（谁在访问、真人/爬虫/自建监控）
-`public-traffic-analysis.md` · 成本 `cost-and-rightsizing.md` · 资源/QoS
-`k8s-qos-resource-management.md` · TF state `terraform-state.md`（走 `just tf`）。
+**按域查细节（`docs/reference/`）**：术语 `terminology.md`（写文档/注释前对一眼）· 服务清单 `services.md` ·
+☠️ LLM 网关 `litellm-gateway.md`（**虚拟 key 的模型白名单在 Postgres 不在 git**，改别名不同步改 key 就「Synced 但调用全挂」）·
+GitOps/App `argocd-app-patterns.md` · 入口/DNS `networking-ingress.md` · 跨集群 `tailscale-network.md` · 存储/备份 `storage.md` ·
+身份 `identity.md` · 安全 `security.md` · 可观测 `observability-multicluster.md` · 告警/SLO `observability-alerting-slo.md` ·
+公网访问 `public-traffic-analysis.md` · 成本 `cost-and-rightsizing.md` · 资源/QoS `k8s-qos-resource-management.md` ·
+TF state `terraform-state.md`（走 `just tf`）。
 
 ## Working Conventions
 
-- **任务运行器** `just`（每个 root 都有 justfile，根 `just --list` 聚合全部）·
-  **Commits** Conventional Commits · **Helm** 配置进 `values/*.yaml`，不用内联 `--set` ·
-  **SSH** 全舰队 key `~/.ssh/vgio`。
-- **新增服务**走 [runbooks/add-service.md](runbooks/add-service.md)（manifest → HTTPRoute → homepage →
-  Uptime Kuma 全流程；skill `.claude/skills/add-service/SKILL.md` 只是它的入口壳，改流程改 runbook）。落点按资源画像选，判据与实测容量见
-  [cluster-placement-for-new-services.md](decisions/cluster-placement-for-new-services.md)：
-  计算密集 / 大流量公共服务 / 只有 amd64 镜像 → homelab；轻量无状态 → oracle-k3s。
-  ⚠️ 两边都不宽裕，**别照搬上游 manifest 的 requests**，按实测填。
-- 新服务的硬性要求（错了通常静默失效）：⚠️ arm64 先确认镜像有 `linux/arm64`，pin
-  **多架构 index digest** 不是单架构的 · 同 ns 后端**不需要** ReferenceGrant（Gateway 靠
-  listener 的 `allowedRoutes` 接管；真跨 ns 才要，写 `v1beta1`，见 H3）· 可写 PVC 一律
-  `local-path`（唯一例外是只读媒体的静态 NFS PV，见 Storage Notes）·
-  oracle 密钥放 `secret/oracle-k3s/<service>` ·
-  非核心挂 `priorityClassName: bulk`。
-- ⚠️ **判断内存余量看 `free -m` 的 available 或 `rssBytes`，别信 `kubectl top node`**；
-  requests 只反映申报、不反映实占（两者可差数百 Mi）。→ [k8s-qos-resource-management.md](reference/k8s-qos-resource-management.md)
+- `just` 是任务运行器 · Conventional Commits · Helm 配置进 `values/*.yaml` 不用 `--set` · SSH 全舰队用 `~/.ssh/vgio`。
+- **新增服务**走 [runbooks/add-service.md](runbooks/add-service.md)；放哪个集群按
+  [cluster-placement-for-new-services.md](decisions/cluster-placement-for-new-services.md)（计算密集 / 大流量 / 只有 amd64 → homelab，
+  轻量无状态 → oracle）。⚠️ 两边都不宽裕，requests 按实测填，别照搬上游。
+- 新服务的硬性要求（错了通常静默失效）：arm64 先确认镜像有 `linux/arm64` 并钉**多架构 index digest** ·
+  同 ns 后端**不需要** ReferenceGrant（真跨 ns 才要，写 `v1beta1`）· 可写 PVC 一律 `local-path` ·
+  oracle 密钥放 `secret/oracle-k3s/<service>` · 非核心挂 `priorityClassName: bulk`。
+- ⚠️ **判断内存余量看 `free -m` 的 available 或 `rssBytes`，别信 `kubectl top node`**（requests 只是申报）。
+  → [k8s-qos-resource-management.md](reference/k8s-qos-resource-management.md)
 
 ## Documentation Rules
 
-写文档前读 [docs/RULES.md](RULES.md) 的 R1–R8（目录归属/命名/文首字段/状态标记/索引维护/
-唯一真相源/命令上下文/长度预算），CI 的 `check-docs.py` 强制。最常踩的三条：
+写文档前读 [docs/RULES.md](RULES.md)（R1–R8，CI 的 `check-docs.py` 强制，含链接锚点与 `just` 配方存在性）。最常踩的三条：
 
-- **架构事实**进 `reference/`（唯一真相源），别在 plan 里留唯一副本；
-  **决策**进 `decisions/`；**可重复 SOP** 进 `runbooks/`；**故障复盘**进 `records/`。
-- `plans/` 只放**还没做完**的方案，**做完即删**：先把结论回写 `reference/`/`decisions/`、
-  `git grep` 改掉所有指向它的链接，再删文件（不归档，历史在 git）。
-- 命令步骤必须可执行，避免思路型描述；过期内容挪走有用部分后删除，不留 `Deprecated` 墓碑。
+- 架构事实进 `reference/`（唯一真相源）· 决策进 `decisions/` · 可重复 SOP 进 `runbooks/` · 故障复盘进 `records/`。
+- `plans/` 只放没做完的方案，**做完即删**：先把结论回写 reference/decisions、`git grep` 改掉指向它的链接，再删。
+- 命令必须可执行；过期内容挪走有用部分后删除，不留 `Deprecated` 墓碑。
 
 ## Manifest Safety (CI 强制)
 
-☠️ **删任何清单文件前先 `grep '^kind:' <file>`**。ArgoCD 按目录同步，删掉文件就 prune 掉
-文件里的全部对象；内嵌的 `Namespace` 会连带删光同 ns 下其它应用的数据
-（PVC 的 `Prune=false` 拦不住，被 prune 的是 ns）。2026-08-03 真这样删过一次。
-⚠️ 反过来也要记得：`Prune=false` 意味着**退役服务时 PVC 不会被删**，得手工清。
+☠️ **删任何清单文件前先 `grep '^kind:' <file>`**：ArgoCD 按目录同步，删文件会 prune 掉里面全部对象，内嵌的
+`Namespace` 会连带删光同 ns 下别的应用的数据（PVC 的 `Prune=false` 拦不住）。反过来，退役服务时 PVC 不会自动删，得手工清。
 
-`scripts/check-manifests.py` 强制 5 条由真实事故反推的规则：**H1** Namespace/CRD 独占文件 ·
-**H2** Application 的 `path` 与 `destination` 同集群 · **H3** ReferenceGrant 声明 `v1beta1` ·
-**H4** 新增 PVC 必须有备份归属 · **H5** Namespace 必须显式写 PSA 等级（漏写 = 静默吃默认
-`privileged`）。另有 `scripts/check-embedded-scripts.py` 的 **E1**：ConfigMap 内嵌的脚本必须与
-`.py` 源一致，且 pod 模板带它的 checksum 注解。改了 `.py` 就得在 `k8s/helm/` 跑
-`just gen-embedded-scripts`，否则要么部署的是旧副本、要么 ConfigMap 变了 **pod 根本不重启**。
-规则全文 + 静态查不出、只能靠人的那几类 →
-[manifest-safety-checks.md](reference/manifest-safety-checks.md)。
-搬有状态服务照 [runbooks/stateful-service-cross-cluster-migration.md](runbooks/stateful-service-cross-cluster-migration.md) 走。
+`check-manifests.py` 强制 **H1** Namespace/CRD 独占文件 · **H2** Application 的 path/values 与 destination 同集群 ·
+**H3** ReferenceGrant 用 `v1beta1` · **H4** 新增 PVC 必须有备份归属 · **H5** Namespace 显式写 PSA 等级。
+`check-embedded-scripts.py` 的 **E1**：改了 ConfigMap 内嵌脚本的 `.py` 源，要在 `k8s/helm/` 跑 `just gen-embedded-scripts`。
+细节与静态查不出的那几类 → [manifest-safety-checks.md](reference/manifest-safety-checks.md)；
+搬有状态服务照 [stateful-service-cross-cluster-migration.md](runbooks/stateful-service-cross-cluster-migration.md)。
 
 ## Security Model
 
-纵深防御 11 层：Cloudflare WAF → ZITADEL OIDC → Vault+ESO → PSA → Kyverno → Trivy →
-kube-bench → 节点 CIS → 网络 → Tetragon → restic。逐层状态与灰度路径见
-[security.md](reference/security.md)。
+纵深防御 11 层（WAF → OIDC → Vault+ESO → PSA → Kyverno → Trivy → kube-bench → 节点 CIS → 网络 → Tetragon → restic），
+逐层状态见 [security.md](reference/security.md)。
 
-- ⚠️ **第 9 层网络基本只到「可见性」**：自建管控只有 readlist Job 的 `NetworkPolicy` 和 oracle
-  只拦 IMDS `:80` 的 CCNP（☠️ 同址 `:53` 是 VCN DNS）。集群级默认拒绝刻意延后，别当已生效。
-- 🚫 **不提交任何密钥**（gitleaks 全量扫）：放 Vault，配方现取经 env 传入（范例 `just omlx`）。
-- 🚫 **不提交任何公网 IP**（CI 强制 `check-public-ips.py`，全量跑）。节点一律用 Tailscale
-  （`100.64/10`）或内网地址；文档写 `<ORACLE_PUBLIC_IP>` 占位符，真值现取
-  `cd cloud/oracle/terraform && just tf output -raw instance_public_ip`。
-  只放行第三方 anycast DNS，豁免写行内 `public-ip-ok: <理由>`。
-- **硬约束**：homelab 控制面 `k8s-node` 是 Ryzen 5600H 热笔记本（空闲 ~60–62°C，抬温有实际代价 →
-  [homelab-host-power-thermal.md](reference/homelab-host-power-thermal.md)）。2026-08-13 起
-  集群另有 worker `k8s-worker-106`，但热约束与安全组件仍以控制面为准。
+- ⚠️ **第 9 层网络只到「可见性」**：集群级默认拒绝刻意延后，别当已生效。oracle 的 IMDS CCNP 只拦
+  `169.254.169.254:80`（☠️ 同址 `:53` 是 VCN DNS，整址封掉 = CoreDNS 转发断）。
+- 🚫 **不提交密钥**（gitleaks 全量扫）：放 Vault，配方现取经 env 传入（范例 `just omlx`）。
+- 🚫 **不提交公网 IP**（`check-public-ips.py`）：用 Tailscale 或内网地址；文档写 `<ORACLE_PUBLIC_IP>`，真值现取
+  `cd cloud/oracle/terraform && just tf output -raw instance_public_ip`；第三方 anycast DNS 写行内 `public-ip-ok: <理由>`。
+- **硬约束**：homelab 控制面是会发热的 5600H 笔记本（→ [homelab-host-power-thermal.md](reference/homelab-host-power-thermal.md)），
   所有安全组件 **fail-open + 控 CPU**。
 
 ## Storage Notes
 
-- **NFS 退役只覆盖读写型 PVC（2026-07-11）**：应用自己的数据一律 `local-path`，
-  **sqlite 应用尤其不能用 NFS**（fcntl 锁极慢）。
-  ⚠️ **但 106 已不再是"非运行时依赖"**：2026-08-16 起 `media` ns 的 5 个只读 NFS PV
-  （`media-{movie,tv,anime,music,podcast}`）挂 106 的 ZFS，且 worker `k8s-worker-106`
-  本身就是跑在 106 上的 VM，106 宕机就是少一个节点加三个媒体服务无数据，不再是
-  "只暂停备份窗口"。媒体是大文件顺序读，不踩 sqlite 那个锁坑。
-  这个例外的边界（只读 / 只媒体 / 不装 provisioner）→ [multimedia-repository-nfs-readonly.md](decisions/multimedia-repository-nfs-readonly.md)。
-- **备份**：restic CronJob 直推 106 ZFS 加密仓库（sftp）。⚠️ **是三个 Job 不是两个**：
-  homelab 控制面 03:00（`--host homelab`）· homelab worker 02:00（`--host homelab-worker`，
-  2026-08-16 新增，控制面那份读不到 worker 的 hostPath）· oracle 03:30。
-  两台 VM 另有 PVE 周备（k8s-node 在 pve、worker 在 106）。
-  ⚠️ 备份是**显式白名单**，新增有状态应用不加进去就静默不备份（H4 查的就是这个）。
-- 恢复演练 2026-07-06 通过。PVC 清单 / 迁移程序 / 备份设计 → [storage.md](reference/storage.md)。
+- 应用数据一律 `local-path`，**sqlite 绝不能上 NFS**（fcntl 锁极慢）。唯一例外是 `media` ns 的只读媒体 NFS PV，
+  挂在 106 上 → 106 宕机 = 少一个 worker 节点 + 媒体服务无数据。→ [multimedia-repository-nfs-readonly.md](decisions/multimedia-repository-nfs-readonly.md)
+- **备份**：restic CronJob 推 106 ZFS 加密仓库，⚠️ **三个 Job**（homelab 控制面、homelab worker、oracle），
+  且是**显式白名单**：新增有状态应用不加进去就静默不备份（H4 查的就是这个）。→ [storage.md](reference/storage.md)
