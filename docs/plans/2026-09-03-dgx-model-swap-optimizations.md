@@ -137,7 +137,7 @@ dgx_served_model := "qwen38-flash-next"
 真正需要 `just gen-embedded-scripts` 的只有 litellm 那份路由表（subPath 挂载 + 进程只在
 启动时读），也就是 SOP §2 反复强调的那一步。
 
-### P1-3 `just dgx-swap`：一条命令走完 SOP §1–§5
+### P1-3 `just dgx-swap`：一条命令走完 SOP §1–§5 <!-- just-ok: 本方案打算新增的配方，尚未实现 -->
 
 `--from <old> --to <new> [--dry-run]`，顺序：采集（served name / `max_model_len` /
 `kv_cache_max_concurrency` vs `--max-num-seqs` / 冷启动）→ 按新名打 4 处清单 →

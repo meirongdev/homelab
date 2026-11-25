@@ -1,6 +1,6 @@
 # Homelab 文档组织规则 (R1–R8)
 
-> Last updated: 2026-11-10
+> Last updated: 2026-11-25
 > 2026-08-14 从 [docs/README.md](README.md)（门户）拆出：门户只做导航，写文档的规则集中在本页。
 >
 > 以下 8 条是强制的。新增或改动文档前先对照，违反的按下面的处理方式修。
@@ -25,6 +25,8 @@ CI 在每次 PR 与 push to main 时跑（`.github/workflows/docs-check.yml`）�
 | R5 | 目录索引双向完整 | ✅ 脚本 |
 | R8 | 索引行与 CHANGELOG 行长度上限 + `AGENTS.md` 字节预算 | ✅ 脚本 |
 | — | 相对链接 + 非 docs 文件对 `docs/` 的引用 | ✅ 脚本 |
+| — | 链接里的 `#锚点` 指向真实存在的标题（同文件内的也查） | ✅ 脚本 |
+| — | 现状文档与 README 里写成代码的 `just <配方>` 真实存在 | ✅ 脚本 |
 | — | 非 docs README 的目录树只画真实存在的子目录 | ✅ 脚本 |
 | — | `Last updated` 不早于最后一次内容提交（R3 的时效部分）| ✅ 脚本 |
 | R1 | 目录归属 | ⚠️ 人 |
@@ -37,6 +39,15 @@ CI 在每次 PR 与 push to main 时跑（`.github/workflows/docs-check.yml`）�
 >
 > 改规则时**必须同步改 `scripts/check-docs.py`**。两边不一致的话，规则要么是摆设，
 > 要么在误伤。
+
+**锚点与 `just` 配方**（2026-11-25 加，都是「文档还在、东西没了」的静默失效）：
+
+- 锚点按 GitHub 的规则从标题生成：渲染后的文字转小写，保留字母、数字、下划线、连字符，空格变 `-`，
+  重名依次加 `-1`。标题改名后，链向它的地方会被报出来。
+- `just` 只查写成代码的命令（反引号或代码块里），认 `just <模块> <配方>`。`records/`、`decisions/`、
+  CHANGELOG 记的是历史，不查。占位写法（`just deploy-*`、`just deploy-<app>`）跳过。
+  方案里还没实现的配方、或说明「以前用过」的旧配方，在同一行写 `<!-- just-ok: 理由 -->`。
+  由来：`macbook/ansible/README.md` 写着 `just herdr`，配方却在 10-23 一次提交里被误回退，一个月没人发现。
 
 ## R1 目录归属：一篇文档只属于一类
 

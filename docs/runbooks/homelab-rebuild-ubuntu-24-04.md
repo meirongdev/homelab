@@ -8,7 +8,7 @@
 > ⚠️ **Phase 4 不要照抄**：其中的保守模式（`kubeProxyReplacement: false`、`gatewayAPI.enabled: false`）
 > 是当年为绕开那个 BPF bug 的临时手段。**标准配置是 `kubeProxyReplacement: true` + Cilium Gateway API**，
 > 见 `k8s/cilium/README.md` 与 `just deploy-cilium`。
-> Last updated: 2026-11-09
+> Last updated: 2026-11-25
 
 ## Goal
 
@@ -119,7 +119,7 @@ just plan
 just apply
 ```
 
-(Before 2026-09-09 this section used `just destroy-vm` / `just apply-vm`; those recipes no
+(Before 2026-09-09 this section used `just destroy-vm` / `just apply-vm`; those recipes no <!-- just-ok: 2026-09-09 已删除的旧配方，这里是历史说明 -->
 longer exist.)
 
 Validate the VM on Proxmox:

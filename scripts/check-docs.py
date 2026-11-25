@@ -15,7 +15,9 @@ import re
 import subprocess
 import sys
 import pathlib
+import unicodedata
 from collections import defaultdict
+from urllib.parse import unquote
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs"
@@ -276,15 +278,159 @@ def check_readme_trees():
                 fail("TREE", p, f"目录树画了不存在的 {m.group(1)}/", i)
 
 
+def gh_slug(heading):
+    """GitHub 给标题生成的锚点（github-slugger 的规则）：先按渲染后的文字取（去掉链接语法、反引号、
+    加粗/斜体的星号），转小写，只保留字母 / 组合符号 / 数字 / 连接符（含下划线）/ 空格 / 连字符，
+    空格变 `-`，不合并连续的 `-`。中文按字母保留；emoji 与 ☠️ 这类符号被丢掉。
+    ⚠️ 别手写成「去掉标点」：下划线是连接符要保留（11-25 体检脚本就因为删了 `_` 误报过一次）。"""
+    h = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", heading)
+    h = re.sub(r"<[^>]+>", "", h).replace("`", "").replace("*", "")
+    out = []
+    for ch in h.strip().lower():
+        cat = unicodedata.category(ch)
+        if ch in " -" or cat[0] in "LMN" or cat == "Pc":
+            out.append("-" if ch == " " else ch)
+    return "".join(out)
+
+
+_anchor_cache = {}
+
+
+def anchors_in(path):
+    """一篇 markdown 能被链接到的全部锚点：标题（重名依次加 -1、-2）+ 显式的 <a id/name>。代码块里的 # 不算。"""
+    key = path.resolve()
+    if key not in _anchor_cache:
+        seen, found, fence = defaultdict(int), set(), False
+        for line in path.read_text().splitlines():
+            if line.lstrip().startswith("```"):
+                fence = not fence
+                continue
+            if fence:
+                continue
+            m = re.match(r"^#{1,6}\s+(.*?)\s*#*\s*$", line)
+            if m:
+                s = gh_slug(m.group(1))
+                found.add(s if seen[s] == 0 else f"{s}-{seen[s]}")
+                seen[s] += 1
+            found.update(re.findall(r'<a\s+(?:id|name)="([^"]+)"', line))
+        _anchor_cache[key] = found
+    return _anchor_cache[key]
+
+
 def check_links(md, text):
-    """所有 docs 内的相对 markdown 链接必须解析得到。"""
+    """所有 docs 内的相对 markdown 链接必须解析得到；带 `#锚点` 的，锚点也必须真实存在。
+
+    锚点是 2026-11-25 加的：此前只查文件存在，标题一改名链接就静默失效（plans/README 指向的
+    `RULES.md#r4-状态枚举` 在 R4 改名「状态标记」后坏了不知多久）。同文件内的 `#xxx` 一起查。
+    """
     for i, line in enumerate(text.splitlines(), 1):
         for target in MD_LINK.findall(line):
-            t = target.split("#")[0]
-            if not t or t.startswith(("http", "mailto:", "#")):
+            if target.startswith(("http", "mailto:")):
                 continue
-            if not (md.parent / t).resolve().exists():
+            path_part, _, anchor = target.partition("#")
+            dest = md if not path_part else (md.parent / path_part).resolve()
+            if path_part and not dest.exists():
                 fail("LINK", md, f"死链 -> {target}", i)
+                continue
+            if anchor and dest.suffix == ".md" and dest.is_file():
+                if unquote(anchor).lower() not in anchors_in(dest):
+                    fail("ANCHOR", md, f"锚点不存在 -> {target}（目标文档里没有这个标题，多半是标题改过名）", i)
+
+
+# ── JUST ──────────────────────────────────────────────────────────────────
+# 文档里写着的 `just <配方>` 必须真实存在。2026-11-25 体检时发现 macbook/ansible/README.md 写着
+# `just herdr`，justfile 里却没有——10-23 一次提交在旧版本文件上改完整份写回，把配方回退掉了，
+# 文档照旧、命令却跑不了，一个月没人发现。
+# 只查**写成代码**的命令（反引号里 / 代码块里），不查英文行文里的 just（"not just image tags"）。
+# 不查 records/、decisions/、CHANGELOG：它们记的是历史，提到已删除的配方是正常的。
+# 豁免：同一行写 `just-ok: <理由>`（如方案里打算新增、还不存在的配方）。
+JUST_EXEMPT = "just-ok:"
+JUST_HISTORY = ("records", "decisions")
+JUST_CMD = re.compile(r"(?:^|[\s`(;|&$])just\s+((?:-[\w-]+(?:=\S+)?\s+)*)([\w][\w-]*)(?:\s+([\w][\w-]*))?")
+RECIPE_LINE = re.compile(r"^@?([A-Za-z_][\w-]*)(?:\s[^\n]*)?:(?!=)")
+
+
+def justfile_recipes(jf):
+    """一个 justfile 里的配方名与 alias（纯文本解析，CI 上不需要装 just）。"""
+    names = set()
+    for line in jf.read_text().splitlines():
+        # `import 'x'` / `mod x` / `set` / `export` 是语句；但 `import` 也可以是配方名
+        # （cloud/oracle/terraform 就有 `import vcn igw …:`），只在后面跟路径引号时才当语句跳过。
+        if not line or line[0] in " \t#[" or re.match(r"^(set|mod|export)\b|^import\??\s+['\"]", line):
+            continue
+        m = re.match(r"^alias\s+([\w-]+)\s*:=", line)
+        if m:
+            names.add(m.group(1))
+            continue
+        if re.match(r"^[\w-]+\s*:=", line):
+            continue  # 变量赋值
+        m = RECIPE_LINE.match(line)
+        if m:
+            names.add(m.group(1))
+    return names
+
+
+def load_recipes():
+    """(全部配方名, {模块名: 该模块的配方})。模块来自根 justfile 的 `mod <名> '<路径>'`。"""
+    every = set()
+    for jf in ROOT.rglob("justfile"):
+        rel = jf.relative_to(ROOT).parts
+        if rel[0] in (".git",) or ".terraform" in rel or jf.resolve().is_relative_to(VENDORED):
+            continue
+        every |= justfile_recipes(jf)
+    modules = {}
+    root_jf = ROOT / "justfile"
+    if root_jf.exists():
+        for m in re.finditer(r"^mod\??\s+([\w-]+)(?:\s+'([^']+)')?", root_jf.read_text(), re.M):
+            p = ROOT / (m.group(2) or m.group(1))
+            jf = p if p.is_file() else p / "justfile"
+            if jf.exists():
+                modules[m.group(1)] = justfile_recipes(jf)
+    return every, modules
+
+
+def code_spans(text):
+    """(行号, 代码文本)：代码块整行 + 行内反引号片段。"""
+    fence = False
+    for i, line in enumerate(text.splitlines(), 1):
+        if line.lstrip().startswith("```"):
+            fence = not fence
+            continue
+        if fence:
+            yield i, line, line
+        else:
+            for span in re.findall(r"`([^`\n]+)`", line):
+                yield i, span, line
+
+
+def check_just_refs(recipes):
+    every, modules = recipes
+    targets = [p for p in DOCS.rglob("*.md")
+               if p.relative_to(DOCS).parts[0] not in JUST_HISTORY and p.name != "CHANGELOG.md"]
+    for p in ROOT.rglob("*.md"):
+        rel = p.relative_to(ROOT).parts
+        if rel[0] in (".git", "docs") or ".terraform" in rel or p.resolve().is_relative_to(VENDORED):
+            continue
+        targets.append(p)
+    for md in targets:
+        if md.is_symlink():
+            continue  # CLAUDE.md / AGENTS.md 等软链只查实体一次
+        for i, code, full in code_spans(md.read_text()):
+            if JUST_EXEMPT in full:
+                continue
+            if code is full and "#" in code:
+                code = re.split(r"(?:^|\s)#", code, maxsplit=1)[0]  # 代码块里 # 之后是注释（"# not just image tags"）
+            for m in JUST_CMD.finditer(code):
+                first, second = m.group(2), m.group(3)
+                nxt = code[m.end(2):m.end(2) + 1]
+                # 占位写法：`just deploy-*`、`just deploy-<app>`、`just deploy-X`（本仓库配方名全小写）
+                if nxt in ("*", "<", "{", "…", "[") or re.search(r"[A-Z]", first):
+                    continue
+                if first in modules:
+                    if second and second not in modules[first]:
+                        fail("JUST", md, f"`just {first} {second}`：模块 {first} 里没有这个配方", i)
+                elif first not in every:
+                    fail("JUST", md, f"`just {first}`：仓库里没有任何 justfile 定义这个配方（改名/误删？计划中的写 `{JUST_EXEMPT} 理由`）", i)
 
 
 def check_external_refs():
@@ -376,6 +522,8 @@ RULES_COVERED = [
     ("R5", "目录 README 索引双向完整", "✅ 自动"),
     ("R8", f"索引行与 CHANGELOG 行 ≤{INDEX_ROW_MAX} 字符 + AGENTS.md ≤{AGENTS_MAX_BYTES} 字节", "✅ 自动"),
     ("--", "docs 内相对链接 + 非 docs 文件对 docs/ 的引用", "✅ 自动"),
+    ("--", "链接里的 `#锚点` 指向真实存在的标题（同文件内的也查）", "✅ 自动"),
+    ("--", "现状文档与 README 里写成代码的 `just <配方>` 真实存在（records/decisions/CHANGELOG 不查）", "✅ 自动"),
     ("--", "非 docs README 的目录树只画真实存在的子目录", "✅ 自动"),
     ("--", "`Last updated:` 不早于最后一次内容提交（浅克隆时跳过）", "✅ 自动"),
     ("R1", "目录归属（这份文档该放哪）", "⚠️ 需人判断"),
@@ -407,6 +555,7 @@ def main():
     check_agents_budget()
     check_readme_trees()
     check_external_refs()
+    check_just_refs(load_recipes())
     check_last_updated()
 
     total = sum(len(v) for v in violations.values())
