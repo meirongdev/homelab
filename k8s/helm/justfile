@@ -645,7 +645,12 @@ homelab-recover:
         echo "  ✓ all 12 ExternalSecrets SecretSynced"
     fi
     echo ""
-    kubectl --context "$ctx" get applications -n {{argocd_ns}} 2>/dev/null
+    # ☠️ ArgoCD 控制面 2026-08-02 起在 oracle-k3s，homelab 上根本没有 applications CRD：原来这行
+    #   `kubectl --context "$ctx" get applications` 在 set -e 下让整个配方在**做完全部恢复之后**报 exit 1
+    #   （2026-11-25 k8s-node 换内核重启时撞上）。改成到 oracle 上查、只列 homelab 的 App；读不到也不算失败。
+    kubectl --context oracle-k3s -n {{argocd_ns}} get applications -o json 2>/dev/null \
+      | jq -r '.items[] | select(.spec.destination.server=="https://100.94.186.7:6443") | "  \(.metadata.name)\t\(.status.sync.status)/\(.status.health.status)"' \
+      || echo "  (读不到 oracle 上的 ArgoCD 状态，跳过)"
     echo ""
     echo "✅ homelab-recover done"
 
