@@ -51,7 +51,7 @@ Internet → Cloudflare DNS → Cloudflare Tunnel(cloudflared) → Cilium Gatewa
 |------|------|------|
 | CNI | Cilium (eBPF + VXLAN)，双集群统一；从 Flannel 迁入 | [`decisions/cilium-as-cni.md`](decisions/cilium-as-cni.md) |
 | Ingress | Cilium Gateway API (非 Traefik) | [`decisions/gateway-controller-evaluation.md`](decisions/gateway-controller-evaluation.md) |
-| 镜像更新 | Renovate 自托管，只开 PR 不合并（digest 刷新每天、版本升级每周一）；🚧 待配 `RENOVATE_TOKEN`。ArgoCD Image Updater 已于 2026-08-03 退役 | [`decisions/trivy-cve-automation.md`](decisions/trivy-cve-automation.md) |
+| 镜像更新 | 没有自动更新：版本升级与厂商重建后的 digest 跟进都是手动改清单再 push（Renovate 2026-11-25 撤销，没在用；ArgoCD Image Updater 2026-08-03 退役） | [`decisions/trivy-cve-automation.md`](decisions/trivy-cve-automation.md) |
 | 告警投递 | Alertmanager 原生 telegramConfigs (Gotify 已退役) | [`decisions/alerting-telegram-migration.md`](decisions/alerting-telegram-migration.md) |
 | 子域名 DNS | external-dns (HTTPRoute 声明式，取代 Terraform 手管) | [`decisions/external-dns-adoption.md`](decisions/external-dns-adoption.md) |
 | 成本/右尺寸 | OpenCost 走 collector 旁路 + KRR 窄口径采集 | [`decisions/opencost-krr-data-sources.md`](decisions/opencost-krr-data-sources.md) |

@@ -170,7 +170,7 @@ Service → Pod ────── 网络由 Cilium eBPF 承载；跨集群走 C
 
 ## 5. 故意没有的东西
 
-Cert-Manager（TLS 在边缘终结）· Crossplane · Vault HA · Thanos/Mimir · 镜像自动合并（Renovate 只开 PR）·
+Cert-Manager（TLS 在边缘终结）· Crossplane · Vault HA · Thanos/Mimir · 镜像自动更新（Renovate 2026-11-25 撤销，没在用）·
 集群级网络默认拒绝（延后不是取消）。理由与重评条件在 [ROADMAP.md「不做 / 已取消」](../ROADMAP.md#不做--已取消)。
 
 ## 6. 真相源地图（配置和版本钉在哪）

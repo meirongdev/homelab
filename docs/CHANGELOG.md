@@ -149,6 +149,7 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-11-24 | **GitHub Actions 升 Node 24**：checkout v7 / setup-uv v10.3.3（v8 起无浮动大版本 tag）/ setup-terraform v4 / docker 系 v4–v7，setup-uv 关缓存；每次运行的弃用警告清零 |
 | 2026-11-24 | **oracle 换 7.0 内核**：7.0.0-1016 带 09-01 AppArmor 崩溃的上游修复（CVE-2026-72462）；panic_on_oops 守卫经真实重启验证（kubelet 就绪后 +2s 写回 1）。Falco 0.44.1 加载 BPF 被 memcg OOM，先修为 0.45.2 + 1Gi ([记录](records/2026-11-24-oracle-kernel-7-falco-to-tetragon.md)) |
 | 2026-11-24 | **运行时检测两集群统一 Tetragon，Falco 退役**：策略与公共 values 进共用树 `security/tetragon/`；告警两集群化（promtool 11 组、12 处变异全杀）；移植无文件执行 / 攻击工具两条检测；oracle 独有负载与 11-20 起每晚的夜备误报精确放行 ([ADR](decisions/runtime-detection-tetragon-both-clusters.md)) |
+| 2026-11-25 | **撤掉 Renovate**：用户确认没在用（从没配过 `RENOVATE_TOKEN`，workflow 每天跳过）。删 workflow 与 `.github/renovate.json5`，文档改为「镜像与 digest 手动更新」 ([决策](decisions/trivy-cve-automation.md)) |
 
 ### 审计与清理（历史）
 

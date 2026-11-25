@@ -116,9 +116,9 @@ Namespace 被 prune 会级联删光 ns 下一切，`Prune=false` 拦不住（[�
 - **`multica`**: OCI chart（坑 1）。库在共享的 `databases/apps-pg`（`postgres.external.enabled: true`）；
   chart 生成的 `multica-backend-uploads` PVC，CI 的 H4 看不见（备份见 [storage.md](storage.md)）。执行任务的
   daemon 在 M2 MacBook 上，离线时集群侧一切正常（[runbook](../runbooks/multica-install.md)）。
-- 镜像不会自动进集群：Renovate（自托管，2026-11-06）只开 PR，合并 push 后才经 ArgoCD 同步；
-  `argocd-image-updater` 已退役（[存档](../decisions/argocd-image-updater.md)）。Renovate 的范围、
-  以及只钉 digest 的引用为什么默认不管，见 [决策](../decisions/trivy-cve-automation.md)。
+- 镜像不会自动进集群：没有任何自动更新，升级或跟进厂商重建的 digest 都是手动改清单、push 后经 ArgoCD 同步。
+  `argocd-image-updater` 已退役（[存档](../decisions/argocd-image-updater.md)），自托管 Renovate 2026-11-25 撤销
+  （没在用，[决策](../decisions/trivy-cve-automation.md)）。
 
 ## Prune 与 bootstrap 依赖
 
