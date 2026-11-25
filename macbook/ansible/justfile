@@ -79,6 +79,14 @@ omlx-metrics target="omlx":
 macmon target="macmon":
     ansible-playbook playbooks/macmon.yaml --limit '{{target}}'
 
+# M5 把任务派给 Studio 的那一端：开机拉起 herdr server 的 LaunchAgent + claude/codex integration。
+# LaunchAgent 只是一次性启动器，重跑/改 plist 不会结束 Studio 上正在跑的 pane。
+# 部署/确认 herdr server 开机即在（仅 herdr 组 = Studio，无需 sudo，幂等）
+# 2026-11-25 恢复：1ab7113（mac-sync）在旧版本文件上改完整份写回，把本配方连同 site.yaml 的 import、
+# packages.yaml 的 glab 一起回退掉了，README 却一直写着 `just herdr`。
+herdr target="herdr":
+    ansible-playbook playbooks/herdr.yaml --limit '{{target}}'
+
 # OrbStack 容器/虚拟化环境（Homebrew cask + 无头免密配置 + 开机自启 + 启动服务；三台，无需 sudo，幂等）
 orbstack target="base":
     ansible-playbook playbooks/orbstack.yaml --limit '{{target}}'
