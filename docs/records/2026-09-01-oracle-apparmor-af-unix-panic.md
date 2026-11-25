@@ -317,12 +317,17 @@ oops 会照旧重启并触发 `NodeRebooted`，信号没丢。所以告警里**�
   表象（按修复描述匹配，没读 diff）。Ubuntu 把它带进了 `7.0.0-1016-oracle`（`6.17.0-1020` 没有），oracle 11-24
   重启换上（[records/2026-11-24](2026-11-24-oracle-kernel-7-falco-to-tetragon.md)）。⚠️ 它自带的后遗症修复
   1cdda838e847（sleep-in-atomic）不在 7.0.0-1016 里，重启后 dmesg 干净。下面那份上游报告**不用再提交**。
-  撤掉 nscd 豁免、把 `panic_on_oops` 改回默认、撤导出器，是另一个决定，**还没做**，先观察。
+  **2026-11-25 决定：三样都保持**（nscd 豁免、`panic_on_oops=0` + 守卫、内核健康导出器）。单节点集群上
+  `panic_on_oops=0` 把一次 oops 的代价从「整机 10 秒后重启」降到「死一个线程」，`KernelOopsOccurred` 照样看得见；
+  nscd 关着的代价只是每次检查多一次 DNS 查询。修复是按描述匹配的、后遗症修复也不在这个内核里，撤掉的收益很小。
+  复查触发：要从 oracle 内核轨道换走，或这几样绕行本身出了问题。
   （原文：）**内核 bug 本身没修，也修不了**。上游主线仍无 `path->mnt` 保护。我们只是让
   本集群不再走到那条路径；postgres 那条路径理论上仍暴露，现在至少**出事能被看见**
   （`KernelOopsOccurred`）。上游修掉之后，可以删掉 provisioner 里那段 nscd 豁免、
   把 `panic_on_oops` 改回默认、并撤掉这套导出器。
-- ☠️ **homelab 的 `k8s-node` 同样暴露，未处理**。实测它跑 `7.0.0-30-generic`，
+- **homelab 的 `k8s-node`：2026-11-25 已换上带修复的 `7.0.0-43-generic`**（同一个上游修复，已核 changelog），
+  重启后 taint 0、dmesg 干净，`panic_on_oops` 仍是发行版默认 1（出事会重启、`NodeRebooted` 必响）。以下是当时的原文：
+  ☠️ **homelab 的 `k8s-node` 同样暴露，未处理**。实测它跑 `7.0.0-30-generic`，
   `sudo grep -w unix_fs_perm /boot/System.map-$(uname -r)` **有命中**，
   且 24 个 AppArmor profile 在 enforce、`panic_on_oops=1`。
   只是它上面没有 nscd 那种「libuv 反复连带路径 unix 套接字」的负载，从没被踩到。

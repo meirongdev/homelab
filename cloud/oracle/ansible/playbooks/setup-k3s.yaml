@@ -233,7 +233,7 @@
     # 且 v6.17 与上游 master 分支的那一行**完全相同** —— 补丁至今未进上游。
     # (terminology-ok: master 此处指 torvalds/linux 的 git 分支名，非控制面节点)
     # ✅ 2026-11-24 更新：上游已修（b1aea2c19607，CVE-2026-72462），7.0.0-1016-oracle 带着它，oracle 同日换上。
-    #    本条与 nscd 豁免、内核健康导出器暂留，撤除要另行决定（见下面那份复盘的「遗留」）。
+    #    2026-11-25 决定本条、nscd 豁免、内核健康导出器都**保持**（理由见下面那份复盘「遗留」第一条）。
     # 根治只有两条：等上游修，或给触发方 pod 设 AppArmor Unconfined
     # （`unix_fs_perm` 开头就是 `if (unconfined(label)) return 0`，不受约束即不走该路径）。
     # 完整取证方法与推理链 → docs/records/2026-09-01-oracle-apparmor-af-unix-panic.md
