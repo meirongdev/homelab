@@ -26,7 +26,7 @@ metadata:
   labels:
     # kube-bench 需 hostPID + hostPath 检视节点 → 显式 privileged 豁免
     # warn/audit 仍记 baseline（2026-08-10 从 privileged 改回）：三档全 privileged 等于
-    # **连审计线索都没有**，与 monitoring/tetragon/backup 的口径相反，也和 security.md 矩阵里
+    # **连审计线索都没有**，与 monitoring/tetragon/backup 的口径相反，也和 docs/reference/admission-control.md 等级矩阵里
     # 「privileged（显式豁免, warn/audit 仍记 baseline）」那句直接矛盾。
     # 代价是每周那个 Job 会打一条已知的 baseline warning —— 换来的是**新混进来的**特权 Pod
     # 能被看见，monitoring/tetragon 早就在付同样的代价。

@@ -42,7 +42,7 @@ resources:
 #   jobs-sg-retech     — 重放归档重算规则层技术栈（job_tech 的 source='rule'）
 # 两者都**默认 dry-run**、`--apply` 才写，都要挂 jobs-sg-data 到 /data（可写）。
 # 之所以必须进镜像：要 replay 的归档在节点 local-path 卷上、几百 MB，
-# 「拷到本地跑」不是真选项。用法见 docs/reference/jobs-sg.md。
+# 「拷到本地跑」不是真选项。用法见 docs/reference/jobs-sg-classification.md。
 #
 # eaf5db1（2026-08-08）修的是 reclassify 的缺口指标口径。
 # 线上首次 dry-run 报「archived but not in jobs.db 190418」，看着像丢了 19 万条，
@@ -58,7 +58,7 @@ resources:
 # local-path 卷上、几百 MB，"拷到本地跑"不是真选项。
 # **默认 dry-run**，`--apply` 才写；只写派生列，生命周期四列（closed_at /
 # last_seen_at / first_seen_at / miss_count）绝不触碰。用法见
-# docs/reference/jobs-sg.md 的「重放归档重算分类」。
+# docs/reference/jobs-sg-classification.md 的「重放归档重算分类」。
 #
 # 其前身 730c6f3（2026-08-08）：写事务撞锁会重跑，不再把整轮标成 partial。
 # 一次手动 ingest 里 13600 条只有 1 条 upsert 撞上 SQLITE_BUSY（对手是**只读**的
@@ -114,7 +114,7 @@ resources:
 #
 # 其前身 472aaf5 加了 LLM_THINKING 开关。清单里**不设** LLM_THINKING
 # （= 默认开 reasoning，保精度）；啃积压走一次性 Job，
-# 见 docs/reference/jobs-sg.md 的「一次性积压回填」。
+# 见 docs/reference/jobs-sg-enrich.md 的「一次性积压回填」。
 #
 # 其前身 a17d39d 修的是超时：更早的镜像硬编码 60s，而真实调用要 66.5s
 # → 几乎每条都超时 fail-open，排空只有 2.1 条/分钟。
@@ -157,7 +157,7 @@ images:
     #      ⚠️ 代价：手工 INSERT 进 tech_taxonomy 的别名会被下次 ingest/enrich 清掉。
     #   ③ enrich 积压跳过做过的岗位 → 改别名修不了历史。新增第 6 个二进制
     #      `jobs-sg-retech`（运维工具，无 CronJob）重放规则层，默认 dry-run。
-    # ⚠️ **只换 digest 不修历史**，要两步收尾（都在 docs/reference/jobs-sg.md）：
+    # ⚠️ **只换 digest 不修历史**，要两步收尾（都在 docs/reference/jobs-sg-classification.md）：
     #   1. `jobs-sg-retech --apply` —— 已富化的 6749 条岗位仍带旧的假阳性行
     #      （实测 811 条要改）。`/`、`/tech`、`/pay` 随请求渲染，跑完立即正确。
     #   2. **`report --week` 逐周重算** —— `weekly_metric` 是物化的，retech 不碰。

@@ -1,6 +1,6 @@
 # Open Notebook — AI 研读知识库（架构事实）
 
-> Last updated: 2026-11-16
+> Last updated: 2026-11-25
 > Status: 生效事实
 > Scope: Open Notebook（NotebookLM 自托管替代）在 homelab 集群的部署形态、模型接线、
 > 配置真相源地图、备份口径，本文是 source of truth。
@@ -43,7 +43,7 @@ personal-services 的网络策略随之只放行 litellm:4000，不再给 DGX、
 
 Mac 那四个别名在网关里按 OMLX 的模型 ID **原名**建（litellm.yaml「open-notebook 专用」）：这里的模型按名字
 绑在凭据上、API 没有 PUT，改名得在 UI 删了重建，所以是网关迁就这边。上游模型的事实（served name / 端点 /
-ctx / 冷启动 / 回滚）以 [litellm-gateway.md](litellm-gateway.md) 的「DGX 主力栈」为准。
+ctx / 冷启动 / 回滚）以 [litellm-upstreams.md](litellm-upstreams.md) 的「DGX 主力栈」为准。
 
 - ☠️ 模型名必须同时在网关的 model_list 里、且在 `open-notebook` 那把 key 的白名单里（[litellm-gateway.md](litellm-gateway.md) 坑 A）。
   写错当场 400，不再像直连 SGLang 时那样静默回显。

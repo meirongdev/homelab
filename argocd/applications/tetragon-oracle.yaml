@@ -8,7 +8,7 @@ metadata:
 spec:
   project: oracle-k3s
   # 2026-11-24 起 oracle 的运行时检测由 Falco 换成 Tetragon（两集群统一），取舍见
-  # docs/reference/security.md §8.5。与 homelab 的 tetragon App 一一对应：共用 values 在前、集群 values 在后。
+  # docs/reference/tetragon-runtime-detection.md。与 homelab 的 tetragon App 一一对应：共用 values 在前、集群 values 在后。
   sources:
     # 与 homelab 的 tetragon App 必须同版本（check-version-pairs.py V1 强制）。
     - repoURL: https://helm.cilium.io/

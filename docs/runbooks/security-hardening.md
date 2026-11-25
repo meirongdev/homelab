@@ -60,7 +60,7 @@ git push                                               # 清单内的 ns：标�
 ```
 
 **两条下发路径，按「ns 是谁建的」分**（等级矩阵的唯一真相源在
-[reference/security.md §5.1](../reference/security.md)，这里不重复维护清单）：
+[reference/admission-control.md §1](../reference/admission-control.md)，这里不重复维护清单）：
 
 | ns 由谁创建 | 谁打标签 | 兜底 |
 |---|---|---|

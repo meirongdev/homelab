@@ -12,7 +12,7 @@
 #
 # 为何选 Tetragon：Cilium 原生（两集群的 CNI 本来就是 Cilium，版本节奏和内核兼容性跟着同一个
 # 升级闸门走），**内核态(eBPF)过滤**只把命中事件上报用户态，远比 Falco 用户态逐 syscall 处理省 CPU。
-# 取舍见 docs/reference/security.md §8.5。
+# 取舍见 docs/reference/tetragon-runtime-detection.md。
 #
 # 范围：默认进程可见性（process exec/exit 由 export-stdout 容器打到 stdout → 各集群 OTel → oracle 上的
 # Loki）+ Prometheus 指标 + 两条观察版 TracingPolicy（security/tetragon/policies/，独立 App）。

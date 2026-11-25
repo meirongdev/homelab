@@ -29,7 +29,7 @@
 | 2 | 身份 | ZITADEL OIDC + GitHub 联邦 | ✅ 生产 | `zitadel/`, 各 app values | oracle-k3s（IdP） |
 | 3 | 密钥 | Vault + ESO + 健康告警 | ✅ 生产 | `k8s/helm/values/vault-*`, `eso-alerts.yaml` | 双 |
 | 4 | 准入：Pod 基线 | Pod Security Admission | ✅ 生产 | `just harden-psa` / ns 清单 | 双 |
-| 5 | 准入：策略即代码 | Kyverno（2 Audit + 2 Enforce，§5.2）| ✅ 生产 | `values/kyverno.yaml`, `manifests/kyverno-policies/` | homelab（oracle 无引擎，§11） |
+| 5 | 准入：策略即代码 | Kyverno（2 Audit + 2 Enforce，§5）| ✅ 生产 | `values/kyverno.yaml`, `manifests/kyverno-policies/` | homelab（oracle 无引擎，§11） |
 | 6 | 供应链/CVE | Trivy Operator（运行中镜像）；镜像与 digest 更新手动（Renovate 2026-11-25 撤销） | ✅ 生产 | 两集群各自的 `values/trivy-operator.yaml` | 双 |
 | 7 | CIS 合规 | kube-bench（周巡检，钉 control-plane；worker node 级未覆盖，有意接受） | ✅ 生产 | `manifests/kube-bench/kube-bench.yaml` | homelab |
 | 8 | 节点加固 | k3s `protect-kernel-defaults` + sysctl | ✅ 生效（两节点 k3s 都在配置之后重启过，2026-10-28 核） | `k8s/ansible/playbooks/setup-k3s.yaml` | homelab |
@@ -68,63 +68,14 @@
 
 ## 5. 准入管控 (Admission)
 
-### 5.1 Pod Security Admission（基线地板，永远在线）
-- 内置准入，零运行时开销，Kyverno 宕了也生效。只在 Pod 创建/更新时评估、**不杀已运行 Pod**：翻标签当下总是「看着没事」，代价到下一次 Pod 重建才兑现。
-- **下发按「ns 是谁建的」分两条路**：
+- **PSA 是地板**（双集群）：内置、零开销、Kyverno 宕了也生效；只在 Pod 创建/更新时评估，**不杀已运行 Pod**。
+  仓库清单建的 ns 由 ArgoCD 打标签（H5 兜底），chart / k3s 自建的 ns 由 `just harden-psa` 打、`just psa-check` 兜底。
+- **Kyverno 只在 homelab**：4 条 CEL ValidatingPolicy，`disallow-latest-tag`、`require-requests-limits` 为 Deny，
+  `restrict-image-registries`、`require-probes` 为 Audit；全部 fail-open，Deny 的实际语义是「controller 存活期间强制」。
+  🚧 oracle 没有策略引擎（§11）。
+- **资源护栏**：LimitRange 按 ns 逐个铺（不是全集群），ResourceQuota 只限对象数量。
 
-  | ns 由谁创建 | 谁打标签 | 兜底 |
-  |---|---|---|
-  | 仓库清单（`*/namespace.yaml`） | ArgoCD | CI 的 H5：漏写等级直接失败 |
-  | Helm chart / k3s 自建（`kube-system`、`external-secrets`、`cnpg-system`、`trivy-system`、`default`…） | `just harden-psa`（列表在 `k8s/helm/justfile`、`cloud/oracle/justfile`） | `just psa-check`：有 Pod 无标签 → 非零退出 |
-
-  ☠️ 别给第二类补 Namespace 清单：等于把 ns 交给 ArgoCD prune（[2026-08-03 级联删除](../records/2026-08-03-namespace-prune-cascade.md)的成因）。代价是命令式标签不随 ns 重建复活，由 `psa-check` 兜底。⚠️ 一个 ns 只能有一个写者：清单管的 ns（如 `kube-bench`）不得再进 `psa_*` 列表。
-
-- **等级矩阵**（最近一次对 live 核对：2026-11-18，两集群逐 ns 全量比对，与下表一致）：
-
-  | enforce | namespace |
-  |---------|-----------|
-  | `baseline` | default, vault, personal-services, cloudflare, external-secrets, kyverno, external-dns, opencost, media, litellm, databases（homelab；官方 postgres 镜像先以 root 建/chown 数据目录再 gosu 降权，restricted 会挡住）；argocd, cloudflare, external-dns, homepage, personal-services, rss-system, opencost, default, external-secrets, cnpg-system（oracle） |
-  | `restricted` | jobs-sg（homelab）；databases（oracle，CNPG `apps-pg`）· zitadel（oracle，SSO + 身份库 zitadel-pg） |
-  | `privileged`（显式豁免, warn/audit 仍记 baseline） | kube-system, monitoring, trivy-system, tetragon, kube-bench, backup（homelab）；kube-system, monitoring, trivy-system, tetragon, backup（oracle） |
-
-  只剩 `cilium-secrets` / `kube-node-lease` / `kube-public` 无标签：它们不跑 Pod，`psa-check` 据此放行（判据是「有没有 Pod」，不维护会漂的白名单）。
-  一处不对称值得记着：oracle 的 `argocd` / `opencost` 是 `enforce=baseline` 而 `warn=restricted`（比 enforce 高一档的预演，warn 只记事件不阻断），对账时别当成标签写错。
-
-- ⚠️ `trivy-system` 两集群都是 `privileged`，别照 dry-run 的干净结果降档：node-collector 是挂 `/var/lib/etcd` 等 hostPath 的周期 Job，dry-run 时不在场；降档的症状是合规扫描静默停更。
-- ⚠️ `zitadel-pg` 在 `zitadel` ns（`cloud/oracle/manifests/zitadel/zitadel-pg-cluster.yaml`），不在 `databases`；`databases` 只承载 `apps-pg`。
-- ☠️ `zitadel` ns 的 restricted 依赖 [`zitadel.yaml`](../../cloud/oracle/manifests/zitadel/zitadel.yaml) `valuesContent` 里的 `securityContext`/`podSecurityContext`（chart 默认缺 `allowPrivilegeEscalation:false` / `capabilities.drop[ALL]` / `seccompProfile`）。删了运行中 Pod 无异样，下次 helm upgrade 时 `zitadel-init`/`zitadel-setup` Job 被拒，升级卡在 DB 迁移中途。收紧任何 ns 都先补 securityContext 并复核，再翻 enforce（H5 由来见 [manifest-safety-checks.md](manifest-safety-checks.md)）。
-- **收紧前先用 dry-run 问准入自己**，PSA 会列出现存违规 Pod；它只看当下存在的 Pod，周期 Job 不在场时干净不等于安全：
-
-  ```bash
-  kubectl --context oracle-k3s label ns <ns> \
-      pod-security.kubernetes.io/enforce=restricted --overwrite --dry-run=server
-  ```
-- 不做全局 `restricted`（monitoring 的 grafana 跑 root），按 ns 逐个上。
-
-### 5.2 Kyverno（策略即代码，homelab）
-- 拆分 controller 各 `replicas:1`、`backgroundScanInterval:24h`、**所有策略 `failurePolicy:Ignore`（fail-open）**：fail-closed 时 Kyverno 起不来全集群就无法调度，与恢复路径冲突。
-- ☠️ 代价要说全：admission-controller 单副本、无反亲和、`priorityClassName:bulk`（内存压力下主动可驱逐），叠加 `failurePolicy:Ignore` 后，**`validationActions:[Deny]` 的实际语义是「该 controller 存活期间强制」**——重启/升级/被驱逐的窗口里新建 Pod 一律放行，且没有任何「这段时间没校验」的信号。机制级地板只有 PSA（§5.1）。
-- **4 条 ValidatingPolicy**（`policies.kyverno.io/v1`，CEL；2026-11-19 由 legacy ClusterPolicy 迁入；最近对 live 核对：2026-11-19）：
-
-  | 策略 | Action | 说明 |
-  |------|--------|------|
-  | disallow-latest-tag | **Deny** | digest-aware（只拦 `:latest`）；运行中工作负载零 `:latest`，零阻断 |
-  | require-requests-limits | **Deny**（2026-11-18 提升） | 提升依据见下条方法论：11 条违规**全在 kube-system**，而它整 ns 被排除 → 受管控 ns 违规为 0，提升当下零新增阻断。⚠️ 此后 `cloudflare`/`databases`/`litellm`/`opencost`（无 LimitRange，§5.3）里任何不声明 resources 的 Pod 都会被拒 |
-  | restrict-image-registries | Audit（长期） | 实测 91 条违规里**没有一个非可信来源**：11 个唯一镜像串只是省略了 `docker.io/` 前缀（隐式 docker.io，本就在白名单内，其中 10 个还是 digest 固定的），另两个是白名单确实漏了 `reg.kyverno.io`（Kyverno 官方源，只在 kyverno ns，不受准入管控，只污染后台报告）与 `mirror.gcr.io`。即它校验的是镜像串写法而非来源可信度，故长期保持 Audit；真正的供应链缺口在别处——digest 固定率不足一半（2026-11-18 业务容器 35/93），而 `mirror.gcr.io` 正是「无认证 Hub 透明镜像 + 不固定 digest」两个弱条件叠加。要收紧应新增一条要求 digest 固定的规则，而不是放宽本条 |
-  | require-probes | Audit | 失败大头是 Job/CronJob（合理无 probe）+ 基础设施，Enforce 会误伤批处理 |
-
-- **Audit→Deny 的分母是「本 webhook 真正 gate 的 ns」，不是 `polr` 原始计数**：原始计数同时混入了被排除的 `kube-system`/`kyverno`、0 副本历史 ReplicaSet 与一次性 Job，直接看既虚高又可能指向错误的 ns。正确做法是按规则聚合后剔除非 gate ns。现值（2026-11-18）：`registries` 91（受管控 68）、`readiness-probe` 18（受管控 13）、`requests-limits` 11（受管控 **0**）、`latest-tag` 0。Deny 只作用于新建 Pod。2026-11-19 迁 CEL 后 `require-requests-limits` 的 namespaceSelector 连后台扫描一起排除 kube-system，报告里不再有那 11 条。
-- ⚠️ **豁免通道当前是关的**：admission-controller 带 `--enablePolicyException=false`，而 PolicyException 的 CRD（`kyverno.io/v2` 与 `policies.kyverno.io/v1`）都 served —— 今天创建例外对象会被静默收下、不生效。现有 2 条 Deny 都零违规所以不挡路，但要给改不动的上游 chart（jellyfin/navidrome 这类）提 Deny，得先实测例外 API 真的生效、在 chart 里怎么打开（v1.20 起 legacy 的 `kyverno.io` PolicyException 随 legacy 执行一起移除，只有 `policies.kyverno.io/v1` 那套有意义）。
-- 系统 ns（CNI/控制面绝不 gate）：准入侧由 configmap 的 webhook namespaceSelector 排除 kube-system/kyverno，两条 Deny 策略另在自己的 `namespaceSelector` 里显式写了 kube-system/kube-public/kube-node-lease/kyverno，这样后台扫描也一致。ValidatingPolicy 不回填服务端默认字段，App 不再需要 `ignoreDifferences`。
-- ✅ **legacy `kyverno.io` 策略类型已清零**（2026-11-19）：Kyverno v1.20 源码里已删掉 legacy 准入/后台/报告执行路径，且 chart 3.10 在集群里还有 legacy 策略时拒绝升级，所以升级前必须迁完。迁移要点（语义对应表在各策略文件头注释里）：① `objectSelector` 只在 webhook 层生效，**后台扫描不认**，要排除某类对象必须再写 `matchConditions`（`require-probes` 排除 Job Pod 就栽过：并跑对比时新版多出 25 个 CronJob Pod 的恒定误报）；② 迁移用**并跑 + 按资源逐条对比两个 source 的 PolicyReport**（`source=kyverno` vs `KyvernoValidatingPolicy`），不看 READY；③ 新写策略一律 `policies.kyverno.io/v1`，别再加 ClusterPolicy。
-- 🚧 **oracle-k3s 没有策略引擎**：实测那边只有 CNPG/ESO 的 CRD schema 校验 webhook + PSA，`:latest`、无 requests、任意 registry 装进 oracle 不留任何记录。而它承载 GitOps 控制面 + ZITADEL + 生产 PG。不值得为它再跑 4 个 controller，候选做法是把 `disallow-latest-tag` 用原生 ValidatingAdmissionPolicy（CEL，v1.35 已 GA）单条装过去——零常驻成本，见 §11。
-
-### 5.3 资源护栏：LimitRange + ResourceQuota
-- **LimitRange**：`manifests/namespace-guardrails/namespace-guardrails.yaml`（App `namespace-guardrails`）给轻量应用 ns（external-secrets/vault/default；zitadel、argocd 已迁去 oracle）注入默认 `requests`(cpu25m/mem64Mi) + `limits.memory` 1Gi（宽松，避免 request>limit 被拒；不设 cpu limit，避免节流）。jobs-sg/media/personal-services 用各自清单里的 LimitRange。
-- 作用：未声明资源的容器不再无界；LimitRanger 先于 Kyverno 注入默认值，新 Pod 自动满足 require-requests-limits。monitoring/kube-system 刻意不加，避免拒绝风险。
-- ⚠️ **覆盖是按 ns 逐个铺的，不是全集群**：实测（2026-11-18）有 LimitRange 的只有 default/external-secrets/vault（guardrails）+ jobs-sg/media/personal-services（自带）6 个。`cloudflare`、`databases`、`litellm`、`opencost` 没有——那 4 个 ns 的 requests/limits 全靠清单自己写，由 §5.2 的 Enforce 拦住。新 ns 要不要加，先看这张覆盖表。
-- **ResourceQuota 是另一条独立的线**，只限**对象数量**、不限 cpu/mem，别和 LimitRange 混为一谈：`jobs-sg-quota`（`count/jobs.batch` 现 9/限 25、`pods` 1/12）、`media-object-caps`（pods 3/15）、`personal-services-object-caps`（jobs 0/15、pods 7/30），清单与各自的 LimitRange 同文件（`k8s/helm/manifests/{jobs-sg,media,personal-services}/`）。
-- 它防的是**节点级稀缺资源**：kubelet 的 pod 上限是硬天花板，一个失控的 CrashLoop Job 刷出几十个 Pod 就能把整节点填满，而 LimitRange 对「数量」完全无感——这正是当初驱逐事故的第二个成因面。
+等级矩阵、下发路径、Kyverno 的 Audit→Deny 方法论与豁免通道、护栏覆盖表 → [admission-control.md](admission-control.md)。
 
 ## 6. 供应链与漏洞扫描 (Supply chain / CVE) — Trivy Operator
 
@@ -149,59 +100,10 @@
 
 ## 8.5 运行时检测 (Runtime detection) — 两集群统一 Tetragon
 
-eBPF 运行时威胁检测（容器内起 shell、读敏感文件、提权、无文件执行、攻击工具）。**2026-11-24 起两集群统一用
-Tetragon**，oracle 原来的 Falco + Falcosidekick 同日退役（取舍与 Falco 规则逐条去向见
-[ADR](../decisions/runtime-detection-tetragon-both-clusters.md)，经过见
-[records/2026-11-24](../records/2026-11-24-oracle-kernel-7-falco-to-tetragon.md)）。
-
-- **部署**：两集群各一个 Helm App（homelab `tetragon`、oracle `tetragon-oracle`，ns `tetragon`，chart 版本由 V1 强制
-  一致），都先引用两集群共用的 `security/tetragon/values-common.yaml`（导出过滤、argv 脱敏、优先级），再叠加各自的
-  `values/tetragon.yaml`（agent 资源；homelab 另开 ServiceMonitor）。`security/tetragon/` 是 H2 登记的共用树
-  （[manifest-safety-checks.md](manifest-safety-checks.md)）。内核态过滤只上报命中事件，省 CPU。
-  默认进程 exec/exit → `export-stdout` → 各集群 OTel → oracle 上的 Loki（`{k8s_namespace_name="tetragon"}`，`cluster`
-  标签区分）。指标：homelab 走 ServiceMonitor；oracle 由 OTel 抓 `tetragon:2112`，只留告警用的三个指标。
-- **策略**（`security/tetragon/policies/`，两集群同一份，独立 App `tetragon-policies` / `tetragon-policies-oracle`，
-  拆法同 kyverno-policies）：`container-escape-syscalls`（容器内 ptrace / process_vm_writev / 内核模块装卸 / kexec /
-  open_by_handle_at）与 `sensitive-file-access`（`security_file_open` 上内核态匹配 /etc/shadow、sudoers、/root/.ssh 等
-  凭据路径）。全部**只观察、不拦截**：仓库硬约束是安全组件 fail-open，拦截型策略误报即杀生产进程。
-- **告警分两路**。健康走 Prometheus（`alerts/tetragon-alerts.yaml`：`TetragonDown` / `TetragonPolicyLoadFailed` /
-  `TetragonPolicyNotEnabled` / `TetragonEventsLost`，按 `(cluster, node)` 分组，`TetragonDown` 每集群一个 absent；
-  promtool 用例在 `scripts/alert-rule-tests/tetragon-alerts.test.yaml`）。检测走 **Loki ruler**
-  （`cloud/oracle/manifests/monitoring/loki-rules.yaml` 的 tetragon-runtime 组，不按集群过滤，warning）：
-  - `TetragonRuntimePolicyHit`：上面两条策略的命中，`tp-` 前缀的策略视为临时测试不告警。夜备精确放行三条
-    （restic 调 ssh 读自己的 `/root/.ssh/{id_ed25519,known_hosts,config}`、`backup.sh` 写 config、apk 的 `adduser` 改
-    `/etc/shadow`）：策略 11-20 上线起每晚误报 ~130 次，11-24 才发现并补上。
-  - `TetragonAppSpawnedShell`（11-22）：父进程是应用（node、python…）的 shell，webshell / 命令注入最典型的形态。
-    父进程是 containerd-shim / runc 的（容器入口、exec 探针、`kubectl exec`）分不开，homelab 7 天 689 次 shell 里约 600 次
-    是这类，**不报**，所以 `kubectl exec` 起的 shell 不在视野里。放行按「父进程参数 + 命令」精确写，不按 namespace：
-    Prisma 的 `ldconfig -p`、supervisord；11-24 补 oracle 独有的 CNPG `manager wal-archive`、s6 的 `./run`、browserless
-    读 `/proc/stat`、rsshub 的 npm 入口。
-  - `TetragonFilelessExec`（11-24，移植自 Falco）：从 `/dev/shm`、memfd（`/proc/*/fd/N`）、`/tmp`、`/var/tmp` 执行或
-    二进制已删除。`/dev/shm` 在容器里实测可执行。
-  - `TetragonAttackToolExec`（11-24，移植自 Falco）：`nc`/`ncat`/`socat` 带 `-e`/`-c`/`EXEC:`；grep/find/rg 翻私钥标记、
-    ssh key、云凭据、kubeconfig；shred/wipefs/mkfs/debugfs；truncate `/var/log`；`busybox nc -e` 直接调用一支（经软链
-    调用时 Tetragon 报调用路径 `/bin/grep`，不是 busybox）。
-  命中不用指标，因为 **Tetragon 会在 pod 删除后清掉该 pod 的指标序列**（实测），寿命短的 pod 里的命中可能在被评估前
-  就没了，日志行不会。
-- ☠️ **集群独有负载只在那个集群的基线里**：oracle 上线头一小时，「应用起 shell」就被 homelab 没有的负载触发（见上）。
-  oracle 的基线截至 11-24 只有数小时，日/小时级的合法 shell 还可能冒出来，照同样写法补精确放行并重放。
-- ☠️ **换内核前把 eBPF 组件当成要过闸门的东西**：unattended-upgrades 装好新内核、下次重启即生效。Falco 就是这样在
-  7.0 上被 BPF 校验器的内存顶破 limit 的。重启后核：`tetra tracingpolicy list` 两条 enabled、agent 的 `memory.peak`
-  离 limit 有余量（两集群 limit 都是 512Mi，按**策略更新路径**的峰值定：oracle 308Mi、homelab 373Mi；稳态远低于此，
-  测法见 `cloud/oracle/values/tetragon.yaml` 的注释）。
-- ⚠️ **增删策略要同步改 `TetragonPolicyNotEnabled` 里的 `2`**，否则要么永远报警、要么少一条也不报。
-- ☠️ **`matchBinaries NotIn` 在这里不生效**（Tetragon 1.7.0、内核 6.8/7.0，对照实验：排除 python3 的策略照样上报 python3）。别指望用它排噪声，要排就在告警表达式 / `exportDenyList` 里做，并且做完拿真事件验证。已知噪声：apps-pg 的就绪探针 `pg_isready -U postgres` 每次都打开 /etc/shadow；它不在 Loki 里（`exportDenyList` 已挡），但在 Prometheus 指标里。
-- **`exportDenyList` 也会挡策略事件**：kube-system / cilium / 宿主（namespace 为空）的命中不会进 Loki，也就不会告警；宿主进程本来就被策略的 `matchNamespaces Pid NotIn host_ns` 排除（已用宿主 `sudo cat /etc/shadow` 实测不触发）。
-- **CRD 会回填服务端默认值**（`return` / `maxData` / `resolve` / `returnCopy` / `followChildren`），App 永久 OutOfSync，已用 `ignoreDifferences` 忽略。新策略用到别的可选字段时可能再冒出新键：逐字段对比 git 与 live 再补，别写 `*`。
-- **验证要两个方向都测，而且别往群里发消息**：测试 pod 放 kube-system（`exportDenyList` 不导出 → 不进 Loki、不告警），
-  在 agent 上 `tetra getevents --namespace kube-system --pods <pod>` 看策略命中；ptrace 用 `PTRACE_PEEKDATA` 打向不存在的
-  pid，无副作用，再读一个普通文件当对照。只测 exec 类规则时测试 pod 才放导出的 ns，再用规则表达式直接查 Loki。
-  ☠️ 别在导出的 ns 里 `grep -r … /etc`：会顺带打开 /etc/shadow（11-24 就这么误发过一条）。`tetra tracingpolicy list`
-  显示 `enabled` 不等于探针真的在工作。
-- ☠️ **进程事件带完整 argv，命令行里的密钥会进 Loki**（2026-11-24 起两集群都是）。密钥改用 env，或 curl 的 `--variable %VAR` + `--expand-*`（curl ≥ 8.3，命令行只剩 `{{VAR}}`）。exit 事件也带 argv，Tetragon 重启时还会给存量进程补发 exec 事件（`flags=procFS`），所以长期运行的进程同样会漏。
-- `redactionFilters` 兜底 6 条（两集群共用）：bot token / `-u` 口令 / Bearer / URL 里的 `user:pass@` / `-token`、`--token` 的参数值 / `…Token:` 请求头的值。兜底不是正解：带空格且加引号的口令只能打掉一半。泄露经过与未轮换项见 [records/2026-10-24](../records/2026-10-24-intrusion-sweep-argv-secrets-in-loki.md)。
-- ☠️ **跨文件挪 values 要拆两次提交**：多源 App 的 `$values` 跟 `main` 立即生效，valueFiles 列表要等 root App 同步；
-  11-24 拆共用 values 时中间态把 tetragon-config 的 redaction-filters 写空了 6 分钟（agent 未重启，未生效）。
+2026-11-24 起两集群统一 Tetragon（Falco 退役，[ADR](../decisions/runtime-detection-tetragon-both-clusters.md)）：
+两条 TracingPolicy（容器逃逸类 syscall、敏感文件访问）**只观察、不拦截**；健康告警走 Prometheus，检测告警走
+Loki ruler（策略命中 / 应用起 shell / 无文件执行 / 攻击工具命令行）。☠️ 进程事件带完整 argv，**命令行里的密钥会进 Loki**。
+部署、告警与放行、换内核闸门、已知坑、验证方法 → [tetragon-runtime-detection.md](tetragon-runtime-detection.md)。
 
 ## 9. 安全可观测与告警
 
@@ -233,7 +135,7 @@ Tetragon**，oracle 原来的 Falco + Falcosidekick 同日退役（取舍与 Fal
 1. **运行时检测调优**（观察版已部署，§8.5）：① Tetragon 还没做的：异常外联、ServiceAccount token 读取（都要先有「谁该读 / 该连谁」的基线，否则满屏误报）；`kubectl exec` 起的 shell 有意不报；观察一段时间后再评估是否提严，**拦截型策略要先写 ADR**；② 有意未移植的 Falco 规则（访问 K8s API、packet socket、release_agent、链接覆盖敏感文件、非标端口 SSH，理由见 [ADR](../decisions/runtime-detection-tetragon-both-clusters.md)）；③ oracle 的「应用起 shell」基线只有上线后数小时。
 2. **网络默认拒绝（门控灰度）**：Hubble 基线流量 → 每端点 `PolicyAuditMode` 只记不拦 → 单个无状态叶子 ns（personal-services/homepage）试点 CiliumNetworkPolicy（放行 DNS/Envoy/必要 egress）→ soak → 逐 ns 评估，**建议只对对外暴露 ns 做**。
 3. **节点 API 审计日志**：延后（磁盘紧）；如开启用 Metadata 级策略 + 严格 maxsize/maxbackup，先确认磁盘余量。
-4. **Kyverno Audit→Enforce**（§5.2）：`require-requests-limits` 已于 2026-11-18 提升，剩 `require-probes`（先按 ns 豁免批处理）与 `restrict-image-registries`（长期保持 Audit——它抓的是镜像串写法，不是来源）。提下一条之前有两个前置：① 打开并实测 PolicyException 通道（现在是关的）；② 顺手把 `disallow-latest-tag` 改成原生 ValidatingAdmissionPolicy，填上 oracle 零引擎的空子——`--generateValidatingAdmissionPolicy=true` 已开，per-rule 开关是 `rules[].validate.cel.generate: true`，两集群都 v1.35（VAP 自 1.30 GA，homelab 已有 Cilium 的一条在跑）。⚠️ Kyverno 生成的 VAP 是否真生效**尚未实测**，先拿一个 ns 试一条并 `kubectl get vap` 核对。
+4. **Kyverno Audit→Enforce**（[admission-control.md](admission-control.md) §2）：`require-requests-limits` 已于 2026-11-18 提升，剩 `require-probes`（先按 ns 豁免批处理）与 `restrict-image-registries`（长期保持 Audit——它抓的是镜像串写法，不是来源）。提下一条之前有两个前置：① 打开并实测 PolicyException 通道（现在是关的）；② 顺手把 `disallow-latest-tag` 改成原生 ValidatingAdmissionPolicy，填上 oracle 零引擎的空子——`--generateValidatingAdmissionPolicy=true` 已开，per-rule 开关是 `rules[].validate.cel.generate: true`，两集群都 v1.35（VAP 自 1.30 GA，homelab 已有 Cilium 的一条在跑）。⚠️ Kyverno 生成的 VAP 是否真生效**尚未实测**，先拿一个 ns 试一条并 `kubectl get vap` 核对。
 5. **离站备份**：restic 仓库只有 106 本地 ZFS 单副本，未同步到云端（OCI always-free / B2）。见 [backup-recovery.md](../runbooks/backup-recovery.md)、[ROADMAP.md](../ROADMAP.md)。
 6. **oracle 节点 OS 层防火墙口子过多**（未处理）：firewalld `public` zone 开着 `10250 / 2380 / 4240 / 4244 / 32379 / 16443 / 25000 / 19001 / 12379 / 10248-10259 / 7800 / 1338 / …`，多为早期 CNI（`cali+`、`flannel.1`、`cni0` 仍挂在 `trusted` zone）与 microk8s 试验残留，只靠 OCI Security List 一层挡。收口前逐端口确认归属：`enp0s3` 也在 `public` zone，误删可能切断节点到 API 的路径；`firewall-cmd --reload` 会冲掉 Cilium iptables（[records/2026-10-01](../records/2026-10-01-oracle-firewalld-flushes-cilium-iptables.md)）。在那之前**别往 Security List 加任何 `0.0.0.0/0` 规则**。背后真在监听的 3 个手工遗留（Dante SOCKS `:10080`、WireGuard `wg0 :51420`、root 的 node_exporter `:19898`）已停用，文件在节点 `/root/decommissioned-2026-10-24/`（0700）（[records/2026-10-24](../records/2026-10-24-intrusion-sweep-argv-secrets-in-loki.md)）。
 7. **Nakama 管理控制台裸挂公网**（有意接受）：`nakama-console.meirong.dev` → console(7351)，能看/删账号、改任意存储、调任意 RPC，只有 Nakama 自带口令（无 ZITADEL / oauth2-proxy / Cloudflare Access），是公网可达却不过第 2 层身份的管理面之一（另一个是 Timeslot `/admin/`，见第 10 条；Grafana/ArgoCD 在 OIDC 后面，Vault 用自带认证）。缓解：口令 32 字节随机（Vault `secret/homelab/nakama` → `console_password`），6 个带不安全默认值的 key 全已换掉。⚠️ 收紧要在 HTTPRoute（`k8s/helm/manifests/gateway/route-nakama-console.yaml`）前加 oauth2-proxy 或 Cloudflare Access，改口令不减暴露面。

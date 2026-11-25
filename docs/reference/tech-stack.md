@@ -54,7 +54,7 @@ Service → Pod ────── 网络由 Cilium eBPF 承载；跨集群走 C
 | **Proxmox VE** | 裸机上跑虚拟机。跑在笔记本 `pve` 上，VM 由 Terraform 声明 |
 | **storage-106** | NAS，ZFS raidz1 + sanoid 快照。☠️ 不只是备份目标：还是 worker VM 的宿主和媒体只读 NFS 源 → [storage.md](storage.md) |
 | **Oracle Cloud Free Tier** | 永久免费的 ARM（Ampere A1）云主机，承载对外服务面。shape 缩容不可逆 → [runbook](../runbooks/oracle-k3s-shape-downsize.md) |
-| **Mac M2 / Mac Studio / DGX Spark** | 本地推理算力，不是集群节点，LiteLLM 按 Tailscale IP 直连 → [litellm-gateway.md](litellm-gateway.md) · [为何不接 ClusterMesh](../decisions/dgx-clustermesh-not-adopted.md) |
+| **Mac M2 / Mac Studio / DGX Spark** | 本地推理算力，不是集群节点，LiteLLM 按 Tailscale IP 直连 → [litellm-upstreams.md](litellm-upstreams.md) · [为何不接 ClusterMesh](../decisions/dgx-clustermesh-not-adopted.md) |
 
 ### 3.2 预配（把机器变成节点）
 

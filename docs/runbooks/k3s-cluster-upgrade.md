@@ -135,7 +135,7 @@ done
   对象时直接拒绝升级（render-time `lookup` + pre-upgrade hook Job `kyverno-check-legacy-policies`）。
   升前先清零：`for k in clusterpolicies policies cleanuppolicies clustercleanuppolicies policyexceptions;
   do kubectl --context k3s-homelab get $k.kyverno.io -A --no-headers | wc -l; done` 全为 0。
-  迁移做法见 [security.md](../reference/security.md) §5.2：并跑、逐资源对比两个 source 的
+  迁移做法见 [admission-control.md](../reference/admission-control.md) §2：并跑、逐资源对比两个 source 的
   PolicyReport、再切换；`objectSelector` 后台扫描不认，排除对象要再写 `matchConditions`。
 - ⚠️ **升大版本后重新列一遍 webhook 的 failurePolicy**，别假设还是全 `Ignore`：v1.20 新增了
   fail-closed 的 `protect-generation-labels`，已用 `features.protectGenerationLabels.enabled=false` 关掉

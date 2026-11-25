@@ -13,7 +13,7 @@
 #
 # 作用范围：只看容器里的进程（matchNamespaces Pid NotIn host_ns）。宿主上 systemd 拉起带
 # `User=` 的单元时会读 /etc/shadow 与 pam —— oracle 的 Falco 就因此刷过 500 条/天误报
-# （docs/reference/security.md §8.5），宿主进程在这里不该出现。
+# （docs/reference/tetragon-runtime-detection.md），宿主进程在这里不该出现。
 #
 # ☠️ 已知噪声：apps-pg 的就绪探针 `pg_isready -U postgres` 每次都会打开 /etc/shadow
 # （2026-11-20 上线后第一次观察就抓到：100 秒 20 条，永远不会停）。

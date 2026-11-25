@@ -24,9 +24,12 @@
 - [open-notebook.md](open-notebook.md) — AI 研读知识库：部署形态、模型接线（DGX + Mac OMLX）、配置真相源地图、备份口径
 - [litellm-gateway.md](litellm-gateway.md) — LLM 网关运维事实。☠️ **配置真相源分两半**：模型/路由在 git，
   虚拟 key 的模型白名单在 Postgres，改别名不同步改 key 就「配置正确 + 调用全挂」。
-  另含 `/v1/models` 为何会自查误判、免费模型怎么查、按 (provider, model) 验证思维链、
-  按 key 查用量与真实来源 IP、对外发 key 的参数
+  另含自动降级、按 key 分首选、`/v1/models` 为何会自查误判、按 key 查用量与来源 IP、对外发 key
+- [litellm-upstreams.md](litellm-upstreams.md) — 网关背后的上游与兼容层：DGX 主力栈（☠️ 对外别名与实际模型刻意不一致）、
+  Mac Studio、思维链模型的 `max_tokens` 陷阱、codex / DGX 两个兼容 hook、OpenRouter 免费模型怎么查
 - [jobs-sg.md](jobs-sg.md) — SG 岗位周报：独立 ns + 3 个 CronJob、digest 固定、备份两条路径、bootstrap 依赖
+- [jobs-sg-enrich.md](jobs-sg-enrich.md) — jobs-sg 的 LLM 富化：经网关的 `custom_dgx/` 别名打 DGX、超时与并发、关 reasoning 啃积压、`reasoning_effort` 封顶
+- [jobs-sg-classification.md](jobs-sg-classification.md) — jobs-sg 分类与技术栈口径：`reclassify` / `retech` / `report --week` 离线重算的红线、别名表规则、`work_mode` 口径
 - [calibre-metadata.md](calibre-metadata.md) — 书库元数据：覆盖率实测、mtime 冒充出版日期（487 本）、回补匹配门与判据、拿不到书评/评分的边界
 
 ### 网络
@@ -53,7 +56,10 @@
 
 ### 安全与身份
 
-- [security.md](security.md) — 纵深防御 11 层逐层状态 + 威胁覆盖矩阵。⚠️ 第 9 层网络**只到可见性**，无自建 CiliumNetworkPolicy
+- [security.md](security.md) — 纵深防御 11 层逐层状态 + 威胁覆盖矩阵。⚠️ 第 9 层网络**只到可见性**：自建策略只有 oracle 拦 IMDS `:80`
+  的一条 CCNP 与 readlist Job 的零出口
+- [admission-control.md](admission-control.md) — 准入：PSA 等级矩阵与两条下发路径、Kyverno 4 条 CEL 策略（fail-open 的真实语义、Audit→Deny 的分母、关着的豁免通道）、LimitRange / ResourceQuota 覆盖表
+- [tetragon-runtime-detection.md](tetragon-runtime-detection.md) — 运行时检测（两集群 Tetragon）：只观察不拦截、Loki ruler 四条检测告警与精确放行、换内核闸门、两个方向的验证方法、☠️ argv 里的密钥会进 Loki
 - [trivy-cve-ops.md](trivy-cve-ops.md) — Trivy Operator 配置真相 + 告警语义 + **六类静默失败**（TTL 卡吞吐 / ignoreFile 不触发重扫 / arm64-only 扫不了 / Docker Hub 限流不自愈 / 0 副本 ReplicaSet 报告不衰减 / 扫描 Job 被时限杀掉：扫得慢或调度不上）+ 覆盖率体检
 - [identity.md](identity.md) — ZITADEL 部署形态（HelmChart CR + CNPG）、各应用原生 OIDC 接入、per-app oauth2-proxy、GitHub 联邦 IdP
 

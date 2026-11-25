@@ -2,7 +2,7 @@
 
 > 日期: 2026-11-24
 > 状态: ✅ 已实施（oracle 的 Tetragon 与告警 11-24 上线并做过两向实测，Falco 同日删除）
-> 关联：[reference/security.md §8.5](../reference/security.md) ·
+> 关联：[reference/tetragon-runtime-detection.md](../reference/tetragon-runtime-detection.md) ·
 > [records/2026-11-24-oracle-kernel-7-falco-to-tetragon](../records/2026-11-24-oracle-kernel-7-falco-to-tetragon.md) ·
 > [reference/manifest-safety-checks.md（H2 共用树）](../reference/manifest-safety-checks.md)
 

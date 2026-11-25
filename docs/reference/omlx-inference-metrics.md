@@ -1,6 +1,6 @@
 # Mac OMLX 推理指标（采集口径与陷阱）
 
-> Last updated: 2026-10-28
+> Last updated: 2026-11-25
 > Status: 生效事实
 
 ## 速览
@@ -96,7 +96,7 @@ Tailscale 起来）；后面的地址不在网卡上会被**静默跳过**、照
 
 ☠️ **`dummy` 能用全靠 `allow_unauthenticated_inference: true` 这一个开关**。重装 OMLX、在 admin 面板里重置
 设置或有人把它关掉，`mac/*` 别名和 Open Notebook 的对话/嵌入/TTS/STT 会一起 401。修法：开关开回来，或给
-这两处换真 key（网关另见 [litellm-gateway.md](litellm-gateway.md)）。
+这两处换真 key（网关另见 [litellm-upstreams.md](litellm-upstreams.md)「Mac Studio 上游」）。
 
 ⚠️ **对不存在的模型名，chat 会回退到默认模型并把它装进来**（触发换入换出）。测鉴权用 `/v1/models` 或
 `/v1/embeddings`（后者对未知模型直接 404）。

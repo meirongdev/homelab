@@ -25,8 +25,8 @@
 # ⚠️ 指标名是现网 build 实际吐出来的（curl :2112/metrics），不是文档里的名字。
 #
 # TetragonPolicyNotEnabled 里的「2」= security/tetragon/policies/ 下的 TracingPolicy 个数（两集群同一份）。
-# **增删策略要同步改这个数**（否则要么永远报警、要么少一条也不报），docs/reference/security.md
-# §8.5 的清单里也写了这一条。
+# **增删策略要同步改这个数**（否则要么永远报警、要么少一条也不报），docs/reference/tetragon-runtime-detection.md
+# 的「已知坑」里也写了这一条。
 #
 # 告警说明里的 kubectl context：homelab 的叫 k3s-homelab，其余与 cluster 标签同名（oracle-k3s）。
 # `release` 标签是 kube-prometheus-stack ruleSelector 必需的。

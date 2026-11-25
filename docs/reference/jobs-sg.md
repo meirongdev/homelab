@@ -2,7 +2,8 @@
 
 > Last updated: 2026-11-25
 > Status: 生效事实
-> Scope: jobs-sg 在 homelab 集群的部署形态、镜像固定方式、备份口径、首次上线依赖顺序
+> Scope: jobs-sg 在 homelab 集群的部署形态、镜像固定方式、备份口径、首次上线依赖顺序；
+> LLM 富化、分类与技术栈重算各拆一篇（[jobs-sg-enrich.md](jobs-sg-enrich.md)、[jobs-sg-classification.md](jobs-sg-classification.md)）。
 > 本文是 source of truth。应用代码在 [meirongdev/jobs-sg](https://github.com/meirongdev/jobs-sg)。
 
 ## 速览
@@ -10,8 +11,8 @@
 - **在哪**：homelab 集群独立 ns `jobs-sg`，`jobs.meirong.dev`（无认证，公开统计）。
   一个镜像里 6 个二进制：4 个管线阶段（ingest / enrich / report / web）= 3 个 CronJob
   + 1 Deployment；另外 2 个是运维工具、**没有任何 CronJob 跑**，手动起一次性 Job
-  （`reclassify` 重算分类、`retech` 重算规则层技术栈，都默认 dry-run）。
-- **跑什么**：每日抓 SG 岗位 → 规则 + LLM 富化（经 LiteLLM 网关打 DGX，fail-open）→ 周报推 Telegram；
+  （`reclassify` 重算分类、`retech` 重算规则层技术栈，都默认 dry-run，见 [jobs-sg-classification.md](jobs-sg-classification.md)）。
+- **跑什么**：每日抓 SG 岗位 → 规则 + LLM 富化（经 LiteLLM 网关打 DGX，fail-open，见 [jobs-sg-enrich.md](jobs-sg-enrich.md)）→ 周报推 Telegram；
   聚合页随请求渲染。
 - **备份两条路径，缺一不可**：`jobs.db` 走白名单；`raw/*.jsonl.gz` 单独纳 restic，
   只加白名单会静默漏备（H4 查不出）。
@@ -133,134 +134,11 @@ busy handler（在那儿睡可能死锁）。
   周日那轮撞一次锁就静默损失一周的岗位寿命数据。
 - `/ops/2026-08-08` 01:09 那行 `partial` / `errors=1` 保留不动：它是当时的事实，改库等于篡改记录。
 
-## LLM 富化：经 LiteLLM 网关打 DGX
+## LLM 富化（细节在 jobs-sg-enrich.md）
 
-2026-11-11 起 `enrich` 的 `LLM_BASE_URL` 是集群内的 `http://litellm.litellm.svc.cluster.local:4000`，
-`LLM_MODELS` 是网关别名 `custom_dgx/DeepSeek-V4.1-Flash-1017`（2026-11-15 前是 `custom_dgx/qwen3.8-flash-next-tp2`），带虚拟 key（`key_alias=jobs-sg`，
-Vault `secret/homelab/jobs-sg` 的 `llm_api_key` → ExternalSecret `jobs-sg-llm` → env `LLM_API_KEY`）。
-此前直连 DGX 的 Tailscale IP；改走网关是为了让 jobs-sg ns 的网络策略碰不到 tailnet。
-DGX 栈本身（模型、端口、引擎、档位）的唯一真相源是 [litellm-gateway.md](litellm-gateway.md) 的「DGX 主力栈」；
-换栈照 [runbooks/dgx-model-swap-homelab-followup.md](../runbooks/dgx-model-swap-homelab-followup.md) 走。
+`enrich` 经 LiteLLM 网关的 `custom_dgx/` 别名打 DGX（刻意不要兜底），DGX 不可用时 fail-open 退回纯规则。
+接线与取舍、耗时与超时、关 reasoning 啃积压、`reasoning_effort` 封顶、归档读取 → [jobs-sg-enrich.md](jobs-sg-enrich.md)。
 
-- ☠️ **用 `custom_dgx/` 前缀那条，不用同名裸别名**：裸别名配了兜底，DGX 出错时网关静默换成 Studio 的 Qwen3.8-27B
-  作答；而模型名同时是 enrich 缓存键和 `job_tech` 的出处，别的模型的结果会挂着 DGX 的名字进缓存。
-  前缀这条没有兜底，DGX 不通就如实报错，岗位留在积压里第二天再试。
-- ☠️ 换别名要同时改 key 的白名单（[litellm-gateway.md](litellm-gateway.md) 坑 A），这把 key 只认这一个别名。
-- ⚠️ 走集群内 Service，不走 `llm.meirong.dev`：后者经 Cloudflare，有 100s 上限。网关自身不会先于
-  `LLM_TIMEOUT` 超时（2026-11-11 查 30 天：15 个 >300s 的请求经网关成功，最长 1267s）。
-- ⚠️ 2026-11-11 换名（裸引擎名 → 网关别名）只让缓存对重复描述多算一次：积压按处理层（`source='llm'`）判断，
-  与模型名无关，不重跑历史。
-- 经网关时思维链在 `reasoning_content`（直连时是 `message.reasoning`）。判「思考关没关」看
-  `usage.completion_tokens_details.reasoning_tokens`（关思考时为 0），2026-11-11 经网关实测为 0。
-
-enrich 要模型回严格 JSON（上游 `ExtractPrompt`，六个 key），换模型要连这条一起验。
-
-模型相关参数全部是 `LLM_*` 环境变量（上游 `internal/llm/config.go` 一处解析）：
-`LLM_BASE_URL / LLM_MODELS / LLM_TIMEOUT / LLM_CONCURRENCY / LLM_RETRIES / LLM_THINKING /
-LLM_THINKING_KWARG / LLM_MAX_TOKENS / LLM_MAX_DESC_CHARS / LLM_PROMPT / LLM_PROMPT_VERSION /
-LLM_API_KEY / LLM_AUTH_HEADER / LLM_EXTRA_BODY`。换模型不改代码、不发版；参数写错只丢那一个
-旋钮并打告警，启动日志 `llm enabled` 打的是生效值。全表与调参口径在上游
-`docs/09-deploy-runbook.md` §3.2/§5，本文只留 homelab 的取值与理由。
-
-换模型的验收（在 jobs-sg 仓库根目录跑，默认跳过、不进 CI）：真调一次并断言推理确实被关掉，
-挂了就换 `LLM_LIVE_KWARG` 试。当前栈 2026-10-04 PASS，即 `LLM_THINKING_KWARG` 保持默认值。
-
-```sh
-LLM_LIVE_URL=http://100.94.186.7:31400 LLM_LIVE_MODEL=custom_dgx/DeepSeek-V4.1-Flash-1017 \
-  LLM_LIVE_KEY=$(VAULT_ADDR=https://vault.meirong.dev vault kv get -field=llm_api_key secret/homelab/jobs-sg) \
-  go test ./internal/llm -run Live -v
-```
-
-**取舍**：经网关多一跳和一条 Vault 依赖，换来用量计量（spend log 按 `key_alias=jobs-sg` 可查）和
-「jobs-sg 碰不到 tailnet」。刻意不要网关的兜底（见上）。DGX 是跨 tailnet 共享的境内机器
-（RTT 66–83ms），不可用时 enrich fail-open 退回纯规则。
-
-### 耗时、超时与并发
-
-- 单次调用（上游 2026-09-03 用 16 条真实岗位、并发 8 实测，当时是 qwen38-flash-next）：开推理
-  均值 18.7s、最坏 58.7s、15 条/分钟；`LLM_THINKING=false` 是 2.8s / 6.1s / 154 条/分钟。
-  本仓库整轮实测 6.9 条/分钟（242 次调用 / 35 分钟）。两个数口径不同（抽样 vs 整轮、共享 GPU
-  上还有别的租户），别互相替换。
-- ⚠️ 小样本测不出尾巴：封顶前生产约 1.3% 的调用超过 300s。判断要不要干预看这个比例，不看抽样
-  最坏值；短 prompt（约 15s）更不能拿来规划容量。
-- `LLM_TIMEOUT=300`。该端点非流式，生成完才回 header，所以预算覆盖整个生成过程（报错里的
-  "awaiting headers" 极具误导性）；客户端放弃不会让服务端停止生成，每次超时还白耗一次共享 GPU。
-  ☠️ 超时值别卡在真实耗时下面：只有短帖侥幸跑完，表现像「慢」不像「坏」。
-- 进度逐条落库，中途被 deadline 杀掉不丢；`enrich_cache` 按 `description_sha256` 去重。
-  baseline 积压 2026-09-03 前已排空。
-- ⚠️ 并发和 CPU 都不是提速的答案：LLM 阶段 CPU 只有 1m（在等推理），加 CPU 只加速一次性的归档
-  扫描；旧模型实测 8× 并发只换来 3.3× 吞吐，DGX 已接近饱和，再加只会加深排队并挤占 Open Notebook。
-  清单的 `LLM_CONCURRENCY=8` 高于引擎 KV 池实测的 `kv_cache_max_concurrency=5.34`，降到 5 是否
-  更好未实测不改（待办在 [ROADMAP.md](../ROADMAP.md)）。真正的杠杆是减少 token（下两节）。
-
-## 真正的提速杠杆：关掉 reasoning（`LLM_THINKING=false`）
-
-reasoning 占这类模型约 95% 的 output token。`LLM_THINKING=false` 时发 `chat_template_kwargs`，
-键名是 `LLM_THINKING_KWARG`，默认 `enable_thinking`（当前栈实测生效）。
-
-- ☠️ 旧键名 `{"thinking": false}` 回 200 但**静默**不生效。设了 `LLM_THINKING=false` 而模型仍在
-  推理时，客户端每进程打一条 `reasoning was not disabled` 的 WARN，并点名要改的键。
-- 旧栈上 4 条真实岗位实测：平均 60.5s → 3.2s（18.8×），completion token 降一个数量级。键名别照抄
-  旧栈，倍率可参考。
-- 质量代价小且不是单向变差：裸输出更松（"wear many hats" 会抽出 "hats"），但每个词都过
-  `tech_taxonomy` 白名单，没命中的进 `unmapped_tech`、进不了 `job_tech`。白名单才是质量闸门。
-- **用法定位**：只用来啃积压，不用于稳态。清单不设它（= 开推理），啃积压走下一节的一次性 Job；
-  稳态用封顶。
-
-## 一次性积压回填
-
-当前无积压，需要时照这个做。实测 26–29 条/分钟：8 并发照样把 DGX 推满，别拿「DGX 空闲时单条
-3.2s」推成 150 条/分钟。
-
-```bash
-# 先停掉正在跑的 enrich：两个进程会争同一个 SQLite 库，且读到同一份积压、把每次 LLM 调用做两遍
-kubectl --context k3s-homelab -n jobs-sg delete job -l job-name --ignore-not-found
-# 一次性 Job：与 CronJob 同 podspec，只多一个 LLM_THINKING=false，
-# 且不带 ArgoCD 标签（否则可能被 sync prune 掉）
-kubectl --context k3s-homelab -n jobs-sg apply -f <一次性 Job yaml>
-```
-
-进度逐条落库，中途被杀不丢。跑完删掉 Job，之后每晚的 CronJob 用默认（开推理）处理当天新增。
-
-## 稳态旋钮：给推理封顶（`LLM_EXTRA_BODY` + `reasoning_effort`）
-
-清单写 `LLM_EXTRA_BODY={"reasoning_effort":"medium"}`。推理模型会在个别长岗位上把推理写飞
-（生成长度双峰：正常 1000–2000 token、跑飞 >7000，是触发了循环），这是 enrich 记 partial 的
-常态成因。
-
-- ☠️ partial 了起手别查「DGX 是不是慢了」：先比每输出 token 耗时、排队、抢占这些引擎读数与前夜
-  有没有变，没变就是跑飞。
-- 生效的是顶层 `reasoning_effort`：它关不掉推理，但能封顶。`chat_template_kwargs` 里的推理预算键
-  （`thinking_budget` / `reasoning_max_tokens` / `max_thinking_tokens`）**静默**无效。
-- 当前栈档位 `low` / `medium` / `xhigh`（默认），`minimal`、`high` 回 400。默认档是 `xhigh`，
-  封顶键不能省。⚠️ 失效形态是整轮 400 全挂，不是悄悄不生效；档位集合每次换栈都变过，换栈后先核。
-- 经 LiteLLM 网关也能传，但裸别名上传错档位会被兜底吞掉、换模型回 200（见
-  [litellm-gateway.md](litellm-gateway.md)）。本作业用的是不带兜底的 `custom_dgx/` 别名，不受影响。
-- 封顶只能封推理。调大 `LLM_TIMEOUT` 没用（生成长度没有上界，`max_model_len` 262144）；
-  `LLM_MAX_TOKENS` 更糟，模型先把推理写满、`content` 返回 null，慢成功变硬失败，清单刻意不设。
-- 封顶效果是在 qwen38-flash-next 上测的（前夜超时的 5 条全部 8–22s 完成，8 条正常岗位合计
-  244s → 82s、抽词几乎不变）；当前栈只在短题上看过推理变短，真实提示词没重测。
-- `LLM_RETRIES=0`，理由是封顶后本来就不该有超时。⚠️ 别写成「重试几乎没用」：同一岗位每次都是
-  重新抽签（`temperature: 0` 挡不住连续批处理的抖动），超时的岗位隔天重跑 76% 一次过。若封顶后
-  仍有残留超时，改成 1 是便宜的保险（待办在 [ROADMAP.md](../ROADMAP.md)）。
-
-经过与数值见 [records/2026-09-04-jobs-sg-enrich-runaway-reasoning.md](../records/2026-09-04-jobs-sg-enrich-runaway-reasoning.md)。
-
-## 归档读取：每轮一次，不是每条一次
-
-上游 `738cb98` 起 `mcf.ReadArchiveDescriptions` 按文件分组待取的记录，每个文件只走一遍、只解码
-`description`，取齐即停；两个富化层共用同一份描述表。
-
-- ☠️ 别回滚到 `738cb98` 之前的镜像：按每条岗位从头扫 gzip，一轮约 30 CPU 小时，窗口只有 3h。
-- 代价是描述表进内存：4,900 条描述峰值 82.5MiB（enrich 512Mi limit）。归档单文件涨到数十万条时
-  要重新量，这是用 CPU 换内存。
-- 归档读失败会计数并记日志。若再出现「CPU 满载、无日志、无进度」，先怀疑归档读取。
-- ⚠️ 看进度别只看 `jobs_sg_enrich_backlog`：它只数 LLM 层未处理的岗位（缺 `source='llm'` 行
-  **且**缺 `enrich_done` 标记），整个规则层阶段它一动不动。看 `job_tech` 的 `source='llm'` 行数
-  或 `enrich_cache`。
-
-`enrich_done` 记「这层跑过」：LLM 结果全落 `unmapped_tech` 的岗位也写标记，否则会永留积压
-（`llm_cached ≈ backlog` 是这个病的指纹）。
 
 ## 镜像固定
 
@@ -412,103 +290,17 @@ Prometheus/Alertmanager 在 homelab，监控对象跟着落 homelab。
 
 - 开放项见 [ROADMAP.md](../ROADMAP.md) 第 9 条（Telegram 端到端实测、Grafana 面板、`closed` 口径、
   并发与重试两个旋钮）。`jobs_sg_*` 已在采，没有面板时用 Explore 查。
-- 历史周的 `active_jobs` 无法按出版时点重建（as-of 查询未实现），见「重算历史周」。
+- 历史周的 `active_jobs` 无法按出版时点重建（as-of 查询未实现），见 [jobs-sg-classification.md](jobs-sg-classification.md)「重算历史周」。
 - 手动 kill enrich/ingest Job 会留下孤儿 `running` 行（只写了 StartRun，`ended_at` 为 NULL）。
   确认集群无活跃 run 后，在 PVC 所在节点上先备份 `jobs.db`，再执行
   `DELETE FROM ingest_run WHERE status='running' AND ended_at IS NULL`。
 
-## 重放归档重算分类（`jobs-sg-reclassify`）
+## 分类与技术栈：口径与重算（细节在 jobs-sg-classification.md）
 
-分类结论（`is_swe` / `role_family` / `seniority` / `work_mode` / `company_type`）是 ingest 当时
-算好存在行上的。修了分类器，只有管线再次看见的岗位会被修正，已下架的岗位永远保留错误结论。
-分类规则是归档 JSON 的纯函数，所以整段历史可以离线重算：零 API 调用，覆盖每一条归档过的岗位
-（含已下架）。强制 reconcile 要约 867 页 × 1.5s、20–25 分钟，且只覆盖还在架的。
+分类结论与规则层技术栈都是 ingest / enrich 当时算好落库的，改了分类器或别名表修不了历史，要用两个运维工具
+（`jobs-sg-reclassify`、`jobs-sg-retech`，都默认 dry-run）重放归档；`weekly_metric` 另要逐周 `report --week`。
+用法与红线、别名表规则、`work_mode` 口径 → [jobs-sg-classification.md](jobs-sg-classification.md)。
 
-```sh
-# 1) 先 dry-run：只报告 old->new 迁移矩阵，不写库
-kubectl --context k3s-homelab -n jobs-sg create job reclassify-dry --dry-run=client -o yaml \
-  --image=ghcr.io/meirongdev/jobs-sg@sha256:<当前digest> -- \
-  /usr/local/bin/jobs-sg-reclassify --data-dir /data > /tmp/j.yaml
-# 补上 PVC 挂载后 apply（PVC: jobs-sg-data，挂 /data，可写）
-# 2) 看完矩阵再决定是否加 --apply 重跑一次
-```
-
-1. 默认 dry-run，`--apply` 才写。`is_swe` 的增减移动的是所有指标的统计口径，先看矩阵。
-2. ☠️ 只写派生列。`closed_at` / `last_seen_at` / `first_seen_at` / `miss_count` 在 SQL 里不出现：
-   重放归档说明不了岗位是否还在架，碰 `last_seen_at` 会悄悄撤销一次关闭。
-3. 归档里有、库里没有的 uuid 只计数不插入（没有诚实的 `first_seen_at` 可填）。这个计数就是
-   「partial 那几轮漏了几条」的答案。
-4. 不重跑 LLM，也不动技术栈；`job_tech` 用 `retech`。
-
-## 重放规则层重算技术栈（`jobs-sg-retech`）
-
-enrich 的积压口径是 `NOT EXISTS job_tech AND NOT EXISTS enrich_done`，做过的永远不重算。所以改了
-`tech_taxonomy` 别名表或匹配逻辑，已富化的岗位保留旧结论，`/tech`、`/pay` 和周报的技术栈趋势
-一直错着。`retech` 扫归档、用当前别名表重算规则层、重写 `job_tech`：零 API 调用，只碰
-`source='rule'`（`source='llm'` 没有模型重放不出来，读都不读）。
-
-```sh
-# 1) dry-run：报告哪些 slug 增减了多少条，不写库
-kubectl --context k3s-homelab -n jobs-sg create job retech-dry --dry-run=client -o yaml \
-  --image=ghcr.io/meirongdev/jobs-sg@sha256:<当前digest> -- \
-  /usr/local/bin/jobs-sg-retech --data-dir /data > /tmp/j.yaml
-# 补上 PVC 挂载后 apply（PVC: jobs-sg-data，挂 /data，可写）
-# 2) 看完增减再决定是否加 --apply 重跑一次
-```
-
-1. 默认 dry-run，`--apply` 才写。dry-run 真的只读（replay 的是代码里的 `store.TechSeeds()`）；
-   `--apply` 才跑 `Seed()` 把表也收敛掉（每晚 enrich 读的是表，表里留着退役别名，新岗位照样命中）。
-2. 报告里的变化不都是规则造成的：重放用最后一次归档的文本，描述改过的岗位也会进 diff。判据：
-   规则改动一次动几百条，描述编辑是长尾的单条。
-3. `enrich_done` 只补不盖：已有标记绝不重新盖时间戳；缺的必须补上（早于 `enrich_done` 表富化的
-   岗位，`job_tech` 行就是「这层跑过」的唯一证据，清空它就掉回积压）。
-4. ⚠️ 判 rule 层积压别看 `jobs_sg_enrich_backlog`（只数 LLM 层），自己查
-   `NOT EXISTS job_tech(source='rule') AND NOT EXISTS enrich_done(source='rule')`。
-
-### 重算历史周（`report --week`）
-
-`weekly_metric` 是物化的，retech/reclassify 都不碰，历史周要逐周 `report --week`。
-
-- ⚠️ 用**不带 Telegram env 的 Job**：推送是 env-driven、unset 即跳过，而
-  `--from=cronjob/report` 会把 env 一起抄过来，等于把历史周报重推一遍进 Telegram。
-- ☠️ `report --week` 无条件把 `latest.html` / `index.html` 覆写成那一周。重算完旧周必须把最新周的
-  HTML 复制回去，否则「最新周报」倒退。
-- ☠️ `active_jobs`（"On the board at publication"）重算出来是「重算当日」快照：SQL 是
-  `closed_at IS NULL AND expiry_date >= 周末`，而 `closed_at` 只反映今天。重算会覆盖历史真值且
-  无快照可复原，别随手重算历史周。
-- 判旧周是否已按新口径：查对应 `week_start` 的 `weekly_metric.computed_at` 是否晚于修复的部署时间。
-
-2026-08-24/26 已对全表跑过 `reclassify --apply`、`retech --apply`，W31–W34 已逐周重算，过程见
-[records/2026-08-24-jobs-sg-tech-alias-false-positives.md](../records/2026-08-24-jobs-sg-tech-alias-false-positives.md)。
-
-## 别名表（`tech_taxonomy`）的规则
-
-规则层是纯文本词边界匹配，分不清词义。
-
-- 别名同时是普通英文词（`express`、`go`）时加**词义门**：只在技术枚举上下文里算命中（一侧紧邻
-  `( , / ; [` 或 `) . ]` 等分隔符）。门有代价（漏掉 "Node.js Express REST APIs" 这种散文里的真
-  命中），只给实测精度差的加；`spark`、`node`、`swift` 刻意不加。
-- ☠️ `Seed()` 会删掉表里不在 seed 列表的别名：手工 `INSERT` 进 `tech_taxonomy` 的别名会被下一次
-  ingest/enrich 清掉，加别名只能改代码。
-- 改别名表修不了历史，要跑 `retech`。
-
-### 判一个别名准不准：拿 LLM 层当对照，不用人工判
-
-规则层和 LLM 层是两套独立方法看同一批 JD，两层命中集合的 Jaccard 重合度就是免标注的精度代理。
-健康区间约 79–92%（2026-08-24 全量实测：`python` 91.9%、`kubernetes` 85.7%、`spark` 78.7%；
-加门后的 `go` 78.7%、`expressjs` 77.2%）。新增或怀疑一个别名时先看这个数，明显低于 79% 就去看
-命中上下文。
-
-## work_mode 的口径：Unknown 是一等状态
-
-MCF 的 `flexibleWorkArrangements` 回答的是什么时候上班，不是在哪上班：500 条全行业样本里只有
-7.4% 带这个字段，唯一的地点信号 `Telecommuting` 占 0.6%，其余是 `Flexi-Hours` 之类的排班值。
-
-- 只有地点类 arrangement 产生结论（`Telecommuting`→Remote、`Flexi-Place`→Hybrid），排班类一律不
-  产生，没有地点信号就是 `Unknown`。看到「Unknown 占九成」不是故障，是数据源只知道这么多。
-- ⚠️ 换镜像不会立刻改变页面：`work_mode` 由 ingest 的 upsert 重写，web 只读，要等下一轮抓取；
-  周日 reconcile 走全 board，一次刷新所有在架岗位；已下架的要 `reclassify`。
-- 生产库全表 0 条 `Onsite`（2026-08-24 `reclassify --apply` 后），W31–W34 已按新口径重算。
 
 ## 相关记录
 

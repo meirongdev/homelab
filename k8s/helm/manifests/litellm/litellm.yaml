@@ -7,7 +7,7 @@
 #   - admin UI (/ui): LiteLLM 自带登录 (UI_USERNAME/UI_PASSWORD, Vault→ESO)
 # Config: config.yaml in git (model_list); keys/spend live in Postgres —— 2026-08-25 起
 #   是共享实例 `databases/apps-pg` 的 litellm 租户，不再是本 ns 自带的 litellm-pg。
-# 自托管上游: DGX (DeepSeek-V4.1-Flash-1017) + Mac Studio OMLX (Qwen3.8-27B) + MacPro M2 OMLX (Ornith-1.5-35B 等)。
+# 自托管上游: DGX（对外别名 DeepSeek-V4.1-Flash-1017，2026-11-17 起实际跑 Qwen3.8-Flash-Next）+ Mac Studio OMLX (Qwen3.8-27B) + MacPro M2 OMLX (Ornith-1.5-35B 等)。
 #   裸别名 DeepSeek-V4.1-Flash-1017 = 同组三级 DGX → Studio → M2，按 order 降级 + 健康检查剔除（2026-11-15 起，
 #   见 docs/reference/litellm-gateway.md「自动降级」）；各上游另有指名别名。
 #   homelab 内部的 key 经 key 级 aliases（在 Postgres）改道 homelab/qwen3.8-27b = Studio → DGX → M2（2026-11-15 起）。

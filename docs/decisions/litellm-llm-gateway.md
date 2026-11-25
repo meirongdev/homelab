@@ -11,7 +11,7 @@
 >   别名 `custom_dgx/deepseek-v4-flash` / `deepseek-v4-flash` →
 >   `custom_dgx/qwen38-flash-next` / `qwen38-flash-next`。换栈由上游 nv-dgx-spark 单方面做出，
 >   本仓库只是跟着改引用；生效事实见
->   [reference/litellm-gateway.md](../reference/litellm-gateway.md) 的「DGX 主力栈」，
+>   [reference/litellm-upstreams.md](../reference/litellm-upstreams.md) 的「DGX 主力栈」，
 >   换栈理由与压测在 nv-dgx-spark 仓库。本文件的 Decision 仍不改写，见末尾「2026-09-03 修订」。
 > 修订: 2026-09-19：DGX 主力栈由 `Qwen3.8-Flash-Next` 换为 `Qwen3.8-27B-Uncensored`
 >   （NVFP4 + **SGLang** + DFlash2，单节点），别名 → `custom_dgx/qwen3.8-27b-sglang` /
@@ -39,7 +39,7 @@
 >   responses / messages 三条路），上下文同为 262k；池天花板 ~106G、模型常驻，没有 M2 那种换入换出期间回
 >   `is busy` 的故障模式。代价两条：OMLX 不校验 `reasoning_effort`，裸别名上的参数级 400 全被兜底吞掉；
 >   兜底流量与 xiaogpt 等指名调用挤同一个进程。M2 的别名全部保留，只是不再进兜底链。
->   生效事实见 [reference/litellm-gateway.md](../reference/litellm-gateway.md) 的「Mac Studio 上游」。
+>   生效事实见 [reference/litellm-upstreams.md](../reference/litellm-upstreams.md) 的「Mac Studio 上游」。
 > 修订: 2026-11-15（二）：「严格主→兜底」从**两级 + 手工切换**改为**三级自动降级**（用户要求故障时自动切换、
 >   保证基本可用）。同日 DGX 宕机时还得人手把裸别名改指 Studio、恢复后再改回；现在裸别名是同组三条 deployment
 >   （`order` DGX → Studio → M2）+ 后台健康检查剔除，宕机和恢复都不用动配置，M2 重新进链当第 3 级。

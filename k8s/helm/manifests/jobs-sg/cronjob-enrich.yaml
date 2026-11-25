@@ -30,7 +30,7 @@
 # 进度逐条落库，中途被 activeDeadlineSeconds 杀掉不丢。
 #
 # 别指望加并发提速：旧模型实测 8× 并发只换来 3.3× 吞吐，DGX 已接近饱和，再加只会加深排队，
-# 还会挤占同时在给 Open Notebook 供交互式推理的 DGX。8 是刻意保守的（见 docs/reference/jobs-sg.md）。
+# 还会挤占同时在给 Open Notebook 供交互式推理的 DGX。并发现为 4，理由见下方 LLM_CONCURRENCY 的注释与 docs/reference/jobs-sg-enrich.md。
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -93,6 +93,7 @@ spec:
                 # 8 → 4（2026-11-15）：新引擎 /health 报 `max_batch_size: 4`，第 5 路起在引擎里排队，
                 # 而排队时间也算在下面的 LLM_TIMEOUT 里 —— 8 并发等于一半请求先等一轮再开始算。
                 # 旧栈（vLLM max-num-seqs=64）给 8 是有余量的，现在没有了。
+                # 2026-11-17 起 DGX 换回 vLLM，上面这条约束不再成立；回调多少合适未实测（ROADMAP 第 9 条）。
                 - name: LLM_CONCURRENCY
                   value: "4"
                 # 单次调用预算（= 上游 llm.DefaultTimeout，可配，不必重构镜像）。
@@ -169,7 +170,7 @@ spec:
                 #    （reasoning_content 0 字符 / completion 7 token），默认值不用改；
                 #    `thinking=false` 仍是静默空操作（417 字符推理照出）。
                 # 真要应急排空：临时加 LLM_THINKING=false，排空后删掉（历史实测见
-                # docs/reference/jobs-sg.md「真正的提速杠杆」）。
+                # docs/reference/jobs-sg-enrich.md「真正的提速杠杆」）。
                 # 这里**没有**网关的 virtual key：直连 DGX 不需要，
                 # external-secret.yaml 也不再声明该键。若改走 LLM 网关才需要补回
                 # （改 LLM_BASE_URL + 删 LLM_MODELS + 声明对应的 key）。

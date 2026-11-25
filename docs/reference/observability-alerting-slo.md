@@ -29,7 +29,7 @@
   webhook 到 Multica autopilot，自动建分诊 issue；URL 含 token，走 Vault → ESO。⚠️ 它的投递失败被
   watchdog 那条 `integration="webhook"` 的 null 路由一并静默（Telegram 照常到），见该文件头。
 - 运行时检测（两集群 Tetragon）走 **Loki ruler → 本 Alertmanager → Telegram**（`loki-rules.yaml` 的 tetragon-runtime 组，
-  4 条：策略命中 / 应用起 shell / 无文件执行 / 攻击工具命令行），见 [security.md §8.5](security.md)。2026-11-24 之前 oracle 的
+  4 条：策略命中 / 应用起 shell / 无文件执行 / 攻击工具命令行），见 [tetragon-runtime-detection.md](tetragon-runtime-detection.md)。2026-11-24 之前 oracle 的
   Falco 经 Falcosidekick 绕过 Alertmanager 直推，那条独立通路已随 Falco 退役。
 
 ☠️ 判投递健康只看指标，不看 AM 日志：默认 `info` 级别下首次投递成功只打 DEBUG（重试成功才 INFO，
