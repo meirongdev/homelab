@@ -187,7 +187,8 @@ Tetragon**，oracle 原来的 Falco + Falcosidekick 同日退役（取舍与 Fal
   oracle 的基线截至 11-24 只有数小时，日/小时级的合法 shell 还可能冒出来，照同样写法补精确放行并重放。
 - ☠️ **换内核前把 eBPF 组件当成要过闸门的东西**：unattended-upgrades 装好新内核、下次重启即生效。Falco 就是这样在
   7.0 上被 BPF 校验器的内存顶破 limit 的。重启后核：`tetra tracingpolicy list` 两条 enabled、agent 的 `memory.peak`
-  离 limit 有余量（oracle 首次加载 185Mi / limit 768Mi，homelab 策略更新路径峰值 373Mi / 512Mi）。
+  离 limit 有余量（两集群 limit 都是 512Mi，按**策略更新路径**的峰值定：oracle 308Mi、homelab 373Mi；稳态远低于此，
+  测法见 `cloud/oracle/values/tetragon.yaml` 的注释）。
 - ⚠️ **增删策略要同步改 `TetragonPolicyNotEnabled` 里的 `2`**，否则要么永远报警、要么少一条也不报。
 - ☠️ **`matchBinaries NotIn` 在这里不生效**（Tetragon 1.7.0、内核 6.8/7.0，对照实验：排除 python3 的策略照样上报 python3）。别指望用它排噪声，要排就在告警表达式 / `exportDenyList` 里做，并且做完拿真事件验证。已知噪声：apps-pg 的就绪探针 `pg_isready -U postgres` 每次都打开 /etc/shadow；它不在 Loki 里（`exportDenyList` 已挡），但在 Prometheus 指标里。
 - **`exportDenyList` 也会挡策略事件**：kube-system / cilium / 宿主（namespace 为空）的命中不会进 Loki，也就不会告警；宿主进程本来就被策略的 `matchNamespaces Pid NotIn host_ns` 排除（已用宿主 `sudo cat /etc/shadow` 实测不触发）。
@@ -229,7 +230,7 @@ Tetragon**，oracle 原来的 Falco + Falcosidekick 同日退役（取舍与 Fal
 
 ## 11. 已知缺口与路线图
 
-1. **运行时检测调优**（观察版已部署，§8.5）：① Tetragon 还没做的：异常外联、ServiceAccount token 读取（都要先有「谁该读 / 该连谁」的基线，否则满屏误报）；`kubectl exec` 起的 shell 有意不报；观察一段时间后再评估是否提严，**拦截型策略要先写 ADR**；② 有意未移植的 Falco 规则（访问 K8s API、packet socket、release_agent、链接覆盖敏感文件、非标端口 SSH，理由见 [ADR](../decisions/runtime-detection-tetragon-both-clusters.md)）；③ oracle 的「应用起 shell」基线只有上线后数小时；④ oracle agent 的 memory limit（768Mi）待测过策略更新路径的峰值后收紧。
+1. **运行时检测调优**（观察版已部署，§8.5）：① Tetragon 还没做的：异常外联、ServiceAccount token 读取（都要先有「谁该读 / 该连谁」的基线，否则满屏误报）；`kubectl exec` 起的 shell 有意不报；观察一段时间后再评估是否提严，**拦截型策略要先写 ADR**；② 有意未移植的 Falco 规则（访问 K8s API、packet socket、release_agent、链接覆盖敏感文件、非标端口 SSH，理由见 [ADR](../decisions/runtime-detection-tetragon-both-clusters.md)）；③ oracle 的「应用起 shell」基线只有上线后数小时。
 2. **网络默认拒绝（门控灰度）**：Hubble 基线流量 → 每端点 `PolicyAuditMode` 只记不拦 → 单个无状态叶子 ns（personal-services/homepage）试点 CiliumNetworkPolicy（放行 DNS/Envoy/必要 egress）→ soak → 逐 ns 评估，**建议只对对外暴露 ns 做**。
 3. **节点 API 审计日志**：延后（磁盘紧）；如开启用 Metadata 级策略 + 严格 maxsize/maxbackup，先确认磁盘余量。
 4. **Kyverno Audit→Enforce**（§5.2）：`require-requests-limits` 已于 2026-11-18 提升，剩 `require-probes`（先按 ns 豁免批处理）与 `restrict-image-registries`（长期保持 Audit——它抓的是镜像串写法，不是来源）。提下一条之前有两个前置：① 打开并实测 PolicyException 通道（现在是关的）；② 顺手把 `disallow-latest-tag` 改成原生 ValidatingAdmissionPolicy，填上 oracle 零引擎的空子——`--generateValidatingAdmissionPolicy=true` 已开，per-rule 开关是 `rules[].validate.cel.generate: true`，两集群都 v1.35（VAP 自 1.30 GA，homelab 已有 Cilium 的一条在跑）。⚠️ Kyverno 生成的 VAP 是否真生效**尚未实测**，先拿一个 ns 试一条并 `kubectl get vap` 核对。
