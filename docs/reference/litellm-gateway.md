@@ -1,6 +1,6 @@
 # LiteLLM 网关（运维事实与坑）
 
-> Last updated: 2026-11-25
+> Last updated: 2026-11-26
 > Status: 生效事实
 > Scope: `llm.meirong.dev` 这个 LLM 网关的配置生效路径、鉴权分层、路由与 key（上游与兼容层在 [litellm-upstreams.md](litellm-upstreams.md)），
 > 本文是 source of truth。为什么选 LiteLLM、上游怎么选、兜底为何几经更换（Qwen3.6 → Ornith → Studio），见
@@ -125,19 +125,25 @@ SDK 的 kwarg，从来没生效过，主上游一失败就 500 `LLM Provider NOT
 | 外发 key（4 把 `ext-*`、`ext-team-1` 账户下的 key）、master key、以后新发的 key | 原组：DGX → Studio → M2 | 只有 Studio，不降级 |
 | 带 `aliases` 的内部 key | 改道 `homelab/qwen3.8-27b`：Studio → DGX → M2 | 同左 |
 
-带 `aliases` 的内部 key（2026-11-15）：`LITELLM_VK`（sha256 前缀 2c15baf776…，三台 Mac 的 Qwen Code / codex / k8sgpt）、
+带 `aliases` 的内部 key（2026-11-26 才真正写入，见下方「写完必须回读」）：`LITELLM_VK`（sha256 前缀 2c15baf776…，三台 Mac 的 Qwen Code / codex / k8sgpt）、
 `m2-magpie`、`m5-magpie`、`studio-magpie`、`open-notebook`、`calibre-metadata-llm`、`xiaogpt`。
 `jobs-sg` 刻意没带：它只用 `custom_dgx/` 前缀（就要打 DGX、不降级），这个名字也不在改道表里。
 
 - 实测（2026-11-15，线上 1.103.1，临时 key）：白名单按客户端请求的**原名**查，白名单只有目标组、没有原名的 key 是 403；
   改道后响应体的 `model` 仍是原名，客户端看不出来。所以 `homelab/qwen3.8-27b` 不进任何白名单，外发 key 指名调它是 403。
 - 谁答的：响应头 `x-litellm-model-api-base`。spend log 的 `model_group` 记的是改道后的组名，
-  内部 key 的调用在那里显示为 `homelab/qwen3.8-27b`，不是客户端填的名字。
+  内部 key 的调用在那里显示为 `homelab/qwen3.8-27b`，不是客户端填的名字；`original_model_group` 也是改道后的组名
+  （11-26 实测），客户端原本填了什么在库里查不到。
 - ☠️ `/key/update` 传 `aliases` 是**整表替换**（实测：只传一条，原来那条就没了），改完立即生效，不用重启。
 - ☠️ 改道目标组在 config 里不存在时，请求直接 400 `There are no healthy deployments for this model`（实测）。
   所以顺序是先 push 新组、等 pod 换上，再写 `aliases`；删组时反过来，先清 `aliases`。
 - ☠️ 这又是一处不在 git 里的路由事实（与坑 A 同类）。换栈改名时，`aliases` 的**键**（客户端请求的原名）要跟着改：
   键对不上不会报错，只是不再改道，内部流量悄悄回到 DGX 首选。
+- ☠️ **写完必须回读，别只改文档**：11-15 只上线了改道组，写 `aliases` 那一步漏了，本文与 CHANGELOG 却写成已完成，
+  内部流量 10 天都是 DGX 首选（`LITELLM_VK` 431 次 DGX、8 次 Studio），11-25 查 400 时才发现。11-26 补写，判据两条：
+  下方 psql 回读有 7 行；spend log 里内部 key 的 `model_group` 是 `homelab/qwen3.8-27b`、`api_base` 是 Studio。
+- 改道组里 DGX 是第 2 级，那条 deployment 同样带 `upstream_compat` 声明。hook 按 deployment 改写（2026-11-25 起），
+  降到 DGX 时照样改写，Studio 收到原样请求（[litellm-upstreams.md](litellm-upstreams.md) 坑 E）。
 - 新增内部 key 时在 `/key/generate` 里带上同样的 `aliases`；不带就是外发口径（DGX 首选）。
 
 ```bash

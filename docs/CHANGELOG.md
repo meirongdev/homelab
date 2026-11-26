@@ -1,6 +1,6 @@
 # Homelab Changelog
 
-> Last updated: 2026-11-25
+> Last updated: 2026-11-26
 > 已经做完的事，一条一行，按阶段/时间倒着找。**这里只回答「做过什么」**——
 > 还剩什么没做看 [ROADMAP.md](ROADMAP.md)，现在是什么样看 [reference/](reference/README.md)。
 > 2026-09-02 从 ROADMAP 拆出：那份文件长到 23.8KB，9 条开放项被 65 条历史淹没，
@@ -135,7 +135,7 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-11-15 | **LiteLLM 兜底换成 Mac Studio**：DGX 裸别名的兜底由 M2 的 `mac/ornith` 换成 `studio/qwen3.8-27b`（262k、模型常驻不换入换出）；换前经网关实测七档 `reasoning_effort` / 对话中间的 system / 工具调用全收。代价：裸别名上的参数级 400 全被兜底吞掉 ([现状](reference/litellm-gateway.md)) |
 | 2026-11-15 | **LiteLLM 裸别名三级自动降级**：DGX → Studio → M2，同组 `order` + 健康检查剔除，宕机与恢复不再要人改配置（ROADMAP #22 关闭）。实测主上游整机离线时只靠 `order` 每请求先卡约 406s，加健康检查后 0.3s ([自动降级](reference/litellm-gateway.md)) |
 | 2026-11-15 | **三台 Mac 的 Qwen Code / codex 统一走网关**：`just llm-clients` 下发，清掉直连 DGX / M2 / 本机 OMLX 的旧配置和坏掉的 MCP；codex 默认仍是 ChatGPT，Studio 补装 codex ([macbook/ansible](../macbook/ansible/README.md)) |
-| 2026-11-15 | **LiteLLM 按 key 分首选**：外发 key 照旧 DGX → Studio → M2；homelab 内部 7 把 key 带 key 级 `aliases`，同样的名字改道到新组 `homelab/qwen3.8-27b`（Studio → DGX → M2），客户端不改。实测白名单按原名查、响应 `model` 仍是原名 ([按 key 分首选](reference/litellm-gateway.md)) |
+| 2026-11-15 | **LiteLLM 按 key 分首选**：外发 key 照旧 DGX → Studio → M2；homelab 内部 7 把 key 带 key 级 `aliases`（⚠️ 当时漏写，11-26 才补），同样的名字改道到新组 `homelab/qwen3.8-27b`（Studio → DGX → M2），客户端不改。实测白名单按原名查、响应 `model` 仍是原名 ([按 key 分首选](reference/litellm-gateway.md)) |
 | 2026-11-18 | **DGX 后端换回 Qwen，网关对外名字不变**：四条 DGX deployment 改指 `qwen3.8-flash-next-tp2`（kit v5.4，vLLM），加回 upstream_compat 两条声明；DGX 三条告警改成 `tensorfold:*` / `vllm:*` 并集 ([现状](reference/litellm-gateway.md)) |
 | 2026-11-20 | **k3s 三节点升 v1.36.6**（oracle → 控制面 → worker，验收全过）：先把 Kyverno 4 条策略从 legacy ClusterPolicy 迁到 CEL ValidatingPolicy、再升 Kyverno v1.20（它不再执行 legacy），顺带修了 runbook 回滚命令的 glob 空操作 ([复盘](records/2026-11-20-k3s-1-36-upgrade.md)) |
 | 2026-11-20 | **Cilium 1.20.0 → 1.20.5（两集群）**：chart 默认值静默把 Envoy xDS 从 ads 翻成 split、Envoy 1.37→1.39，已显式钉 `envoy.xdsMode: ads`；先 oracle 后 homelab，26 个真实域名状态码与升级前逐一一致。k3s 1.37 要等 Cilium 1.21 正式版（1.20 线官方只测到 1.36）([复盘](records/2026-11-20-k3s-1-36-upgrade.md)) |
@@ -151,6 +151,7 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-11-24 | **运行时检测两集群统一 Tetragon，Falco 退役**：策略与公共 values 进共用树 `security/tetragon/`；告警两集群化（promtool 11 组、12 处变异全杀）；移植无文件执行 / 攻击工具两条检测；oracle 独有负载与 11-20 起每晚的夜备误报精确放行 ([ADR](decisions/runtime-detection-tetragon-both-clusters.md)) |
 | 2026-11-25 | **文档瘦身**：check-docs 加查锚点与 `just` 配方；AGENTS.md 13970→9966 字节；security / litellm-gateway / jobs-sg 按子题拆出 5 篇，顺手改正与现网不符的 DGX 一节（11-17 起是 vLLM 的 Qwen3.8-Flash-Next）与 jobs-sg 的并发值 ([索引](reference/README.md)) |
 | 2026-11-25 | **撤掉 Renovate**：用户确认没在用（从没配过 `RENOVATE_TOKEN`，workflow 每天跳过）。删 workflow 与 `.github/renovate.json5`，文档改为「镜像与 digest 手动更新」 ([决策](decisions/trivy-cve-automation.md)) |
+| 2026-11-26 | **补完 LiteLLM 按 key 分首选**：11-15 只上线了改道组，7 把内部 key 的 `aliases` 一直没写，内部流量 10 天都是 DGX 首选。先把 `upstream_compat` 改为按 deployment 改写（aliases 先于 pre_call_hook 套用，组级声明顾此失彼），再写 aliases；线上实测改道到 Studio、发往 DGX 的请求照样改写 ([坑 E](reference/litellm-upstreams.md)) |
 
 ### 审计与清理（历史）
 

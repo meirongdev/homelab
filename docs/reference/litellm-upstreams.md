@@ -122,16 +122,17 @@ DeepSeek-V4.1 / TensorFold 那三天（11-15 ~ 11-17）的实测表（模型名�
   镜像对假上游实测过：chat / responses / messages 三条路与流式，Studio 收到原样请求，DGX 收到改写版，改写不污染降级到
   下一级的请求。11-15 ~ 11-17 的 DeepSeek / TensorFold 栈两种都接受，那三天声明撤掉过。
 - 验证 hook 已加载：`kubectl --context k3s-homelab -n litellm logs deploy/litellm | grep upstream_compat`（每个 pod 首次改写打一条 WARNING）。
-- 这类问题不会自己报出来。查最近谁被静默兜底了（本机任意目录；修复后应只剩 DGX 真宕机时段的行）：
+- 这类问题不会自己报出来。查最近哪些本该 DGX 作答的请求落到了别处（本机任意目录；正常只剩 DGX 宕机或忙到探测超时
+  时段的行）。降级在组内按 order 走，`model_group` 不变，只有 `api_base` 看得出（`original_model_group` 也是组名，没用）：
 
 ```bash
 kubectl --context k3s-homelab -n databases exec deploy/apps-pg -- psql -U postgres -d litellm -c "
 select coalesce(nullif(metadata->>'user_api_key_alias', ''), left(api_key, 12)) as key,
        split_part(metadata->>'user_agent', ' ', 1) as ua,
-       metadata->>'original_model_group' as asked, model_group as served, count(*) as n
+       model_group, split_part(api_base, '/', 3) as served_by, count(*) as n, max(\"startTime\")::timestamp(0) as last
 from \"LiteLLM_SpendLogs\"
 where \"startTime\" > now() - interval '7 days' and status = 'success'
-  and metadata->>'original_model_group' <> model_group
+  and model_group in ('DeepSeek-V4.1-Flash-1017', 'qwen3.8-flash-next-tp2') and api_base not like '%100.97.87.120%'
 group by 1, 2, 3, 4 order by n desc;"
 ```
 
