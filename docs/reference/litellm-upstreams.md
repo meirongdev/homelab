@@ -26,7 +26,7 @@
 | served name | `qwen3.8-flash-next-tp2`。vLLM 对别的名字一律 404 |
 | 端点 | `100.97.87.120:8000/v1`（head 在 S1）|
 | `max_model_len` | 409600（2026-11-25 `/v1/models` 实测）|
-| `reasoning_effort` | 只收 `none` / `low` / `medium` / `xhigh`（11-18 实测），`none` 真能关思考。集合外的档位由网关的 `upstream_compat` 改写（坑 E）|
+| `reasoning_effort` | 只收 `none` / `low` / `medium` / `xhigh`（11-18 实测），`none` 真能关思考。400 的报错原文只列 xhigh / medium / low，别据此删掉 none（11-26 复测 chat 与 Responses 都是 0 推理 token）。集合外的档位由网关的 `upstream_compat` 改写（坑 E）|
 | 中间的 system 消息 | 400（11-18 实测），由 `upstream_compat` 并进开头（坑 E）|
 | 关思考 | `chat_template_kwargs {"enable_thinking": false}`（Qwen 栈 2026-10-04 实测；v5.4 只测过 `reasoning_effort: none`）。☠️ 旧键 `{"thinking": false}` 在 Qwen 栈上是静默空操作 |
 | 并发 | 本栈的 `max-num-seqs` 未核（上一个 vLLM 栈是 64）。jobs-sg 的 `LLM_CONCURRENCY` 11-15 为 TensorFold 的 `max_batch_size: 4` 从 8 降到 4，换回 vLLM 后没调回（[ROADMAP](../ROADMAP.md) 第 9 条）|
@@ -36,7 +36,8 @@
 DeepSeek-V4.1 / TensorFold 那三天（11-15 ~ 11-17）的实测表（模型名写错照常 200、`max_batch_size: 4`、七档全收等）
 对现网不适用，只留在 git 历史：`git show 0fc3f02:docs/reference/litellm-gateway.md`。换回那个栈时照 runbook 重测，别照抄。
 
-- ✅ 经网关能传 `reasoning_effort`（2026-10-04 实测，镜像 v1.103.1）。想看 DGX 对档位的 400 原文（换栈后核档位集合就靠它），
+- ✅ 经网关能传推理档位：chat 的 `reasoning_effort` 一直可以；`/v1/responses` 的 `reasoning.effort` 与 `/v1/messages` 的
+  `thinking` 要靠 `model_info` 的 `supports_reasoning`（2026-11-26 起，见「推理档位经网关」）。想看 DGX 对档位的 400 原文（换栈后核档位集合就靠它），
   对 `custom_dgx/` 前缀别名传一个**不认识的值**，比如 `"bogus"`：声明了档位集合的栈上，`high` 这类已知档位会先被
   `upstream_compat` 改写（坑 E）。
 - ☠️ **裸别名上，参数错误会被降级悄悄吞掉**：DGX 回 400 → 第 2 级 Studio 接受这个参数 → 200，只有响应头
@@ -65,6 +66,28 @@ DeepSeek-V4.1 / TensorFold 那三天（11-15 ~ 11-17）的实测表（模型名�
   → [omlx-inference-metrics.md 的「鉴权」](omlx-inference-metrics.md#鉴权omlx-07-起)
 - ⚠️ 网关里没有任何文生图模型：`studio/qwen-image-2.1` 2026-10-03 同日上线同日撤下，原因与当时的实现 →
   [decisions/studio-image-generation.md](../decisions/studio-image-generation.md)。
+
+## 推理档位经网关（`supports_reasoning`，2026-11-26）
+
+☠️ LiteLLM 在 `/v1/responses` 与 `/v1/messages`（翻译成 Responses）上按自带模型表查 `supports_reasoning`，自托管模型不在表里：
+不声明时，带 `reasoning.effort` 的请求在网关就回 400 `UnsupportedParamsError … lacks supports_reasoning`，哪个上游都到不了；
+Claude Code 的 `thinking` 会被翻成档位，所以它经网关时首轮必 400。chat 路径不查。现在 14 条自托管 chat deployment 的
+`model_info` 都带 `supports_reasoning: true`（embedding / TTS / ASR 不带），**新加自托管 chat 模型也要带**。
+
+放行后发给上游的形状（本地同 digest 镜像实测）：Responses 只多 `reasoning: {"effort": …}`；`thinking` 那条路另带
+`include: ["reasoning.encrypted_content"]`（budget 1024 → `low`）。2026-11-26 不经网关、直连三个上游实测：
+
+| 形状 | DGX | Studio | M2 |
+|---|---|---|---|
+| 集合内档位 | 200 | 200 | 200 |
+| `thinking` 翻译后的形状（`effort: low` + `include`） | 200 | 200 | 200 |
+| `reasoning.summary: auto` | 200 | 200 | 未测 |
+| `effort: none` | 200，推理 0 token（chat 与 Responses 都是） | 200，照样思考 | 未测 |
+| `developer` 消息（开头或中间） | 200 | 200 | 200 |
+| Responses 的 `input` 中间夹 `system` | **400**，`upstream_compat` 并进 `instructions`（坑 E） | 200 | 200 |
+
+- ⚠️ codex 不给不认识的模型发 `reasoning`：45 天 spend log 里 codex 的 11 次 Responses 请求全部成功、没有一次因档位被拒，
+  所以 `llm_clients.py` 给三个 profile 配的 `model_reasoning_effort` 对网关上的模型是空操作，网关放行也不改变这一点。
 
 ## 上游是思维链模型：小 `max_tokens` 会把思维链漏进 `content`
 
@@ -109,10 +132,11 @@ DeepSeek-V4.1 / TensorFold 那三天（11-15 ~ 11-17）的实测表（模型名�
   | `Unexpected reasoning effort high. Supported types are …` | 透传客户端档位的代理（magpie 0.1.2138），或直接传 `high` / `minimal` 的客户端 |
 
 - ⚠️ `/v1/messages` 打 `openai/` 上游时，LiteLLM 1.103.1 走的是 Responses API（DGX 收到的是 `instructions` + `input`），
-  不是 chat；Claude Code 第一次请求带的 `thinking` 会在 LiteLLM 参数层被拒（`UnsupportedParamsError … reasoning.effort`），
-  客户端去掉 thinking 重试，重试那次才撞到上面第一种 400。
+  不是 chat；Claude Code 带的 `thinking` 被翻成 `reasoning.effort`。2026-11-26 前 deployment 没声明 `supports_reasoning`，这一步
+  在 LiteLLM 参数层就被拒（`UnsupportedParamsError …`），客户端去掉 thinking 重试，重试那次才撞到上面第一种 400。
 - 修法：`k8s/helm/manifests/litellm/upstream_compat.py` 在请求发往 DGX 之前，按那条 deployment `model_info` 里的声明改写：
-  `upstream_system_first` 把中间的 system 并进开头，`upstream_reasoning_efforts` 把集合外的档位换成不低于它的最小档。
+  `upstream_system_first` 把中间的 system 并进开头（chat 并进 `messages[0]`、Anthropic 并进 `system`、Responses 并进
+  `instructions`，后者 11-26 加），`upstream_reasoning_efforts` 把集合外的档位换成不低于它的最小档。
   规则、作用域与失败模式在它的文件头。☠️ **换栈时这两条声明要跟着重核**（档位集合每个栈都变过），runbook 已列为必改项。
   声明写在**四条**指向 DGX 的 deployment 上（`custom_dgx/…`、裸别名与兼容别名两组的 order 1、内部改道组
   `homelab/qwen3.8-27b` 的 order 2），档位集合 `none` / `low` / `medium` / `xhigh`。2026-11-25 起 hook 挂在

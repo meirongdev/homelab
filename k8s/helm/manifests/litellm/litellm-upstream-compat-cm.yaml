@@ -42,7 +42,8 @@ data:
       upstream_system_first: true
           非首位的 role=system 消息并进开头的 system 提示（追加在末尾，静态前缀不动，
           上游的前缀缓存照样命中）。chat 格式并进 messages[0]（没有就新建一条）；
-          Anthropic 格式（/v1/messages）并进顶层 `system`。
+          Anthropic 格式（/v1/messages）并进顶层 `system`；Responses 格式（/v1/responses）把 `input` 里
+          role=system 的项并进 `instructions`。`developer` 不动：DGX 收（2026-11-26 直连实测，开头、中间都 200）。
 
       upstream_reasoning_efforts: [none, low, medium, xhigh]      ← 现值，11-18 对 Qwen v5.4 实测
           请求的档位不在集合里时，换成集合中**不低于**它的最小档；没有更高的就取最高档。
@@ -66,10 +67,10 @@ data:
 
     ## 作用域与失败模式
 
-    - 不处理 Anthropic 的 `thinking` / `output_config`：那条路在 LiteLLM 参数映射层就以
-      `UnsupportedParamsError … reasoning.effort` 拒掉，DGX 和 Ornith 都到不了；Claude Code 会去掉
-      thinking 重试，重试那次才轮到本层的规则 1。
-    - 不搬 responses 的 `input` 里的 system / developer 项（与旧版一致）。
+    - Anthropic 的 `thinking` 由 LiteLLM 翻成 Responses 的 `reasoning.effort`（budget 1024 → low），本层在翻译后的
+      aresponses 那一次按档位规则处理。前提是 deployment 的 model_info 带 `supports_reasoning: true`：没有它，
+      LiteLLM 在参数映射层就以 `UnsupportedParamsError … reasoning.effort` 拒掉，哪个上游都到不了（2026-11-26 之前
+      就是这样，Claude Code 首轮必 400，去掉 thinking 重试才过）。`output_config` 不处理。
     - 声明从钩子 kwargs 的 `metadata.model_info`（chat）或 `litellm_metadata.model_info`
       （responses / messages）读，由 router 按所选 deployment 填；两处都没有就当没声明。
     - 钩子拿到的是 kwargs 的浅拷贝，改写全部换新对象、不碰原消息对象：同一请求降级到下一个
@@ -221,6 +222,25 @@ data:
         return rest, new_system
 
 
+    def hoist_system_responses(items: Any, instructions: Any) -> Optional[Tuple[List[Any], Any]]:
+        """Responses 格式：`input` 里 role=system 的消息并进 `instructions`。developer 不动。无需改动返回 None。"""
+        if not isinstance(items, list):
+            return None
+        late = {
+            i for i, it in enumerate(items)
+            if isinstance(it, dict) and it.get("role") == "system" and it.get("type", "message") == "message"
+        }
+        if not late:
+            return None
+        rest = [it for i, it in enumerate(items) if i not in late]
+        if not rest:  # 只有 system、没有对话：搬空了反而是坏请求，原样交给上游
+            return None
+        texts = [t for t in (_text_of(items[i].get("content")) for i in sorted(late)) if t]
+        head = instructions if isinstance(instructions, str) else ""
+        merged = "\n\n".join(x for x in [head, *texts] if x)
+        return rest, (merged or instructions)
+
+
     def rewrite(
         data: Dict[str, Any], call_type: str, efforts: Optional[List[str]], system_first: bool
     ) -> List[str]:
@@ -238,6 +258,11 @@ data:
             if hoisted is not None:
                 updates["messages"], updates["system"] = hoisted
                 changes.append("system 消息并进顶层 system")
+        elif system_first and call_type in RESPONSES_CALL_TYPES:
+            hoisted_r = hoist_system_responses(data.get("input"), data.get("instructions"))
+            if hoisted_r is not None:
+                updates["input"], updates["instructions"] = hoisted_r
+                changes.append("input 里的 system 并进 instructions")
 
         if efforts:
             if call_type in CHAT_CALL_TYPES and "reasoning_effort" in data:

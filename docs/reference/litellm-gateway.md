@@ -247,7 +247,7 @@ curl -s -H "Authorization: Bearer $MK" -H "Content-Type: application/json" \
 
 | 消费方 | 用哪个别名 | 配置在哪 |
 |---|---|---|
-| 三台 Mac 的 Qwen Code 与 codex | 默认 `DeepSeek-V4.1-Flash-1017`（`LITELLM_VK` 带 `aliases`，实际 Studio 首选、DGX 兜底），可指名 `studio/qwen3.8-27b` / `mac/ornith`。codex 默认仍是 ChatGPT 登录，经网关用 `codex -p litellm\|studio\|mac` | `cd macbook/ansible && just llm-clients` 统一下发（2026-11-15 起；直连上游的旧 profile 已清掉）|
+| 三台 Mac 的 Qwen Code 与 codex | 默认 `DeepSeek-V4.1-Flash-1017`（`LITELLM_VK` 带 `aliases`，实际 Studio 首选、DGX 兜底），可指名 `studio/qwen3.8-27b` / `mac/ornith`。codex 默认仍是 ChatGPT 登录，经网关用 `codex -p litellm\|studio\|mac`（profile 里的推理档位对这些模型是空操作，见 [litellm-upstreams.md](litellm-upstreams.md)「推理档位经网关」）| `cd macbook/ansible && just llm-clients` 统一下发（2026-11-15 起；直连上游的旧 profile 已清掉）|
 | 本机任意 OpenAI 兼容客户端 | `studio/qwen3.8-27b` | 读 `LITELLM_VK`；目前没有固定消费方 |
 | k8sgpt（默认，`--backend localai`）| `mac/ornith-fast` | `~/Library/Application Support/k8sgpt/k8sgpt.yaml`（本机）|
 | k8sgpt（`--backend openai`）| `DeepSeek-V4.1-Flash-1017` | 同上。☠️ explain 输出为空：k8sgpt 0.4.39 实际按 2048 截断（无视 `maxtokens: 4096`），DGX 默认开思考，2048 全用在思考上（网关记 `success`、`completion_tokens=2048`），所以默认后端是 localai |

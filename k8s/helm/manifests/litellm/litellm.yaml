@@ -27,6 +27,11 @@ data:
   # 强制 key 鉴权由 env LITELLM_MASTER_KEY 实现（general_settings.master_key 语义=require a key for all calls）。
   config.yaml: |
     model_list:
+      # ☠️ 自托管 chat 模型（DGX / Studio / M2）的 model_info 一律带 supports_reasoning: true（2026-11-26）：LiteLLM 在
+      #    /v1/responses 与 /v1/messages（翻译成 Responses）上按自带模型表查 supports_reasoning，自托管模型不在表里 →
+      #    带推理档位的请求在网关就 400（UnsupportedParamsError），到不了任何上游；Claude Code 的 thinking 也会被翻成档位，
+      #    首轮必 400。chat 路径不查。新加自托管 chat 模型要带，embedding / TTS / ASR 不带。三个上游收这些形状已直连实测，
+      #    见 docs/reference/litellm-upstreams.md「推理档位经网关」。
       # ── DGX（主；custom_dgx/ 前缀是历史约定，保留）──
       # 现状（2026-11-18 起）：DGX 后端是 Qwen3.8-Flash-Next（hibrid48 权重，myllmbox cluster kit v5.4，vLLM）双机 TP=2，
       #   端点 100.97.87.120:8000，served name `qwen3.8-flash-next-tp2`。2026-11-17 13:43 上游从 DeepSeek-V4.1-Flash-1017
@@ -58,6 +63,7 @@ data:
         model_info:
           upstream_reasoning_efforts: [none, low, medium, xhigh]
           upstream_system_first: true
+          supports_reasoning: true
       # ── 无前缀别名 DeepSeek-V4.1-Flash-1017：DGX → Studio → M2 三级自动降级 ──
       # 2026-11-15 前靠 router_settings.fallbacks 串别名；现在改为同组 order + 健康检查（理由见下面那组的注释）。
       # ☠️ 别往模型条目的 litellm_params 里写 fallbacks：那是透传给 SDK 的 kwarg，从来没生效过
@@ -81,13 +87,13 @@ data:
       # ⚠️ 别用 YAML 锚点去重：PyYAML 的别名是同一个 dict 对象，LiteLLM 会往 model_info 里写各自的 id。
       - model_name: DeepSeek-V4.1-Flash-1017
         litellm_params: {model: openai/qwen3.8-flash-next-tp2, api_base: "http://100.97.87.120:8000/v1", api_key: dummy, order: 1}
-        model_info: {health_check_timeout: 30, health_check_max_tokens: 16, upstream_reasoning_efforts: [none, low, medium, xhigh], upstream_system_first: true}
+        model_info: {health_check_timeout: 30, health_check_max_tokens: 16, upstream_reasoning_efforts: [none, low, medium, xhigh], upstream_system_first: true, supports_reasoning: true}
       - model_name: DeepSeek-V4.1-Flash-1017
         litellm_params: {model: openai/Qwen3.8-27B-MLX-4bit, api_base: "http://100.98.220.75:8000/v1", api_key: dummy, order: 2}
-        model_info: {health_check_timeout: 60, health_check_max_tokens: 16}
+        model_info: {health_check_timeout: 60, health_check_max_tokens: 16, supports_reasoning: true}
       - model_name: DeepSeek-V4.1-Flash-1017
         litellm_params: {model: openai/ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit, api_base: "http://100.89.15.120:8000/v1", api_key: dummy, order: 3}
-        model_info: {health_check_timeout: 60, health_check_max_tokens: 16}
+        model_info: {health_check_timeout: 60, health_check_max_tokens: 16, supports_reasoning: true}
       # ── 兼容别名 qwen3.8-flash-next-tp2（2026-11-15）──
       # 上一个 DGX 栈的名字。外发 key 的使用者还不知道已改名为 DeepSeek-V4.1-Flash-1017，客户端照旧发旧名，
       # 所以按旧名建一组，**三级上游始终与上面的裸别名保持一致**。4 把 ext-* key 和 ext-team-1 账户的白名单
@@ -95,13 +101,13 @@ data:
       # 删它的条件：spend log 里连续两周没有旧名调用；删时同步从那 5 处白名单里拿掉，并从健康检查列表里删掉。
       - model_name: qwen3.8-flash-next-tp2
         litellm_params: {model: openai/qwen3.8-flash-next-tp2, api_base: "http://100.97.87.120:8000/v1", api_key: dummy, order: 1}
-        model_info: {health_check_timeout: 30, health_check_max_tokens: 16, upstream_reasoning_efforts: [none, low, medium, xhigh], upstream_system_first: true}
+        model_info: {health_check_timeout: 30, health_check_max_tokens: 16, upstream_reasoning_efforts: [none, low, medium, xhigh], upstream_system_first: true, supports_reasoning: true}
       - model_name: qwen3.8-flash-next-tp2
         litellm_params: {model: openai/Qwen3.8-27B-MLX-4bit, api_base: "http://100.98.220.75:8000/v1", api_key: dummy, order: 2}
-        model_info: {health_check_timeout: 60, health_check_max_tokens: 16}
+        model_info: {health_check_timeout: 60, health_check_max_tokens: 16, supports_reasoning: true}
       - model_name: qwen3.8-flash-next-tp2
         litellm_params: {model: openai/ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit, api_base: "http://100.89.15.120:8000/v1", api_key: dummy, order: 3}
-        model_info: {health_check_timeout: 60, health_check_max_tokens: 16}
+        model_info: {health_check_timeout: 60, health_check_max_tokens: 16, supports_reasoning: true}
       # ── homelab 内部改道组 homelab/qwen3.8-27b（2026-11-15）：Studio → DGX → M2，与上面两组顺序相反 ──
       # 用户的分工：外发 key 用 DGX 的 DeepSeek-V4.1-Flash 当首选、Qwen3.8-27B 兜底；homelab 内部反过来。
       # 两边请求的是同一批名字（裸别名、兼容别名），按名字分不开，所以按 **key** 分：内部 key 在 Postgres 里带
@@ -113,13 +119,13 @@ data:
       #    清单与回读命令见 docs/reference/litellm-gateway.md「按 key 分首选」。
       - model_name: homelab/qwen3.8-27b
         litellm_params: {model: openai/Qwen3.8-27B-MLX-4bit, api_base: "http://100.98.220.75:8000/v1", api_key: dummy, order: 1}
-        model_info: {health_check_timeout: 60, health_check_max_tokens: 16}
+        model_info: {health_check_timeout: 60, health_check_max_tokens: 16, supports_reasoning: true}
       - model_name: homelab/qwen3.8-27b
         litellm_params: {model: openai/qwen3.8-flash-next-tp2, api_base: "http://100.97.87.120:8000/v1", api_key: dummy, order: 2}
-        model_info: {health_check_timeout: 30, health_check_max_tokens: 16, upstream_reasoning_efforts: [none, low, medium, xhigh], upstream_system_first: true}
+        model_info: {health_check_timeout: 30, health_check_max_tokens: 16, upstream_reasoning_efforts: [none, low, medium, xhigh], upstream_system_first: true, supports_reasoning: true}
       - model_name: homelab/qwen3.8-27b
         litellm_params: {model: openai/ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit, api_base: "http://100.89.15.120:8000/v1", api_key: dummy, order: 3}
-        model_info: {health_check_timeout: 60, health_check_max_tokens: 16}
+        model_info: {health_check_timeout: 60, health_check_max_tokens: 16, supports_reasoning: true}
       # ── M2 的 Ornith（指名别名；同一份权重也是裸别名的第 3 级，见上）──
       # 2026-08-25 由 Qwen3.6-35B 换为 Ornith-1.5-35B-A3B（OMLX 的 is_default 同日已指向它）。
       # ☠️ 只暴露一个 Mac 35B：OMLX 池天花板 30GB 装不下两个（19.95 + 19.08GB），
@@ -130,6 +136,8 @@ data:
           model: openai/ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit
           api_base: http://100.89.15.120:8000/v1
           api_key: dummy
+        model_info:
+          supports_reasoning: true
       # ── Mac 无思维链变体（OMLX 的 fast profile: enable_thinking=false）──
       # 给「小 max_tokens + 要求简短输出」的消费方（k8sgpt 就是）：思维链模型的
       # reasoning_content 切分依赖 </think> 闭合标签，token 用完标签不出现 → OMLX 的 parser
@@ -140,6 +148,8 @@ data:
           model: "openai/ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit:fast"
           api_base: http://100.89.15.120:8000/v1
           api_key: dummy
+        model_info:
+          supports_reasoning: true
       # ── open-notebook 专用：别名 = OMLX 的模型 ID 原文（2026-11-11）──
       # 推理请求统一走网关后，open-notebook 两个凭据的 base_url 指向这里。它的模型按名字绑在凭据上，
       # API 没有 PUT，改名只能在 UI 里删了重建（还要先扫 SurrealDB 有没有引用），所以网关这边按它
@@ -152,6 +162,8 @@ data:
           model: openai/ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit
           api_base: http://100.89.15.120:8000/v1
           api_key: dummy
+        model_info:
+          supports_reasoning: true
       - model_name: mlx-community__Qwen3-Embedding-4B-4bit-DWQ
         litellm_params:
           model: openai/mlx-community__Qwen3-Embedding-4B-4bit-DWQ
@@ -188,6 +200,8 @@ data:
           model: openai/Qwen3.8-27B-MLX-4bit
           api_base: http://100.98.220.75:8000/v1
           api_key: dummy
+        model_info:
+          supports_reasoning: true
       # ── OpenRouter（第三来源，独立透传，2026-08-16）──
       # 全部模型透传：openrouter/<任意 OpenRouter 模型 ID> 直接命中。
       # ⚠️ key 是真实付费凭据：用环境变量引用（os.environ/OPENROUTER_API_KEY），
@@ -262,14 +276,14 @@ spec:
         #    ⇒ ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按**旧路由表**继续跑。
         #    2026-08-25 实际踩过一次（改了 mac/ornith 后必须手动 rollout restart 才生效）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py 的 STAMP_ONLY），别手改。
-        checksum/config: "7b6d9782c17cc30a"
+        checksum/config: "2a364e9467d667d2"
         # 同理，但盯的是 codex_compat.py（litellm-codex-compat ConfigMap）：
         # 也是 subPath 挂载 + 只在启动时 import，改了不重启就是静默跑旧代码。
         checksum/codex-compat-py: "e5da4a39d90243d4"
         # 同理，盯 client_ip.py（litellm-client-ip ConfigMap）。
         checksum/client-ip-py: "73ac6eb0b2a145f1"
         # 同理，盯 upstream_compat.py（litellm-upstream-compat ConfigMap）。
-        checksum/upstream-compat-py: "5445f3a99f378ab5"
+        checksum/upstream-compat-py: "680816c242210e56"
       labels:
         app: litellm
     spec:

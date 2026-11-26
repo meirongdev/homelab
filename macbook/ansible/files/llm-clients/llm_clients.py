@@ -36,6 +36,8 @@ QWEN_GEN = {"contextWindowSize": CTX, "timeout": 300000, "maxRetries": 3}
 
 # codex：默认仍走 ChatGPT 登录（2026-11-15 用户定），自建模型用 -p <profile>
 CODEX_BASE_KEYS = {"model": '"gpt-6-luna"', "model_reasoning_effort": '"xhigh"'}
+# ⚠️ 下面的 reasoning_effort 对网关上的自托管模型是空操作：codex 不给不认识的模型发 reasoning（2026-11-26 查 spend log，
+#    11 次 Responses 请求无一带档位）。见 docs/reference/litellm-upstreams.md「推理档位经网关」。
 CODEX_PROFILES = {  # profile 名 → (网关别名, reasoning_effort)
     "litellm": ("DeepSeek-V4.1-Flash-1017", "high"),
     "studio": ("studio/qwen3.8-27b", "high"),
