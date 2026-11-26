@@ -15,65 +15,75 @@ metadata:
   labels: { app: litellm }
 data:
   upstream_compat.py: |
-    """upstream_compat — 把请求改写成「目标上游声明过能接受」的形状，别让兜底静默接走。
+    """upstream_compat — 把发往某个上游的请求改写成「这个上游声明过能接受」的形状，别让兜底静默接走。
 
-    挂在 LiteLLM 的 `async_pre_call_hook` 上（litellm_settings.callbacks）。只改写**指名的
-    model group 在 config.yaml 的 `model_info` 里声明过**的那两件事，没声明的上游一律不碰。
+    挂在 LiteLLM 的 `async_pre_call_deployment_hook` 上（litellm_settings.callbacks）：router 选定
+    deployment、请求真正发出之前，按**这个 deployment** 在 config.yaml 的 `model_info` 里声明的两件事
+    改写；没声明的 deployment（Studio / M2）收到原样请求。组内降级（order 1 → 2 → 3）每次尝试都会
+    重新调用这个钩子，所以「Studio → DGX」降级时只有发给 DGX 的那一次被改写。
 
     ## 为什么需要
 
-    2026-11 的 DGX 栈（vLLM + Qwen chat template）有两种请求会回 400，而 Mac 的 OMLX 两种都接受
-    （11-15 换上的 DeepSeek-V4.1 / TensorFold 两种都接受，所以当前 config 里没有声明，本层对它是空操作；
-    留着它是为了下一个挑剔的栈只需加两行声明）：
+    2026-11 的 DGX 栈（vLLM + Qwen chat template）有两种请求会回 400，而 Mac 的 OMLX 两种都接受：
 
       1. 对话中间出现 role=system 消息 → `400 System message must be at the beginning.`
          （Qwen 模板里的 raise_exception）。Claude Code 2.1.31x 起把 `# Environment` 块作为
          `messages[1]` 的 role=system 发出来，经 LiteLLM 翻译后原样到达 DGX。
       2. `reasoning_effort` 不在它的档位集合里 → `400 Unexpected reasoning effort high`。
-         DGX 只认 low / medium / xhigh；magpie 一类代理会把客户端的 `high` 透传过来。
+         magpie 一类代理会把客户端的 `high` 透传过来。
 
-    DGX 的裸别名（当时是 `qwen3.8-flash-next-tp2`）配了 `mac/ornith` 兜底，所以这两种 400 **不会报错**：
-    请求被悄悄转给 M2，调用方只觉得慢（Ornith 30–47s，DGX 几秒），响应里的 `model` 变成
-    `ornith-ai__…`。2026-11-13 查外发 key 时发现 3 把 key 的主力请求全落在 M2 上，DGX 空着。
-    没有这一层时，唯一的痕迹是 spend log 里 `original_model_group ≠ model_group`。
+    DGX 所在的组都配了降级，所以这两种 400 **不会报错**：请求被悄悄转给下一级，调用方只觉得慢，
+    只有响应头 `x-litellm-model-api-base` 换了上游。2026-11-13 查外发 key 时发现 3 把 key 的主力请求
+    全落在 M2 上，DGX 空着。（11-15 ~ 11-17 的 DeepSeek / TensorFold 栈两种都接受，那三天声明撤掉过；
+    11-17 换回 Qwen 后 11-18 加回。）
 
-    ## 改写规则（声明在 config.yaml 的 model_info，换栈时跟模型条目一起改；值是 11-14 给 Qwen 栈写的）
+    ## 改写规则（声明在 config.yaml 的 model_info，换栈时跟模型条目一起改）
 
       upstream_system_first: true
           非首位的 role=system 消息并进开头的 system 提示（追加在末尾，静态前缀不动，
           上游的前缀缓存照样命中）。chat 格式并进 messages[0]（没有就新建一条）；
           Anthropic 格式（/v1/messages）并进顶层 `system`。
 
-      upstream_reasoning_efforts: [low, medium, xhigh]
+      upstream_reasoning_efforts: [none, low, medium, xhigh]      ← 现值，11-18 对 Qwen v5.4 实测
           请求的档位不在集合里时，换成集合中**不低于**它的最小档；没有更高的就取最高档。
-          high→xhigh、minimal→low、none→low（DGX 没有关思考的档位；真要关思考用
-          chat_template_kwargs）。不认识的值不猜，原样交给上游报错。
+          high→xhigh、minimal→low；集合里没有 none 的栈上 none→low。不认识的值不猜，原样交给上游报错。
           覆盖 chat 的 `reasoning_effort` 和 responses 的 `reasoning.effort`。chat 里
-          {"effort","summary"} 这种 dict 形式会被 LiteLLM 原样转发、vLLM 只认字符串，所以压平成
-          字符串。Ornith 也接受换后的值（11-14 实测 xhigh/medium/low 均 200），改写不会弄坏兜底。
+          {"effort","summary"} 这种 dict 形式会被 LiteLLM 原样转发、vLLM 只认字符串，所以压平成字符串。
 
       ⚠️ /v1/messages 打 `openai/` 上游时，LiteLLM（1.103.1）走的是 **Responses API**（上游收到
-      `instructions` + `input`），不是 chat。本层在 Anthropic 格式上把 system 并进顶层 `system`，
-      翻译后就全落在 `instructions` 里，`input` 不再有 system 项。
+      `instructions` + `input`），不是 chat。这条路上本钩子每次尝试触发两次：先是 Anthropic 格式
+      （anthropic_messages，本层把 system 并进顶层 `system`），再是翻译后的 Responses 格式
+      （aresponses，system 已全在 `instructions` 里，本层只看档位）。
 
-    声明按**指名的 model group** 取：兜底到别的 group 时沿用同一份已改写的请求。
+    ## 为什么不挂 async_pre_call_hook（11-14 ~ 11-25 的做法）
+
+    pre_call_hook 在选 deployment 之前跑，只能按**组**取声明，而且跑在 key 级 `aliases` 之后：
+    LiteLLM 1.103.1 的 `common_processing_pre_call_logic` 先在 `add_litellm_data_to_request` 里套
+    aliases（`_update_model_if_key_alias_exists`，L2021 再套一次），L2122 才调 pre_call_hook。带
+    aliases 的内部 key 读到的是改道组 `homelab/qwen3.8-27b`，DGX 在那组是第 2 级，组级声明只能二选一：
+    不加，降到 DGX 时 400 → 再降 M2；加了，连发给 Studio（第 1 级）的请求也一起改写。按 deployment
+    改写两头都对，也不再有「兜底到别的组沿用同一份已改写请求」这条隐含规则。
 
     ## 作用域与失败模式
 
     - 不处理 Anthropic 的 `thinking` / `output_config`：那条路在 LiteLLM 参数映射层就以
       `UnsupportedParamsError … reasoning.effort` 拒掉，DGX 和 Ornith 都到不了；Claude Code 会去掉
       thinking 重试，重试那次才轮到本层的规则 1。
-    - 读声明靠 `proxy_server.llm_router.get_model_list()`；拿不到路由表就当没声明。
+    - 不搬 responses 的 `input` 里的 system / developer 项（与旧版一致）。
+    - 声明从钩子 kwargs 的 `metadata.model_info`（chat）或 `litellm_metadata.model_info`
+      （responses / messages）读，由 router 按所选 deployment 填；两处都没有就当没声明。
+    - 钩子拿到的是 kwargs 的浅拷贝，改写全部换新对象、不碰原消息对象：同一请求降级到下一个
+      deployment 时拿到的仍是原样请求，再按那个 deployment 的声明处理。
     - 任何异常都原样透传请求（与 codex_compat 同一原则）：改写失败最坏是回到「没这层」的
-      行为（DGX 400 → 兜底），不能把正常请求带下去。新值全部算好才一次性写回 data。
+      行为（DGX 400 → 降级），不能把正常请求带下去。新值全部算好才一次性写回。
 
     ## 验证（本机任意目录）
 
         kubectl --context k3s-homelab -n litellm logs deploy/litellm | grep upstream_compat
 
-    每个 pod 首次改写打一条 WARNING（`本层已生效…`），之后降到 INFO：本部署没设 `LITELLM_LOG`，
-    INFO 被丢掉，全用 INFO 的话「没在干活」和「今天没流量」分不出。行为判据是
-    spend log 里外发 key 不再出现 `model_group='mac/ornith'` 且 `original_model_group` 为 DGX 别名。
+    每个 pod 首次改写打一条 WARNING（`本层已生效…`，带目标 deployment），之后降到 INFO：本部署没设
+    `LITELLM_LOG`，INFO 被丢掉，全用 INFO 的话「没在干活」和「今天没流量」分不出。行为判据是 spend
+    log 里 DGX 健康时段，DGX 首选组的请求 `api_base` 都是 DGX，没有被降到 Studio / M2。
     """
 
     from typing import Any, Dict, List, Optional, Tuple
@@ -248,25 +258,24 @@ data:
     # ── LiteLLM 接线 ──────────────────────────────────────────────────────────────
 
 
-    def declared_rules(model_group: Any) -> Tuple[Optional[List[str]], bool]:
-        """从路由表读指名 group 的声明。拿不到路由表 / 没声明 → (None, False)。"""
-        if not isinstance(model_group, str) or not model_group:
+    def deployment_rules(kwargs: Dict[str, Any]) -> Tuple[Optional[List[str]], bool]:
+        """读 router 为所选 deployment 填进 kwargs 的 model_info 声明。没有 → (None, False)。"""
+        info: Any = None
+        for key in ("metadata", "litellm_metadata"):
+            meta = kwargs.get(key)
+            if isinstance(meta, dict) and isinstance(meta.get("model_info"), dict):
+                info = meta["model_info"]
+                break
+        if not isinstance(info, dict):
             return None, False
-        import litellm.proxy.proxy_server as proxy_server  # 调用时才 import：proxy 启动后才有路由表
+        declared = info.get(KEY_EFFORTS)
+        efforts = [e for e in declared if isinstance(e, str)] if isinstance(declared, list) else None
+        return efforts, info.get(KEY_SYSTEM_FIRST) is True
 
-        router = getattr(proxy_server, "llm_router", None)
-        if router is None:
-            return None, False
-        efforts: Optional[List[str]] = None
-        system_first = False
-        for deployment in router.get_model_list(model_name=model_group) or []:
-            info = deployment.get("model_info") or {}
-            declared = info.get(KEY_EFFORTS)
-            if efforts is None and isinstance(declared, list):
-                efforts = [e for e in declared if isinstance(e, str)]
-            if info.get(KEY_SYSTEM_FIRST) is True:
-                system_first = True
-        return efforts, system_first
+
+    def call_type_name(call_type: Any) -> str:
+        """CallTypes 枚举 → 它的值（'acompletion' 等）；字符串原样返回。"""
+        return str(getattr(call_type, "value", call_type) or "")
 
 
     class UpstreamCompat(CustomLogger):
@@ -276,35 +285,30 @@ data:
             super().__init__()
             self._announced = False
 
-        async def async_pre_call_hook(
-            self,
-            user_api_key_dict: Any,
-            cache: Any,
-            data: dict,
-            call_type: str,
-        ) -> Optional[dict]:
-            if call_type not in CHAT_CALL_TYPES + ANTHROPIC_CALL_TYPES + RESPONSES_CALL_TYPES:
+        async def async_pre_call_deployment_hook(self, kwargs: Dict[str, Any], call_type: Any) -> Optional[dict]:
+            name = call_type_name(call_type)
+            if name not in CHAT_CALL_TYPES + ANTHROPIC_CALL_TYPES + RESPONSES_CALL_TYPES:
                 return None
-            model = data.get("model")
             try:
-                efforts, system_first = declared_rules(model)
+                efforts, system_first = deployment_rules(kwargs)
                 if not efforts and not system_first:
                     return None
-                changes = rewrite(data, call_type, efforts, system_first)
+                changes = rewrite(kwargs, name, efforts, system_first)
             except Exception as exc:  # 兼容层不许把请求搞挂
                 verbose_proxy_logger.warning("upstream_compat: 改写失败，原样透传: %s", exc)
                 return None
             if not changes:
                 return None
+            target = f"{kwargs.get('model')} @ {kwargs.get('api_base')}"
             summary = "; ".join(changes)
             if not self._announced:
                 self._announced = True
                 verbose_proxy_logger.warning(
-                    "upstream_compat: 本层已生效（首次改写，后续降为 INFO）—— %s [%s]: %s", model, call_type, summary
+                    "upstream_compat: 本层已生效（首次改写，后续降为 INFO）—— %s [%s]: %s", target, name, summary
                 )
             else:
-                verbose_proxy_logger.info("upstream_compat: %s [%s]: %s", model, call_type, summary)
-            return data
+                verbose_proxy_logger.info("upstream_compat: %s [%s]: %s", target, name, summary)
+            return kwargs
 
 
     upstream_compat_handler = UpstreamCompat()

@@ -1,6 +1,6 @@
 # LiteLLM 网关的上游与兼容层
 
-> Last updated: 2026-11-25
+> Last updated: 2026-11-26
 > Status: 生效事实
 > Scope: 网关背后各上游的生效事实（DGX 主力栈、Mac Studio、思维链模型的共性陷阱、OpenRouter 免费档），
 > 以及两个兼容 hook（坑 D `codex_compat`、坑 E `upstream_compat`）。2026-11-25 从
@@ -111,13 +111,16 @@ DeepSeek-V4.1 / TensorFold 那三天（11-15 ~ 11-17）的实测表（模型名�
 - ⚠️ `/v1/messages` 打 `openai/` 上游时，LiteLLM 1.103.1 走的是 Responses API（DGX 收到的是 `instructions` + `input`），
   不是 chat；Claude Code 第一次请求带的 `thinking` 会在 LiteLLM 参数层被拒（`UnsupportedParamsError … reasoning.effort`），
   客户端去掉 thinking 重试，重试那次才撞到上面第一种 400。
-- 修法：`k8s/helm/manifests/litellm/upstream_compat.py` 在转发前按两个 DGX 别名 `model_info` 里的声明改写：
+- 修法：`k8s/helm/manifests/litellm/upstream_compat.py` 在请求发往 DGX 之前，按那条 deployment `model_info` 里的声明改写：
   `upstream_system_first` 把中间的 system 并进开头，`upstream_reasoning_efforts` 把集合外的档位换成不低于它的最小档。
   规则、作用域与失败模式在它的文件头。☠️ **换栈时这两条声明要跟着重核**（档位集合每个栈都变过），runbook 已列为必改项。
-  现行（11-18 起）两条声明写在三条 DGX deployment 上（`custom_dgx/…` 与裸别名、兼容别名的 order 1），档位集合
-  `none` / `low` / `medium` / `xhigh`。⚠️ 内部改道组 `homelab/qwen3.8-27b` 里 DGX 那条（order 2）没写：内部 key 降到 DGX
-  时请求会不会被改写，取决于 hook 读到的是原名还是改道后的组名，未实测。11-15 ~ 11-17 的 DeepSeek / TensorFold 栈
-  两种都接受，那三天声明撤掉过（`upstream_compat.py` 文件头「当前 config 里没有声明」一句是那时写的）。
+  声明写在**四条**指向 DGX 的 deployment 上（`custom_dgx/…`、裸别名与兼容别名两组的 order 1、内部改道组
+  `homelab/qwen3.8-27b` 的 order 2），档位集合 `none` / `low` / `medium` / `xhigh`。2026-11-25 起 hook 挂在
+  `async_pre_call_deployment_hook`，**按 deployment 改写**：只改发往带声明那条的请求，同组的 Studio / M2 收到原样请求，
+  组内降级每一跳重新判断。此前挂在 pre_call_hook 上按组取声明，而 key 级 `aliases` 先于它套用，内部改道组只能在
+  「DGX 那条不加声明，降到 DGX 时 400」与「加了，连发给 Studio 的请求一起改写」之间二选一。新旧行为都用线上同 digest
+  镜像对假上游实测过：chat / responses / messages 三条路与流式，Studio 收到原样请求，DGX 收到改写版，改写不污染降级到
+  下一级的请求。11-15 ~ 11-17 的 DeepSeek / TensorFold 栈两种都接受，那三天声明撤掉过。
 - 验证 hook 已加载：`kubectl --context k3s-homelab -n litellm logs deploy/litellm | grep upstream_compat`（每个 pod 首次改写打一条 WARNING）。
 - 这类问题不会自己报出来。查最近谁被静默兜底了（本机任意目录；修复后应只剩 DGX 真宕机时段的行）：
 

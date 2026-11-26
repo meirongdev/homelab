@@ -35,7 +35,7 @@ data:
       #   DeepSeek-V4.1-Flash-1017、兼容别名 qwen3.8-flash-next-tp2 照旧可用，只改下面四条 DGX deployment 的
       #   `model:`。所以虚拟 key 白名单、健康检查的模型组名都不用动；代价是「DeepSeek」这个名字背后答话的是 Qwen。
       # 2026-11-15 → 11-17 的后端是 DeepSeek-V4.1-Flash-1017，TensorFold（Zig）双机 TP=2，同一端点。
-      # 历次换栈与各栈参数见 docs/reference/litellm-gateway.md「DGX 主力栈」。
+      # 现行栈参数见 docs/reference/litellm-upstreams.md「DGX 主力栈」（历次换栈在 git 历史）。
       # ☠️ 换栈时端口可能跟着变（:8000 / :8888 都被不同的栈用过，旧端口会直接不监听），
       #    只改模型名不改 api_base = 把消费方指向空端口。端口也区分不了后端，改之前先
       #    `curl -s http://100.97.87.120:<port>/v1/models` 看 served name 再动手。
@@ -44,7 +44,9 @@ data:
       # minimal / high / max 回 400（"bogus" 的报错列七档，那是接口层，模板只认四档）；none 真能关思考（推理 0 字），
       # 所以集合里保留 none（11-14 那版写的 [low, medium, xhigh] 会把 none 改成 low）；对话中间的 system 消息
       # chat 与 /v1/responses 都 400（"System message must be at the beginning."）。DeepSeek 那三天两条都不需要。
-      # homelab/qwen3.8-27b 那组不加：声明对整组生效，会改写发给 Studio 的请求，而 DGX 在那组只是第 2 级。
+      # 声明按 deployment 生效（2026-11-25 起 upstream_compat 挂在 async_pre_call_deployment_hook）：只改写发往
+      #   带声明那条 deployment 的请求，同组的 Studio / M2 收到原样请求。所以**凡是指向 DGX 的 deployment 都要带这两条**，
+      #   包括内部改道组 homelab/qwen3.8-27b 里第 2 级那条（漏了 = 内部 key 降到 DGX 时 400 → 再降 M2）；换栈时四处一起改。
       # ☠️ 换栈时重测（坑 E）：对本别名传
       # "reasoning_effort": "bogus" 看 400 原文列出的集合，再发一条中间带 system 的请求；
       # 有一项被拒就把对应声明加回这两条（两条必须一致）。
@@ -114,7 +116,7 @@ data:
         model_info: {health_check_timeout: 60, health_check_max_tokens: 16}
       - model_name: homelab/qwen3.8-27b
         litellm_params: {model: openai/qwen3.8-flash-next-tp2, api_base: "http://100.97.87.120:8000/v1", api_key: dummy, order: 2}
-        model_info: {health_check_timeout: 30, health_check_max_tokens: 16}
+        model_info: {health_check_timeout: 30, health_check_max_tokens: 16, upstream_reasoning_efforts: [none, low, medium, xhigh], upstream_system_first: true}
       - model_name: homelab/qwen3.8-27b
         litellm_params: {model: openai/ornith-ai__Ornith-1.5-35B-A3B-MLX-4bit, api_base: "http://100.89.15.120:8000/v1", api_key: dummy, order: 3}
         model_info: {health_check_timeout: 60, health_check_max_tokens: 16}
@@ -196,7 +198,7 @@ data:
           api_base: https://openrouter.ai/api/v1
           api_key: os.environ/OPENROUTER_API_KEY
       # NVIDIA build.nvidia.com（原第四来源 `nvidia/*`）2026-10-04 删除：自 08-25 起全 404、
-      # 无消费方，且给 /v1/models 灌进 200+ 个不存在的条目。原因见 litellm-gateway.md。
+      # 无消费方，且给 /v1/models 灌进 200+ 个不存在的条目。原因见 docs/reference/litellm-upstreams.md「哪些模型能免费用」。
     # ── Codex 多 agent 兼容层（2026-09-08）──
     # codex 的 `multi_agent_version: "v2"` 会把 agent 间消息作为私有的 `agent_message`
     # item 发进 `input`；自托管上游（vLLM / OMLX）拿 openai-python 的 union 校验请求体，
@@ -231,9 +233,10 @@ data:
     # 全记成 10.42.0.152。client_ip hook 改用 Cloudflare 写的 CF-Connecting-IP。
     # ⚠️ 别改成 general_settings.use_x_forwarded_for：那会把整条可伪造的 XFF 链存成一个字符串。
     #    理由与信任边界见 client_ip.py 的文件头。
-    # ── 上游兼容改写（2026-11-14）──
-    # DGX 会对两种请求回 400（对话中间的 system 消息、不认识的 reasoning_effort 档位），
-    # 裸别名的兜底把它们静默转给当时的兜底 Ornith。upstream_compat 按上面 model_info 的声明在转发前改写。
+    # ── 上游兼容改写（2026-11-14；11-25 起按 deployment 改写）──
+    # DGX 会对两种请求回 400（对话中间的 system 消息、不认识的 reasoning_effort 档位），组内降级会把它们
+    # 静默转给 Studio / M2。upstream_compat 在请求发往某条 deployment 之前，按那条的 model_info 声明改写；
+    # 没声明的上游收到原样请求。
     # 详见 upstream_compat.py 的文件头；同样必须 subPath 挂到 /app/。
     litellm_settings:
       callbacks: ["codex_compat.codex_compat_handler", "client_ip.client_ip_handler",
@@ -259,14 +262,14 @@ spec:
         #    ⇒ ArgoCD Synced/Healthy、pod Running、探针全绿，而网关按**旧路由表**继续跑。
         #    2026-08-25 实际踩过一次（改了 mac/ornith 后必须手动 rollout restart 才生效）。
         # 值由 `just gen-embedded-scripts` 写入（scripts/check-embedded-scripts.py 的 STAMP_ONLY），别手改。
-        checksum/config: "ea33144b4902d498"
+        checksum/config: "7b6d9782c17cc30a"
         # 同理，但盯的是 codex_compat.py（litellm-codex-compat ConfigMap）：
         # 也是 subPath 挂载 + 只在启动时 import，改了不重启就是静默跑旧代码。
         checksum/codex-compat-py: "e5da4a39d90243d4"
         # 同理，盯 client_ip.py（litellm-client-ip ConfigMap）。
         checksum/client-ip-py: "73ac6eb0b2a145f1"
         # 同理，盯 upstream_compat.py（litellm-upstream-compat ConfigMap）。
-        checksum/upstream-compat-py: "8333687bb362acb1"
+        checksum/upstream-compat-py: "5445f3a99f378ab5"
       labels:
         app: litellm
     spec:

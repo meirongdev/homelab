@@ -1,6 +1,6 @@
 # DGX 换了主力模型：homelab 侧跟进 SOP
 
-> Last updated: 2026-11-16
+> Last updated: 2026-11-26
 > Status: 生效事实 + 切换 SOP
 > 触发条件：`100.97.87.120:<port>/v1/models` 返回的 served name 与仓库里的引用不一致
 > —— 上游（`~/projects/meirongdev/nv-dgx-spark`）换栈、改 served name、或从换栈中
@@ -114,7 +114,7 @@ d=json.load(sys.stdin)["data"]
 
 | # | 文件 | 字段 | 备注 |
 |---|---|---|---|
-| 1 | `k8s/helm/manifests/litellm/litellm.yaml` | `custom_dgx/<name>` 与裸 `<name>` 的 `model_name` + `model: openai/<name>`（裸别名是三条 `order` 1/2/3 的同名 deployment，只有 order 1 那条的 `model` 是 DGX 的名字），以及 `model_info` 声明 | `general_settings.background_health_check_model_groups` 里的名字跟着换（漏改 = 不再探活，DGX 整机离线时每个请求先挨约 406s，[自动降级](../reference/litellm-gateway.md)）；☠️ `upstream_reasoning_efforts` 按 §1 采到的集合改，`upstream_system_first` 看新模板还拒不拒中间的 system（[坑 E](../reference/litellm-gateway.md)）；☠️ 改完**必须** `cd k8s/helm && just gen-embedded-scripts` |
+| 1 | `k8s/helm/manifests/litellm/litellm.yaml` | `custom_dgx/<name>` 与裸 `<name>` 的 `model_name`；**四条**指向 DGX 的 deployment 的 `model: openai/<name>` 与 `model_info` 声明：`custom_dgx/`、裸别名与兼容别名两组的 order 1、内部改道组 `homelab/qwen3.8-27b` 的 order 2（各组其余几级是 Studio / M2，不动） | `general_settings.background_health_check_model_groups` 里的名字跟着换（漏改 = 不再探活，DGX 整机离线时每个请求先挨约 406s，[自动降级](../reference/litellm-gateway.md)）；☠️ `upstream_reasoning_efforts` 按 §1 采到的集合改，`upstream_system_first` 看新模板还拒不拒中间的 system（[坑 E](../reference/litellm-upstreams.md)）；☠️ 改完**必须** `cd k8s/helm && just gen-embedded-scripts` |
 | 2 | `k8s/helm/manifests/jobs-sg/cronjob-enrich.yaml` | `LLM_MODELS` | 走网关（2026-11-11 起），用**前缀别名** `custom_dgx/<name>`（不带兜底）|
 | 3 | `k8s/helm/manifests/personal-services/open-notebook-provision.yaml` | `MODELS` + `DEFAULTS` 四个角色 + `EPISODE_PROFILE_LLMS` 三个 profile | 走网关（2026-11-11 起），用**裸名别名**；声明式，push 即生效 |
 | 4 | `cloud/oracle/manifests/calibre-metadata/metadata-llm.yaml` | 内嵌脚本的 `LLM_MODEL` 默认值 + CronJob 的 `LLM_MODEL` | 走网关，走的是**裸名别名** |
