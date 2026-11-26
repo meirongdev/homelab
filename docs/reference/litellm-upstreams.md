@@ -41,7 +41,8 @@ DeepSeek-V4.1 / TensorFold 那三天（11-15 ~ 11-17）的实测表（模型名�
   对 `custom_dgx/` 前缀别名传一个**不认识的值**，比如 `"bogus"`：声明了档位集合的栈上，`high` 这类已知档位会先被
   `upstream_compat` 改写（坑 E）。
 - ☠️ **裸别名上，参数错误会被降级悄悄吞掉**：DGX 回 400 → 第 2 级 Studio 接受这个参数 → 200，只有响应头
-  `x-litellm-model-api-base` 看得出换了上游。Studio 的 OMLX 不校验 `reasoning_effort`（`bogus` 也 200），所以**任何**档位错误都会被吞。
+  `x-litellm-model-api-base` 看得出换了上游。Studio 的 OMLX 从不因档位报错（不认识的值先按别名换、换不了就丢掉用模板默认，见「Mac Studio 上游」），
+  所以**任何**档位错误都会被吞。
   调参数用带前缀的别名。机制见 [litellm-gateway.md](litellm-gateway.md)「自动降级」，Qwen 栈上的实例见坑 E。
 
 ## Mac Studio 上游：`studio/qwen3.8-27b`
@@ -49,9 +50,9 @@ DeepSeek-V4.1 / TensorFold 那三天（11-15 ~ 11-17）的实测表（模型名�
 | | |
 |---|---|
 | 别名 → 上游 | `studio/qwen3.8-27b` → `openai/Qwen3.8-27B-MLX-4bit` @ `100.98.220.75:8000/v1` |
-| 机器 | Mac Studio M5 Max / 128G，OMLX 0.7.0；池天花板 ~106G，常驻、不换入换出（M2「只暴露一个 35B」的约束不适用）|
+| 机器 | Mac Studio M5 Max / 128G，OMLX 0.7.3（2026-11-26 核）；池天花板 ~106G，常驻、不换入换出（M2「只暴露一个 35B」的约束不适用）|
 | 模型 | HF `lmstudio-community/Qwen3.8-27B-MLX-4bit`（VLM，262k ctx），思维链分离到 `reasoning_content`。⚠️ OMLX 0.7 的模型 ID 不带 org，别照 M2 写成 `org__name` |
-| 降级 | 2026-11-15 起是裸别名 `DeepSeek-V4.1-Flash-1017` 的第 2 级（[litellm-gateway.md](litellm-gateway.md)「自动降级」）、内部改道组 `homelab/qwen3.8-27b` 的第 1 级（同篇「按 key 分首选」）。上线前经网关实测（短提示）：`reasoning_effort` none…max 七档和 `bogus` 全 200（OMLX 不校验，`none` 也照样思考；关思考要用 `chat_template_kwargs {"enable_thinking": false}`）；对话中间的 system 在 chat / `/v1/responses` / `/v1/messages` 三条路都 200；工具调用 `finish_reason=tool_calls` |
+| 降级 | 2026-11-15 起是裸别名 `DeepSeek-V4.1-Flash-1017` 的第 2 级（[litellm-gateway.md](litellm-gateway.md)「自动降级」）、内部改道组 `homelab/qwen3.8-27b` 的第 1 级（同篇「按 key 分首选」）。上线前经网关实测（短提示）：`reasoning_effort` none…max 七档和 `bogus` 全 200（各档实际变成什么见下方「推理档位」；关思考要用 `chat_template_kwargs {"enable_thinking": false}`）；对话中间的 system 在 chat / `/v1/responses` / `/v1/messages` 三条路都 200；工具调用 `finish_reason=tool_calls` |
 | key 白名单 | `LITELLM_VK`（sha256 前缀 2c15baf776…）、`key_alias=xiaogpt`（只有这一个模型）、`ext-team-1`（账户与 key 两层白名单都有）、`key_alias=open-notebook`（2026-11-11，第二备选）。其余窄 key 刻意没加，谁要用按 [litellm-gateway.md](litellm-gateway.md) 坑 A 单独加 |
 
 主机侧（OMLX 安装、key、模型下载、DFlash2 与实测性能）→ `macbook/ansible/README.md`；指标 →
@@ -60,6 +61,13 @@ DeepSeek-V4.1 / TensorFold 那三天（11-15 ~ 11-17）的实测表（模型名�
 - ⚠️ **Studio 比 DGX 弱的两处**（homelab 内部流量首选它，外发 key 的流量在 DGX 挂掉时降到它）：预填充约 1000 tok/s（DGX 的 DeepSeek 栈实测约 2,300，现行栈未测），接近 262k 满窗的请求要 4 分钟以上，
   撞 300 秒客户端超时；homelab 内部的全部流量与外发 key 的降级流量挤同一个 OMLX 进程，
   而 N=2 时总吞吐不涨、每路减半（2026-10-22 实测）。Studio 忙到探测超时（60s）时内部请求会降到 DGX，这是设计如此。
+- **推理档位交给模型自己的 chat template**（2026-11-26 读 OMLX 0.7.3 源码与模型模板核实）：Qwen3.8-27B 的模板只认
+  `xhigh`（默认）/ `medium` / `low`，**没有 `max`**；`xhigh` 在系统提示里加一段「仔细思考、校验关键假设」，`low` 加一段
+  「简短思考」。OMLX 先按别名表换（`none` / `minimal` / `off` → `low`，`high` / `max` → `xhigh`，`moderate` → `medium`），
+  换不了就丢掉、用模板默认 `xhigh`，所以从不报错。不传档位就是 `xhigh`；`model_settings` 没开 `thinking_budget`，思考不封顶。
+  ⚠️ 档位几乎不改变思考长度：同一道多步推理题各跑 3 次，`low` 平均 631 推理 token、`xhigh` 598，差异在波动之内。所以
+  Claude Code 的 `thinking` 被翻成 `low` 送到 Studio（「推理档位经网关」）没有可见代价；要钉死 `xhigh`，给指向 Studio 的
+  4 条 deployment 声明 `upstream_reasoning_efforts: [xhigh]` 即可（11-26 评估过，收益看不出，没加）。
 
 - ☠️ **`mac/*` 与 `studio/*` 的 `api_key: dummy` 能用，是 Mac 上一个开关的结果**：OMLX 0.7 起非回环监听必须配 key，
   现行配法是 key + `allow_unauthenticated_inference: true`。开关一丢就全部 401，而网关清单正确、ArgoCD Synced。
@@ -82,7 +90,7 @@ Claude Code 的 `thinking` 会被翻成档位，所以它经网关时首轮必 4
 | 集合内档位 | 200 | 200 | 200 |
 | `thinking` 翻译后的形状（`effort: low` + `include`） | 200 | 200 | 200 |
 | `reasoning.summary: auto` | 200 | 200 | 未测 |
-| `effort: none` | 200，推理 0 token（chat 与 Responses 都是） | 200，照样思考 | 未测 |
+| `effort: none` | 200，推理 0 token（chat 与 Responses 都是） | 200，OMLX 换成 `low`（仍思考） | 未测 |
 | `developer` 消息（开头或中间） | 200 | 200 | 200 |
 | Responses 的 `input` 中间夹 `system` | **400**，`upstream_compat` 并进 `instructions`（坑 E） | 200 | 200 |
 
