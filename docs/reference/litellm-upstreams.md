@@ -86,6 +86,9 @@ Claude Code 的 `thinking` 会被翻成档位，所以它经网关时首轮必 4
 | `developer` 消息（开头或中间） | 200 | 200 | 200 |
 | Responses 的 `input` 中间夹 `system` | **400**，`upstream_compat` 并进 `instructions`（坑 E） | 200 | 200 |
 
+- ✅ 上线后经网关用 `LITELLM_VK` 实测（2026-11-26）：带 `high` 的 Responses 打 `custom_dgx/` → DGX 200（hook 记
+  `high→xhigh`）；打 `studio/qwen3.8-27b` → 改道后 Studio 200；Claude Code 形状的 `thinking`（budget 1024）打 `custom_dgx/`
+  → 200，不再首轮 400；Responses 中间夹 `system` 打 `custom_dgx/`（这个别名不降级）→ DGX 200，即 hook 已并进 `instructions`。
 - ⚠️ codex 不给不认识的模型发 `reasoning`：45 天 spend log 里 codex 的 11 次 Responses 请求全部成功、没有一次因档位被拒，
   所以 `llm_clients.py` 给三个 profile 配的 `model_reasoning_effort` 对网关上的模型是空操作，网关放行也不改变这一点。
 

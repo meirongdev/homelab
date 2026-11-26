@@ -152,6 +152,7 @@ Cloudflare Zone 级 WAF · Uptime Kuma · 双集群从 Flannel 迁 Cilium
 | 2026-11-25 | **文档瘦身**：check-docs 加查锚点与 `just` 配方；AGENTS.md 13970→9966 字节；security / litellm-gateway / jobs-sg 按子题拆出 5 篇，顺手改正与现网不符的 DGX 一节（11-17 起是 vLLM 的 Qwen3.8-Flash-Next）与 jobs-sg 的并发值 ([索引](reference/README.md)) |
 | 2026-11-25 | **撤掉 Renovate**：用户确认没在用（从没配过 `RENOVATE_TOKEN`，workflow 每天跳过）。删 workflow 与 `.github/renovate.json5`，文档改为「镜像与 digest 手动更新」 ([决策](decisions/trivy-cve-automation.md)) |
 | 2026-11-26 | **补完 LiteLLM 按 key 分首选**：11-15 只上线了改道组，7 把内部 key 的 `aliases` 一直没写，内部流量 10 天都是 DGX 首选。先把 `upstream_compat` 改为按 deployment 改写（aliases 先于 pre_call_hook 套用，组级声明顾此失彼），再写 aliases；线上实测改道到 Studio、发往 DGX 的请求照样改写 ([坑 E](reference/litellm-upstreams.md)) |
+| 2026-11-26 | **LiteLLM 放行 Responses / messages 的推理档位**：LiteLLM 按自带模型表查 `supports_reasoning`，自托管模型不在表里，带档位的 `/v1/responses` 与 Claude Code 的 `thinking` 在网关就 400。14 条自托管 deployment 声明它，`upstream_compat` 补上 Responses 格式的 system；线上 4 条实测全 200 ([推理档位经网关](reference/litellm-upstreams.md)) |
 
 ### 审计与清理（历史）
 
